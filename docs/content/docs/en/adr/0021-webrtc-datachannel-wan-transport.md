@@ -48,7 +48,7 @@ path, and the WebRTC tier is consulted only when LAN is unavailable.
 
 ### Signaling rendezvous (standalone Rust binary)
 
-A new repo subdirectory, `signaling-server/`, hosts a tiny axum +
+A new repo subdirectory, `services/signaling-server/`, hosts a tiny axum +
 tokio-tungstenite WebSocket router (~250 LOC). It is **stateless** with
 respect to application logic: rooms keyed by `rendezvousId` hold a
 `Vec<PeerHandle>`; relay frames fan out to other members. No persistence,
@@ -66,14 +66,14 @@ privacy or operational preference may also override per-install at runtime via
 ### Signaling deployment targets (axum self-host **or** Cloudflare Worker)
 
 The signaling server ships in two interchangeable deployment forms that speak
-the **identical wire protocol**. The shared `signaling-server/core` crate
+the **identical wire protocol**. The shared `services/signaling-server/core` crate
 (`cognia-signaling-core`: `ClientFrame` / `ServerFrame` / `Envelope` + the
 token bucket) is the single source of truth, consumed by the axum binary, the
 Cloudflare Worker, **and** the desktop peer (`src-tauri/.../signaling`) — so no
 mirror can drift.
 
 - **axum binary** (above): one stateful process; Docker / Fly.io.
-- **Cloudflare Worker + Durable Objects** (`signaling-server/worker/`,
+- **Cloudflare Worker + Durable Objects** (`services/signaling-server/worker/`,
   workers-rs): the platform-native form. The Worker is a stateless router; each
   room is a **Durable Object** addressed by `idFromName(rendezvousId)` — exactly
   what the axum server's in-process `RoomRegistry` was, except the platform
@@ -145,7 +145,7 @@ envelope, or read the SDP/ICE traffic — it only sees opaque base64.
 ### Where things live
 
 ```
-signaling-server/                       (Rust, standalone Cargo workspace)
+services/signaling-server/                       (Rust, standalone Cargo workspace)
   Cargo.toml (workspace root = axum pkg), Dockerfile, fly.toml, README.md
   src/{room,ws,server,ip_limits,metrics,lib,main}.rs   axum binary
   core/                                  shared wire protocol + token bucket
@@ -263,7 +263,7 @@ for `app_settings_update`:
 Each component ships with co-located tests; the project gate
 (`pnpm test:coverage`) holds them to ≥90% lines/branches/functions:
 
-- `signaling-server/tests/room_routing.rs` — boot the server, drive a
+- `services/signaling-server/tests/room_routing.rs` — boot the server, drive a
   two-client subscribe→relay→leave dance, assert ordering.
 - `src-tauri/src/companion_api/auth.rs` `#[cfg(test)]` — pair response
   carries valid `rendezvousId` (UUID) + `rendezvousSecret` (32 bytes
@@ -314,7 +314,7 @@ The signaling rendezvous now exposes:
 
 Both endpoints are cheap (lock-free counters; no Dexie/DB touch) and
 safe to scrape at 30 s intervals. The fly.io probe is wired in
-`signaling-server/fly.toml`.
+`services/signaling-server/fly.toml`.
 
 ### Defensive limits
 
@@ -348,5 +348,5 @@ rotate.
 
 - [ADR-0014: Capacitor mobile shell](./0014-capacitor-mobile-shell.md)
 - [ADR-0015: Mobile V2 completion](./0015-mobile-v2-completion.md)
-- `signaling-server/README.md`
+- `services/signaling-server/README.md`
 - [webrtc.rs documentation](https://docs.rs/webrtc/latest/webrtc/)

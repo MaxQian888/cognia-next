@@ -1626,6 +1626,8 @@ dependencies = [
  "chrono",
  "clap",
  "cognia-signaling-core",
+ "core-foundation 0.10.1",
+ "core-graphics 0.25.0",
  "crash-handler",
  "cron",
  "dial9-tokio-telemetry",
@@ -1713,6 +1715,8 @@ dependencies = [
  "toml_edit 0.22.27",
  "tower 0.5.3",
  "tower-http",
+ "tracing",
+ "tracing-subscriber",
  "uiautomation",
  "url",
  "urlencoding",
@@ -11114,6 +11118,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11123,12 +11137,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

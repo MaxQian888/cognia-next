@@ -6,9 +6,10 @@
 #   - crates/cognia-cli/   — plugin-author CLI (`cognia`).
 #
 # Intentionally excluded:
-#   - signaling-server/             standalone deploy artifact built via
-#                                   Dockerfile/Fly.io. Keeping its own
-#                                   Cargo.lock isolates the deploy image.
+#   - services/signaling-server/, services/share-server/
+#                                   standalone deploy artifacts built via
+#                                   Dockerfile/Fly.io. Each keeps its own
+#                                   Cargo.lock to isolate the deploy image.
 #   - crates/cognia-plugin-template, plugins/wasm-example-formatter
 #                                   wasm32-wasip2 components built with
 #                                   `cargo component`; their tighter
@@ -26,7 +27,8 @@ members = [
   "crates/cognia-sandbox-runner",
 ]
 exclude = [
-  "signaling-server",
+  "services/signaling-server",
+  "services/share-server",
   "crates/cognia-plugin-template",
   "crates/cognia-plugin-template-ts",
   "plugins/wasm-example-formatter",

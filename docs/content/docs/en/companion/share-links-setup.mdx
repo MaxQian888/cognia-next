@@ -41,19 +41,19 @@ links requires a bearer secret only you hold.
 
 ## Deploy the worker (the API)
 
-The worker lives in `share-server/worker/`. It is a standalone project (not part
+The worker lives in `services/share-server/worker/`. It is a standalone project (not part
 of the app's pnpm workspace) and is now a pure JSON API — the viewer is the
 app's own `/share/view` route, deployed separately to Cloudflare Pages (next
 section).
 
 ```bash
 # 1. Install deps (standalone — ignore the app workspace)
-cd share-server/worker && pnpm install --ignore-workspace
+cd services/share-server/worker && pnpm install --ignore-workspace
 
 # 2. Create the storage the worker binds to
 wrangler r2 bucket create cognia-shares
 wrangler kv namespace create SHARE_KV
-#   → paste the printed namespace id into share-server/worker/wrangler.toml
+#   → paste the printed namespace id into services/share-server/worker/wrangler.toml
 #     under [[kv_namespaces]] id = "..."
 
 # 3. Set the bearer secret the app will use to create/revoke links
@@ -85,13 +85,13 @@ wrangler pages deploy out --project-name cognia-share-viewer
 Bind the Pages project to your share host (e.g. `share.cognia.cn`). The Worker
 route `…/v1/*` takes precedence, so `/v1/*` hits the API and `/share/view` (plus
 the rest of the static app) is served by Pages. See
-`share-server/pages/README.md` for details and the note that the full app shell
+`services/share-server/pages/README.md` for details and the note that the full app shell
 becomes publicly reachable at that host.
 
 Run the test suite any time without an account — it uses miniflare:
 
 ```bash
-cd share-server/worker && pnpm test
+cd services/share-server/worker && pnpm test
 ```
 
 ## Point the app at it

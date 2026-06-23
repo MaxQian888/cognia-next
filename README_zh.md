@@ -73,10 +73,10 @@ Cognia 用同一份 Next.js 16 静态导出驱动三种外壳 —— 浏览器�
                     Claude Agent SDK + A2UI MCP
 ```
 
-monorepo 旁有两个独立服务：
+`services/` 下有两个独立服务，各自是独立的部署产物（自带 `Cargo.lock`、Dockerfile、Fly.io 配置）：
 
-- `signaling-server/` —— WebRTC 信令汇合（axum + workers-rs）。
-- `share-server/` —— Cloudflare Worker + Vite 查看器，承载公共分享链。
+- `services/signaling-server/` —— WebRTC 信令汇合（axum + workers-rs）。
+- `services/share-server/` —— Cloudflare Worker + Vite 查看器，承载公共分享链。
 
 完整子系统目录与一对一的 ADR 见
 [`docs/content/docs/zh/adr/`](./docs/content/docs/zh/adr/)。
@@ -125,8 +125,9 @@ cognia-next/
 ├── sidecar/               Node sidecar（Claude Agent SDK 宿主、A2UI MCP）—— 独立 lockfile
 ├── mobile/                Capacitor 8 外壳（workspace 子包）
 ├── docs/                  Fumadocs 站点 + ADR（workspace 子包，端口 3001）
-├── signaling-server/      独立的 WebRTC 信令汇合服务
-├── share-server/          Cloudflare Worker + Vite 查看器，承载分享链
+├── services/              独立部署产物（自带 Cargo.lock / Docker / Fly.io）
+│   ├── signaling-server/  WebRTC 信令汇合服务（axum + workers-rs）
+│   └── share-server/      Cloudflare Worker + Vite 查看器，承载分享链
 ├── tests/e2e/             Playwright 套件（workflows、mobile、tauri）
 └── scripts/               构建、审计、迁移辅助
 ```

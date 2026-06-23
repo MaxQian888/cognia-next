@@ -60,7 +60,7 @@
     "docs",
     "mobile",
     "sidecar",
-    "share-server",
+    "services/share-server",
     "out",
     ".next",
     "tests/e2e",

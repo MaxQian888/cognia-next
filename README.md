@@ -77,10 +77,11 @@ bundled Node sidecar hosts the Claude Agent SDK.
                     Claude Agent SDK + A2UI MCP
 ```
 
-Two standalone services live alongside the monorepo:
+Two standalone services live under `services/`, each an independent deploy
+artifact (own `Cargo.lock`, Dockerfile, and Fly.io config):
 
-- `signaling-server/` — WebRTC rendezvous (axum + workers-rs).
-- `share-server/` — Cloudflare Worker + Vite viewer for public share links.
+- `services/signaling-server/` — WebRTC rendezvous (axum + workers-rs).
+- `services/share-server/` — Cloudflare Worker + Vite viewer for public share links.
 
 The full subsystem catalogue, with one ADR per topic, lives under
 [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
@@ -129,8 +130,9 @@ cognia-next/
 ├── sidecar/               Node sidecar (Claude Agent SDK host, A2UI MCP) — separate lockfile
 ├── mobile/                Capacitor 8 shell (workspace package)
 ├── docs/                  Fumadocs site + ADRs (workspace package, port 3001)
-├── signaling-server/      Standalone WebRTC rendezvous service
-├── share-server/          Cloudflare Worker + Vite viewer for share links
+├── services/              Standalone deploy artifacts (own Cargo.lock / Docker / Fly.io)
+│   ├── signaling-server/  WebRTC rendezvous service (axum + workers-rs)
+│   └── share-server/      Cloudflare Worker + Vite viewer for share links
 ├── tests/e2e/             Playwright suites (workflows, mobile, tauri)
 └── scripts/               Build, audit, and migration helpers
 ```

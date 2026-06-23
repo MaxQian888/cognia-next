@@ -2,7 +2,7 @@
 /**
  * Smoke test for the standalone signaling rendezvous server.
  *
- * Boots `signaling-server/target/<profile>/cognia-signaling-server` on an
+ * Boots `services/signaling-server/target/<profile>/cognia-signaling-server` on an
  * ephemeral port, drives two WebSocket clients through the supported
  * lifecycle (subscribe → relay → unsubscribe), and asserts the server's
  * rejection paths:
@@ -40,7 +40,7 @@ if (typeof globalThis.WebSocket !== "function") {
 const PROFILE = process.env.SIGNALING_SMOKE_PROFILE ?? "debug"
 const BIN_PATH =
   process.env.SIGNALING_SMOKE_BIN ??
-  `signaling-server/target/${PROFILE}/cognia-signaling-server${process.platform === "win32" ? ".exe" : ""}`
+  `services/signaling-server/target/${PROFILE}/cognia-signaling-server${process.platform === "win32" ? ".exe" : ""}`
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,7 +60,7 @@ function ensureBuilt() {
     "cargo",
     ["build", PROFILE === "release" ? "--release" : ""].filter(Boolean),
     {
-      cwd: "signaling-server",
+      cwd: "services/signaling-server",
       stdio: "inherit",
       shell: process.platform === "win32",
     }

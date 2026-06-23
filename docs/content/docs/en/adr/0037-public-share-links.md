@@ -6,7 +6,7 @@ description: Turn chat exports, workflow images, A2UI apps, and backup packages 
 # ADR 0037 — Public share links (zero-knowledge)
 
 > **Status**: Accepted on 2026-05-26. Phases 0–3 shipped: crypto core +
-> Dexie mirror, the Cloudflare worker (`share-server/worker/`), the standalone
+> Dexie mirror, the Cloudflare worker (`services/share-server/worker/`), the standalone
 > viewer SPA, and the create-side UI for all four artifacts.
 >
 > **Phase 4 (2026-05-29)** superseded the standalone Vite viewer: the app's own
@@ -66,12 +66,12 @@ Recipient browser → viewer → GET envelope → decrypt with #fragment key →
   leaf (its own `sha256` in `lib/share/hash.ts`, no dependency on
   `lib/data/crypto`) so the standalone viewer can import it without dragging in
   app-wide types.
-- **Worker** (`share-server/worker/`) — a standalone TS project (own
+- **Worker** (`services/share-server/worker/`) — a standalone TS project (own
   `package.json` + lockfile, installed with `--ignore-workspace`, like
   `sidecar/`). R2 holds the envelope body; KV holds lifecycle counters with a
   TTL backstop and lazy GC of orphans. Tested with `@cloudflare/vitest-pool-workers`
   (miniflare).
-- **Viewer** (`share-server/viewer/`) — a Vite React SPA served as the worker's
+- **Viewer** (`services/share-server/viewer/`) — a Vite React SPA served as the worker's
   static assets. It imports the real `lib/share/crypto` via a `@` → repo-root
   alias and renders by kind: chat HTML/animated in a **sandboxed iframe**,
   Markdown/JSON/text as preformatted text, workflow PNG as an `<img>`, and
@@ -110,7 +110,7 @@ See `companion/share-links-setup` for the operator deploy guide.
 
 ## Phase 4 — unified viewer + A2UI true rendering (2026-05-29)
 
-The standalone Vite viewer (`share-server/viewer/`) is **removed**. It could not
+The standalone Vite viewer (`services/share-server/viewer/`) is **removed**. It could not
 render A2UI apps because the A2UI catalog statically imports 61 components plus
 `next/image`, recharts/three/d3/tone/framer-motion and the full Radix/HeroUI
 surface — so A2UI shares were download-only. The deferred-rendering note in
@@ -139,7 +139,7 @@ Consequences is now resolved by the architecture it predicted.
 - **Worker is a pure API.** It no longer serves static assets; non-`/v1` paths
   return 404. `wrangler.toml` drops `[assets]` and scopes the Worker route to
   `share.cognia.cn/v1/*` so a Cloudflare Pages project (serving `out/`) owns the
-  rest of the host. Deploy guide: `share-server/pages/README.md`.
+  rest of the host. Deploy guide: `services/share-server/pages/README.md`.
 
 **New consequence:** because `out/` is a monolithic export, deploying it to
 Pages publishes the whole (secret-free) app shell at the share host. Acceptable
@@ -152,11 +152,11 @@ exposed can add a Pages `_redirects` rule pointing non-`/share/view` paths at
 The Worker ties the share API to Cloudflare R2 + KV. Operators who already run
 the signaling server's self-hosted Rust binary (ADR-0021) — or who simply don't
 want Cloudflare — now have a parallel option for shares: a standalone axum
-server at `share-server/` that speaks the **exact same `/v1` contract**.
+server at `services/share-server/` that speaks the **exact same `/v1` contract**.
 
-**What it is:** `share-server/` is now a Cargo workspace (`Cargo.toml`, `src/`,
+**What it is:** `services/share-server/` is now a Cargo workspace (`Cargo.toml`, `src/`,
 `core/`, `tests/`, `Dockerfile`, `fly.toml`) alongside the existing TypeScript
-`worker/` and `pages/`. It is the share-service twin of `signaling-server/`:
+`worker/` and `pages/`. It is the share-service twin of `services/signaling-server/`:
 one static binary, the same `docker` / `fly` story, the same security and
 observability posture. No app change is needed — the operator sets
 `AppSettings.shareUrl` (and the upload secret in the keyring) to point at it,
@@ -179,10 +179,10 @@ limiting** (`429`) to blunt code enumeration, plus an optional `Origin`
 allowlist. Client IP is resolved from `Fly-Client-IP` / the first
 `X-Forwarded-For` hop. TLS is terminated by the platform, as with signaling.
 
-**Shared logic.** A `share-server/core/` crate holds the side-effect-free parts
+**Shared logic.** A `services/share-server/core/` crate holds the side-effect-free parts
 — envelope validation, the read-lifecycle decision, code generation, the
 constant-time compare, and the rate-limit token bucket — unit-tested in
-isolation, mirroring `signaling-server/core/`. (The split is structural only:
+isolation, mirroring `services/signaling-server/core/`. (The split is structural only:
 the share Worker is TypeScript, so the shared contract is the HTTP API, not code.)
 
 **Observability.** `GET /healthz` (JSON) and `GET /metrics` (Prometheus:
@@ -192,4 +192,4 @@ the share Worker is TypeScript, so the shared contract is the HTTP API, not code
 Config is env-driven (`SHARE_DB_PATH`, `SHARE_UPLOAD_SECRET`,
 `SHARE_MAX_BODY_BYTES`, `SHARE_ALLOWED_ORIGINS`, `SHARE_RATE_PER_SEC` /
 `SHARE_RATE_BURST`, `SHARE_REAPER_INTERVAL_SECS`, `PORT` / `BIND_ADDR`). See
-`share-server/README.md` for the build/run/deploy guide.
+`services/share-server/README.md` for the build/run/deploy guide.

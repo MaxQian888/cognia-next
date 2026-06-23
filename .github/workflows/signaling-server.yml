@@ -13,11 +13,11 @@ on:
   push:
     branches: [master]
     paths:
-      - "signaling-server/**"
+      - "services/signaling-server/**"
       - ".github/workflows/signaling-server.yml"
   pull_request:
     paths:
-      - "signaling-server/**"
+      - "services/signaling-server/**"
       - ".github/workflows/signaling-server.yml"
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: signaling-server
+    working-directory: services/signaling-server
 
 jobs:
   test:
@@ -52,8 +52,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            signaling-server/target
-          key: ${{ runner.os }}-signaling-${{ hashFiles('signaling-server/Cargo.lock') }}
+            services/signaling-server/target
+          key: ${{ runner.os }}-signaling-${{ hashFiles('services/signaling-server/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-signaling-
 
@@ -94,7 +94,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: signaling-server/worker
+        working-directory: services/signaling-server/worker
 
     steps:
       - name: Checkout code
@@ -112,8 +112,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            signaling-server/worker/target
-          key: ${{ runner.os }}-signaling-worker-${{ hashFiles('signaling-server/worker/Cargo.lock') }}
+            services/signaling-server/worker/target
+          key: ${{ runner.os }}-signaling-worker-${{ hashFiles('services/signaling-server/worker/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-signaling-worker-
 

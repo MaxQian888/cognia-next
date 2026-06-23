@@ -1,0 +1,124 @@
+name: Share Server
+
+# ============================================================================
+# share-server (Rust + Cloudflare Worker) — test + coverage gate
+# ============================================================================
+# The self-hosted public share-link service (ADR-0037) is the share twin of
+# signaling-server: a standalone Cargo workspace (root axum pkg + `core/`
+# member) plus a separate TypeScript Cloudflare Worker. Neither is part of the
+# pnpm/Cargo workspace, so the main Node and Tauri workflows never run them.
+# This workflow runs the Rust unit + integration tests under a >=90% line
+# gate (cargo-llvm-cov) and type-checks + tests the Worker (vitest/miniflare).
+# ============================================================================
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "services/share-server/**"
+      - ".github/workflows/share-server.yml"
+  pull_request:
+    paths:
+      - "services/share-server/**"
+      - ".github/workflows/share-server.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: share-server-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/share-server
+
+jobs:
+  test:
+    name: Test + Coverage
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo + target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/share-server/target
+          key: ${{ runner.os }}-share-${{ hashFiles('services/share-server/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-share-
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Clippy (deny warnings)
+        # `--workspace` covers the shared `core/` crate (the Worker is a separate
+        # TypeScript project, excluded from the workspace and tested below).
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test with coverage (>=90% lines)
+        run: cargo llvm-cov --workspace --all-targets --fail-under-lines 90 --summary-only
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "## share-server coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cargo llvm-cov report >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================================
+  # Cloudflare Worker (ADR-0037) — standalone TypeScript project with its own
+  # lockfile (installed with --ignore-workspace, like sidecar/). Its specs run
+  # inside workerd via @cloudflare/vitest-pool-workers so R2 + KV bindings
+  # behave like production. Type-checked and tested here; it is never part of
+  # the root Jest suite.
+  # ==========================================================================
+  worker:
+    name: Worker (typecheck + vitest)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: services/share-server/worker
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: services/share-server/worker/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (vitest / miniflare)
+        run: pnpm test

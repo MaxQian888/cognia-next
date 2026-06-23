@@ -113,7 +113,7 @@ The controllers only wire configuration — they do *not* contain the RTC logic:
 
 ## The rendezvous server
 
-`signaling-server/` is a Rust signaling relay with two interchangeable backends sharing the
+`services/signaling-server/` is a Rust signaling relay with two interchangeable backends sharing the
 `cognia_signaling_core` crate (`proto` / `policy` / `limits`). The client sends `?rid=` either way; the
 HMAC envelope is **opaque** to both — the server forwards it verbatim and never sees plaintext.
 
@@ -134,7 +134,7 @@ The deployed backend is a Worker that shards **one Durable Object per room**:
 
 ### axum (self-host)
 
-`signaling-server/src/` is the equivalent single-process server for self-hosting: `router()`
+`services/signaling-server/src/` is the equivalent single-process server for self-hosting: `router()`
 (`server.rs:76`) serves `/healthz`, `/metrics`, and `any /v1/signaling` → `ws_upgrade` (`ws.rs:62`); a
 `Mutex<HashMap<rid, Vec<PeerHandle>>>` `RoomRegistry` (`room.rs:45`) holds rooms in memory; `handle_frame`
 (`ws.rs:256`) implements the same `Subscribe` / `Relay` / `Ping` semantics. Default `$PORT` 7892,

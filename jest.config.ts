@@ -99,6 +99,7 @@ const config: Config = {
     "!lib/ai/agent/team/auto/types.ts",
     "!lib/claude/subagent-importers/types.ts",
     "!lib/perf/backend/types.ts",
+    "!lib/memory/external/types.ts",
     "!lib/pet/live2d/types.ts",
     "!lib/tts/providers/adapter.ts",
     "!components/editor/diagnostics/types.ts",
@@ -538,11 +539,11 @@ const config: Config = {
     "/out/",
     "/src-tauri/",
     "/sidecar/",
-    // `share-server/` (worker + viewer) is a standalone Vitest workspace with
-    // its own package.json/node_modules — same arrangement as `sidecar/`. Its
-    // specs `import` from `vitest` and `cloudflare:test`, which Jest's CJS
-    // loader can't resolve. Run them via the share-server workspace's own
-    // `vitest` / `wrangler` scripts, not the root Jest suite.
+    // `services/share-server/` (worker + viewer) is a standalone Vitest
+    // workspace with its own package.json/node_modules — same arrangement as
+    // `sidecar/`. Its specs `import` from `vitest` and `cloudflare:test`, which
+    // Jest's CJS loader can't resolve. Run them via the share-server workspace's
+    // own `vitest` / `wrangler` scripts, not the root Jest suite.
     "/share-server/",
     // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
     // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.

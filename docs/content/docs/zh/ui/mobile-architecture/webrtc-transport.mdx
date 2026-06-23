@@ -112,7 +112,7 @@ sequenceDiagram
 
 ## Rendezvous 服务器
 
-`signaling-server/` 是一个 Rust signaling 中继，拥有两个可互换的后端，共享
+`services/signaling-server/` 是一个 Rust signaling 中继，拥有两个可互换的后端，共享
 `cognia_signaling_core` crate（`proto` / `policy` / `limits`）。客户端两种方式均发送 `?rid=`；
 HMAC 信封对两者均**不透明**——服务器原样转发，从不接触明文。
 
@@ -133,7 +133,7 @@ HMAC 信封对两者均**不透明**——服务器原样转发，从不接触�
 
 ### axum（自托管）
 
-`signaling-server/src/` 是等效的单进程服务器，用于自托管：`router()`（`server.rs:76`）
+`services/signaling-server/src/` 是等效的单进程服务器，用于自托管：`router()`（`server.rs:76`）
 提供 `/healthz`、`/metrics` 和 `any /v1/signaling` → `ws_upgrade`（`ws.rs:62`）；
 `Mutex<HashMap<rid, Vec<PeerHandle>>>` 类型的 `RoomRegistry`（`room.rs:45`）将房间保存在内存中；
 `handle_frame`（`ws.rs:256`）实现相同的 `Subscribe` / `Relay` / `Ping` 语义。

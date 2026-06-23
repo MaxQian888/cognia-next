@@ -10,8 +10,8 @@ You analyze the infrastructure and DevOps setup of cognia-next. Focus on:
 
 - `.github/workflows/` — All CI/CD pipelines (ci.yml, test.yml, quality.yml, build-tauri.yml, deploy.yml, release.yml, signaling-server.yml)
 - `scripts/` — Build, audit, migration, and gate scripts
-- `signaling-server/` — WebRTC signaling service (axum + workers-rs)
-- `share-server/` — Cloudflare Worker + Vite viewer for zero-knowledge share links
+- `services/signaling-server/` — WebRTC signaling service (axum + workers-rs)
+- `services/share-server/` — Cloudflare Worker + Vite viewer for zero-knowledge share links
 - Root configs — `package.json` scripts, `pnpm-workspace.yaml`, `tsconfig.json`, `eslint.config.mjs`, `jest.config.ts`, `playwright.config.ts`, `next.config.ts`, `postcss.config.mjs`
 - `husky/`, `.lintstagedrc.json`, `commitlint.config.cjs` — Commit quality gates
 - `Dockerfile.cognia-server` — Container deployment
