@@ -94,6 +94,59 @@ describe("BaseTerminalSession.onData", () => {
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
+
+  it("buffers data that arrives before any listener and replays it on subscribe", () => {
+    const session = makeSession()
+    // Simulates Rust's reattach replay landing before the xterm mounts.
+    session.pushData(new Uint8Array([1, 2]))
+    session.pushData(new Uint8Array([3]))
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    expect(seen.map((c) => Array.from(c))).toEqual([[1, 2], [3]])
+  })
+
+  it("does not replay the buffer to a second subscriber", () => {
+    const session = makeSession()
+    session.pushData(new Uint8Array([9]))
+    const first: Uint8Array[] = []
+    const second: Uint8Array[] = []
+    session.onData((b) => first.push(b))
+    session.onData((b) => second.push(b))
+    expect(first).toHaveLength(1)
+    expect(second).toHaveLength(0)
+  })
+
+  it("re-buffers and replays after all listeners detach (tab switch)", () => {
+    const session = makeSession()
+    const off = session.onData(() => {})
+    off()
+    // Output produced while the tab is backgrounded (no mounted instance).
+    session.pushData(new Uint8Array([7]))
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    expect(seen.map((c) => Array.from(c))).toEqual([[7]])
+  })
+
+  it("caps the early-data buffer, dropping the oldest chunks", () => {
+    const session = makeSession()
+    const big = () => new Uint8Array(400 * 1024) // 400KB; cap is 1MB
+    session.pushData(big()) // oldest — should be evicted (3×400KB > 1MB)
+    session.pushData(big())
+    session.pushData(big())
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    // Oldest chunk dropped so total stays under the 1MB cap.
+    expect(seen.length).toBe(2)
+    expect(seen.reduce((n, c) => n + c.length, 0)).toBeLessThanOrEqual(1024 * 1024)
+  })
+
+  it("ignores empty data chunks in the buffer", () => {
+    const session = makeSession()
+    session.pushData(new Uint8Array([]))
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    expect(seen).toHaveLength(0)
+  })
 })
 
 describe("BaseTerminalSession.onIntegration", () => {

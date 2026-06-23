@@ -41,6 +41,19 @@ export abstract class BaseTerminalSession {
   protected exited = false
   protected exitCode: number | null = null
 
+  // Early-data buffer: bytes that arrive while there is NO data listener are
+  // held here and replayed to the next subscriber instead of being dropped.
+  // This is what makes a reattached session (webview reload) repaint — Rust
+  // replays the retained scrollback the instant the Channel is wired, long
+  // before the dock mounts the xterm and calls `onData`. It also restores the
+  // last screen when switching back to a background tab (the dock only mounts
+  // the active tab's instance). Bounded so a chatty unwatched shell can't grow
+  // it without limit — the oldest chunks are dropped, which is harmless since
+  // a fresh xterm only renders the latest screen anyway.
+  private pendingData: Uint8Array[] = []
+  private pendingBytes = 0
+  private static readonly MAX_PENDING_BYTES = 1024 * 1024
+
   /** Stable session id from the info block. */
   get id(): string {
     return this.info.id
@@ -60,6 +73,20 @@ export abstract class BaseTerminalSession {
 
   onData(listener: DataListener): () => void {
     this.dataListeners.add(listener)
+    // Replay anything buffered while no one was listening, in arrival order,
+    // so the new subscriber (a freshly-mounted xterm) repaints the screen.
+    if (this.pendingData.length > 0) {
+      const pending = this.pendingData
+      this.pendingData = []
+      this.pendingBytes = 0
+      for (const chunk of pending) {
+        try {
+          listener(chunk)
+        } catch (err) {
+          console.warn(`terminal-session(${this.info.id}): data listener threw on replay:`, err)
+        }
+      }
+    }
     return () => {
       this.dataListeners.delete(listener)
     }
@@ -93,12 +120,30 @@ export abstract class BaseTerminalSession {
   // ── Fan-out helpers for subclasses ───────────────────────────────
 
   protected dispatchData(bytes: Uint8Array): void {
+    if (this.dataListeners.size === 0) {
+      this.bufferPendingData(bytes)
+      return
+    }
     for (const listener of this.dataListeners) {
       try {
         listener(bytes)
       } catch (err) {
         console.warn(`terminal-session(${this.info.id}): data listener threw:`, err)
       }
+    }
+  }
+
+  /** Append to the early-data buffer, dropping oldest chunks past the cap. */
+  private bufferPendingData(bytes: Uint8Array): void {
+    if (bytes.length === 0) return
+    this.pendingData.push(bytes)
+    this.pendingBytes += bytes.length
+    while (
+      this.pendingBytes > BaseTerminalSession.MAX_PENDING_BYTES &&
+      this.pendingData.length > 1
+    ) {
+      const dropped = this.pendingData.shift()
+      if (dropped) this.pendingBytes -= dropped.length
     }
   }
 

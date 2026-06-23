@@ -51,6 +51,15 @@ export async function rehydrateTerminals(
   let failed = 0
   for (const info of infos) {
     try {
+      // Order matters: reattach (which makes the live session) and register it
+      // in the live registry BEFORE adding the store row. The store row is what
+      // makes the dock mount the `TerminalInstance`, whose setup effect reads
+      // `getLiveSession(id)` once and bails permanently if it's missing. Adding
+      // the row first (as the original code did) let the instance mount during
+      // the `await reattach` gap — before the live session existed — leaving a
+      // dead, black terminal. This mirrors the spawn path (spawn-orchestrator).
+      const session = await reattach(info.id, 0)
+      registerLiveSession(session)
       store.registerSession({
         id: info.id,
         projectId: info.projectId,
@@ -58,8 +67,6 @@ export async function rehydrateTerminals(
         origin: info.origin,
         shell: info.shell,
       })
-      const session = await reattach(info.id, 0)
-      registerLiveSession(session)
       wireSessionToStore(session, store)
       restored++
     } catch {

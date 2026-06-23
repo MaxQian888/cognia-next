@@ -398,6 +398,51 @@ describe("TerminalInstance", () => {
     expect(opts.theme.background).toBe("#282a36")
   })
 
+  it("auto scheme follows the app --background/--foreground CSS tokens", async () => {
+    const realGCS = window.getComputedStyle.bind(window)
+    const spy = jest.spyOn(window, "getComputedStyle").mockImplementation(((
+      el: Element,
+      pseudo?: string | null
+    ) => {
+      // The theme probe carries an inline `color: var(--…)`; the browser would
+      // resolve it to rgb — emulate that here.
+      const inline = (el as HTMLElement).style?.color
+      if (inline === "var(--background)") return { color: "rgb(18, 18, 18)" } as CSSStyleDeclaration
+      if (inline === "var(--foreground)")
+        return { color: "rgb(230, 230, 230)" } as CSSStyleDeclaration
+      return realGCS(el, pseudo ?? undefined)
+    }) as typeof window.getComputedStyle)
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: { background: string; foreground: string; cursor: string }
+    }
+    expect(opts.theme.background).toBe("rgb(18, 18, 18)")
+    expect(opts.theme.foreground).toBe("rgb(230, 230, 230)")
+    expect(opts.theme.cursor).toBe("rgb(230, 230, 230)")
+    spy.mockRestore()
+  })
+
+  it("does not override a named scheme even when app tokens resolve", async () => {
+    mockTerminalSettings = { colorScheme: "dracula" }
+    const realGCS = window.getComputedStyle.bind(window)
+    const spy = jest.spyOn(window, "getComputedStyle").mockImplementation(((
+      el: Element,
+      pseudo?: string | null
+    ) => {
+      const inline = (el as HTMLElement).style?.color
+      if (inline?.startsWith("var(")) return { color: "rgb(18, 18, 18)" } as CSSStyleDeclaration
+      return realGCS(el, pseudo ?? undefined)
+    }) as typeof window.getComputedStyle)
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: { background: string }
+    }
+    expect(opts.theme.background).toBe("#282a36")
+    spy.mockRestore()
+  })
+
   it("applies cursorStyle from settings", async () => {
     mockTerminalSettings = { cursorStyle: "bar", cursorBlink: false }
     render(<TerminalInstance sessionId="s-1" />)
@@ -416,6 +461,53 @@ describe("TerminalInstance", () => {
     rerender(<TerminalInstance sessionId="s-1" fontSize={18} />)
     await flushAsync()
     expect(mockTermInstance.options.fontSize).toBe(18)
+  })
+
+  it("re-fits and resizes the PTY when the font size changes", async () => {
+    mockTermInstance.rows = 30
+    mockTermInstance.cols = 100
+    const { rerender } = render(<TerminalInstance sessionId="s-1" fontSize={13} />)
+    await flushAsync()
+    mockFit.mockClear()
+    sessionRegistry.current!.resize.mockClear()
+    // The larger font yields a coarser cell grid on the next fit.
+    mockFit.mockImplementation(() => {
+      mockTermInstance.rows = 24
+      mockTermInstance.cols = 80
+    })
+    rerender(<TerminalInstance sessionId="s-1" fontSize={18} />)
+    await flushAsync()
+    expect(mockFit).toHaveBeenCalled()
+    expect(sessionRegistry.current!.resize).toHaveBeenCalledWith(24, 80)
+  })
+
+  it("re-fits when the font family changes", async () => {
+    const { rerender } = render(<TerminalInstance sessionId="s-1" fontFamily="Menlo" />)
+    await flushAsync()
+    mockFit.mockClear()
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Fira Code" />)
+    await flushAsync()
+    expect(mockTermInstance.options.fontFamily).toBe("Fira Code")
+    expect(mockFit).toHaveBeenCalled()
+  })
+
+  it("does not re-fit when only a non-font setting changes", async () => {
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} scrollback={1000} />
+    )
+    await flushAsync()
+    // The mock Terminal ignores its constructor options, so mirror the committed
+    // font onto the stub the way the real constructor would — otherwise the next
+    // effect run would see a spurious font change.
+    mockTermInstance.options.fontFamily = "Menlo"
+    mockTermInstance.options.fontSize = 13
+    mockFit.mockClear()
+    rerender(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} scrollback={5000} />
+    )
+    await flushAsync()
+    expect(mockTermInstance.options.scrollback).toBe(5000)
+    expect(mockFit).not.toHaveBeenCalled()
   })
 
   type IntegrationCb = (ev: { kind: string; exit_code?: number | null; cwd?: string }) => void
@@ -722,5 +814,20 @@ describe("TerminalInstance", () => {
       captured.cb?.({ kind: "prompt_start" })
       expect(mockAutocomplete.reset).toHaveBeenCalled()
     })
+  })
+})
+
+describe("TerminalInstance stylesheet", () => {
+  // Regression guard: xterm.js relies on its own stylesheet to absolutely
+  // position the viewport, screen, and renderer canvases. If this side-effect
+  // import is dropped, every row collapses into the top-left corner — a layout
+  // bug jsdom can't surface, so we assert the import at the source level.
+  it("imports the xterm stylesheet", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require("node:fs") as typeof import("node:fs")
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { join } = require("node:path") as typeof import("node:path")
+    const source = readFileSync(join(__dirname, "terminal-instance.tsx"), "utf8")
+    expect(source).toMatch(/import\s+["']@xterm\/xterm\/css\/xterm\.css["']/)
   })
 })

@@ -54,6 +54,32 @@ describe("rehydrateTerminals", () => {
     expect(wireSessionToStore).toHaveBeenCalledTimes(2)
   })
 
+  it("registers the live session before the store row so the instance can attach", async () => {
+    const order: string[] = []
+    const store = makeStore()
+    ;(store.registerSession as jest.Mock).mockImplementation(() => order.push("store"))
+    ;(registerLiveSession as jest.Mock).mockImplementation(() => order.push("live"))
+    const list = jest.fn(async () => [info("a")])
+    const reattach = jest.fn(fakeReattach) as unknown as ReattachFn
+
+    await rehydrateTerminals({ store, list, reattach })
+
+    // The dock mounts the TerminalInstance off the store row; its setup effect
+    // reads getLiveSession() once, so the live registry must be populated first.
+    expect(order).toEqual(["live", "store"])
+  })
+
+  it("does not add a store row when reattach fails", async () => {
+    const store = makeStore()
+    const list = jest.fn(async () => [info("bad")])
+    const reattach = jest.fn(() => Promise.reject(new Error("gone"))) as unknown as ReattachFn
+
+    const res = await rehydrateTerminals({ store, list, reattach })
+
+    expect(res).toEqual({ restored: 0, failed: 1 })
+    expect(store.registerSession).not.toHaveBeenCalled()
+  })
+
   it("returns zero when listing throws (no sessions / not Tauri)", async () => {
     const res = await rehydrateTerminals({
       store: makeStore(),

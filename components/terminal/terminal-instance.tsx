@@ -60,9 +60,15 @@ import {
 import { useTranslations } from "next-intl"
 
 import type { IDecoration, ILink, ILinkProvider, IMarker } from "@xterm/xterm"
+// xterm.js ships its own stylesheet that positions the viewport, screen, and the
+// stacked renderer canvases (`position: absolute`). Without it every row/cell
+// collapses into the top-left corner. Same side-effect-import pattern the
+// workflow canvas uses for `@xyflow/react/dist/style.css`.
+import "@xterm/xterm/css/xterm.css"
 
 import { TerminalBackpressure } from "@/lib/terminal/backpressure"
-import { resolveTerminalTheme } from "@/lib/terminal/color-schemes"
+import { findColorScheme, resolveTerminalTheme } from "@/lib/terminal/color-schemes"
+import type { TerminalTheme } from "@/lib/terminal/color-schemes"
 import { exitMarkerColor, nextMarkerLine, prevMarkerLine } from "@/lib/terminal/command-markers"
 import { getLiveSession } from "@/lib/terminal/session-registry"
 import { matchFileLinks, resolveLinkPath } from "@/lib/terminal/terminal-links"
@@ -201,6 +207,31 @@ function clampFontSize(size: number): number {
  * scheme presets live in one place. `"auto"` (default) follows the app's
  * light/dark mode; named schemes are fixed.
  */
+/**
+ * Resolve the app's `--background` / `--foreground` design tokens to concrete
+ * `rgb(...)` strings (which xterm parses) by probing computed style. Returns
+ * null outside the browser (SSR / jsdom) or when the vars don't resolve, so
+ * callers fall back to the static palette. This is what keeps the `"auto"`
+ * scheme matching the surrounding `bg-background` chrome under any theme —
+ * including user custom themes that retune the oklch tokens in `globals.css`.
+ */
+function readAppAutoTokens(): Pick<TerminalTheme, "background" | "foreground" | "cursor"> | null {
+  if (typeof document === "undefined" || !document.body) return null
+  const resolveVar = (varName: string): string | null => {
+    const probe = document.createElement("span")
+    probe.style.color = `var(${varName})`
+    probe.style.display = "none"
+    document.body.appendChild(probe)
+    const rgb = getComputedStyle(probe).color
+    probe.remove()
+    return rgb && rgb.startsWith("rgb") ? rgb : null
+  }
+  const background = resolveVar("--background")
+  const foreground = resolveVar("--foreground")
+  if (!background || !foreground) return null
+  return { background, foreground, cursor: foreground }
+}
+
 function makeTheme(isDark: boolean, schemeId?: string) {
   // Match the app's neutral palette (oklch in `globals.css`) for the base
   // tokens, and supply a full ANSI 16-color palette so colored output
@@ -208,7 +239,13 @@ function makeTheme(isDark: boolean, schemeId?: string) {
   // legible colors instead of xterm's washed-out defaults. The dark palette
   // is Windows Terminal's "Campbell" — the canonical PowerShell scheme — so
   // PowerShell prompts look exactly as the user expects.
-  return resolveTerminalTheme(schemeId, isDark)
+  const base = resolveTerminalTheme(schemeId, isDark)
+  // Named schemes are intentionally fixed palettes; only `"auto"` follows the
+  // app. For it, override the base/foreground/cursor with the live CSS tokens
+  // so the terminal surface stays consistent with the rest of the UI.
+  if (findColorScheme(schemeId)) return base
+  const tokens = readAppAutoTokens()
+  return tokens ? { ...base, ...tokens } : base
 }
 
 function isHtmlDark(): boolean {
@@ -248,6 +285,11 @@ function TerminalInstanceImpl(
   const zoomRef = useRef<number>(0)
   const fontSizeRef = useRef<number>(DEFAULT_FONT_SIZE)
   const applyZoomRef = useRef<(() => void) | null>(null)
+  // Re-fit the live xterm to the container and propagate the new cols/rows to
+  // the PTY. Wired during setup so the live-settings effect can re-fit after a
+  // font change (a different cell size means the old cols/rows no longer match
+  // the container) from outside the setup-effect closure.
+  const refitRef = useRef<(() => void) | null>(null)
 
   // Settings-store derived defaults. Component props override; this lets
   // the mobile screen pin a fontSize while desktop follows user settings.
@@ -477,8 +519,7 @@ function TerminalInstanceImpl(
       const applyZoom = () => {
         try {
           term.options.fontSize = clampFontSize(fontSizeRef.current + zoomRef.current)
-          fit.fit()
-          void session.resize(term.rows, term.cols)
+          refitRef.current?.()
         } catch {
           /* noop — container may not be laid out */
         }
@@ -661,6 +702,24 @@ function TerminalInstanceImpl(
       const initial = { rows: term.rows, cols: term.cols }
       void session.resize(initial.rows, initial.cols)
 
+      // Single source of truth for re-fitting: recompute cols/rows from the
+      // container and, when they changed, push the new size to the PTY. Shared
+      // by the ResizeObserver, the zoom shortcuts, and the live-settings effect
+      // (font changes alter the cell size, so a re-fit must follow).
+      const refit = () => {
+        try {
+          fit.fit()
+          if (term.rows !== initial.rows || term.cols !== initial.cols) {
+            initial.rows = term.rows
+            initial.cols = term.cols
+            void session.resize(term.rows, term.cols)
+          }
+        } catch {
+          // ignore — fit can throw when the container has no layout yet
+        }
+      }
+      refitRef.current = refit
+
       const bp = new TerminalBackpressure({
         term: { write: (data, cb) => term.write(data, cb) },
       })
@@ -754,16 +813,7 @@ function TerminalInstanceImpl(
       // dimensions; we then propagate to the Rust side so the child sees
       // SIGWINCH (or ConPTY's equivalent).
       const ro = new ResizeObserver(() => {
-        try {
-          fit.fit()
-          if (term.rows !== initial.rows || term.cols !== initial.cols) {
-            initial.rows = term.rows
-            initial.cols = term.cols
-            void session.resize(term.rows, term.cols)
-          }
-        } catch {
-          // ignore — fit can throw when the container has no layout yet
-        }
+        refit()
       })
       ro.observe(container)
 
@@ -824,6 +874,8 @@ function TerminalInstanceImpl(
         term.dispose()
         termRef.current = null
         searchAddonRef.current = null
+        refitRef.current = null
+        applyZoomRef.current = null
       }
     })().catch((err) => {
       console.warn(`terminal-instance: setup failed for ${sessionId}:`, err)
@@ -847,13 +899,24 @@ function TerminalInstanceImpl(
     const term = termRef.current
     if (!term) return
     try {
-      if (term.options.fontFamily !== fontFamily) term.options.fontFamily = fontFamily
+      // Track whether a font dimension changed: the cell size shifts, so the
+      // container now fits a different cols/rows count and the terminal must
+      // re-fit (and tell the PTY) — otherwise the layout desyncs from the font.
+      let fontChanged = false
+      if (term.options.fontFamily !== fontFamily) {
+        term.options.fontFamily = fontFamily
+        fontChanged = true
+      }
       // Apply the configured size plus any active zoom delta.
       const effectiveSize = clampFontSize(fontSize + zoomRef.current)
-      if (term.options.fontSize !== effectiveSize) term.options.fontSize = effectiveSize
+      if (term.options.fontSize !== effectiveSize) {
+        term.options.fontSize = effectiveSize
+        fontChanged = true
+      }
       if (term.options.scrollback !== scrollback) term.options.scrollback = scrollback
       if (term.options.cursorStyle !== cursorStyle) term.options.cursorStyle = cursorStyle
       if (term.options.cursorBlink !== cursorBlink) term.options.cursorBlink = cursorBlink
+      if (fontChanged) refitRef.current?.()
     } catch {
       /* noop */
     }
