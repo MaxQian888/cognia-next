@@ -13,7 +13,6 @@
 //! here. `build-options.ts` injects the access token as an `Authorization`
 //! header at send time (the Agent SDK exposes no `authProvider` hook).
 
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -71,35 +70,24 @@ impl McpAuthEntry {
 // Keyring I/O
 // ---------------------------------------------------------------------------
 
-fn entry_for(server_name: &str) -> Result<Entry, String> {
-    Entry::new(SERVICE, server_name).map_err(|e| format!("keyring init failed: {e}"))
-}
-
 pub fn save(server_name: &str, entry: &McpAuthEntry) -> Result<(), String> {
     let blob = serde_json::to_string(entry).map_err(|e| format!("serialize failed: {e}"))?;
-    entry_for(server_name)?
-        .set_password(&blob)
-        .map_err(|e| format!("keyring write failed: {e}"))
+    crate::secret_store::set(SERVICE, server_name, &blob)
 }
 
 pub fn load(server_name: &str) -> Result<Option<McpAuthEntry>, String> {
-    match entry_for(server_name)?.get_password() {
-        Ok(blob) => {
+    match crate::secret_store::get(SERVICE, server_name)? {
+        Some(blob) => {
             let parsed: McpAuthEntry =
                 serde_json::from_str(&blob).map_err(|e| format!("parse failed: {e}"))?;
             Ok(Some(parsed))
         }
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
+        None => Ok(None),
     }
 }
 
 pub fn clear(server_name: &str) -> Result<(), String> {
-    match entry_for(server_name)?.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete failed: {e}")),
-    }
+    crate::secret_store::delete(SERVICE, server_name)
 }
 
 // ---------------------------------------------------------------------------
@@ -291,10 +279,6 @@ async fn run_helper(
 mod tests {
     use super::*;
 
-    fn keyring_available() -> bool {
-        std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
-    }
-
     fn entry_with_token(tok: &str) -> McpAuthEntry {
         McpAuthEntry {
             tokens: Some(serde_json::json!({ "access_token": tok, "token_type": "Bearer" })),
@@ -352,13 +336,10 @@ mod tests {
         assert_eq!(out.entry.unwrap().access_token(), Some("z".to_string()));
     }
 
-    // ── Keyring round-trip (opt-in: COGNIA_TEST_KEYRING=1) ────────────────────
+    // ── secret-store round-trip (hermetic via the in-memory test global) ──────
 
     #[test]
     fn keyring_save_load_clear_round_trip() {
-        if !keyring_available() {
-            return;
-        }
         let name = "__cognia_test_mcp_oauth__";
         let _ = clear(name);
         assert!(load(name).unwrap().is_none());

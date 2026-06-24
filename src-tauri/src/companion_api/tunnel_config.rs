@@ -67,36 +67,23 @@ fn config_path(data_dir: Option<&Path>) -> PathBuf {
     }
 }
 
-fn keyring_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|e| format!("keyring entry: {e}"))
-}
-
 // ---------------------------------------------------------------------------
-// Token (keyring)
+// Token (secret store)
 // ---------------------------------------------------------------------------
 
-/// Store the connector token in the OS keyring.
+/// Store the connector token.
 pub fn save_token(token: &str) -> Result<(), String> {
-    keyring_entry()?
-        .set_password(token)
-        .map_err(|e| format!("keyring write: {e}"))
+    crate::secret_store::set(KEYRING_SERVICE, KEYRING_ACCOUNT, token)
 }
 
-/// Read the connector token from the OS keyring.
+/// Read the connector token.
 pub fn load_token() -> Result<Option<String>, String> {
-    match keyring_entry()?.get_password() {
-        Ok(s) => Ok(Some(s)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read: {e}")),
-    }
+    crate::secret_store::get(KEYRING_SERVICE, KEYRING_ACCOUNT)
 }
 
-/// Remove the token from the OS keyring.
+/// Remove the token.
 pub fn clear_token() -> Result<(), String> {
-    match keyring_entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete: {e}")),
-    }
+    crate::secret_store::delete(KEYRING_SERVICE, KEYRING_ACCOUNT)
 }
 
 // ---------------------------------------------------------------------------
@@ -252,10 +239,9 @@ mod tests {
     }
 
     #[test]
-    fn token_roundtrip_when_keyring_available() {
-        if std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() != Some("1") {
-            return;
-        }
+    fn token_roundtrip() {
+        // Hermetic via the in-memory secret_store global under cfg(test); the
+        // mutex guard serializes against the other token-touching tests.
         let _guard = keyring_test_guard();
         let _ = clear_token();
         assert!(load_token().unwrap().is_none());

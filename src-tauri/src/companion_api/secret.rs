@@ -15,7 +15,6 @@
 //! and generation tests run unconditionally.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use keyring::Entry;
 use rand::RngCore as _;
 
 const SERVICE: &str = "com.cognia.companion/v1";
@@ -34,18 +33,14 @@ const ACCOUNT: &str = "signing-key";
 ///
 /// Propagates keyring errors as human-readable strings.
 pub fn load_or_generate() -> Result<Vec<u8>, String> {
-    let entry = entry()?;
-    match entry.get_password() {
-        Ok(encoded) => decode_secret(&encoded),
-        Err(keyring::Error::NoEntry) => {
+    match crate::secret_store::get(SERVICE, ACCOUNT)? {
+        Some(encoded) => decode_secret(&encoded),
+        None => {
             let secret = generate_secret();
             let encoded = B64.encode(&secret);
-            entry
-                .set_password(&encoded)
-                .map_err(|e| format!("keyring write failed: {e}"))?;
+            crate::secret_store::set(SERVICE, ACCOUNT, &encoded)?;
             Ok(secret)
         }
-        Err(e) => Err(format!("keyring read failed: {e}")),
     }
 }
 
@@ -54,28 +49,19 @@ pub fn load_or_generate() -> Result<Vec<u8>, String> {
 #[allow(dead_code)]
 pub fn store(new_secret: &[u8]) -> Result<(), String> {
     let encoded = B64.encode(new_secret);
-    entry()?
-        .set_password(&encoded)
-        .map_err(|e| format!("keyring write failed: {e}"))
+    crate::secret_store::set(SERVICE, ACCOUNT, &encoded)
 }
 
 /// Remove the stored secret.  Next `load_or_generate` call will produce a new
 /// one, invalidating all existing device JWTs.
 #[allow(dead_code)]
 pub fn clear() -> Result<(), String> {
-    match entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete failed: {e}")),
-    }
+    crate::secret_store::delete(SERVICE, ACCOUNT)
 }
 
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-fn entry() -> Result<Entry, String> {
-    Entry::new(SERVICE, ACCOUNT).map_err(|e| format!("keyring init failed: {e}"))
-}
 
 fn generate_secret() -> Vec<u8> {
     let mut buf = vec![0u8; 32];

@@ -15,7 +15,6 @@
 // The migration is idempotent: a second call after the v2 vault has the
 // migrated account returns `AlreadyMigrated` instead of duplicating.
 
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -222,7 +221,7 @@ fn migrate_anthropic_for_account(local_account_id: &str) -> Result<MigrationOutc
             provider: provider_id,
         });
     };
-    if read_account_migration_marker(ProviderId::Anthropic)?.is_some() {
+    if read_account_migration_marker(local_account_id, ProviderId::Anthropic)?.is_some() {
         return Ok(MigrationOutcome::AlreadyMigrated {
             provider: provider_id,
         });
@@ -236,7 +235,7 @@ fn migrate_anthropic_for_account(local_account_id: &str) -> Result<MigrationOutc
         _ => false,
     });
     if already {
-        write_account_migration_marker(ProviderId::Anthropic, local_account_id)?;
+        write_account_migration_marker(local_account_id, ProviderId::Anthropic)?;
         return Ok(MigrationOutcome::AlreadyMigrated {
             provider: provider_id,
         });
@@ -257,7 +256,7 @@ fn migrate_anthropic_for_account(local_account_id: &str) -> Result<MigrationOutc
         vault.active_account_id = Some(account_id.clone());
     }
     vault::save_for_account(local_account_id, ProviderId::Anthropic, &vault)?;
-    write_account_migration_marker(ProviderId::Anthropic, local_account_id)?;
+    write_account_migration_marker(local_account_id, ProviderId::Anthropic)?;
     Ok(MigrationOutcome::Migrated {
         provider: provider_id,
         account_id,
@@ -272,7 +271,7 @@ fn migrate_codex_for_account(local_account_id: &str) -> Result<MigrationOutcome,
             provider: provider_id,
         });
     };
-    if read_account_migration_marker(ProviderId::Codex)?.is_some() {
+    if read_account_migration_marker(local_account_id, ProviderId::Codex)?.is_some() {
         return Ok(MigrationOutcome::AlreadyMigrated {
             provider: provider_id,
         });
@@ -288,7 +287,7 @@ fn migrate_codex_for_account(local_account_id: &str) -> Result<MigrationOutcome,
         _ => false,
     });
     if already {
-        write_account_migration_marker(ProviderId::Codex, local_account_id)?;
+        write_account_migration_marker(local_account_id, ProviderId::Codex)?;
         return Ok(MigrationOutcome::AlreadyMigrated {
             provider: provider_id,
         });
@@ -309,7 +308,7 @@ fn migrate_codex_for_account(local_account_id: &str) -> Result<MigrationOutcome,
         vault.active_account_id = Some(account_id.clone());
     }
     vault::save_for_account(local_account_id, ProviderId::Codex, &vault)?;
-    write_account_migration_marker(ProviderId::Codex, local_account_id)?;
+    write_account_migration_marker(local_account_id, ProviderId::Codex)?;
     Ok(MigrationOutcome::Migrated {
         provider: provider_id,
         account_id,
@@ -317,36 +316,38 @@ fn migrate_codex_for_account(local_account_id: &str) -> Result<MigrationOutcome,
 }
 
 fn read_v1_blob(service: &str, account: &str) -> Result<Option<String>, String> {
-    let entry =
-        Entry::new(service, account).map_err(|e| format!("legacy keyring init failed: {e}"))?;
-    match entry.get_password() {
-        Ok(blob) => Ok(Some(blob)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("legacy keyring read failed: {e}")),
-    }
+    crate::secret_store::get(service, account)
 }
 
-#[allow(dead_code)]
-fn read_account_migration_marker(provider: ProviderId) -> Result<Option<String>, String> {
-    let entry = Entry::new(V2_ACCOUNT_MIGRATION_SERVICE, provider.as_str())
-        .map_err(|e| format!("account migration marker init failed: {e}"))?;
-    match entry.get_password() {
-        Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("account migration marker read failed: {e}")),
-    }
+/// Keyring `account` field for the legacy-migration marker. Scoping it to
+/// `(local_account_id, provider)` — not just `provider` — is what lets every
+/// local profile reuse the device-global v1 login: each profile runs the v1→v2
+/// copy into its OWN vault exactly once. A provider-only key let the first
+/// profile to boot claim the device-wide credential and starved every other
+/// profile with a bogus "No API key" (`AlreadyMigrated` over an empty vault).
+fn account_migration_marker_key(local_account_id: &str, provider: ProviderId) -> String {
+    format!("{local_account_id}/{}", provider.as_str())
 }
 
-#[allow(dead_code)]
-fn write_account_migration_marker(
-    provider: ProviderId,
+fn read_account_migration_marker(
     local_account_id: &str,
+    provider: ProviderId,
+) -> Result<Option<String>, String> {
+    crate::secret_store::get(
+        V2_ACCOUNT_MIGRATION_SERVICE,
+        &account_migration_marker_key(local_account_id, provider),
+    )
+}
+
+fn write_account_migration_marker(
+    local_account_id: &str,
+    provider: ProviderId,
 ) -> Result<(), String> {
-    let entry = Entry::new(V2_ACCOUNT_MIGRATION_SERVICE, provider.as_str())
-        .map_err(|e| format!("account migration marker init failed: {e}"))?;
-    entry
-        .set_password(local_account_id)
-        .map_err(|e| format!("account migration marker write failed: {e}"))
+    crate::secret_store::set(
+        V2_ACCOUNT_MIGRATION_SERVICE,
+        &account_migration_marker_key(local_account_id, provider),
+        local_account_id,
+    )
 }
 
 fn new_uuid_v7() -> String {
@@ -372,9 +373,7 @@ mod tests {
     }
 
     fn clear_v1(service: &str) {
-        if let Ok(e) = Entry::new(service, V1_ACCOUNT) {
-            let _ = e.delete_credential();
-        }
+        let _ = crate::secret_store::delete(service, V1_ACCOUNT);
     }
 
     fn write_v1_anthropic() -> String {
@@ -389,8 +388,7 @@ mod tests {
             stored_at_ms: 1_700_000_000_000,
         };
         let blob = serde_json::to_string(&cred).unwrap();
-        let entry = Entry::new(V1_ANTHROPIC_SERVICE, V1_ACCOUNT).unwrap();
-        entry.set_password(&blob).unwrap();
+        crate::secret_store::set(V1_ANTHROPIC_SERVICE, V1_ACCOUNT, &blob).unwrap();
         blob
     }
 
@@ -409,8 +407,7 @@ mod tests {
             stored_at_ms: 1_700_000_000_000,
         };
         let blob = serde_json::to_string(&cred).unwrap();
-        let entry = Entry::new(V1_CODEX_SERVICE, V1_ACCOUNT).unwrap();
-        entry.set_password(&blob).unwrap();
+        crate::secret_store::set(V1_CODEX_SERVICE, V1_ACCOUNT, &blob).unwrap();
         blob
     }
 
@@ -484,8 +481,9 @@ mod tests {
         }
 
         // V1 entry untouched (90-day rollback).
-        let entry = Entry::new(V1_ANTHROPIC_SERVICE, V1_ACCOUNT).unwrap();
-        assert!(entry.get_password().is_ok());
+        assert!(crate::secret_store::get(V1_ANTHROPIC_SERVICE, V1_ACCOUNT)
+            .unwrap()
+            .is_some());
 
         // Cleanup.
         clear_v1(V1_ANTHROPIC_SERVICE);
@@ -545,6 +543,82 @@ mod tests {
 
         clear_v1(V1_CODEX_SERVICE);
         vault::clear(ProviderId::Codex).unwrap();
+    }
+
+    #[test]
+    fn account_migration_marker_key_is_scoped_per_account_and_provider() {
+        // No keyring needed — this is the pure key-derivation that fixes the
+        // multi-profile bug. The key MUST vary by both local account and
+        // provider, otherwise one profile's marker masks another's migration.
+        let a_anthropic = account_migration_marker_key("local_a", ProviderId::Anthropic);
+        let b_anthropic = account_migration_marker_key("local_b", ProviderId::Anthropic);
+        let a_codex = account_migration_marker_key("local_a", ProviderId::Codex);
+
+        assert_eq!(a_anthropic, "local_a/anthropic");
+        assert_ne!(a_anthropic, b_anthropic);
+        assert_ne!(a_anthropic, a_codex);
+    }
+
+    #[test]
+    fn each_local_profile_reuses_the_legacy_login() {
+        if !keyring_available() {
+            return;
+        }
+        // One device-global v1 credential; two distinct local profiles.
+        clear_v1(V1_ANTHROPIC_SERVICE);
+        let _ = vault::clear_for_account("local_a", ProviderId::Anthropic);
+        let _ = vault::clear_for_account("local_b", ProviderId::Anthropic);
+        let _ = crate::secret_store::delete(
+            V2_ACCOUNT_MIGRATION_SERVICE,
+            &account_migration_marker_key("local_a", ProviderId::Anthropic),
+        );
+        let _ = crate::secret_store::delete(
+            V2_ACCOUNT_MIGRATION_SERVICE,
+            &account_migration_marker_key("local_b", ProviderId::Anthropic),
+        );
+        write_v1_anthropic();
+
+        // Profile A migrates the legacy login into ITS vault.
+        let a = migrate_v1_to_v2_for_account("local_a", ProviderId::Anthropic).unwrap();
+        assert!(matches!(a, MigrationOutcome::Migrated { .. }));
+
+        // Profile B must ALSO get it — the old device-global marker used to
+        // starve it with AlreadyMigrated over an empty vault.
+        let b = migrate_v1_to_v2_for_account("local_b", ProviderId::Anthropic).unwrap();
+        assert!(
+            matches!(b, MigrationOutcome::Migrated { .. }),
+            "second profile should reuse the legacy login, got {b:?}"
+        );
+
+        let vault_a = vault::load_for_account("local_a", ProviderId::Anthropic)
+            .unwrap()
+            .unwrap();
+        let vault_b = vault::load_for_account("local_b", ProviderId::Anthropic)
+            .unwrap()
+            .unwrap();
+        assert_eq!(vault_a.accounts.len(), 1);
+        assert_eq!(vault_b.accounts.len(), 1);
+
+        // Re-running for A is idempotent (marker present, no duplicate account).
+        let a_again = migrate_v1_to_v2_for_account("local_a", ProviderId::Anthropic).unwrap();
+        assert!(matches!(a_again, MigrationOutcome::AlreadyMigrated { .. }));
+        let vault_a2 = vault::load_for_account("local_a", ProviderId::Anthropic)
+            .unwrap()
+            .unwrap();
+        assert_eq!(vault_a2.accounts.len(), 1);
+
+        // Cleanup.
+        clear_v1(V1_ANTHROPIC_SERVICE);
+        let _ = vault::clear_for_account("local_a", ProviderId::Anthropic);
+        let _ = vault::clear_for_account("local_b", ProviderId::Anthropic);
+        let _ = crate::secret_store::delete(
+            V2_ACCOUNT_MIGRATION_SERVICE,
+            &account_migration_marker_key("local_a", ProviderId::Anthropic),
+        );
+        let _ = crate::secret_store::delete(
+            V2_ACCOUNT_MIGRATION_SERVICE,
+            &account_migration_marker_key("local_b", ProviderId::Anthropic),
+        );
     }
 
     #[test]

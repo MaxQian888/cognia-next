@@ -1,15 +1,14 @@
-// OS-keyring-backed storage for TTS provider API keys.
+// Storage for TTS provider API keys.
 //
-// Uses the cross-platform `keyring` crate (Keychain on macOS, Credential
-// Manager on Windows, Secret Service on Linux). Service name is namespaced
-// to "com.cognia.tts" and the entry account is the provider id (`openai`,
-// `google`, `elevenlabs`, etc.).
+// Service name is namespaced to "com.cognia.tts" and the entry account is the
+// provider id (`openai`, `google`, `elevenlabs`, etc.). Backed by
+// [`crate::secret_store`] (single OS-keyring master key), so the
+// `list_providers` enumeration below is an in-memory map scan — not seven
+// separate Keychain prompts.
 //
 // The frontend hits these via `tts_keyring_get/set/delete/list_providers`.
-// On a system without an OS keyring (rare server-mode CI), every command
-// returns a structured error so the UI can fall back to a different store.
 
-use keyring::Entry;
+use crate::secret_store;
 
 const SERVICE: &str = "com.cognia.tts";
 
@@ -23,44 +22,33 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "deepgram",
 ];
 
-fn entry_for(provider: &str) -> Result<Entry, String> {
+fn validate_provider(provider: &str) -> Result<(), String> {
     if provider.is_empty() {
         return Err("provider must not be empty".into());
     }
-    Entry::new(SERVICE, provider).map_err(|e| format!("keyring init failed: {e}"))
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn tts_keyring_get(provider: String) -> Result<Option<String>, String> {
-    let entry = entry_for(&provider)?;
-    match entry.get_password() {
-        Ok(s) => Ok(Some(s)),
-        // Map "no entry" (NoEntry) to None — the caller treats this as "no key".
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
-    }
+    validate_provider(&provider)?;
+    secret_store::get(SERVICE, &provider)
 }
 
 #[tauri::command]
 pub async fn tts_keyring_set(provider: String, key: String) -> Result<(), String> {
-    let entry = entry_for(&provider)?;
+    validate_provider(&provider)?;
     if key.trim().is_empty() {
         // Treat empty as a delete — keeps the UI flow simple.
         return tts_keyring_delete(provider).await;
     }
-    entry
-        .set_password(&key)
-        .map_err(|e| format!("keyring write failed: {e}"))
+    secret_store::set(SERVICE, &provider, &key)
 }
 
 #[tauri::command]
 pub async fn tts_keyring_delete(provider: String) -> Result<(), String> {
-    let entry = entry_for(&provider)?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete failed: {e}")),
-    }
+    validate_provider(&provider)?;
+    secret_store::delete(SERVICE, &provider)
 }
 
 /// Returns the list of providers that currently have a key stored. Useful
@@ -70,13 +58,12 @@ pub async fn tts_keyring_delete(provider: String) -> Result<(), String> {
 pub async fn tts_keyring_list_providers() -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for p in KNOWN_PROVIDERS {
-        let entry = entry_for(p)?;
-        match entry.get_password() {
-            Ok(_) => out.push((*p).to_string()),
-            Err(keyring::Error::NoEntry) => {}
+        match secret_store::get(SERVICE, p) {
+            Ok(Some(_)) => out.push((*p).to_string()),
+            Ok(None) => {}
             Err(e) => {
                 // A single broken entry shouldn't kill enumeration; log and continue.
-                log::warn!("keyring read failed for {p}: {e}");
+                log::warn!("secret-store read failed for {p}: {e}");
             }
         }
     }
@@ -87,12 +74,6 @@ pub async fn tts_keyring_list_providers() -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    // The OS keyring is unavailable in many CI environments. Skip the
-    // round-trip tests unless explicitly opted in via an env var.
-    fn keyring_available() -> bool {
-        std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
-    }
-
     #[tokio::test]
     async fn rejects_empty_provider() {
         let res = tts_keyring_get(String::new()).await;
@@ -101,9 +82,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_set_is_delete() {
-        if !keyring_available() {
-            return;
-        }
+        // Hermetic via the in-memory secret_store global under cfg(test).
         let provider = "cognia_test_provider_empty";
         tts_keyring_set(provider.into(), "value".into())
             .await
@@ -115,9 +94,6 @@ mod tests {
 
     #[tokio::test]
     async fn round_trip() {
-        if !keyring_available() {
-            return;
-        }
         let provider = "cognia_test_provider_rt";
         tts_keyring_set(provider.into(), "secret".into())
             .await
@@ -128,5 +104,23 @@ mod tests {
         );
         tts_keyring_delete(provider.into()).await.unwrap();
         assert_eq!(tts_keyring_get(provider.into()).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn list_providers_reports_only_configured() {
+        // "openai" + "hume" configured; the rest absent.
+        tts_keyring_set("openai".into(), "k-openai".into())
+            .await
+            .unwrap();
+        tts_keyring_set("hume".into(), "k-hume".into())
+            .await
+            .unwrap();
+        let found = tts_keyring_list_providers().await.unwrap();
+        assert!(found.contains(&"openai".to_string()));
+        assert!(found.contains(&"hume".to_string()));
+        assert!(!found.contains(&"deepgram".to_string()));
+        // Cleanup so this never bleeds into another test in the shared global.
+        tts_keyring_delete("openai".into()).await.unwrap();
+        tts_keyring_delete("hume".into()).await.unwrap();
     }
 }

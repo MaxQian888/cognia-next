@@ -1,36 +1,24 @@
-//! OS-keyring-backed storage for the gateway bearer token. Mirrors
-//! `remote_control::keyring` — fixed service/account names, every read
-//! tolerates `NoEntry` so callers can use the helper as a get-or-default.
+//! Storage for the gateway bearer token. Mirrors `remote_control::keyring` —
+//! fixed service/account names, every read tolerates a missing entry so
+//! callers can use the helper as a get-or-default. Backed by
+//! [`crate::secret_store`] (single OS-keyring master key) rather than a
+//! dedicated keyring item.
 
-use keyring::Entry;
+use crate::secret_store;
 
 const SERVICE: &str = "com.cognia.gateway";
 const TOKEN_ACCOUNT: &str = "bearer-token";
 
-fn entry() -> Result<Entry, String> {
-    Entry::new(SERVICE, TOKEN_ACCOUNT).map_err(|e| format!("keyring init failed: {e}"))
-}
-
 pub fn read_token() -> Result<Option<String>, String> {
-    match entry()?.get_password() {
-        Ok(s) => Ok(Some(s)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
-    }
+    secret_store::get(SERVICE, TOKEN_ACCOUNT)
 }
 
 pub fn write_token(token: &str) -> Result<(), String> {
-    entry()?
-        .set_password(token)
-        .map_err(|e| format!("keyring write failed: {e}"))
+    secret_store::set(SERVICE, TOKEN_ACCOUNT, token)
 }
 
 pub fn clear_token() -> Result<(), String> {
-    match entry()?.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete failed: {e}")),
-    }
+    secret_store::delete(SERVICE, TOKEN_ACCOUNT)
 }
 
 /// Generate a fresh 256-bit bearer token (UUIDv4 ×2, hex-encoded).
@@ -44,10 +32,6 @@ pub fn generate_token() -> String {
 mod tests {
     use super::*;
 
-    fn keyring_available() -> bool {
-        std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
-    }
-
     #[test]
     fn generated_token_is_64_hex_chars() {
         let token = generate_token();
@@ -57,12 +41,11 @@ mod tests {
 
     #[test]
     fn token_round_trip() {
-        if !keyring_available() {
-            return;
-        }
+        // Routes through the in-memory secret_store global under cfg(test), so
+        // this is hermetic — no OS keyring required.
         let token = generate_token();
         write_token(&token).unwrap();
-        assert_eq!(read_token().unwrap(), Some(token));
+        assert_eq!(read_token().unwrap(), Some(token.clone()));
         clear_token().unwrap();
         assert_eq!(read_token().unwrap(), None);
     }

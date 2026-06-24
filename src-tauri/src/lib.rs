@@ -33,6 +33,7 @@ mod proxy_config;
 mod remote_control;
 pub mod sandbox;
 mod scheduler;
+mod secret_store;
 mod settings;
 mod shell;
 mod skills;

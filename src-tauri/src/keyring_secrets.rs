@@ -13,7 +13,7 @@
 //! Lookup / set / delete commands all swallow keyring `NoEntry` errors as
 //! `Ok(None)` / no-ops so the caller can keep a single happy path.
 
-use keyring::Entry;
+use crate::secret_store;
 use serde::{Deserialize, Serialize};
 
 const SERVICE_PREFIX: &str = "com.cognia.";
@@ -23,10 +23,12 @@ fn service_name(namespace: &str) -> String {
     format!("{SERVICE_PREFIX}{namespace}{SERVICE_SUFFIX}")
 }
 
-fn entry(namespace: &str, key: &str) -> Result<Entry, String> {
+/// Validate the `(namespace, key)` pair and return the resolved keyring
+/// service name. Storage now goes through [`crate::secret_store`].
+fn resolved_service(namespace: &str, key: &str) -> Result<String, String> {
     validate_namespace(namespace)?;
     validate_key(key)?;
-    Entry::new(&service_name(namespace), key).map_err(|e| format!("keyring init failed: {e}"))
+    Ok(service_name(namespace))
 }
 
 fn validate_namespace(namespace: &str) -> Result<(), String> {
@@ -61,12 +63,8 @@ fn validate_key(key: &str) -> Result<(), String> {
 /// Read a single secret. Returns `Ok(None)` when nothing is stored under
 /// `(namespace, key)`.
 pub fn get(namespace: &str, key: &str) -> Result<Option<String>, String> {
-    let entry = entry(namespace, key)?;
-    match entry.get_password() {
-        Ok(s) => Ok(Some(s)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring get failed: {e}")),
-    }
+    let service = resolved_service(namespace, key)?;
+    secret_store::get(&service, key)
 }
 
 /// Upsert a secret. Empty `value` is rejected — call {@link clear} to remove.
@@ -74,19 +72,14 @@ pub fn set(namespace: &str, key: &str, value: &str) -> Result<(), String> {
     if value.is_empty() {
         return Err("keyring set: value must not be empty".into());
     }
-    entry(namespace, key)?
-        .set_password(value)
-        .map_err(|e| format!("keyring set failed: {e}"))
+    let service = resolved_service(namespace, key)?;
+    secret_store::set(&service, key, value)
 }
 
 /// Remove an entry. Idempotent — missing entries return `Ok(())`.
 pub fn clear(namespace: &str, key: &str) -> Result<(), String> {
-    let entry = entry(namespace, key)?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring clear failed: {e}")),
-    }
+    let service = resolved_service(namespace, key)?;
+    secret_store::delete(&service, key)
 }
 
 // ── IPC surface ──────────────────────────────────────────────────────────────
@@ -133,32 +126,46 @@ mod tests {
     }
 
     #[test]
-    fn entry_rejects_empty_namespace_and_key() {
-        assert!(entry("", "k").is_err());
-        assert!(entry("ns", "").is_err());
+    fn resolved_service_rejects_empty_namespace_and_key() {
+        assert!(resolved_service("", "k").is_err());
+        assert!(resolved_service("ns", "").is_err());
     }
 
     #[test]
-    fn entry_rejects_blank_or_untrimmed_namespace_and_key() {
-        assert!(entry("   ", "k").is_err());
-        assert!(entry(" ns", "k").is_err());
-        assert!(entry("ns ", "k").is_err());
-        assert!(entry("ns", "   ").is_err());
-        assert!(entry("ns", " key").is_err());
-        assert!(entry("ns", "key ").is_err());
+    fn resolved_service_rejects_blank_or_untrimmed_namespace_and_key() {
+        assert!(resolved_service("   ", "k").is_err());
+        assert!(resolved_service(" ns", "k").is_err());
+        assert!(resolved_service("ns ", "k").is_err());
+        assert!(resolved_service("ns", "   ").is_err());
+        assert!(resolved_service("ns", " key").is_err());
+        assert!(resolved_service("ns", "key ").is_err());
     }
 
     #[test]
-    fn entry_rejects_namespace_separators_and_control_chars() {
-        assert!(entry("bad/name", "k").is_err());
-        assert!(entry("bad\\name", "k").is_err());
-        assert!(entry("bad\nname", "k").is_err());
-        assert!(entry("plugin:p", "token").is_ok());
+    fn resolved_service_rejects_namespace_separators_and_control_chars() {
+        assert!(resolved_service("bad/name", "k").is_err());
+        assert!(resolved_service("bad\\name", "k").is_err());
+        assert!(resolved_service("bad\nname", "k").is_err());
+        assert_eq!(
+            resolved_service("plugin:p", "token").unwrap(),
+            "com.cognia.plugin:p/v1"
+        );
     }
 
     #[test]
     fn set_rejects_empty_value() {
         let err = set("test-ns", "k", "").unwrap_err();
         assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn get_set_clear_round_trip() {
+        // Hermetic via the in-memory secret_store global under cfg(test).
+        let ns = "keyring-secrets-round-trip";
+        assert_eq!(get(ns, "tok").unwrap(), None);
+        set(ns, "tok", "s3cr3t").unwrap();
+        assert_eq!(get(ns, "tok").unwrap(), Some("s3cr3t".to_string()));
+        clear(ns, "tok").unwrap();
+        assert_eq!(get(ns, "tok").unwrap(), None);
     }
 }

@@ -125,29 +125,16 @@ impl PushCredStore for KeyringPushCredStore {
     }
 }
 
-fn keyring_entry(account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, account).map_err(|e| format!("keyring entry: {e}"))
-}
-
 fn keyring_get(account: &str) -> Result<Option<String>, String> {
-    match keyring_entry(account)?.get_password() {
-        Ok(s) => Ok(Some(s)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read: {e}")),
-    }
+    crate::secret_store::get(SERVICE, account)
 }
 
 fn keyring_set(account: &str, raw: &str) -> Result<(), String> {
-    keyring_entry(account)?
-        .set_password(raw)
-        .map_err(|e| format!("keyring write: {e}"))
+    crate::secret_store::set(SERVICE, account, raw)
 }
 
 fn keyring_delete(account: &str) -> Result<(), String> {
-    match keyring_entry(account)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete: {e}")),
-    }
+    crate::secret_store::delete(SERVICE, account)
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,6 @@
 // I/O and structural validation; provider-specific credential validation is
 // delegated to `SubscriptionProvider::validate`.
 
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
 
 use crate::subscription::preset::ProviderPreset;
@@ -434,10 +433,6 @@ impl ProviderVault {
 // Keyring I/O
 // ---------------------------------------------------------------------------
 
-fn entry_for(provider: ProviderId) -> Result<Entry, String> {
-    Entry::new(SERVICE, provider.as_str()).map_err(|e| format!("keyring init failed: {e}"))
-}
-
 pub fn service_name_for_account(local_account_id: &str) -> Result<String, String> {
     let trimmed = local_account_id.trim();
     if trimmed.is_empty() {
@@ -450,14 +445,6 @@ pub fn service_name_for_account(local_account_id: &str) -> Result<String, String
         return Err("localAccountId contains unsafe characters".into());
     }
     Ok(format!("{SERVICE}/account/{trimmed}"))
-}
-
-fn entry_for_account(local_account_id: &str, provider: ProviderId) -> Result<Entry, String> {
-    Entry::new(
-        &service_name_for_account(local_account_id)?,
-        provider.as_str(),
-    )
-    .map_err(|e| format!("keyring init failed: {e}"))
 }
 
 fn validate_vault(vault: &ProviderVault) -> Result<(), String> {
@@ -493,9 +480,7 @@ fn parse_vault_blob(blob: &str) -> Result<ProviderVault, String> {
 pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
     validate_vault(vault)?;
     let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
-    entry_for(provider)?
-        .set_password(&blob)
-        .map_err(|e| format!("keyring write failed: {e}"))
+    crate::secret_store::set(SERVICE, provider.as_str(), &blob)
 }
 
 #[allow(dead_code)]
@@ -506,19 +491,17 @@ pub fn save_for_account(
 ) -> Result<(), String> {
     validate_vault(vault)?;
     let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
-    entry_for_account(local_account_id, provider)?
-        .set_password(&blob)
-        .map_err(|e| format!("keyring write failed: {e}"))
+    let service = service_name_for_account(local_account_id)?;
+    crate::secret_store::set(&service, provider.as_str(), &blob)
 }
 
 /// Read the vault. Returns `Ok(None)` when no entry exists, surfaces parse
 /// errors as `Err` so the UI can show "credential corrupted" rather than
 /// silently dropping the user back to "logged out".
 pub fn load(provider: ProviderId) -> Result<Option<ProviderVault>, String> {
-    match entry_for(provider)?.get_password() {
-        Ok(blob) => Ok(Some(parse_vault_blob(&blob)?)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
+    match crate::secret_store::get(SERVICE, provider.as_str())? {
+        Some(blob) => Ok(Some(parse_vault_blob(&blob)?)),
+        None => Ok(None),
     }
 }
 
@@ -527,10 +510,10 @@ pub fn load_for_account(
     local_account_id: &str,
     provider: ProviderId,
 ) -> Result<Option<ProviderVault>, String> {
-    match entry_for_account(local_account_id, provider)?.get_password() {
-        Ok(blob) => Ok(Some(parse_vault_blob(&blob)?)),
-        Err(keyring::Error::NoEntry) => adopt_legacy_vault_for_account(local_account_id, provider),
-        Err(e) => Err(format!("keyring read failed: {e}")),
+    let service = service_name_for_account(local_account_id)?;
+    match crate::secret_store::get(&service, provider.as_str())? {
+        Some(blob) => Ok(Some(parse_vault_blob(&blob)?)),
+        None => adopt_legacy_vault_for_account(local_account_id, provider),
     }
 }
 
@@ -552,20 +535,13 @@ fn adopt_legacy_vault_for_account(
 /// that needs to reset between runs.
 #[allow(dead_code)]
 pub fn clear(provider: ProviderId) -> Result<(), String> {
-    match entry_for(provider)?.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete failed: {e}")),
-    }
+    crate::secret_store::delete(SERVICE, provider.as_str())
 }
 
 #[allow(dead_code)]
 pub fn clear_for_account(local_account_id: &str, provider: ProviderId) -> Result<(), String> {
-    match entry_for_account(local_account_id, provider)?.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete failed: {e}")),
-    }
+    let service = service_name_for_account(local_account_id)?;
+    crate::secret_store::delete(&service, provider.as_str())
 }
 
 // ---------------------------------------------------------------------------
