@@ -5,7 +5,7 @@
 // and a row menu (mark read / archive / snooze / remove). Pure presentational —
 // all mutations come in as handlers from the center.
 
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   BellIcon,
   CalendarClockIcon,
@@ -82,6 +82,9 @@ export function NotificationItem({
 }: NotificationItemProps) {
   const t = useTranslations("notificationCenter")
   const format = useFormatter()
+  // Anchor relative timestamps to a single render-time "now" so next-intl
+  // doesn't fall back to an implicit current time (ENVIRONMENT_FALLBACK).
+  const now = useNow()
   const Icon = SOURCE_ICON[record.source] ?? BellIcon
   const unread = record.readState === "unseen" || record.readState === "seen"
 
@@ -128,7 +131,7 @@ export function NotificationItem({
           <span>{t(`sources.${record.source}`)}</span>
           <span aria-hidden>·</span>
           <time dateTime={new Date(record.createdAt).toISOString()}>
-            {format.relativeTime(new Date(record.createdAt))}
+            {format.relativeTime(new Date(record.createdAt), now)}
           </time>
         </div>
       </button>

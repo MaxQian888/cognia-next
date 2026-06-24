@@ -6,6 +6,7 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string, vals?: Record<string, unknown>) =>
     vals ? `${ns}.${key}:${JSON.stringify(vals)}` : `${ns}.${key}`,
   useFormatter: () => ({ relativeTime: () => "2 minutes ago" }),
+  useNow: () => new Date("2024-01-01T00:00:00Z"),
 }))
 
 import { NotificationItem } from "./notification-item"
