@@ -181,7 +181,12 @@ describe("load", () => {
 
   it("seeds default tier mappings on load for a fresh user and persists them", async () => {
     dbSettings.getSettings.mockResolvedValue(
-      baseSettings({ modelMappings: undefined, providerSettings: { openai: { enabled: true } } })
+      baseSettings({
+        modelMappings: undefined,
+        providerSettings: {
+          openai: { enabled: true },
+        } as unknown as AppSettings["providerSettings"],
+      })
     )
     keyring.loadAllProviderKeys.mockResolvedValue({})
     tauri.isTauri.mockReturnValue(false)

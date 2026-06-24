@@ -17,7 +17,7 @@ describe("computeEnabledProviderIds", () => {
         providerSettings: {
           openai: { enabled: true },
           groq: { enabled: false },
-        } as AppSettings["providerSettings"],
+        } as unknown as AppSettings["providerSettings"],
       })
     )
     expect(ids.has("openai")).toBe(true)
@@ -28,7 +28,9 @@ describe("computeEnabledProviderIds", () => {
   it("excludes anthropic only when explicitly disabled", () => {
     const ids = computeEnabledProviderIds(
       makeSettings({
-        providerSettings: { anthropic: { enabled: false } } as AppSettings["providerSettings"],
+        providerSettings: {
+          anthropic: { enabled: false },
+        } as unknown as AppSettings["providerSettings"],
       })
     )
     expect(ids.has("anthropic")).toBe(false)
@@ -78,7 +80,9 @@ describe("seedDefaultMappingsIfNeeded", () => {
 
   it("returns the same reference when no providers are enabled", () => {
     const before = makeSettings({
-      providerSettings: { anthropic: { enabled: false } } as AppSettings["providerSettings"],
+      providerSettings: {
+        anthropic: { enabled: false },
+      } as unknown as AppSettings["providerSettings"],
     })
     expect(seedDefaultMappingsIfNeeded(before)).toBe(before)
   })
