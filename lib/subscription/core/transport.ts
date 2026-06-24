@@ -10,6 +10,7 @@
 
 import { transport } from "@/lib/tauri"
 import { markSubscriptionVaultChanged } from "@/lib/subscription/sync/change-tracker"
+import { notifySubscriptionChanged } from "@/lib/subscription/core/subscription-events"
 import { useAccountStore } from "@/stores/account/account-store"
 
 import type {
@@ -122,6 +123,11 @@ export async function setActiveAccount(
 ): Promise<void> {
   await transport.call("subscription_set_active", { provider, ...subscriptionScope(), accountId })
   vaultMutated()
+  // The active credential (and, for Anthropic, the in-process OAuth bearer) just
+  // changed. Wake any UI mirroring auth state (e.g. the chat header's
+  // No-API-key / subscription-tier badge) so it re-reads immediately instead of
+  // latching the pre-activation value.
+  notifySubscriptionChanged()
 }
 
 export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnapshot> {

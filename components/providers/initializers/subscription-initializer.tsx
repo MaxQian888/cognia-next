@@ -16,6 +16,7 @@ import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 
 import { subscriptionInitOnce } from "@/lib/subscription/core/migration"
+import { notifySubscriptionChanged } from "@/lib/subscription/core/subscription-events"
 import { maybeAutoUploadSubscription } from "@/lib/subscription/sync/subscription-sync"
 import { useAccountStore } from "@/stores/account/account-store"
 
@@ -37,6 +38,11 @@ export function SubscriptionInitializer() {
       await subscriptionInitOnce({
         translateToast: (key, params) => t(key, params as Parameters<typeof t>[1]),
       })
+      // The boot rebuild (subscription_init → apply_active_projection) may have
+      // just pushed the OAuth bearer into ApiKeyState. Tell the chat header so
+      // it drops the stale "No API key" badge without waiting for the user to
+      // poke the settings popover.
+      notifySubscriptionChanged()
       await maybeAutoUploadSubscription().catch(() => undefined)
     })()
   }, [accountRevision, t, unlockedAccountId])
