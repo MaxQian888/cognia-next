@@ -1884,6 +1884,11 @@ async function handleEvent(
       try {
         const session = await getSession(sessionId)
         applyPlanModeBridge(env.event, sessionId, session?.teamId)
+        // Bridge SDK-native subagents (the `opts.agents` / Task-tool path used by
+        // workflow-editor and direct chat) into the runtime store so they render
+        // in the chat subagent tree alongside `dispatch_agent` runs.
+        const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
+        applySdkSubagentBridge(env.event, sessionId)
         // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into
         // a structured draft AgentPlan so it can be approved + executed through
         // the unified plan pipeline. Runs once per turn (turnComplete). Lazy

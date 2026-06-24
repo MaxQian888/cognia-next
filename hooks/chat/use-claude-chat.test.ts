@@ -44,6 +44,12 @@ jest.mock("@/lib/claude/adapter", () => ({
   mergeTwinSourcesIntoLastAssistant: (msgs: unknown) => msgs,
 }))
 
+const applySdkSubagentBridgeMock = jest.fn()
+jest.mock("@/lib/claude/sdk-subagent-bridge", () => ({
+  applySdkSubagentBridge: (...args: unknown[]) => applySdkSubagentBridgeMock(...args),
+  __resetSdkSubagentBridge: () => {},
+}))
+
 jest.mock("@/lib/plugin/messaging/message-bus", () => {
   const actual = jest.requireActual("@/lib/plugin/messaging/message-bus")
   return { ...actual, emitSystemBusEvent: jest.fn() }
@@ -1469,6 +1475,29 @@ describe("useClaudeChat — concurrent sessions", () => {
     await flush()
     expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
     expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+  })
+
+  it("feeds every SDK event to the SDK-native subagent bridge", async () => {
+    chatState.activeSessionId = "sess-1"
+    chatState.openSessionIds = ["sess-1"]
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    applySdkSubagentBridgeMock.mockClear()
+    const event = {
+      type: "system",
+      subtype: "task_started",
+      task_id: "T1",
+      subagent_type: "researcher",
+      description: "d",
+      uuid: "u",
+      session_id: "sdk",
+    }
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event })
+    })
+    await flush()
+    expect(applySdkSubagentBridgeMock).toHaveBeenCalledWith(event, "sess-1")
   })
 
   it("send() is blocked (no sidecar call) when the concurrency cap is reached", async () => {
