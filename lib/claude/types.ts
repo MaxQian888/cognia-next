@@ -162,6 +162,12 @@ export interface SendOptions {
   settingSources?: Array<"user" | "project" | "local">
   /** Dynamic subagent definitions keyed by name. */
   agents?: Record<string, Record<string, unknown>>
+  /**
+   * Forward subagent text + thinking blocks as assistant/user messages with
+   * `parent_tool_use_id` set (default off in the SDK). Enabled for team /
+   * workflow-editor so the SDK-subagent bridge can render rich nested logs.
+   */
+  forwardSubagentText?: boolean
   /** Only use mcpServers from this blob; ignore on-disk discoveries. */
   strictMcpConfig?: boolean
   /** SDK effort level. */
@@ -854,6 +860,10 @@ export interface SDKAssistantMessage {
   uuid: string
   session_id: string
   error?: string
+  /** Subagent type that produced this message (set on SDK-native subagent frames). */
+  subagent_type?: string
+  /** Task description for the spawning Task tool, when known. */
+  task_description?: string
 }
 
 export interface SDKUserMessage {
@@ -862,6 +872,8 @@ export interface SDKUserMessage {
   parent_tool_use_id: string | null
   uuid: string
   session_id: string
+  /** Subagent type that produced this message (set on SDK-native subagent frames). */
+  subagent_type?: string
 }
 
 export interface SDKResultMessage {
@@ -897,12 +909,59 @@ export interface SDKPartialAssistantMessage {
   session_id: string
 }
 
+/** SDK Task-subagent lifecycle frames (type: "system"). Authoritative source
+ *  for SDK-native subagent start / progress / status used by the chat bridge. */
+export interface SDKTaskStartedMessage {
+  type: "system"
+  subtype: "task_started"
+  task_id: string
+  tool_use_id?: string
+  description: string
+  subagent_type?: string
+  task_type?: string
+  prompt?: string
+  skip_transcript?: boolean
+  uuid: string
+  session_id: string
+}
+
+export interface SDKTaskProgressMessage {
+  type: "system"
+  subtype: "task_progress"
+  task_id: string
+  tool_use_id?: string
+  description: string
+  subagent_type?: string
+  usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+  last_tool_name?: string
+  summary?: string
+  uuid: string
+  session_id: string
+}
+
+export interface SDKTaskUpdatedMessage {
+  type: "system"
+  subtype: "task_updated"
+  task_id: string
+  patch: {
+    status?: "pending" | "running" | "completed" | "failed" | "killed" | "paused"
+    description?: string
+    error?: string
+    is_backgrounded?: boolean
+  }
+  uuid: string
+  session_id: string
+}
+
 export type SDKMessage =
   | SDKAssistantMessage
   | SDKUserMessage
   | SDKResultMessage
   | SDKSystemMessage
   | SDKPartialAssistantMessage
+  | SDKTaskStartedMessage
+  | SDKTaskProgressMessage
+  | SDKTaskUpdatedMessage
   | { type: string; session_id: string; [k: string]: unknown }
 
 // ---- Persistence shapes --------------------------------------------------
