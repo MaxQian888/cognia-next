@@ -14,6 +14,7 @@ import {
 } from "./empty-state"
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
+import { RunStatusBar } from "./run-status-bar"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
 import { Button } from "@/components/ui/button"
@@ -58,6 +59,8 @@ interface ChatPaneProps {
   sessionId?: string
   onSend: (content: SendContent) => Promise<void>
   onStop: () => Promise<void>
+  /** Interrupt the running turn and immediately replay the queued steer. */
+  onSteerNow?: () => Promise<void> | void
   onRegenerate: () => Promise<void>
   onEditResend: (messageId: string, newContent: SendContent) => Promise<void>
   onCreate: () => void
@@ -114,6 +117,7 @@ export function ChatPane({
   sessionId,
   onSend,
   onStop,
+  onSteerNow,
   onRegenerate,
   onEditResend,
   onCreate,
@@ -250,6 +254,16 @@ export function ChatPane({
     />
   )
 
+  // Transient run-status layer (timer / interrupt / live tools / steer queue),
+  // pinned directly above the composer. Self-hides when idle with no queue.
+  const runStatusEl = (
+    <RunStatusBar
+      sessionId={boundId}
+      onStop={() => void onStop()}
+      onSteerNow={onSteerNow ? () => void onSteerNow() : undefined}
+    />
+  )
+
   // Error banner + footer plugin slot — identical in both layouts, sitting
   // just above the composer. Only one layout branch mounts at a time.
   const errorAndFooter = (
@@ -365,6 +379,7 @@ export function ChatPane({
             />
             <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
             {errorAndFooter}
+            {runStatusEl}
             {composerEl}
           </motion.div>
         )}

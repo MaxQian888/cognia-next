@@ -25,6 +25,8 @@ export interface ChatPaneGroupProps {
   /** Per-session send — the workspace wraps trust-prompting around it. */
   send: (content: SendContent, sessionId: string) => Promise<void> | void
   stop: (sessionId: string) => Promise<void> | void
+  /** Interrupt the running turn and immediately replay the queued steer. */
+  steerNow: (sessionId: string) => Promise<void> | void
   regenerate: (sessionId: string) => Promise<void> | void
   editResend: (messageId: string, content: SendContent, sessionId: string) => Promise<void> | void
   respondToApproval: (
@@ -67,6 +69,7 @@ export function ChatPaneGroup({
   sessions,
   send,
   stop,
+  steerNow,
   regenerate,
   editResend,
   respondToApproval,
@@ -125,6 +128,7 @@ export function ChatPaneGroup({
         activeSession={session}
         onSend={(content) => Promise.resolve(sessionId ? send(content, sessionId) : undefined)}
         onStop={() => Promise.resolve(sessionId ? stop(sessionId) : undefined)}
+        onSteerNow={() => Promise.resolve(sessionId ? steerNow(sessionId) : undefined)}
         onRegenerate={() => Promise.resolve(sessionId ? regenerate(sessionId) : undefined)}
         onEditResend={(id, content) =>
           Promise.resolve(sessionId ? editResend(id, content, sessionId) : undefined)

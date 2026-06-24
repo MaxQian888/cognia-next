@@ -215,6 +215,8 @@ interface ChatStateLike {
   clearEphemeralSkillIds: jest.Mock
   setLastSend: jest.Mock
   clearLastSend: jest.Mock
+  enqueueSteer: jest.Mock
+  clearSteerQueue: jest.Mock
 }
 
 const sliceWrite = (id: string, patch: Partial<SliceLike>) => {
@@ -299,6 +301,8 @@ const chatState: ChatStateLike = {
   clearLastSend: jest.fn((id: string) => {
     delete chatState.lastSendBySession[id]
   }),
+  enqueueSteer: jest.fn(),
+  clearSteerQueue: jest.fn(),
 }
 
 const subscribers: Array<(s: ChatStateLike) => void> = []

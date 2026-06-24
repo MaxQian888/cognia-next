@@ -690,6 +690,10 @@ function ComposerInner(props: InnerProps) {
   ])
 
   // --- Textarea key handling --------------------------------------------
+  // Local handles so the key handler depends on the specific props it reads,
+  // not the whole `props` object (react-hooks/exhaustive-deps).
+  const turnStatus = props.status
+  const onStopTurn = props.onStop
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
       // Shift+Tab cycles permission mode regardless of popover state.
@@ -753,6 +757,13 @@ function ComposerInner(props: InnerProps) {
           return
         }
       }
+      // Esc interrupts the running turn — the keystroke behind the run-status
+      // bar's "Esc to interrupt" affordance — once no popover/ghost claimed it.
+      if (e.key === "Escape" && turnStatus === "streaming") {
+        e.preventDefault()
+        void onStopTurn()
+        return
+      }
       // ↑/↓ recall of previously sent messages (only when no popover is open
       // and not composing). ↑ engages from the very start of the input; while
       // navigating, both arrows walk the history and ↓ past the newest restores
@@ -800,6 +811,8 @@ function ComposerInner(props: InnerProps) {
       ghost,
       inputHistoryRecall,
       sendOnEnter,
+      turnStatus,
+      onStopTurn,
     ]
   )
 

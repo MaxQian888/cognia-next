@@ -59,6 +59,8 @@ jest.mock("@/stores/chat", () => ({
   useSessionMessagesLoading: () => storeState.messagesLoading,
   useSessionMessagesLoadError: () => storeState.messagesLoadError,
   useIsAtStreamCap: () => storeState.atCapacity,
+  useSessionRunTiming: () => ({ startedAt: null, pausedAt: null, pausedAccumMs: 0 }),
+  useSessionSteerQueue: () => [],
 }))
 
 // Welcome-section dismissal persistence (AppSettings.welcomeHidden).

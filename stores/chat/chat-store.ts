@@ -4,6 +4,7 @@ import type { UIMessage } from "ai"
 import { create } from "zustand"
 import type { PendingApproval, SendContent, SendOptions } from "@/lib/claude/types"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
+import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
@@ -77,6 +78,15 @@ export interface SessionChatSlice {
   messagesLoading: boolean
   messagesLoadError: string | null
   messagesReloadNonce: number
+  /**
+   * Steer queue — follow-up messages the user typed while this session's turn
+   * was still running. Held client-side (true mid-turn injection isn't
+   * available; see `lib/claude/steer.ts`) and replayed as a fresh turn when the
+   * running turn settles. The run-status bar shows the depth + a preview.
+   */
+  steerQueue: string[]
+  /** Active-work clock for the run-status bar's elapsed timer. */
+  runTiming: RunTiming
 }
 
 /** Default-initialised slice. `loading` seeds the hydration spinner for a
@@ -91,6 +101,8 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     messagesLoading: loading,
     messagesLoadError: null,
     messagesReloadNonce: 0,
+    steerQueue: [],
+    runTiming: IDLE_TIMING,
   }
 }
 
@@ -141,9 +153,29 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       messagesLoading: state.messagesLoading,
       messagesLoadError: state.messagesLoadError,
       messagesReloadNonce: state.messagesReloadNonce,
+      // steerQueue / runTiming are slice-only (not projected onto the top-level
+      // active mirror), so seed them from defaults when materialising a slice
+      // for the active session before its first explicit write.
+      steerQueue: [],
+      runTiming: IDLE_TIMING,
     }
   }
   return makeSessionSlice()
+}
+
+/**
+ * Status-change patch that also advances the run clock. Every status mutation
+ * (setStatus / setSessionStatus / setError / pushApproval / clearApproval)
+ * routes through this so the elapsed timer starts, pauses on approval, and
+ * clears on settle in one place.
+ */
+function statusPatch(
+  state: ChatState,
+  id: string,
+  next: ChatStatus
+): Pick<SessionChatSlice, "status" | "runTiming"> {
+  const prev = sliceForId(state, id)
+  return { status: next, runTiming: nextRunTiming(prev.runTiming, next, Date.now()) }
 }
 
 /** Write `patch` into session `id`'s slice; re-project onto the top-level
@@ -279,6 +311,10 @@ interface ChatState {
   requestSessionMessagesReload: (id: string) => void
   setSessionStatus: (id: string, s: ChatStatus) => void
   setSessionError: (id: string, msg: string | null) => void
+  /** Append a steer message to a session's queue (typed while it was busy). */
+  enqueueSteer: (id: string, text: string) => void
+  /** Drop all queued steer messages for a session. */
+  clearSteerQueue: (id: string) => void
   setSessionActiveBranch: (id: string, branchGroupId: string, messageId: string) => void
   hydrateSessionActiveBranches: (id: string, map: Record<string, string>) => void
   /** Append an approval, routed by `approval.sessionId` (per-session queue). */
@@ -412,9 +448,18 @@ export const useChatStore = create<ChatState>((set) => ({
         messagesLoadError: null,
       })
     ),
-  setStatus: (st) => set((s) => patchActiveState(s, { status: st })),
+  setStatus: (st) =>
+    set((s) => {
+      const id = s.activeSessionId
+      return patchActiveState(s, id ? statusPatch(s, id, st) : { status: st })
+    }),
   setError: (msg) =>
-    set((s) => patchActiveState(s, { errorMessage: msg, status: msg ? "error" : "idle" })),
+    set((s) => {
+      const next: ChatStatus = msg ? "error" : "idle"
+      const id = s.activeSessionId
+      const timing = id ? { runTiming: statusPatch(s, id, next).runTiming } : {}
+      return patchActiveState(s, { errorMessage: msg, status: next, ...timing })
+    }),
   setSessionMessages: (id, msgs) =>
     set((s) =>
       patchSliceState(s, id, { messages: msgs, messagesLoading: false, messagesLoadError: null })
@@ -433,9 +478,20 @@ export const useChatStore = create<ChatState>((set) => ({
         messagesLoadError: null,
       })
     ),
-  setSessionStatus: (id, st) => set((s) => patchSliceState(s, id, { status: st })),
+  setSessionStatus: (id, st) => set((s) => patchSliceState(s, id, statusPatch(s, id, st))),
   setSessionError: (id, msg) =>
-    set((s) => patchSliceState(s, id, { errorMessage: msg, status: msg ? "error" : "idle" })),
+    set((s) =>
+      patchSliceState(s, id, {
+        errorMessage: msg,
+        ...statusPatch(s, id, msg ? "error" : "idle"),
+      })
+    ),
+  enqueueSteer: (id, text) =>
+    set((s) => patchSliceState(s, id, { steerQueue: [...sliceForId(s, id).steerQueue, text] })),
+  clearSteerQueue: (id) =>
+    set((s) =>
+      sliceForId(s, id).steerQueue.length === 0 ? s : patchSliceState(s, id, { steerQueue: [] })
+    ),
   setSessionActiveBranch: (id, branchGroupId, messageId) =>
     set((s) => {
       const slice = sliceForId(s, id)
@@ -451,7 +507,7 @@ export const useChatStore = create<ChatState>((set) => ({
       const slice = sliceForId(s, approval.sessionId)
       return patchSliceState(s, approval.sessionId, {
         pendingApprovals: [...slice.pendingApprovals, approval],
-        status: "awaiting_approval",
+        ...statusPatch(s, approval.sessionId, "awaiting_approval"),
       })
     }),
   clearApproval: (requestId, sessionId) =>
@@ -468,10 +524,11 @@ export const useChatStore = create<ChatState>((set) => ({
       const slice = sliceForId(s, targetId)
       const next = slice.pendingApprovals.filter((a) => a.requestId !== requestId)
       if (next.length === slice.pendingApprovals.length) return s
+      const nextStatus: ChatStatus =
+        next.length === 0 && slice.status === "awaiting_approval" ? "streaming" : slice.status
       return patchSliceState(s, targetId, {
         pendingApprovals: next,
-        status:
-          next.length === 0 && slice.status === "awaiting_approval" ? "streaming" : slice.status,
+        ...statusPatch(s, targetId, nextStatus),
       })
     }),
   setPermissionMode: (mode) => set({ permissionMode: mode }),
@@ -628,6 +685,22 @@ export function useSessionMessagesLoadError(sessionId: string | null): string | 
 /** Reactive cap check for a pane's composer (disable send + show notice). */
 export function useIsAtStreamCap(sessionId: string | null): boolean {
   return useChatStore((s) => (sessionId ? selectIsAtStreamCap(s, sessionId) : false))
+}
+
+const EMPTY_STEER: string[] = []
+
+/** A session's pending steer messages (drives the run-status `btw` chip). */
+export function useSessionSteerQueue(sessionId: string | null): string[] {
+  return useChatStore((s) =>
+    sessionId ? (s.sessions[sessionId]?.steerQueue ?? EMPTY_STEER) : EMPTY_STEER
+  )
+}
+
+/** A session's active-work clock (drives the run-status elapsed timer). */
+export function useSessionRunTiming(sessionId: string | null): RunTiming {
+  return useChatStore((s) =>
+    sessionId ? (s.sessions[sessionId]?.runTiming ?? IDLE_TIMING) : IDLE_TIMING
+  )
 }
 
 /**

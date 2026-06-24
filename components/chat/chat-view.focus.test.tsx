@@ -86,6 +86,8 @@ jest.mock("@/stores/chat", () => ({
   useSessionMessagesLoading: () => storeState.messagesLoading,
   useSessionMessagesLoadError: () => storeState.messagesLoadError,
   useIsAtStreamCap: () => false,
+  useSessionRunTiming: () => ({ startedAt: null, pausedAt: null, pausedAccumMs: 0 }),
+  useSessionSteerQueue: () => [],
 }))
 
 jest.mock("@/stores/settings", () => {

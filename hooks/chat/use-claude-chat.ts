@@ -35,6 +35,7 @@ import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
+import { frameSteerQueue } from "@/lib/claude/steer"
 import {
   approveTool,
   closeSession,
@@ -122,7 +123,7 @@ import type {
   SendContent,
   SendOptions,
 } from "@/lib/claude/types"
-import { useChatStore, selectIsAtStreamCap } from "@/stores/chat"
+import { useChatStore, selectIsAtStreamCap, type ChatStatus } from "@/stores/chat"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
   selectSessionSubagents,
@@ -713,6 +714,21 @@ export function useClaudeChat() {
         return
       }
 
+      // Steer instead of restart: a fresh user turn while THIS session is still
+      // streaming / awaiting approval would make the sidecar close-and-restart
+      // the live turn (host `restartReason`), silently dropping its context.
+      // Hold the message as a steer and replay it when the turn settles
+      // (the run-status bar surfaces the queue). Internal re-issues (regenerate
+      // / routing fallback) pass `skipUserAppend` and bypass this.
+      if (!callOptions?.skipUserAppend) {
+        const st = sessionStatusOf(sessionId)
+        if (st === "streaming" || st === "awaiting_approval") {
+          const text = steerTextOf(content)
+          if (text) useChatStore.getState().enqueueSteer(sessionId, text)
+          return
+        }
+      }
+
       const session = await getSession(sessionId)
 
       // ADR-0019 — a fresh user message while a goal is self-driving is
@@ -1160,6 +1176,10 @@ export function useClaudeChat() {
       // Each pane wires its own Stop to its own session id; default to focused.
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
+      // Plain stop discards any queued steer — the user is taking over, not
+      // steering — and disarms the drain so the settle doesn't replay it.
+      useChatStore.getState().clearSteerQueue(sessionId)
+      steerArmed.delete(sessionId)
       try {
         await interruptSession(sessionId)
         // Commit + persist whatever partial we have, then drop this session's
@@ -1177,6 +1197,24 @@ export function useClaudeChat() {
     },
     [store, registry]
   )
+
+  // "Interrupt & steer now": cut the running turn short so its settle replays
+  // the queued steer immediately, instead of waiting for the turn to finish.
+  // Arming covers the case where the abort surfaces as an errored
+  // `session_ended`. No-op when nothing is queued.
+  const interruptAndSteer = useCallback(async (targetSessionId?: string) => {
+    const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+    if (!sessionId) return
+    const queued = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
+    if (queued.length === 0) return
+    steerArmed.add(sessionId)
+    try {
+      await interruptSession(sessionId)
+    } catch (err) {
+      console.error("interrupt(steer) failed", err)
+      steerArmed.delete(sessionId)
+    }
+  }, [])
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
@@ -1341,6 +1379,7 @@ export function useClaudeChat() {
   return {
     send,
     stop,
+    interruptAndSteer,
     respondToApproval,
     close,
     editAndResend,
@@ -1510,6 +1549,37 @@ function sliceMessages(sessionId: string): UIMessage[] {
   return useChatStore.getState().sessions[sessionId]?.messages ?? []
 }
 
+/** Sessions whose imminent settle must drain the steer queue even if the turn
+ * ended via interrupt/error (set by `interruptAndSteer`). A natural clean end
+ * always drains regardless of this set. */
+const steerArmed = new Set<string>()
+
+/** Live status for a session (its slice, falling back to the active mirror). */
+function sessionStatusOf(sessionId: string): ChatStatus {
+  const s = useChatStore.getState()
+  return s.sessions[sessionId]?.status ?? (sessionId === s.activeSessionId ? s.status : "idle")
+}
+
+/** Plain text of a send for the steer queue (text-only; attachments dropped). */
+function steerTextOf(content: SendContent): string {
+  if (typeof content === "string") return content.trim()
+  const block = content.find((b) => b.type === "text") as { text?: string } | undefined
+  return (block?.text ?? "").trim()
+}
+
+/**
+ * Replay a session's queued steer messages as one fresh, framed turn. No-op
+ * when the queue is empty. Called only once the turn has settled (idle/error),
+ * so `send`'s busy-gate sees a non-streaming session and won't re-enqueue it.
+ */
+function maybeDrainSteer(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
+  steerArmed.delete(sessionId)
+  const queue = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
+  if (queue.length === 0) return
+  useChatStore.getState().clearSteerQueue(sessionId)
+  void sendRef.current?.(frameSteerQueue(queue), undefined, { sessionId })
+}
+
 async function handleEvent(
   evt: ClaudeEvent,
   activeRef: React.MutableRefObject<string | null>,
@@ -1616,6 +1686,12 @@ async function handleEvent(
           sealSession(evt.sessionId)
           useChatStore.getState().setSessionStatus(evt.sessionId, "idle")
           useChatStore.getState().clearLastSend(evt.sessionId)
+        }
+        // Turn settled — replay any steer the user queued mid-run. A clean end
+        // always drains; an errored end drains only when an explicit
+        // "interrupt & steer" armed it (a natural error keeps the queue).
+        if (!evt.error || steerArmed.has(evt.sessionId)) {
+          maybeDrainSteer(evt.sessionId, sendRef)
         }
       }
       return

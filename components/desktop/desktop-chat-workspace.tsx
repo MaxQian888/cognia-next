@@ -280,6 +280,7 @@ export function DesktopChatWorkspace() {
     [directChat]
   )
   const paneStop = useCallback((sid: string) => directChat.stop(sid), [directChat])
+  const paneSteer = useCallback((sid: string) => directChat.interruptAndSteer(sid), [directChat])
   const paneRegenerate = useCallback((sid: string) => directChat.regenerate(sid), [directChat])
   const paneEditResend = useCallback(
     (messageId: string, content: SendContent, sid: string) =>
@@ -465,6 +466,7 @@ export function DesktopChatWorkspace() {
                   sessions={sessions}
                   send={paneSend}
                   stop={paneStop}
+                  steerNow={paneSteer}
                   regenerate={paneRegenerate}
                   editResend={paneEditResend}
                   respondToApproval={directChat.respondToApproval}

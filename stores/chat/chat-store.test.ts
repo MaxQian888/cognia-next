@@ -818,3 +818,84 @@ describe("selectBranchSiblings", () => {
     expect(selectBranchSiblings([m("a", "g1", 0)], "g2")).toEqual([])
   })
 })
+
+describe("steer queue + run timing", () => {
+  const { useSessionSteerQueue, useSessionRunTiming } =
+    require("./chat-store") as typeof import("./chat-store")
+
+  beforeEach(() => {
+    act(() => useChatStore.getState().clear())
+  })
+
+  it("enqueues then clears steer messages per session", () => {
+    act(() => {
+      useChatStore.getState().setActiveSession("s1")
+      useChatStore.getState().enqueueSteer("s1", "first")
+      useChatStore.getState().enqueueSteer("s1", "second")
+    })
+    const { result } = renderHook(() => useSessionSteerQueue("s1"))
+    expect(result.current).toEqual(["first", "second"])
+    act(() => useChatStore.getState().clearSteerQueue("s1"))
+    expect(result.current).toEqual([])
+  })
+
+  it("clearSteerQueue on an empty queue is a no-op", () => {
+    act(() => useChatStore.getState().clearSteerQueue("ghost"))
+    const { result } = renderHook(() => useSessionSteerQueue("ghost"))
+    expect(result.current).toEqual([])
+  })
+
+  it("starts the clock on streaming and clears it on idle", () => {
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    const { result } = renderHook(() => useSessionRunTiming("s1"))
+    expect(typeof result.current.startedAt).toBe("number")
+    expect(result.current.pausedAt).toBeNull()
+    act(() => useChatStore.getState().setSessionStatus("s1", "idle"))
+    expect(result.current.startedAt).toBeNull()
+  })
+
+  it("pauses the clock on approval and resumes when it clears", () => {
+    const approval = {
+      sessionId: "s1",
+      requestId: "r1",
+      toolUseID: "t",
+      toolName: "Bash",
+      input: {},
+    } as unknown as PendingApproval
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    act(() => useChatStore.getState().pushApproval(approval))
+    const { result } = renderHook(() => useSessionRunTiming("s1"))
+    expect(typeof result.current.pausedAt).toBe("number")
+    act(() => useChatStore.getState().clearApproval("r1", "s1"))
+    expect(result.current.pausedAt).toBeNull()
+  })
+
+  it("setError clears the run clock on the active session", () => {
+    act(() => {
+      useChatStore.getState().setActiveSession("s1")
+      useChatStore.getState().setSessionStatus("s1", "streaming")
+      useChatStore.getState().setError("boom")
+    })
+    expect(useChatStore.getState().sessions["s1"]?.runTiming.startedAt ?? null).toBeNull()
+  })
+
+  it("advances timing via the active projection before a slice is materialised", () => {
+    act(() =>
+      useChatStore.setState({
+        activeSessionId: "act",
+        sessions: {},
+        status: "streaming",
+        messages: [],
+      })
+    )
+    act(() => useChatStore.getState().setStatus("idle"))
+    expect(useChatStore.getState().sessions["act"]?.runTiming.startedAt ?? null).toBeNull()
+  })
+
+  it("returns stable defaults for a null session id", () => {
+    const q = renderHook(() => useSessionSteerQueue(null))
+    const timing = renderHook(() => useSessionRunTiming(null))
+    expect(q.result.current).toEqual([])
+    expect(timing.result.current.startedAt).toBeNull()
+  })
+})
