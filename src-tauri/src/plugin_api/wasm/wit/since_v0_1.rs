@@ -107,7 +107,8 @@ impl cognia::plugin::notification::Host for HostState {
 }
 
 // =============================================================================
-// Secrets — wraps the existing `keyring` crate via per-plugin service id.
+// Secrets — per-plugin service id, stored via the shared `secret_store`
+// (single OS-keyring master key) so plugin secrets don't add Keychain prompts.
 // =============================================================================
 
 #[async_trait::async_trait]
@@ -115,35 +116,19 @@ impl cognia::plugin::secrets::Host for HostState {
     async fn get(&mut self, key: String) -> Result<Option<String>, String> {
         secrets::check_read(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        let entry =
-            keyring::Entry::new(&service, &key).map_err(|e| format!("keyring open: {e}"))?;
-        match entry.get_password() {
-            Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("keyring read: {e}")),
-        }
+        crate::secret_store::get(&service, &key)
     }
 
     async fn set(&mut self, key: String, value: String) -> Result<(), String> {
         secrets::check_write(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        let entry =
-            keyring::Entry::new(&service, &key).map_err(|e| format!("keyring open: {e}"))?;
-        entry
-            .set_password(&value)
-            .map_err(|e| format!("keyring write: {e}"))
+        crate::secret_store::set(&service, &key, &value)
     }
 
     async fn delete(&mut self, key: String) -> Result<(), String> {
         secrets::check_write(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        let entry =
-            keyring::Entry::new(&service, &key).map_err(|e| format!("keyring open: {e}"))?;
-        match entry.delete_credential() {
-            Ok(()) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("keyring delete: {e}")),
-        }
+        crate::secret_store::delete(&service, &key)
     }
 }
 

@@ -118,4 +118,36 @@ describe("usePluginMarketplace", () => {
     await waitFor(() => expect(result.current.state.kind).toBe("ready"))
     expect(result.current.state.kind === "ready" && result.current.state.results.length).toBe(2)
   })
+
+  it("does not auto-search on mount when autoLoad is false", async () => {
+    const client = makeClient()
+    __resetPluginMarketplaceClientForTests(client)
+
+    const { result } = renderHook(() => usePluginMarketplace({ autoLoad: false }))
+
+    // Give the (suppressed) mount effect a chance to fire before asserting.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    expect(client.searchPlugins).not.toHaveBeenCalled()
+    expect(client.getFeaturedPlugins).not.toHaveBeenCalled()
+    expect(result.current.state.kind).toBe("idle")
+
+    // Manual refresh (e.g. the Sync Registry button) still queries on demand.
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(client.searchPlugins).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.state.kind).toBe("ready"))
+  })
+
+  it("auto-searches on mount when autoLoad defaults to true", async () => {
+    const client = makeClient()
+    __resetPluginMarketplaceClientForTests(client)
+
+    const { result } = renderHook(() => usePluginMarketplace({}))
+    await waitFor(() => expect(result.current.state.kind).toBe("ready"))
+    expect(client.searchPlugins).toHaveBeenCalledTimes(1)
+  })
 })

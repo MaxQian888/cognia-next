@@ -92,6 +92,7 @@ jest.mock("@/lib/plugin/dexie/bridge", () => ({
 jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(async () => undefined),
   updatePlugin: jest.fn(async () => undefined),
+  upsertPlugin: jest.fn(async () => undefined),
   getPythonHostSettings: jest.fn(async () => undefined),
   setPythonHostSettings: jest.fn(async () => undefined),
 }))
@@ -112,7 +113,7 @@ jest.mock("@/lib/plugin/security/wasm-grant", () => ({
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
-import { getPlugin, updatePlugin } from "@/lib/db/plugins"
+import { getPlugin, updatePlugin, upsertPlugin } from "@/lib/db/plugins"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
@@ -450,6 +451,69 @@ describe("PluginManager", () => {
       await expect(
         manager.registerDiskPlugin({ id: "", name: "" } as unknown as PluginManifest, "/d")
       ).rejects.toThrow(/Invalid plugin manifest/i)
+    })
+  })
+
+  describe("scanBrowserBuiltins persistence", () => {
+    it("persists every discovered built-in to the Dexie plugins table with source 'builtin'", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) store.plugins[pluginId] = { ...p, status: "installed", installedAt: new Date() }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      ;(upsertPlugin as jest.Mock).mockClear()
+
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+      })
+      const discovered = await manager.scanPlugins()
+
+      // Every built-in surfaced by the registry walk must land in Dexie, or the
+      // Dexie-backed Library + marketplace "Built-in" section render nothing.
+      expect(discovered.length).toBeGreaterThan(0)
+      expect(upsertPlugin).toHaveBeenCalledTimes(discovered.length)
+      expect(upsertPlugin).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "builtin", type: expect.any(String) })
+      )
+    })
+
+    it("swallows a Dexie persistence failure so discovery still completes", async () => {
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      ;(upsertPlugin as jest.Mock).mockClear()
+      ;(upsertPlugin as jest.Mock).mockRejectedValue(new Error("IndexedDB closed"))
+
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+      })
+      const discovered = await manager.scanPlugins()
+
+      // A persistence hiccup must not abort the in-memory discovery walk.
+      expect(discovered.length).toBeGreaterThan(0)
+      expect(upsertPlugin).toHaveBeenCalled()
+      ;(upsertPlugin as jest.Mock).mockResolvedValue(undefined)
     })
   })
 

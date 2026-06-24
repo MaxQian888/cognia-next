@@ -23,10 +23,20 @@ describe("PluginLibraryPane", () => {
     expect(screen.getByTestId("plugin-library-list-stub")).toBeInTheDocument()
   })
 
-  it("hides the capability rail below the lg breakpoint via hidden lg:block", () => {
+  it("hides the capability rail on a narrow pane via a container query", () => {
     render(<PluginLibraryPane />)
     const rail = screen.getByTestId("plugin-library-capability-rail")
     expect(rail.className).toContain("hidden")
-    expect(rail.className).toContain("lg:block")
+    // Container-relative, not viewport-relative — the pane is only a slice
+    // of the window, so the rail keys off the pane's own width.
+    expect(rail.className).toContain("@3xl/plugin-pane:block")
+  })
+
+  it("scopes the list body to its own container so cards/rows size to the pane", () => {
+    render(<PluginLibraryPane />)
+    const pane = screen.getByTestId("plugin-library-pane")
+    expect(pane.className).toContain("@container/plugin-pane")
+    // The list wrapper opens a nested container measured after the rail.
+    expect(pane.querySelector(".\\@container\\/plugin-list")).not.toBeNull()
   })
 })

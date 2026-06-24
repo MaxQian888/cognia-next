@@ -183,18 +183,23 @@ export function PluginMarketplace() {
         <PluginEmptyState hint={t("emptySection")} />
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {sectionEntries.slice(0, visibleCount).map((entry) => (
-              <PluginMarketplaceCard
-                key={entry.id}
-                entry={entry}
-                installed={installedIds.has(entry.id)}
-                installing={market.installingId === entry.id || preInstall.busy}
-                onView={() => setSelectedEntry(entry)}
-                onInstall={(id, version) => onInstallById(id, version)}
-                onUninstall={(id) => void market.uninstall(id)}
-              />
-            ))}
+          {/* Container-query columns (not viewport): the marketplace renders
+              inside the center pane, so viewport breakpoints would overlap the
+              cards when the window is wide but the pane is narrow. */}
+          <div className="@container/plugin-grid">
+            <div className="grid gap-3 @lg/plugin-grid:grid-cols-2 @4xl/plugin-grid:grid-cols-3">
+              {sectionEntries.slice(0, visibleCount).map((entry) => (
+                <PluginMarketplaceCard
+                  key={entry.id}
+                  entry={entry}
+                  installed={installedIds.has(entry.id)}
+                  installing={market.installingId === entry.id || preInstall.busy}
+                  onView={() => setSelectedEntry(entry)}
+                  onInstall={(id, version) => onInstallById(id, version)}
+                  onUninstall={(id) => void market.uninstall(id)}
+                />
+              ))}
+            </div>
           </div>
           {visibleCount < sectionEntries.length && (
             <div className="flex justify-center pt-2">

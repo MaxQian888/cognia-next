@@ -115,7 +115,7 @@ export function PluginLibraryRow({
             )}
           </div>
         </div>
-        <div className="hidden items-center gap-1 lg:flex">
+        <div className="hidden items-center gap-1 @2xl/plugin-list:flex">
           {contributions.slice(0, 3).map((contribution) => (
             <CapabilityHoverChip
               key={contribution.capability}
@@ -136,7 +136,7 @@ export function PluginLibraryRow({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {permissionCount > 0 && (
-            <span className="hidden md:flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="hidden @lg/plugin-list:flex items-center gap-1 text-xs text-muted-foreground">
               <ShieldCheckIcon className="size-3" />
               {permissionCount}
             </span>

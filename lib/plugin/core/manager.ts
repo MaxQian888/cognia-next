@@ -79,6 +79,7 @@ import {
 import { getDb } from "@/lib/db/schema"
 import {
   updatePlugin,
+  upsertPlugin,
   getPlugin,
   setPluginConfig,
   getPythonHostSettings,
@@ -1124,6 +1125,8 @@ export class PluginManager {
           await store.installPlugin(manifest.id)
         }
 
+        await this.persistDiscoveredPluginRow(manifest, projection.source, path)
+
         this.registerPluginPermissions(manifest.id, manifest.permissions || [])
 
         discovered.push({
@@ -1138,6 +1141,45 @@ export class PluginManager {
     }
 
     return discovered
+  }
+
+  /**
+   * Mirror a freshly-discovered plugin into the Dexie `plugins` table — the
+   * single source of truth the /plugins Library (`usePlugins` → `listPlugins`)
+   * and the marketplace "Built-in" section (`useBuiltinPluginEntries` →
+   * `listPluginsBySource("builtin")`) both read.
+   *
+   * `store.discoverPlugin` / `store.installPlugin` only mutate the in-memory
+   * Zustand store (localStorage-persisted); without this write, built-in and
+   * marketplace plugins are discovered into the runtime but never reach the
+   * Dexie-backed UI surfaces, so both render empty.
+   *
+   * `upsertPlugin` preserves the existing row's status / enabled / config when
+   * those aren't supplied, so re-discovery on every launch is idempotent and
+   * never clobbers the user's enable state. Non-fatal: a Dexie hiccup must not
+   * abort discovery, so failures are logged and swallowed.
+   */
+  private async persistDiscoveredPluginRow(
+    manifest: PluginManifest,
+    source: PluginSource,
+    path: string
+  ): Promise<void> {
+    try {
+      await upsertPlugin({
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        type: (manifest.type as string) || "frontend",
+        source,
+        path,
+        manifest: manifest as unknown as Record<string, unknown>,
+        capabilities: Array.isArray(manifest.capabilities) ? [...manifest.capabilities] : [],
+      })
+    } catch (error) {
+      loggers.manager.warn(`[plugin:${manifest.id}] failed to persist discovery row to Dexie`, {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   private async scanBrowserBuiltins(): Promise<DiscoveredPlugin[]> {
@@ -1185,6 +1227,8 @@ export class PluginManager {
       if (!existing) {
         await store.installPlugin(manifest.id)
       }
+
+      await this.persistDiscoveredPluginRow(manifest, "builtin", entry.path)
 
       this.registerPluginPermissions(manifest.id, manifest.permissions || [])
 
@@ -1242,6 +1286,8 @@ export class PluginManager {
     if (!existing) {
       await store.installPlugin(manifest.id)
     }
+
+    await this.persistDiscoveredPluginRow(manifest, projection.source, dir)
 
     this.registerPluginPermissions(manifest.id, manifest.permissions || [])
   }
@@ -1365,6 +1411,8 @@ export class PluginManager {
 
     await store.installPlugin(result.manifest.id)
     txn.stepsCompleted.storeInstall = true
+
+    await this.persistDiscoveredPluginRow(result.manifest, projection.source, result.path)
 
     this.recordPluginVerification(result.manifest.id, {
       status: "installed",
@@ -2896,6 +2944,8 @@ export class PluginManager {
           await store.installPlugin(runtime.manifest.id)
         }
 
+        await this.persistDiscoveredPluginRow(runtime.manifest, projection.source, runtime.path)
+
         if (runtime.status) {
           store.setPluginStatus(runtime.manifest.id, runtime.status)
         }
@@ -2949,6 +2999,8 @@ export class PluginManager {
         if (!existing) {
           await store.installPlugin(runtime.manifest.id)
         }
+
+        await this.persistDiscoveredPluginRow(runtime.manifest, projection.source, runtime.path)
 
         if (runtime.status) {
           store.setPluginStatus(runtime.manifest.id, runtime.status)

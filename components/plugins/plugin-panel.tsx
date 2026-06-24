@@ -160,7 +160,12 @@ export function PluginPanel() {
   const rollbackTarget = usePluginsStore((s) => s.rollbackTarget)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
 
-  const market = usePluginMarketplace()
+  // The panel only needs the imperative `refresh()` for the Sync Registry
+  // button — it never renders search/featured results itself. Opt out of the
+  // on-mount auto-search so entering /plugins from the sidebar (which lands on
+  // the Library section) doesn't fire a marketplace search. The Discover /
+  // marketplace surfaces keep their own auto-loading hook instances.
+  const market = usePluginMarketplace({ autoLoad: false })
   const [syncing, setSyncing] = useState(false)
   // syncRegistry: refresh the marketplace catalog and stamp every installed
   // plugin with `manifest.updateAvailable` if the catalog reports a newer
@@ -266,9 +271,12 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
       leftPane={{
         label: t("library"),
         content: <PluginNavSidebar />,
-        defaultSize: 18,
-        minSize: 14,
-        maxSize: 26,
+        // Keep the nav rail compact by default — its rows are short labels
+        // ("已安装" / Discover / Governance), so a wide column just wastes
+        // horizontal space the center list needs.
+        defaultSize: 15,
+        minSize: 12,
+        maxSize: 24,
       }}
       rightPane={{
         label: t("detailSheetLabel"),

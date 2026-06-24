@@ -51,22 +51,28 @@ export function PluginPanelGrid() {
     )
   }
 
+  // Column count tracks the grid's OWN width (`@container/plugin-grid`),
+  // not the viewport. The grid renders inside the center pane (and is reused
+  // in narrower embedded shells), so viewport breakpoints would pack 2–3
+  // columns into a cramped pane and overlap the cards.
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {filtered.map((p) => (
-        <PluginCard
-          key={p.id}
-          plugin={p}
-          selected={selection.has(p.id)}
-          onToggleSelect={toggleSelection}
-          onOpen={openDetail}
-          onConfigure={openConfigure}
-          onToggleEnabled={(plugin) => void setPluginEnabled(plugin.id, !plugin.enabled)}
-          onUninstall={(plugin) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
-          onReviewPermissions={openPermissionReview}
-          onRollback={setRollbackTarget}
-        />
-      ))}
+    <div className="@container/plugin-grid">
+      <div className="grid gap-3 @lg/plugin-grid:grid-cols-2 @4xl/plugin-grid:grid-cols-3">
+        {filtered.map((p) => (
+          <PluginCard
+            key={p.id}
+            plugin={p}
+            selected={selection.has(p.id)}
+            onToggleSelect={toggleSelection}
+            onOpen={openDetail}
+            onConfigure={openConfigure}
+            onToggleEnabled={(plugin) => void setPluginEnabled(plugin.id, !plugin.enabled)}
+            onUninstall={(plugin) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
+            onReviewPermissions={openPermissionReview}
+            onRollback={setRollbackTarget}
+          />
+        ))}
+      </div>
     </div>
   )
 }
