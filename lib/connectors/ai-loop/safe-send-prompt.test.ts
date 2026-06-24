@@ -214,7 +214,41 @@ describe("safeSendPrompt", () => {
       cacheReadTokens: 7,
       cacheCreationTokens: 3,
       sessionId: "sess_1",
+      surface: "connector",
     })
+  })
+
+  it("threads the connector turn's traceId/spanId into the provider outcome", async () => {
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      totalCostUsd: 0.001,
+      durationMs: 120,
+    }
+    mockRun.mockResolvedValueOnce({
+      text: "reply",
+      messageId: "msg-trace",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+      usage,
+    })
+
+    await safeSendPrompt(
+      "sess_1",
+      "clean",
+      { provider: "openai", model: "gpt-4o", traceId: "a".repeat(32), spanId: "b".repeat(16) },
+      auditCtx
+    )
+
+    expect(mockRecordProviderOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: "a".repeat(32),
+        parentSpanId: "b".repeat(16),
+        surface: "connector",
+      })
+    )
   })
 
   it("does not write usage telemetry when the captured result has no usage", async () => {

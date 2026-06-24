@@ -66,6 +66,15 @@ jest.mock("@/lib/connectors/im-rate/registry", () => ({
   evaluateImRate: (...args: unknown[]) => mockEvaluateImRate(...(args as [])),
 }))
 
+// Spy on the agent-trace root-span close while keeping the rest of the emitter
+// real (resolveSendOptions still mints a real root span via startSpan).
+jest.mock("@cognia/agent-trace/emitter", () => ({
+  ...jest.requireActual("@cognia/agent-trace/emitter"),
+  endSpan: jest.fn(),
+}))
+import { endSpan as endSpanImport } from "@cognia/agent-trace/emitter"
+const endSpanMock = endSpanImport as jest.Mock
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeEvent(
@@ -168,6 +177,7 @@ beforeEach(async () => {
     messageId: "uuid-asst-1",
   })
   tryBuildTwinDepsImpl = jest.fn(async () => undefined)
+  endSpanMock.mockClear()
   installRuntime(bus, { runAndCapture: DEFAULT_RUN_AND_CAPTURE })
 })
 
@@ -920,5 +930,64 @@ describe("inboundEventToSendContent", () => {
         source: { type: "base64", media_type: "image/jpeg", data: "AAA" },
       })
     }
+  })
+})
+
+describe("installRuntime — ai-run (agent-trace root span)", () => {
+  const HEX32 = /^[0-9a-f]{32}$/
+  const HEX16 = /^[0-9a-f]{16}$/
+
+  it("opens a connector root span and threads its trace ids into the capture sendOptions", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
+    await callHandler(event, "ai-run")
+
+    const sendOptions = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][2] as {
+      traceId?: string
+      spanId?: string
+    }
+    expect(sendOptions.traceId).toMatch(HEX32)
+    expect(sendOptions.spanId).toMatch(HEX16)
+  })
+
+  it("ends the root span with the captured token usage + cost on success", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValueOnce({
+      text: "hi",
+      messageId: "m-usage",
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadInputTokens: 5,
+        cacheCreationInputTokens: 2,
+        totalCostUsd: 0.003,
+      },
+    })
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" }), "ai-run")
+
+    expect(endSpanMock).toHaveBeenCalledWith(
+      expect.stringMatching(HEX16),
+      expect.objectContaining({
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationTokens: 2,
+          cacheReadTokens: 5,
+        },
+        costUsdEstimate: 0.003,
+        metadata: { assistantMessageId: "m-usage" },
+      })
+    )
+  })
+
+  it("ends the root span with an error when the capture throws", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(new Error("boom"))
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" }), "ai-run")
+
+    expect(endSpanMock).toHaveBeenCalledWith(
+      expect.stringMatching(HEX16),
+      expect.objectContaining({
+        errorType: "ai_run_capture_failed",
+        errorMessage: "boom",
+      })
+    )
   })
 })

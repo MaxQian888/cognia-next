@@ -131,6 +131,11 @@ export async function safeSendPrompt(
         cacheReadTokens: usage.cacheReadInputTokens,
         cacheCreationTokens: usage.cacheCreationInputTokens,
         sessionId,
+        // Provider child span nests under the connector turn's root span
+        // (minted by resolveSendOptions with traceSurface "connector").
+        traceId: options?.traceId,
+        parentSpanId: options?.spanId,
+        surface: "connector",
       })
     }
   }

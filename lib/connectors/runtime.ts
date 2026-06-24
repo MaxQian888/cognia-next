@@ -36,6 +36,7 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { endSpan } from "@cognia/agent-trace/emitter"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { appendAudit } from "./audit"
@@ -97,6 +98,13 @@ export type RunAndCaptureFn = (
    * reasons as `a2uiSurfaces`.
    */
   a2uiSurfaceOrder?: string[]
+  /**
+   * Token/cost usage for this turn, when the capture wrapper extracted it
+   * from the SDK result message. Optional so test stubs and older wrappers
+   * that don't surface usage keep compiling; the runtime only reads it to
+   * close the connector turn's root trace span with LLM accounting.
+   */
+  usage?: import("@/lib/claude/adapter").UsageInfo
 }>
 
 export interface RuntimeOptions {
@@ -451,6 +459,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           inboxPolicy,
           twinDeps: twinHandshake,
           twinUserMessage: twinHandshake ? event.plainText : undefined,
+          // Open the connector turn's agent-trace ROOT span so the whole ai-run
+          // appears in the waterfall under surface "connector". The span is
+          // ended on the capture-error / success branches below with the
+          // turn's usage. Suppressed turns mint nothing (guarded in the
+          // resolver), so the short-circuit `break` above needs no `endSpan`.
+          emitTrace: true,
+          traceSurface: "connector",
         })
 
         // ── Suppression gate: short-circuit before the sidecar call ──
@@ -581,6 +596,14 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               })
             )
             .catch(() => undefined)
+          // Close the agent-trace root span on a failed capture so it doesn't
+          // dangle. Idempotent + no-op when minting was skipped (suppressed).
+          if (sendOptions.spanId) {
+            endSpan(sendOptions.spanId, {
+              errorType: "ai_run_capture_failed",
+              errorMessage: err instanceof Error ? err.message : String(err),
+            })
+          }
           break
         }
 
@@ -636,6 +659,29 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             sourceMessageId: storedMsg.id,
           },
         })
+
+        // Close the agent-trace root span with the turn's token usage + cost.
+        // The connector inbound path runs `runAndCaptureAssistantReply`
+        // directly (no `recordProviderOutcome` child span), so the root span
+        // itself carries the LLM accounting. No-op when minting was skipped.
+        if (sendOptions.spanId) {
+          const u = captured.usage
+          endSpan(sendOptions.spanId, {
+            responseModel: sendOptions.model,
+            ...(typeof u?.totalCostUsd === "number" ? { costUsdEstimate: u.totalCostUsd } : {}),
+            ...(u
+              ? {
+                  usage: {
+                    inputTokens: u.inputTokens ?? 0,
+                    outputTokens: u.outputTokens ?? 0,
+                    cacheCreationTokens: u.cacheCreationInputTokens ?? 0,
+                    cacheReadTokens: u.cacheReadInputTokens ?? 0,
+                  },
+                }
+              : {}),
+            metadata: { assistantMessageId: captured.messageId },
+          })
+        }
         break
       }
 
