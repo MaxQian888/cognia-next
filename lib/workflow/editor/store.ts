@@ -466,7 +466,14 @@ const labelByKind: Partial<Record<WorkflowNodeKind, string>> = {
   "flow.set": "Set variable",
 }
 
-function defaultLabelFor(kind: WorkflowNodeKind): string {
+/**
+ * The label `addNode` bakes into a freshly-dropped node's `data.label`. This
+ * is intentionally the un-localized English/raw value (the store is a plain
+ * Zustand store with no access to next-intl) — the canvas renderer detects a
+ * still-default label and substitutes the translated `workflows.nodes.<kind>`
+ * catalog string. Exported so that comparison stays in one place.
+ */
+export function defaultLabelFor(kind: WorkflowNodeKind): string {
   return labelByKind[kind] ?? kind
 }
 

@@ -68,8 +68,9 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
             data-testid={`workflow-card-${workflow.id}`}
             data-workflow-id={workflow.id}
             data-selected={selected}
+            onClick={activate}
             className={cn(
-              "group relative transition hover:border-primary/50 hover:shadow-sm",
+              "group relative cursor-pointer transition hover:border-primary/50 hover:shadow-sm",
               selected && "border-primary ring-1 ring-primary"
             )}
           >
@@ -90,7 +91,12 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
             <CardHeader className="flex flex-row items-start justify-between gap-2 pb-3 pl-10">
               <button
                 type="button"
-                onClick={activate}
+                onClick={(e) => {
+                  // The whole card already activates; stop the bubble so the
+                  // keyboard-focusable title button doesn't fire activate twice.
+                  e.stopPropagation()
+                  activate()
+                }}
                 className="flex min-w-0 flex-1 items-start gap-3 text-left"
                 data-testid={`workflow-open-${workflow.id}`}
               >
@@ -120,6 +126,7 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
                   <Button
                     variant="ghost"
                     size="icon"
+                    onClick={(e) => e.stopPropagation()}
                     className="size-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                     aria-label={t("moreActions")}
                     data-testid={`workflow-card-menu-${workflow.id}`}

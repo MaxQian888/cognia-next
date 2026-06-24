@@ -1028,10 +1028,16 @@ export function __resetPluginCatalogForTesting(): void {
   invalidateCatalogSnapshot()
 }
 
-/** Lookup an entry by kind. Falls back to a synthesized entry for unknown kinds. */
+/**
+ * Lookup an entry by kind. Resolution order: built-in catalog → registered
+ * plugin entry (so plugin nodes surface their real label/description/pluginId
+ * to the inspector + canvas) → synthesized stub for unknown kinds.
+ */
 export function nodeCatalogEntry(kind: WorkflowNodeKind): NodeCatalogEntry {
   const meta = ENTRIES[kind]
   if (meta) return { kind, category: workflowNodeCategory(kind), ...meta }
+  const pluginEntry = pluginCatalog.get(kind)
+  if (pluginEntry) return pluginEntry
   return {
     kind,
     category: workflowNodeCategory(kind),
@@ -1102,12 +1108,15 @@ export function searchCatalog(
   opts?: {
     includeDesktopOnly?: boolean
     /**
-     * Localized display strings per kind (from `workflows.nodes.<kind>` via
-     * `tNode`). When supplied, the translated label/description participate
-     * in matching alongside the English catalog text, so e.g. a zh-CN user
-     * can search "循环" and find `flow.loop`.
+     * Localized display strings per entry (built-ins via
+     * `workflows.nodes.<kind>`, plugin nodes via their
+     * `plugin.<pluginId>.workflow.nodes.<rawKind>` overlay). When supplied,
+     * the translated label/description participate in matching alongside the
+     * English catalog text, so e.g. a zh-CN user can search "循环" and find
+     * `flow.loop`, or a localized plugin node by its translated name. Receives
+     * the full entry so callers can branch on `pluginId`.
      */
-    getText?: (kind: string) => { label?: string; description?: string } | undefined
+    getText?: (entry: NodeCatalogEntry) => { label?: string; description?: string } | undefined
   }
 ): NodeCatalogEntry[] {
   const q = query.trim().toLowerCase()
@@ -1117,7 +1126,7 @@ export function searchCatalog(
   const scored = all
     .filter((e) => desktopOnly || !e.desktopOnly)
     .map((e) => {
-      const localized = opts?.getText?.(e.kind)
+      const localized = opts?.getText?.(e)
       const labels = [e.label, localized?.label].filter(
         (v): v is string => typeof v === "string" && v !== ""
       )

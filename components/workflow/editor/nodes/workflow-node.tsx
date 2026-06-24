@@ -17,6 +17,9 @@ import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import type { WorkflowNodeData } from "@/types/workflow/visual"
 import type { NodeRunStatus } from "@/lib/workflow/editor/store"
+import { defaultLabelFor } from "@/lib/workflow/editor/store"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { tNodeField as translateNodeLabel } from "@/lib/workflow/i18n/node-translate"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
 import { useNodeDecoration } from "@/lib/workflow/editor/use-node-decoration"
@@ -178,6 +181,26 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // mounted (test renders, storybook).
   const decoration = useNodeDecoration(id)
   const tNode = useTranslations("workflows.node")
+  // Catalog translator. A freshly-dropped node carries the un-localized
+  // `defaultLabelFor(kind)` in `data.label`; while it remains untouched we
+  // render the translated catalog label so the canvas is localized out of the
+  // box. Built-ins resolve under `workflows.nodes.<kind>`, plugin nodes under
+  // their `plugin.<id>.workflow.nodes.<rawKind>` overlay. Once the user renames
+  // the node, `data.label` diverges from the default and we show their custom
+  // text verbatim. A root translator covers both namespaces.
+  const tRoot = useTranslations() as unknown as ((key: string) => string) & {
+    has?: (key: string) => boolean
+  }
+  const catalogEntry = nodeCatalogEntry(data.kind)
+  const displayLabel =
+    data.label === defaultLabelFor(data.kind)
+      ? translateNodeLabel(tRoot, {
+          kind: data.kind,
+          pluginId: catalogEntry?.pluginId,
+          field: "label",
+          fallback: catalogEntry?.label ?? data.label,
+        })
+      : data.label
   const status: NodeRunStatus = decoration.runStatus ?? data.runStatus ?? "idle"
   const validationFields = decoration.validation?.fields
   const validationSummary = decoration.validation?.summary
@@ -421,7 +444,9 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
         {createElement(icon, { className: "size-4 shrink-0 mt-0.5", "aria-hidden": true })}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <div className="text-sm font-medium truncate text-foreground flex-1">{data.label}</div>
+            <div className="text-sm font-medium truncate text-foreground flex-1">
+              {displayLabel}
+            </div>
             {decoration.pinned ? (
               <span
                 title={tNode("pinnedTitle")}

@@ -6,6 +6,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { usePalettePreferencesStore } from "@/stores/workflow"
+import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { registerPluginI18n, __resetPluginI18nForTesting } from "@/lib/i18n/plugin-i18n-registry"
 import { NodeSearchSidebar } from "./node-search-sidebar"
 
 function mount() {
@@ -86,5 +88,71 @@ describe("NodeSearchSidebar", () => {
     mount()
     // Stale kind is filtered out → favorites group stays in its empty state.
     expect(screen.getByText("No favorites yet — star a node to pin it here.")).toBeInTheDocument()
+  })
+
+  describe("plugin node localization", () => {
+    afterEach(() => {
+      act(() => {
+        __resetPluginCatalogForTesting()
+        __resetPluginI18nForTesting()
+      })
+    })
+
+    function registerDemoNode() {
+      act(() => {
+        addPluginCatalogEntry({
+          kind: "demo.action.format" as never,
+          category: "plugin",
+          label: "Format Rust",
+          description: "Run rustfmt on a Rust source string",
+          iconName: "Wand",
+          keywords: [],
+          pluginId: "demo",
+        })
+      })
+    }
+
+    // Mirrors what the plugin manager does on enable: register a plugin's
+    // `manifest.i18n` strings under the absolute `plugin.<id>.…` namespace.
+    function registerDemoTranslations() {
+      act(() => {
+        registerPluginI18n({
+          pluginId: "demo",
+          messages: {
+            en: {
+              "plugin.demo.workflow.nodes.action.format.label": "格式化 Rust",
+              "plugin.demo.workflow.nodes.action.format.description": "运行 rustfmt",
+            },
+          },
+        })
+      })
+    }
+
+    it("renders the plugin author's raw label when no translation is registered", () => {
+      registerDemoNode()
+      mount()
+      const chip = screen.getByTestId("wf-sidebar-demo.action.format")
+      expect(chip).toHaveTextContent("Format Rust")
+    })
+
+    it("renders the translated label from the plugin's i18n overlay namespace", () => {
+      registerDemoNode()
+      registerDemoTranslations()
+      mount()
+      const chip = screen.getByTestId("wf-sidebar-demo.action.format")
+      expect(chip).toHaveTextContent("格式化 Rust")
+      expect(chip).not.toHaveTextContent("Format Rust")
+    })
+
+    it("finds a plugin node by its translated label in search mode", () => {
+      registerDemoNode()
+      registerDemoTranslations()
+      mount()
+      const search = screen.getByPlaceholderText("Search nodes…")
+      act(() => {
+        fireEvent.change(search, { target: { value: "格式化" } })
+      })
+      expect(screen.getByTestId("wf-sidebar-demo.action.format")).toBeInTheDocument()
+    })
   })
 })

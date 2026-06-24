@@ -8,6 +8,8 @@ import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { WorkflowNodeComponent } from "./workflow-node"
+import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { registerPluginI18n, __resetPluginI18nForTesting } from "@/lib/i18n/plugin-i18n-registry"
 
 // React Flow's Handle pulls in DOM measurements that jsdom can't provide.
 // Stub the surface used by `WorkflowNodeComponent`. The Handle is rendered
@@ -104,6 +106,74 @@ describe("WorkflowNodeComponent", () => {
     renderNode({ store, label: "AI step", kind: "ai.prompt" })
     expect(screen.getByText("AI step")).toBeInTheDocument()
     expect(screen.getByText("ai.prompt")).toBeInTheDocument()
+  })
+
+  it("translates the catalog label for a freshly-dropped (default-labelled) node", () => {
+    const { store } = withStore()
+    // `addNode` bakes the raw kind into `data.label` for kinds without an
+    // entry in `labelByKind`; the renderer must substitute the localized
+    // `workflows.nodes.<kind>.label` so the canvas isn't stuck on raw kinds.
+    renderNode({ store, label: "action.goal.create", kind: "action.goal.create" })
+    expect(screen.getByText("Create goal")).toBeInTheDocument()
+    // The raw kind still shows in the lowercase subtitle line.
+    expect(screen.getByText("action.goal.create")).toBeInTheDocument()
+  })
+
+  it("keeps a user-customized label verbatim (no translation override)", () => {
+    const { store } = withStore()
+    renderNode({ store, label: "My goal step", kind: "action.goal.create" })
+    expect(screen.getByText("My goal step")).toBeInTheDocument()
+    expect(screen.queryByText("Create goal")).not.toBeInTheDocument()
+  })
+
+  describe("plugin node label localization", () => {
+    afterEach(() => {
+      __resetPluginCatalogForTesting()
+      __resetPluginI18nForTesting()
+    })
+
+    function registerDemoNode() {
+      addPluginCatalogEntry({
+        kind: "demo.action.format" as never,
+        category: "plugin",
+        label: "Format Rust",
+        description: "Run rustfmt on a Rust source string",
+        iconName: "Wand",
+        keywords: [],
+        pluginId: "demo",
+      })
+    }
+
+    it("falls back to the plugin author's catalog label when untranslated", () => {
+      registerDemoNode()
+      const { store } = withStore()
+      // Instance label equals the raw kind (what `addNode` bakes for plugin
+      // kinds), so the renderer substitutes the catalog label.
+      renderNode({
+        store,
+        label: "demo.action.format",
+        kind: "demo.action.format" as WorkflowNodeKind,
+      })
+      expect(screen.getByText("Format Rust")).toBeInTheDocument()
+    })
+
+    it("renders the translated label from the plugin overlay namespace", () => {
+      registerDemoNode()
+      registerPluginI18n({
+        pluginId: "demo",
+        messages: {
+          en: { "plugin.demo.workflow.nodes.action.format.label": "格式化 Rust" },
+        },
+      })
+      const { store } = withStore()
+      renderNode({
+        store,
+        label: "demo.action.format",
+        kind: "demo.action.format" as WorkflowNodeKind,
+      })
+      expect(screen.getByText("格式化 Rust")).toBeInTheDocument()
+      expect(screen.queryByText("Format Rust")).not.toBeInTheDocument()
+    })
   })
 
   it("does not render the floating toolbar without a store provider", () => {

@@ -118,7 +118,8 @@ describe("RunsTab", () => {
   it("reveals the selected step on the canvas", async () => {
     await getDb().workflowRuns.put(runRow())
     const setViewport = jest.fn()
-    const store = mount({ setViewport })
+    const setCenter = jest.fn()
+    const store = mount({ setViewport, setCenter })
     fireEvent.click(await screen.findByTestId("runs-tab-row-run_1"))
     // Select a step via the timeline stub, then reveal it.
     fireEvent.click(await screen.findByTestId("timeline-select"))
@@ -127,6 +128,9 @@ describe("RunsTab", () => {
       fireEvent.click(reveal)
     })
     expect(store.getState().selectedNodeIds).toEqual(["n_step"])
-    expect(setViewport).toHaveBeenCalled()
+    // Pane-aware centering — setCenter, not window-width setViewport math.
+    expect(setViewport).not.toHaveBeenCalled()
+    expect(setCenter).toHaveBeenCalledTimes(1)
+    expect(setCenter.mock.calls[0][2].zoom).toBeCloseTo(1.2)
   })
 })

@@ -28,7 +28,7 @@ import {
   type WorkflowNodeKind,
 } from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
-import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { tNodeField } from "@/lib/workflow/i18n/node-translate"
 import { getNodeIndex } from "@/lib/workflow/editor/node-index"
 import { supportsErrorHandling } from "@/lib/workflow/editor/node-handles"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
@@ -111,7 +111,9 @@ function InspectorPanelInner({
   embedded?: boolean
 }) {
   const t = useTranslations("workflows.inspector")
-  const tNodes = useTranslations("workflows.nodes")
+  // Root translator resolves both built-in (`workflows.nodes.*`) and plugin
+  // (`plugin.<id>.workflow.nodes.*`) node strings through `tNodeField`.
+  const tRoot = useTranslations()
 
   // Selector split (perf A4-style): subscribe in three narrow slices so a
   // mutation that doesn't change *the selected node* never reaches the
@@ -262,10 +264,20 @@ function InspectorPanelInner({
             ) : null}
           </div>
           <h3 className="mt-1.5 text-sm font-semibold leading-tight">
-            {tNode(tNodes, `${node.data.kind}.label`, entry.label)}
+            {tNodeField(tRoot, {
+              kind: node.data.kind,
+              pluginId: entry.pluginId,
+              field: "label",
+              fallback: entry.label,
+            })}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {tNode(tNodes, `${node.data.kind}.description`, entry.description)}
+            {tNodeField(tRoot, {
+              kind: node.data.kind,
+              pluginId: entry.pluginId,
+              field: "description",
+              fallback: entry.description,
+            })}
           </p>
         </div>
         {embedded ? null : (

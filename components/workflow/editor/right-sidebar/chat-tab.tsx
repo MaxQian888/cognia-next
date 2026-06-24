@@ -25,13 +25,21 @@
 
 import { useCallback, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import { ChatPane } from "@/components/chat/chat-view"
 import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
-import { useWorkflowEditorSession } from "@/hooks/chat/use-workflow-editor-session"
+import {
+  createWorkflowEditorSession,
+  isWorkflowEditorSessionId,
+  useWorkflowEditorSession,
+} from "@/hooks/chat/use-workflow-editor-session"
+import { useChatStore } from "@/stores/chat"
+import { getDb } from "@/lib/db/schema"
+import { listMessages } from "@/lib/db/messages"
 import { Loader2Icon, MessageSquareIcon } from "lucide-react"
 import { WorkflowSessionBar } from "@/components/workflow/editor/chat/session-bar"
-import type { SendContent } from "@/lib/claude/types"
+import type { ChatSession, SendContent } from "@/lib/claude/types"
 import type { EditorStore } from "@/lib/workflow/editor/store"
 import {
   WorkflowEditorProvider,
@@ -68,6 +76,69 @@ export function WorkflowEditorChatTab({
   const t = useTranslations("workflowEditor.chat")
   const { session, loading } = useWorkflowEditorSession(workflowId, workflowName)
   const claude = useClaudeChat()
+
+  // The session bar lets the user spin off / switch additional sessions for
+  // this workflow; those mutate the chat store's `activeSessionId`. Track it
+  // live so the pane + bar re-render against the chosen session instead of
+  // staying pinned to the default `useWorkflowEditorSession` row.
+  const activeStoreId = useChatStore((s) => s.activeSessionId)
+  const showAdditional =
+    !!workflowId &&
+    !!session &&
+    isWorkflowEditorSessionId(activeStoreId, workflowId) &&
+    activeStoreId !== session.id
+  // Resolve the additional session's row (the default row is already in hand).
+  const additionalRow = useLiveQuery<ChatSession | undefined>(
+    () => (showAdditional && activeStoreId ? getDb().sessions.get(activeStoreId) : undefined),
+    [showAdditional, activeStoreId]
+  )
+
+  // The session the pane actually reads/streams from.
+  const effectiveSessionId = showAdditional ? activeStoreId : (session?.id ?? null)
+  // Retry hook: ChatPane's "retry load" bumps this slice nonce.
+  const reloadNonce = useChatStore((s) =>
+    effectiveSessionId ? (s.sessions[effectiveSessionId]?.messagesReloadNonce ?? 0) : 0
+  )
+
+  // Hydrate the active session's history from Dexie on switch / mount. The
+  // standalone `/workflows/editor` route does NOT mount `useSessions` (the
+  // main shell's hydration owner), so without this the pane would show every
+  // session — including freshly-switched additional ones — as blank. The
+  // freshly-focused slice already carries `messagesLoading: true` (seeded by
+  // `setActiveSession`), so no synchronous loading-set is needed here.
+  useEffect(() => {
+    if (!effectiveSessionId) return
+    const id = effectiveSessionId
+    let cancelled = false
+    listMessages(id)
+      .then((msgs) => {
+        if (!cancelled) useChatStore.getState().setSessionMessages(id, msgs)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          useChatStore
+            .getState()
+            .setSessionMessagesLoadError(id, err instanceof Error ? err.message : String(err))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveSessionId, reloadNonce])
+
+  // Mirror the session bar's create path for the welcome-state + composer
+  // "new session" affordances so every entry point behaves identically.
+  const handleCreateSession = useCallback(async () => {
+    if (!workflowId) return
+    try {
+      const title = workflowName
+        ? t("session.newSuffixed", { name: workflowName })
+        : t("session.newDefault")
+      await createWorkflowEditorSession(workflowId, title)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }, [workflowId, workflowName, t])
 
   const handleSend = useCallback(
     async (content: SendContent) => {
@@ -171,6 +242,20 @@ export function WorkflowEditorChatTab({
     )
   }
 
+  // The session the pane binds to: the store's active additional session when
+  // one is focused (falling back to a lightweight placeholder while its Dexie
+  // row hydrates so the pane never flashes the default's messages), else the
+  // pinned default row.
+  const activeSession: ChatSession = showAdditional
+    ? (additionalRow ?? {
+        id: activeStoreId as string,
+        title: "",
+        kind: "workflow-editor",
+        createdAt: 0,
+        updatedAt: 0,
+      })
+    : session
+
   return (
     <WorkflowEditorProvider value={ctxValue}>
       <PerfBoundary id="workflow:chat-tab">
@@ -182,19 +267,16 @@ export function WorkflowEditorChatTab({
           <WorkflowSessionBar
             workflowId={workflowId}
             workflowName={workflowName}
-            activeSessionId={session.id}
+            activeSessionId={activeSession.id}
           />
           <ChatPane
-            activeSession={session}
+            activeSession={activeSession}
+            sessionId={activeSession.id}
             onSend={handleSend}
             onStop={handleStop}
             onRegenerate={handleRegenerate}
             onEditResend={handleEditResend}
-            onCreate={() => {
-              /* New-session button is a no-op here — the workflow-editor session
-               * is fixed per workflow. The button is still visible (so muscle
-               * memory works) but the click is benign. */
-            }}
+            onCreate={() => void handleCreateSession()}
             onUseSample={(text) => {
               void handleSend({ type: "text", text } as never)
             }}

@@ -65,8 +65,9 @@ function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
             data-testid={`workflow-row-${workflow.id}`}
             data-workflow-id={workflow.id}
             data-selected={selected}
+            onClick={activate}
             className={cn(
-              "group flex flex-row items-center gap-3 p-3 shadow-none transition hover:border-primary/50",
+              "group flex cursor-pointer flex-row items-center gap-3 p-3 shadow-none transition hover:border-primary/50",
               selected && "border-primary ring-1 ring-primary"
             )}
           >
@@ -79,7 +80,12 @@ function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
             />
             <button
               type="button"
-              onClick={activate}
+              onClick={(e) => {
+                // The whole row already activates; stop the bubble so the
+                // keyboard-focusable title button doesn't fire activate twice.
+                e.stopPropagation()
+                activate()
+              }}
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
               data-testid={`workflow-open-${workflow.id}`}
             >
@@ -129,6 +135,7 @@ function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
                 <Button
                   variant="ghost"
                   size="icon"
+                  onClick={(e) => e.stopPropagation()}
                   className="size-8 shrink-0"
                   aria-label={t("moreActions")}
                   data-testid={`workflow-row-menu-${workflow.id}`}

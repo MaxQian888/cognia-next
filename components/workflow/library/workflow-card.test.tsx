@@ -127,6 +127,32 @@ describe("WorkflowCard", () => {
     expect(useWorkflowLibraryStore.getState().selection.size).toBe(0)
   })
 
+  it("activates from anywhere on the card, not just the title", () => {
+    // Whole-card affordance: clicking the body (badges/padding) must activate,
+    // not only the small header title button.
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-card-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(true)
+  })
+
+  it("activates exactly once when the title button is clicked", () => {
+    // The title button must not double-fire by also bubbling to the card.
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-open-wf_a"))
+    // A second toggle would clear it again; selection proves a single toggle.
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(true)
+  })
+
+  it("does not activate the card when opening the actions menu", async () => {
+    const user = userEvent.setup()
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(false)
+  })
+
   it("opens the rename dialog from the menu", async () => {
     const user = userEvent.setup()
     render(<WorkflowCard workflow={makeWorkflow()} />)

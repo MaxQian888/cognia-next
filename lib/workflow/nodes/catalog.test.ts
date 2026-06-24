@@ -1,5 +1,26 @@
-import { NODE_CATALOG, groupedCatalog, nodeCatalogEntry, searchCatalog } from "./catalog"
+import {
+  NODE_CATALOG,
+  addPluginCatalogEntry,
+  groupedCatalog,
+  nodeCatalogEntry,
+  searchCatalog,
+  __resetPluginCatalogForTesting,
+} from "./catalog"
 import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
+import enMessages from "@/i18n/messages/en.json"
+import zhMessages from "@/i18n/messages/zh-CN.json"
+
+function nodeMessage(
+  messages: Record<string, unknown>,
+  kind: string
+): { label?: unknown; description?: unknown } | undefined {
+  let cursor: unknown = (messages as { workflows?: { nodes?: unknown } }).workflows?.nodes
+  for (const part of kind.split(".")) {
+    if (!cursor || typeof cursor !== "object") return undefined
+    cursor = (cursor as Record<string, unknown>)[part]
+  }
+  return cursor as { label?: unknown; description?: unknown } | undefined
+}
 
 describe("NODE_CATALOG", () => {
   it("has one fully-described entry per palette kind", () => {
@@ -31,6 +52,26 @@ describe("NODE_CATALOG", () => {
       expect(cats.has(required as ReturnType<typeof nodeCatalogEntry>["category"])).toBe(true)
     }
   })
+
+  // Built-in catalog entries (NODE_CATALOG never contains plugin-contributed
+  // kinds — those are added at runtime via `addPluginCatalogEntry` and keep
+  // their plugin author's English fallback). Every built-in kind MUST carry a
+  // localized `label` + `description` in BOTH message bundles, otherwise the
+  // palette / sidebar / inspector silently render the hard-coded English
+  // fallback. This invariant is what stops node-catalog growth from drifting
+  // out of i18n coverage.
+  describe.each([
+    ["en", enMessages as unknown as Record<string, unknown>],
+    ["zh-CN", zhMessages as unknown as Record<string, unknown>],
+  ])("workflows.nodes i18n coverage (%s)", (_locale, messages) => {
+    it.each(NODE_CATALOG.map((e) => e.kind))("has a label + description for %s", (kind) => {
+      const entry = nodeMessage(messages, kind)
+      expect(typeof entry?.label).toBe("string")
+      expect((entry?.label as string)?.length ?? 0).toBeGreaterThan(0)
+      expect(typeof entry?.description).toBe("string")
+      expect((entry?.description as string)?.length ?? 0).toBeGreaterThan(0)
+    })
+  })
 })
 
 describe("nodeCatalogEntry", () => {
@@ -61,6 +102,25 @@ describe("nodeCatalogEntry", () => {
     const e = nodeCatalogEntry("custom.thing.foo" as Parameters<typeof nodeCatalogEntry>[0])
     expect(e.label).toBe("custom.thing.foo")
     expect(e.iconName).toBe("Box")
+  })
+
+  it("resolves a registered plugin entry (with pluginId) before synthesizing", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.format" as never,
+      category: "plugin",
+      label: "Format",
+      description: "Format text",
+      iconName: "Wand",
+      keywords: [],
+      pluginId: "demo",
+    })
+    const e = nodeCatalogEntry("demo.action.format" as Parameters<typeof nodeCatalogEntry>[0])
+    expect(e.label).toBe("Format")
+    expect(e.description).toBe("Format text")
+    expect(e.pluginId).toBe("demo")
+    expect(e.iconName).toBe("Wand")
+    __resetPluginCatalogForTesting()
   })
 })
 
@@ -166,13 +226,35 @@ describe("searchCatalog", () => {
   })
 
   it("matches localized labels/descriptions when a translator is supplied", () => {
-    const getText = (kind: string) =>
-      kind === "flow.loop" ? { label: "循环", description: "重复执行子图" } : undefined
+    const getText = (entry: { kind: string }) =>
+      entry.kind === "flow.loop" ? { label: "循环", description: "重复执行子图" } : undefined
     const byLabel = searchCatalog("循环", { getText })
     expect(byLabel[0]?.kind).toBe("flow.loop")
     const byDesc = searchCatalog("子图", { getText })
     expect(byDesc.some((e) => e.kind === "flow.loop")).toBe(true)
     // Without the translator the same query finds nothing.
     expect(searchCatalog("循环").some((e) => e.kind === "flow.loop")).toBe(false)
+  })
+
+  it("hands getText the full entry so plugin kinds can be localized", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.format" as never,
+      category: "plugin",
+      label: "Format",
+      description: "Format text",
+      iconName: "Box",
+      keywords: [],
+      pluginId: "demo",
+    })
+    const seen: Array<string | undefined> = []
+    const getText = (entry: { kind: string; pluginId?: string }) => {
+      seen.push(entry.pluginId)
+      return entry.pluginId === "demo" ? { label: "格式化", description: "格式化文本" } : undefined
+    }
+    const out = searchCatalog("格式化", { getText })
+    expect(out.some((e) => (e.kind as string) === "demo.action.format")).toBe(true)
+    expect(seen).toContain("demo")
+    __resetPluginCatalogForTesting()
   })
 })

@@ -19,6 +19,13 @@ const messages = {
       orphanNode: "Not reachable from any trigger.",
       missingTrigger: "No trigger.",
     },
+    // `nodeParam` diagnostics carry a full-path messageKey rooted here, NOT
+    // under `workflows.diagnostics`. The Problems tab must resolve them with a
+    // root translator — otherwise the key is double-prefixed and goes MISSING.
+    validation: {
+      required: "This field is required",
+      cronExpr: "Use a 5-field cron expression",
+    },
   },
 }
 
@@ -93,12 +100,20 @@ describe("ProblemsTab", () => {
 
   it("reveals the node on the canvas when a row is clicked", () => {
     const setViewport = jest.fn()
-    const store = renderTab({ setViewport })
+    const setCenter = jest.fn()
+    const store = renderTab({ setViewport, setCenter })
     const errorRow = screen
       .getAllByTestId("problems-row")
       .find((r) => r.getAttribute("data-severity") === "error")!
     fireEvent.click(errorRow)
-    expect(setViewport).toHaveBeenCalled()
+    // Pane-aware centering — must use setCenter, not window-width setViewport
+    // math (which lands the node right of centre with the sidebar open).
+    expect(setViewport).not.toHaveBeenCalled()
+    expect(setCenter).toHaveBeenCalledTimes(1)
+    const [cx, cy, opts] = setCenter.mock.calls[0]
+    expect(typeof cx).toBe("number")
+    expect(typeof cy).toBe("number")
+    expect(opts.zoom).toBeCloseTo(1.2)
     expect(store.getState().selectedNodeIds).toEqual(["p"])
   })
 
@@ -131,6 +146,11 @@ describe("ProblemsTab", () => {
     )
     const row = screen.getAllByTestId("problems-row").find((r) => r.textContent?.includes("Cron"))!
     expect(row).toBeTruthy()
+    // The validation message resolves via the root translator — the raw key
+    // (or a double-prefixed `workflows.diagnostics.workflows.validation.*`)
+    // must NOT leak into the row.
+    expect(row.textContent).not.toContain("workflows.validation")
+    expect(row.textContent).toMatch(/cron expression|field is required/i)
     fireEvent.click(row)
     expect(store.getState().selectedNodeIds).toEqual(["cron"])
   })

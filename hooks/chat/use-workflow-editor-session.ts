@@ -39,6 +39,52 @@ export function workflowSessionId(workflowId: string): string {
 }
 
 /**
+ * True when `id` is a session belonging to `workflowId` — either the
+ * deterministic default (`workflow:${workflowId}`) or one of the additional
+ * sessions spun off from the session bar (`workflow:${workflowId}:${suffix}`).
+ * The `:` separator guard avoids a false positive between sibling workflows
+ * whose ids share a prefix (e.g. `wf_a` vs `wf_ab`).
+ */
+export function isWorkflowEditorSessionId(
+  id: string | null | undefined,
+  workflowId: string
+): id is string {
+  if (!id) return false
+  const base = workflowSessionId(workflowId)
+  return id === base || id.startsWith(`${base}:`)
+}
+
+/**
+ * Create a new *additional* session for this workflow, switch the global
+ * chat store's focus to it, and reset the visible message list. Returns the
+ * new session id.
+ *
+ * Shared by the session bar's "+" button and the chat tab's "new session"
+ * affordances (welcome state + composer) so every create path is identical:
+ * deterministic id contract, `kind: "workflow-editor"` discriminator (what
+ * `resolveSendOptions` keys on), and an immediate focus switch.
+ */
+export async function createWorkflowEditorSession(
+  workflowId: string,
+  title: string
+): Promise<string> {
+  const now = Date.now()
+  const id = `${workflowSessionId(workflowId)}:${Math.random().toString(36).slice(2, 8)}`
+  const row: ChatSession = {
+    id,
+    title,
+    kind: "workflow-editor",
+    createdAt: now,
+    updatedAt: now,
+  }
+  await getDb().sessions.put(row)
+  const store = useChatStore.getState()
+  store.setActiveSession(id)
+  store.setMessages([])
+  return id
+}
+
+/**
  * Ensure a `ChatSession` exists for this workflow id, pin the global
  * store's `activeSessionId` to it, and restore the previous active
  * session id on unmount. Idempotent across remounts.
@@ -100,9 +146,11 @@ export function useWorkflowEditorSession(
       cancelled = true
       // Restore the previous active session id on the way out so leaving
       // the editor doesn't strand the user on a hidden workflow-editor
-      // session.
+      // session. Covers the additional sessions spun off via the session bar
+      // (`workflow:${id}:${suffix}`), not just the pinned default — otherwise
+      // creating a new conversation and leaving would strand the user on it.
       const current = useChatStore.getState().activeSessionId
-      if (current === sessionId) {
+      if (isWorkflowEditorSessionId(current, workflowId)) {
         useChatStore.getState().setActiveSession(previousActiveSessionId)
       }
     }

@@ -196,6 +196,31 @@ describe("FlowCanvas", () => {
     expect(store.getState().isDraggingAny).toBe(false)
   })
 
+  it("freezes the minimap into a static placeholder for the duration of a drag", () => {
+    const { store, trigger } = seedStore()
+    renderCanvas(store)
+    const { act } = jest.requireActual("@testing-library/react")
+
+    // Idle: the live React Flow MiniMap is mounted (and repaints on store change).
+    expect(screen.getByTestId("minimap-mock")).toBeInTheDocument()
+    expect(screen.queryByTestId("minimap-frozen")).not.toBeInTheDocument()
+
+    act(() => {
+      ;(reactFlowPropsRef.current!.onNodeDragStart as (...a: unknown[]) => void)(
+        {},
+        { id: trigger, position: { x: 0, y: 0 } }
+      )
+    })
+    // Dragging: live minimap unmounted, non-subscribing placeholder shown.
+    expect(screen.queryByTestId("minimap-mock")).not.toBeInTheDocument()
+    expect(screen.getByTestId("minimap-frozen")).toBeInTheDocument()
+
+    act(() => (reactFlowPropsRef.current!.onNodeDragStop as () => void)())
+    // Drop: the live minimap returns (one repaint), placeholder gone.
+    expect(screen.getByTestId("minimap-mock")).toBeInTheDocument()
+    expect(screen.queryByTestId("minimap-frozen")).not.toBeInTheDocument()
+  })
+
   it("onMoveEnd writes the viewport back to the store", () => {
     const { store } = seedStore()
     renderCanvas(store)

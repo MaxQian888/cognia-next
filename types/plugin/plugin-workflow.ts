@@ -43,9 +43,21 @@ export interface PluginNodeDef {
    * category to interleave with the host's nodes.
    */
   category: WorkflowNodeCategory | "plugin"
-  /** Display name in the catalog. */
+  /**
+   * Display name in the catalog (palette / inspector / canvas). Used verbatim
+   * as the fallback. To LOCALIZE it, ship `manifest.i18n.locales.<locale>` with
+   * the UNPREFIXED key `"workflow.nodes.<kind>.label"` (the host prefixes it to
+   * `plugin.<pluginId>.workflow.nodes.<kind>.label`, where `<kind>` is THIS
+   * `kind` field). The editor resolves that overlay key per the active locale
+   * and falls back to this string when no translation is registered. See
+   * `lib/workflow/i18n/node-translate.ts:pluginNodeMessageKey`.
+   */
   label: string
-  /** Short description shown in the catalog tooltip. */
+  /**
+   * Short description shown in the catalog tooltip / inspector. Localize via
+   * the UNPREFIXED key `"workflow.nodes.<kind>.description"` (same scheme as
+   * `label` above).
+   */
   description: string
   /** lucide-react icon name; falls back to `Box` when missing. */
   iconName: string
@@ -105,7 +117,15 @@ export interface PluginTriggerDef {
   /** Unprefixed kind (e.g. `"trigger.cronEx"`). Runtime prefixes pluginId. */
   kind: string
   typeVersion: number
+  /**
+   * Catalog display name (fallback). Localize via the UNPREFIXED overlay key
+   * `"workflow.nodes.<kind>.label"` in `manifest.i18n.locales` — the host
+   * resolves `plugin.<pluginId>.workflow.nodes.<kind>.label` for triggers too
+   * (the leading `trigger.` segment is preserved). See
+   * `lib/workflow/i18n/node-translate.ts:pluginNodeMessageKey`.
+   */
   label: string
+  /** Catalog description (fallback). Localize via `"workflow.nodes.<kind>.description"`. */
   description: string
   iconName: string
   paramsSchema: Record<string, unknown>

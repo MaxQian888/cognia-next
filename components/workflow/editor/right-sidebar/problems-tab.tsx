@@ -44,6 +44,11 @@ const SEVERITY_CLASS: Record<DiagnosticSeverity, string> = {
 
 export function ProblemsTab({ useStore, reactFlowInstance }: ProblemsTabProps) {
   const t = useTranslations("workflows.diagnostics") as unknown as LooseT
+  // Root (un-namespaced) translator for `nodeParam` diagnostics, whose
+  // `messageKey` is already a full path from the bundle root (e.g.
+  // `workflows.validation.required`). Using the scoped `t` would wrongly
+  // prepend `workflows.diagnostics.` and miss the message.
+  const tRoot = useTranslations() as unknown as LooseT
   const [filter, setFilter] = useState<SeverityFilter>("all")
 
   const diagnostics = useStore((s: EditorState) => s.diagnostics.diagnostics)
@@ -63,18 +68,17 @@ export function ProblemsTab({ useStore, reactFlowInstance }: ProblemsTabProps) {
     const state = useStore.getState()
     if (d.nodeId) {
       const node = state.nodes.find((n) => n.id === d.nodeId)
-      if (node && reactFlowInstance && typeof window !== "undefined") {
+      if (node && reactFlowInstance) {
+        // Pane-aware centring — see spotlight-search.tsx:handleSelect. Using
+        // `setCenter` (not window-width setViewport math) keeps the node in the
+        // middle of the visible canvas, not pushed right by the open sidebar.
         const zoom = 1.2
         const w = node.width ?? node.measured?.width ?? 240
         const h = node.height ?? node.measured?.height ?? 80
-        reactFlowInstance.setViewport(
-          {
-            x: window.innerWidth / 2 - (node.position.x + w / 2) * zoom,
-            y: window.innerHeight / 2 - (node.position.y + h / 2) * zoom,
-            zoom,
-          },
-          { duration: 240 }
-        )
+        reactFlowInstance.setCenter(node.position.x + w / 2, node.position.y + h / 2, {
+          zoom,
+          duration: 240,
+        })
       }
       state.setSelectedNodes([d.nodeId])
       state.pulseNode(d.nodeId, 3000)
@@ -89,9 +93,10 @@ export function ProblemsTab({ useStore, reactFlowInstance }: ProblemsTabProps) {
   const messageOf = (d: Diagnostic): string => {
     const key = d.code === "nodeParam" ? d.messageKey : d.code
     try {
-      // For nodeParam the key is a full path → use the root translator form.
+      // For nodeParam the key is a full path from the bundle root → resolve
+      // it with the root translator, not the diagnostics-scoped one.
       if (d.code === "nodeParam") {
-        return (t as unknown as LooseT)(d.messageKey, d.messageParams)
+        return tRoot(d.messageKey, d.messageParams)
       }
       return t(key, d.messageParams)
     } catch {

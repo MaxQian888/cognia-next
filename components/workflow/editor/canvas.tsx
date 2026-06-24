@@ -36,6 +36,7 @@ import {
   serializeClipboard,
 } from "@/lib/workflow/editor/clipboard"
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
+import { paneCenterScreenPoint } from "@/lib/workflow/editor/pane-center"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
 import { CanvasContextMenu, type ContextTarget } from "./canvas-context-menu"
 import { SpotlightSearch } from "./spotlight-search"
@@ -675,10 +676,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setSelectedNodes([connectedId])
         return
       }
-      const center = reactFlowInstance?.screenToFlowPosition({
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-      })
+      const center = reactFlowInstance?.screenToFlowPosition(
+        paneCenterScreenPoint(canvasWrapperRef.current?.getBoundingClientRect())
+      )
       const id = useStore.getState().addNode(kind, center ?? { x: 80, y: 80 })
       setSelectedNodes([id])
     },
@@ -889,10 +889,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleAddAtCenter = useCallback(
     (entry: NodeCatalogEntry) => {
       if (!reactFlowInstance) return
-      const center = reactFlowInstance.screenToFlowPosition({
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-      })
+      const center = reactFlowInstance.screenToFlowPosition(
+        paneCenterScreenPoint(canvasWrapperRef.current?.getBoundingClientRect())
+      )
       const id = useStore.getState().addNode(entry.kind, center)
       usePalettePreferencesStore.getState().recordUsed(entry.kind)
       setSelectedNodes([id])

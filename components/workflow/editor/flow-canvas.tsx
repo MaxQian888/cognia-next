@@ -55,11 +55,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type { EditorStore, EditorState } from "@/lib/workflow/editor/store"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
-import {
-  computeAlignmentGuides,
-  type GuidesResult,
-  type RectLike,
-} from "@/lib/workflow/editor/alignment-guides"
+import { computeAlignmentGuides, type RectLike } from "@/lib/workflow/editor/alignment-guides"
 import { useDragSnapshot } from "@/hooks/workflow/use-drag-snapshot"
 import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
 import type { EffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
@@ -67,7 +63,7 @@ import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import { PerfMiniMap } from "./minimap-perf"
 import { ViewportBreadcrumb } from "./viewport-breadcrumb"
 import { LassoOverlay } from "./lasso-overlay"
-import { AlignmentOverlay } from "./alignment-overlay"
+import { AlignmentGuidesLayer, type AlignmentGuidesHandle } from "./alignment-overlay"
 import { ConnectionPointerListener } from "./connection-overlay"
 import { PerfBoundary } from "@/lib/perf"
 import type { CanvasBackgroundVariant } from "./canvas-toolbar"
@@ -188,8 +184,10 @@ export function FlowCanvas({
   }, [rf, viewport])
 
   // Alignment guides — populated by `onNodeDrag` while a node is moving,
-  // cleared on drag stop so the overlay doesn't linger.
-  const [alignmentGuides, setAlignmentGuides] = useState<GuidesResult | null>(null)
+  // cleared on drag stop so the overlay doesn't linger. Held in a self-contained
+  // layer (driven imperatively via this ref) so the ~60×/s guide updates
+  // re-render ONLY the overlay, never this component or the `<ReactFlow>` tree.
+  const guidesRef = useRef<AlignmentGuidesHandle | null>(null)
   // Track whether the user is actively panning/zooming the viewport so the
   // minimap can drop to its flat-colour degrade path (same as node-drag).
   const [isMovingViewport, setIsMovingViewport] = useState(false)
@@ -312,7 +310,7 @@ export function FlowCanvas({
     (dragged: RectLike) => {
       const index = drag.getAlignmentIndex()
       if (!index) return
-      setAlignmentGuides(computeAlignmentGuides(dragged, index))
+      guidesRef.current?.setGuides(computeAlignmentGuides(dragged, index))
     },
     [drag]
   )
@@ -386,7 +384,7 @@ export function FlowCanvas({
       dragThrottled.cancel()
       drag.release()
       dragRectRef.current = null
-      setAlignmentGuides(null)
+      guidesRef.current?.setGuides(null)
       useStore.getState().setIsDraggingAny(false)
 
       // Container drop: re-parent a node dropped over a loop OR group
@@ -501,12 +499,13 @@ export function FlowCanvas({
           ) : null}
           {perfTier.flags.showMinimap && minimapVisible ? (
             <PerfMiniMap
-              degraded={isDraggingAny || isMovingViewport || perfTier.flags.minimapDegraded}
+              frozen={isDraggingAny}
+              degraded={isMovingViewport || perfTier.flags.minimapDegraded}
               nodeColor={minimapNodeColor}
               className="!rounded-md !border !bg-background"
             />
           ) : null}
-          <AlignmentOverlay guides={alignmentGuides} />
+          <AlignmentGuidesLayer ref={guidesRef} />
         </ReactFlow>
       </PerfBoundary>
       {overlays}

@@ -61,7 +61,10 @@ import { getDb } from "@/lib/db/schema"
 import { clearMessages } from "@/lib/db/messages"
 import { clearSessionSdkLink, deleteSession, updateSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
-import { workflowSessionId } from "@/hooks/chat/use-workflow-editor-session"
+import {
+  createWorkflowEditorSession,
+  workflowSessionId,
+} from "@/hooks/chat/use-workflow-editor-session"
 import type { ChatSession } from "@/lib/claude/types"
 import { cn } from "@/lib/utils"
 
@@ -71,11 +74,6 @@ export interface SessionBarProps {
   /** Sessions are filtered against this prefix (`workflow:${workflowId}`). */
   activeSessionId: string
   className?: string
-}
-
-function makeAdditionalSessionId(workflowId: string): string {
-  const suffix = Math.random().toString(36).slice(2, 8)
-  return `${workflowSessionId(workflowId)}:${suffix}`
 }
 
 export function WorkflowSessionBar({
@@ -160,20 +158,10 @@ export function WorkflowSessionBar({
   // ── Create + Switch ───────────────────────────────────────────────
   const handleCreate = useCallback(async () => {
     try {
-      const now = Date.now()
-      const id = makeAdditionalSessionId(workflowId)
-      const row: ChatSession = {
-        id,
-        title: workflowName
-          ? t("session.newSuffixed", { name: workflowName })
-          : t("session.newDefault"),
-        kind: "workflow-editor",
-        createdAt: now,
-        updatedAt: now,
-      }
-      await getDb().sessions.put(row)
-      useChatStore.getState().setActiveSession(id)
-      useChatStore.getState().setMessages([])
+      const title = workflowName
+        ? t("session.newSuffixed", { name: workflowName })
+        : t("session.newDefault")
+      await createWorkflowEditorSession(workflowId, title)
       toast.success(t("session.created"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

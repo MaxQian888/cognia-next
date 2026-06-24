@@ -27,7 +27,7 @@ import {
   nodeCatalogEntry,
   type NodeCatalogEntry,
 } from "@/lib/workflow/nodes/catalog"
-import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { tNodeField } from "@/lib/workflow/i18n/node-translate"
 import { usePalettePreferencesStore } from "@/stores/workflow"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
@@ -60,7 +60,9 @@ export const NodeSearchSidebar = memo(function NodeSearchSidebar({
   embedded?: boolean
 }) {
   const t = useTranslations("workflows.sidebar")
-  const tNodesSearch = useTranslations("workflows.nodes")
+  // Root translator so both built-in (`workflows.nodes.*`) and plugin
+  // (`plugin.<id>.workflow.nodes.*`) node strings resolve via `tNodeField`.
+  const tRootSearch = useTranslations()
   const [query, setQuery] = useState("")
   // Subscribe to the plugin catalog so newly-registered plugin nodes appear
   // in the sidebar without a page reload. The snapshot identity changes on
@@ -81,15 +83,26 @@ export const NodeSearchSidebar = memo(function NodeSearchSidebar({
     void pluginEntries
     if (!query.trim()) return null
     // Search the localized strings too so e.g. zh-CN users can find nodes by
-    // their translated palette names. `tNode` falls back to undefined-ish for
-    // plugin kinds, which searchCatalog tolerates.
+    // their translated palette names — including plugin nodes that ship their
+    // own translations. `tNodeField` falls back to "" for un-localized kinds,
+    // which searchCatalog tolerates.
     return searchCatalog(query, {
-      getText: (kind) => ({
-        label: tNode(tNodesSearch, `${kind}.label`, ""),
-        description: tNode(tNodesSearch, `${kind}.description`, ""),
+      getText: (entry) => ({
+        label: tNodeField(tRootSearch, {
+          kind: entry.kind,
+          pluginId: entry.pluginId,
+          field: "label",
+          fallback: "",
+        }),
+        description: tNodeField(tRootSearch, {
+          kind: entry.kind,
+          pluginId: entry.pluginId,
+          field: "description",
+          fallback: "",
+        }),
       }),
     })
-  }, [query, pluginEntries, tNodesSearch])
+  }, [query, pluginEntries, tRootSearch])
 
   // Favorite + recent kinds (persisted). Resolve each stored kind to a live
   // catalog entry and drop any that no longer exist (e.g. a plugin node whose
@@ -284,9 +297,19 @@ function NodeChip({
   onAddNodeAtCenter?: (entry: NodeCatalogEntry) => void
 }) {
   const t = useTranslations("workflows.sidebar")
-  const tNodes = useTranslations("workflows.nodes")
-  const label = tNode(tNodes, `${entry.kind}.label`, entry.label)
-  const description = tNode(tNodes, `${entry.kind}.description`, entry.description)
+  const tRoot = useTranslations()
+  const label = tNodeField(tRoot, {
+    kind: entry.kind,
+    pluginId: entry.pluginId,
+    field: "label",
+    fallback: entry.label,
+  })
+  const description = tNodeField(tRoot, {
+    kind: entry.kind,
+    pluginId: entry.pluginId,
+    field: "description",
+    fallback: entry.description,
+  })
   const Icon =
     (LucideIcons as unknown as Record<string, LucideIcon>)[entry.iconName] ?? LucideIcons.Box
   const isFavorite = usePalettePreferencesStore((s) => s.favoriteNodeKinds.includes(entry.kind))
