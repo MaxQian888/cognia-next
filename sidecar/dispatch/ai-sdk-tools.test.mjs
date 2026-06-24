@@ -176,6 +176,29 @@ test("createToolPermissionGate: plan mode allows the side-effect-free ask_user t
   await assert.rejects(gate("mcp__cognia-plugin-tools__grep", {}), /plan mode/)
 })
 
+test("createToolPermissionGate: ask_user is allowed without prompting in default mode", async () => {
+  // Regression: ask_user IS the user interaction (the renderer's AskUserDialog
+  // blocks until answered), so it must never round-trip through the generic
+  // tool-approval modal. With no explicit ruleset/suppress entry it would
+  // otherwise fall through to a permission_request — the bug this guards.
+  const events = []
+  const pendingApprovals = new Map()
+  const gate = createToolPermissionGate({
+    emit: (m) => events.push(m),
+    sessionId: "s1",
+    pendingApprovals,
+    sendOptions: {}, // no mode, no ruleset, no suppress/alwaysAllow
+  })
+  const input = { question: "Which target?" }
+  assert.deepEqual(await gate("mcp__cognia-plugin-tools__ask_user", input), input)
+  assert.equal(
+    events.some((e) => e.type === "permission_request"),
+    false,
+    "ask_user must not emit a permission_request"
+  )
+  assert.equal(pendingApprovals.size, 0)
+})
+
 test("createToolPermissionGate: reads permissionMode live so a mid-session set_mode takes effect", async () => {
   // Mutating sendOptions.permissionMode (as the claude_set_mode handler does)
   // must change the gate's decision WITHOUT rebuilding the gate.

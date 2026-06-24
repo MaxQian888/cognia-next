@@ -35,6 +35,22 @@ import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 
+/** Bare name of the `ask_user` elicitation tool (namespaced by the sidecar as
+ * `mcp__cognia-plugin-tools__ask_user`). */
+const ASK_USER_TOOL_NAME = "ask_user"
+
+/**
+ * True when a (possibly namespaced) tool name refers to the `ask_user`
+ * elicitation tool. `ask_user` IS the user interaction — the renderer's
+ * AskUserDialog blocks until the user answers — so it must never be routed
+ * through the generic tool-approval modal in any permission mode.
+ */
+function isAskUserTool(toolName) {
+  const parts = String(toolName).split("__")
+  const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
+  return bare === ASK_USER_TOOL_NAME
+}
+
 /**
  * @param {{
  *   sessionId: string,
@@ -46,6 +62,11 @@ import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
  */
 export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, log }) {
   const inputStream = makeInputStream()
+  // Verbose canUseTool tracing (shares the host's COGNIA_SIDECAR_VERBOSE gate).
+  // Surfaces as frontend `log` events so a tool-call hang can be diagnosed
+  // without stderr access.
+  const CANUSETOOL_DEBUG =
+    process.env.COGNIA_SIDECAR_VERBOSE === "1" || process.env.COGNIA_SIDECAR_VERBOSE === "true"
   /** @type {Map<string, { resolve: (r: any) => void }>} */
   const pendingApprovals = new Map()
   /**
@@ -268,6 +289,14 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     hooks: lspEnabled ? buildLspHooks(lspResolver) : undefined,
 
     canUseTool: (toolName, input, ctx) => {
+      // The `ask_user` elicitation tool is the user interaction itself: the
+      // renderer's AskUserDialog blocks until the user answers, so it must
+      // never surface the generic tool-approval modal. Each call is inherently
+      // human-gated (no runaway loop is possible without a human answering),
+      // so allow it unconditionally — ahead of even the doom-loop guard.
+      if (isAskUserTool(toolName)) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
       // Doom-loop guard: the Nth identical call must round-trip through the
       // user even when the suppress-list / ruleset would allow it silently.
       const doomed = doomGuard.check(toolName, input) === "ask"
@@ -305,6 +334,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         }
       }
       const requestId = randomUUID()
+      // Boundary instrumentation (COGNIA_SIDECAR_VERBOSE=1): the Agent SDK path
+      // forces a `canUseTool` round-trip for every gated tool, so when a turn
+      // "hangs at the tool call" these three log lines localise the stall —
+      // entry (the SDK called us), emit (the request left the sidecar), resolve
+      // (the renderer answered). A missing "resolved" line means the round-trip
+      // never came back (no dialog / swallowed approval).
+      if (CANUSETOOL_DEBUG) {
+        log("info", `[canUseTool] enter tool=${toolName} requestId=${requestId}`)
+      }
       emit({
         type: "permission_request",
         sessionId,
@@ -319,12 +357,30 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         decisionReason: ctx.decisionReason,
         suggestions: ctx.suggestions,
       })
+      if (CANUSETOOL_DEBUG) {
+        log(
+          "info",
+          `[canUseTool] permission_request emitted tool=${toolName} requestId=${requestId}`
+        )
+      }
       return new Promise((resolve) => {
-        pendingApprovals.set(requestId, { resolve })
+        const settle = (result) => {
+          if (CANUSETOOL_DEBUG) {
+            log(
+              "info",
+              `[canUseTool] resolved tool=${toolName} requestId=${requestId} behavior=${result?.behavior ?? "?"}`
+            )
+          }
+          resolve(result)
+        }
+        // Stash the original tool input so the host can hand it back as
+        // `updatedInput` when the user approves the call unmodified — the SDK
+        // requires `updatedInput` to be a record on an allow.
+        pendingApprovals.set(requestId, { resolve: settle, input })
         if (ctx.signal) {
           const onAbort = () => {
             if (pendingApprovals.delete(requestId)) {
-              resolve({ behavior: "deny", message: "aborted" })
+              settle({ behavior: "deny", message: "aborted" })
             }
           }
           if (ctx.signal.aborted) onAbort()

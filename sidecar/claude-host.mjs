@@ -355,6 +355,29 @@ async function handleControl(msg) {
   }
 }
 
+/**
+ * Map a renderer `permission_response` to the SDK `PermissionResult` shape.
+ *
+ * Pure so the allow/deny mapping is unit-testable. The crux: an `allow` MUST
+ * carry an `updatedInput` *record*. The renderer omits `updatedInput` whenever
+ * the user approves a call unmodified, so we fall back to the ORIGINAL tool
+ * input. Resolving with `updatedInput: undefined` fails the Agent-SDK
+ * subprocess's zod schema (which requires a record), surfacing to the user as
+ * `Tool permission request failed: ZodError`. `allow_always` is enforced
+ * parent-side (it stops re-asking); for this individual call it is a plain
+ * allow.
+ *
+ * @param {"allow"|"allow_always"|"deny"} decision
+ * @param {{ updatedInput?: Record<string, unknown>, message?: string, input?: Record<string, unknown> }} opts
+ * @returns {{ behavior: "allow", updatedInput?: Record<string, unknown> } | { behavior: "deny", message: string }}
+ */
+export function buildPermissionResult(decision, { updatedInput, message, input } = {}) {
+  if (decision === "deny") {
+    return { behavior: "deny", message: message ?? "denied by user" }
+  }
+  return { behavior: "allow", updatedInput: updatedInput ?? input }
+}
+
 function handlePermissionResponse(msg) {
   const { sessionId, requestId, decision, updatedInput, message } = msg
   const s = sessions.get(sessionId)
@@ -363,15 +386,7 @@ function handlePermissionResponse(msg) {
   if (!pending) return
   s.pendingApprovals.delete(requestId)
 
-  if (decision === "deny") {
-    pending.resolve({ behavior: "deny", message: message ?? "denied by user" })
-  } else if (decision === "allow_always") {
-    // The "always" behavior is enforced by the parent (it stops asking for the
-    // matching scope). For the SDK we just allow this individual call.
-    pending.resolve({ behavior: "allow", updatedInput: updatedInput ?? undefined })
-  } else {
-    pending.resolve({ behavior: "allow", updatedInput: updatedInput ?? undefined })
-  }
+  pending.resolve(buildPermissionResult(decision, { updatedInput, message, input: pending.input }))
 }
 
 /**

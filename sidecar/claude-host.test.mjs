@@ -188,3 +188,43 @@ test("restartReason: the implicit anthropic default never reads as a provider ch
   const explicit = { multiTurn: true, q: { active: false }, sendOptions: { cwd: "/x" } }
   assert.equal(restartReason(explicit, { cwd: "/x", provider: "anthropic" }), null)
 })
+
+// ---- buildPermissionResult ------------------------------------------------
+// Regression: the renderer's `permission_response` carries no `updatedInput`
+// when the user approves a call unmodified. Resolving the Agent-SDK
+// `canUseTool` promise with `{ behavior: "allow", updatedInput: undefined }`
+// fails the SDK subprocess's zod schema (it requires a record), surfacing as
+// `Tool permission request failed: ZodError`. The allow result must fall back
+// to the ORIGINAL tool input so `updatedInput` is always a record.
+
+import { buildPermissionResult } from "./claude-host.mjs"
+
+test("buildPermissionResult: allow without updatedInput falls back to the original input (never undefined)", () => {
+  const input = { query: "foo", path: "/x" }
+  const res = buildPermissionResult("allow", { input })
+  assert.equal(res.behavior, "allow")
+  assert.deepEqual(res.updatedInput, input)
+  assert.notEqual(res.updatedInput, undefined)
+})
+
+test("buildPermissionResult: allow_always also falls back to the original input", () => {
+  const input = { a: 1 }
+  const res = buildPermissionResult("allow_always", { input })
+  assert.deepEqual(res, { behavior: "allow", updatedInput: { a: 1 } })
+})
+
+test("buildPermissionResult: an explicit updatedInput is preserved over the original input", () => {
+  const res = buildPermissionResult("allow", { updatedInput: { a: 2 }, input: { a: 1 } })
+  assert.deepEqual(res.updatedInput, { a: 2 })
+})
+
+test("buildPermissionResult: deny carries the message (default when absent)", () => {
+  assert.deepEqual(buildPermissionResult("deny", { message: "nope" }), {
+    behavior: "deny",
+    message: "nope",
+  })
+  assert.deepEqual(buildPermissionResult("deny", {}), {
+    behavior: "deny",
+    message: "denied by user",
+  })
+})

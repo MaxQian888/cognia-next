@@ -150,6 +150,18 @@ export function createToolPermissionGate({
   const canPrompt = typeof emit === "function" && pendingApprovals instanceof Map
 
   return async function gate(toolName, input) {
+    // The `ask_user` elicitation tool is the user interaction itself: the
+    // renderer's AskUserDialog blocks until the user answers, so it must never
+    // be routed through the generic tool-approval modal — in ANY mode. Each
+    // call is inherently human-gated (no runaway loop without a human answer),
+    // so allow it unconditionally, ahead of the doom-loop guard. The plan-mode
+    // branch below also permits it; this generalises that to every mode.
+    {
+      const parts = String(toolName).split("__")
+      const bareName = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
+      if (bareName === ASK_USER_TOOL_NAME) return input
+    }
+
     // Read the permission mode LIVE (not closed-over): a `claude_set_mode`
     // control message mutates `sendOptions.permissionMode` on the running
     // session, and the next tool gate must honour it without a respawn.
@@ -231,7 +243,9 @@ export function createToolPermissionGate({
       input,
     })
     const decision = await new Promise((resolve) => {
-      pendingApprovals.set(requestId, { resolve })
+      // Stash the original input so an approved-unmodified call resolves with a
+      // concrete `updatedInput` (parity with the Agent-SDK path's host handler).
+      pendingApprovals.set(requestId, { resolve, input })
     })
     if (decision && decision.behavior === "deny") {
       throw new Error(decision.message ?? `denied: ${toolName}`)
