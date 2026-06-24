@@ -12,7 +12,7 @@
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -62,6 +62,34 @@ pub fn register_managed_dir(dir: PathBuf) {
     let mut dirs = managed_dirs().lock();
     if !dirs.contains(&dir) {
         dirs.insert(0, dir);
+    }
+}
+
+/// Directory the running executable lives in. In a `pnpm tauri dev` build the
+/// app binary runs from the shared workspace target dir (`target/debug/`),
+/// which is exactly where `cargo build -p cognia-cli` drops the `cognia`
+/// binary — so registering it makes a locally-built CLI detectable without
+/// `cargo install` polluting the developer's PATH. Returns `None` when the
+/// exe path is unresolvable.
+pub fn current_exe_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+}
+
+/// Dev-only convenience: in debug builds, treat the running executable's
+/// directory as a managed dir so a co-built `cognia` (see [`current_exe_dir`])
+/// is auto-detected. A no-op in release builds — production must never search
+/// the install directory for an unsigned sibling binary. Also drops any stale
+/// cached `cognia` probe so the DevTools status card refreshes on its next
+/// poll instead of waiting out the TTL.
+pub fn register_dev_build_dir() {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(dir) = current_exe_dir() {
+            register_managed_dir(dir);
+            invalidate("cognia");
+        }
     }
 }
 
@@ -283,5 +311,22 @@ mod tests {
         invalidate("rustc");
         let guard = cache().lock();
         assert!(!guard.keys().any(|(n, _)| n == "rustc"));
+    }
+
+    #[test]
+    fn current_exe_dir_resolves_to_test_binary_dir() {
+        // The test harness is itself an executable, so this must resolve and
+        // point at an existing directory (the dir holding the test binary).
+        let dir = current_exe_dir().expect("current exe dir resolves under test");
+        assert!(dir.is_dir());
+    }
+
+    #[test]
+    fn register_dev_build_dir_registers_the_exe_dir_in_debug() {
+        // Tests compile with debug_assertions on, so the dir must be present
+        // in the managed-dir set afterwards. Idempotent with prior calls.
+        register_dev_build_dir();
+        let dir = current_exe_dir().expect("current exe dir resolves under test");
+        assert!(managed_dirs().lock().iter().any(|d| *d == dir));
     }
 }

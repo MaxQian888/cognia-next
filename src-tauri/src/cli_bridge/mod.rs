@@ -156,6 +156,11 @@ pub fn write_endpoint_file(path: &Path, base_url: &str, dev_token: &str) -> Resu
 /// boot. The CLI will simply return "no running cognia detected" until
 /// the next launch.
 pub async fn init(app_handle: tauri::AppHandle, state: &CliBridgeServerState) -> Result<u16> {
+    // Dev convenience: in debug builds, make a locally-built `cognia`
+    // (dropped into the shared workspace target dir by `cargo build -p
+    // cognia-cli`) detectable without a `cargo install`. No-op in release.
+    detect::register_dev_build_dir();
+
     let dev_token = generate_dev_token();
     let shared = Arc::new(CliBridgeState {
         dev_token: dev_token.clone(),
