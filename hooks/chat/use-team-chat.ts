@@ -886,6 +886,16 @@ async function handleTeamEvent(
       const existingIds = new Set(teamMsgs.map((m) => m.id))
       const { messages: nextMessages, result: sdkResult } = applySdkEvent(teamMsgs, evt.event)
 
+      // Bridge SDK-native subagents (the `opts.agents` / Task-tool path used by
+      // team sessions) into the runtime store so they render in the chat
+      // subagent tree. Guarded — a bridge throw must never break the team loop.
+      try {
+        const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
+        applySdkSubagentBridge(evt.event, teamSessionId)
+      } catch (err) {
+        console.warn("sdkSubagentBridge (team) failed", err)
+      }
+
       // Persist per-turn usage + cost for the speaking member. The team
       // assistant message id is the same id we're tagging with senderId
       // below, so capture it before the post-processing slice.

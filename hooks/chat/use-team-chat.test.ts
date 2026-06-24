@@ -34,6 +34,12 @@ jest.mock("@/lib/claude/adapter", () => ({
   makeUserMessage: (c: unknown) => ({ id: "u1", role: "user", parts: [{ type: "text", text: c }] }),
 }))
 
+const applySdkSubagentBridgeMock = jest.fn()
+jest.mock("@/lib/claude/sdk-subagent-bridge", () => ({
+  applySdkSubagentBridge: (...args: unknown[]) => applySdkSubagentBridgeMock(...args),
+  __resetSdkSubagentBridge: () => {},
+}))
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resolveSendOptionsMock = jest.fn<Promise<{ model: string; systemPrompt: string }>, [any]>(
   async () => ({ model: "sonnet", systemPrompt: "sys" })
@@ -2191,6 +2197,30 @@ describe("useTeamChat — content helpers", () => {
 
     // No crash — the decodeSubSession handled it gracefully
     expect(persistMessagesMock).not.toHaveBeenCalled()
+  })
+
+  it("event handler: bridges SDK-native subagents to the team session", async () => {
+    const { getEmit } = makeAutoResolveSetup()
+    listMessagesMock.mockResolvedValueOnce([])
+    renderHook(() => useTeamChat())
+    await flush()
+
+    const event = {
+      type: "system",
+      subtype: "task_started",
+      task_id: "T1",
+      subagent_type: "researcher",
+      description: "d",
+      uuid: "u",
+      session_id: "sdk",
+    }
+    await act(async () => {
+      // Non-active sub-session (team-2 ≠ active team-1) → decodes to team-2.
+      getEmit()?.({ type: "event", sessionId: "team-2::char::alice::t1", event })
+      await new Promise<void>((r) => setTimeout(r, 5))
+    })
+
+    expect(applySdkSubagentBridgeMock).toHaveBeenCalledWith(event, "team-2")
   })
 
   it("send() persist error with non-Error value uses String(err)", async () => {
