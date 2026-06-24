@@ -1,3 +1,5 @@
+import { CLAUDE_CLI_USER_AGENT } from "./constants"
+
 import {
   OAUTH_USAGE_BETA,
   OAUTH_USAGE_ENDPOINT,
@@ -86,6 +88,9 @@ describe("fetchOAuthUsage", () => {
     expect(seenHeaders).toMatchObject({
       Authorization: "Bearer sk-ant",
       "anthropic-beta": OAUTH_USAGE_BETA,
+      // Without a claude-cli User-Agent the endpoint drops the caller into an
+      // aggressively rate-limited 429 bucket, forcing the paid probe fallback.
+      "User-Agent": CLAUDE_CLI_USER_AGENT,
     })
     expect(meters).toHaveLength(4)
   })

@@ -8,15 +8,17 @@
 //
 // Grounding: endpoints/field paths verified against CC Switch
 // (`farion1231/cc-switch`) `services/balance.rs` + `services/coding_plan.rs`
-// (v3.16). The engine now supports two primitives that let the Chinese "Coding
-// Plan" quota providers join this catalog as pure data:
+// (v3.16), the MiniMax Token Plan FAQ, and the opencode-glm-quota plugin. The
+// engine supports three primitives that let the Chinese "Coding/Token Plan"
+// quota providers join this catalog as pure data:
 //   - count-based windows (`usedPath`/`totalPath`/`remainingPath`) for providers
-//     that report request/token counts rather than a percentage (MiniMax,
-//     Kimi-coding), and
+//     that report request/token counts rather than a percentage (Kimi-coding),
+//   - `invert` for providers that report a *remaining* percent (MiniMax), and
 //   - `select` (discriminated-array element pick) so each window tier reads from
-//     its own `data.limits[]` entry tagged by `TOKENS_LIMIT` (Zhipu GLM).
+//     its own array entry — `data.limits[]` tagged by a numeric `unit` (Zhipu
+//     GLM), or `model_remains[]` keyed by `model_name` (MiniMax).
 // This is the deliberate trade for not shipping a JS sandbox: declarative path
-// extraction + these two primitives cover every Coding Plan shape seen so far.
+// extraction + these primitives cover every Coding/Token Plan shape seen so far.
 // Providers with genuinely no documented usage API (Qwen/通义, Baichuan/百川,
 // 01.AI/零一万物) stay absent — users add those via the custom-source UI.
 
@@ -37,9 +39,11 @@ const stepfun: SourceDescriptor = {
 // Zhipu GLM (智谱 BigModel) Coding Plan — quota/limit endpoint. Uses the raw
 // API key with NO `Bearer` scheme (the descriptor's Authorization header
 // overrides the default bearer). `data.limits[]` is a discriminated array — one
-// entry per window tier tagged `TOKENS_LIMIT: "five_hour" | "weekly"`, each
-// carrying a utilization `percentage` and a unix-second `nextResetTime`. The
-// `select` primitive picks the matching tier per window.
+// entry per window tier tagged by a numeric `unit` (3 = 5-hour, 6 = weekly),
+// each carrying a utilization `percentage` and a unix-second `nextResetTime`.
+// The `select` primitive picks the matching tier per window.
+// Discriminator/auth verified against cc-switch `coding_plan.rs` (v3.16) and
+// the opencode-glm-quota plugin (raw-key, no Bearer).
 const glm: SourceDescriptor = {
   id: "glm",
   match: { providerKey: "glm", baseUrlIncludes: "api.z.ai" },
@@ -56,7 +60,7 @@ const glm: SourceDescriptor = {
         usedPctPath: "percentage",
         resetAtPath: "nextResetTime",
         resetUnit: "unix",
-        select: { arrayPath: "data.limits", by: "TOKENS_LIMIT", equals: "five_hour" },
+        select: { arrayPath: "data.limits", by: "unit", equals: 3 },
       },
       {
         id: "weekly",
@@ -64,37 +68,43 @@ const glm: SourceDescriptor = {
         usedPctPath: "percentage",
         resetAtPath: "nextResetTime",
         resetUnit: "unix",
-        select: { arrayPath: "data.limits", by: "TOKENS_LIMIT", equals: "weekly" },
+        select: { arrayPath: "data.limits", by: "unit", equals: 6 },
       },
     ],
   },
 }
 
-// MiniMax Coding Plan — `coding_plan/remains`, Bearer. `model_remains[0]`
-// carries interval + weekly count pairs plus their reset times. Counts, not a
-// percentage → the engine derives `used/total` utilization per window.
+// MiniMax Token Plan — `/v1/token_plan/remains`, Bearer. (Supersedes the legacy
+// `coding_plan/remains` path, which is a web-console route that rejects API-key
+// callers with `1004 "cookie is missing"`.) `model_remains[]` is keyed by
+// `model_name`; the `general` entry carries *remaining* percents per window, so
+// the engine inverts them to a used%. Reset fields are best-effort (the public
+// docs don't pin their names; a missing reset just renders the meter without a
+// countdown). Endpoint + shape per the MiniMax Token Plan FAQ and cc-switch.
 const minimax: SourceDescriptor = {
   id: "minimax",
   match: { providerKey: "minimax", baseUrlIncludes: "minimax" },
-  request: { path: "/v1/api/openplatform/coding_plan/remains" },
+  request: { path: "/v1/token_plan/remains" },
   extract: {
     kind: "window",
     windows: [
       {
         id: "session",
         labelKey: "subscription.limits.meter.session",
-        usedPath: "model_remains.0.current_interval_usage_count",
-        totalPath: "model_remains.0.current_interval_total_count",
-        resetAtPath: "model_remains.0.end_time",
+        usedPctPath: "current_interval_remaining_percent",
+        invert: true,
+        resetAtPath: "end_time",
         resetUnit: "unix",
+        select: { arrayPath: "model_remains", by: "model_name", equals: "general" },
       },
       {
         id: "weekly",
         labelKey: "subscription.limits.meter.weekly",
-        usedPath: "model_remains.0.current_weekly_usage_count",
-        totalPath: "model_remains.0.current_weekly_total_count",
-        resetAtPath: "model_remains.0.weekly_end_time",
+        usedPctPath: "current_weekly_remaining_percent",
+        invert: true,
+        resetAtPath: "weekly_end_time",
         resetUnit: "unix",
+        select: { arrayPath: "model_remains", by: "model_name", equals: "general" },
       },
     ],
   },

@@ -10,6 +10,7 @@
 // the header path at all, so this also surfaces two windows we couldn't show
 // before.
 
+import { CLAUDE_CLI_USER_AGENT } from "@/lib/subscription/anthropic/constants"
 import { balanceMeter, windowMeter } from "@/lib/subscription/limits/meters"
 
 import type { BalanceSnapshot, LimitsMeter } from "@/types/subscription"
@@ -140,6 +141,11 @@ export async function fetchOAuthUsage(token: string, deps: OAuthUsageDeps): Prom
       Authorization: `Bearer ${token}`,
       "anthropic-beta": OAUTH_USAGE_BETA,
       Accept: "application/json",
+      // A `claude-cli/...`-shaped User-Agent is required: without it the endpoint
+      // serves an aggressively rate-limited 429 bucket, which would silently push
+      // every poll onto the paid probe fallback (~10 tokens/poll). Anthropic
+      // validates the shape, not the version (see constants.ts).
+      "User-Agent": CLAUDE_CLI_USER_AGENT,
     })
   } catch {
     return []

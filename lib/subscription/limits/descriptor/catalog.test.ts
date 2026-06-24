@@ -70,11 +70,13 @@ describe("glm (Zhipu Coding Plan) descriptor", () => {
         authedGet: async (url, headers) => {
           seenUrl = url
           seenHeaders = headers
+          // data.limits[] is discriminated by a numeric `unit` (3=5h, 6=weekly),
+          // not a `TOKENS_LIMIT` string — verified against cc-switch coding_plan.rs.
           return JSON.stringify({
             data: {
               limits: [
-                { TOKENS_LIMIT: "five_hour", percentage: 75.4, nextResetTime: 3000 },
-                { TOKENS_LIMIT: "weekly", percentage: 40, nextResetTime: 9000 },
+                { unit: 3, percentage: 75.4, nextResetTime: 3000 },
+                { unit: 6, percentage: 40, nextResetTime: 9000 },
               ],
             },
           })
@@ -97,7 +99,7 @@ describe("minimax (Coding Plan) descriptor", () => {
     expect(minimax.matches({ baseUrl: "https://api.minimaxi.com" })).toBe(true)
   })
 
-  it("derives interval + weekly utilization from counts", async () => {
+  it("derives interval + weekly utilization from remaining-percent on the general model", async () => {
     let seenUrl = ""
     const snap = await minimax.fetch(
       ctx({
@@ -105,14 +107,16 @@ describe("minimax (Coding Plan) descriptor", () => {
         baseUrl: "https://api.minimaxi.com",
         authedGet: async (url) => {
           seenUrl = url
+          // Token Plan endpoint: model_remains[] keyed by model_name, each
+          // carrying *remaining* percents (engine inverts to used%). The legacy
+          // coding_plan/remains path returns 1004 "cookie missing" for API keys.
           return JSON.stringify({
             model_remains: [
               {
-                current_interval_usage_count: 100,
-                current_interval_total_count: 300,
+                model_name: "general",
+                current_interval_remaining_percent: 67,
                 end_time: 2000,
-                current_weekly_usage_count: 1000,
-                current_weekly_total_count: 5000,
+                current_weekly_remaining_percent: 80,
                 weekly_end_time: 9000,
               },
             ],
@@ -120,10 +124,10 @@ describe("minimax (Coding Plan) descriptor", () => {
         },
       })
     )
-    expect(seenUrl).toBe("https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains")
+    expect(seenUrl).toBe("https://api.minimaxi.com/v1/token_plan/remains")
     expect(snap?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
-    expect(snap?.meters[0]).toMatchObject({ usedPct: 33, resetAt: 2_000_000 }) // 100/300≈33
-    expect(snap?.meters[1]).toMatchObject({ usedPct: 20, resetAt: 9_000_000 }) // 1000/5000=20
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 33, resetAt: 2_000_000 }) // 100-67=33
+    expect(snap?.meters[1]).toMatchObject({ usedPct: 20, resetAt: 9_000_000 }) // 100-80=20
   })
 })
 

@@ -17,10 +17,13 @@ import { ppioBalanceAdapter } from "./adapters/ppio"
 import { siliconflowBalanceAdapter } from "./adapters/siliconflow"
 import { threeOTwoBalanceAdapter } from "./adapters/threeotwo"
 
-// Researched 2026-06-07: Zhipu/bigmodel (console-only), MiniMax (cookie
-// session required), Together (dashboard-only) and AiHubMix (needs a separate
-// dashboard access token, not the inference key) have NO usable documented
-// balance API — deliberately absent.
+// Researched 2026-06-07: Zhipu/bigmodel, MiniMax, Together (dashboard-only) and
+// AiHubMix (needs a separate dashboard access token, not the inference key) have
+// NO usable documented *credit-balance* API — deliberately absent here. NOTE:
+// this is the balance (top-up credit) layer only. Zhipu and MiniMax DO expose
+// API-key-callable *plan-usage* windows (5h/weekly), which ship as catalog
+// descriptors (`limits/descriptor/catalog.ts` → `glm`, `minimax`), not as
+// balance adapters.
 export const BALANCE_ADAPTERS: readonly BalanceAdapter[] = [
   deepseekBalanceAdapter,
   openrouterBalanceAdapter,
