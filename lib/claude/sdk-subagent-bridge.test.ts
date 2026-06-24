@@ -138,6 +138,45 @@ describe("applySdkSubagentBridge — lifecycle", () => {
     )
     expect(node("ghost")).toBeUndefined()
   })
+
+  it("leaves a running subagent unchanged on a non-terminal task_updated", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "T1",
+        patch: { status: "running" },
+        uuid: "u",
+        session_id: "sdk",
+      } as never,
+      SID
+    )
+    expect(node("T1")!.status).toBe("running")
+  })
+
+  it("falls back to description for the task when prompt is absent", () => {
+    applySdkSubagentBridge(started({ prompt: undefined }), SID)
+    expect(node("T1")!.task).toBe("Research X")
+  })
+
+  it("task_progress without last_tool_name/usage is a no-op on logs and progress", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "T1",
+        description: "d",
+        uuid: "u",
+        session_id: "sdk",
+      } as never,
+      SID
+    )
+    const n = node("T1")!
+    expect(n.logs).toHaveLength(0)
+    expect(n.progress).toBe(0)
+  })
 })
 
 describe("applySdkSubagentBridge — rich logs via parent_tool_use_id", () => {
@@ -208,5 +247,29 @@ describe("applySdkSubagentBridge — robustness", () => {
     expect(() =>
       applySdkSubagentBridge({ type: "system", subtype: "other" } as never, SID)
     ).not.toThrow()
+  })
+
+  it("swallows a throw raised while inspecting the event", () => {
+    const hostile = {
+      get type(): string {
+        throw new Error("boom")
+      },
+    }
+    expect(() => applySdkSubagentBridge(hostile as never, SID)).not.toThrow()
+  })
+
+  it("ignores a forwarded child frame whose content is not an array", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      {
+        type: "user",
+        parent_tool_use_id: "tu1",
+        uuid: "u",
+        session_id: "sdk",
+        message: { role: "user", content: "plain string" },
+      } as never,
+      SID
+    )
+    expect(node("T1")!.logs).toHaveLength(0)
   })
 })
