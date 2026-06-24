@@ -13,15 +13,40 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: {
+// `member-list` reaches lib/db/characters → the plugin registries → the plugin
+// manager → lsp-registry, which calls `loggers.plugin.child(...)` at import
+// time. Provide a Proxy that lazily materialises a full stub logger for ANY
+// namespace (with a `.child()` that recurses) so the module graph loads no
+// matter which loggers the transitive imports touch; the `ui` namespace stays
+// wired to the assertion spies.
+jest.mock("@/lib/logging", () => {
+  const makeLogger = (): Record<string, unknown> => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    fatal: jest.fn(),
+    child: () => makeLogger(),
+  })
+  const cache: Record<string, unknown> = {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),
       warn: jest.fn(),
       error: (...args: unknown[]) => logError(...args),
+      debug: jest.fn(),
+      fatal: jest.fn(),
+      child: () => makeLogger(),
     },
-  },
-}))
+  }
+  const loggers = new Proxy(cache, {
+    get: (target, prop) => {
+      if (typeof prop !== "string") return Reflect.get(target, prop)
+      if (!(prop in target)) target[prop] = makeLogger()
+      return target[prop]
+    },
+  })
+  return { loggers, logger: makeLogger(), createLogger: () => makeLogger() }
+})
 
 interface QueryStub<T> {
   current: T
@@ -161,6 +186,22 @@ test("empty member list shows the empty-state copy", () => {
   queueQueries({ ...sampleTeam, members: [] } as unknown as Team, [])
   render(<MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
   expect(screen.getByText("empty")).toBeInTheDocument()
+})
+
+test("expanded rail opts into the chat wallpaper scope", () => {
+  queueQueries(sampleTeam, sampleMembers)
+  render(<MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  const rail = screen.getByLabelText("label")
+  expect(rail).toHaveAttribute("data-bg-target", "chat")
+})
+
+test("collapsed strip also opts into the chat wallpaper scope", () => {
+  showMemberList.current = false
+  queueQueries(sampleTeam, sampleMembers)
+  const { container } = render(
+    <MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />
+  )
+  expect(container.querySelector('[data-bg-target="chat"]')).not.toBeNull()
 })
 
 test("scratchpad textarea persists on a debounce", async () => {

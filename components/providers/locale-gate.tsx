@@ -1,9 +1,9 @@
 "use client"
 
-import { useMemo, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { NextIntlClientProvider } from "next-intl"
 import { useSettingsStore } from "@/stores/settings"
-import { allMessages } from "@/i18n/messages"
+import { defaultMessages, loadMessages, type Messages } from "@/i18n/messages"
 import { defaultLocale, type Locale } from "@/i18n/config"
 import {
   getMergedPluginMessages,
@@ -16,6 +16,13 @@ import {
  * Wraps children in a NextIntlClientProvider whose locale is sourced from
  * the persisted user setting and whose messages are the host bundle merged
  * with every enabled plugin's `manifest.i18n.locales` contribution.
+ *
+ * Only the default locale ships eagerly in the main bundle. Non-default
+ * locales (e.g. `zh-CN`) are code-split: their ~930KB message JSON loads as a
+ * separate chunk via `loadMessages` only when the user switches to them. Until
+ * the chunk resolves — and permanently if it ever fails to load (e.g. an
+ * offline shell protocol quirk) — the gate renders the eager default bundle, so
+ * the UI is never blank.
  *
  * Plugin messages flow through `lib/i18n/plugin-i18n-registry.ts` — the
  * plugin manager registers them on enable and unregisters them on disable.
@@ -39,11 +46,35 @@ export function LocaleGate({ children }: { children: React.ReactNode }) {
   // first client render.
   const pluginVersion = useSyncExternalStore(subscribeToPluginI18n, getPluginI18nSnapshot, () => 0)
 
+  // Host message bundle per locale. The default locale is eager; any other
+  // locale is filled in asynchronously once its code-split chunk resolves.
+  const [hostByLocale, setHostByLocale] = useState<Partial<Record<Locale, Messages>>>({
+    [defaultLocale]: defaultMessages,
+  })
+
+  useEffect(() => {
+    if (locale === defaultLocale || hostByLocale[locale]) return
+    let cancelled = false
+    loadMessages(locale)
+      .then((msgs) => {
+        if (!cancelled) setHostByLocale((prev) => ({ ...prev, [locale]: msgs }))
+      })
+      .catch(() => {
+        // Chunk failed to load — keep rendering the eager default bundle rather
+        // than blanking the UI. The next locale change retries.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [locale, hostByLocale])
+
+  // Fall back to the eager default bundle until the active locale is available.
+  const host = hostByLocale[locale] ?? defaultMessages
+
   const messages = useMemo(() => {
     // pluginVersion is the invalidation trigger — read it inside the body so
     // ESLint sees the dependency, and so the React compiler doesn't elide it.
     void pluginVersion
-    const host = allMessages[locale]
     const merged = getMergedPluginMessages()
     const pluginFlat = merged[locale]
     if (!pluginFlat || Object.keys(pluginFlat).length === 0) {
@@ -52,8 +83,8 @@ export function LocaleGate({ children }: { children: React.ReactNode }) {
     // next-intl expects nested objects — inflate the flat dot-notation keys
     // the plugin registry stores before merging.
     const pluginNested = inflateFlatKeys(pluginFlat)
-    return { ...host, ...pluginNested } as typeof host
-  }, [locale, pluginVersion])
+    return { ...host, ...pluginNested } as Messages
+  }, [host, locale, pluginVersion])
 
   return (
     <NextIntlClientProvider

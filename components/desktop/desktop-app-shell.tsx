@@ -35,6 +35,7 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
 import { PageLoading } from "@/components/ui/loading-states"
+import { loadSystemFonts } from "@/lib/appearance/load-system-fonts"
 import { whenSeeded } from "@/lib/db/schema"
 import { loggers } from "@/lib/logging"
 import { useUIStore } from "@/stores/ui/ui-store"
@@ -84,6 +85,9 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
     void whenSeeded()
+    // Enumerate installed fonts once so the appearance + terminal font
+    // pickers can offer real system families (desktop-only, best-effort).
+    void loadSystemFonts()
   }, [])
 
   // The `data-app-shell` body attribute switches on the global

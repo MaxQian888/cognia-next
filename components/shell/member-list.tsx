@@ -82,7 +82,11 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
 
   if (!showMemberList) {
     return (
-      <div className="hidden border-l bg-muted/20 lg:flex">
+      // `data-bg-target="chat"` opts this rail into the wallpaper layer so it
+      // matches the ChannelList on the opposite side — without it the right
+      // rail stays opaque while the rest of the chat scope shows the active
+      // background (see app/globals.css "Appearance: wallpaper layer").
+      <div className="hidden border-l bg-muted/20 lg:flex" data-bg-target="chat">
         <Button
           variant="ghost"
           size="icon"
@@ -101,6 +105,10 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
     <aside
       className="hidden h-full w-56 shrink-0 flex-col border-l bg-muted/20 lg:flex"
       aria-label={t("label")}
+      // Mirror the ChannelList rail: absorb the chat-scope wallpaper so the
+      // background and theme stay unified across both side rails. The shared
+      // form-control rules then make the scratchpad textarea wallpaper-aware.
+      data-bg-target="chat"
     >
       <div className="flex items-center justify-between gap-2 px-3 py-3">
         <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
