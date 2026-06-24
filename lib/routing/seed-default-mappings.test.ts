@@ -86,4 +86,16 @@ describe("seedDefaultMappingsIfNeeded", () => {
     })
     expect(seedDefaultMappingsIfNeeded(before)).toBe(before)
   })
+
+  it("returns the same reference when enabled providers match no tier", () => {
+    // A custom provider that isn't in any tier catalog, with Anthropic
+    // disabled, yields enabled ids but zero generated mappings.
+    const before = makeSettings({
+      providerSettings: {
+        anthropic: { enabled: false },
+      } as unknown as AppSettings["providerSettings"],
+      customProviders: [{ id: "weirdo", enabled: true }] as AppSettings["customProviders"],
+    })
+    expect(seedDefaultMappingsIfNeeded(before)).toBe(before)
+  })
 })
