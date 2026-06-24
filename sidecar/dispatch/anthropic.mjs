@@ -278,6 +278,11 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     includePartialMessages: sendOptions.includePartialMessages,
     settingSources: sendOptions.settingSources,
     agents: sendOptions.agents,
+    // Forward subagent text/thinking as parent_tool_use_id-tagged frames so the
+    // renderer's SDK-subagent bridge can render rich nested logs (team /
+    // workflow-editor). The query options are an explicit whitelist, so this
+    // must be passed through here.
+    forwardSubagentText: sendOptions.forwardSubagentText,
     strictMcpConfig: sendOptions.strictMcpConfig,
     effort: sendOptions.effort,
     resume: resumeId,

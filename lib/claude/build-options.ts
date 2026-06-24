@@ -2182,6 +2182,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // We DON'T touch the resume/fork block below — that still applies so
   // sidecar restarts can recover the workflow chat seamlessly.
   if (session?.kind === "workflow-editor") {
+    // Forward subagent text/thinking so the SDK-subagent bridge can render rich
+    // nested logs in the chat tree (default off in the SDK).
+    opts.forwardSubagentText = true
     try {
       const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
       opts.agents = {
@@ -2264,6 +2267,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // every plugin-contributed subagent from the `subagent-registry`
     // overlay. Plugin subagent ids are namespaced as `<pluginId>:<id>`
     // so they can never collide with built-in dispatcher names.
+    // Forward subagent text/thinking so the SDK-subagent bridge renders rich logs.
+    opts.forwardSubagentText = true
     try {
       const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
       opts.agents = {

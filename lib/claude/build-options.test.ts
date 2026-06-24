@@ -2921,3 +2921,27 @@ describe("resolveSendOptions — agent-trace root span minting", () => {
     expect(__getActiveSpanForTesting(parentTrace.rootSpanId)).toBeUndefined()
   })
 })
+
+describe("resolveSendOptions — forwardSubagentText (SDK-subagent bridge)", () => {
+  it("enables forwardSubagentText for team and workflow-editor sessions", async () => {
+    const team = await resolveSendOptions({
+      session: makeSession({ id: "s-team", kind: "team" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(team.forwardSubagentText).toBe(true)
+
+    const wf = await resolveSendOptions({
+      session: makeSession({ id: "workflow:wf1", kind: "workflow-editor" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(wf.forwardSubagentText).toBe(true)
+  })
+
+  it("leaves forwardSubagentText off for a direct chat session", async () => {
+    const direct = await resolveSendOptions({
+      session: makeSession({ id: "s-direct", kind: "direct" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(direct.forwardSubagentText).toBeUndefined()
+  })
+})
