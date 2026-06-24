@@ -111,9 +111,21 @@ describe("Composer — multi-command submit", () => {
     const clearMessages = jest.fn(async () => undefined)
     renderComposer(onSend, makeAdapter({ clearMessages }))
     const ta = document.querySelector("textarea") as HTMLTextAreaElement
-    await typeAndSubmit(ta, "/clear")
 
-    // /clear is an action command → mutates state, sends nothing.
+    // Typing "/clear" opens the slash popover. The first Enter CONFIRMS the
+    // pick and drops "/clear " into the box (deferred-execution UX) — it must
+    // not run the command or send a turn yet.
+    fireEvent.change(ta, { target: { value: "/clear" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(ta.value).toContain("/clear")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(clearMessages).not.toHaveBeenCalled()
+
+    // The popover is now dismissed; a second Enter submits. /clear is an action
+    // command → mutates state, clears the box, sends nothing.
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 50))
     expect(ta.value).toBe("")
     expect(onSend).not.toHaveBeenCalled()
   })

@@ -19,6 +19,8 @@
 
 import { memo, useDeferredValue } from "react"
 import { MessageResponse } from "@/components/ai-elements/message"
+import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import { cn } from "@/lib/utils"
 
 interface Props {
   text: string
@@ -29,7 +31,23 @@ function StreamingTextPartInner({ text }: Props) {
   // Deferred so React can interrupt the markdown commit when a faster event
   // (scroll, focus, key) arrives. Token visibility lags by ≤1 frame.
   const deferred = useDeferredValue(text)
-  return <MessageResponse>{deferred}</MessageResponse>
+  // Reduced motion: a static (non-blinking) caret so we still signal "more is
+  // coming" without an animation. `animate-pulse` is a guaranteed Tailwind
+  // utility (no dependency on `animate-caret-blink`).
+  const { reduce } = useFlowMotion()
+  return (
+    <>
+      <MessageResponse>{deferred}</MessageResponse>
+      <span
+        aria-hidden
+        data-testid="streaming-caret"
+        className={cn(
+          "ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 rounded-full bg-foreground/60 align-middle",
+          !reduce && "animate-pulse"
+        )}
+      />
+    </>
+  )
 }
 
 export const StreamingTextPart = memo(

@@ -59,9 +59,11 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
-import { closeSession, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { closeSession } from "@/lib/claude/ipc"
 import { Badge } from "@/components/ui/badge"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
+import { ClearConversationTrigger } from "@/components/chat/dialogs/clear-conversation-trigger"
+import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { AgentFlowDisplayToggle } from "@/components/chat/agent-flow-display-toggle"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
@@ -133,7 +135,12 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
     [session.disabledSkillIds]
   )
   const [open, setOpen] = useState(false)
-  const [keyOk, setKeyOk] = useState<boolean | null>(null)
+  // Reactive credential status (api key OR subscription bearer) + active
+  // subscription tier. Re-reads on profile unlock and on subscription-changed
+  // broadcasts, so the badge never latches a stale "No API key" for a
+  // subscription-reuse user whose bearer lands after boot.
+  const { keyOk, plan } = useCredentialStatus()
+  const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : null
 
   // Form state, hydrated from the active session whenever the popover opens.
   const [form, setForm] = useState<FormState>({
@@ -184,34 +191,6 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
     }
     setPresetId(resolvedId ?? "")
   }, [open, session, presets])
-
-  // Periodically check auth status (useful for the badge). "Configured"
-  // means EITHER a direct Anthropic API key OR a subscription OAuth bearer
-  // (ADR-0025 — `subscription_set_active` pushes the bearer, not an api key),
-  // so subscription-reuse users don't see a bogus "No API key" badge.
-  useEffect(() => {
-    if (!isTauri()) return
-    let cancelled = false
-    Promise.all([
-      hasApiKey().catch((err) => {
-        loggers.chat.warn("hasApiKey check failed", {
-          err: err instanceof Error ? err.message : String(err),
-        })
-        return false
-      }),
-      hasOauthBearer().catch((err) => {
-        loggers.chat.warn("hasOauthBearer check failed", {
-          err: err instanceof Error ? err.message : String(err),
-        })
-        return false
-      }),
-    ]).then(([key, bearer]) => {
-      if (!cancelled) setKeyOk(key || bearer)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [open])
 
   const handlePickDir = async () => {
     if (!isTauri()) return
@@ -461,6 +440,18 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
             {t("noApiKey")}
           </Badge>
         )}
+        {planLabel && (
+          <Badge
+            variant="secondary"
+            className="cursor-pointer gap-1"
+            onClick={onOpenSettings}
+            aria-label={t("subscriptionBadgeAria", { tier: planLabel })}
+            title={t("subscriptionBadgeAria", { tier: planLabel })}
+          >
+            <SparklesIcon className="size-3" />
+            {t("subscriptionBadge", { tier: planLabel })}
+          </Badge>
+        )}
       </div>
 
       <SessionCostBadgeLive
@@ -474,6 +465,8 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
       <PlanModeTasksSheet sessionId={session.id} />
 
       <SingleExportTrigger session={session} />
+
+      <ClearConversationTrigger />
 
       {session.sdkSessionId && (
         <Tooltip>

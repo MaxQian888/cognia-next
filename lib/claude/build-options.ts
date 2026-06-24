@@ -44,6 +44,9 @@ import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
 import { resolveCompaction, resolveCompactInstructions } from "@/lib/claude/compact-instructions"
 import { getCompactionStrategy } from "@/lib/plugin/registries/compaction-strategy-registry"
 import { loggers } from "@/lib/logging"
+import { startRootTrace } from "@/lib/agent-trace/trace-context"
+import type { SpanSurface } from "@/types/agent-trace/span"
+import type { TraceContext } from "@/types/agent-trace/trace-context"
 import type {
   AppSettings,
   Character,
@@ -354,6 +357,28 @@ export interface BuildOptionsContext {
    * top-level chat (no parent ⇒ no ceiling).
    */
   permissionCeiling?: import("@/lib/ai/agent/external/permission-cascade").ExternalSessionPermissionSpec
+  /**
+   * Surface that owns this turn — drives the agent-trace root span's `surface`.
+   * Defaults to "chat". Connector ai-runs pass "connector", workflow nodes
+   * "workflow", team member sends "agent-team".
+   */
+  traceSurface?: SpanSurface
+  /**
+   * Pre-minted parent trace. When set (and `emitTrace`), `resolveSendOptions`
+   * does NOT mint a new root span; it stamps these ids onto `SendOptions`
+   * verbatim so this send nests under an existing turn (e.g. a team member
+   * inheriting the team root).
+   */
+  parentTrace?: TraceContext
+  /**
+   * Opt IN to root-span minting. The resolver only mints a root span when this
+   * is `true`, because the CALLER owns the span lifecycle — it must call
+   * `endSpan(opts.spanId)` when the turn closes (the chat hook does this in its
+   * result / error branches). Callers that cannot close the span (headless
+   * runners, diagnostics dumps, eval targets) leave this unset so no span
+   * leaks. The minted ids land on `SendOptions.{traceId,spanId}`.
+   */
+  emitTrace?: boolean
 }
 
 /**
@@ -2414,6 +2439,43 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         ? { permissionMode: opts.permissionMode }
         : {}),
     })
+  }
+
+  // --- Agent-trace root span (telemetry correlation) ------------------------
+  // Mint the turn's ROOT span as the FINAL step so the whole turn (provider
+  // call + tool + sub-agent spans) hangs off one traceId. Opt-in via
+  // `emitTrace` because the CALLER owns `endSpan` — see the field doc.
+  // `SendOptions.{traceId,spanId}` ARE the on-the-wire TraceContext that
+  // downstream child spans read (never the tab-global `logContext`). A caller
+  // that already stamped a trace, or supplies `parentTrace`, is respected. A
+  // suppressed turn (quiet hours / muted / manual mode) never calls the model,
+  // so it gets no span — the caller short-circuits before any `endSpan`.
+  if (ctx.emitTrace && !opts.traceId && !opts.suppressedReason) {
+    if (ctx.parentTrace) {
+      opts.traceId = ctx.parentTrace.traceId
+      opts.spanId = ctx.parentTrace.rootSpanId
+    } else {
+      const promptPreview = ctx.routingContextHint?.promptText
+      const { ctx: traceCtx } = startRootTrace({
+        operationName: "invoke_agent",
+        // The root is the agent invocation, not the LLM call — keep
+        // providerName "anthropic" historically; the real provider rides the
+        // provider child span (Phase 2) + `metadata.providerId`. Avoids
+        // widening the narrow `SpanProviderName` union here.
+        providerName: "anthropic",
+        sessionId: session?.id ?? "",
+        surface: ctx.traceSurface ?? "chat",
+        requestModel: opts.model,
+        agentId: character?.id,
+        inputPreview: promptPreview || undefined,
+        metadata: {
+          providerId,
+          ...(ctx.conversationKey ? { conversationKey: ctx.conversationKey } : {}),
+        },
+      })
+      opts.traceId = traceCtx.traceId
+      opts.spanId = traceCtx.rootSpanId
+    }
   }
 
   return opts

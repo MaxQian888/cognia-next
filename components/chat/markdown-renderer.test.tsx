@@ -97,7 +97,8 @@ jest.mock("@/components/artifacts/artifact-create-button", () => ({
 }))
 
 import { render, screen } from "@testing-library/react"
-import { MarkdownRenderer } from "./markdown-renderer"
+import React from "react"
+import { MarkdownRenderer, parseTaskListItem } from "./markdown-renderer"
 
 describe("MarkdownRenderer", () => {
   // ── basic text ──────────────────────────────────────────────────────────────
@@ -225,5 +226,45 @@ describe("MarkdownRenderer", () => {
   it("accepts className and applies it to the container", () => {
     render(<MarkdownRenderer content="hi" className="custom-class" />)
     expect(document.querySelector(".custom-class")).toBeTruthy()
+  })
+})
+
+// parseTaskListItem is unit-tested directly: remark-gfm / rehype-raw are stubbed
+// in jest, so the checkbox <input> a GFM task item produces can't reach the `li`
+// handler through the full pipeline. The helper is the routing decision; we feed
+// it the children shape react-markdown would hand the `li` component.
+describe("parseTaskListItem", () => {
+  const checkbox = (checked: boolean) =>
+    React.createElement("input", { type: "checkbox", disabled: true, checked })
+
+  it("returns null for ordinary list-item children", () => {
+    expect(parseTaskListItem("just text")).toBeNull()
+    expect(parseTaskListItem([<span key="a">bold</span>, " text"])).toBeNull()
+  })
+
+  it("detects a checked task item and strips the checkbox from the label", () => {
+    const result = parseTaskListItem([checkbox(true), " done item"])
+    expect(result).not.toBeNull()
+    expect(result!.checked).toBe(true)
+    expect(result!.label).toEqual([" done item"])
+  })
+
+  it("detects an unchecked task item", () => {
+    const result = parseTaskListItem([checkbox(false), " todo item"])
+    expect(result!.checked).toBe(false)
+    expect(result!.label).toEqual([" todo item"])
+  })
+
+  it("preserves inline-formatted label nodes after the checkbox", () => {
+    const result = parseTaskListItem([checkbox(false), " ", <strong key="b">important</strong>])
+    expect(result!.label).toHaveLength(2)
+    // Children.toArray re-keys elements, so compare structurally, not by ref.
+    const strong = result!.label.find((n) => React.isValidElement(n) && n.type === "strong")
+    expect(strong).toBeTruthy()
+  })
+
+  it("ignores non-checkbox inputs", () => {
+    const textInput = React.createElement("input", { type: "text" })
+    expect(parseTaskListItem([textInput, " label"])).toBeNull()
   })
 })

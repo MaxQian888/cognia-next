@@ -3,8 +3,22 @@
 // BUILTIN_SLASH_COMMANDS in `../builtin.ts`.
 
 import type { SlashContext } from "../builtin"
+import type { SlashCommandResultBlock } from "../system-blocks"
 import { listSessions } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
+
+/**
+ * Build the inline result chip for a successful `/resume`, so the transcript
+ * shows a compact "/resume <arg> — Resumed X" marker instead of a bare line.
+ */
+function resumedChip(arg: string, title: string | undefined): SlashCommandResultBlock {
+  return {
+    kind: "slash-result",
+    commandId: "resume",
+    args: arg,
+    summary: `Resumed ${title ?? "session"}`,
+  }
+}
 
 /**
  * Render the user's session list as a markdown table system message. Pulls
@@ -85,7 +99,7 @@ export async function handleResume(ctx: SlashContext): Promise<void> {
   const exactId = rows.find((s) => s.id === arg)
   if (exactId) {
     useChatStore.getState().setActiveSession(exactId.id)
-    ctx.pushSystemMessage(`Resumed \`${exactId.title}\`.`)
+    ctx.pushSystemMessage(resumedChip(arg, exactId.title))
     return
   }
   // 2. case-insensitive exact title
@@ -93,14 +107,14 @@ export async function handleResume(ctx: SlashContext): Promise<void> {
   const exactTitle = rows.filter((s) => (s.title ?? "").toLowerCase() === needle)
   if (exactTitle.length === 1) {
     useChatStore.getState().setActiveSession(exactTitle[0].id)
-    ctx.pushSystemMessage(`Resumed \`${exactTitle[0].title}\`.`)
+    ctx.pushSystemMessage(resumedChip(arg, exactTitle[0].title))
     return
   }
   // 3. substring match
   const partial = rows.filter((s) => (s.title ?? "").toLowerCase().includes(needle))
   if (partial.length === 1) {
     useChatStore.getState().setActiveSession(partial[0].id)
-    ctx.pushSystemMessage(`Resumed \`${partial[0].title}\`.`)
+    ctx.pushSystemMessage(resumedChip(arg, partial[0].title))
     return
   }
   if (partial.length === 0 && exactTitle.length === 0) {

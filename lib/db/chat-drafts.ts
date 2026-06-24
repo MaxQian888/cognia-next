@@ -45,11 +45,20 @@ export async function setDraft(
   })
 }
 
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
 export async function clearDraft(sessionId: string): Promise<void> {
+  // Cancel any pending debounced save first, otherwise an in-flight write
+  // re-creates the row right after we delete it (e.g. on optimistic
+  // clear-after-send), leaving stale text that reappears next time the
+  // session is opened.
+  const pending = debounceTimers.get(sessionId)
+  if (pending) {
+    clearTimeout(pending)
+    debounceTimers.delete(sessionId)
+  }
   await getDb().chatDrafts.delete(sessionId)
 }
-
-const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export function setDraftDebounced(
   sessionId: string,

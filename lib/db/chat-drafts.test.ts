@@ -87,6 +87,22 @@ describe("chat-drafts", () => {
     await expect(clearDraft("ses_missing")).resolves.toBeUndefined()
   })
 
+  it("clearDraft cancels a pending debounced write (no stale resurrection)", async () => {
+    jest.useFakeTimers()
+    try {
+      setDraftDebounced("ses_a", "stale text", [], 500)
+      // Clear before the debounce fires — must also cancel the pending timer,
+      // otherwise the write lands after the delete and the draft reappears.
+      await clearDraft("ses_a")
+      jest.advanceTimersByTime(500)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(await getDraft("ses_a")).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("setDraftDebounced delays the write until flush", async () => {
     jest.useFakeTimers()
     try {

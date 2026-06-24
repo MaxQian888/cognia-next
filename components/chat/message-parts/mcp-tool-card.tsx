@@ -8,7 +8,8 @@
  *
  * The recognised set covers:
  *  - cognia's MCP server: `wiki_search`, `wiki_read`, `rag_search`, `runtime_query`
- *  - Claude built-ins: `Plan`, `Read`, `Glob`
+ *  - Claude built-ins: `Read`, `Glob`, `Grep`, `WebFetch`, … and the plan-mode
+ *    signal tools `exit_plan_mode` / `ExitPlanMode`
  *
  * Plugin-provided MCP tools are NOT handled here — they go through
  * `registerMessagePartRenderer` (P2.1) instead.
@@ -41,8 +42,13 @@ const REGISTRY: Record<string, CardComponent> = {
   wiki_read: WikiReadCard,
   rag_search: RagSearchCard,
   runtime_query: RuntimeQueryCard,
+  // Plan-mode signal tools. `exit_plan_mode` also covers the namespaced
+  // cognia form (`mcp__cognia-tools__exit_plan_mode`) via normalizeToolName;
+  // `ExitPlanMode` is the native Anthropic equivalent. Both carry the plan as
+  // markdown in `input.plan`.
+  exit_plan_mode: PlanCard,
+  ExitPlanMode: PlanCard,
   // Claude built-ins
-  Plan: PlanCard,
   Read: ReadCard,
   Glob: GlobCard,
   Grep: GrepCard,

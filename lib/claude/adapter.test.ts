@@ -912,6 +912,60 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
     expect(part.state).toBe("done")
   })
 
+  it("does not merge a new turn's deltas into a prior turn's assistant message", () => {
+    // Turn 1 sealed (user1 + completed assistant). Turn 2 started: `send`
+    // appended the optimistic user2 message. A `content_block_delta` then
+    // arrives whose `message_start` was dropped (aborted / resent turn that
+    // "didn't send"). It must NOT grow the prior turn's finished assistant —
+    // doing so produces the garbled "greeting two + greeting one tail" merge.
+    const prior = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "greeting one", state: "done" }],
+      },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "hi" }] },
+    ] as unknown as UIMessage[]
+    const out = applySdkEvent(
+      prior,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: " LEAK" } })
+    ).messages
+    // Reference unchanged and the prior assistant text is untouched.
+    expect(out).toBe(prior)
+    const a1 = out[1].parts[0] as { text: string }
+    expect(a1.text).toBe("greeting one")
+  })
+
+  it("grows the current turn's assistant once message_start seeds it after the user turn", () => {
+    // Same turn-2 base, but message_start arrives first → a fresh assistant is
+    // seeded after user2 and the delta lands there, never on the prior turn.
+    const base = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "greeting one", state: "done" }],
+      },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "hi" }] },
+    ] as unknown as UIMessage[]
+    let msgs = applySdkEvent(
+      base,
+      streamEvt({ type: "message_start", message: { id: "a2" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "greeting two" },
+      })
+    ).messages
+    expect(msgs).toHaveLength(4)
+    expect((msgs[1].parts[0] as { text: string }).text).toBe("greeting one")
+    expect(msgs[3].id).toBe("a2")
+    expect((msgs[3].parts[0] as { text: string }).text).toBe("greeting two")
+  })
+
   it("ignores deltas with no active assistant message and unknown raw events", () => {
     expect(
       applySdkEvent(

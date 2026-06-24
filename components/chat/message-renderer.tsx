@@ -15,6 +15,7 @@ import { normalizeErrorText } from "@cognia/error-parsers"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { StreamingTextPart } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
+import { A2UIToolOutput, hasA2UIToolOutput } from "@/components/a2ui/a2ui-tool-output"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
@@ -23,6 +24,14 @@ import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
 import { MCPToolCard, isStructuredMcpToolType } from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
+import { DiagnosticsCard } from "@/components/chat/message-parts/diagnostics-card"
+import { SlashCommandResultChip } from "@/components/chat/message-parts/slash-command-result-chip"
+import {
+  DIAGNOSTICS_PART_TYPE,
+  isSystemMessageBlock,
+  isSlashCommandResultBlock,
+  type SystemMessageBlock,
+} from "@/lib/slash-commands/system-blocks"
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import {
   ToolActivityGroup,
@@ -750,6 +759,21 @@ function renderToolPart(
         </ToolContent>
       </Tool>
     )
+  } else if (tp.state !== "output-error" && hasA2UIToolOutput(tp.output)) {
+    // A tool whose result embeds an A2UI payload (surface + components) renders
+    // as an interactive surface instead of the generic tool body.
+    toolEl = (
+      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          <A2UIToolOutput
+            toolId={tp.toolCallId}
+            toolName={type.replace(/^tool-/, "")}
+            output={tp.output}
+          />
+        </ToolContent>
+      </Tool>
+    )
   } else if (tp.state === "output-error") {
     const rawError = (tp as { errorText?: unknown }).errorText
     toolEl = (
@@ -821,6 +845,17 @@ function renderPart(
     return <A2UIPart key={key} part={part as unknown as A2UIPartType} _messageId={messageId} />
   }
 
+  if (type === DIAGNOSTICS_PART_TYPE) {
+    const data = (part as { data?: unknown }).data
+    if (isSlashCommandResultBlock(data)) {
+      return <SlashCommandResultChip key={key} block={data} />
+    }
+    if (isSystemMessageBlock(data)) {
+      return <DiagnosticsCard key={key} block={data as SystemMessageBlock} />
+    }
+    return null
+  }
+
   if (type === "subagent") {
     // Subagent parts are rendered together as a dispatch tree at the message
     // level (see the parts map), never individually here.
@@ -867,7 +902,15 @@ function renderPart(
     const reasoningDefaultOpen =
       mode === "detailed" ? true : mode === "simplified" ? false : undefined
     return (
-      <Reasoning key={key} isStreaming={stillStreaming} defaultOpen={reasoningDefaultOpen}>
+      <Reasoning
+        key={key}
+        isStreaming={stillStreaming}
+        defaultOpen={reasoningDefaultOpen}
+        // Keep a finished thinking block in place instead of auto-collapsing it
+        // the instant the answer streams in — the reasoning is part of the
+        // transcript and should stay readable.
+        closeOnFinish={false}
+      >
         <ReasoningTrigger />
         <ReasoningContent>{text}</ReasoningContent>
       </Reasoning>

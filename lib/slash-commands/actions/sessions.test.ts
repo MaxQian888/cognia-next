@@ -142,7 +142,12 @@ describe("handleResume", () => {
     const ctx = makeCtx({ args: "id-2" })
     await handleResume(ctx)
     expect(setActive).toHaveBeenCalledWith("id-2")
-    expect(ctx._pushed[0]).toContain("Resumed `Second`.")
+    expect(ctx._pushed[0]).toEqual({
+      kind: "slash-result",
+      commandId: "resume",
+      args: "id-2",
+      summary: "Resumed Second",
+    })
   })
 
   it("matches by case-insensitive exact title", async () => {
@@ -155,7 +160,12 @@ describe("handleResume", () => {
     const ctx = makeCtx({ args: "first" })
     await handleResume(ctx)
     expect(setActive).toHaveBeenCalledWith("id-1")
-    expect(ctx._pushed[0]).toContain("Resumed `First`.")
+    expect(ctx._pushed[0]).toEqual({
+      kind: "slash-result",
+      commandId: "resume",
+      args: "first",
+      summary: "Resumed First",
+    })
   })
 
   it("matches by substring when there is exactly one partial match", async () => {
@@ -168,7 +178,12 @@ describe("handleResume", () => {
     const ctx = makeCtx({ args: "alpha" })
     await handleResume(ctx)
     expect(setActive).toHaveBeenCalledWith("a")
-    expect(ctx._pushed[0]).toContain("Resumed `Alpha thing`.")
+    expect(ctx._pushed[0]).toEqual({
+      kind: "slash-result",
+      commandId: "resume",
+      args: "alpha",
+      summary: "Resumed Alpha thing",
+    })
   })
 
   it("reports no match when neither title nor id matches", async () => {

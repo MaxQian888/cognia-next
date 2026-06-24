@@ -6,24 +6,19 @@
 // test for message-list's clear/export flows, not for the renderer chain.
 import * as ReactForMocks from "react"
 
-jest.mock("@/components/ai-elements/conversation", () => {
-  return {
-    Conversation: ({ children }: { children: ReactForMocks.ReactNode }) =>
-      ReactForMocks.createElement("div", { "data-test": "conversation" }, children),
-    ConversationContent: ({ children }: { children: ReactForMocks.ReactNode }) =>
-      ReactForMocks.createElement("div", { "data-test": "conversation-content" }, children),
-    ConversationScrollButton: () => null,
-    messagesToMarkdown: (msgs: unknown[]) =>
-      `# msgs\n${(msgs as { id: string }[]).map((m) => m.id).join("\n")}`,
-  }
-})
-
 jest.mock("@/components/ai-elements/shimmer", () => {
   return {
     Shimmer: ({ children }: { children: ReactForMocks.ReactNode }) =>
       ReactForMocks.createElement("span", null, children),
   }
 })
+
+// The thinking indicator has its own suite (phases / tips / reduced motion).
+// Stub it to the bare label so message-list's shouldShowThinking assertions
+// stay isolated from its timers and motion wiring.
+jest.mock("./thinking-indicator", () => ({
+  ChatThinkingIndicator: () => ReactForMocks.createElement("span", null, "Claude is thinking…"),
+}))
 
 // jsdom has no layout engine so useVirtualizer always returns empty items.
 // Mock it to render every item so message-level assertions work in tests.
@@ -73,10 +68,6 @@ jest.mock("./message-renderer", () => {
   }
 })
 
-jest.mock("@/lib/files/download", () => ({
-  downloadBlob: jest.fn(),
-}))
-
 jest.mock("@/hooks/use-platform", () => ({
   usePlatform: jest.fn(() => "desktop"),
 }))
@@ -105,7 +96,7 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
     ),
 }))
 
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
 import { MessageList, VIRTUALIZE_THRESHOLD } from "./message-list"
@@ -113,7 +104,6 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
-import { downloadBlob } from "@/lib/files/download"
 import { usePlatform } from "@/hooks/use-platform"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
@@ -156,83 +146,6 @@ beforeEach(() => {
 })
 
 describe("MessageList", () => {
-  it("renders nothing-to-export action bar only when there are messages", () => {
-    const { rerender } = render(
-      <DataAdapterProvider adapter={makeAdapter()}>
-        <MessageList messages={[]} status="idle" />
-      </DataAdapterProvider>
-    )
-    expect(screen.queryByText(/Export/i)).toBeNull()
-
-    rerender(
-      <DataAdapterProvider adapter={makeAdapter()}>
-        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
-      </DataAdapterProvider>
-    )
-    expect(screen.getByText(/Export/i)).toBeInTheDocument()
-  })
-
-  it("clear-history button calls adapter.clearMessages with the active sessionId", async () => {
-    const clearMessages = jest.fn(async () => undefined)
-    const adapter = makeAdapter({ clearMessages })
-    const Wrapper = withAdapter(adapter)
-    render(
-      <Wrapper>
-        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
-      </Wrapper>
-    )
-
-    fireEvent.click(screen.getByText(/Clear/i))
-    // Confirm in the alert dialog.
-    const confirm = await screen.findByRole("button", { name: /Delete messages/i })
-    await act(async () => {
-      fireEvent.click(confirm)
-    })
-
-    await waitFor(() => expect(clearMessages).toHaveBeenCalledWith("ses_1"))
-  })
-
-  it("clear-history is a no-op when there is no active session", async () => {
-    useChatStore.getState().setActiveSession(null)
-    const clearMessages = jest.fn(async () => undefined)
-    const adapter = makeAdapter({ clearMessages })
-    const Wrapper = withAdapter(adapter)
-    render(
-      <Wrapper>
-        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
-      </Wrapper>
-    )
-
-    fireEvent.click(screen.getByText(/Clear/i))
-    const confirm = await screen.findByRole("button", { name: /Delete messages/i })
-    await act(async () => {
-      fireEvent.click(confirm)
-    })
-
-    expect(clearMessages).not.toHaveBeenCalled()
-  })
-
-  it("surfaces clear-history errors via toast (does not crash)", async () => {
-    const clearMessages = jest.fn(async () => {
-      throw new Error("boom")
-    })
-    const adapter = makeAdapter({ clearMessages })
-    const Wrapper = withAdapter(adapter)
-    render(
-      <Wrapper>
-        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
-      </Wrapper>
-    )
-    fireEvent.click(screen.getByText(/Clear/i))
-    const confirm = await screen.findByRole("button", { name: /Delete messages/i })
-    await act(async () => {
-      fireEvent.click(confirm)
-    })
-    await waitFor(() => expect(clearMessages).toHaveBeenCalled())
-    // No further assertion needed — the catch block is what we're exercising;
-    // the test is green if React doesn't blow up the tree.
-  })
-
   it("renders messages from the input prop", () => {
     const Wrapper = withAdapter(makeAdapter())
     render(
@@ -242,20 +155,6 @@ describe("MessageList", () => {
     )
     expect(screen.getByText("hello")).toBeInTheDocument()
     expect(screen.getByText("world")).toBeInTheDocument()
-  })
-
-  it("export button triggers downloadBlob with markdown content", () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
-      </Wrapper>
-    )
-    fireEvent.click(screen.getByText(/Export/i))
-    expect(downloadBlob).toHaveBeenCalledWith(
-      expect.any(Blob),
-      expect.stringMatching(/^cognia-chat-.*\.md$/)
-    )
   })
 
   it("renders a short list in document flow (no virtualized [data-index] rows)", () => {

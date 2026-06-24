@@ -113,14 +113,22 @@ export function ToolApprovalDialog({ approval, onRespond }: Props) {
         </DialogHeader>
 
         {approval && (
-          <div className="space-y-3 text-sm">
-            <div>
+          // `min-w-0` lets this grid item shrink below its content's intrinsic
+          // width so the code/JSON previews below scroll inside their own
+          // `overflow-x-auto` box instead of stretching the dialog past its
+          // `max-w-xl`.
+          <div className="min-w-0 space-y-3 text-sm">
+            <div className="min-w-0">
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("toolLabel")}
               </div>
-              <div className="font-mono text-sm">{approval.displayName ?? approval.toolName}</div>
+              {/* Namespaced tool names (e.g. mcp__cognia-plugin-tools__…) have
+                  no spaces; `break-all` wraps them instead of overflowing. */}
+              <div className="break-all font-mono text-sm">
+                {approval.displayName ?? approval.toolName}
+              </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("inputLabel")}
               </div>

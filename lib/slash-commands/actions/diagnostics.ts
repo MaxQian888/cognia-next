@@ -201,31 +201,31 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
           providerId
         )
 
-  lines.push(`- **Turns**: ${assistantTurnCount} assistant (${usageHits} with metrics)`)
-  lines.push(`- **Input tokens**: ${inputTokens.toLocaleString()}`)
-  lines.push(`- **Output tokens**: ${outputTokens.toLocaleString()}`)
-  if (cacheCreationTokens > 0 || cacheReadTokens > 0) {
-    lines.push(
-      `- **Cache**: write ${cacheCreationTokens.toLocaleString()} / read ${cacheReadTokens.toLocaleString()}`
-    )
-  }
-  if (sessionCostUsd > 0) {
-    const estimated = totalCostUsd <= 0
-    lines.push(`- **Cost**: $${sessionCostUsd.toFixed(4)} USD${estimated ? " (estimated)" : ""}`)
-  }
-  if (durationMs > 0) {
-    lines.push(`- **Duration**: ${(durationMs / 1000).toFixed(1)}s`)
-  }
-
   // Context-window occupancy of the latest turn (not the cumulative sum).
   const latest = getLatestUsage(messages as UIMessage[])
   const win = computeContextWindowUsage(latest, model, resolveWindowOverride(model, providerId))
-  lines.push(
-    `- **Context window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
-      `(${(win.fraction * 100).toFixed(1)}% used)`
-  )
 
-  ctx.pushSystemMessage(lines.join("\n"))
+  ctx.pushSystemMessage({
+    kind: "cost",
+    assistantTurns: assistantTurnCount,
+    metricTurns: usageHits,
+    inputTokens,
+    outputTokens,
+    cacheCreateTokens: cacheCreationTokens,
+    cacheReadTokens,
+    costUsd: sessionCostUsd > 0 ? sessionCostUsd : null,
+    costEstimated: sessionCostUsd > 0 && totalCostUsd <= 0,
+    durationMs,
+    window: {
+      used: win.used,
+      max: win.max,
+      fraction: win.fraction,
+      remaining: win.remaining,
+      level: win.level,
+      compactThresholdTokens: win.compactThresholdTokens,
+      autoCompactFraction: AUTO_COMPACT_FRACTION,
+    },
+  })
 }
 
 /**
@@ -357,20 +357,11 @@ export async function handleContext(ctx: SlashContext): Promise<void> {
     }
   }
 
-  const lines: string[] = ["**Context**", ""]
-  lines.push(`- Messages: ${userTurns} user · ${assistantTurns} assistant`)
+  // Before any assistant turn the window is fresh — emit a card with just the
+  // message counts (no tokens / window section).
   if (assistantTurns === 0) {
-    lines.push("- No usage metrics yet — context window is fresh.")
-    ctx.pushSystemMessage(lines.join("\n"))
+    ctx.pushSystemMessage({ kind: "context", userTurns, assistantTurns })
     return
-  }
-  const totalIn = inputTokens + cacheReadTokens + cacheCreationTokens
-  lines.push(`- Input tokens (incl. cache): ${totalIn.toLocaleString()}`)
-  lines.push(`- Output tokens: ${outputTokens.toLocaleString()}`)
-  if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
-    lines.push(
-      `- Cache hits: write ${cacheCreationTokens.toLocaleString()} / read ${cacheReadTokens.toLocaleString()}`
-    )
   }
 
   // Window occupancy is the *latest* turn against the model's context window
@@ -378,15 +369,24 @@ export async function handleContext(ctx: SlashContext): Promise<void> {
   const latest = getLatestUsage(messages as UIMessage[])
   const { model, providerId } = await resolveActiveModelInfo(ctx.activeSessionId)
   const win = computeContextWindowUsage(latest, model, resolveWindowOverride(model, providerId))
-  lines.push(
-    `- **Window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
-      `(${(win.fraction * 100).toFixed(1)}% used, ${win.remaining.toLocaleString()} left)`
-  )
-  lines.push(
-    `- **Auto-compact at**: ${(AUTO_COMPACT_FRACTION * 100).toFixed(1)}% ` +
-      `(~${win.compactThresholdTokens.toLocaleString()} tokens)`
-  )
-
-  lines.push("", "Run `/compact` to ask the SDK to summarise older turns and free up the window.")
-  ctx.pushSystemMessage(lines.join("\n"))
+  ctx.pushSystemMessage({
+    kind: "context",
+    userTurns,
+    assistantTurns,
+    tokens: {
+      input: inputTokens,
+      output: outputTokens,
+      cacheRead: cacheReadTokens,
+      cacheCreate: cacheCreationTokens,
+    },
+    window: {
+      used: win.used,
+      max: win.max,
+      fraction: win.fraction,
+      remaining: win.remaining,
+      level: win.level,
+      compactThresholdTokens: win.compactThresholdTokens,
+      autoCompactFraction: AUTO_COMPACT_FRACTION,
+    },
+  })
 }

@@ -8,9 +8,19 @@ jest.mock("@/components/ai-elements/message", () => ({
   ),
 }))
 
+// Control reduced-motion so we can assert the caret's blink toggles.
+const flowMotion = { reduce: false, speed: 1 }
+jest.mock("@/components/chat/motion/motion-reveal", () => ({
+  useFlowMotion: () => flowMotion,
+}))
+
 import { StreamingTextPart } from "./streaming-text-part"
 
 describe("StreamingTextPart", () => {
+  beforeEach(() => {
+    flowMotion.reduce = false
+    flowMotion.speed = 1
+  })
   it("renders the supplied text via MessageResponse", () => {
     const { getByTestId } = render(<StreamingTextPart text="hello world" isStreaming={true} />)
     expect(getByTestId("msg-response").textContent).toBe("hello world")
@@ -44,5 +54,18 @@ describe("StreamingTextPart", () => {
   it("renders an empty string as no visible text", () => {
     const { getByTestId } = render(<StreamingTextPart text="" isStreaming={true} />)
     expect(getByTestId("msg-response").textContent).toBe("")
+  })
+
+  it("renders a blinking caret alongside the streaming text", () => {
+    const { getByTestId } = render(<StreamingTextPart text="hello" isStreaming={true} />)
+    const caret = getByTestId("streaming-caret")
+    expect(caret).toBeInTheDocument()
+    expect(caret).toHaveClass("animate-pulse")
+  })
+
+  it("renders a static caret under reduced motion", () => {
+    flowMotion.reduce = true
+    const { getByTestId } = render(<StreamingTextPart text="hello" isStreaming={true} />)
+    expect(getByTestId("streaming-caret")).not.toHaveClass("animate-pulse")
   })
 })

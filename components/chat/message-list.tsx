@@ -1,22 +1,9 @@
 "use client"
 
-import { useTranslations } from "next-intl"
-import { messagesToMarkdown } from "@/components/ai-elements/conversation"
-import { Shimmer } from "@/components/ai-elements/shimmer"
+import { ChatThinkingIndicator } from "@/components/chat/thinking-indicator"
 import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import type { UIMessage } from "ai"
-import { ArrowDownIcon, DownloadIcon, Trash2Icon } from "lucide-react"
+import { ArrowDownIcon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
 import {
   CompactBoundaryMarker,
@@ -29,16 +16,12 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
 import { usePlatform } from "@/hooks/use-platform"
-import { useCharacters, useClearMessages } from "@/lib/data-hooks/context"
+import { useCharacters } from "@/lib/data-hooks/context"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
 import type { Character } from "@/lib/claude/types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { toast } from "sonner"
-import { saveExport } from "@/lib/files/save-export"
-import { notifyExportOutcome } from "@/lib/files/export-feedback"
-import { loggers } from "@/lib/logging"
 import { PerfBoundary } from "@/lib/perf"
 
 // Lists at or below this length render in normal document flow (no
@@ -72,11 +55,8 @@ export function MessageList({
   onRegenerate,
   onEditResend,
 }: Props) {
-  const t = useTranslations("chat.list")
-  const tExport = useTranslations("export")
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
-  const clearMessages = useClearMessages()
   const platform = usePlatform()
   const isMobile = platform === "mobile"
   const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
@@ -102,33 +82,6 @@ export function MessageList({
   const autoScrollOnStream = useSettingsStore(
     (s) => s.settings?.composerBehavior?.autoScrollOnStream
   )
-
-  const handleExport = useCallback(async () => {
-    if (messages.length === 0) {
-      toast.info(t("nothingToExport"))
-      return
-    }
-    const md = messagesToMarkdown(messages)
-    const ts = new Date().toISOString().replaceAll(/[:.]/g, "-")
-    const outcome = await saveExport({
-      filename: `cognia-chat-${ts}.md`,
-      data: md,
-      mimeType: "text/markdown",
-    })
-    notifyExportOutcome(outcome, { t: tExport, shareTitle: t("exported") })
-  }, [messages, t, tExport])
-
-  const handleClear = useCallback(async () => {
-    if (!sessionId) return
-    try {
-      await clearMessages(sessionId)
-      useChatStore.getState().replaceMessages([])
-      toast.success(t("cleared"))
-    } catch (err) {
-      loggers.chat.error("clear messages failed", err, { sessionId })
-      toast.error(err instanceof Error ? err.message : t("cleared"))
-    }
-  }, [sessionId, t, clearMessages])
 
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -216,6 +169,16 @@ export function MessageList({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [])
 
+  // Re-pin to the bottom when the thinking indicator grows (skeleton / tips
+  // reveal or tip rotation). The stick-to-bottom effect above only reacts to
+  // `messages`/`status`, so it can't see this row's internal timer growth.
+  const pinToBottom = useCallback(() => {
+    if (autoScrollOnStream === false) return
+    if (!isAtBottom) return
+    const el = scrollParentRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [autoScrollOnStream, isAtBottom])
+
   // Shared row body for both the virtualized and the document-flow branch so
   // the MessageRenderer props (and the mobile LongPress wrapper) stay
   // identical regardless of which path renders the row.
@@ -252,44 +215,6 @@ export function MessageList({
   return (
     <PerfBoundary id="chat:list">
       <div className="relative flex flex-1 flex-col overflow-hidden">
-        {messages.length > 0 && (
-          <div className="flex items-center justify-end gap-1 border-b bg-background/40 px-3 py-1.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void handleExport()}
-              className="h-7 gap-1.5 text-xs"
-            >
-              <DownloadIcon className="size-3.5" />
-              {t("export")}
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
-                >
-                  <Trash2Icon className="size-3.5" />
-                  {t("clear")}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t("clearTitle")}</AlertDialogTitle>
-                  <AlertDialogDescription>{t("clearDescription")}</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t("clearCancel")}</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => void handleClear()}>
-                    {t("clearAction")}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
-        )}
-
         <div className="relative flex flex-1 overflow-hidden">
           <div
             ref={scrollParentRef}
@@ -316,9 +241,10 @@ export function MessageList({
                           padding: "0 1rem",
                         }}
                       >
-                        <Shimmer as="p" className="px-1 py-2 text-sm">
-                          {t("thinking")}
-                        </Shimmer>
+                        <ChatThinkingIndicator
+                          directCharacter={directCharacter}
+                          onPhaseChange={pinToBottom}
+                        />
                       </div>
                     )
                   }
@@ -367,9 +293,10 @@ export function MessageList({
                 })}
                 {showThinking && (
                   <div key="thinking" style={{ padding: "0 1rem" }}>
-                    <Shimmer as="p" className="px-1 py-2 text-sm">
-                      {t("thinking")}
-                    </Shimmer>
+                    <ChatThinkingIndicator
+                      directCharacter={directCharacter}
+                      onPhaseChange={pinToBottom}
+                    />
                   </div>
                 )}
               </div>

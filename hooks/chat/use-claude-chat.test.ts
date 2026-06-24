@@ -330,6 +330,13 @@ const settingsSubscribers: Array<(s: typeof settingsState) => void> = []
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: () => null,
 }))
+// Wrap the real Auto-mode runner so most tests keep its deterministic rules
+// tier, while one test can override it to a never-resolving promise (a wedged
+// model judge) and assert the renderer's timeout still surfaces the dialog.
+jest.mock("@/lib/claude/permissions/auto-mode-runner", () => {
+  const actual = jest.requireActual("@/lib/claude/permissions/auto-mode-runner")
+  return { ...actual, runAutoModeForTool: jest.fn(actual.runAutoModeForTool) }
+})
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: Object.assign(
     <T>(selector: (s: typeof settingsState) => T): T => selector(settingsState),
@@ -929,6 +936,50 @@ describe("useClaudeChat — actions", () => {
       expect.stringContaining("auto-denied")
     )
     delete (settingsState.settings as Record<string, unknown>).agentPermissions
+  })
+
+  it("surfaces the manual approval dialog when the Auto-mode judge hangs (no-dialog hang guard)", async () => {
+    const { runAutoModeForTool } = await import("@/lib/claude/permissions/auto-mode-runner")
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    chatState.pushApproval.mockClear()
+
+    // A wedged utility-LLM judge: the Auto-mode decision never settles. Without
+    // the renderer timeout this would freeze the turn with no dialog ever shown.
+    ;(runAutoModeForTool as jest.Mock).mockReturnValueOnce(new Promise(() => {}))
+    jest.useFakeTimers()
+    try {
+      act(() => {
+        _messageCallback?.({
+          type: "permission_request",
+          sessionId: "sess-1",
+          requestId: "req-hang",
+          toolUseID: "tu-h",
+          toolName: "Bash",
+          input: { command: "echo hi" },
+        })
+      })
+      // Let the handler reach the awaited Auto-mode race (still pending).
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(chatState.pushApproval).not.toHaveBeenCalled()
+
+      // After the decision timeout the request falls through to the manual modal.
+      act(() => {
+        jest.advanceTimersByTime(12_000)
+      })
+      jest.useRealTimers()
+      await flush()
+      expect(chatState.pushApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "sess-1", requestId: "req-hang" })
+      )
+    } finally {
+      jest.useRealTimers()
+      ;(runAutoModeForTool as jest.Mock).mockReset()
+    }
   })
 
   it("incoming permission_request for a non-open session is auto-denied", async () => {

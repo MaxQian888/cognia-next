@@ -40,9 +40,16 @@ describe("isStructuredMcpToolType", () => {
   })
 
   it("recognises Claude built-ins", () => {
-    expect(isStructuredMcpToolType("tool-Plan")).toBe(true)
     expect(isStructuredMcpToolType("tool-Read")).toBe(true)
     expect(isStructuredMcpToolType("tool-Glob")).toBe(true)
+  })
+
+  it("recognises the plan-mode signal tools — native, bare and cognia-namespaced", () => {
+    expect(isStructuredMcpToolType("tool-ExitPlanMode")).toBe(true)
+    expect(isStructuredMcpToolType("tool-exit_plan_mode")).toBe(true)
+    expect(isStructuredMcpToolType("tool-mcp__cognia-tools__exit_plan_mode")).toBe(true)
+    // The dead `Plan` tool name no longer routes anywhere.
+    expect(isStructuredMcpToolType("tool-Plan")).toBe(false)
   })
 
   it("rejects unknown tools and non-tool types", () => {
@@ -206,25 +213,28 @@ describe("MCPToolCard — wiki_read", () => {
   })
 })
 
-describe("MCPToolCard — Plan", () => {
-  it("renders one row per plan step with status data", () => {
-    const input = {
-      steps: [
-        { content: "Step 1", status: "completed" },
-        { content: "Step 2", status: "in_progress" },
-        { content: "Step 3" },
-      ],
-    }
-    render(<MCPToolCard part={part("tool-Plan", undefined, input)} />)
-    const steps = screen.getAllByTestId("mcp-plan-step")
-    expect(steps).toHaveLength(3)
-    expect(steps[0]).toHaveAttribute("data-status", "completed")
-    expect(steps[1]).toHaveAttribute("data-status", "in_progress")
-    expect(steps[2]).toHaveAttribute("data-status", "pending")
+describe("MCPToolCard — exit_plan_mode", () => {
+  it("renders the plan markdown from input.plan", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-ExitPlanMode", undefined, { plan: "## Plan\n\n1. Do the thing" })}
+      />
+    )
+    expect(screen.getByTestId("mcp-plan-card")).toBeInTheDocument()
+    expect(screen.getByTestId("mcp-plan-body")).toHaveTextContent("Do the thing")
   })
 
-  it("falls back to ToolBody when there are no steps", () => {
-    render(<MCPToolCard part={part("tool-Plan", undefined, { steps: [] })} />)
+  it("routes the cognia-namespaced exit_plan_mode to the same card", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-mcp__cognia-tools__exit_plan_mode", undefined, { plan: "do it" })}
+      />
+    )
+    expect(screen.getByTestId("mcp-plan-body")).toHaveTextContent("do it")
+  })
+
+  it("falls back to ToolBody when the plan is empty", () => {
+    render(<MCPToolCard part={part("tool-exit_plan_mode", undefined, { plan: "   " })} />)
     expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
   })
 })

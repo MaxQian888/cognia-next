@@ -26,6 +26,8 @@ import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
 import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
 import { deploymentKeyOf, DEPLOYMENT_MODEL_WILDCARD } from "@cognia/provider-types/deployment"
+import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
+import type { SpanSurface } from "@/types/agent-trace/span"
 
 export interface ProviderOutcome {
   providerId: string
@@ -56,6 +58,17 @@ export interface ProviderOutcome {
    * releases the pin.
    */
   sessionId?: string
+  /**
+   * W3C trace id of the owning turn (from `SendOptions.traceId`). When present
+   * — together with `sessionId` — the sink emits a provider CHILD span so the
+   * LLM call (with its tokens + cost) joins the turn's trace in the waterfall /
+   * OTLP / Langfuse. Absent on older call sites → no span (back-compat).
+   */
+  traceId?: string
+  /** Root/parent span id (`SendOptions.spanId`) the provider child span nests under. */
+  parentSpanId?: string
+  /** Surface that drove the turn — tags the child span. Defaults to "chat". */
+  surface?: SpanSurface
 }
 
 export function recordProviderOutcome(outcome: ProviderOutcome): void {
@@ -138,5 +151,42 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     }
   } catch {
     // Telemetry must never break a send.
+  }
+
+  // Agent-trace provider CHILD span: the LLM call as a child of the turn's root
+  // span, carrying token usage + cost for the waterfall / OTLP / Langfuse. Kept
+  // in its own try, AFTER (and independent of) the routing/breaker/cost fan-out
+  // above — additive, never reshaping that path. Skipped when the caller did
+  // not thread a `traceId` (older sites) or has no `sessionId`
+  // (`emitFinishedSpan` drops identity-less spans).
+  if (outcome.traceId && sessionId) {
+    try {
+      emitFinishedSpan({
+        traceId: outcome.traceId,
+        parentSpanId: outcome.parentSpanId,
+        operationName: "chat",
+        // The narrow `SpanProviderName` union only models anthropic|openai|
+        // cognia.*; arbitrary providerIds bucket to "openai" with the true id
+        // preserved in `metadata.providerId` (OTLP / waterfall read metadata).
+        providerName: providerId === "anthropic" ? "anthropic" : "openai",
+        sessionId,
+        surface: outcome.surface ?? "chat",
+        requestModel: modelId,
+        responseModel: modelId,
+        durationMs: Number.isFinite(latencyMs) && latencyMs >= 0 ? latencyMs : 0,
+        usage: {
+          inputTokens: inputTokens ?? 0,
+          outputTokens: outputTokens ?? 0,
+          cacheCreationTokens: cacheCreationTokens ?? 0,
+          cacheReadTokens: cacheReadTokens ?? 0,
+        },
+        costUsdEstimate: effectiveCostUsd > 0 ? effectiveCostUsd : undefined,
+        errorType: ok ? undefined : "provider_error",
+        errorMessage: ok ? undefined : errorMessage,
+        metadata: { providerId },
+      })
+    } catch {
+      // Span emission is best-effort — never break a send.
+    }
   }
 }

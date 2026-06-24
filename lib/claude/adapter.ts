@@ -439,6 +439,19 @@ function findLastAssistantIndex(messages: UIMessage[]): number {
   return -1
 }
 
+/**
+ * Index of the most recent real user turn — the boundary the live streaming
+ * target must sit after. Tool-result `user` payloads never reach the message
+ * list as their own rows (they patch existing assistant parts), so this only
+ * matches genuine user prompts, i.e. true turn boundaries.
+ */
+function findLastUserIndex(messages: UIMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return i
+  }
+  return -1
+}
+
 /** Append a text / reasoning delta to the last like-typed part, or start one. */
 function appendDelta(
   messages: UIMessage[],
@@ -505,6 +518,14 @@ function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage
     if (!partType || !chunk) return messages
     const idx = findLastAssistantIndex(messages)
     if (idx < 0) return messages
+    // Turn guard: never grow an assistant message that predates the latest
+    // user turn. When this turn's `message_start` was dropped or suppressed
+    // (an aborted / resent send that "didn't go out"), the only assistant in
+    // the list is the PRIOR turn's finished reply — appending here merges the
+    // new turn's tokens into it ("greeting two" + the old greeting's tail).
+    // Drop the orphaned delta instead; the canonical `assistant` message
+    // (carrying the real id) seeds this turn's reply correctly when it lands.
+    if (idx < findLastUserIndex(messages)) return messages
     return appendDelta(messages, idx, partType, chunk)
   }
 

@@ -7,23 +7,17 @@
  * triggering command label visible. Optional summary text replaces the
  * default body.
  *
- * Phase 8 of the ClaudeCode 完整化 plan. Used by the chat composer's
- * `pushSystemMessage(blockOrString)` extension.
+ * Emitted by slash actions via `ctx.pushSystemMessage({ kind: "slash-result",
+ * … })` (see `lib/slash-commands/system-blocks.ts`); the chat message renderer
+ * dispatches the carrying `data-diagnostics` part here on `kind`.
  */
 
 import { useTranslations } from "next-intl"
 import { TerminalSquareIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import type { SlashCommandResultBlock } from "@/lib/slash-commands/system-blocks"
 
-export interface SlashCommandResultBlock {
-  kind: "slash-result"
-  /** Name of the command that fired (without the leading `/`). */
-  commandId: string
-  /** Optional argument string the user typed after the command name. */
-  args?: string
-  /** Inline summary; falls through to a default i18n message if omitted. */
-  summary?: string
-}
+export type { SlashCommandResultBlock }
 
 export function SlashCommandResultChip({ block }: { block: SlashCommandResultBlock }) {
   const t = useTranslations("chat.slashCommand")

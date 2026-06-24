@@ -24,6 +24,7 @@ import {
 } from "./actions/diagnostics"
 import { handleBalance, handleLogin, handleModels, handleUsage } from "./actions/billing"
 import { seedBuiltinSlashCommands } from "./registry"
+import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-blocks"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
 import { dispatchLoopSubcommand } from "./actions/loop"
@@ -55,8 +56,14 @@ export interface SlashContext {
   openSettings: (tab: SettingsSectionId) => void
   /** Force a permission mode change (Shift+Tab equivalent). */
   setPermissionMode: (mode: PermissionMode | null) => void
-  /** Push a system message into the active session — used by /help. */
-  pushSystemMessage: (markdown: string) => void
+  /**
+   * Push a system message into the active session. Accepts markdown (rendered
+   * as text — used by /help, /status, …), a structured
+   * {@link SystemMessageBlock} that renders as a diagnostics card
+   * (/context, /usage, /cost), or a {@link SlashCommandResultBlock} that
+   * renders as a compact inline result chip (/resume, …).
+   */
+  pushSystemMessage: (payload: string | SystemMessageBlock | SlashCommandResultBlock) => void
 }
 
 export type SlashScope = "builtin" | "project" | "user"

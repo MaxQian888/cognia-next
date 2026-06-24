@@ -138,6 +138,26 @@ describe("ToolApprovalDialog — input previews", () => {
     expect(screen.getByTestId("diff-preview")).toBeInTheDocument()
   })
 
+  it("constrains width so long names/JSON don't overflow the dialog", () => {
+    // Regression: a long namespaced tool name must wrap (`break-all`) and the
+    // preview containers must be able to shrink (`min-w-0`) so the JSON/code
+    // block scrolls inside its own box instead of stretching the dialog.
+    render(
+      <ToolApprovalDialog
+        approval={approval({
+          toolName: "mcp__cognia-plugin-tools__some_extremely_long_tool_name",
+          input: { a: 1 },
+        })}
+        onRespond={jest.fn()}
+      />
+    )
+    const name = screen.getByText("mcp__cognia-plugin-tools__some_extremely_long_tool_name")
+    expect(name).toHaveClass("break-all")
+    // The JSON preview sits inside a shrinkable (`min-w-0`) section.
+    const preview = screen.getByTestId("code-block")
+    expect(preview.closest(".min-w-0")).not.toBeNull()
+  })
+
   it("responds with the chosen decision", () => {
     const onRespond = jest.fn()
     render(

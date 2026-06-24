@@ -20,6 +20,24 @@ jest.mock("@/lib/shell/exec", () => ({
 jest.mock("@/lib/files/memory", () => ({
   appendMemory: jest.fn(),
 }))
+// The attachment dispatch pipeline (token counting / PII / oversize) pulls in
+// heavy deps irrelevant to composer logic tests. Stub it so a send reaches the
+// `onSend` prop cleanly.
+jest.mock("@/lib/chat/attachments/dispatch", () => ({
+  buildSendContent: jest.fn(async (text: string) => ({
+    content: text,
+    rejected: [],
+    tokens: 1,
+  })),
+  INLINE_TOKEN_CEILING: 1_000_000,
+}))
+// Chat-draft persistence hits IndexedDB; stub it so clear-after-send and draft
+// hydration are no-ops in the logic test.
+jest.mock("@/lib/db/chat-drafts", () => ({
+  clearDraft: jest.fn(async () => undefined),
+  getDraft: jest.fn(async () => undefined),
+  setDraftDebounced: jest.fn(() => undefined),
+}))
 jest.mock("./composer/screenshot-button", () => ({
   ScreenshotButton: () => null,
 }))
@@ -162,6 +180,83 @@ describe("Composer — data-hooks integration", () => {
   })
 })
 
+describe("Composer — send protection", () => {
+  it("switches the send button to a disabled running state while a send is in flight", async () => {
+    // onSend never resolves, holding the composer in its "sending" window —
+    // before the chat store would flip to "streaming".
+    const onSend = jest.fn(() => new Promise<void>(() => {}))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "hello" } })
+    })
+
+    const sendBtn = document.querySelector('button[aria-label="Send"]') as HTMLButtonElement | null
+    expect(sendBtn).not.toBeNull()
+
+    await act(async () => {
+      fireEvent.click(sendBtn as HTMLButtonElement)
+      await Promise.resolve()
+    })
+
+    // The button immediately reflects the running state: relabelled "Sending…"
+    // and disabled so a fast second submit cannot double-send.
+    const sending = document.querySelector(
+      'button[aria-label="Sending…"]'
+    ) as HTMLButtonElement | null
+    expect(sending).not.toBeNull()
+    expect(sending?.disabled).toBe(true)
+    expect(onSend).toHaveBeenCalledTimes(1)
+    // Optimistic clear: the input empties the instant the turn is dispatched,
+    // not after the whole send pipeline resolves.
+    expect(textarea.value).toBe("")
+  })
+
+  it("restores the typed text if the send fails", async () => {
+    const onSend = jest.fn(async () => {
+      throw new Error("send boom")
+    })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "keep me" } })
+    })
+
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+
+    // The failed send must not lose the user's text.
+    await waitFor(() => expect(textarea.value).toBe("keep me"))
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("Composer — mobile (Claude-style) layout", () => {
   function renderComposer() {
     const Wrapper = withAdapter(makeAdapter())
@@ -214,6 +309,35 @@ describe("Composer — mobile (Claude-style) layout", () => {
     const taWrapper = document.querySelector("textarea")?.parentElement
     expect(taWrapper?.className ?? "").toContain("@sm/composer:flex-1")
     expect(taWrapper?.className ?? "").toContain("@sm/composer:w-auto")
+  })
+})
+
+describe("Composer — wallpaper-aware tonality", () => {
+  function renderComposer() {
+    const Wrapper = withAdapter(makeAdapter())
+    return render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+  }
+
+  it("flags the input pill as a translucent tonality surface", () => {
+    renderComposer()
+    const pill = document.querySelector("textarea")?.closest("[class*='rounded-2xl']")
+    expect(pill).toHaveAttribute("data-tonality", "translucent")
+  })
+
+  it("flags the bottom bar as a glass tonality surface", () => {
+    renderComposer()
+    const bar = document.querySelector("[class*='@container/composer']")
+    expect(bar).toHaveAttribute("data-tonality", "glass")
   })
 })
 

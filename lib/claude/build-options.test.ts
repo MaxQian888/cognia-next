@@ -106,6 +106,10 @@ import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
+import {
+  __getActiveSpanForTesting,
+  __resetAgentTraceEmitterForTesting,
+} from "@cognia/agent-trace/emitter"
 import { listTeamMembers, resolveMemberConfig, resolveSendOptions } from "./build-options"
 import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
 import type { Project } from "@/types"
@@ -2855,5 +2859,65 @@ describe("maxBudgetUsd from active goal (/goal cost ceiling)", () => {
   it("does not set maxBudgetUsd without an active goal", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(opts.maxBudgetUsd).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — agent-trace root span minting", () => {
+  const HEX32 = /^[0-9a-f]{32}$/
+  const HEX16 = /^[0-9a-f]{16}$/
+
+  afterEach(() => {
+    __resetAgentTraceEmitterForTesting()
+  })
+
+  it("does NOT mint a root span unless emitTrace is set (opt-in)", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.traceId).toBeUndefined()
+    expect(opts.spanId).toBeUndefined()
+  })
+
+  it("mints traceId + spanId with W3C shapes when emitTrace is true", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-trace" }),
+      character: makeChar({ id: "c1" }),
+      emitTrace: true,
+    })
+    expect(opts.traceId).toMatch(HEX32)
+    expect(opts.spanId).toMatch(HEX16)
+  })
+
+  it("stamps the root span surface from traceSurface and carries session/provider metadata", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-conn" }),
+      character: makeChar({ id: "c1" }),
+      emitTrace: true,
+      traceSurface: "connector",
+      conversationKey: "conv-9",
+      routingContextHint: { promptText: "hello there" },
+    })
+    const span = __getActiveSpanForTesting(opts.spanId!)
+    expect(span).toBeDefined()
+    expect(span?.surface).toBe("connector")
+    expect(span?.sessionId).toBe("s-conn")
+    expect(span?.operationName).toBe("invoke_agent")
+    expect(span?.inputPreview).toBe("hello there")
+    expect(span?.metadata).toMatchObject({ conversationKey: "conv-9" })
+    // parentSpanId is absent on a root span.
+    expect(span?.parentSpanId).toBeUndefined()
+  })
+
+  it("stamps a parentTrace verbatim and does NOT mint a new root span", async () => {
+    const parentTrace = { traceId: "a".repeat(32), rootSpanId: "b".repeat(16) }
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-child" }),
+      character: makeChar({ id: "c1" }),
+      emitTrace: true,
+      parentTrace,
+    })
+    // Verbatim stamping — fresh ids would differ (random), so equality proves
+    // no new span was minted.
+    expect(opts.traceId).toBe(parentTrace.traceId)
+    expect(opts.spanId).toBe(parentTrace.rootSpanId)
+    expect(__getActiveSpanForTesting(parentTrace.rootSpanId)).toBeUndefined()
   })
 })

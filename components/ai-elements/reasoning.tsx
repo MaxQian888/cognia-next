@@ -43,6 +43,13 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
   duration?: number
+  /**
+   * Auto-collapse the block ~1s after streaming ends. Defaults to `true` to
+   * preserve the upstream behavior, but the chat transcript opts out
+   * (`closeOnFinish={false}`) so a completed "thinking" block stays visible
+   * instead of vanishing the moment the answer lands.
+   */
+  closeOnFinish?: boolean
 }
 
 const AUTO_CLOSE_DELAY = 1000
@@ -56,6 +63,7 @@ export const Reasoning = memo(
     defaultOpen,
     onOpenChange,
     duration: durationProp,
+    closeOnFinish = true,
     children,
     ...props
   }: ReasoningProps) => {
@@ -97,8 +105,10 @@ export const Reasoning = memo(
       }
     }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed])
 
-    // Auto-close when streaming ends (once only, and only if it ever streamed)
+    // Auto-close when streaming ends (once only, and only if it ever streamed).
+    // Opt-out via `closeOnFinish={false}` so finished thinking blocks persist.
     useEffect(() => {
+      if (!closeOnFinish) return
       if (hasEverStreamedRef.current && !isStreaming && isOpen && !hasAutoClosed) {
         const timer = setTimeout(() => {
           setIsOpen(false)
@@ -107,7 +117,7 @@ export const Reasoning = memo(
 
         return () => clearTimeout(timer)
       }
-    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed])
+    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed, closeOnFinish])
 
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {

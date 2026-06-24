@@ -20,6 +20,15 @@ jest.mock("@/lib/db/provider-cost-daily", () => ({
 import { incrementProviderCost as incrementProviderCostImport } from "@/lib/db/provider-cost-daily"
 const incrementProviderCost = incrementProviderCostImport as jest.Mock
 
+// Spy on the agent-trace child-span emission while keeping the rest of the
+// emitter real. Mock fn defined inside the factory (TDZ).
+jest.mock("@cognia/agent-trace/emitter", () => ({
+  ...jest.requireActual("@cognia/agent-trace/emitter"),
+  emitFinishedSpan: jest.fn(),
+}))
+import { emitFinishedSpan as emitFinishedSpanImport } from "@cognia/agent-trace/emitter"
+const emitFinishedSpan = emitFinishedSpanImport as jest.Mock
+
 /** Let the fire-and-forget dynamic import + .then chain settle. */
 async function flushAsync() {
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -36,6 +45,8 @@ describe("recordProviderOutcome", () => {
     useRateLimitStore.getState().reset()
     resetAffinity()
     incrementProviderCost.mockClear()
+    emitFinishedSpan.mockClear()
+    emitFinishedSpan.mockReset()
   })
 
   it("records a success into health metrics and the breaker", () => {
@@ -267,5 +278,136 @@ describe("recordProviderOutcome", () => {
       expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
       expect(incrementProviderCost).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe("recordProviderOutcome — agent-trace provider child span", () => {
+  beforeEach(() => {
+    useHealthMetricsStore.getState().resetAll()
+    useCircuitBreakerStore.getState().resetAll()
+    useProviderCostMirrorStore.getState().reset()
+    useRateLimitStore.getState().reset()
+    resetAffinity()
+    emitFinishedSpan.mockReset()
+  })
+
+  it("does NOT emit a span when no traceId is threaded (back-compat)", () => {
+    recordProviderOutcome({
+      providerId: "anthropic",
+      ok: true,
+      latencyMs: 100,
+      modelId: "claude-opus-4-8",
+      sessionId: "s1",
+    })
+    expect(emitFinishedSpan).not.toHaveBeenCalled()
+  })
+
+  it("does NOT emit a span when traceId is present but sessionId is missing", () => {
+    recordProviderOutcome({
+      providerId: "anthropic",
+      ok: true,
+      latencyMs: 100,
+      modelId: "claude-opus-4-8",
+      traceId: "a".repeat(32),
+      parentSpanId: "b".repeat(16),
+    })
+    expect(emitFinishedSpan).not.toHaveBeenCalled()
+  })
+
+  it("emits exactly one child span nested under the root with usage + cost on success", () => {
+    recordProviderOutcome({
+      providerId: "anthropic",
+      ok: true,
+      latencyMs: 240,
+      estimatedCostUsd: 0.012,
+      modelId: "claude-opus-4-8",
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 200,
+      cacheCreationTokens: 50,
+      sessionId: "s1",
+      traceId: "a".repeat(32),
+      parentSpanId: "b".repeat(16),
+      surface: "chat",
+    })
+    expect(emitFinishedSpan).toHaveBeenCalledTimes(1)
+    expect(emitFinishedSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: "a".repeat(32),
+        parentSpanId: "b".repeat(16),
+        operationName: "chat",
+        providerName: "anthropic",
+        sessionId: "s1",
+        surface: "chat",
+        requestModel: "claude-opus-4-8",
+        responseModel: "claude-opus-4-8",
+        durationMs: 240,
+        usage: {
+          inputTokens: 1000,
+          outputTokens: 500,
+          cacheCreationTokens: 50,
+          cacheReadTokens: 200,
+        },
+        costUsdEstimate: 0.012,
+        metadata: { providerId: "anthropic" },
+      })
+    )
+    const span = emitFinishedSpan.mock.calls[0][0]
+    expect(span.errorType).toBeUndefined()
+  })
+
+  it("buckets a non-anthropic provider to openai with the true id in metadata", () => {
+    recordProviderOutcome({
+      providerId: "openai",
+      ok: true,
+      latencyMs: 50,
+      modelId: "gpt-4o",
+      sessionId: "s1",
+      traceId: "a".repeat(32),
+      parentSpanId: "b".repeat(16),
+    })
+    expect(emitFinishedSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerName: "openai",
+        surface: "chat",
+        metadata: { providerId: "openai" },
+      })
+    )
+  })
+
+  it("maps a failure to errorType/errorMessage on the span", () => {
+    recordProviderOutcome({
+      providerId: "anthropic",
+      ok: false,
+      latencyMs: 0,
+      errorMessage: "overloaded",
+      modelId: "claude-opus-4-8",
+      sessionId: "s1",
+      traceId: "a".repeat(32),
+      parentSpanId: "b".repeat(16),
+    })
+    expect(emitFinishedSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorType: "provider_error",
+        errorMessage: "overloaded",
+      })
+    )
+  })
+
+  it("does not throw when span emission fails", () => {
+    emitFinishedSpan.mockImplementation(() => {
+      throw new Error("emitter boom")
+    })
+    expect(() =>
+      recordProviderOutcome({
+        providerId: "anthropic",
+        ok: true,
+        latencyMs: 100,
+        modelId: "claude-opus-4-8",
+        sessionId: "s1",
+        traceId: "a".repeat(32),
+        parentSpanId: "b".repeat(16),
+      })
+    ).not.toThrow()
   })
 })

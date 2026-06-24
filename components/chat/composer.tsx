@@ -19,7 +19,7 @@ import {
   usePromptInputAttachments,
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input"
-import type { ChatStatus as PromptStatus } from "ai"
+import type { ChatStatus as PromptStatus, UIMessage } from "ai"
 import { ArrowUpIcon, FolderIcon, Loader2Icon, PaperclipIcon, SquareIcon } from "lucide-react"
 import {
   ChangeEvent,
@@ -99,6 +99,11 @@ import {
   type SlashContext,
 } from "@/lib/slash-commands/builtin"
 import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
+import {
+  DIAGNOSTICS_PART_TYPE,
+  type SystemMessageBlock,
+  type SlashCommandResultBlock,
+} from "@/lib/slash-commands/system-blocks"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
 import { runSegments } from "@/lib/slash-commands/run-segments"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
@@ -295,6 +300,14 @@ function ComposerInner(props: InnerProps) {
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Send protection: the chat store only flips to "streaming" once the dispatch
+  // pipeline reaches `setSessionStatus`, leaving a window after the click where
+  // the button would still read as "send". `isSending` is set synchronously the
+  // instant a turn is dispatched so the button shows the running state
+  // immediately and a second submit (a fast Enter / double-click) is rejected.
+  // The ref is the synchronous re-entrancy guard; the state drives the render.
+  const [isSending, setIsSending] = useState(false)
+  const isSendingRef = useRef(false)
   const chipOverlayRef = useRef<HTMLDivElement>(null)
   const ghostOverlayRef = useRef<HTMLDivElement>(null)
   const ghost = useComposerGhostText(props.session)
@@ -484,33 +497,13 @@ function ComposerInner(props: InnerProps) {
           dismissPopover()
           return
         }
+        // Don't run the command on pick — drop it into the composer so the user
+        // can review / append args and send it together with the rest of their
+        // message. Both action handlers and templates are expanded on submit by
+        // `runSegments` (see the submit handler), so the behavior is uniform:
+        // pick → stays in the box → Enter sends.
         const args = trigger.query.replace(new RegExp(`^${cmd.name}\\s*`), "").trim()
-        const handled = await props.onCommand(cmd, args)
-        if (handled) {
-          if (cmd.handler) {
-            controller.textInput.clear()
-          } else if (cmd.template) {
-            const filled = applyTemplate(cmd.template, args)
-            controller.textInput.setInput(filled)
-            if (cmd.model || cmd.allowedTools || cmd.paths) {
-              useChatStore.getState().setPendingCommandOverrides({
-                model: cmd.model,
-                allowedTools: cmd.allowedTools,
-                paths: cmd.paths,
-              })
-            } else {
-              useChatStore.getState().setPendingCommandOverrides(null)
-            }
-            requestAnimationFrame(() => {
-              const ta2 = textareaRef.current
-              if (ta2) {
-                ta2.setSelectionRange(filled.length, filled.length)
-                ta2.focus()
-              }
-            })
-          }
-        }
-        dismissPopover()
+        insertReplacement(`/${cmd.name}${args ? ` ${args}` : ""} `)
       } else if (item.kind === "file") {
         const e = item.entry
         addReferencedPath({
@@ -579,72 +572,112 @@ function ComposerInner(props: InnerProps) {
   const submit = useCallback(async () => {
     const text = controller.textInput.value
     if (props.disabled) return
+    // Re-entrancy guard (send protection): reject a second dispatch while one is
+    // already in flight — covers the window between the click and the store
+    // flipping to "streaming", where a fast Enter could otherwise double-send.
+    if (isSendingRef.current) return
 
-    const filesToSend: SubmittedFile[] = await Promise.all(
-      attachments.files.map(async ({ id: _id, ...item }) => {
-        if (item.url?.startsWith("blob:")) {
-          const dataUrl = await blobUrlToDataUrl(item.url)
-          return { ...item, url: dataUrl ?? item.url }
-        }
-        return item
-      })
-    )
-
-    const empty = text.trim().length === 0 && filesToSend.length === 0
+    // Emptiness is decided from the synchronous attachment count (blob→data-url
+    // conversion below preserves count) so the guard can be armed BEFORE the
+    // first await, leaving no race for a concurrent submit to slip through.
+    const empty = text.trim().length === 0 && attachments.files.length === 0
     if (empty) return
 
-    // Record the exact typed text for ↑/↓ recall (before any command stripping).
-    history.record(text)
+    isSendingRef.current = true
+    setIsSending(true)
 
-    const clearAfterSend = () => {
-      // When clear-after-send is off, keep the typed text + attachments (and
-      // their persisted draft) so the user can resend or tweak; just refocus.
-      if (!clearAfterSendEnabled) {
-        textareaRef.current?.focus()
-        return
-      }
+    // Snapshot the attachments BEFORE the optimistic clear so the actual send
+    // still has them (and so a failed send can restore the composer).
+    const snapshotFiles = [...attachments.files]
+    const snapshotAttachmentInputs = snapshotFiles.map(({ id: _id, ...item }) => item)
+
+    // ── Optimistic clear ───────────────────────────────────────────────────
+    // Natural chat UX: the box empties the instant you hit send — not after the
+    // whole turn resolves (`onSubmit` only settles once the send pipeline has
+    // run, which is why the text used to linger for the entire response). We
+    // snapshot first and restore on a rejected/failed send. `clearAfterSend`
+    // off keeps everything in place (the user resends/tweaks), so skip then.
+    let cleared = false
+    const clearInputOptimistically = () => {
+      if (!clearAfterSendEnabled || cleared) return
       controller.textInput.clear()
       attachments.clear()
       setRestoredAttachments([])
-      if (sessionId) {
-        void clearChatDraft(sessionId)
-      }
-      textareaRef.current?.focus()
+      if (sessionId) void clearChatDraft(sessionId)
+      cleared = true
     }
+    const restoreInputAfterFailure = () => {
+      if (!cleared) return
+      controller.textInput.setInput(text)
+      cleared = false
+    }
+    clearInputOptimistically()
 
-    // Multi-command: the live `segments` memo already split this input into
-    // ordered command / text segments. A `!shell` / `#memory` whole-message
-    // prefix is left to the outer handleSubmit (the parser ignores those). When
-    // the message contains one or more line-start `/commands`, run them in
-    // order: action handlers execute via `props.onCommand` (context-rich,
-    // self-toasting), template commands expand inline, and the leftover prose is
-    // what gets sent.
-    const hasCommand = segments.some((s) => s.kind === "command")
-    if (hasCommand) {
-      const { outgoingText, overrides, ranAction } = await runSegments(segments, {
-        commandMap,
-        runAction: async (command, args) => {
-          await props.onCommand(command, args)
-        },
-        applyTemplate,
-      })
-      useChatStore.getState().setPendingCommandOverrides(overrides)
-      // Only send a turn when there is prose or attachments. An action-only
-      // batch (e.g. `/clear`) mutates client state and sends nothing — mirroring
-      // today's "action command clears the input, no turn" behavior.
-      let sent = true
-      if (outgoingText.length > 0 || filesToSend.length > 0) {
-        sent = await props.onSubmit(outgoingText, filesToSend)
-      } else if (!ranAction) {
-        // Defensive: no prose, no files, no action — nothing to do.
+    try {
+      const filesToSend: SubmittedFile[] = await Promise.all(
+        snapshotAttachmentInputs.map(async (item) => {
+          if (item.url?.startsWith("blob:")) {
+            const dataUrl = await blobUrlToDataUrl(item.url)
+            return { ...item, url: dataUrl ?? item.url }
+          }
+          return item
+        })
+      )
+
+      // Record the exact typed text for ↑/↓ recall (before any command stripping).
+      history.record(text)
+
+      // Multi-command: the live `segments` memo already split this input into
+      // ordered command / text segments. A `!shell` / `#memory` whole-message
+      // prefix is left to the outer handleSubmit (the parser ignores those). When
+      // the message contains one or more line-start `/commands`, run them in
+      // order: action handlers execute via `props.onCommand` (context-rich,
+      // self-toasting), template commands expand inline, and the leftover prose is
+      // what gets sent.
+      const hasCommand = segments.some((s) => s.kind === "command")
+      if (hasCommand) {
+        const { outgoingText, overrides, ranAction } = await runSegments(segments, {
+          commandMap,
+          runAction: async (command, args) => {
+            await props.onCommand(command, args)
+          },
+          applyTemplate,
+        })
+        useChatStore.getState().setPendingCommandOverrides(overrides)
+        // Only send a turn when there is prose or attachments. An action-only
+        // batch (e.g. `/clear`) mutates client state and sends nothing — mirroring
+        // today's "action command clears the input, no turn" behavior.
+        let sent = true
+        if (outgoingText.length > 0 || filesToSend.length > 0) {
+          sent = await props.onSubmit(outgoingText, filesToSend)
+        } else if (!ranAction) {
+          // Defensive: no prose, no files, no action — nothing was dispatched,
+          // so restore the optimistically-cleared input rather than lose it.
+          restoreInputAfterFailure()
+          return
+        }
+        if (sent) textareaRef.current?.focus()
+        else restoreInputAfterFailure()
         return
       }
-      if (sent) clearAfterSend()
-      return
-    }
 
-    const sent = await props.onSubmit(text, filesToSend)
-    if (sent) clearAfterSend()
+      const sent = await props.onSubmit(text, filesToSend)
+      if (sent) textareaRef.current?.focus()
+      else restoreInputAfterFailure()
+    } catch (err) {
+      // A thrown send must not leave the user's text lost — restore the
+      // optimistically-cleared input and surface the failure (don't rethrow
+      // into the fire-and-forget click handler).
+      restoreInputAfterFailure()
+      loggers.chat.error("composer send failed", err)
+    } finally {
+      // Always release the guard. On a successful send the store has already
+      // flipped to "streaming" (so the button stays in stop state); on a
+      // rejected/aborted send it returns to the idle send state so the user can
+      // retry.
+      isSendingRef.current = false
+      setIsSending(false)
+    }
   }, [
     controller.textInput,
     attachments,
@@ -1039,6 +1072,13 @@ function ComposerInner(props: InnerProps) {
           "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
           "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
         )}
+        // Opt the input surface into the shared wallpaper-aware tonality system
+        // (app/globals.css §5): when a background is active the hardcoded
+        // bg-background/70 is replaced by the token-driven translucent surface
+        // + blur, so the composer adapts like every other surface and honours
+        // prefers-reduced-transparency. Falls back to bg-background/70 when no
+        // wallpaper is set.
+        data-tonality="translucent"
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -1160,11 +1200,17 @@ function ComposerInner(props: InnerProps) {
                 </Button>
               ) : (
                 <Button
-                  aria-label={isStreaming ? t("ariaStop") : t("ariaSend")}
-                  className="size-9 rounded-full"
+                  aria-label={
+                    isStreaming ? t("ariaStop") : isSending ? t("ariaSending") : t("ariaSend")
+                  }
+                  className="size-9 rounded-full transition-transform duration-200 ease-out will-change-transform active:scale-90 disabled:scale-100"
                   disabled={
                     // In web mode, platform-bound sessions cannot send outbound messages.
                     (!isDesktop && !!props.session?.platformBinding) ||
+                    // A turn is being dispatched: the button is a non-interactive
+                    // spinner until the store flips to "streaming" (then it becomes
+                    // the live Stop button).
+                    isSending ||
                     (!isStreaming &&
                       (props.disabled ||
                         (controller.textInput.value.trim().length === 0 &&
@@ -1174,12 +1220,20 @@ function ComposerInner(props: InnerProps) {
                   size="icon"
                   type="button"
                 >
+                  {/* Icon swap cross-fades + zooms on each state change for a
+                      natural send→running→stop morph (keys force the enter anim). */}
                   {isStreaming ? (
-                    <SquareIcon className="size-4" />
-                  ) : props.status === "submitted" ? (
-                    <Loader2Icon className="size-4 animate-spin" />
+                    <SquareIcon
+                      key="stop"
+                      className="size-4 duration-200 animate-in fade-in-0 zoom-in-75"
+                    />
+                  ) : isSending || props.status === "submitted" ? (
+                    <Loader2Icon key="sending" className="size-4 animate-spin" />
                   ) : (
-                    <ArrowUpIcon className="size-4" />
+                    <ArrowUpIcon
+                      key="send"
+                      className="size-4 duration-200 animate-in fade-in-0 zoom-in-75"
+                    />
                   )}
                 </Button>
               )}
@@ -1336,11 +1390,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [session?.platformBinding?.conversationKey, resolvedMode])
 
   const pushSystemMessage = useCallback(
-    (markdown: string) => {
+    (payload: string | SystemMessageBlock | SlashCommandResultBlock) => {
+      // Strings render as markdown text; any structured block (diagnostics card
+      // or slash-result chip) rides the same data part and is dispatched by the
+      // message renderer on its `kind`.
+      const parts =
+        typeof payload === "string"
+          ? [{ type: "text", text: payload }]
+          : [{ type: DIAGNOSTICS_PART_TYPE, data: payload }]
       appendMessage({
         id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: "system",
-        parts: [{ type: "text", text: markdown }],
+        parts: parts as UIMessage["parts"],
       })
     },
     [appendMessage]
@@ -1594,7 +1655,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [])
 
   return (
-    <div className="@container/composer border-t bg-background/70 p-2 sm:p-3">
+    <div
+      className="@container/composer border-t bg-background/70 p-2 sm:p-3"
+      // Frosted-glass chrome over an active wallpaper (app/globals.css §5),
+      // matching the other toolbar surfaces; bg-background/70 stays the
+      // no-wallpaper fallback.
+      data-tonality="glass"
+    >
       <PromptInputProvider>
         <ComposerInner
           session={session}

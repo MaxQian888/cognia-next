@@ -9,14 +9,23 @@ jest.mock("@tauri-apps/plugin-dialog", () => ({
   open: jest.fn(async () => null),
 }))
 
-// hasApiKey()/hasOauthBearer() are Tauri IPC calls — also conditional on
-// isTauri(). Controllable so the No-API-key badge cases can flip them.
-// jest.fn defined INSIDE the factory: modules call isTauri() at init time,
-// so an outer `const mock...` hits the TDZ before initialization.
+// The header reads credential status (api key OR subscription bearer) + the
+// active subscription tier through `useCredentialStatus`. Mock it so the
+// No-API-key / tier badge cases are driven directly; the hook's own probe
+// logic is covered in use-credential-status.test.ts.
+jest.mock("@/hooks/chat/use-credential-status", () => ({
+  useCredentialStatus: jest.fn(() => ({ keyOk: true, plan: null })),
+}))
+
+// closeSession is a Tauri IPC call the header imports for its close button.
 jest.mock("@/lib/claude/ipc", () => ({
-  hasApiKey: jest.fn(async () => true),
-  hasOauthBearer: jest.fn(async () => false),
   closeSession: jest.fn(async () => undefined),
+}))
+
+// The clear-conversation trigger pulls in the chat store + data adapter; the
+// header's logic tests don't need its internals (it has its own suite).
+jest.mock("@/components/chat/dialogs/clear-conversation-trigger", () => ({
+  ClearConversationTrigger: () => null,
 }))
 
 // isTauri() gates the key probe (and the working-dir picker). Default false
@@ -48,11 +57,10 @@ jest.mock("@/components/chat/session-cost-badge-live", () => ({
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { ChatHeader } from "./chat-header"
-import { hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { isTauri } from "@/lib/tauri"
 
-const mockHasApiKey = hasApiKey as unknown as jest.Mock
-const mockHasOauthBearer = hasOauthBearer as unknown as jest.Mock
+const mockCredentialStatus = useCredentialStatus as unknown as jest.Mock
 const mockIsTauri = isTauri as unknown as jest.Mock
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
@@ -111,14 +119,11 @@ const mkCharacter = (overrides: Partial<Character> = {}): Character => ({
 describe("ChatHeader", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
-    mockHasApiKey.mockResolvedValue(true)
-    mockHasOauthBearer.mockResolvedValue(false)
+    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
   })
 
   it("shows the No-API-key badge when neither api key nor subscription bearer exists", async () => {
-    mockIsTauri.mockReturnValue(true)
-    mockHasApiKey.mockResolvedValue(false)
-    mockHasOauthBearer.mockResolvedValue(false)
+    mockCredentialStatus.mockReturnValue({ keyOk: false, plan: null })
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
@@ -128,22 +133,30 @@ describe("ChatHeader", () => {
     expect(await screen.findByText(/no api key/i)).toBeInTheDocument()
   })
 
-  it("hides the No-API-key badge when a subscription OAuth bearer is active", async () => {
+  it("hides the No-API-key badge when a subscription OAuth bearer is active", () => {
     // Subscription-reuse users have no ANTHROPIC_API_KEY — auth flows through
     // the OAuth bearer pushed by `subscription_set_active`. The badge must
     // treat that as configured.
-    mockIsTauri.mockReturnValue(true)
-    mockHasApiKey.mockResolvedValue(false)
-    mockHasOauthBearer.mockResolvedValue(true)
+    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
         <ChatHeader session={mkSession()} />
       </Wrapper>
     )
-    // Let the key probe resolve, then assert the badge stayed hidden.
-    await waitFor(() => expect(mockHasOauthBearer).toHaveBeenCalled())
-    await act(async () => {})
+    expect(screen.queryByText(/no api key/i)).not.toBeInTheDocument()
+  })
+
+  it("shows the subscription tier badge (capitalized) when on a subscription", () => {
+    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: "max" })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    // Tier label is the capitalized plan; "no api key" must not show.
+    expect(screen.getByText(/Max/)).toBeInTheDocument()
     expect(screen.queryByText(/no api key/i)).not.toBeInTheDocument()
   })
 

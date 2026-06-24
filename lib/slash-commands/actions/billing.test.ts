@@ -41,8 +41,10 @@ import { handleUsage, handleBalance, handleModels, handleLogin } from "./billing
 
 // ── Fake SlashContext ──────────────────────────────────────────────────────
 
-function makeCtx(): { ctx: SlashContext; pushed: string[]; openSettings: jest.Mock } {
-  const pushed: string[] = []
+type Pushed = Parameters<SlashContext["pushSystemMessage"]>[0]
+
+function makeCtx(): { ctx: SlashContext; pushed: Pushed[]; openSettings: jest.Mock } {
+  const pushed: Pushed[] = []
   const openSettings = jest.fn()
   const ctx = {
     args: "",
@@ -52,7 +54,7 @@ function makeCtx(): { ctx: SlashContext; pushed: string[]; openSettings: jest.Mo
     startNewSession: jest.fn(),
     openSettings,
     setPermissionMode: jest.fn(),
-    pushSystemMessage: (m: string) => pushed.push(m),
+    pushSystemMessage: (m: Pushed) => pushed.push(m),
   } as unknown as SlashContext
   return { ctx, pushed, openSettings }
 }
@@ -91,15 +93,20 @@ describe("handleUsage", () => {
     ]
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    const out = pushed.join("\n")
-    expect(out).toMatch(/5-hour window\*\*: 42% used/)
-    expect(out).toMatch(/7-day window\*\*: 95% used \[warn\]/)
-    expect(out).toMatch(/resets in 1h/)
-    expect(out).toMatch(/Fallback\*\*: 12%/)
-    expect(out).toMatch(/Overage disabled\*\*: spend cap reached/)
+    const block = pushed[0] as Extract<Pushed, { kind: "usage" }>
+    expect(block.kind).toBe("usage")
+    const five = block.windows.find((w) => w.key === "fiveHour")!
+    const seven = block.windows.find((w) => w.key === "sevenDay")!
+    expect(five.utilization).toBe(42)
+    expect(seven.utilization).toBe(95)
+    expect(seven.level).toBe("warn")
+    // 5h resets ~1h15m out → still a positive countdown.
+    expect(five.msUntilReset).toBeGreaterThan(3_600_000)
+    expect(block.fallbackPercentage).toBe(12)
+    expect(block.overageDisabledReason).toBe("spend cap reached")
   })
 
-  it("renders 'not reported' when a window is absent", async () => {
+  it("reports a null utilization when a window is absent", async () => {
     usageRows = [
       {
         fetchedAt: Date.now(),
@@ -115,10 +122,13 @@ describe("handleUsage", () => {
     ]
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    expect(pushed.join("\n")).toMatch(/5-hour window\*\*: not reported/)
+    const block = pushed[0] as Extract<Pushed, { kind: "usage" }>
+    const five = block.windows.find((w) => w.key === "fiveHour")!
+    expect(five.utilization).toBeNull()
+    expect(five.level).toBeNull()
   })
 
-  it("marks a window as resetting when the countdown is expired", async () => {
+  it("surfaces an expired countdown as a non-positive msUntilReset", async () => {
     const now = Date.now()
     usageRows = [
       {
@@ -135,7 +145,9 @@ describe("handleUsage", () => {
     ]
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    expect(pushed.join("\n")).toMatch(/resetting/)
+    const block = pushed[0] as Extract<Pushed, { kind: "usage" }>
+    const five = block.windows.find((w) => w.key === "fiveHour")!
+    expect(five.msUntilReset).toBe(0)
   })
 
   it("degrades gracefully when the Dexie read throws", async () => {

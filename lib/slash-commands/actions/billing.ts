@@ -6,27 +6,12 @@
 
 import type { SlashContext } from "../builtin"
 import { getDb } from "@/lib/db/schema"
-import {
-  summarizeCurrentWindow,
-  splitCountdown,
-  type WindowStatus,
-} from "@/lib/subscription/anthropic/usage-analytics"
+import { summarizeCurrentWindow } from "@/lib/subscription/anthropic/usage-analytics"
 import { latestBalanceSnapshot } from "@/lib/subscription/balance/store"
 import { listAccounts } from "@/lib/subscription/core/transport"
 import { syncModelsDevCatalog } from "@/lib/ai/providers/models-dev-sync"
 import { ALL_PROVIDER_IDS } from "@/types/subscription"
 import type { AccountSummary, SubscriptionUsageRow } from "@/types/subscription"
-
-/** Render one Anthropic quota window as a markdown bullet. */
-function windowLine(label: string, w: WindowStatus | null): string {
-  if (!w) return `- **${label}**: not reported`
-  let reset = ""
-  if (w.msUntilReset != null) {
-    const c = splitCountdown(w.msUntilReset)
-    reset = c.expired ? " (resetting…)" : ` (resets in ${c.hours}h ${c.minutes}m)`
-  }
-  return `- **${label}**: ${w.utilization.toFixed(0)}% used [${w.level}]${reset}`
-}
 
 /**
  * `/usage` — Anthropic subscription quota windows (5h / 7d) from the newest
@@ -53,16 +38,25 @@ export async function handleUsage(ctx: SlashContext): Promise<void> {
     return
   }
 
-  lines.push(windowLine("5-hour window", summary.fiveHour))
-  lines.push(windowLine("7-day window", summary.sevenDay))
-  if (summary.fallbackPercentage != null) {
-    lines.push(`- **Fallback**: ${summary.fallbackPercentage}%`)
-  }
-  if (summary.overageDisabledReason) {
-    lines.push(`- **Overage disabled**: ${summary.overageDisabledReason}`)
-  }
-  lines.push("", "_See Settings → Subscription → Usage for charts and history._")
-  ctx.pushSystemMessage(lines.join("\n"))
+  ctx.pushSystemMessage({
+    kind: "usage",
+    windows: [
+      {
+        key: "fiveHour",
+        utilization: summary.fiveHour?.utilization ?? null,
+        level: summary.fiveHour?.level ?? null,
+        msUntilReset: summary.fiveHour?.msUntilReset ?? null,
+      },
+      {
+        key: "sevenDay",
+        utilization: summary.sevenDay?.utilization ?? null,
+        level: summary.sevenDay?.level ?? null,
+        msUntilReset: summary.sevenDay?.msUntilReset ?? null,
+      },
+    ],
+    fallbackPercentage: summary.fallbackPercentage,
+    overageDisabledReason: summary.overageDisabledReason,
+  })
 }
 
 /**

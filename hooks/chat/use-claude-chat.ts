@@ -1464,6 +1464,13 @@ async function buildSendOptions(
     ephemeralSkillIds,
     activeGoal,
     activeLoop,
+    // Open this turn's agent-trace ROOT span here (one mint per turn). The hook
+    // owns `endSpan` (result / error branches of `handleEvent`, keyed off the
+    // cached `sendOptions.spanId`). The inline `startSpan` fallback below stays
+    // only for the `opts`-bypass path (retry / loop) where buildSendOptions —
+    // and thus this resolver — is skipped.
+    emitTrace: true,
+    traceSurface: "chat",
   })
 }
 
@@ -1490,6 +1497,13 @@ interface StreamCoalescing {
 function isSessionOpen(sessionId: string): boolean {
   return useChatStore.getState().openSessionIds.includes(sessionId)
 }
+
+/**
+ * Upper bound on how long the renderer waits for Auto-mode's optional model
+ * judge before giving up and showing the manual approval modal. Prevents a
+ * wedged utility-LLM call from freezing a turn with no visible dialog.
+ */
+const AUTO_MODE_DECISION_TIMEOUT_MS = 12_000
 
 /** Read a session's current slice messages (its streaming base). */
 function sliceMessages(sessionId: string): UIMessage[] {
@@ -1566,6 +1580,10 @@ async function handleEvent(
               errorMessage: evt.error,
               modelId: failedSend?.options.model,
               sessionId: evt.sessionId,
+              // Provider child span nests under this turn's root span.
+              traceId: failedSend?.options.traceId,
+              parentSpanId: failedSend?.options.spanId,
+              surface: "chat",
             })
           }
           // P4 routing-fallback: re-issue against the next entry in the
@@ -1662,14 +1680,26 @@ async function handleEvent(
           override: settings?.agentPermissions?.autoApprove?.judgeModel,
           featureId: "command-safety",
         })
-        const decision = await runAutoModeForTool({
-          toolName: evt.toolName,
-          input: evt.input,
-          settings,
-          client: judgeClient,
-          locale: settings?.language,
-          pluginRules: getPluginCommandRulesets(),
-        })
+        // The model judge tier (`rules+model`) has no internal timeout, so a
+        // wedged utility-LLM fetch would otherwise hang this handler forever —
+        // and because the handler sits before `pushApproval`, the result is a
+        // frozen turn with NO approval dialog ever shown (most visible on the
+        // Claude Agent SDK path, which forces a `canUseTool` round-trip for every
+        // tool). Bound it: on timeout fall through to the manual approval modal
+        // (treat as undecided) instead of swallowing the request.
+        const decision = await Promise.race([
+          runAutoModeForTool({
+            toolName: evt.toolName,
+            input: evt.input,
+            settings,
+            client: judgeClient,
+            locale: settings?.language,
+            pluginRules: getPluginCommandRulesets(),
+          }),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), AUTO_MODE_DECISION_TIMEOUT_MS)
+          }),
+        ])
         if (decision && decision.decision === "allow") {
           await approveTool(evt.sessionId, evt.requestId, "allow")
           return
@@ -1900,6 +1930,11 @@ async function handleEvent(
             cacheReadTokens: turnUsage?.cacheReadInputTokens,
             cacheCreationTokens: turnUsage?.cacheCreationInputTokens,
             sessionId,
+            // Provider child span nests under this turn's root span, carrying
+            // the resolved tokens + cost into the trace.
+            traceId: lastSendForSpan?.options.traceId,
+            parentSpanId: lastSendForSpan?.options.spanId,
+            surface: "chat",
           })
         }
         // Plugin token-usage observability (System-A onTokenUsage) — previously

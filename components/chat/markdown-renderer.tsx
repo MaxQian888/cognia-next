@@ -25,6 +25,7 @@ import { AudioBlock } from "@/components/chat/renderers/audio-block"
 import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderers/alert-block"
 import { DetailsBlock } from "@/components/chat/renderers/details-block"
 import { KbdInline } from "@/components/chat/renderers/kbd-inline"
+import { TaskListItem } from "@/components/chat/renderers/task-list"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 
@@ -453,6 +454,13 @@ function buildComponents(
       return <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>
     },
     li({ children }) {
+      // GFM task-list items (`- [ ]` / `- [x]`) arrive with a disabled
+      // checkbox `<input>` as the first child. Route those to the styled
+      // TaskListItem; everything else stays a plain list item.
+      const task = parseTaskListItem(children)
+      if (task) {
+        return <TaskListItem checked={task.checked}>{task.label}</TaskListItem>
+      }
       return <li className="leading-relaxed">{children}</li>
     },
     h1({ children }) {
@@ -514,6 +522,30 @@ function buildComponents(
       return <KbdInline>{children}</KbdInline>
     },
   }
+}
+
+/**
+ * Detect a GFM task-list item by its leading disabled checkbox `<input>` child.
+ * Returns the checked state plus the remaining children (the label, with inline
+ * formatting preserved), or null for ordinary list items. Exported for unit
+ * testing because remark-gfm / rehype-raw are stubbed in the jest env, so the
+ * checkbox child can't be produced through the full markdown pipeline there.
+ */
+export function parseTaskListItem(
+  children: React.ReactNode
+): { checked: boolean; label: React.ReactNode[] } | null {
+  const childArray = Children.toArray(children)
+  const inputIdx = childArray.findIndex(
+    (child) =>
+      isValidElement(child) &&
+      child.type === "input" &&
+      (child.props as { type?: string }).type === "checkbox"
+  )
+  if (inputIdx === -1) return null
+  const input = childArray[inputIdx] as React.ReactElement
+  const checked = Boolean((input.props as { checked?: boolean }).checked)
+  const label = childArray.filter((_, i) => i !== inputIdx)
+  return { checked, label }
 }
 
 function extractTextContent(children: React.ReactNode): string {
