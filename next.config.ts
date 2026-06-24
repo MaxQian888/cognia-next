@@ -133,6 +133,18 @@ const nextConfig: NextConfig = {
   // Next's built-in default list, so they are intentionally omitted here.
   experimental: {
     optimizePackageImports: ["radix-ui", "motion", "recharts"],
+    // Disable Turbopack's persistent FileSystem dev cache (default-on since
+    // Next 16.1). Its LSM store (`.next/dev/cache/turbopack/`) has an upstream
+    // single-writer race where a background compaction and a persist write
+    // batch collide, spamming `Persisting failed: Another write batch or
+    // compaction is already active` / `Compaction failed: ...` and often
+    // corrupting the `.sst` files (vercel/next.js#90691). The store is compiled
+    // into the SWC binary and can't be patched here. Turning it off removes the
+    // race entirely and also defuses the unbounded cache-growth/OOM problems
+    // this repo has fought before; the trade-off is slower cold starts (no
+    // cross-session cache restore), which also makes the predev
+    // `clean-stale-turbopack-cache.mjs` purge largely redundant for dev.
+    turbopackFileSystemCacheForDev: false,
   },
   // Build-time metadata for the About page. Inlined as NEXT_PUBLIC_* envs.
   env: {
@@ -149,6 +161,12 @@ const nextConfig: NextConfig = {
   // Turbopack (pnpm dev): alias Node.js built-ins to the empty stub so none of
   // their (third-party) callers enter the browser bundle.
   turbopack: {
+    // Pin the workspace root to this project. Without it, Next.js infers the
+    // root by walking up for lockfiles and picks the stray
+    // `/Users/bytedance/Project/package-lock.json` over our own
+    // `pnpm-workspace.yaml`, emitting a "multiple lockfiles" warning and
+    // potentially resolving modules from the wrong tree.
+    root: __dirname,
     resolveAlias: {
       ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, browserStub])),
       // Collapse pixi.js to its pre-bundled single file (see above).

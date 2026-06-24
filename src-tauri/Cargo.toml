@@ -141,6 +141,12 @@ wait-timeout = "0.2"
 # upstream of choice — accept its known ConPTY quirks (resize artifacts,
 # Alt-key duplication) for v1 and patch downstream if hit.
 portable-pty = "0.8"
+# System font enumeration for the appearance / terminal font pickers
+# (`src-tauri/src/fonts.rs`). Pure-Rust — loads the OS font set and reports
+# each face's monospaced flag so the terminal picker can show only
+# fixed-pitch families. The webview can't do this (WKWebView has no Local
+# Font Access API).
+fontdb = "0.18"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }

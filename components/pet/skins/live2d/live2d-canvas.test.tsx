@@ -52,7 +52,7 @@ jest.mock("@/lib/db/pet-models", () => ({
 // The canvas registers the Live2D render pipe before building the renderer; the
 // registrar imports pixi + the engine, both unavailable in jsdom. Stub it and
 // keep a handle so the "registers before init" ordering can be asserted.
-const ensureLive2dPluginRegistered = jest.fn(() => Promise.resolve())
+const ensureLive2dPluginRegistered = jest.fn((..._args: unknown[]) => Promise.resolve())
 jest.mock("@/lib/pet/live2d/register-plugin", () => ({
   ensureLive2dPluginRegistered: (...a: unknown[]) => ensureLive2dPluginRegistered(...a),
 }))

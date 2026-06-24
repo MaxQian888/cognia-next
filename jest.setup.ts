@@ -346,6 +346,16 @@ jest.mock("next-intl", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const messages = require("./i18n/messages/en.json") as Record<string, unknown>
 
+  // Plugin i18n overlay. In production `<LocaleGate>` merges plugin-shipped
+  // strings (registered under `plugin.<id>.…`) into the next-intl bundle.
+  // Mirror that here as a strict fallback so plugin-localized surfaces (e.g.
+  // workflow plugin nodes) resolve in tests. Looked up only when `en.json`
+  // has no entry, so existing tests are unaffected.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pluginI18n = require("./lib/i18n/plugin-i18n-registry") as {
+    lookupPluginMessage: (locale: string, key: string) => string | undefined
+  }
+
   const resolvePath = (root: Record<string, unknown> | undefined, dottedKey: string): unknown => {
     if (!root) return undefined
     const segments = dottedKey.split(".")
@@ -412,15 +422,26 @@ jest.mock("next-intl", () => {
     const root = namespace
       ? (resolvePath(messages, namespace) as Record<string, unknown> | undefined)
       : (messages as Record<string, unknown>)
+    // The full dotted key (namespace-qualified) used to consult the plugin
+    // overlay, which stores keys under their absolute `plugin.<id>.…` path.
+    const fullKey = (key: string) => (namespace ? `${namespace}.${key}` : key)
     const t = (key: string, values?: Record<string, unknown>) => {
-      const resolved = resolvePath(root, key)
+      let resolved = resolvePath(root, key)
+      if (typeof resolved !== "string") {
+        const overlay = pluginI18n.lookupPluginMessage("en", fullKey(key))
+        if (typeof overlay === "string") resolved = overlay
+      }
       const template = typeof resolved === "string" ? resolved : key
       return interpolate(template, values)
     }
     ;(t as unknown as { rich: typeof t }).rich = t
     ;(t as unknown as { markup: typeof t }).markup = t
     ;(t as unknown as { has: (k: string) => boolean }).has = (k: string) =>
-      typeof resolvePath(root, k) === "string"
+      typeof resolvePath(root, k) === "string" ||
+      typeof pluginI18n.lookupPluginMessage("en", fullKey(k)) === "string"
+    // `t.raw(key)` returns the un-interpolated value at the path (objects /
+    // arrays included) — used for things like the chat thinking-tips array.
+    ;(t as unknown as { raw: (k: string) => unknown }).raw = (k: string) => resolvePath(root, k)
     return t
   }
 
