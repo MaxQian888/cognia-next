@@ -36,12 +36,13 @@ describe("plugin-nav-config", () => {
     ])
   })
 
-  it("exposes the 4 governance views in the navigation order: permissions → scheduled → analytics → audit", () => {
+  it("exposes the governance views in order: permissions → scheduled → analytics → audit → policy", () => {
     expect(PLUGIN_GOVERNANCE_VIEWS.map((v) => v.value)).toEqual([
       "permissions",
       "scheduled",
       "analytics",
       "audit",
+      "policy",
     ])
   })
 })

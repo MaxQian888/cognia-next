@@ -2,7 +2,6 @@ import { act, renderHook } from "@testing-library/react"
 import {
   usePluginsStore,
   DEFAULT_PLUGIN_FILTERS,
-  deriveSectionFromTab,
   type PluginImportStaging,
   type ConflictSummary,
 } from "./plugins-store"
@@ -13,7 +12,6 @@ it("barrel re-exports usePluginsStore", () => {
 })
 
 const RESET = {
-  activeTab: "installed" as const,
   activeSection: "library" as const,
   librarySubFilter: "all" as const,
   governanceView: "permissions" as const,
@@ -23,7 +21,6 @@ const RESET = {
   selection: new Set<string>(),
   detailPluginId: null,
   filterSheetOpen: false,
-  configTarget: null,
   importStaging: null,
   deleteTarget: null,
   deleteQueue: [],
@@ -39,7 +36,6 @@ describe("usePluginsStore", () => {
 
   it("starts with documented defaults", () => {
     const { result } = renderHook(() => usePluginsStore())
-    expect(result.current.activeTab).toBe("installed")
     expect(result.current.activeSection).toBe("library")
     expect(result.current.librarySubFilter).toBe("all")
     expect(result.current.governanceView).toBe("permissions")
@@ -49,7 +45,6 @@ describe("usePluginsStore", () => {
     expect(result.current.selection.size).toBe(0)
     expect(result.current.detailPluginId).toBeNull()
     expect(result.current.filterSheetOpen).toBe(false)
-    expect(result.current.configTarget).toBeNull()
     expect(result.current.importStaging).toBeNull()
     expect(result.current.deleteTarget).toBeNull()
     expect(result.current.deleteQueue).toEqual([])
@@ -58,62 +53,7 @@ describe("usePluginsStore", () => {
     expect(result.current.rollbackTarget).toBeNull()
   })
 
-  describe("tabs and filters", () => {
-    it("setActiveTab switches across all 7 tab values", () => {
-      const { result } = renderHook(() => usePluginsStore())
-      const tabs = [
-        "browse",
-        "configure",
-        "permissions",
-        "scheduled",
-        "analytics",
-        "devtools",
-        "installed",
-      ] as const
-      for (const tab of tabs) {
-        act(() => result.current.setActiveTab(tab))
-        expect(result.current.activeTab).toBe(tab)
-      }
-    })
-
-    it("setActiveTab mirrors the tab into activeSection / governanceView / librarySubFilter", () => {
-      const { result } = renderHook(() => usePluginsStore())
-      act(() => result.current.setActiveTab("browse"))
-      expect(result.current.activeSection).toBe("discover")
-      act(() => result.current.setActiveTab("permissions"))
-      expect(result.current.activeSection).toBe("governance")
-      expect(result.current.governanceView).toBe("permissions")
-      act(() => result.current.setActiveTab("scheduled"))
-      expect(result.current.governanceView).toBe("scheduled")
-      act(() => result.current.setActiveTab("analytics"))
-      expect(result.current.governanceView).toBe("analytics")
-      act(() => result.current.setActiveTab("devtools"))
-      expect(result.current.activeSection).toBe("devtools")
-      act(() => result.current.setActiveTab("configure"))
-      expect(result.current.activeSection).toBe("library")
-      expect(result.current.librarySubFilter).toBe("configurable")
-      expect(result.current.detailSubTab).toBe("configure")
-      act(() => result.current.setActiveTab("installed"))
-      expect(result.current.activeSection).toBe("library")
-    })
-
-    it("deriveSectionFromTab is exhaustive across all 7 tabs", () => {
-      const tabs = [
-        "installed",
-        "browse",
-        "configure",
-        "permissions",
-        "scheduled",
-        "analytics",
-        "devtools",
-      ] as const
-      for (const tab of tabs) {
-        const derived = deriveSectionFromTab(tab)
-        expect(typeof derived.section).toBe("string")
-        expect(["library", "discover", "governance", "devtools"]).toContain(derived.section)
-      }
-    })
-
+  describe("sections and filters", () => {
     it("setActiveSection sets the section without touching filters", () => {
       const { result } = renderHook(() => usePluginsStore())
       act(() => result.current.setActiveSection("discover"))
@@ -270,17 +210,12 @@ describe("usePluginsStore", () => {
       expect(result.current.detailPluginId).toBeNull()
     })
 
-    it("openConfigure now routes through the detail pane on the Configure sub-tab", () => {
+    it("openConfigure routes through the detail pane on the Configure sub-tab", () => {
       const { result } = renderHook(() => usePluginsStore())
       act(() => result.current.openConfigure("plugin_a"))
-      // configTarget stays set as a back-compat shim for legacy consumers,
-      // but the detail pane is the primary surface from this release on.
-      expect(result.current.configTarget).toEqual({ pluginId: "plugin_a" })
       expect(result.current.detailPluginId).toBe("plugin_a")
       expect(result.current.detailSubTab).toBe("configure")
       expect(result.current.activeSection).toBe("library")
-      act(() => result.current.closeConfigure())
-      expect(result.current.configTarget).toBeNull()
     })
 
     it("filter sheet toggle persists", () => {

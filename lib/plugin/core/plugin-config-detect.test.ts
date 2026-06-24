@@ -1,4 +1,4 @@
-import { pluginExposesConfig, filterConfigurablePlugins } from "./plugin-config-utils"
+import { pluginExposesConfig, filterConfigurablePlugins } from "./plugin-config-detect"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 function row(id: string, manifest: Record<string, unknown>, name = id): PluginRow {

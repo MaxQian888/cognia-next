@@ -21,6 +21,7 @@ import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
 import { PluginVersionBadge } from "./_shared/plugin-version-badge"
+import { PluginAvatar } from "./plugin-avatar"
 
 interface Props {
   plugin: PluginRow
@@ -92,6 +93,13 @@ export function PluginCard({
           onCheckedChange={() => onToggleSelect(plugin.id)}
           className="mt-0.5"
           aria-label={t("selectAria", { name: plugin.name })}
+        />
+        <PluginAvatar
+          name={plugin.name}
+          icon={(plugin.manifest as { icon?: string })?.icon}
+          seed={plugin.id}
+          size={28}
+          className="mt-0.5"
         />
         <Button
           asChild

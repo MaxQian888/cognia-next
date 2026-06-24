@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/empty"
 import { PluginPanelGrid } from "../plugin-panel-grid"
 import { PluginLibraryRow } from "./plugin-library-row"
+import { PluginLibraryListSkeleton, PluginLibraryGridSkeleton } from "./plugin-library-skeleton"
 
 export function PluginLibraryList() {
   const t = useTranslations("plugins.grid")
@@ -46,7 +47,11 @@ export function PluginLibraryList() {
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
 
   if (loading) {
-    return <p className="p-4 text-sm text-muted-foreground">{t("loading")}</p>
+    return (
+      <div className="p-4">
+        {viewMode === "card" ? <PluginLibraryGridSkeleton /> : <PluginLibraryListSkeleton />}
+      </div>
+    )
   }
 
   if (totals.total === 0) {

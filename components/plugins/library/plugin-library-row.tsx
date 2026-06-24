@@ -20,6 +20,7 @@ import { PluginRowActionsMenu } from "../plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginStatusPill } from "../plugin-status-badge"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
+import { PluginAvatar } from "../plugin-avatar"
 
 interface Props {
   plugin: PluginRow
@@ -95,6 +96,12 @@ export function PluginLibraryRow({
         className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-ring"
         data-testid={`plugin-library-row-${plugin.id}`}
       >
+        <PluginAvatar
+          name={plugin.name}
+          icon={(plugin.manifest as { icon?: string })?.icon}
+          seed={plugin.id}
+          size={24}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="font-medium truncate">{plugin.name}</span>

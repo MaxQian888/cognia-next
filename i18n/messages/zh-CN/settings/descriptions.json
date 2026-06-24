@@ -34,7 +34,6 @@
   "notifications": "通知中心的渠道、安静时段、按来源静音与保留策略。",
   "ocr": "OCR 服务提供商（Mistral OCR、Google Vision、AWS Textract、Azure DI、Claude / GPT / Gemini 视觉、Mathpix、OCR.space、ABBYY、Nanonets、飞书）以及本地引擎（Tesseract WASM/原生、Windows.Media.Ocr、Apple Vision、Android ML Kit、ocrs、PaddleOCR）和自托管 HTTP 适配器。含自动路由、PDF 文本层快速路径与结果缓存。",
   "pet": "你的桌面动画伙伴。",
-  "pluginConfig": "在一处集中配置每个已启用插件的设置——与各插件详情页内的表单完全一致。",
   "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
   "presets": "可复用的会话配置 — 系统提示词加上模型、工具、MCP 与技能覆盖。",
   "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",

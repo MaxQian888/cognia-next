@@ -13,9 +13,13 @@
 // Every child reads pluginId off props and pulls its own data, so this
 // pane stays a thin composition wrapper.
 
+import { useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
+import { ChevronRightIcon } from "lucide-react"
 
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
 import { usePluginRow } from "@/hooks/plugins"
 import { DEFAULT_RATE_LIMITS } from "@/lib/plugin/security/rate-limiter"
 import { PluginAnalytics } from "./plugin-analytics"
@@ -53,36 +57,62 @@ export function PluginDetailData({ pluginId }: { pluginId: string }) {
   const manifest = plugin.manifest as { dependencies?: Record<string, string> }
 
   return (
-    <div className="space-y-4">
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold">{t("sectionTables")}</h3>
+    <div className="space-y-2">
+      {/* Tables open by default — the most-reached maintenance surface; the
+          rest are second-level collapsibles so the dense Data section stays
+          scannable in the narrow right pane. */}
+      <DataSubSection title={t("sectionTables")} testId="data-sub-tables" defaultOpen>
         <PluginDataManagement pluginId={pluginId} />
-      </section>
+      </DataSubSection>
 
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold">{t("sectionSchedules")}</h3>
+      <DataSubSection title={t("sectionSchedules")} testId="data-sub-schedules">
         <PluginScheduledJobs pluginId={pluginId} />
-      </section>
+      </DataSubSection>
 
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold">{t("sectionAnalytics")}</h3>
+      <DataSubSection title={t("sectionAnalytics")} testId="data-sub-analytics">
         <PluginAnalytics pluginId={pluginId} />
-      </section>
+      </DataSubSection>
 
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold">{t("sectionBackup")}</h3>
+      <DataSubSection title={t("sectionBackup")} testId="data-sub-backup">
         <PluginBackupPanel pluginId={pluginId} />
-      </section>
+      </DataSubSection>
 
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold">{t("sectionResources")}</h3>
+      <DataSubSection title={t("sectionResources")} testId="data-sub-resources">
         <PluginResourceManager pluginId={pluginId} limits={RESOURCE_LIMITS} />
-      </section>
+      </DataSubSection>
 
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold">{t("sectionDependencies")}</h3>
+      <DataSubSection title={t("sectionDependencies")} testId="data-sub-dependencies">
         <PluginDependencyGraph manifest={{ id: plugin.id, dependencies: manifest.dependencies }} />
-      </section>
+      </DataSubSection>
     </div>
+  )
+}
+
+function DataSubSection({
+  title,
+  testId,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  testId?: string
+  defaultOpen?: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border">
+      <CollapsibleTrigger
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold hover:bg-accent/40 focus-visible:outline-2 focus-visible:outline-ring"
+        data-testid={testId}
+        data-state={open ? "open" : "closed"}
+      >
+        <ChevronRightIcon
+          className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")}
+        />
+        <span className="flex-1 text-left">{title}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="p-3 pt-2">{children}</CollapsibleContent>
+    </Collapsible>
   )
 }

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -53,11 +53,30 @@ jest.mock("@/lib/db/plugins", () => ({
   setPluginEnabled: (id: string, enabled: boolean) => setPluginEnabledMock(id, enabled),
 }))
 
+const toastMock = jest.fn()
+jest.mock("sonner", () => ({ toast: (...args: unknown[]) => toastMock(...args) }))
+
+const checkForUpdatesMock = jest.fn(async (_ids?: string[]) => [
+  { pluginId: "a", latestVersion: "2.0.0" },
+])
+const installUpdateMock = jest.fn(async (_id: string, _v: string) => undefined)
+jest.mock("@/lib/plugin/lifecycle/updater", () => ({
+  getPluginUpdater: () => ({
+    checkForUpdates: (ids?: string[]) => checkForUpdatesMock(ids),
+    installUpdate: (id: string, v: string) => installUpdateMock(id, v),
+  }),
+}))
+
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { usePluginsStore } from "@/stores/plugins"
 
 beforeEach(() => {
   setPluginEnabledMock.mockClear()
+  toastMock.mockClear()
+  checkForUpdatesMock.mockClear()
+  installUpdateMock.mockClear()
+  // Reset the update flag mutated by the batch-update tests.
+  mockRows[0].manifest = { id: "a" }
   usePluginsStore.setState({
     selection: new Set(["a", "b"]),
     deleteTarget: null,
@@ -113,6 +132,21 @@ describe("PluginBatchActionsBar", () => {
     // Head of the queue lands in deleteTarget, the rest stays in deleteQueue.
     expect(state.deleteTarget).toEqual({ pluginId: "a", name: "A" })
     expect(state.deleteQueue).toEqual([{ pluginId: "b", name: "B" }])
+  })
+
+  it("hides the update button when no selected plugin has an update", () => {
+    render(<PluginBatchActionsBar />)
+    expect(screen.queryByLabelText(/updateAll/)).not.toBeInTheDocument()
+  })
+
+  it("shows the update button and applies updates to updatable selected plugins", async () => {
+    mockRows[0].manifest = { id: "a", updateAvailable: true }
+    render(<PluginBatchActionsBar />)
+    const btn = screen.getByLabelText("updateAll:1")
+    fireEvent.click(btn)
+    await waitFor(() => expect(installUpdateMock).toHaveBeenCalledWith("a", "2.0.0"))
+    expect(checkForUpdatesMock).toHaveBeenCalledWith(["a"])
+    expect(toastMock).toHaveBeenCalled()
   })
 
   it("Clear-selection drops any pending delete queue", () => {

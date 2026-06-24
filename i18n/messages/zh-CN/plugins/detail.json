@@ -18,6 +18,7 @@
     "empty": "此插件尚未注册任何运行时贡献。",
     "externalAgentAdapters": "外部 Agent 适配器",
     "externalAgentPresets": "外部 Agent 预设",
+    "hooks": "生命周期 Hook",
     "mcpServerPresets": "MCP 服务预设",
     "modes": "Agent 模式",
     "nativeAnthropicTools": "原生 Anthropic 工具",

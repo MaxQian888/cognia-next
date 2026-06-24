@@ -34,7 +34,6 @@
   "notifications": "Notification center channels, quiet hours, per-source mute, and retention.",
   "ocr": "OCR providers (Mistral OCR, Google Vision, AWS Textract, Azure DI, Claude / GPT / Gemini vision, Mathpix, OCR.space, ABBYY, Nanonets, Lark) plus on-device engines (Tesseract WASM/native, Windows.Media.Ocr, Apple Vision, Android ML Kit, ocrs, PaddleOCR) and the self-hosted HTTP adapter. Includes auto-router, PDF fast-path, and result cache.",
   "pet": "Your animated desktop companion.",
-  "pluginConfig": "Configure each enabled plugin's settings in one place — the same forms surfaced inside each plugin's detail pane.",
   "plugins": "Browse, install, configure, and govern plugins. Review permissions, scheduled jobs, devtools, and contract audits.",
   "presets": "Reusable session configurations — system prompt plus model, tool, MCP, and skill overrides.",
   "profile": "Your local display name, avatar and bio — synced to companion devices and included in backups.",

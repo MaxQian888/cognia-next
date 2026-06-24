@@ -1,10 +1,9 @@
 "use client"
 
-// Configure sub-tab — embeds the same configSchema-driven form that the
-// modal `PluginConfigForm` uses, only rendered inline so the user doesn't
-// have to open a dialog to tweak settings. The inline `variant` of
-// `PluginConfigFormContent` swaps Dialog primitives for plain `<header>` /
-// `<div>` chrome so the form blends into the surrounding pane.
+// Configure sub-tab — embeds the configSchema-driven form inline so the user
+// doesn't have to open a dialog to tweak settings. `PluginConfigFormContent`
+// renders with plain `<header>` / `<div>` chrome so the form blends into the
+// surrounding pane.
 //
 // `onClose` is wired to a no-op (there's no host to close); the form's
 // internal "Save" still calls `setPluginConfig`, the manager picks the
@@ -28,7 +27,7 @@ export function PluginDetailConfigure({ pluginId }: { pluginId: string }) {
       {hasPythonHost && (
         <PluginPythonHostSettings pluginId={pluginId} pythonDependencies={pythonDependencies} />
       )}
-      <PluginConfigFormContent pluginId={pluginId} onClose={() => undefined} variant="inline" />
+      <PluginConfigFormContent pluginId={pluginId} onClose={() => undefined} />
     </div>
   )
 }

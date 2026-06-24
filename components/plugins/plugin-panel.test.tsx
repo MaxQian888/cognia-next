@@ -23,8 +23,9 @@ jest.mock("next/link", () => ({
 let mockSearchString = ""
 let mockSearchCacheKey = ""
 let mockSearchCacheValue = new URLSearchParams("")
+const mockReplace = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  useRouter: () => ({ push: jest.fn(), replace: mockReplace, back: jest.fn() }),
   usePathname: () => "/plugins",
   useSearchParams: () => {
     if (mockSearchString !== mockSearchCacheKey) {
@@ -109,8 +110,8 @@ beforeEach(() => {
   mockSearchString = ""
   mockSearchCacheKey = ""
   mockSearchCacheValue = new URLSearchParams("")
+  mockReplace.mockClear()
   usePluginsStore.setState({
-    activeTab: "installed",
     activeSection: "library",
     librarySubFilter: "all",
     governanceView: "permissions",
@@ -120,7 +121,6 @@ beforeEach(() => {
     selection: new Set(),
     detailPluginId: null,
     filterSheetOpen: false,
-    configTarget: null,
     importStaging: null,
     deleteTarget: null,
     permissionReviewTarget: null,
@@ -165,11 +165,19 @@ describe("PluginPanel (3-pane shell)", () => {
     expect(screen.getAllByText(/title/).length).toBeGreaterThan(0)
   })
 
-  it("hydrates legacy ?tab=browse into both activeTab and activeSection=discover", () => {
+  it("redirects a legacy ?tab=browse deep link to the canonical ?section=discover URL", () => {
     mockSearchString = "tab=browse"
     render(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("browse")
-    expect(usePluginsStore.getState().activeSection).toBe("discover")
+    expect(mockReplace).toHaveBeenCalledWith("/plugins?section=discover", { scroll: false })
+  })
+
+  it("redirects ?tab=configure to the configurable library + configure subtab", () => {
+    mockSearchString = "tab=configure"
+    render(<PluginPanel />)
+    expect(mockReplace).toHaveBeenCalledWith(
+      "/plugins?section=library&sub=configurable&subtab=configure",
+      { scroll: false }
+    )
   })
 
   it("hydrates new ?section=governance&gov=audit into the store on mount", () => {
@@ -189,14 +197,10 @@ describe("PluginPanel (3-pane shell)", () => {
     expect(usePluginsStore.getState().activeSection).toBe("discover")
   })
 
-  it("ignores unknown ?tab= values without overriding the current active tab", () => {
-    mockSearchString = "tab=installed"
-    const { rerender } = render(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("installed")
-
+  it("does not redirect for an unknown ?tab= value", () => {
     mockSearchString = "tab=garbage"
-    rerender(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("installed")
+    render(<PluginPanel />)
+    expect(mockReplace).not.toHaveBeenCalled()
   })
 
   it("ignores unknown ?section= values without overriding the current section", () => {

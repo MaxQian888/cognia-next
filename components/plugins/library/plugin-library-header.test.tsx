@@ -70,6 +70,17 @@ describe("PluginLibraryHeader", () => {
     expect(screen.getByTestId("plugin-panel-toolbar")).toBeInTheDocument()
   })
 
+  it("renders the first-class Sort control reflecting filters.sort", () => {
+    usePluginsStore.setState({
+      filters: { ...usePluginsStore.getState().filters, sort: "updated" },
+    })
+    render(<PluginLibraryHeader />)
+    const sort = screen.getByTestId("plugin-library-sort")
+    expect(sort).toBeInTheDocument()
+    // The trigger shows the active sort mode's label (sortMode.updated).
+    expect(sort.textContent).toContain("sortMode.updated")
+  })
+
   it("renders the capability sheet trigger gated to lg:hidden so the rail is only fallback for narrow viewports", () => {
     render(<PluginLibraryHeader />)
     const sheet = screen.getByTestId("plugin-category-sheet")

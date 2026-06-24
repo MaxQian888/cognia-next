@@ -342,6 +342,24 @@ describe("PluginLifecycleHooks - New Dispatchers", () => {
     })
   })
 
+  describe("getHooksByPlugin", () => {
+    it("returns the hook names a plugin registered", () => {
+      lifecycleHooks.registerHooks("p1", { onEnable: jest.fn(), onDisable: jest.fn() })
+      const names = lifecycleHooks.getHooksByPlugin("p1")
+      expect(names).toEqual(expect.arrayContaining(["onEnable", "onDisable"]))
+      expect(names).toHaveLength(2)
+    })
+
+    it("returns an empty array for an unregistered plugin", () => {
+      expect(lifecycleHooks.getHooksByPlugin("missing")).toEqual([])
+    })
+
+    it("ignores hook keys explicitly set to undefined", () => {
+      lifecycleHooks.registerHooks("p2", { onEnable: jest.fn(), onDisable: undefined })
+      expect(lifecycleHooks.getHooksByPlugin("p2")).toEqual(["onEnable"])
+    })
+  })
+
   describe("Session Lifecycle Extended Hooks", () => {
     it("dispatchOnSessionRename should call registered hooks", () => {
       const onSessionRename = jest.fn()

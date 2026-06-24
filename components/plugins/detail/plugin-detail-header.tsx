@@ -26,6 +26,7 @@ import { usePluginsStore } from "@/stores/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginStatusPill } from "../plugin-status-badge"
+import { PluginAvatar } from "../plugin-avatar"
 
 interface Props {
   plugin: PluginRow
@@ -56,6 +57,13 @@ export function PluginDetailHeader({ plugin }: Props) {
   return (
     <header className="shrink-0 border-b px-4 py-3 space-y-3">
       <div className="flex items-start gap-3">
+        <PluginAvatar
+          name={plugin.name}
+          icon={(plugin.manifest as { icon?: string })?.icon}
+          seed={plugin.id}
+          size={36}
+          className="mt-0.5"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <h2 className="text-base font-semibold truncate">{plugin.name}</h2>

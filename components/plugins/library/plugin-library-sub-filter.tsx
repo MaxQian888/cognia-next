@@ -5,6 +5,11 @@
 // already ships so the visual treatment matches. Counts come straight
 // from `usePlugins()` so the chip badges reflect the live row totals
 // (filtered/total split happens in the library list, not here).
+//
+// The active chip is DERIVED from `filters` (the single source of truth)
+// rather than from a separate stored field, so it can never disagree with
+// the filter sheet's status/has-update controls. A custom status set in the
+// sheet (e.g. "disabled") matches no chip — nothing is falsely highlighted.
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
@@ -13,10 +18,25 @@ import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore, type PluginLibrarySubFilter } from "@/stores/plugins"
 import { PLUGIN_LIBRARY_SUBFILTERS } from "../plugin-nav-config"
 
+export function deriveActiveSubFilter(filters: {
+  configurable: boolean
+  hasUpdate: boolean
+  status: string
+}): string {
+  if (filters.configurable) return "configurable"
+  if (filters.hasUpdate) return "updates"
+  if (filters.status === "enabled") return "enabled"
+  if (filters.status === "error") return "errored"
+  if (filters.status === "all") return "all"
+  // Custom status from the filter sheet — no quick-filter chip represents it.
+  return ""
+}
+
 export function PluginLibrarySubFilter() {
   const t = useTranslations("plugins.sections.librarySub")
-  const sub = usePluginsStore((s) => s.librarySubFilter)
+  const filters = usePluginsStore((s) => s.filters)
   const setSub = usePluginsStore((s) => s.setLibrarySubFilter)
+  const sub = deriveActiveSubFilter(filters)
   const { all } = usePlugins()
 
   const counts = useMemo(() => {

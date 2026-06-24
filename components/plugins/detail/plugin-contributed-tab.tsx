@@ -37,6 +37,7 @@ import {
 import { listMcpServerPresetEntries } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { listSkillEntries } from "@/lib/plugin/registries/skill-registry"
 import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { listDynamicPresetEntries } from "@/lib/ai/agent/external/presets"
 import { listPluginProtocolAdapters } from "@/lib/ai/agent/external/protocol-adapter"
 import { getPluginAdapterIds } from "@/lib/plugin/bridge/connectors-bridge"
@@ -65,6 +66,7 @@ type ContributionLabelKey =
   | "connectors"
   | "workflowNodes"
   | "workflowTriggers"
+  | "hooks"
 
 interface Section {
   key: ContributionLabelKey
@@ -179,6 +181,13 @@ export function PluginContributedTab({ pluginId }: Props) {
     {
       key: "workflowTriggers",
       items: triggerEntries.map((e) => e.label || e.kind),
+    },
+    {
+      // Lifecycle hooks the plugin registered (onLoad / onEnable / message
+      // pipeline / …). Closes the gap where "hooks" was a filterable
+      // capability but the contributed hooks were never listed.
+      key: "hooks",
+      items: getPluginLifecycleHooks().getHooksByPlugin(pluginId),
     },
   ]
 

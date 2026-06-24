@@ -3,7 +3,7 @@
 // Right-side filter sheet that drives the shared `usePluginsStore.filters`.
 // Mirrors `components/skills/skill-filter-sheet.tsx` but exposes plugin-
 // specific axes: capability / permission / source / status / signed-only /
-// hasUpdate / sort.
+// hasUpdate. Sort lives in the library header as a first-class control.
 
 import { useTranslations } from "next-intl"
 import {
@@ -28,27 +28,7 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { usePluginsStore } from "@/stores/plugins"
 import { PERMISSION_GROUPS } from "@/lib/plugin/security/permission-guard"
-
-const CAPABILITY_OPTIONS = [
-  "tools",
-  "components",
-  "modes",
-  "skills",
-  "media",
-  "canvas",
-  "ai-provider",
-  "themes",
-  "commands",
-  "hooks",
-  "processors",
-  "providers",
-  "exporters",
-  "importers",
-  "a2ui",
-  "python",
-  "scheduler",
-  "external-agent-preset",
-] as const
+import { CAPABILITY_META } from "../plugin-capabilities"
 
 const STATUS_OPTIONS = [
   "discovered",
@@ -66,10 +46,9 @@ const STATUS_OPTIONS = [
 
 const SOURCE_OPTIONS = ["builtin", "local", "marketplace", "git", "dev"] as const
 
-const SORT_OPTIONS = ["name", "updated", "usage", "rating"] as const
-
 export function PluginFilterSheet() {
   const t = useTranslations("plugins.filterSheet")
+  const tc = useTranslations("plugins.categorySidebar")
   const open = usePluginsStore((s) => s.filterSheetOpen)
   const setOpen = usePluginsStore((s) => s.setFilterSheetOpen)
   const filters = usePluginsStore((s) => s.filters)
@@ -102,9 +81,9 @@ export function PluginFilterSheet() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">{t("any")}</SelectItem>
-                {CAPABILITY_OPTIONS.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
+                {CAPABILITY_META.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {tc(`capability.${c.i18nKey}` as never)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -173,26 +152,6 @@ export function PluginFilterSheet() {
             checked={filters.hasUpdate}
             onCheckedChange={(v) => setFilters({ hasUpdate: v })}
           />
-
-          <Separator />
-
-          <FilterField label={t("sort")}>
-            <Select
-              value={filters.sort}
-              onValueChange={(v) => setFilters({ sort: v as (typeof SORT_OPTIONS)[number] })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {t(`sortMode.${s}` as never)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FilterField>
         </div>
 
         <SheetFooter className="mt-4">

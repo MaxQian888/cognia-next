@@ -51,11 +51,7 @@ export {
 export { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 
 // Detail-pane content
-export {
-  PluginConfigForm,
-  PluginConfigFormBody,
-  PluginConfigFormContent,
-} from "./detail/plugin-config-form"
+export { PluginConfigFormBody, PluginConfigFormContent } from "./detail/plugin-config-form"
 export {
   PluginDependencyGraph,
   __resetPluginDependencyResolverForTests,

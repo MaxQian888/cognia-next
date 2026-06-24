@@ -12,17 +12,17 @@
 //               Permissions / Data). On narrow viewports the right pane
 //               collapses into FeaturePageShellMobile's Sheet trigger.
 //
-// Dialog hosts (delete, permission review, configure form, import,
-// conflict, update, rollback) are mounted once at the root.
+// Dialog hosts (delete, permission review, import, conflict, update,
+// rollback) are mounted once at the root.
 //
 // URL deep links: `?section=` / `?sub=` / `?gov=` / `?subtab=` drive the
-// new layout. Legacy `?tab=` deep links are still accepted as a
-// back-compat shim — `setActiveTab` mirrors the value into
-// `activeSection`, so external surfaces that have not yet migrated their
-// links keep working.
+// layout. Legacy `?tab=` deep links are translated once to the canonical
+// section vocabulary via `router.replace` (see `TAB_REDIRECT`), so old
+// external links keep landing on the right view without a parallel store
+// concept.
 
 import { useCallback, useEffect, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import {
   usePluginsStore,
@@ -30,7 +30,6 @@ import {
   type PluginGovernanceView,
   type PluginLibrarySubFilter,
   type PluginNavSection,
-  type PluginPanelTab,
 } from "@/stores/plugins"
 import { deletePlugin, listPlugins, updatePlugin } from "@/lib/db/plugins"
 import { getDb } from "@/lib/db/schema"
@@ -42,7 +41,6 @@ import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { PluginFilterSheet } from "./dialogs/plugin-filter-sheet"
 import { PluginDeleteDialog } from "./dialogs/plugin-delete-dialog"
 import { PluginPermissionReview } from "./plugin-permission-review"
-import { PluginConfigForm } from "./detail/plugin-config-form"
 import { PluginImportDialog } from "./dialogs/plugin-import-dialog"
 import { PluginConflictDialog } from "./dialogs/plugin-conflict-dialog"
 import { PluginUpdateDialog } from "./dialogs/plugin-update-dialog"
@@ -58,15 +56,27 @@ import { PluginGovernancePane } from "./governance/plugin-governance-pane"
 import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
 import { PluginDetailPane } from "./detail/plugin-detail-pane"
 
-const VALID_TABS: ReadonlySet<PluginPanelTab> = new Set([
-  "installed",
-  "browse",
-  "configure",
-  "permissions",
-  "scheduled",
-  "analytics",
-  "devtools",
-])
+// One-time translation of legacy `?tab=` deep links into the canonical
+// `?section=/&sub=/&gov=/&subtab=` vocabulary. The redirect rewrites the URL
+// and the section/sub/gov/subtab effect below applies it to the store.
+const TAB_REDIRECT: Record<
+  string,
+  {
+    section: PluginNavSection
+    sub?: PluginLibrarySubFilter
+    gov?: PluginGovernanceView
+    subtab?: PluginDetailSubTab
+  }
+> = {
+  installed: { section: "library" },
+  browse: { section: "discover" },
+  configure: { section: "library", sub: "configurable", subtab: "configure" },
+  permissions: { section: "governance", gov: "permissions" },
+  scheduled: { section: "governance", gov: "scheduled" },
+  analytics: { section: "governance", gov: "analytics" },
+  devtools: { section: "devtools" },
+}
+
 const VALID_SECTIONS: ReadonlySet<PluginNavSection> = new Set([
   "library",
   "discover",
@@ -85,6 +95,7 @@ const VALID_GOVERNANCE: ReadonlySet<PluginGovernanceView> = new Set([
   "scheduled",
   "analytics",
   "audit",
+  "policy",
 ])
 const VALID_DETAIL_SUBTAB: ReadonlySet<PluginDetailSubTab> = new Set([
   "overview",
@@ -94,40 +105,42 @@ const VALID_DETAIL_SUBTAB: ReadonlySet<PluginDetailSubTab> = new Set([
   "data",
 ])
 
-function isValidTab(value: string | null): value is PluginPanelTab {
-  return value !== null && VALID_TABS.has(value as PluginPanelTab)
-}
-
 function isValidSection(value: string | null): value is PluginNavSection {
   return value !== null && VALID_SECTIONS.has(value as PluginNavSection)
 }
 
 export function PluginPanel() {
-  const activeTab = usePluginsStore((s) => s.activeTab)
-  const setActiveTab = usePluginsStore((s) => s.setActiveTab)
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
   const setLibrarySubFilter = usePluginsStore((s) => s.setLibrarySubFilter)
   const setGovernanceView = usePluginsStore((s) => s.setGovernanceView)
   const setDetailSubTab = usePluginsStore((s) => s.setDetailSubTab)
 
-  // URL sync — extend the legacy `?tab=` deep-link with `?section=`,
-  // `?sub=`, `?gov=`, `?subtab=` so external surfaces can choose either
-  // vocabulary. We adopt the URL value on mount AND whenever the URL
-  // changes; local clicks don't touch the URL, so this effect stays a
-  // no-op for in-app navigation.
+  // URL sync — `?section=`, `?sub=`, `?gov=`, `?subtab=` drive the layout.
+  // We adopt the URL value on mount AND whenever the URL changes; local
+  // clicks don't touch the URL, so this effect stays a no-op for in-app
+  // navigation.
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const requestedTabParam = searchParams?.get("tab") ?? null
   const requestedSectionParam = searchParams?.get("section") ?? null
   const requestedSubParam = searchParams?.get("sub") ?? null
   const requestedGovParam = searchParams?.get("gov") ?? null
   const requestedSubtabParam = searchParams?.get("subtab") ?? null
 
+  // Legacy `?tab=` → canonical params, then strip `tab`. The section effect
+  // below picks up the rewritten URL.
   useEffect(() => {
-    if (isValidTab(requestedTabParam) && requestedTabParam !== activeTab) {
-      // setActiveTab also mirrors into activeSection / governanceView via
-      // deriveSectionFromTab, so legacy deep links land both layouts.
-      setActiveTab(requestedTabParam)
-    }
+    if (!requestedTabParam) return
+    const mapped = TAB_REDIRECT[requestedTabParam]
+    if (!mapped) return
+    const next = new URLSearchParams(searchParams?.toString() ?? "")
+    next.delete("tab")
+    next.set("section", mapped.section)
+    if (mapped.sub) next.set("sub", mapped.sub)
+    if (mapped.gov) next.set("gov", mapped.gov)
+    if (mapped.subtab) next.set("subtab", mapped.subtab)
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedTabParam])
 
@@ -205,7 +218,6 @@ export function PluginPanel() {
   const dialogHosts = (
     <>
       <PluginPermissionReview />
-      <PluginConfigForm />
       <PluginDeleteDialogHost />
       <PluginImportDialog />
       <PluginConflictDialog />
@@ -280,10 +292,13 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
       }}
       rightPane={{
         label: t("detailSheetLabel"),
+        // README-centric detail reads better with width — give it a wider
+        // default/max than the old tabbed pane (the shell still collapses it
+        // into a Sheet on narrow viewports).
         content: <PluginDetailPane />,
-        defaultSize: 38,
-        minSize: 28,
-        maxSize: 50,
+        defaultSize: 46,
+        minSize: 30,
+        maxSize: 60,
       }}
     >
       {center}

@@ -1,8 +1,0 @@
-{
-  "description": "在此配置每个已启用插件的设置。这些表单与各插件详情页内的完全一致；更改会在插件下次激活时生效。",
-  "emptyHint": "声明了配置 schema 或配置组件的已启用插件会显示在这里。",
-  "emptyTitle": "暂无可配置的插件",
-  "manageAll": "管理全部插件",
-  "title": "插件配置",
-  "versionLabel": "v{version}"
-}

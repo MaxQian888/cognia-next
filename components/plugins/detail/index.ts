@@ -1,10 +1,5 @@
 export { PluginAnalytics } from "./plugin-analytics"
-export {
-  PluginConfigForm,
-  PluginConfigFormBody,
-  PluginConfigFormContent,
-  type PluginConfigFormVariant,
-} from "./plugin-config-form"
+export { PluginConfigFormBody, PluginConfigFormContent } from "./plugin-config-form"
 export { PluginContributedTab } from "./plugin-contributed-tab"
 export {
   PluginDependencyGraph,
@@ -18,7 +13,7 @@ export { PluginDetailHeader } from "./plugin-detail-header"
 export { PluginDetailOverview } from "./plugin-detail-overview"
 export { PluginDetailPane } from "./plugin-detail-pane"
 export { PluginDetailPermissions } from "./plugin-detail-permissions"
-export { PluginDetailTabs } from "./plugin-detail-tabs"
+export { PluginDetailSection } from "./plugin-detail-section"
 export { PluginPermissionsTab } from "./plugin-permissions-tab"
 export { PluginResourceManager } from "./plugin-resource-manager"
 export { PluginScheduledJobs } from "./plugin-scheduled-jobs"

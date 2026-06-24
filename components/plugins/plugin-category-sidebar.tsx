@@ -5,47 +5,13 @@
 // Selecting a category writes through to `usePluginsStore.setFilters`.
 
 import { useTranslations } from "next-intl"
-import {
-  LayersIcon,
-  WrenchIcon,
-  PaletteIcon,
-  PuzzleIcon,
-  CommandIcon,
-  ZapIcon,
-  PackageIcon,
-  ImageIcon,
-  PencilRulerIcon,
-  CalendarClockIcon,
-  ServerCogIcon,
-  BotIcon,
-  CodeIcon,
-} from "lucide-react"
+import { LayersIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
-
-const CAPABILITY_META: Array<{
-  id: string
-  label: string
-  icon: React.ComponentType<{ className?: string }>
-}> = [
-  { id: "tools", label: "tools", icon: WrenchIcon },
-  { id: "components", label: "components", icon: PuzzleIcon },
-  { id: "modes", label: "modes", icon: BotIcon },
-  { id: "themes", label: "themes", icon: PaletteIcon },
-  { id: "commands", label: "commands", icon: CommandIcon },
-  { id: "hooks", label: "hooks", icon: ZapIcon },
-  { id: "media", label: "media", icon: ImageIcon },
-  { id: "canvas", label: "canvas", icon: PencilRulerIcon },
-  { id: "ai-provider", label: "ai-provider", icon: ServerCogIcon },
-  { id: "scheduler", label: "scheduler", icon: CalendarClockIcon },
-  { id: "exporters", label: "exporters", icon: PackageIcon },
-  { id: "importers", label: "importers", icon: PackageIcon },
-  { id: "python", label: "python", icon: CodeIcon },
-  { id: "external-agent-preset", label: "agentPresets", icon: BotIcon },
-]
+import { CAPABILITY_META } from "./plugin-capabilities"
 
 export function PluginCategorySidebar() {
   const t = useTranslations("plugins.categorySidebar")
@@ -71,7 +37,7 @@ export function PluginCategorySidebar() {
             key={meta.id}
             icon={meta.icon}
             active={active === meta.id}
-            label={t(`capability.${meta.label}` as never)}
+            label={t(`capability.${meta.i18nKey}` as never)}
             count={count}
             onClick={() => setFilters({ capability: meta.id })}
             disabled={count === 0}

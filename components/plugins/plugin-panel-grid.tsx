@@ -13,6 +13,7 @@ import { setPluginEnabled } from "@/lib/db/plugins"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginCard } from "./plugin-card"
+import { PluginLibraryGridSkeleton } from "./library/plugin-library-skeleton"
 
 export function PluginPanelGrid() {
   const t = useTranslations("plugins.grid")
@@ -27,7 +28,7 @@ export function PluginPanelGrid() {
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>
+    return <PluginLibraryGridSkeleton />
   }
 
   if (totals.total === 0) {

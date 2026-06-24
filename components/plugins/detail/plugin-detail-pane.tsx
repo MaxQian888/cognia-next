@@ -2,28 +2,81 @@
 
 // Right-pane host for the plugin detail surface. Reads `detailPluginId` from
 // the plugins store; renders the empty state when nothing is selected,
-// otherwise the 5-tab pane (Overview / Capabilities / Configure /
-// Permissions / Data). This replaces the older 3-outer-tab + 8-inner-tab
-// structure from `plugin-detail.tsx` while preserving every feature it
-// surfaced (just relocated across the 5 flat sub-tabs).
+// otherwise a README-centric pane: the Overview (meta + README) is the
+// always-visible reading-first body, and Capabilities / Configure /
+// Permissions / Data / Logs are collapsible sections below. Exactly one
+// section is open at a time, driven by `detailSubTab`, so a `?subtab=` deep
+// link auto-expands the matching section. Every feature the old flat tab
+// strip surfaced is preserved — only the chrome changed.
 //
 // The pane is plugin-id-keyed, so switching between plugins re-mounts the
-// inner tab state and the form values inside ConfigForm. This mirrors the
-// old PluginDetail's `key={pluginId}` semantics.
+// section state and the form values inside ConfigForm. This mirrors the old
+// PluginDetail's `key={pluginId}` semantics.
 
 import { useTranslations } from "next-intl"
+import {
+  BlocksIcon,
+  DatabaseIcon,
+  ScrollTextIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+} from "lucide-react"
+import type { ComponentType, ReactNode } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePluginRow } from "@/hooks/plugins"
-import { usePluginsStore } from "@/stores/plugins"
+import { usePluginsStore, type PluginDetailSubTab } from "@/stores/plugins"
 import { PluginDetailEmpty } from "./plugin-detail-empty"
 import { PluginDetailHeader } from "./plugin-detail-header"
-import { PluginDetailTabs } from "./plugin-detail-tabs"
+import { PluginDetailSection } from "./plugin-detail-section"
 import { PluginDetailOverview } from "./plugin-detail-overview"
 import { PluginDetailCapabilities } from "./plugin-detail-capabilities"
 import { PluginDetailConfigure } from "./plugin-detail-configure"
 import { PluginDetailPermissions } from "./plugin-detail-permissions"
 import { PluginDetailData } from "./plugin-detail-data"
 import { PluginDetailLogs } from "./plugin-detail-logs"
+
+interface SectionDef {
+  value: Exclude<PluginDetailSubTab, "overview">
+  labelKey: string
+  icon: ComponentType<{ className?: string }>
+  render: (pluginId: string) => ReactNode
+  /** Only render for python/hybrid plugins (the host subprocess log source). */
+  pythonOnly?: boolean
+}
+
+const SECTIONS: ReadonlyArray<SectionDef> = [
+  {
+    value: "capabilities",
+    labelKey: "subtab.capabilities",
+    icon: BlocksIcon,
+    render: (id) => <PluginDetailCapabilities pluginId={id} />,
+  },
+  {
+    value: "configure",
+    labelKey: "subtab.configure",
+    icon: SettingsIcon,
+    render: (id) => <PluginDetailConfigure pluginId={id} />,
+  },
+  {
+    value: "permissions",
+    labelKey: "subtab.permissions",
+    icon: ShieldCheckIcon,
+    render: (id) => <PluginDetailPermissions pluginId={id} />,
+  },
+  {
+    value: "data",
+    labelKey: "subtab.data",
+    icon: DatabaseIcon,
+    render: (id) => <PluginDetailData pluginId={id} />,
+  },
+  {
+    value: "logs",
+    labelKey: "subtab.logs",
+    icon: ScrollTextIcon,
+    render: (id) => <PluginDetailLogs pluginId={id} />,
+    pythonOnly: true,
+  },
+]
 
 export function PluginDetailPane() {
   const detailPluginId = usePluginsStore((s) => s.detailPluginId)
@@ -38,6 +91,7 @@ function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
   const rowState = usePluginRow(pluginId)
   const subTab = usePluginsStore((s) => s.detailSubTab)
+  const setSubTab = usePluginsStore((s) => s.setDetailSubTab)
 
   if (rowState.state === "loading") {
     return (
@@ -64,20 +118,31 @@ function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
   }
 
   const plugin = rowState.row
+  const hasPythonHost = plugin.type === "python" || plugin.type === "hybrid"
+  const sections = SECTIONS.filter((s) => !s.pythonOnly || hasPythonHost)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PluginDetailHeader plugin={plugin} />
 
-      <PluginDetailTabs pluginType={plugin.type} />
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+        {/* README-centric body: meta + README are always visible. */}
+        <PluginDetailOverview pluginId={pluginId} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        {subTab === "overview" && <PluginDetailOverview pluginId={pluginId} />}
-        {subTab === "capabilities" && <PluginDetailCapabilities pluginId={pluginId} />}
-        {subTab === "configure" && <PluginDetailConfigure pluginId={pluginId} />}
-        {subTab === "permissions" && <PluginDetailPermissions pluginId={pluginId} />}
-        {subTab === "data" && <PluginDetailData pluginId={pluginId} />}
-        {subTab === "logs" && <PluginDetailLogs pluginId={pluginId} />}
+        {sections.map((section) => (
+          <PluginDetailSection
+            key={section.value}
+            icon={section.icon}
+            title={t(section.labelKey)}
+            open={subTab === section.value}
+            // Open → set this section; collapse → fall back to overview (the
+            // always-visible body), so at most one section is expanded.
+            onOpenChange={(open) => setSubTab(open ? section.value : "overview")}
+            testId={`plugin-detail-section-${section.value}`}
+          >
+            {section.render(pluginId)}
+          </PluginDetailSection>
+        ))}
       </div>
     </div>
   )

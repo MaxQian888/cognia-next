@@ -8,6 +8,7 @@ import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listPlugins } from "@/lib/db/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
+import { pluginExposesConfig } from "@/lib/plugin/core/plugin-config-detect"
 import { usePluginsStore, type PluginFilters } from "@/stores/plugins"
 
 export interface PluginsView {
@@ -107,9 +108,11 @@ function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
       const hasUpdate = !!(row.manifest as { updateAvailable?: boolean })?.updateAvailable
       if (!hasUpdate) return false
     }
-    if (filters.configurable) {
-      const hasSchema = !!(row.manifest as { configSchema?: unknown })?.configSchema
-      if (!hasSchema) return false
+    if (filters.configurable && !pluginExposesConfig(row)) {
+      // Matches the retired "Plugin configuration" settings section: a plugin
+      // is configurable if it ships a configSchema with properties OR a custom
+      // configComponent.
+      return false
     }
     if (q) {
       const description = (

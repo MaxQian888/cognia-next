@@ -30,7 +30,6 @@ import {
   ZapIcon,
   RadioTowerIcon,
   BoxesIcon,
-  SlidersHorizontalIcon,
   WebhookIcon,
   NetworkIcon,
   TerminalSquareIcon,
@@ -92,7 +91,6 @@ export type SettingsSectionId =
   | "mcp"
   | "a2ui"
   | "plugins"
-  | "plugin-config"
   | "connections"
   | "github-delivery"
   | "data"
@@ -309,13 +307,6 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "plugins",
     group: "extensions",
     icon: BoxesIcon,
-  },
-  {
-    id: "plugin-config",
-    labelKey: "pluginConfig",
-    descriptionKey: "pluginConfig",
-    group: "extensions",
-    icon: SlidersHorizontalIcon,
   },
   {
     id: "connections",
@@ -1134,15 +1125,13 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "scheduled",
     "audit",
     "diagnostics",
-    "插件",
-    "扩展",
-    "市场",
-  ],
-  "plugin-config": [
     "plugin config",
     "plugin settings",
     "configure plugin",
     "plugin configuration",
+    "插件",
+    "扩展",
+    "市场",
     "插件配置",
     "插件设置",
   ],

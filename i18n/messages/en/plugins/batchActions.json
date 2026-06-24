@@ -5,5 +5,8 @@
   "enableAll": "Enable all",
   "refresh": "Refresh",
   "selected": "{count} selected",
-  "uninstall": "Uninstall"
+  "uninstall": "Uninstall",
+  "updateAll": "Update {count}",
+  "updateResult": "{ok} updated, {failed} failed",
+  "updating": "Updating…"
 }

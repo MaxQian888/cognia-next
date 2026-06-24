@@ -71,6 +71,11 @@ jest.mock("@/lib/workflow/nodes/catalog", () => ({
   subscribePluginCatalog: () => () => undefined,
 }))
 
+const mockGetHooksByPlugin = jest.fn<string[], [string]>()
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginLifecycleHooks: () => ({ getHooksByPlugin: mockGetHooksByPlugin }),
+}))
+
 import { PluginContributedTab } from "./plugin-contributed-tab"
 
 beforeEach(() => {
@@ -87,6 +92,7 @@ beforeEach(() => {
   mockListPluginProtocolAdapters.mockReturnValue([])
   mockGetPluginAdapterIds.mockReturnValue([])
   mockGetPluginCatalogSnapshot.mockReturnValue([])
+  mockGetHooksByPlugin.mockReturnValue([])
 })
 
 describe("PluginContributedTab", () => {
@@ -123,6 +129,14 @@ describe("PluginContributedTab", () => {
     // Cards with no items don't render
     expect(screen.queryByTestId("contributed-modes")).not.toBeInTheDocument()
     expect(screen.queryByTestId("contributed-themes")).not.toBeInTheDocument()
+  })
+
+  it("enumerates the plugin's contributed lifecycle hooks", () => {
+    mockGetHooksByPlugin.mockReturnValue(["onEnable", "onMessageSend"])
+    render(<PluginContributedTab pluginId="p1" />)
+    expect(screen.getByTestId("contributed-hooks")).toBeInTheDocument()
+    expect(screen.getByText("onEnable")).toBeInTheDocument()
+    expect(screen.getByText("onMessageSend")).toBeInTheDocument()
   })
 
   it("filters themes / mcp presets / external presets / adapters / workflow entries by pluginId", () => {

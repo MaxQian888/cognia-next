@@ -1,5 +1,8 @@
-// Pure helpers for the global "Plugin configuration" Settings section. Kept
-// React-free so the bulk of branch coverage lives in a fast unit test.
+// Pure helpers for detecting whether a plugin exposes a configuration
+// surface. Kept React-free so the bulk of branch coverage lives in a fast
+// unit test. Consumed by the Library "Configurable" filter
+// (`hooks/plugins/use-plugins.ts`) and any surface that lists configurable
+// plugins.
 
 import type { PluginRow } from "@/lib/db/plugin-types"
 
@@ -20,10 +23,10 @@ function hasConfigComponent(configComponent: unknown): boolean {
 }
 
 /**
- * True when a plugin exposes a configuration surface worth showing in the
- * global Settings section: a `configSchema` with at least one property, or a
- * custom `configComponent` entry. A schema with no properties renders nothing
- * useful, so it does not count.
+ * True when a plugin exposes a configuration surface worth showing: a
+ * `configSchema` with at least one property, or a custom `configComponent`
+ * entry. A schema with no properties renders nothing useful, so it does not
+ * count.
  */
 export function pluginExposesConfig(plugin: PluginRow): boolean {
   const manifest = (plugin.manifest ?? {}) as ConfigManifestShape

@@ -1,8 +1,0 @@
-{
-  "description": "Configure each enabled plugin's settings here. These are the same forms surfaced inside each plugin's detail pane; changes are picked up on the plugin's next activation.",
-  "emptyHint": "Enabled plugins that declare a configuration schema or component appear here.",
-  "emptyTitle": "No configurable plugins",
-  "manageAll": "Manage all plugins",
-  "title": "Plugin configuration",
-  "versionLabel": "v{version}"
-}

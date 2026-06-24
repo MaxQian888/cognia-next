@@ -20,6 +20,9 @@ jest.mock("../detail/plugin-analytics", () => ({
 jest.mock("./plugin-audit-log", () => ({
   PluginAuditLog: () => <div data-testid="governance-audit" />,
 }))
+jest.mock("./plugin-governance-policy-tab", () => ({
+  PluginGovernancePolicyTab: () => <div data-testid="governance-policy" />,
+}))
 
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginGovernancePane } from "./plugin-governance-pane"
@@ -34,6 +37,7 @@ describe("PluginGovernancePane", () => {
     ["scheduled", "governance-scheduled"],
     ["analytics", "governance-analytics"],
     ["audit", "governance-audit"],
+    ["policy", "governance-policy"],
   ] as const)("delegates to the %s child when governanceView=%s", (view, testid) => {
     usePluginsStore.setState({ governanceView: view })
     render(<PluginGovernancePane />)

@@ -24,14 +24,6 @@ import {
   type ConfigComponent,
 } from "@/lib/plugin/bridge/config-component-bridge"
 import type { PluginManifest } from "@/types/plugin/plugin"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -48,7 +40,6 @@ import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
-import { usePluginsStore } from "@/stores/plugins"
 
 /**
  * Best-effort config-change fan-out (JS onConfigChange hook + python host
@@ -370,27 +361,12 @@ function collectErrors(
   }
   return out
 }
-export function PluginConfigForm() {
-  const target = usePluginsStore((s) => s.configTarget)
-  const close = usePluginsStore((s) => s.closeConfigure)
-  const open = target !== null
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="w-[95vw] max-w-xl">
-        {target ? <PluginConfigFormContent pluginId={target.pluginId} onClose={close} /> : null}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 export function PluginConfigFormContent({
   pluginId,
   onClose,
-  variant = "modal",
 }: {
   pluginId: string
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   const t = useTranslations("plugins.configForm")
   const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
@@ -400,13 +376,7 @@ export function PluginConfigFormContent({
   }
 
   return (
-    <PluginConfigFormBody
-      key={pluginId}
-      pluginId={pluginId}
-      plugin={plugin}
-      onClose={onClose}
-      variant={variant}
-    />
+    <PluginConfigFormBody key={pluginId} pluginId={pluginId} plugin={plugin} onClose={onClose} />
   )
 }
 
@@ -435,32 +405,20 @@ function seedValues(
   return seed
 }
 
-export type PluginConfigFormVariant = "modal" | "inline"
-
 /**
  * Form body for a plugin's `manifest.configSchema`.
  *
- * The same body is rendered in two contexts:
- *
- *   - **modal** — wrapped in `<Dialog>` by `PluginConfigForm`; uses Dialog
- *     primitives (`DialogHeader` / `DialogFooter`) so the modal chrome lines
- *     up with the rest of the panel's dialog hosts.
- *   - **inline** — embedded inside the right-pane detail's Configure
- *     sub-tab (`components/plugins/detail/plugin-detail-configure.tsx`).
- *     Replaces Dialog primitives with plain headings so the form blends
- *     into the surrounding pane instead of looking like a misplaced
- *     dialog. `onClose` is still wired (used as "save completed"
- *     callback) but no longer closes a host.
- *
- * Both variants share schema parsing, validation, default-seeding,
- * setPluginConfig persistence, and the saving/error state machine — only
- * the surrounding chrome differs.
+ * Rendered inline inside the right-pane detail's Configure section
+ * (`components/plugins/detail/plugin-detail-configure.tsx`) — plain
+ * `<header>` / `<div>` chrome so the form blends into the surrounding pane.
+ * `onClose` is wired as a "save completed" callback (there is no host to
+ * close). Handles schema parsing, validation, default-seeding,
+ * setPluginConfig persistence, and the saving/error state machine.
  */
 export function PluginConfigFormBody(props: {
   pluginId: string
   plugin: PluginRow
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   // A plugin may ship its own React settings UI via `manifest.configComponent`
   // (ADR-0026 §3 §B). When declared, render it instead of the generic
@@ -479,12 +437,10 @@ function SchemaConfigBody({
   pluginId,
   plugin,
   onClose,
-  variant = "modal",
 }: {
   pluginId: string
   plugin: PluginRow
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   const t = useTranslations("plugins.configForm")
   const schema = useMemo(
@@ -512,13 +468,10 @@ function SchemaConfigBody({
     }
   }
 
-  const Header = variant === "modal" ? ModalHeader : InlineHeader
-  const Footer = variant === "modal" ? ModalFooter : InlineFooter
-
   if (schema.unknown || Object.keys(schema.fields).length === 0) {
     return (
       <>
-        <Header title={plugin.name} description={t("noSchema")} version={null} />
+        <FormHeader title={plugin.name} description={t("noSchema")} version={null} />
         <Card className="p-0">
           <ScrollArea className="max-h-[40vh]">
             <pre className="p-3 text-xs font-mono">
@@ -526,16 +479,16 @@ function SchemaConfigBody({
             </pre>
           </ScrollArea>
         </Card>
-        <Footer>
+        <FormFooter>
           <Button onClick={onClose}>{t("close")}</Button>
-        </Footer>
+        </FormFooter>
       </>
     )
   }
 
   return (
     <>
-      <Header title={plugin.name} version={plugin.version} description={t("description")} />
+      <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
 
       <ScrollArea className="max-h-[60vh]">
         <div className="space-y-4 pr-3">
@@ -553,14 +506,14 @@ function SchemaConfigBody({
         </div>
       </ScrollArea>
 
-      <Footer>
+      <FormFooter>
         <Button variant="outline" onClick={onClose} disabled={saving}>
           {t("cancel")}
         </Button>
         <Button onClick={handleSave} disabled={saving || hasErrors}>
           {saving ? t("saving") : t("save")}
         </Button>
-      </Footer>
+      </FormFooter>
     </>
   )
 }
@@ -588,12 +541,10 @@ function CustomConfigBody({
   pluginId,
   plugin,
   onClose,
-  variant = "modal",
 }: {
   pluginId: string
   plugin: PluginRow
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   const t = useTranslations("plugins.configForm")
   const [state, setState] = useState<CustomLoadState>({ status: "loading" })
@@ -630,17 +581,13 @@ function CustomConfigBody({
   )
 
   if (state.status === "fallback") {
-    return (
-      <SchemaConfigBody pluginId={pluginId} plugin={plugin} onClose={onClose} variant={variant} />
-    )
+    return <SchemaConfigBody pluginId={pluginId} plugin={plugin} onClose={onClose} />
   }
-
-  const Header = variant === "modal" ? ModalHeader : InlineHeader
 
   if (state.status === "loading") {
     return (
       <>
-        <Header title={plugin.name} version={plugin.version} description={t("description")} />
+        <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
         <p className="text-sm text-muted-foreground p-4">{t("loadingComponent")}</p>
       </>
     )
@@ -649,7 +596,7 @@ function CustomConfigBody({
   const { Component } = state
   return (
     <>
-      <Header title={plugin.name} version={plugin.version} description={t("description")} />
+      <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
       <PluginExtensionBoundary pluginId={pluginId} extensionId={`${pluginId}:configComponent`}>
         <Component config={plugin.config ?? {}} onSave={handleSave} pluginId={pluginId} />
       </PluginExtensionBoundary>
@@ -663,24 +610,7 @@ interface HeaderProps {
   description: string
 }
 
-function ModalHeader({ title, version, description }: HeaderProps) {
-  return (
-    <DialogHeader>
-      <DialogTitle>
-        {title}
-        {version ? (
-          <>
-            {" "}
-            <span className="text-muted-foreground text-sm font-normal">v{version}</span>
-          </>
-        ) : null}
-      </DialogTitle>
-      <DialogDescription>{description}</DialogDescription>
-    </DialogHeader>
-  )
-}
-
-function InlineHeader({ title, version, description }: HeaderProps) {
+function FormHeader({ title, version, description }: HeaderProps) {
   return (
     <header className="space-y-1 pb-2 border-b">
       <h2 className="text-base font-semibold">
@@ -697,11 +627,7 @@ function InlineHeader({ title, version, description }: HeaderProps) {
   )
 }
 
-function ModalFooter({ children }: { children: React.ReactNode }) {
-  return <DialogFooter>{children}</DialogFooter>
-}
-
-function InlineFooter({ children }: { children: React.ReactNode }) {
+function FormFooter({ children }: { children: React.ReactNode }) {
   return <div className="flex items-center justify-end gap-2 pt-2 border-t">{children}</div>
 }
 

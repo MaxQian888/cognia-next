@@ -12,16 +12,25 @@
 // the top of the center pane on every breakpoint.
 
 import { useTranslations } from "next-intl"
-import { FilterIcon, SearchIcon } from "lucide-react"
-import { usePluginsStore } from "@/stores/plugins"
+import { ArrowDownUpIcon, FilterIcon, SearchIcon } from "lucide-react"
+import { usePluginsStore, type PluginSortMode } from "@/stores/plugins"
 import { usePlugins } from "@/hooks/plugins"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
 import { PluginPanelToolbar } from "../plugin-panel-toolbar"
 import { PluginActiveFilters } from "./plugin-active-filters"
 import { PluginLibrarySubFilter } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
+
+const SORT_MODES: readonly PluginSortMode[] = ["name", "updated", "usage", "rating"]
 
 interface Props {
   onCheckUpdates?: () => void
@@ -31,8 +40,10 @@ interface Props {
 
 export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }: Props) {
   const t = useTranslations("plugins.panel")
+  const tSort = useTranslations("plugins.filterSheet")
   const filters = usePluginsStore((s) => s.filters)
   const setQuery = usePluginsStore((s) => s.setQuery)
+  const setFilters = usePluginsStore((s) => s.setFilters)
   const setFilterSheetOpen = usePluginsStore((s) => s.setFilterSheetOpen)
   const { filtered, totals, loading } = usePlugins()
   // Only surface the count when the visible set is narrower than the total
@@ -67,6 +78,28 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
             equivalent affordance as a Sheet trigger so the capability
             filter axis stays reachable. */}
         <PluginCategorySheet className="lg:hidden" />
+        <Select
+          value={filters.sort}
+          onValueChange={(v) => setFilters({ sort: v as PluginSortMode })}
+        >
+          <SelectTrigger
+            className="h-8 w-auto gap-1.5 text-xs"
+            aria-label={t("sortBy")}
+            data-testid="plugin-library-sort"
+          >
+            <ArrowDownUpIcon className="size-3.5" />
+            <span className="hidden sm:inline">
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_MODES.map((mode) => (
+              <SelectItem key={mode} value={mode}>
+                {tSort(`sortMode.${mode}` as never)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <PluginLibraryViewToggle />
         <PluginPanelToolbar
           onCheckUpdates={onCheckUpdates}

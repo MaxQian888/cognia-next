@@ -55,7 +55,6 @@ beforeEach(() => {
   setPluginEnabledMock.mockClear()
   mockDiagnostics = []
   usePluginsStore.setState({
-    configTarget: null,
     deleteTarget: null,
     permissionReviewTarget: null,
     detailPluginId: "alpha",

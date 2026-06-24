@@ -1,6 +1,7 @@
 {
   "all": "All capabilities",
   "capability": {
+    "a2ui": "A2UI",
     "agentPresets": "Agent presets",
     "ai-provider": "AI provider",
     "canvas": "Canvas",
@@ -11,8 +12,11 @@
     "importers": "Importers",
     "media": "Media",
     "modes": "Modes",
+    "processors": "Processors",
+    "providers": "Providers",
     "python": "Python",
     "scheduler": "Scheduler",
+    "skills": "Skills",
     "themes": "Themes",
     "tools": "Tools"
   }

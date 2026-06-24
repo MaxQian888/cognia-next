@@ -1,6 +1,7 @@
 {
   "all": "全部能力",
   "capability": {
+    "a2ui": "A2UI",
     "agentPresets": "Agent 预设",
     "ai-provider": "AI 提供商",
     "canvas": "画布",
@@ -11,8 +12,11 @@
     "importers": "导入器",
     "media": "媒体",
     "modes": "模式",
+    "processors": "处理器",
+    "providers": "提供方",
     "python": "Python",
     "scheduler": "调度器",
+    "skills": "技能",
     "themes": "主题",
     "tools": "工具"
   }

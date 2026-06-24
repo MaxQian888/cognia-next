@@ -8619,7 +8619,10 @@
       "enableAll": "全部启用",
       "refresh": "刷新",
       "selected": "已选择 {count}",
-      "uninstall": "卸载"
+      "uninstall": "卸载",
+      "updateAll": "更新 {count} 个",
+      "updateResult": "成功 {ok} 个，失败 {failed} 个",
+      "updating": "更新中…"
     },
     "browse": {
       "emptySection": "此分区暂无内容。",
@@ -8663,6 +8666,7 @@
     "categorySidebar": {
       "all": "全部能力",
       "capability": {
+        "a2ui": "A2UI",
         "agentPresets": "Agent 预设",
         "ai-provider": "AI 提供商",
         "canvas": "画布",
@@ -8673,8 +8677,11 @@
         "importers": "导入器",
         "media": "媒体",
         "modes": "模式",
+        "processors": "处理器",
+        "providers": "提供方",
         "python": "Python",
         "scheduler": "调度器",
+        "skills": "技能",
         "themes": "主题",
         "tools": "工具"
       }
@@ -8889,6 +8896,7 @@
         "empty": "此插件尚未注册任何运行时贡献。",
         "externalAgentAdapters": "外部 Agent 适配器",
         "externalAgentPresets": "外部 Agent 预设",
+        "hooks": "生命周期 Hook",
         "mcpServerPresets": "MCP 服务预设",
         "modes": "Agent 模式",
         "nativeAnthropicTools": "原生 Anthropic 工具",
@@ -9173,6 +9181,23 @@
       "readme": "README",
       "title": "从 GitHub 安装"
     },
+    "governance": {
+      "policy": {
+        "autoUpdate": "自动更新",
+        "autoUpdateHint": "市场更新可用时自动应用。",
+        "governance": "治理模式",
+        "governanceBlock": "拦截",
+        "governanceHint": "Warn 让未知点带告警通过；Block 直接拒绝。",
+        "governanceWarn": "告警",
+        "rateLimitsNote": "速率限制与沙箱默认值在全局配置；每个插件的实际用量在插件详情中可见。",
+        "securityPosture": "严格沙箱",
+        "securityPostureHint": "拒绝未声明白名单插件的网络出口，并对每一项已声明权限都弹窗确认。关闭（平衡）保持默认：危险权限仍会弹窗，未声明白名单的插件保持不受限出口。",
+        "signatureRequired": "强制签名",
+        "signatureRequiredHint": "拒绝加载未通过发布者签名验证的插件。",
+        "trustedPublishersOnly": "仅信任的发布者",
+        "trustedPublishersOnlyHint": "仅接受来自官方密钥或你信任的发布者的签名；拒绝未知签名者。"
+      }
+    },
     "grid": {
       "browseMarketplace": "浏览市场",
       "emptyAll": "尚未安装任何插件。",
@@ -9291,6 +9316,7 @@
       "resultsCount": "{count} / {total} 个插件",
       "resultsCountEmpty": "无匹配——已安装 {total} 个插件",
       "searchPlaceholder": "搜索插件…",
+      "sortBy": "排序",
       "totalBadge": "共 {count}"
     },
     "permissionReview": {
@@ -9423,6 +9449,7 @@
         "analytics": "使用统计",
         "audit": "审计日志",
         "permissions": "权限",
+        "policy": "策略",
         "scheduled": "定时任务"
       },
       "library": "已安装",
@@ -15358,7 +15385,6 @@
       "notifications": "通知中心的渠道、安静时段、按来源静音与保留策略。",
       "ocr": "OCR 服务提供商（Mistral OCR、Google Vision、AWS Textract、Azure DI、Claude / GPT / Gemini 视觉、Mathpix、OCR.space、ABBYY、Nanonets、飞书）以及本地引擎（Tesseract WASM/原生、Windows.Media.Ocr、Apple Vision、Android ML Kit、ocrs、PaddleOCR）和自托管 HTTP 适配器。含自动路由、PDF 文本层快速路径与结果缓存。",
       "pet": "你的桌面动画伙伴。",
-      "pluginConfig": "在一处集中配置每个已启用插件的设置——与各插件详情页内的表单完全一致。",
       "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
       "presets": "可复用的会话配置 — 系统提示词加上模型、工具、MCP 与技能覆盖。",
       "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",
@@ -16480,23 +16506,8 @@
       },
       "title": "宠物"
     },
-    "pluginConfig": {
-      "description": "在此配置每个已启用插件的设置。这些表单与各插件详情页内的完全一致；更改会在插件下次激活时生效。",
-      "emptyHint": "声明了配置 schema 或配置组件的已启用插件会显示在这里。",
-      "emptyTitle": "暂无可配置的插件",
-      "manageAll": "管理全部插件",
-      "title": "插件配置",
-      "versionLabel": "v{version}"
-    },
     "plugins": {
       "audit": {
-        "allVerified": "全部 implemented 契约均已通过验证。",
-        "badgeMissing": "缺证据 {count}",
-        "badgeTotal": "共 {count} 条契约",
-        "badgeVerified": "已验证 {count}",
-        "colId": "ID",
-        "colKind": "类型",
-        "colMissing": "缺失字段",
         "diagnostics": {
           "cancel": "取消",
           "clearAll": "清除全部",
@@ -16512,9 +16523,7 @@
           "hint": "来自治理、静默失败、运行时检查的实时信号。错误默认展开；仅含警告的分组保持折叠。",
           "severityFilterAria": "按严重程度筛选诊断",
           "title": "插件运行诊断"
-        },
-        "hint": "每一个 implemented 状态的扩展点、Hook 与激活模式都需附带 binding、文档链接与必填测试列表。verified 表示已通过；missing_proof 表示存在契约漂移，需要修复。",
-        "title": "契约审计"
+        }
       },
       "dataManagement": {
         "deleteButton": "删除数据",
@@ -16527,60 +16536,14 @@
         "emptyForAll": "尚无插件声明自定义数据表。",
         "emptyForPlugin": "该插件未声明任何自定义数据表。"
       },
-      "description": "治理插件：查看插件数量与运行健康度、定时任务、契约审计与全局策略。完整工作台位于 /plugins。",
+      "description": "插件在 /plugins 工作台中管理。此入口一览状态并提供进入工作台的链接。",
       "overview": {
         "badgeEnabled": "{count} 已启用",
         "badgeError": "{count} 异常",
-        "badgeLoading": "{count} 加载中",
-        "badgeTotal": "共 {count}",
-        "devtoolsCard": {
-          "cta": "打开开发工具",
-          "hint": "查看实时消息总线、Hook 历史、沙箱状态并触发热重载（仅开发版本）。",
-          "title": "开发工具"
-        },
-        "hint": "下方展示插件数量与健康状况，需要管理、市场、权限或开发工具时请进入完整工作台。",
-        "installedCard": {
-          "cta": "打开已安装",
-          "hint": "启用、停用、配置或卸载插件。",
-          "title": "已安装"
-        },
-        "manageButton": "进入插件工作台",
-        "marketplaceCard": {
-          "cta": "打开市场",
-          "hint": "在统一市场中搜索并安装插件。",
-          "title": "市场"
-        },
-        "permissionsCard": {
-          "cta": "打开权限",
-          "hint": "审查每个插件持有的权限，重点关注危险权限。",
-          "title": "权限"
-        }
-      },
-      "policy": {
-        "autoUpdate": "自动更新",
-        "autoUpdateHint": "市场更新可用时自动应用。",
-        "governance": "治理模式",
-        "governanceBlock": "拦截",
-        "governanceHint": "Warn 让未知点带告警通过；Block 直接拒绝。",
-        "governanceWarn": "告警",
-        "rateLimitsNote": "速率限制与沙箱默认值在全局配置；每个插件的实际用量在 /plugins 中可见。",
-        "securityPosture": "严格沙箱",
-        "securityPostureHint": "拒绝未声明白名单插件的网络出口，并对每一项已声明权限都弹窗确认。关闭（平衡）保持默认：危险权限仍会弹窗，未声明白名单的插件保持不受限出口。",
-        "signatureRequired": "强制签名",
-        "signatureRequiredHint": "拒绝加载未通过发布者签名验证的插件。",
-        "trustedPublishersOnly": "仅信任的发布者",
-        "trustedPublishersOnlyHint": "仅接受来自官方密钥或你信任的发布者的签名；拒绝未知签名者。"
-      },
-      "scheduled": {
-        "hint": "插件贡献的定时任务与其它定时任务共享同一治理面板。前往调度器配置 cron、间隔与确认策略。",
-        "openSchedulerButton": "打开调度器",
-        "title": "插件定时任务"
-      },
-      "subTabs": {
-        "audit": "审计",
-        "overview": "概览",
-        "policy": "策略",
-        "scheduled": "定时任务"
+        "badgeUpdates": "{count} 可更新",
+        "hint": "在工作台中管理、安装、配置并治理插件。",
+        "manageGovernance": "管理治理",
+        "openWorkspace": "进入插件工作台"
       },
       "title": "插件"
     },
@@ -17286,7 +17249,6 @@
       "notifications": "通知",
       "ocr": "OCR 文字识别",
       "pet": "宠物",
-      "pluginConfig": "插件配置",
       "plugins": "插件",
       "presets": "预设",
       "profile": "个人资料",

@@ -921,6 +921,19 @@ export class PluginLifecycleHooks {
     return Array.from(this.registeredHooks.keys())
   }
 
+  /**
+   * Hook names a plugin has actually registered (a non-undefined handler).
+   * Powers the detail pane's "Capabilities → Hooks" enumeration so users can
+   * see which lifecycle hooks a plugin contributes, not just filter by them.
+   */
+  getHooksByPlugin(pluginId: string): string[] {
+    const registered = this.registeredHooks.get(pluginId)
+    if (!registered) return []
+    return Object.keys(registered.hooks).filter(
+      (name) => registered.hooks[name as HookName] !== undefined
+    )
+  }
+
   clear(): void {
     this.registeredHooks.clear()
     this.hookExecutionOrder = []

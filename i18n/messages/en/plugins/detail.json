@@ -18,6 +18,7 @@
     "empty": "This plugin has not registered any runtime contributions.",
     "externalAgentAdapters": "External agent adapters",
     "externalAgentPresets": "External agent presets",
+    "hooks": "Lifecycle hooks",
     "mcpServerPresets": "MCP server presets",
     "modes": "Agent modes",
     "nativeAnthropicTools": "Native Anthropic tools",

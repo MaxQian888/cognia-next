@@ -69,10 +69,10 @@ beforeEach(() => {
 })
 
 describe("PluginLibraryList", () => {
-  it("shows the loading hint when the live-query has not resolved", () => {
+  it("shows the loading skeleton when the live-query has not resolved", () => {
     mockState.loading = true
     render(<PluginLibraryList />)
-    expect(screen.getByText("loading")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-library-list-skeleton")).toBeInTheDocument()
   })
 
   it("renders the no-plugins empty state with a Discover CTA when totals.total = 0", () => {

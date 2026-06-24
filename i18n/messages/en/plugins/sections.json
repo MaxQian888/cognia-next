@@ -7,6 +7,7 @@
     "analytics": "Analytics",
     "audit": "Audit log",
     "permissions": "Permissions",
+    "policy": "Policy",
     "scheduled": "Scheduled"
   },
   "library": "Library",
