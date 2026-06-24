@@ -72,6 +72,10 @@ import {
   adaptPresetToEnabledProviders,
   getBuiltInPreset,
 } from "@cognia/provider-routing/built-in-presets"
+import {
+  computeEnabledProviderIds,
+  seedDefaultMappingsIfNeeded,
+} from "@/lib/routing/seed-default-mappings"
 
 interface SettingsState {
   settings: AppSettings | null
@@ -540,13 +544,25 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       if (get().loaded) return
       try {
         const raw = await getSettings()
-        const s = repairImportedVscodeThemes(raw)
-        // If the repair produced changes, persist them so subsequent loads
-        // observe the cleaned-up state. The repair is purely subtractive
-        // (drops orphans / collapses duplicate sourceKey rows) so it never
-        // loses the user's intent.
-        if (s.importedVscodeThemes !== raw.importedVscodeThemes) {
-          await saveSettings({ importedVscodeThemes: s.importedVscodeThemes })
+        const repaired = repairImportedVscodeThemes(raw)
+        // Seed default tier aliases (fast/balanced/powerful/reasoning) once for
+        // fresh users so the alias-routing engine activates without manual
+        // setup. Idempotent: returns the same object when mappings already
+        // exist or no providers are enabled.
+        const s = seedDefaultMappingsIfNeeded(repaired)
+        // Persist whatever the repair + seed changed so subsequent loads observe
+        // it. The repair is purely subtractive (drops orphans / collapses
+        // duplicate sourceKey rows) and the seed only fills an empty
+        // modelMappings, so neither loses the user's intent.
+        const patch: Partial<Omit<AppSettings, "id">> = {}
+        if (repaired.importedVscodeThemes !== raw.importedVscodeThemes) {
+          patch.importedVscodeThemes = repaired.importedVscodeThemes
+        }
+        if (s.modelMappings !== repaired.modelMappings) {
+          patch.modelMappings = s.modelMappings
+        }
+        if (Object.keys(patch).length > 0) {
+          await saveSettings(patch)
         }
         set({ settings: s, loaded: true })
         // Push the API key to the Rust process on first load. The user expects
@@ -1028,17 +1044,11 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const preset = getBuiltInPreset(presetId)
       if (!preset) return
 
-      // Adapt to the providers that are actually enabled right now. Anthropic
-      // works without a providerSettings entry (sidecar OAuth/API key), so it
-      // is always considered enabled unless explicitly disabled.
-      const enabledIds = new Set<string>()
-      for (const [id, s] of Object.entries(cur?.providerSettings ?? {})) {
-        if (s.enabled !== false) enabledIds.add(id)
-      }
-      if (cur?.providerSettings?.["anthropic"]?.enabled !== false) enabledIds.add("anthropic")
-      for (const cp of cur?.customProviders ?? []) {
-        if (cp.enabled !== false) enabledIds.add(cp.id)
-      }
+      // Adapt to the providers that are actually enabled right now (shared with
+      // the fresh-user seeding path). Anthropic works without a providerSettings
+      // entry (sidecar OAuth/API key), so it is always considered enabled unless
+      // explicitly disabled.
+      const enabledIds = computeEnabledProviderIds(cur)
       const adapted = adaptPresetToEnabledProviders(preset, enabledIds)
 
       const existingMappings = cur?.modelMappings ?? []

@@ -179,6 +179,54 @@ describe("load", () => {
     expect(useSettingsStore.getState().loaded).toBe(true)
   })
 
+  it("seeds default tier mappings on load for a fresh user and persists them", async () => {
+    dbSettings.getSettings.mockResolvedValue(
+      baseSettings({ modelMappings: undefined, providerSettings: { openai: { enabled: true } } })
+    )
+    keyring.loadAllProviderKeys.mockResolvedValue({})
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    const saved = dbSettings.saveSettings.mock.calls[0]?.[0]
+    expect(saved?.modelMappings?.length).toBeGreaterThan(0)
+    expect(saved?.modelMappings?.some((m: { alias: string }) => m.alias === "fast")).toBe(true)
+    expect(useSettingsStore.getState().settings?.modelMappings?.length).toBeGreaterThan(0)
+  })
+
+  it("does NOT reseed mappings on load when the user already has some", async () => {
+    dbSettings.getSettings.mockResolvedValue(
+      baseSettings({
+        modelMappings: [
+          {
+            id: "existing",
+            alias: "fast",
+            providers: [{ providerId: "openai", modelId: "gpt-4o" }],
+            distribution: "priority",
+            enabled: true,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      })
+    )
+    keyring.loadAllProviderKeys.mockResolvedValue({})
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    // No saveSettings call carries modelMappings (nothing to persist).
+    for (const call of dbSettings.saveSettings.mock.calls) {
+      expect(call[0]?.modelMappings).toBeUndefined()
+    }
+  })
+
   it("repairs orphaned importedVscodeThemes on load and persists the cleanup", async () => {
     // Two import rows, but only one has a matching customTheme — the
     // other is a leftover from the historical saveSettings race.
@@ -217,9 +265,13 @@ describe("load", () => {
     expect(cleanedRecords).toHaveLength(1)
     expect(cleanedRecords?.[0].customThemeId).toBe("ct-keep")
     // The cleanup must be persisted so the next load doesn't redo this work.
-    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
-      importedVscodeThemes: [expect.objectContaining({ customThemeId: "ct-keep" })],
-    })
+    // (Fresh-user mapping seeding may ride along in the same patch, so match
+    // on the importedVscodeThemes field specifically.)
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importedVscodeThemes: [expect.objectContaining({ customThemeId: "ct-keep" })],
+      })
+    )
   })
 })
 
