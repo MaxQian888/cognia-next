@@ -14,6 +14,7 @@ pub mod crash;
 mod cua_sandbox;
 mod external_agent;
 mod files;
+mod fonts;
 mod fs_atomic;
 mod gateway;
 mod git;
@@ -476,6 +477,7 @@ pub fn run() {
             terminal::exec::terminal_exec,
             terminal::complete::terminal_complete_paths,
             terminal::path_scan::terminal_list_path_executables,
+            fonts::os_list_fonts,
             terminal::headless::terminal_headless_exec,
             terminal::headless::terminal_headless_spawn,
             terminal::headless::terminal_headless_run,

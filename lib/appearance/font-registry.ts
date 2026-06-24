@@ -24,6 +24,19 @@ export interface FontEntry {
   pluginId?: string
   /** Optional human label distinct from the CSS name (e.g. "Inter (Plugin)"). */
   label?: string
+  /**
+   * Fixed-pitch? Set for `source === "system"` families enumerated by the
+   * host (`os_list_fonts`). Drives the picker's `monoOnly` filter so the
+   * terminal font picker shows only monospace families. `undefined` when
+   * unknown (web mode, plugin / web-safe entries).
+   */
+  monospaced?: boolean
+}
+
+/** System font as reported by the host enumeration command. */
+export interface SystemFontInfo {
+  family: string
+  monospaced?: boolean
 }
 
 const WEBSAFE_ENTRIES: FontEntry[] = [
@@ -42,7 +55,7 @@ const WEBSAFE_ENTRIES: FontEntry[] = [
 ]
 
 /** System families pushed in by Tauri command (or empty in web mode). */
-let systemFamilies: string[] = []
+let systemFamilies: SystemFontInfo[] = []
 
 interface PluginFontKey {
   family: string
@@ -65,14 +78,30 @@ function emit(): void {
 }
 
 /**
- * Replace the system family list. Idempotent — passing the same list twice
- * doesn't re-emit. Usually called once at boot from a Tauri command.
+ * Replace the system family list. Accepts plain family strings (legacy /
+ * web-safe callers) or `{ family, monospaced }` records from the host
+ * enumeration. Deduped by family (monospaced OR-reduced), sorted, and
+ * idempotent — passing an equivalent list twice doesn't re-emit. Usually
+ * called once at boot from the `os_list_fonts` command.
  */
-export function setSystemFonts(families: string[]): void {
-  const next = Array.from(new Set(families.filter((f) => f.trim().length > 0))).sort()
-  if (next.length === systemFamilies.length && next.every((f, i) => f === systemFamilies[i])) {
-    return
+export function setSystemFonts(families: ReadonlyArray<string | SystemFontInfo>): void {
+  const merged = new Map<string, boolean>()
+  for (const entry of families) {
+    const family = (typeof entry === "string" ? entry : entry.family).trim()
+    if (!family) continue
+    const mono = typeof entry === "string" ? false : entry.monospaced === true
+    merged.set(family, (merged.get(family) ?? false) || mono)
   }
+  const next: SystemFontInfo[] = [...merged.entries()]
+    .map(([family, monospaced]) => ({ family, monospaced }))
+    .sort((a, b) => a.family.localeCompare(b.family))
+  const unchanged =
+    next.length === systemFamilies.length &&
+    next.every(
+      (f, i) =>
+        f.family === systemFamilies[i].family && f.monospaced === systemFamilies[i].monospaced
+    )
+  if (unchanged) return
   systemFamilies = next
   emit()
 }
@@ -115,7 +144,11 @@ listeners.add(invalidateCache)
 
 export function listFonts(): FontEntry[] {
   if (cachedSnapshot) return cachedSnapshot
-  const system: FontEntry[] = systemFamilies.map((family) => ({ family, source: "system" }))
+  const system: FontEntry[] = systemFamilies.map((f) => ({
+    family: f.family,
+    source: "system",
+    monospaced: f.monospaced,
+  }))
   const plugins: FontEntry[] = [...pluginFonts.values()]
     .map((value) => ({
       family: value.family,
