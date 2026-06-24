@@ -1,0 +1,896 @@
+{
+  "agentFlow": {
+    "group": {
+      "collapseAll": "全部折叠",
+      "expandAll": "全部展开",
+      "summary": "{count, plural, =1 {1 次工具调用} other {# 次工具调用}}",
+      "tally": "{name} ×{count}"
+    },
+    "result": {
+      "diff": "+{added} −{removed}",
+      "entries": "{count} 项",
+      "files": "{count} 个文件",
+      "lines": "{count} 行",
+      "matches": "{count} 处匹配"
+    },
+    "rowAria": "{name} 工具调用 — {status}",
+    "status": {
+      "awaitingApproval": "等待批准",
+      "completed": "已完成",
+      "denied": "已拒绝",
+      "error": "出错",
+      "pending": "待处理",
+      "responded": "已响应",
+      "running": "运行中"
+    },
+    "subagents": {
+      "summary": "{count, plural, other {# 个子代理}}"
+    }
+  },
+  "agentTeamDispatch": {
+    "openMember": "打开该成员",
+    "supervisor": "监督者",
+    "title": "调度"
+  },
+  "artifactPart": {
+    "cleared": "（已清空）",
+    "collapse": "折叠预览",
+    "copied": "已复制",
+    "copy": "复制",
+    "copyAria": "复制 artifact 内容",
+    "download": "下载",
+    "downloadAria": "下载 artifact",
+    "expand": "展开预览",
+    "openInCanvas": "在画布中打开",
+    "openInCanvasAria": "在画布中打开 artifact"
+  },
+  "askUser": {
+    "dismiss": "忽略",
+    "multiHint": "可多选",
+    "queued": "还有 {count} 个待回答",
+    "submit": "提交",
+    "submitHint": "⌘/Ctrl + Enter 提交",
+    "textPlaceholder": "输入你的回答…",
+    "title": "智能体有个问题"
+  },
+  "branch": {
+    "cancel": "取消",
+    "confirm": "创建分支",
+    "createError": "创建分支失败",
+    "created": "分支已创建",
+    "description": "将此对话派生为一个新的独立会话，原会话保持不变。",
+    "direct": {
+      "hint": "原样复制到这条消息为止的对话。",
+      "label": "直接分支"
+    },
+    "summary": {
+      "generating": "正在生成摘要……",
+      "hint": "总结目前为止的对话并作为分支起点（让上下文更精简）。",
+      "label": "总结后分支",
+      "placeholder": "摘要将显示在这里——你可以在分支前编辑它。",
+      "previewLabel": "摘要（可编辑）",
+      "regenerate": "重新生成"
+    },
+    "summaryEmpty": "请先填写摘要再分支",
+    "summaryError": "生成摘要失败",
+    "title": "分支对话"
+  },
+  "canvasInline": {
+    "collapsePreview": "折叠预览",
+    "expandPreview": "展开预览",
+    "openInCanvas": "在画布中打开"
+  },
+  "characterMissing": {
+    "action": {
+      "pickAnother": "选择其它角色",
+      "reEnablePluginHint": "重新启用该插件即可恢复。"
+    },
+    "body": "此会话使用的{source}已不可用。后续消息将使用应用默认配置。",
+    "sourceLocalFile": "本地角色包",
+    "sourcePlugin": "插件「{name}」",
+    "title": "角色不可用"
+  },
+  "characterPicker": {
+    "description": "每个角色都有自己的系统提示、模型与工具。",
+    "empty": "没有匹配的角色。",
+    "groupBuiltIn": "内置",
+    "groupHeading": "角色",
+    "groupLocalFile": "来自本地文件",
+    "groupPlugin": "来自 {name}",
+    "groupUser": "我的角色",
+    "searchPlaceholder": "搜索角色…",
+    "title": "选择一个角色"
+  },
+  "compactBoundary": {
+    "auto": "自动",
+    "detail": "{from} → {to} tokens",
+    "label": "上下文已压缩",
+    "manual": "手动"
+  },
+  "composer": {
+    "ariaAttachImage": "添加图片",
+    "ariaMessage": "消息",
+    "ariaSend": "发送",
+    "ariaSending": "发送中…",
+    "ariaStop": "停止",
+    "ariaToggleWebSearch": "切换网络搜索",
+    "ariaUploadImage": "上传图片",
+    "attachImageTooltip": "添加图片",
+    "attachments": {
+      "countLimit": "最多只能附加 {max} 个附件。",
+      "fallbackFile": "文件",
+      "fallbackName": "附件",
+      "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
+      "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
+      "oversizeCancel": "取消",
+      "oversizeConfirm": "仍然发送",
+      "oversizeTitle": "附件较大",
+      "removeAria": "移除 {filename}",
+      "removeFallback": "移除附件",
+      "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。"
+    },
+    "commands": {
+      "failed": "命令执行失败",
+      "unavailable": "/{name} 暂不可用。"
+    },
+    "context": {
+      "ariaLabel": "已附加的文件与引用"
+    },
+    "draftRestore": {
+      "dismiss": "关闭",
+      "label": "需重新添加：",
+      "toast": "已恢复草稿——有 {count} 个附件需要重新添加。"
+    },
+    "draftReview": {
+      "approve": "通过并发送",
+      "noPendingDrafts": "暂无等待审核的草稿。",
+      "reject": "拒绝",
+      "title": "查看待处理草稿"
+    },
+    "dragOverlay": {
+      "dropToAttach": "松开以添加图片"
+    },
+    "enhance": {
+      "modes": {
+        "concise": "更精简",
+        "detailed": "更详细",
+        "improve": "优化",
+        "simpler": "更通俗",
+        "technical": "更专业",
+        "variants": "生成多个版本"
+      },
+      "preview": {
+        "apply": "应用",
+        "cancel": "取消",
+        "enhanced": "润色后",
+        "original": "原文",
+        "title": "润色后的提示词",
+        "variantsTitle": "选择一个版本"
+      },
+      "toast": {
+        "applied": "提示词已更新。",
+        "empty": "暂无可润色的内容。",
+        "error": "润色提示词失败。",
+        "noModel": "请在设置中配置模型后再润色提示词。",
+        "noOutput": "没有可改进的建议。",
+        "pii": "草稿包含敏感信息——已跳过润色。"
+      },
+      "trigger": "润色提示词"
+    },
+    "folder": {
+      "aria": "添加文件夹",
+      "confirmAdd": "添加文件夹",
+      "confirmBody": "“{name}”包含 {count}+ 个文件，agent 将按需读取。确认加入上下文？",
+      "confirmCancel": "取消",
+      "confirmTitle": "添加大文件夹？",
+      "tooltip": "将文件夹加入上下文"
+    },
+    "followUps": {
+      "dismiss": "关闭建议",
+      "label": "追问建议"
+    },
+    "ghostAcceptHint": "Tab",
+    "helperHints": {
+      "dropImages": "拖拽 / 粘贴图片",
+      "send": "⏎ 发送 · ⇧⏎ 换行",
+      "tryPrefix": "试试"
+    },
+    "memory": {
+      "appended": "已写入 {path}",
+      "emptyPreview": "（开始输入 memory 内容）",
+      "failed": "写入 memory 失败",
+      "needsLine": "请在 # 后输入要写入 memory 的内容。",
+      "panelTitle": "追加到 memory",
+      "pickScope": "请在弹层中选择「项目 memory」或「用户 memory」以保存。",
+      "projectLabel": "项目 memory",
+      "userLabel": "用户 memory"
+    },
+    "modelPicker": {
+      "capReasoning": "推理",
+      "capTools": "工具调用",
+      "capVision": "视觉",
+      "contextWindowLabel": "上下文窗口",
+      "liveSwitchFailed": "无法实时切换模型",
+      "liveSwitched": "已切换到 {model}",
+      "noProviders": "尚未配置任何模型提供商",
+      "searchPlaceholder": "搜索模型…",
+      "switchModelAria": "切换模型"
+    },
+    "paramForm": {
+      "cancel": "取消",
+      "insert": "插入",
+      "missingRequired": "请填写“{label}”。",
+      "requiredMark": "必填",
+      "selectPlaceholder": "请选择…",
+      "title": "配置 /{name}"
+    },
+    "placeholder": "输入消息 — 试试 /、@、!、#",
+    "placeholderDisabled": "请选择一个会话开始聊天…",
+    "popover": {
+      "bashEmpty": "'<空>'",
+      "bashHintPrefix": "按",
+      "bashHintSuffix": "以 shell 命令运行。",
+      "bashTitle": "执行 shell 命令",
+      "comingSoon": "即将上线",
+      "fileTitle": "引用文件或文件夹",
+      "memoryTitle": "追加到 memory",
+      "noCommandMatches": "没有匹配「/{query}」的命令。",
+      "noCommands": "暂无可用命令。",
+      "noFiles": "没有匹配「{query}」的文件。",
+      "searching": "搜索中…",
+      "searchingShort": "搜索中…",
+      "slashTitle": "斜杠命令",
+      "workspaceEmpty": "工作区为空。",
+      "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
+    },
+    "references": {
+      "removeAria": "移除引用 {path}"
+    },
+    "sandboxShield": {
+      "label": {
+        "microvm": "沙盒已开启 — microVM 层",
+        "off": "沙盒未开启",
+        "os": "沙盒已开启 — OS 层"
+      },
+      "tooltip": {
+        "microvm": "Bash / Edit / Write 通过 cognia-e2b-sandbox 在临时 Firecracker microVM 中执行。",
+        "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。",
+        "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。"
+      }
+    },
+    "screenshot": {
+      "captureAria": "截图",
+      "captureFailed": "截图失败",
+      "captureTooltip": "截图"
+    },
+    "sendTooltip": "发送",
+    "shell": {
+      "failed": "`$ {cmd}` 执行失败：{error}",
+      "needsCwd": "运行 shell 命令前请先设置工作目录。",
+      "runningHint": "在 `{cwd}` 中执行 `$ {cmd}`…"
+    },
+    "stopTooltip": "停止",
+    "toolbar": {
+      "breakdownAgents": "子智能体",
+      "breakdownCommands": "斜杠命令",
+      "breakdownMcp": "MCP 工具",
+      "breakdownMemory": "记忆文件",
+      "breakdownSystemPrompt": "系统提示词",
+      "breakdownTitle": "上下文构成",
+      "breakdownTools": "内置工具",
+      "compactNow": "立即压缩",
+      "compactThreshold": "{pct} 时自动压缩",
+      "contextUsageAria": "上下文窗口已用 {pct}",
+      "modelTooltip": "当前模型 · 在「设置 → API Key」中切换",
+      "moreControls": "更多控件",
+      "pluginExtensionOverflow": "更多插件操作",
+      "quickActions": "插件快捷操作",
+      "sessionTotal": "会话累计（{turns} 轮）",
+      "usageCached": "缓存",
+      "usageInput": "输入",
+      "usageOutput": "输出",
+      "workflow": {
+        "explain": "解释",
+        "explainAria": "解释所选节点",
+        "explainNoSelection": "请先在画布上选中一个或多个节点",
+        "explainTooltip": "让代理解释当前选中的 {count} 个节点",
+        "suggest": "下一个",
+        "suggestAria": "建议下一个节点",
+        "suggestTooltip": "让 workflow-designer 子代理推荐下一个要添加的节点",
+        "validate": "校验",
+        "validateAria": "校验当前工作流",
+        "validateTooltip": "运行结构校验器，让代理帮你修复发现的问题"
+      }
+    },
+    "voice": {
+      "holdToTalk": "按住说话",
+      "languageLabel": "语言",
+      "microphoneLabel": "麦克风",
+      "selectMicAria": "选择麦克风",
+      "voiceSettings": "语音设置"
+    },
+    "webLabel": "Web"
+  },
+  "concurrent": {
+    "awaitingApproval": "等待审批",
+    "closeTab": "关闭 {title}",
+    "errored": "错误",
+    "exitSplit": "退出分屏",
+    "newTab": "新对话",
+    "openConversations": "已打开的对话",
+    "overCapacity": "已达并发上限（{max} 路流式）。请等待其中一个完成，或停止另一个对话。",
+    "splitView": "分屏",
+    "streaming": "生成中",
+    "untitled": "未命名"
+  },
+  "copy": {
+    "success": "已复制到剪贴板"
+  },
+  "empty": {
+    "brandAlt": "Cognia",
+    "dismiss": "隐藏此区块",
+    "greeting": {
+      "afternoon": "下午好",
+      "evening": "晚上好",
+      "morning": "早上好",
+      "named": "{greeting}，{name}",
+      "night": "夜深了"
+    },
+    "newChat": "新建会话",
+    "samples": {
+      "draftPrompt": "查看暂存区改动（`git diff --cached`），按 Conventional Commits 提一条提交信息。",
+      "draftTitle": "起草提交信息",
+      "explorePrompt": "列出工作目录里的顶层文件，并用 3 句话总结这个项目是做什么的。",
+      "exploreTitle": "探索项目",
+      "reviewPrompt": "执行 `git diff HEAD~3..HEAD`，告诉我改了什么、是否有风险。",
+      "reviewTitle": "查看最近改动",
+      "testsPrompt": "运行项目测试。失败的用例请按一句话假设根因列出。",
+      "testsTitle": "跑测试并定位问题"
+    },
+    "sections": {
+      "aiPrompts": "为你推荐",
+      "characterPrompts": "用该角色试试",
+      "continue": "最近",
+      "tryPrompt": "试试这些"
+    },
+    "style": {
+      "minimal": "精简",
+      "rich": "丰富",
+      "toggleLabel": "切换欢迎页布局"
+    },
+    "subtitle": "随便问、直接进入某个能力，或接着上次继续。",
+    "title": "今天想完成点什么？"
+  },
+  "header": {
+    "accountSwitcher": {
+      "active": "当前",
+      "aria": "切换本会话使用的账号",
+      "noOverride": "继承",
+      "toast": "下一条消息将使用账号 {label}"
+    },
+    "ariaSettings": "会话设置",
+    "bareMode": "极简模式",
+    "briefMode": "简短输出",
+    "cancel": "取消",
+    "cwdFallbackHint": "角色默认: {path}",
+    "cwdReset": "重置",
+    "debugMode": "调试模式",
+    "description": "为本会话覆盖默认值，留空则继承全局设置。",
+    "flowDisplay": {
+      "aria": "Agent 流程展示模式",
+      "detailed": "详细",
+      "simplified": "简化",
+      "standard": "标准"
+    },
+    "forkAria": "派生会话",
+    "forkSuccess": "已派生新会话，已切换到该分支。",
+    "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
+    "forkUnsupported": "此 agent 不支持派生会话。",
+    "groups": {
+      "default": "默认",
+      "favorites": "收藏",
+      "other": "其他"
+    },
+    "modelCustomPlaceholder": "claude-...",
+    "modelLabel": "模型",
+    "modelPresets": {
+      "custom": "自定义",
+      "default": "默认（使用全局）",
+      "haiku45": "Claude Haiku 4.5",
+      "opus45": "Claude Opus 4.5",
+      "opus47": "Claude Opus 4.7",
+      "sonnet45": "Claude Sonnet 4.5"
+    },
+    "noApiKey": "未配置 API Key",
+    "permissionModeAppDefault": "使用应用默认",
+    "permissionModeLabel": "权限模式",
+    "pickDirAria": "选择目录",
+    "pickDirTitle": "为本会话选择工作目录",
+    "presetConflict": {
+      "apply": "应用",
+      "cancel": "取消",
+      "fillEmptyBody": "保留你已经填写的内容，只在会话当前为空时套用预设。最安全的默认。",
+      "fillEmptyTitle": "仅填充空字段",
+      "mergeBody": "对这些标量字段而言等同于“仅填充空字段”。（适用于通过分区编辑器应用、且数组字段会被合并的场景。）",
+      "mergeTitle": "合并",
+      "overwriteAllBody": "无论会话是否已填写，都用预设的字段值覆盖。",
+      "overwriteAllTitle": "全部覆盖",
+      "summary": "该预设会覆盖以下{count, plural, =1 {字段} other {字段}}：{fields}。",
+      "title": "应用预设「{name}」？"
+    },
+    "presetHelp": "从预设中应用系统提示、模型、权限模式与工作目录。",
+    "presetLabel": "应用预设",
+    "presetNoneOption": "（无）",
+    "presetNonePlaceholder": "（无）",
+    "presetPill": {
+      "ariaLabel": "当前预设——点击切换",
+      "defaultBadge": "默认",
+      "empty": "没有匹配的预设。",
+      "manageAll": "管理所有预设…",
+      "none": "未使用预设",
+      "searchAriaLabel": "搜索预设",
+      "searchPlaceholder": "搜索预设…"
+    },
+    "save": "保存",
+    "skills": {
+      "aria": "本会话已激活的技能",
+      "counter": "{active}/{total} 个技能",
+      "description": "仅对当前会话开关技能。如需永久修改，请编辑角色设置。",
+      "title": "技能",
+      "toggleAria": "切换 {name}"
+    },
+    "subscriptionBadge": "{tier} 订阅",
+    "subscriptionBadgeAria": "当前 Anthropic 订阅：{tier}",
+    "systemPromptLabel": "系统提示",
+    "systemPromptPlaceholder": "留空则使用全局默认",
+    "title": "会话设置",
+    "tokensLabel": "{input} in / {output} out",
+    "untitledSession": "（未命名）",
+    "workingDirLabel": "工作目录",
+    "workingDirPlaceholder": "/path/to/project"
+  },
+  "history": {
+    "loadError": "无法加载此对话。",
+    "loading": "正在加载对话…",
+    "retry": "重试"
+  },
+  "inlineError": {
+    "dismiss": "忽略",
+    "openSettings": "打开设置",
+    "retry": "重试",
+    "title": "发送失败"
+  },
+  "list": {
+    "clear": "清空",
+    "clearAction": "删除消息",
+    "clearCancel": "取消",
+    "clearDescription": "本会话中的所有消息将被永久删除，但会话本身会保留。",
+    "clearTitle": "清空当前会话？",
+    "cleared": "会话已清空。",
+    "export": "导出",
+    "exported": "已导出为 Markdown。",
+    "nothingToExport": "暂无内容可导出。",
+    "thinking": "Claude 正在思考…",
+    "tips": [
+      "输入 / 可调用斜杠命令。",
+      "在团队会话中用 @ 提及某位成员。",
+      "为任意消息添加书签，方便日后查找。",
+      "从任意回复创建分支，探索另一种可能。",
+      "编辑你的某条消息并重新发送，引导回答方向。",
+      "随时可将整段对话导出为 Markdown。"
+    ]
+  },
+  "mcp": {
+    "edit": {
+      "editCount": "{count} 处修改",
+      "title": "编辑"
+    },
+    "glob": {
+      "noMatches": "无匹配"
+    },
+    "grep": {
+      "noMatches": "无匹配"
+    },
+    "ls": {
+      "empty": "空目录",
+      "title": "列出目录"
+    },
+    "plan": {
+      "title": "计划"
+    },
+    "webFetch": {
+      "empty": "无返回内容"
+    },
+    "webSearch": {
+      "noResults": "无结果"
+    },
+    "wikiSearch": {
+      "noResults": "无结果"
+    },
+    "write": {
+      "lineCount": "{count} 行",
+      "title": "写入",
+      "truncated": "预览已截断 — 完整内容已写入磁盘。"
+    }
+  },
+  "message": {
+    "attachmentAlt": "附件",
+    "bookmarkLabel": "切换收藏",
+    "bookmarkRemoveTooltip": "取消收藏",
+    "bookmarkTooltip": "收藏",
+    "branchLabel": "分支对话",
+    "branchTooltip": "从这里分支",
+    "copyDone": "已复制！",
+    "copyLabel": "复制消息",
+    "copyTooltip": "复制消息",
+    "editLabel": "编辑并重发",
+    "editTooltip": "编辑并重发",
+    "editingCancel": "取消",
+    "editingSubmit": "发送（⌘/Ctrl+Enter）",
+    "errorCategory": {
+      "brokenPipe": "管道中断",
+      "connectionRefused": "连接被拒绝",
+      "connectionReset": "连接被重置",
+      "dispatchFailed": "调度失败",
+      "dnsFailure": "DNS 解析失败",
+      "fetchFailed": "网络请求失败",
+      "forbidden": "无权限",
+      "invalidRequest": "请求无效",
+      "modelOverloaded": "模型过载",
+      "modelRequired": "未设置模型",
+      "networkUnreachable": "网络不可达",
+      "notFound": "未找到",
+      "payloadTooLarge": "请求过大",
+      "pluginToolMissing": "工具不可用",
+      "providerMisconfigured": "服务商配置不完整",
+      "quotaExceeded": "配额已用尽",
+      "rateLimited": "触发限流",
+      "serverError": "服务器错误",
+      "serviceUnavailable": "服务不可用",
+      "sessionTimeout": "会话超时",
+      "sidecarExited": "后端已停止",
+      "timeout": "请求超时",
+      "unauthorized": "未授权"
+    },
+    "errorCategoryHint": {
+      "brokenPipe": "连接意外关闭——请重试该请求。",
+      "connectionRefused": "服务器未接受连接——请确认它正在运行且端口正确。",
+      "connectionReset": "连接在请求过程中断开——请重试；若持续出现，请检查网络或服务器。",
+      "dispatchFailed": "请求无法调度——请重试；并检查智能体或服务商配置。",
+      "dnsFailure": "无法解析主机名——请检查 URL 以及你的网络 / DNS。",
+      "fetchFailed": "请求无法发送——请检查网络连接和接口 URL。",
+      "forbidden": "你的账户无权访问该资源或模型。",
+      "invalidRequest": "请求格式有误——请检查参数和模型名称。",
+      "modelOverloaded": "服务方当前过载——请稍后重试。",
+      "modelRequired": "发送前请为该服务商选择一个模型。",
+      "networkUnreachable": "无法访问该主机——请检查网络连接以及代理或 VPN。",
+      "notFound": "该资源或接口不存在——请检查 URL 或 id。",
+      "payloadTooLarge": "请求超出大小限制——请缩减输入内容。",
+      "pluginToolMissing": "请求的工具不可用——请启用提供该工具的插件。",
+      "providerMisconfigured": "该服务商需要进一步配置——请在设置中设置协议和凭据。",
+      "quotaExceeded": "你的套餐配额已用完——请检查账单或用量限制。",
+      "rateLimited": "你触发了速率限制——请稍候再试。",
+      "serverError": "服务器处理请求失败——请稍后重试。",
+      "serviceUnavailable": "服务暂时不可用——请稍后重试。",
+      "sessionTimeout": "模型未在规定时间内响应——请重试，或检查 sidecar 与连接。",
+      "sidecarExited": "Claude sidecar 在运行中退出——请重试；若反复出现，请重启应用。",
+      "timeout": "请求耗时过长——请重试，或调高超时时间。",
+      "unauthorized": "身份验证失败——请在设置中检查 API 密钥或令牌。"
+    },
+    "pluginMenu": "插件操作",
+    "readAloud": "朗读",
+    "regenerateLabel": "重新生成",
+    "regenerateTooltip": "重新生成",
+    "shareDone": "已分享！",
+    "shareLabel": "分享消息",
+    "shareTooltip": "分享",
+    "showParsed": "查看解析",
+    "showRaw": "查看原文",
+    "stopReading": "停止朗读",
+    "todoPlanTitle": "计划 · {done}/{total} 已完成",
+    "toolCallFailed": "工具调用失败",
+    "usageCacheHit": "缓存命中：{n}",
+    "usageCacheWrite": "缓存写入：{n}",
+    "usageCost": "费用：${cost}",
+    "usageInput": "输入：{n}",
+    "usageOutput": "输出：{n}",
+    "usageReasoning": "推理：{n}"
+  },
+  "permissionMode": {
+    "acceptEdits": {
+      "label": "自动批准编辑",
+      "tooltip": "自动批准文件编辑；其它工具仍会弹窗征求。"
+    },
+    "aria": "权限模式：{label}。点击切换。",
+    "bypass": {
+      "label": "全部放行",
+      "tooltip": "所有工具自动批准。请谨慎 — Claude 可能执行任意命令。"
+    },
+    "default": {
+      "label": "默认",
+      "tooltip": "工具按常规弹窗征求权限。"
+    },
+    "plan": {
+      "label": "计划模式",
+      "tooltip": "只读规划模式 — Claude 仅提出方案，不会实际改动。"
+    },
+    "shiftTabHint": "按 Shift+Tab 可循环切换。"
+  },
+  "renderers": {
+    "alert": {
+      "caution": "注意",
+      "important": "重要",
+      "note": "备注",
+      "tip": "提示",
+      "warning": "警告"
+    },
+    "audio": {
+      "coverAlt": "封面",
+      "defaultFilename": "audio",
+      "download": "下载",
+      "failedToLoad": "音频加载失败",
+      "loop": "循环",
+      "mute": "静音",
+      "skipBack": "-10 秒",
+      "skipForward": "+10 秒",
+      "unmute": "取消静音"
+    },
+    "code": {
+      "ariaInLanguage": "{language} 代码",
+      "copy": "复制",
+      "copyAria": "复制代码",
+      "defaultLabel": "代码",
+      "download": "下载",
+      "downloadAria": "下载代码",
+      "figureLabel": "代码块",
+      "figureLabelWithLang": "{language} 代码块",
+      "footer": "{lineCount, plural, =1 {# 行} other {# 行}} • {charCount, plural, =1 {# 字符} other {# 字符}}",
+      "fullscreen": "全屏",
+      "fullscreenAria": "全屏查看",
+      "hideLines": "隐藏行号",
+      "hideLinesAria": "隐藏行号",
+      "plainText": "纯文本",
+      "showLines": "显示行号",
+      "showLinesAria": "显示行号",
+      "unwrap": "取消换行",
+      "unwrapAria": "取消自动换行",
+      "wrap": "自动换行",
+      "wrapAria": "启用自动换行"
+    },
+    "diff": {
+      "copy": "复制",
+      "defaultName": "diff",
+      "splitView": "分栏视图",
+      "unifiedView": "统一视图"
+    },
+    "errorBoundary": {
+      "retry": "重试",
+      "titleFallback": "渲染错误",
+      "titleNamed": "{name} 渲染错误"
+    },
+    "image": {
+      "close": "关闭",
+      "copyUrl": "复制链接",
+      "defaultFilename": "image",
+      "defaultTitle": "图片",
+      "download": "下载",
+      "failedToLoad": "图片加载失败",
+      "openInNewTab": "在新标签页打开",
+      "openUrl": "打开链接",
+      "previewDescription": "预览所选图片，可缩放或旋转。",
+      "rotate": "旋转",
+      "viewFullscreen": "全屏查看",
+      "zoomIn": "放大",
+      "zoomOut": "缩小"
+    },
+    "math": {
+      "clickToCopy": "点击复制 LaTeX",
+      "copyLatex": "复制 LaTeX",
+      "copySource": "复制源码",
+      "error": "LaTeX 错误",
+      "expressionLabel": "数学表达式",
+      "expressionLabelInline": "数学：{tex}",
+      "hideSource": "隐藏源码",
+      "inlineErrorTitle": "LaTeX 错误",
+      "invalidLabel": "无效的数学表达式：{tex}",
+      "renderError": "数学渲染错误",
+      "retry": "重试",
+      "showSource": "查看源码",
+      "viewFullscreen": "全屏查看",
+      "viewSource": "查看源码"
+    },
+    "mermaid": {
+      "copySource": "复制源码",
+      "diagramLabel": "Mermaid 图表",
+      "diagramTitle": "Mermaid 图表",
+      "error": "Mermaid 错误",
+      "errorFallback": "图表渲染失败",
+      "exportSvg": "导出 SVG",
+      "hideSource": "隐藏源码",
+      "retry": "重试",
+      "showSource": "查看源码",
+      "viewFullscreen": "全屏查看",
+      "viewSource": "查看源码"
+    },
+    "taskList": {
+      "progress": "进度"
+    },
+    "video": {
+      "bilibiliTitle": "B 站视频",
+      "defaultFilename": "video",
+      "download": "下载",
+      "failedToLoad": "视频加载失败",
+      "fullscreen": "全屏",
+      "mute": "静音",
+      "openUrl": "打开链接",
+      "pause": "暂停",
+      "play": "播放",
+      "unmute": "取消静音",
+      "vimeoTitle": "Vimeo 视频",
+      "youtubeTitle": "YouTube 视频"
+    }
+  },
+  "sessionCost": {
+    "byModelTitle": "按模型拆分",
+    "cache": "缓存",
+    "cacheReadShort": "读",
+    "cacheWriteShort": "写",
+    "cost": "成本",
+    "description": "来自 SDK result 事件的每轮持久化合计；按模型拆分来自 sessionUsage 表。",
+    "input": "输入",
+    "noModelData": "尚无持久化用量记录——上面的汇总来自内存中已加载的轮次。",
+    "output": "输出",
+    "title": "会话成本",
+    "tokensTitle": "输入：{input} · 输出：{output}",
+    "trigger": "会话成本",
+    "turns": "轮次"
+  },
+  "sessionNotice": {
+    "permissionDenied": {
+      "detail": "{tool} 未被允许运行",
+      "label": "工具被拦截"
+    },
+    "rateLimit": {
+      "detailWithReset": "{status} · {time} 重置",
+      "label": "速率限制",
+      "status": {
+        "rejected": "已达上限",
+        "warning": "接近上限"
+      }
+    }
+  },
+  "slashCommand": {
+    "ranSlashCommand": "执行了斜杠命令"
+  },
+  "sourcesPart": {
+    "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
+    "originLabel": {
+      "anthropic": "网络",
+      "footnote": "脚注",
+      "memory": "记忆",
+      "twinRag": "数字分身",
+      "twinStyle": "风格"
+    },
+    "recalledMemoriesHeader": "召回的记忆（{count}）",
+    "retrievedChunksHeader": "检索片段（{count}）",
+    "styleSamplesHeader": "风格样本（{count}）",
+    "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
+    "viewSource": "查看原文"
+  },
+  "subagentPart": {
+    "backgroundRunning": "后台运行中…",
+    "depthBadge": "深度 {n}",
+    "durationMs": "{ms}ms",
+    "noLogsYet": "暂无日志 — 子代理正在初始化。",
+    "openInWorkspace": "在工作区打开",
+    "rejected": {
+      "cycle": "派发被拒 — 会形成循环。",
+      "maxDepth": "派发被拒 — 已达最大嵌套深度。"
+    },
+    "rowAria": "{name} 子代理 — {status}",
+    "title": "子代理",
+    "tokens": "{n} tokens"
+  },
+  "terminalTool": {
+    "bashLabel": "Bash",
+    "runInDock": {
+      "empty": "没有匹配的 tab。",
+      "existingTabs": "已有 tab",
+      "label": "在终端中运行",
+      "newTab": "新建 tab",
+      "searchPlaceholder": "搜索 tab",
+      "trustedBadge": "已信任"
+    },
+    "runningStatus": "运行中"
+  },
+  "timeline": {
+    "collapse": "收起时间线",
+    "expand": "展开对话时间线",
+    "jumpTo": "跳转到：{label}",
+    "replyCount": "{count} 条回复",
+    "title": "时间线"
+  },
+  "toolApproval": {
+    "allowAlways": "始终允许",
+    "allowOnce": "仅本次允许",
+    "deny": "拒绝",
+    "inputLabel": "输入",
+    "titleFallback": "允许执行 {tool}？",
+    "toolLabel": "工具"
+  },
+  "twinBadge": {
+    "fewShotOff": "风格少样本已关闭",
+    "fewShotOn": "风格少样本已启用（{k} 条）",
+    "label": "孪生 · {chunks}",
+    "openWorkbench": "打开孪生工作台",
+    "ragOff": "RAG 已关闭",
+    "ragOn": "RAG 已开启（top-{topK}）",
+    "statSummary": "{sources} 个数据源 · {chunks} 个切片"
+  },
+  "welcomeDemo": {
+    "analyze": "分析",
+    "codeReview": "代码评审",
+    "dialogDescription": "实时 A2UI 演示 —— 选择建议、调整设置并就地渲染。",
+    "dialogTitle": "A2UI 交互式演示",
+    "explainConcept": "解释概念",
+    "generateIdeas": "生成想法",
+    "length": "长度",
+    "openDemo": "试用交互式演示",
+    "quickActions": "快捷操作",
+    "refresh": "刷新演示",
+    "responseSettings": "响应设置",
+    "selectLengthPlaceholder": "选择长度",
+    "selectTonePlaceholder": "选择语气",
+    "summarize": "总结",
+    "tone": "语气",
+    "translate": "翻译"
+  },
+  "workspaceRestricted": {
+    "body": "此工作区尚未受信任。智能体以只读方式运行——Bash、编辑、写入与计算机操作已禁用。",
+    "rootsLabel": "未受信任的文件夹",
+    "title": "受限模式",
+    "trust": "信任此工作区"
+  },
+  "workspaceTrust": {
+    "aboutToRunLabel": "即将执行",
+    "actions": {
+      "hooks": "工作区 .claude/settings.json 的 hooks 与命令",
+      "tools": "Bash、编辑、写入与计算机操作工具"
+    },
+    "description": "该项目附带可在你机器上执行命令的配置。仅在你自己编写或确认来源可信时才信任。",
+    "dontRun": "不运行",
+    "revokeHint": "可在「设置 → Hooks」中随时撤销该信任。",
+    "saving": "保存中…",
+    "title": "信任此工作区？",
+    "trust": "信任工作区",
+    "workspaceLabel": "工作区"
+  },
+  "diagnostics": {
+    "contextTitle": "上下文",
+    "usageTitle": "订阅用量",
+    "costTitle": "费用与用量",
+    "messages": "消息",
+    "messagesValue": "{user} 条用户 · {assistant} 条助手",
+    "freshWindow": "暂无用量指标 —— 上下文窗口是空的。",
+    "inputTokens": "输入（含缓存）",
+    "outputTokens": "输出",
+    "cache": "缓存",
+    "cacheValue": "写入 {write} · 读取 {read}",
+    "compactHint": "运行 /compact 可总结较早的对话并释放窗口空间。",
+    "turns": "轮次",
+    "turnsValue": "{assistant} 轮助手（{metrics} 轮含指标）",
+    "cost": "费用",
+    "estimated": "估算",
+    "duration": "耗时",
+    "durationValue": "{seconds} 秒",
+    "fiveHour": "5 小时窗口",
+    "sevenDay": "7 天窗口",
+    "windowUsed": "已用 {pct}%",
+    "resetsIn": "{hours} 小时 {minutes} 分后重置",
+    "resetting": "重置中…",
+    "notReported": "未上报",
+    "fallback": "回退",
+    "overageDisabled": "已禁用超额",
+    "usageFooter": "在 设置 → 订阅 → 用量 查看图表与历史。"
+  }
+}

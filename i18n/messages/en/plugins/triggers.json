@@ -1,0 +1,39 @@
+{
+  "badge": {
+    "ariaLabel": "Workflow triggers fired by this message",
+    "empty": "No triggers fired.",
+    "label": "{count, plural, one {# workflow trigger} other {# workflow triggers}}",
+    "pluginPrefix": "plugin:",
+    "popoverTitle": "Workflow triggers",
+    "workflowPrefix": "workflow:"
+  },
+  "detailSubscriptions": {
+    "colKind": "Trigger kind",
+    "colWorkflow": "Workflow",
+    "empty": "No workflows subscribe to this plugin's triggers yet.",
+    "muteHint": "Muting stops the trigger from dispatching while keeping the subscription.",
+    "muteToggle": "Mute",
+    "title": "Subscribed workflows"
+  },
+  "devtools": {
+    "clear": "Clear all",
+    "colError": "Error",
+    "colKind": "Kind",
+    "colPlugin": "Plugin",
+    "colStatus": "Status",
+    "colTime": "Time",
+    "colWorkflow": "Workflow",
+    "empty": "No trigger events recorded yet.",
+    "filterKind": "Filter by kind",
+    "filterKindAll": "All kinds",
+    "filterPlugin": "Filter by plugin",
+    "filterPluginAll": "All plugins",
+    "filterPluginBuiltin": "— built-in —",
+    "title": "Triggers"
+  },
+  "status": {
+    "dispatched": "Dispatched",
+    "error": "Error",
+    "rejected": "Rejected"
+  }
+}

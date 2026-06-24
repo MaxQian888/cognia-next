@@ -1,50 +1,4 @@
 {
-  "account": {
-    "gate": {
-      "createAccount": "创建账户",
-      "displayNameLabel": "账户名称",
-      "displayNamePlaceholder": "本地账户",
-      "firstRunForm": "创建本地账户",
-      "firstRunTitle": "创建本地账户",
-      "loading": "正在加载账户...",
-      "operationFailed": "本地账户操作失败。",
-      "passwordLabel": "密码",
-      "passwordPlaceholder": "密码",
-      "unlockAccount": "解锁",
-      "unlockForm": "解锁本地账户",
-      "unlockTitle": "解锁 {name}",
-      "unknownAccount": "账户"
-    },
-    "manage": {
-      "activeBadge": "当前",
-      "confirmDelete": "确认删除",
-      "createAccount": "创建账户",
-      "delete": "删除",
-      "description": "创建、重命名和移除此设备上的本地账户。",
-      "editDisplayNameLabel": "账户名称",
-      "empty": "选择账户",
-      "listLabel": "本地账户",
-      "newDisplayNameLabel": "新账户名称",
-      "newDisplayNamePlaceholder": "本地账户",
-      "newPasswordLabel": "新账户密码",
-      "newPasswordPlaceholder": "密码",
-      "operationFailed": "本地账户操作失败。",
-      "save": "保存",
-      "title": "本地账户"
-    },
-    "switcher": {
-      "active": "当前账户：{name}",
-      "activeBadge": "当前",
-      "confirmSwitch": "切换",
-      "heading": "账户",
-      "lock": "锁定",
-      "manage": "管理账户",
-      "noActive": "无当前账户",
-      "operationFailed": "本地账户操作失败。",
-      "switchPasswordLabel": "密码",
-      "switchPasswordPlaceholder": "密码"
-    }
-  },
   "a2ui": {
     "aiGenerate": "AI 生成",
     "aiPaperAnalysis": "AI 论文分析",
@@ -275,7 +229,18 @@
     "save": "保存",
     "saveApp": "保存",
     "searchAndManageApps": "搜索、排序并快速回到已有应用，保持管理链路顺手。",
+    "searchLoadMore": "加载更多结果",
+    "searchLoading": "加载中...",
+    "searchNoPapers": "未找到论文",
+    "searchNoPapersHint": "尝试其他搜索词或调整筛选条件",
+    "searchOpenAccess": "开放获取",
+    "searchPapersCount": "{count} 篇论文",
     "searchPlaceholder": "搜索模板和应用...",
+    "searchResultsFor": "“{query}”的搜索结果",
+    "searchSortByPlaceholder": "排序方式",
+    "searchSortCitations": "引用数",
+    "searchSortNewest": "最新",
+    "searchSortRelevance": "相关性",
     "searchingPapers": "正在搜索论文...",
     "selectCategory": "选择分类",
     "selectComponent": "点击组件查看其属性",
@@ -358,6 +323,52 @@
     },
     "zoomIn": "放大",
     "zoomOut": "缩小"
+  },
+  "account": {
+    "gate": {
+      "createAccount": "创建账户",
+      "displayNameLabel": "账户名称",
+      "displayNamePlaceholder": "本地账户",
+      "firstRunForm": "创建本地账户",
+      "firstRunTitle": "创建本地账户",
+      "loading": "正在加载账户...",
+      "operationFailed": "本地账户操作失败。",
+      "passwordLabel": "密码",
+      "passwordPlaceholder": "密码",
+      "unknownAccount": "账户",
+      "unlockAccount": "解锁",
+      "unlockForm": "解锁本地账户",
+      "unlockTitle": "解锁 {name}"
+    },
+    "manage": {
+      "activeBadge": "当前",
+      "confirmDelete": "确认删除",
+      "createAccount": "创建账户",
+      "delete": "删除",
+      "description": "创建、重命名和移除此设备上的本地账户。",
+      "editDisplayNameLabel": "账户名称",
+      "empty": "选择账户",
+      "listLabel": "本地账户",
+      "newDisplayNameLabel": "新账户名称",
+      "newDisplayNamePlaceholder": "本地账户",
+      "newPasswordLabel": "新账户密码",
+      "newPasswordPlaceholder": "密码",
+      "operationFailed": "本地账户操作失败。",
+      "save": "保存",
+      "title": "本地账户"
+    },
+    "switcher": {
+      "active": "当前账户：{name}",
+      "activeBadge": "当前",
+      "confirmSwitch": "切换",
+      "heading": "账户",
+      "lock": "锁定",
+      "manage": "管理账户",
+      "noActive": "无当前账户",
+      "operationFailed": "本地账户操作失败。",
+      "switchPasswordLabel": "密码",
+      "switchPasswordPlaceholder": "密码"
+    }
   },
   "agentMode": {
     "a2uiTemplatePreviewTitle": "A2UI 模板预览",
@@ -2055,6 +2066,7 @@
       "ariaAttachImage": "添加图片",
       "ariaMessage": "消息",
       "ariaSend": "发送",
+      "ariaSending": "发送中…",
       "ariaStop": "停止",
       "ariaToggleWebSearch": "切换网络搜索",
       "ariaUploadImage": "上传图片",
@@ -2269,6 +2281,34 @@
     "copy": {
       "success": "已复制到剪贴板"
     },
+    "diagnostics": {
+      "cache": "缓存",
+      "cacheValue": "写入 {write} · 读取 {read}",
+      "compactHint": "运行 /compact 可总结较早的对话并释放窗口空间。",
+      "contextTitle": "上下文",
+      "cost": "费用",
+      "costTitle": "费用与用量",
+      "duration": "耗时",
+      "durationValue": "{seconds} 秒",
+      "estimated": "估算",
+      "fallback": "回退",
+      "fiveHour": "5 小时窗口",
+      "freshWindow": "暂无用量指标 —— 上下文窗口是空的。",
+      "inputTokens": "输入（含缓存）",
+      "messages": "消息",
+      "messagesValue": "{user} 条用户 · {assistant} 条助手",
+      "notReported": "未上报",
+      "outputTokens": "输出",
+      "overageDisabled": "已禁用超额",
+      "resetsIn": "{hours} 小时 {minutes} 分后重置",
+      "resetting": "重置中…",
+      "sevenDay": "7 天窗口",
+      "turns": "轮次",
+      "turnsValue": "{assistant} 轮助手（{metrics} 轮含指标）",
+      "usageFooter": "在 设置 → 订阅 → 用量 查看图表与历史。",
+      "usageTitle": "订阅用量",
+      "windowUsed": "已用 {pct}%"
+    },
     "empty": {
       "brandAlt": "Cognia",
       "dismiss": "隐藏此区块",
@@ -2382,6 +2422,8 @@
         "title": "技能",
         "toggleAria": "切换 {name}"
       },
+      "subscriptionBadge": "{tier} 订阅",
+      "subscriptionBadgeAria": "当前 Anthropic 订阅：{tier}",
       "systemPromptLabel": "系统提示",
       "systemPromptPlaceholder": "留空则使用全局默认",
       "title": "会话设置",
@@ -2411,7 +2453,15 @@
       "export": "导出",
       "exported": "已导出为 Markdown。",
       "nothingToExport": "暂无内容可导出。",
-      "thinking": "Claude 正在思考…"
+      "thinking": "Claude 正在思考…",
+      "tips": [
+        "输入 / 可调用斜杠命令。",
+        "在团队会话中用 @ 提及某位成员。",
+        "为任意消息添加书签，方便日后查找。",
+        "从任意回复创建分支，探索另一种可能。",
+        "编辑你的某条消息并重新发送，引导回答方向。",
+        "随时可将整段对话导出为 Markdown。"
+      ]
     },
     "mcp": {
       "edit": {
@@ -2427,6 +2477,9 @@
       "ls": {
         "empty": "空目录",
         "title": "列出目录"
+      },
+      "plan": {
+        "title": "计划"
       },
       "webFetch": {
         "empty": "无返回内容"
@@ -2642,6 +2695,9 @@
         "viewFullscreen": "全屏查看",
         "viewSource": "查看源码"
       },
+      "taskList": {
+        "progress": "进度"
+      },
       "video": {
         "bilibiliTitle": "B 站视频",
         "defaultFilename": "video",
@@ -2799,6 +2855,7 @@
   },
   "common": {
     "add": "添加",
+    "all": "全部",
     "back": "上一步",
     "cancel": "取消",
     "close": "关闭",
@@ -2817,8 +2874,7 @@
     "no": "否",
     "remove": "移除",
     "save": "保存",
-    "yes": "是",
-    "all": "全部"
+    "yes": "是"
   },
   "connectors": {
     "audit": {
@@ -3701,21 +3757,6 @@
     }
   },
   "errorPage": {
-    "copyErrorId": "复制 ID",
-    "copyErrorIdSuccess": "错误 ID 已复制",
-    "description": "发生了意外错误。下方的技术细节可以帮助诊断问题。",
-    "errorIdLabel": "错误 ID",
-    "exportCrashLog": "导出崩溃日志",
-    "exportCrashLogFailed": "导出崩溃日志失败",
-    "exportCrashLogSuccess": "崩溃日志已导出",
-    "exportingCrashLog": "导出中…",
-    "globalDescription": "应用程序的主布局加载失败。可以尝试恢复，或通过标题栏关闭窗口。",
-    "globalTitle": "Cognia 已停止工作",
-    "goHome": "返回首页",
-    "openLogs": "打开日志",
-    "retry": "重试",
-    "title": "出错了",
-    "traceTitle": "错误详情",
     "autoRetryIn": "{seconds} 秒后重试…",
     "cancelAutoRetry": "取消",
     "category": {
@@ -3730,6 +3771,9 @@
       "network": "无法连接网络。请检查你的网络连接后重试。",
       "offline": "你似乎处于离线状态。恢复网络后我们会自动重试。"
     },
+    "copyErrorId": "复制 ID",
+    "copyErrorIdSuccess": "错误 ID 已复制",
+    "description": "发生了意外错误。下方的技术细节可以帮助诊断问题。",
     "diagnostics": {
       "appVersion": "应用版本",
       "category": "类别",
@@ -3744,6 +3788,15 @@
       "runtimeDesktop": "桌面应用",
       "title": "系统诊断"
     },
+    "errorIdLabel": "错误 ID",
+    "exportCrashLog": "导出崩溃日志",
+    "exportCrashLogFailed": "导出崩溃日志失败",
+    "exportCrashLogSuccess": "崩溃日志已导出",
+    "exportingCrashLog": "导出中…",
+    "globalDescription": "应用程序的主布局加载失败。可以尝试恢复，或通过标题栏关闭窗口。",
+    "globalTitle": "Cognia 已停止工作",
+    "goHome": "返回首页",
+    "openLogs": "打开日志",
     "recentErrors": {
       "cascadeHint": "短时间内发生了多个错误——这可能是连锁故障。",
       "title": "最近的错误"
@@ -3755,6 +3808,9 @@
       "copyReportSuccess": "报告已复制到剪贴板",
       "reportIssue": "报告问题"
     },
+    "retry": "重试",
+    "title": "出错了",
+    "traceTitle": "错误详情",
     "tryAgainWhenOnline": "重试"
   },
   "eval": {
@@ -5547,6 +5603,16 @@
         "warn": "警告",
         "warnDesc": "需要关注的警告条件"
       },
+      "moduleLevels": {
+        "add": "添加模块",
+        "description": "为特定模块覆盖最低日志级别。最具体的前缀优先（例如 network:lark）。",
+        "empty": "暂无按模块的覆盖设置。",
+        "levelLabel": "级别",
+        "moduleLabel": "模块",
+        "modulePlaceholder": "network:lark",
+        "removeAria": "移除 {module} 覆盖",
+        "title": "按模块级别"
+      },
       "native": {
         "bridge": "桥接状态",
         "bridgeError": "最近桥接错误",
@@ -5559,6 +5625,19 @@
         "status": "状态",
         "targets": "活动目标",
         "title": "原生日志就绪状态"
+      },
+      "nativeLevels": {
+        "add": "添加模块",
+        "apply": "应用",
+        "defaultLabel": "默认级别",
+        "description": "原生（Rust）结构化日志的按目标级别。运行时生效。",
+        "empty": "暂无原生覆盖设置。",
+        "error": "应用失败",
+        "levelLabel": "级别",
+        "moduleLabel": "目标",
+        "removeAria": "移除 {module} 覆盖",
+        "saved": "已应用",
+        "title": "原生（Rust）级别"
       },
       "options": {
         "includeSource": "包含源位置",
@@ -5644,30 +5723,7 @@
         "remoteRetryDelay": "重试延迟",
         "title": "日志传输"
       },
-      "unsavedChanges": "有未保存的修改",
-      "moduleLevels": {
-        "add": "添加模块",
-        "description": "为特定模块覆盖最低日志级别。最具体的前缀优先（例如 network:lark）。",
-        "empty": "暂无按模块的覆盖设置。",
-        "levelLabel": "级别",
-        "moduleLabel": "模块",
-        "modulePlaceholder": "network:lark",
-        "removeAria": "移除 {module} 覆盖",
-        "title": "按模块级别"
-      },
-      "nativeLevels": {
-        "add": "添加模块",
-        "apply": "应用",
-        "defaultLabel": "默认级别",
-        "description": "原生（Rust）结构化日志的按目标级别。运行时生效。",
-        "empty": "暂无原生覆盖设置。",
-        "error": "应用失败",
-        "levelLabel": "级别",
-        "moduleLabel": "目标",
-        "removeAria": "移除 {module} 覆盖",
-        "saved": "已应用",
-        "title": "原生（Rust）级别"
-      }
+      "unsavedChanges": "有未保存的修改"
     },
     "settingsDescription": "配置日志级别、传输方式和保留策略",
     "settingsTitle": "日志配置",
@@ -7346,30 +7402,35 @@
       "label": "通知",
       "unreadAria": "{count} 条未读通知"
     },
+    "buckets": {
+      "earlier": "更早",
+      "today": "今天",
+      "yesterday": "昨天"
+    },
     "center": {
       "archiveAll": "全部归档",
       "clearAll": "清空",
+      "clearAllBody": "这将永久删除所有通知，包括已归档的通知。此操作无法撤销。",
+      "clearAllCancel": "取消",
+      "clearAllConfirm": "全部清除",
+      "clearAllTitle": "清除所有通知？",
       "empty": "已全部处理完毕。",
       "filterAll": "全部来源",
       "groupCount": "另有 {count} 条更新",
       "hideDone": "隐藏已归档",
+      "loadMore": "加载更多（{count}）",
       "markAllRead": "全部标为已读",
       "markDone": "归档",
       "markRead": "标为已读",
+      "moreActions": "更多操作",
       "open": "打开",
       "remove": "移除",
       "settings": "通知设置",
       "showDone": "显示已归档",
       "snooze": "暂停提醒",
       "title": "通知",
-      "unsnooze": "取消暂停",
-      "clearAllBody": "这将永久删除所有通知，包括已归档的通知。此操作无法撤销。",
-      "clearAllCancel": "取消",
-      "clearAllConfirm": "全部清除",
-      "clearAllTitle": "清除所有通知？",
-      "loadMore": "加载更多（{count}）",
-      "moreActions": "更多操作",
-      "unreadCount": "{count} 条未读"
+      "unreadCount": "{count} 条未读",
+      "unsnooze": "取消暂停"
     },
     "levels": {
       "critical": "严重",
@@ -7398,11 +7459,6 @@
       "session": "会话",
       "system": "系统",
       "workflow": "工作流"
-    },
-    "buckets": {
-      "earlier": "更早",
-      "today": "今天",
-      "yesterday": "昨天"
     }
   },
   "observability": {
@@ -8220,12 +8276,12 @@
       }
     },
     "actions": {
+      "clean": "洗澡",
       "feed": "喂食",
       "pet": "抚摸",
       "play": "玩耍",
-      "talk": "聊天",
       "sleep": "睡觉",
-      "clean": "洗澡",
+      "talk": "聊天",
       "treat": "奖励"
     },
     "binding": {
@@ -8236,6 +8292,10 @@
     },
     "bubbles": {
       "achievementUnlocked": ["我们拿到徽章啦！", "成就达成！"],
+      "cleaned": {
+        "0": "干干净净！",
+        "1": "好清爽！"
+      },
       "error": ["糟糕…", "好痛。", "再试一次吧。"],
       "evolved": ["我进化了！", "全新的我！"],
       "fed": ["好吃！", "美味！", "吧唧吧唧。"],
@@ -8254,22 +8314,18 @@
       "petted": ["呼噜…", "真舒服。", "♥"],
       "played": ["真好玩！", "再来！", "哇哦！"],
       "review": ["来看看？", "可以检查啦。"],
-      "success": ["搞定！", "完成啦。", "耶！"],
-      "talked": ["我在听呢！", "再多说点？", "嘿嘿，好哦！"],
-      "thinking": ["唔，处理中…", "让我想想…", "计算中…"],
-      "waiting": ["看你的了！", "等你一下…"],
       "slept": {
         "0": "呼呼…",
         "1": "好舒服…"
       },
-      "cleaned": {
-        "0": "干干净净！",
-        "1": "好清爽！"
-      },
+      "success": ["搞定！", "完成啦。", "耶！"],
+      "talked": ["我在听呢！", "再多说点？", "嘿嘿，好哦！"],
+      "thinking": ["唔，处理中…", "让我想想…", "计算中…"],
       "treated": {
         "0": "好吃！谢谢你！",
         "1": "最棒的奖励！♥"
-      }
+      },
+      "waiting": ["看你的了！", "等你一下…"]
     },
     "care": {
       "unwell": {
@@ -8286,11 +8342,80 @@
       "tabs": {
         "achievements": "成就",
         "binding": "角色",
+        "customize": "自定义",
         "dex": "图鉴",
-        "nurture": "养育",
-        "customize": "自定义"
+        "nurture": "养育"
       },
       "title": "你的宠物"
+    },
+    "customize": {
+      "appearance": {
+        "description": "停靠位置、动效、皮肤与尺寸。",
+        "title": "外观"
+      },
+      "care": {
+        "description": "低功耗模式与照护提醒。",
+        "title": "照护与性能"
+      },
+      "cosmetic": {
+        "bodyOptions": {
+          "round": "圆润",
+          "tall": "高挑",
+          "wide": "宽厚"
+        },
+        "bodyType": "体型",
+        "default": "默认",
+        "eyes": "眼睛",
+        "eyesOptions": {
+          "dot": "圆点",
+          "sleepy": "睡眼",
+          "spiral": "漩涡眼",
+          "star": "星星眼",
+          "wide": "大眼",
+          "wink": "眨眼"
+        },
+        "hat": "帽子",
+        "hatOptions": {
+          "beanie": "毛线帽",
+          "crown": "皇冠",
+          "halo": "光环",
+          "none": "无",
+          "propeller": "竹蜻蜓帽",
+          "tinyduck": "小鸭子",
+          "tophat": "礼帽",
+          "wizard": "巫师帽"
+        },
+        "hatchFirst": "先孵化宠物才能自定义外观。",
+        "palette": "颜色",
+        "paletteOptions": {
+          "amber": "琥珀",
+          "lime": "青柠",
+          "magenta": "品红",
+          "rose": "玫红",
+          "sky": "天蓝",
+          "slate": "石板灰",
+          "teal": "蓝绿",
+          "violet": "紫罗兰"
+        },
+        "reset": "恢复原始外观"
+      },
+      "desktop": {
+        "description": "自由漫游的悬浮伙伴。",
+        "title": "桌面宠物"
+      },
+      "interaction": {
+        "description": "气泡、对话与主动闲聊。",
+        "title": "互动与说话"
+      },
+      "look": {
+        "description": "在不改变身份的前提下重新装扮宠物。",
+        "title": "造型"
+      },
+      "openSettings": "打开完整宠物设置",
+      "sound": {
+        "description": "音效与免打扰时段。",
+        "title": "声音"
+      }
     },
     "live2d": {
       "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"
@@ -8327,6 +8452,12 @@
       "legendary": "传说",
       "rare": "稀有",
       "uncommon": "罕见"
+    },
+    "rename": {
+      "cancel": "取消",
+      "edit": "重命名",
+      "label": "宠物名字",
+      "save": "保存名字"
     },
     "species": {
       "axolotl": "六角恐龙",
@@ -8368,81 +8499,6 @@
       "minimize": "最小化宠物",
       "restore": "显示宠物",
       "toggle": "打开宠物"
-    },
-    "rename": {
-      "edit": "重命名",
-      "label": "宠物名字",
-      "save": "保存名字",
-      "cancel": "取消"
-    },
-    "customize": {
-      "appearance": {
-        "title": "外观",
-        "description": "停靠位置、动效、皮肤与尺寸。"
-      },
-      "look": {
-        "title": "造型",
-        "description": "在不改变身份的前提下重新装扮宠物。"
-      },
-      "interaction": {
-        "title": "互动与说话",
-        "description": "气泡、对话与主动闲聊。"
-      },
-      "sound": {
-        "title": "声音",
-        "description": "音效与免打扰时段。"
-      },
-      "care": {
-        "title": "照护与性能",
-        "description": "低功耗模式与照护提醒。"
-      },
-      "desktop": {
-        "title": "桌面宠物",
-        "description": "自由漫游的悬浮伙伴。"
-      },
-      "openSettings": "打开完整宠物设置",
-      "cosmetic": {
-        "palette": "颜色",
-        "hat": "帽子",
-        "eyes": "眼睛",
-        "bodyType": "体型",
-        "default": "默认",
-        "reset": "恢复原始外观",
-        "hatchFirst": "先孵化宠物才能自定义外观。",
-        "paletteOptions": {
-          "rose": "玫红",
-          "amber": "琥珀",
-          "lime": "青柠",
-          "teal": "蓝绿",
-          "sky": "天蓝",
-          "violet": "紫罗兰",
-          "magenta": "品红",
-          "slate": "石板灰"
-        },
-        "hatOptions": {
-          "none": "无",
-          "beanie": "毛线帽",
-          "propeller": "竹蜻蜓帽",
-          "tophat": "礼帽",
-          "wizard": "巫师帽",
-          "halo": "光环",
-          "crown": "皇冠",
-          "tinyduck": "小鸭子"
-        },
-        "eyesOptions": {
-          "dot": "圆点",
-          "sleepy": "睡眼",
-          "wide": "大眼",
-          "wink": "眨眼",
-          "star": "星星眼",
-          "spiral": "漩涡眼"
-        },
-        "bodyOptions": {
-          "round": "圆润",
-          "tall": "高挑",
-          "wide": "宽厚"
-        }
-      }
     }
   },
   "plan": {
@@ -8593,6 +8649,7 @@
       "runtimeWarnings": {
         "python-runtime-unavailable": "Python 运行时不可用——仅桌面端"
       },
+      "selectAria": "选择 {name}",
       "status": {
         "disabled": "已停用",
         "enabled": "已启用",
@@ -12609,19 +12666,6 @@
           "standard": "标准"
         }
       },
-      "usageDisplay": {
-        "hint": {
-          "detailed": "全部区块展开，附带额外列、每会话明细与原始快照。",
-          "simplified": "仅显示关键统计卡片与当前窗口仪表，图表折叠为摘要。",
-          "standard": "完整仪表盘，含图表与模型、会话表格。"
-        },
-        "label": "用量展示模式",
-        "mode": {
-          "detailed": "详细",
-          "simplified": "简化",
-          "standard": "标准"
-        }
-      },
       "auto": {
         "description": "根据触发条件自动在浅色与深色之间切换。",
         "enabledHint": "让 Cognia 依据下方触发条件自动选择浅色或深色。",
@@ -12823,9 +12867,6 @@
         "agentFlow": {
           "sectionLabel": "Agent 流程"
         },
-        "usageDisplay": {
-          "sectionLabel": "用量展示"
-        },
         "density": {
           "comfortable": "舒适",
           "compact": "紧凑",
@@ -12867,6 +12908,9 @@
           "hint": "调整卡片、按钮和输入框的圆角程度。",
           "label": "圆角半径",
           "sectionLabel": "圆角"
+        },
+        "usageDisplay": {
+          "sectionLabel": "用量展示"
         }
       },
       "personalization": {
@@ -12914,6 +12958,19 @@
         "title": "主题包"
       },
       "title": "外观",
+      "usageDisplay": {
+        "hint": {
+          "detailed": "全部区块展开，附带额外列、每会话明细与原始快照。",
+          "simplified": "仅显示关键统计卡片与当前窗口仪表，图表折叠为摘要。",
+          "standard": "完整仪表盘，含图表与模型、会话表格。"
+        },
+        "label": "用量展示模式",
+        "mode": {
+          "detailed": "详细",
+          "simplified": "简化",
+          "standard": "标准"
+        }
+      },
       "vscode": {
         "activateButton": "应用",
         "activeLabel": "使用中",
@@ -16200,6 +16257,13 @@
         "description": "当宠物因疏于照顾而变得不适时，发送一条温和的通知。",
         "label": "照护提醒"
       },
+      "customBubbles": {
+        "add": "添加口头禅",
+        "description": "添加你自己的短语，宠物会在反应时偶尔说出来。",
+        "label": "口头禅",
+        "placeholder": "添加一句口头禅…",
+        "remove": "移除“{phrase}”"
+      },
       "description": "你的桌面动画伙伴。",
       "desktopPet": {
         "clickThrough": {
@@ -16404,24 +16468,17 @@
       "sound": {
         "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
         "label": "音效",
+        "quietHours": {
+          "description": "在此时间段内静音宠物音效。",
+          "end": "到",
+          "label": "免打扰时段",
+          "start": "从"
+        },
         "volume": {
           "label": "音量（{value}%）"
-        },
-        "quietHours": {
-          "label": "免打扰时段",
-          "description": "在此时间段内静音宠物音效。",
-          "start": "从",
-          "end": "到"
         }
       },
-      "title": "宠物",
-      "customBubbles": {
-        "label": "口头禅",
-        "description": "添加你自己的短语，宠物会在反应时偶尔说出来。",
-        "placeholder": "添加一句口头禅…",
-        "add": "添加口头禅",
-        "remove": "移除“{phrase}”"
-      }
+      "title": "宠物"
     },
     "pluginConfig": {
       "description": "在此配置每个已启用插件的设置。这些表单与各插件详情页内的完全一致；更改会在插件下次激活时生效。",
@@ -16529,6 +16586,11 @@
     },
     "profile": {
       "avatarClear": "移除",
+      "avatarEditAlt": "正在裁剪的图片",
+      "avatarEditDescription": "拖动调整位置，使用滑块缩放。圆形区域为头像显示范围。",
+      "avatarEditReposition": "拖动以调整头像位置",
+      "avatarEditTitle": "编辑头像",
+      "avatarEditZoom": "缩放",
       "avatarHint": "支持 PNG、JPEG、WebP、GIF 或 AVIF。将缩放至 128 px 并保存在本地。",
       "avatarInvalidType": "不支持的图片类型 — 请使用 PNG、JPEG、WebP、GIF 或 AVIF。",
       "avatarLabel": "头像图片",
@@ -17375,6 +17437,8 @@
       "fontFamily": {
         "label": "字体",
         "nerdFontHelper": "oh-my-posh 和 powerline 提示符的图标需要 Nerd Font。请先安装一款（如 CaskaydiaCove Nerd Font），再在此处填写。",
+        "pickerHint": "从本机检测到的等宽字体中选择。",
+        "pickerLabel": "检测到的字体",
         "useNerdFont": "使用推荐的 Nerd Font 字体栈"
       },
       "fontSize": {
@@ -18969,7 +19033,9 @@
       "closePane": "关闭分屏",
       "closePanel": "关闭面板",
       "newSession": "新建终端",
-      "resize": "拖动调整终端 dock 高度（方向键亦可）"
+      "resize": "拖动调整终端 dock 高度（方向键亦可）",
+      "spawnDenied": "终端被插件拦截",
+      "spawnError": "无法打开终端：{message}"
     },
     "emptyState": {
       "desktop": {
@@ -19034,10 +19100,13 @@
       "auto": "默认 Shell",
       "bash": "bash",
       "cmd": "命令提示符",
+      "fish": "fish",
       "label": "选择 Shell",
+      "nu": "Nushell",
       "powershell": "Windows PowerShell",
       "profilesLabel": "配置文件",
       "pwsh": "PowerShell 7",
+      "sh": "sh",
       "zsh": "zsh"
     },
     "tab": {
@@ -21117,6 +21186,34 @@
           }
         }
       },
+      "goalAnalytics": {
+        "limit": {
+          "hint": "最大行数。",
+          "label": "数量限制"
+        },
+        "scope": {
+          "label": "范围",
+          "options": {
+            "all": "全部目标",
+            "session": "按会话列出目标"
+          }
+        },
+        "sessionId": {
+          "hint": "会话范围必填。",
+          "label": "会话 ID"
+        },
+        "windowDays": {
+          "hint": "时间线回看窗口。",
+          "label": "窗口（天）"
+        }
+      },
+      "goalCommon": {
+        "goalId": {
+          "hint": "目标的 ID。",
+          "label": "目标 ID",
+          "placeholder": "goal_"
+        }
+      },
       "goalCompletedTrigger": {
         "characterId": {
           "label": "角色（可选）"
@@ -21133,13 +21230,6 @@
           "hint": "限定单一结果，如 completed、stopped、budget、turn、timeout。留空时任意状态都会触发。",
           "label": "终止状态（可选）",
           "placeholder": "completed"
-        }
-      },
-      "goalCommon": {
-        "goalId": {
-          "hint": "目标的 ID。",
-          "label": "目标 ID",
-          "placeholder": "goal_"
         }
       },
       "goalCreate": {
@@ -21165,6 +21255,12 @@
           "label": "创建为暂停状态"
         }
       },
+      "goalEvents": {
+        "limit": {
+          "hint": "最大事件数。",
+          "label": "数量限制"
+        }
+      },
       "goalList": {
         "limit": {
           "hint": "最大行数。",
@@ -21184,57 +21280,27 @@
           "label": "会话 ID"
         }
       },
-      "goalEvents": {
-        "limit": {
-          "hint": "最大事件数。",
-          "label": "数量限制"
-        }
-      },
-      "goalUpdateObjective": {
-        "rawObjective": {
-          "hint": "替换后的目标。",
-          "label": "新目标"
-        }
-      },
-      "goalUpdateConfig": {
-        "configJson": {
-          "hint": "局部 GoalConfig 补丁。",
-          "label": "配置 JSON"
-        }
-      },
-      "goalToggleSubgoal": {
-        "subgoalId": {
-          "hint": "检查项 ID。",
-          "label": "子目标 ID",
-          "placeholder": "sub_"
-        }
-      },
-      "goalAnalytics": {
-        "limit": {
-          "hint": "最大行数。",
-          "label": "数量限制"
-        },
-        "scope": {
-          "label": "范围",
-          "options": {
-            "all": "全部目标",
-            "session": "按会话列出目标"
-          }
-        },
-        "sessionId": {
-          "hint": "会话范围必填。",
-          "label": "会话 ID"
-        },
-        "windowDays": {
-          "hint": "时间线回看窗口。",
-          "label": "窗口（天）"
-        }
-      },
       "goalTemplateCommon": {
         "templateId": {
           "hint": "目标 goal 模板 ID。",
           "label": "模板 ID",
           "placeholder": "gtpl_"
+        }
+      },
+      "goalTemplateCreateGoal": {
+        "characterId": {
+          "label": "角色（可选）"
+        },
+        "sessionId": {
+          "hint": "要驱动的聊天会话。",
+          "label": "会话 ID",
+          "placeholder": "ses_"
+        }
+      },
+      "goalTemplateFavorite": {
+        "isFavorite": {
+          "hint": "设置模板收藏状态。",
+          "label": "收藏"
         }
       },
       "goalTemplateList": {
@@ -21254,16 +21320,6 @@
           "hint": "按 ID、标题或目标文本匹配。",
           "label": "搜索",
           "placeholder": "release"
-        }
-      },
-      "goalTemplateCreateGoal": {
-        "characterId": {
-          "label": "角色（可选）"
-        },
-        "sessionId": {
-          "hint": "要驱动的聊天会话。",
-          "label": "会话 ID",
-          "placeholder": "ses_"
         }
       },
       "goalTemplateUpsert": {
@@ -21290,494 +21346,23 @@
           "placeholder": "Release review"
         }
       },
-      "goalTemplateFavorite": {
-        "isFavorite": {
-          "hint": "设置模板收藏状态。",
-          "label": "收藏"
+      "goalToggleSubgoal": {
+        "subgoalId": {
+          "hint": "检查项 ID。",
+          "label": "子目标 ID",
+          "placeholder": "sub_"
         }
       },
-      "planCommon": {
-        "planId": {
-          "hint": "目标 AgentPlan ID。",
-          "label": "计划 ID",
-          "placeholder": "plan_"
-        }
-      },
-      "planCreate": {
-        "characterId": {
-          "label": "角色（可选）"
-        },
+      "goalUpdateConfig": {
         "configJson": {
-          "hint": "局部 PlanConfig 覆盖。",
+          "hint": "局部 GoalConfig 补丁。",
           "label": "配置 JSON"
-        },
-        "description": {
-          "hint": "可选的计划上下文。",
-          "label": "描述"
-        },
-        "executionMode": {
-          "label": "执行模式",
-          "options": {
-            "auto": "自动",
-            "in_session": "会话内",
-            "orchestrated": "编排执行"
-          }
-        },
-        "metadataJson": {
-          "hint": "结构化计划元数据。",
-          "label": "元数据 JSON"
-        },
-        "sessionId": {
-          "hint": "计划所属聊天会话。",
-          "label": "会话 ID",
-          "placeholder": "ses_"
-        },
-        "source": {
-          "label": "来源",
-          "options": {
-            "agent_tool": "Agent 工具",
-            "exit_plan_mode": "退出计划模式",
-            "goal_projection": "Goal 投影",
-            "manual": "手动",
-            "planner_llm": "规划 LLM",
-            "team_projection": "团队投影"
-          }
-        },
-        "stepsJson": {
-          "hint": "CreatePlanStepInput 行数组。",
-          "label": "步骤 JSON"
-        },
-        "title": {
-          "hint": "在追踪器中显示的计划标题。",
-          "label": "标题",
-          "placeholder": "Ship feature"
         }
       },
-      "planList": {
-        "limit": {
-          "hint": "最大行数。",
-          "label": "数量限制"
-        },
-        "mode": {
-          "label": "读取模式",
-          "options": {
-            "all": "所有计划",
-            "executingForSession": "会话执行中计划",
-            "openForSession": "会话打开计划",
-            "session": "按会话读取"
-          }
-        },
-        "projectId": {
-          "hint": "覆盖当前工作区范围。",
-          "label": "项目 ID（可选）"
-        },
-        "sessionId": {
-          "hint": "会话范围模式必填。",
-          "label": "会话 ID"
-        },
-        "status": {
-          "label": "状态筛选",
-          "options": {
-            "any": "任意",
-            "approved": "已批准",
-            "awaiting_approval": "等待批准",
-            "cancelled": "已取消",
-            "completed": "已完成",
-            "draft": "草稿",
-            "executing": "执行中",
-            "failed": "失败",
-            "paused": "已暂停"
-          }
-        }
-      },
-      "planEvents": {
-        "limit": {
-          "hint": "最大事件数。",
-          "label": "数量限制"
-        }
-      },
-      "planUpdateDraft": {
-        "configJson": {
-          "hint": "局部 PlanConfig 补丁。",
-          "label": "配置 JSON"
-        },
-        "description": {
-          "hint": "替换描述。",
-          "label": "描述"
-        },
-        "executionMode": {
-          "label": "执行模式",
-          "options": {
-            "auto": "自动",
-            "in_session": "会话内",
-            "orchestrated": "编排执行",
-            "unchanged": "不变"
-          }
-        },
-        "metadataJson": {
-          "hint": "替换元数据对象。",
-          "label": "元数据 JSON"
-        },
-        "stepsJson": {
-          "hint": "用于草稿替换的完整 PlanStep 数组。",
-          "label": "步骤 JSON"
-        },
-        "title": {
-          "hint": "替换标题。",
-          "label": "标题"
-        }
-      },
-      "planReject": {
-        "feedback": {
-          "hint": "记录到拒绝事件中的原因。",
-          "label": "反馈"
-        }
-      },
-      "planRefine": {
-        "customInstructions": {
-          "hint": "传给规划器的额外指令。",
-          "label": "自定义指令"
-        },
-        "failedStepId": {
-          "hint": "修复流程中的可选失败步骤 ID。",
-          "label": "失败步骤 ID"
-        },
-        "refinementType": {
-          "label": "优化类型",
-          "options": {
-            "expand": "扩展",
-            "optimize": "优化",
-            "repair": "修复",
-            "reorder": "重排",
-            "simplify": "简化"
-          }
-        },
-        "trigger": {
-          "label": "触发原因",
-          "options": {
-            "judge_deviation": "评审偏差",
-            "manual": "手动",
-            "step_failure": "步骤失败"
-          }
-        }
-      },
-      "planSetStepStatus": {
-        "attempts": {
-          "hint": "重试计数。",
-          "label": "尝试次数"
-        },
-        "error": {
-          "hint": "失败摘要。",
-          "label": "错误"
-        },
-        "outputJson": {
-          "hint": "结构化步骤输出。",
-          "label": "输出 JSON"
-        },
-        "result": {
-          "hint": "简短结果摘要。",
-          "label": "结果"
-        },
-        "status": {
-          "label": "状态",
-          "options": {
-            "blocked": "已阻塞",
-            "completed": "已完成",
-            "failed": "失败",
-            "in_progress": "进行中",
-            "pending": "待处理",
-            "ready": "就绪",
-            "skipped": "已跳过"
-          }
-        },
-        "stepId": {
-          "hint": "目标计划步骤 ID。",
-          "label": "步骤 ID",
-          "placeholder": "step_"
-        }
-      },
-      "schedulerTaskCommon": {
-        "taskId": {
-          "hint": "目标计划任务 ID。",
-          "label": "任务 ID",
-          "placeholder": "task_"
-        }
-      },
-      "schedulerTaskCreate": {
-        "configJson": {
-          "hint": "局部 TaskExecutionConfig 覆盖。",
-          "label": "配置 JSON"
-        },
-        "cronExpression": {
-          "hint": "标准五段 cron 表达式。",
-          "label": "Cron"
-        },
-        "dependsOnRaw": {
-          "hint": "逗号分隔，必须先完成的任务 ID。",
-          "label": "依赖任务"
-        },
-        "description": {
-          "hint": "可选任务描述。",
-          "label": "描述"
-        },
-        "endAt": {
-          "hint": "可选 ISO 日期，超过后任务过期。",
-          "label": "结束时间"
-        },
-        "eventType": {
-          "hint": "事件触发任务使用的调度器事件类型。",
-          "label": "事件类型"
-        },
-        "intervalMs": {
-          "hint": "间隔触发的毫秒数。",
-          "label": "间隔（毫秒）"
-        },
-        "jitterMs": {
-          "hint": "每次触发可追加的最大随机延迟。",
-          "label": "抖动（毫秒）"
-        },
-        "name": {
-          "hint": "计划任务名称。",
-          "label": "名称",
-          "placeholder": "Nightly run"
-        },
-        "notificationJson": {
-          "hint": "局部 TaskNotificationConfig 覆盖。",
-          "label": "通知 JSON"
-        },
-        "onFailureTaskIdsRaw": {
-          "hint": "逗号分隔，失败后触发的任务 ID。",
-          "label": "失败后"
-        },
-        "onSuccessTaskIdsRaw": {
-          "hint": "逗号分隔，成功后触发的任务 ID。",
-          "label": "成功后"
-        },
-        "payloadJson": {
-          "hint": "传给任务执行器的 ScheduledTaskPayload 对象。",
-          "label": "Payload JSON"
-        },
-        "runAt": {
-          "hint": "一次性触发的 ISO 日期。",
-          "label": "运行时间"
-        },
-        "tagsRaw": {
-          "hint": "逗号分隔的任务标签。",
-          "label": "标签"
-        },
-        "timezone": {
-          "hint": "cron 表达式使用的时区。",
-          "label": "时区"
-        },
-        "triggerType": {
-          "label": "触发器",
-          "options": {
-            "cron": "Cron",
-            "event": "事件",
-            "interval": "间隔",
-            "once": "一次"
-          }
-        },
-        "type": {
-          "label": "任务类型",
-          "options": {
-            "agent": "Agent",
-            "agent-team": "Agent 团队",
-            "ai-generation": "AI 生成",
-            "backup": "备份",
-            "chat": "聊天",
-            "connection:outbound:send": "连接器外发",
-            "connection:scheduled:digest": "连接器摘要",
-            "custom": "自定义",
-            "external-agent": "外部 Agent",
-            "goal": "Goal",
-            "im-push": "IM 推送",
-            "plan": "Plan",
-            "plugin": "插件",
-            "script": "脚本",
-            "skill": "技能",
-            "sync": "同步",
-            "test": "测试",
-            "twin": "数字孪生",
-            "wiki-rebuild": "Wiki 重建",
-            "workflow": "工作流"
-          }
-        }
-      },
-      "schedulerTaskExecutions": {
-        "limit": {
-          "hint": "最大执行记录数。",
-          "label": "数量限制"
-        }
-      },
-      "schedulerTaskBackfill": {
-        "end": {
-          "hint": "回填窗口结束的 ISO 时间。",
-          "label": "结束时间"
-        },
-        "start": {
-          "hint": "回填窗口开始的 ISO 时间。",
-          "label": "开始时间"
-        }
-      },
-      "schedulerTaskExport": {
-        "taskIdsRaw": {
-          "hint": "逗号分隔的任务 ID；留空则导出全部任务。",
-          "label": "任务 ID"
-        }
-      },
-      "schedulerTaskImport": {
-        "dataJson": {
-          "hint": "调度器任务导出包 JSON。",
-          "label": "导入 JSON"
-        },
-        "mode": {
-          "label": "模式",
-          "options": {
-            "merge": "合并",
-            "replace": "替换"
-          }
-        }
-      },
-      "schedulerUpcoming": {
-        "limit": {
-          "hint": "最大 upcoming 任务触发数。",
-          "label": "数量限制"
-        }
-      },
-      "schedulerExecutionsRecent": {
-        "limit": {
-          "hint": "最大近期执行记录数。",
-          "label": "数量限制"
-        }
-      },
-      "schedulerExecutionGet": {
-        "executionId": {
-          "hint": "目标调度器执行记录 ID。",
-          "label": "执行记录 ID",
-          "placeholder": "exec_"
-        }
-      },
-      "schedulerEventTrigger": {
-        "eventSource": {
-          "hint": "可选调度器事件来源。",
-          "label": "事件来源"
-        },
-        "eventType": {
-          "hint": "要分发的调度器事件类型。",
-          "label": "事件类型"
-        },
-        "payloadJson": {
-          "hint": "可选事件 payload 对象。",
-          "label": "Payload JSON"
-        }
-      },
-      "schedulerTaskList": {
-        "limit": {
-          "hint": "最大任务数。",
-          "label": "数量限制"
-        },
-        "search": {
-          "hint": "匹配任务名称或描述。",
-          "label": "搜索"
-        },
-        "statusesRaw": {
-          "hint": "逗号分隔的状态：active、paused、disabled、expired。",
-          "label": "状态"
-        },
-        "tagsRaw": {
-          "hint": "逗号分隔的标签。",
-          "label": "标签"
-        },
-        "typesRaw": {
-          "hint": "逗号分隔的任务类型。",
-          "label": "类型"
-        }
-      },
-      "schedulerTaskUpdate": {
-        "configJson": {
-          "hint": "局部 TaskExecutionConfig 补丁。",
-          "label": "配置 JSON"
-        },
-        "cronExpression": {
-          "hint": "替换 cron 表达式。",
-          "label": "Cron"
-        },
-        "dependsOnRaw": {
-          "hint": "逗号分隔的依赖任务 ID。",
-          "label": "依赖任务"
-        },
-        "description": {
-          "hint": "替换描述。",
-          "label": "描述"
-        },
-        "endAt": {
-          "hint": "可选 ISO 日期，超过后任务过期。",
-          "label": "结束时间"
-        },
-        "eventType": {
-          "hint": "调度器事件类型。",
-          "label": "事件类型"
-        },
-        "intervalMs": {
-          "hint": "替换间隔毫秒数。",
-          "label": "间隔（毫秒）"
-        },
-        "jitterMs": {
-          "hint": "替换最大随机延迟。",
-          "label": "抖动（毫秒）"
-        },
-        "name": {
-          "hint": "替换任务名称。",
-          "label": "名称"
-        },
-        "notificationJson": {
-          "hint": "局部通知补丁。",
-          "label": "通知 JSON"
-        },
-        "onFailureTaskIdsRaw": {
-          "hint": "逗号分隔，失败后触发的任务 ID。",
-          "label": "失败后"
-        },
-        "onSuccessTaskIdsRaw": {
-          "hint": "逗号分隔，成功后触发的任务 ID。",
-          "label": "成功后"
-        },
-        "payloadJson": {
-          "hint": "由任务类型归一化合并的 payload 补丁。",
-          "label": "Payload JSON"
-        },
-        "runAt": {
-          "hint": "替换 ISO 运行日期。",
-          "label": "运行时间"
-        },
-        "status": {
-          "label": "状态",
-          "options": {
-            "active": "激活",
-            "disabled": "禁用",
-            "expired": "已过期",
-            "paused": "已暂停",
-            "unchanged": "不变"
-          }
-        },
-        "tagsRaw": {
-          "hint": "逗号分隔的替换标签。",
-          "label": "标签"
-        },
-        "timezone": {
-          "hint": "替换 cron 时区。",
-          "label": "时区"
-        },
-        "triggerType": {
-          "label": "触发器",
-          "options": {
-            "cron": "Cron",
-            "event": "事件",
-            "interval": "间隔",
-            "once": "一次",
-            "unchanged": "不变"
-          }
+      "goalUpdateObjective": {
+        "rawObjective": {
+          "hint": "替换后的目标。",
+          "label": "新目标"
         }
       },
       "groupAnnotation": {
@@ -22061,6 +21646,206 @@
         "useExpression": "使用表达式",
         "usePicker": "从列表选择"
       },
+      "planCommon": {
+        "planId": {
+          "hint": "目标 AgentPlan ID。",
+          "label": "计划 ID",
+          "placeholder": "plan_"
+        }
+      },
+      "planCreate": {
+        "characterId": {
+          "label": "角色（可选）"
+        },
+        "configJson": {
+          "hint": "局部 PlanConfig 覆盖。",
+          "label": "配置 JSON"
+        },
+        "description": {
+          "hint": "可选的计划上下文。",
+          "label": "描述"
+        },
+        "executionMode": {
+          "label": "执行模式",
+          "options": {
+            "auto": "自动",
+            "in_session": "会话内",
+            "orchestrated": "编排执行"
+          }
+        },
+        "metadataJson": {
+          "hint": "结构化计划元数据。",
+          "label": "元数据 JSON"
+        },
+        "sessionId": {
+          "hint": "计划所属聊天会话。",
+          "label": "会话 ID",
+          "placeholder": "ses_"
+        },
+        "source": {
+          "label": "来源",
+          "options": {
+            "agent_tool": "Agent 工具",
+            "exit_plan_mode": "退出计划模式",
+            "goal_projection": "Goal 投影",
+            "manual": "手动",
+            "planner_llm": "规划 LLM",
+            "team_projection": "团队投影"
+          }
+        },
+        "stepsJson": {
+          "hint": "CreatePlanStepInput 行数组。",
+          "label": "步骤 JSON"
+        },
+        "title": {
+          "hint": "在追踪器中显示的计划标题。",
+          "label": "标题",
+          "placeholder": "Ship feature"
+        }
+      },
+      "planEvents": {
+        "limit": {
+          "hint": "最大事件数。",
+          "label": "数量限制"
+        }
+      },
+      "planList": {
+        "limit": {
+          "hint": "最大行数。",
+          "label": "数量限制"
+        },
+        "mode": {
+          "label": "读取模式",
+          "options": {
+            "all": "所有计划",
+            "executingForSession": "会话执行中计划",
+            "openForSession": "会话打开计划",
+            "session": "按会话读取"
+          }
+        },
+        "projectId": {
+          "hint": "覆盖当前工作区范围。",
+          "label": "项目 ID（可选）"
+        },
+        "sessionId": {
+          "hint": "会话范围模式必填。",
+          "label": "会话 ID"
+        },
+        "status": {
+          "label": "状态筛选",
+          "options": {
+            "any": "任意",
+            "approved": "已批准",
+            "awaiting_approval": "等待批准",
+            "cancelled": "已取消",
+            "completed": "已完成",
+            "draft": "草稿",
+            "executing": "执行中",
+            "failed": "失败",
+            "paused": "已暂停"
+          }
+        }
+      },
+      "planRefine": {
+        "customInstructions": {
+          "hint": "传给规划器的额外指令。",
+          "label": "自定义指令"
+        },
+        "failedStepId": {
+          "hint": "修复流程中的可选失败步骤 ID。",
+          "label": "失败步骤 ID"
+        },
+        "refinementType": {
+          "label": "优化类型",
+          "options": {
+            "expand": "扩展",
+            "optimize": "优化",
+            "reorder": "重排",
+            "repair": "修复",
+            "simplify": "简化"
+          }
+        },
+        "trigger": {
+          "label": "触发原因",
+          "options": {
+            "judge_deviation": "评审偏差",
+            "manual": "手动",
+            "step_failure": "步骤失败"
+          }
+        }
+      },
+      "planReject": {
+        "feedback": {
+          "hint": "记录到拒绝事件中的原因。",
+          "label": "反馈"
+        }
+      },
+      "planSetStepStatus": {
+        "attempts": {
+          "hint": "重试计数。",
+          "label": "尝试次数"
+        },
+        "error": {
+          "hint": "失败摘要。",
+          "label": "错误"
+        },
+        "outputJson": {
+          "hint": "结构化步骤输出。",
+          "label": "输出 JSON"
+        },
+        "result": {
+          "hint": "简短结果摘要。",
+          "label": "结果"
+        },
+        "status": {
+          "label": "状态",
+          "options": {
+            "blocked": "已阻塞",
+            "completed": "已完成",
+            "failed": "失败",
+            "in_progress": "进行中",
+            "pending": "待处理",
+            "ready": "就绪",
+            "skipped": "已跳过"
+          }
+        },
+        "stepId": {
+          "hint": "目标计划步骤 ID。",
+          "label": "步骤 ID",
+          "placeholder": "step_"
+        }
+      },
+      "planUpdateDraft": {
+        "configJson": {
+          "hint": "局部 PlanConfig 补丁。",
+          "label": "配置 JSON"
+        },
+        "description": {
+          "hint": "替换描述。",
+          "label": "描述"
+        },
+        "executionMode": {
+          "label": "执行模式",
+          "options": {
+            "auto": "自动",
+            "in_session": "会话内",
+            "orchestrated": "编排执行",
+            "unchanged": "不变"
+          }
+        },
+        "metadataJson": {
+          "hint": "替换元数据对象。",
+          "label": "元数据 JSON"
+        },
+        "stepsJson": {
+          "hint": "用于草稿替换的完整 PlanStep 数组。",
+          "label": "步骤 JSON"
+        },
+        "title": {
+          "hint": "替换标题。",
+          "label": "标题"
+        }
+      },
       "pluginInvoke": {
         "argsJson": {
           "hint": "转发给插件的任务处理器。",
@@ -22086,6 +21871,290 @@
           "empty": "请先选择插件",
           "label": "工具",
           "placeholder": "选择工具"
+        }
+      },
+      "schedulerEventTrigger": {
+        "eventSource": {
+          "hint": "可选调度器事件来源。",
+          "label": "事件来源"
+        },
+        "eventType": {
+          "hint": "要分发的调度器事件类型。",
+          "label": "事件类型"
+        },
+        "payloadJson": {
+          "hint": "可选事件 payload 对象。",
+          "label": "Payload JSON"
+        }
+      },
+      "schedulerExecutionGet": {
+        "executionId": {
+          "hint": "目标调度器执行记录 ID。",
+          "label": "执行记录 ID",
+          "placeholder": "exec_"
+        }
+      },
+      "schedulerExecutionsRecent": {
+        "limit": {
+          "hint": "最大近期执行记录数。",
+          "label": "数量限制"
+        }
+      },
+      "schedulerTaskBackfill": {
+        "end": {
+          "hint": "回填窗口结束的 ISO 时间。",
+          "label": "结束时间"
+        },
+        "start": {
+          "hint": "回填窗口开始的 ISO 时间。",
+          "label": "开始时间"
+        }
+      },
+      "schedulerTaskCommon": {
+        "taskId": {
+          "hint": "目标计划任务 ID。",
+          "label": "任务 ID",
+          "placeholder": "task_"
+        }
+      },
+      "schedulerTaskCreate": {
+        "configJson": {
+          "hint": "局部 TaskExecutionConfig 覆盖。",
+          "label": "配置 JSON"
+        },
+        "cronExpression": {
+          "hint": "标准五段 cron 表达式。",
+          "label": "Cron"
+        },
+        "dependsOnRaw": {
+          "hint": "逗号分隔，必须先完成的任务 ID。",
+          "label": "依赖任务"
+        },
+        "description": {
+          "hint": "可选任务描述。",
+          "label": "描述"
+        },
+        "endAt": {
+          "hint": "可选 ISO 日期，超过后任务过期。",
+          "label": "结束时间"
+        },
+        "eventType": {
+          "hint": "事件触发任务使用的调度器事件类型。",
+          "label": "事件类型"
+        },
+        "intervalMs": {
+          "hint": "间隔触发的毫秒数。",
+          "label": "间隔（毫秒）"
+        },
+        "jitterMs": {
+          "hint": "每次触发可追加的最大随机延迟。",
+          "label": "抖动（毫秒）"
+        },
+        "name": {
+          "hint": "计划任务名称。",
+          "label": "名称",
+          "placeholder": "Nightly run"
+        },
+        "notificationJson": {
+          "hint": "局部 TaskNotificationConfig 覆盖。",
+          "label": "通知 JSON"
+        },
+        "onFailureTaskIdsRaw": {
+          "hint": "逗号分隔，失败后触发的任务 ID。",
+          "label": "失败后"
+        },
+        "onSuccessTaskIdsRaw": {
+          "hint": "逗号分隔，成功后触发的任务 ID。",
+          "label": "成功后"
+        },
+        "payloadJson": {
+          "hint": "传给任务执行器的 ScheduledTaskPayload 对象。",
+          "label": "Payload JSON"
+        },
+        "runAt": {
+          "hint": "一次性触发的 ISO 日期。",
+          "label": "运行时间"
+        },
+        "tagsRaw": {
+          "hint": "逗号分隔的任务标签。",
+          "label": "标签"
+        },
+        "timezone": {
+          "hint": "cron 表达式使用的时区。",
+          "label": "时区"
+        },
+        "triggerType": {
+          "label": "触发器",
+          "options": {
+            "cron": "Cron",
+            "event": "事件",
+            "interval": "间隔",
+            "once": "一次"
+          }
+        },
+        "type": {
+          "label": "任务类型",
+          "options": {
+            "agent": "Agent",
+            "agent-team": "Agent 团队",
+            "ai-generation": "AI 生成",
+            "backup": "备份",
+            "chat": "聊天",
+            "connection:outbound:send": "连接器外发",
+            "connection:scheduled:digest": "连接器摘要",
+            "custom": "自定义",
+            "external-agent": "外部 Agent",
+            "goal": "Goal",
+            "im-push": "IM 推送",
+            "plan": "Plan",
+            "plugin": "插件",
+            "script": "脚本",
+            "skill": "技能",
+            "sync": "同步",
+            "test": "测试",
+            "twin": "数字孪生",
+            "wiki-rebuild": "Wiki 重建",
+            "workflow": "工作流"
+          }
+        }
+      },
+      "schedulerTaskExecutions": {
+        "limit": {
+          "hint": "最大执行记录数。",
+          "label": "数量限制"
+        }
+      },
+      "schedulerTaskExport": {
+        "taskIdsRaw": {
+          "hint": "逗号分隔的任务 ID；留空则导出全部任务。",
+          "label": "任务 ID"
+        }
+      },
+      "schedulerTaskImport": {
+        "dataJson": {
+          "hint": "调度器任务导出包 JSON。",
+          "label": "导入 JSON"
+        },
+        "mode": {
+          "label": "模式",
+          "options": {
+            "merge": "合并",
+            "replace": "替换"
+          }
+        }
+      },
+      "schedulerTaskList": {
+        "limit": {
+          "hint": "最大任务数。",
+          "label": "数量限制"
+        },
+        "search": {
+          "hint": "匹配任务名称或描述。",
+          "label": "搜索"
+        },
+        "statusesRaw": {
+          "hint": "逗号分隔的状态：active、paused、disabled、expired。",
+          "label": "状态"
+        },
+        "tagsRaw": {
+          "hint": "逗号分隔的标签。",
+          "label": "标签"
+        },
+        "typesRaw": {
+          "hint": "逗号分隔的任务类型。",
+          "label": "类型"
+        }
+      },
+      "schedulerTaskUpdate": {
+        "configJson": {
+          "hint": "局部 TaskExecutionConfig 补丁。",
+          "label": "配置 JSON"
+        },
+        "cronExpression": {
+          "hint": "替换 cron 表达式。",
+          "label": "Cron"
+        },
+        "dependsOnRaw": {
+          "hint": "逗号分隔的依赖任务 ID。",
+          "label": "依赖任务"
+        },
+        "description": {
+          "hint": "替换描述。",
+          "label": "描述"
+        },
+        "endAt": {
+          "hint": "可选 ISO 日期，超过后任务过期。",
+          "label": "结束时间"
+        },
+        "eventType": {
+          "hint": "调度器事件类型。",
+          "label": "事件类型"
+        },
+        "intervalMs": {
+          "hint": "替换间隔毫秒数。",
+          "label": "间隔（毫秒）"
+        },
+        "jitterMs": {
+          "hint": "替换最大随机延迟。",
+          "label": "抖动（毫秒）"
+        },
+        "name": {
+          "hint": "替换任务名称。",
+          "label": "名称"
+        },
+        "notificationJson": {
+          "hint": "局部通知补丁。",
+          "label": "通知 JSON"
+        },
+        "onFailureTaskIdsRaw": {
+          "hint": "逗号分隔，失败后触发的任务 ID。",
+          "label": "失败后"
+        },
+        "onSuccessTaskIdsRaw": {
+          "hint": "逗号分隔，成功后触发的任务 ID。",
+          "label": "成功后"
+        },
+        "payloadJson": {
+          "hint": "由任务类型归一化合并的 payload 补丁。",
+          "label": "Payload JSON"
+        },
+        "runAt": {
+          "hint": "替换 ISO 运行日期。",
+          "label": "运行时间"
+        },
+        "status": {
+          "label": "状态",
+          "options": {
+            "active": "激活",
+            "disabled": "禁用",
+            "expired": "已过期",
+            "paused": "已暂停",
+            "unchanged": "不变"
+          }
+        },
+        "tagsRaw": {
+          "hint": "逗号分隔的替换标签。",
+          "label": "标签"
+        },
+        "timezone": {
+          "hint": "替换 cron 时区。",
+          "label": "时区"
+        },
+        "triggerType": {
+          "label": "触发器",
+          "options": {
+            "cron": "Cron",
+            "event": "事件",
+            "interval": "间隔",
+            "once": "一次",
+            "unchanged": "不变"
+          }
+        }
+      },
+      "schedulerUpcoming": {
+        "limit": {
+          "hint": "最大 upcoming 任务触发数。",
+          "label": "数量限制"
         }
       },
       "setVariable": {
@@ -22922,6 +22991,90 @@
             "label": "Issue → PR 循环"
           }
         },
+        "goal": {
+          "analytics": {
+            "description": "计算目标的完成度、状态、token 与时间线分析。",
+            "label": "目标分析"
+          },
+          "clearSubgoals": {
+            "description": "移除目标上已保存的子目标清单。",
+            "label": "清除子目标"
+          },
+          "create": {
+            "description": "通过 GoalRuntime 为聊天会话创建一个自驱动的 /goal。",
+            "label": "创建目标"
+          },
+          "decomposeSubgoals": {
+            "description": "使用配置的评审模型把目标拆解为清单。",
+            "label": "拆解子目标"
+          },
+          "delete": {
+            "description": "通过 GoalRuntime 清理流程删除目标及其事件日志。",
+            "label": "删除目标"
+          },
+          "events": {
+            "description": "读取目标的生命周期事件时间线。",
+            "label": "列出目标事件"
+          },
+          "get": {
+            "description": "按 id 读取单个目标，并返回脱敏安全的快照。",
+            "label": "获取目标"
+          },
+          "list": {
+            "description": "全局、按会话，或按会话的活跃/未完成目标列出目标。",
+            "label": "列出目标"
+          },
+          "pause": {
+            "description": "暂停活跃目标并中止其进行中的回合驱动。",
+            "label": "暂停目标"
+          },
+          "preempt": {
+            "description": "将活跃目标标记为被外部工作取代。",
+            "label": "抢占目标"
+          },
+          "resume": {
+            "description": "恢复已暂停的目标，使其回合循环继续。",
+            "label": "恢复目标"
+          },
+          "stop": {
+            "description": "停止一个非终态目标并触发目标的终态副作用。",
+            "label": "停止目标"
+          },
+          "template": {
+            "createGoal": {
+              "description": "解析目标模板，并为会话创建由 GoalRuntime 支撑的目标。",
+              "label": "从模板创建目标"
+            },
+            "delete": {
+              "description": "删除用户创建的目标模板；内置模板受保护。",
+              "label": "删除目标模板"
+            },
+            "favorite": {
+              "description": "设置目标模板的收藏标记，使其在选择器中靠前排序。",
+              "label": "收藏目标模板"
+            },
+            "list": {
+              "description": "列出内置与用户创建的目标模板，支持收藏/搜索过滤。",
+              "label": "列出目标模板"
+            },
+            "upsert": {
+              "description": "创建或更新用户目标模板，同时保留内置克隆语义。",
+              "label": "新增或更新目标模板"
+            }
+          },
+          "toggleSubgoal": {
+            "description": "翻转某个子目标清单项的完成状态。",
+            "label": "切换子目标"
+          },
+          "updateConfig": {
+            "description": "修改非终态目标的节奏、预算、评审与超时设置。",
+            "label": "更新目标配置"
+          },
+          "updateObjective": {
+            "description": "通过 GoalRuntime 脱敏路径替换非终态目标的目标内容。",
+            "label": "更新目标内容"
+          }
+        },
         "mcp": {
           "invokeTool": {
             "description": "调用已配置的 MCP 服务器上的工具。",
@@ -22938,10 +23091,150 @@
             "label": "写入记忆"
           }
         },
+        "plan": {
+          "approve": {
+            "description": "将草稿或待定计划转入已批准状态。",
+            "label": "批准计划"
+          },
+          "cancel": {
+            "description": "取消非终态计划并发出运行时退出事件。",
+            "label": "取消计划"
+          },
+          "create": {
+            "description": "通过 PlanRuntime 生命周期为会话创建智能体计划。",
+            "label": "创建计划"
+          },
+          "delete": {
+            "description": "通过 PlanRuntime 清理流程删除计划及其事件日志。",
+            "label": "删除计划"
+          },
+          "events": {
+            "description": "读取计划最新的生命周期与步骤事件。",
+            "label": "列出计划事件"
+          },
+          "get": {
+            "description": "按 id 读取单个已持久化的智能体计划。",
+            "label": "获取计划"
+          },
+          "list": {
+            "description": "按工作区或会话列出计划，可按状态过滤。",
+            "label": "列出计划"
+          },
+          "pause": {
+            "description": "暂停执行中的计划并中止活跃的运行控制器。",
+            "label": "暂停计划"
+          },
+          "refine": {
+            "description": "使用规划模型修复、扩展、简化、重排或优化计划。",
+            "label": "优化计划"
+          },
+          "reject": {
+            "description": "取消待定计划并记录拒绝反馈。",
+            "label": "拒绝计划"
+          },
+          "resume": {
+            "description": "将已暂停的计划恢复为执行中状态。",
+            "label": "恢复计划"
+          },
+          "run": {
+            "description": "通过编排的 PlanRuntime 路径执行已批准的计划。",
+            "label": "运行计划"
+          },
+          "setStepStatus": {
+            "description": "更新单个计划步骤的状态并重新计算计划进度。",
+            "label": "设置计划步骤状态"
+          },
+          "updateDraft": {
+            "description": "修改非执行中计划的标题、步骤、配置或元数据。",
+            "label": "更新计划草稿"
+          }
+        },
         "plugin": {
           "invoke": {
             "description": "调用插件运行时中注册的任务处理器。",
             "label": "调用插件"
+          }
+        },
+        "scheduler": {
+          "event": {
+            "trigger": {
+              "description": "将事件分发到由事件触发的调度任务。",
+              "label": "触发调度事件"
+            }
+          },
+          "execution": {
+            "get": {
+              "description": "按 id 读取单条调度执行记录。",
+              "label": "获取调度执行记录"
+            }
+          },
+          "executions": {
+            "recent": {
+              "description": "读取所有计划任务中最近的调度执行记录。",
+              "label": "列出最近的调度执行"
+            }
+          },
+          "statistics": {
+            "description": "读取调度任务与执行的聚合计数。",
+            "label": "获取调度统计"
+          },
+          "status": {
+            "description": "读取原生调度守护进程的健康与生命周期状态。",
+            "label": "获取调度器状态"
+          },
+          "task": {
+            "backfill": {
+              "description": "在指定时间窗口内重放某个计划任务。",
+              "label": "回填计划任务"
+            },
+            "create": {
+              "description": "通过 TaskScheduler 生命周期创建一个原生调度任务。",
+              "label": "创建计划任务"
+            },
+            "delete": {
+              "description": "删除调度任务及其执行记录。",
+              "label": "删除计划任务"
+            },
+            "executions": {
+              "description": "读取某个调度任务最近的执行历史。",
+              "label": "列出任务执行记录"
+            },
+            "export": {
+              "description": "导出选定的调度任务定义以用于迁移或备份。",
+              "label": "导出计划任务"
+            },
+            "get": {
+              "description": "按 id 读取单个原生计划任务。",
+              "label": "获取计划任务"
+            },
+            "import": {
+              "description": "从导出的 JSON 包导入调度任务定义。",
+              "label": "导入计划任务"
+            },
+            "list": {
+              "description": "列出原生调度任务，可按状态、类型、标签和搜索过滤。",
+              "label": "列出计划任务"
+            },
+            "pause": {
+              "description": "暂停原生调度任务并解除其下次运行。",
+              "label": "暂停计划任务"
+            },
+            "resume": {
+              "description": "恢复已暂停的调度任务并重新计算下次运行。",
+              "label": "恢复计划任务"
+            },
+            "runNow": {
+              "description": "通过已注册的任务执行器立即执行调度任务。",
+              "label": "立即运行计划任务"
+            },
+            "update": {
+              "description": "修改计划任务的元数据、触发器、载荷、配置或生命周期状态。",
+              "label": "更新计划任务"
+            }
+          },
+          "upcoming": {
+            "description": "读取任务注册表中接下来要触发的调度任务。",
+            "label": "列出即将到来的计划任务"
           }
         },
         "skill": {
@@ -23079,6 +23372,10 @@
         "break": {
           "description": "在当前迭代结束后停止最内层循环。",
           "label": "跳出循环"
+        },
+        "catch": {
+          "description": "仅在工作流终态失败时运行；接收错误并驱动恢复/通知路径。",
+          "label": "捕获失败"
         },
         "continue": {
           "description": "跳过当前循环迭代的剩余部分。",

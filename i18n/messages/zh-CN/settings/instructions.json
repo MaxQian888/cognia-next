@@ -1,0 +1,23 @@
+{
+  "description": "将活动工作区的磁盘指令文件（CLAUDE.md / AGENTS.md / AGENT.md）加载进 Agent 的系统提示，支持嵌套目录发现与 @import 展开。",
+  "enabled": "启用指令文件",
+  "enabledHint": "开启后，Agent 每轮都会读取项目指令文件（bare 模式下跳过）。",
+  "extraPaths": "额外指令路径",
+  "extraPathsHint": "每行一个路径或 glob，相对于工作区根目录（如 CONTRIBUTING.md 或 .cursor/rules/*.md）。",
+  "extraPathsPlaceholder": "docs/guidelines.md",
+  "globalPath": "全局指令文件",
+  "globalPathPlaceholder": "留空则使用 ~/.cognia/AGENTS.md",
+  "includeGlobal": "包含全局文件",
+  "includeGlobalHint": "同时加载适用于所有工作区的用户级指令文件。",
+  "loadProjectAgents": "加载项目子代理",
+  "loadProjectAgentsHint": "发现 .cognia/agents/*.md markdown 子代理并暴露给 Agent。",
+  "mode": {
+    "hint": "分层模式从工作区根目录到工作目录收集所有指令文件；最近模式只取最近的一个。",
+    "label": "嵌套模式",
+    "layered": "分层（全部收集，Claude Code）",
+    "nearest": "仅最近（opencode）"
+  },
+  "save": "保存",
+  "saved": "指令设置已保存。",
+  "title": "项目指令"
+}

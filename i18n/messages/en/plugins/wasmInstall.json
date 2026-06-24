@@ -1,0 +1,59 @@
+{
+  "capabilityGrantSheet": {
+    "allowFsAriaLabel": "Allow access to {path}",
+    "cancel": "Cancel",
+    "customPermission": "Custom permission",
+    "dangerousWarning": "You're granting {count, plural, one {# sensitive capability} other {# sensitive capabilities}}. Only install plugins you trust.",
+    "description": "This plugin runs as sandboxed WebAssembly. Review the capabilities it requests before installing — granted calls won't ask again.",
+    "extraFilesystem": "Extra filesystem access",
+    "extraFilesystemDescription": "Beyond its own data directory, this plugin asks to access these paths. Uncheck any you don't want to allow.",
+    "groups": {
+      "clipboard": "Clipboard",
+      "filesystem": "Filesystem",
+      "network": "Network",
+      "notifications": "Notifications",
+      "osProcess": "Processes & automation",
+      "other": "Other",
+      "secrets": "Secrets"
+    },
+    "install": "Install",
+    "noSensitivePermissions": "This plugin requests no sensitive permissions.",
+    "noSignature": "No signature",
+    "optionalPermissions": "Optional permissions",
+    "requestedPermissions": "Requested permissions",
+    "sensitiveBadge": "Sensitive",
+    "title": "Review capabilities for {name}",
+    "togglePermissionAriaLabel": "Toggle permission {permission}",
+    "unsignedAuthor": "Unsigned author"
+  },
+  "fromLocalButton": {
+    "filePickerTitle": "Select a WASM plugin bundle",
+    "filterAllFiles": "All files",
+    "filterWasmBundle": "WASM bundle",
+    "label": "Install local WASM plugin",
+    "tauriRequiredError": "Installing a local WASM plugin requires the desktop app."
+  },
+  "fromUrlDialog": {
+    "alreadyTrusted": "You already trust this author.",
+    "anonymousAuthor": "Anonymous author",
+    "bundleUrlLabel": "Bundle URL",
+    "bundleUrlPlaceholder": "https://example.com/plugin.zip",
+    "cancel": "Cancel",
+    "description": "Provide a direct link to a signed WASM bundle. The manifest is fetched and verified before anything is installed.",
+    "fetchingManifest": "Fetching manifest…",
+    "install": "Install",
+    "installing": "Installing…",
+    "noAuthorKey": "No author key",
+    "preview": "Preview",
+    "publicKeyLabel": "Author public key (optional)",
+    "publicKeyPlaceholder": "base64-encoded ed25519 public key",
+    "signatureUrlLabel": "Signature URL (optional)",
+    "signatureUrlPlaceholder": "https://example.com/plugin.zip.sig",
+    "signatureVerified": "Signature verified",
+    "title": "Install signed WASM plugin",
+    "trustAriaLabel": "Trust this author",
+    "trustFirstTime": "Trust this author for future installs.",
+    "trustRequiredError": "Trust this author before installing.",
+    "unsignedBundle": "Unsigned bundle"
+  }
+}

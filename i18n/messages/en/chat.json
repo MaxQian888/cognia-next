@@ -1,0 +1,896 @@
+{
+  "agentFlow": {
+    "group": {
+      "collapseAll": "Collapse all",
+      "expandAll": "Expand all",
+      "summary": "{count, plural, =1 {1 tool call} other {# tool calls}}",
+      "tally": "{name} ×{count}"
+    },
+    "result": {
+      "diff": "+{added} −{removed}",
+      "entries": "{count, plural, =1 {1 entry} other {# entries}}",
+      "files": "{count, plural, =1 {1 file} other {# files}}",
+      "lines": "{count, plural, =1 {1 line} other {# lines}}",
+      "matches": "{count, plural, =1 {1 match} other {# matches}}"
+    },
+    "rowAria": "{name} tool call — {status}",
+    "status": {
+      "awaitingApproval": "Awaiting approval",
+      "completed": "Completed",
+      "denied": "Denied",
+      "error": "Error",
+      "pending": "Pending",
+      "responded": "Responded",
+      "running": "Running"
+    },
+    "subagents": {
+      "summary": "{count, plural, =1 {1 agent} other {# agents}}"
+    }
+  },
+  "agentTeamDispatch": {
+    "openMember": "Open member",
+    "supervisor": "Supervisor",
+    "title": "Dispatch"
+  },
+  "artifactPart": {
+    "cleared": "(cleared)",
+    "collapse": "Collapse preview",
+    "copied": "Copied",
+    "copy": "Copy",
+    "copyAria": "Copy artifact content",
+    "download": "Download",
+    "downloadAria": "Download artifact",
+    "expand": "Expand preview",
+    "openInCanvas": "Open in canvas",
+    "openInCanvasAria": "Open artifact in canvas"
+  },
+  "askUser": {
+    "dismiss": "Dismiss",
+    "multiHint": "Select all that apply",
+    "queued": "{count} more queued",
+    "submit": "Submit",
+    "submitHint": "⌘/Ctrl + Enter to submit",
+    "textPlaceholder": "Type your answer…",
+    "title": "The agent has a question"
+  },
+  "branch": {
+    "cancel": "Cancel",
+    "confirm": "Create branch",
+    "createError": "Failed to create branch",
+    "created": "Branch created",
+    "description": "Fork this conversation into a new, independent session. The original is left unchanged.",
+    "direct": {
+      "hint": "Copy the conversation up to this message verbatim.",
+      "label": "Direct branch"
+    },
+    "summary": {
+      "generating": "Generating summary…",
+      "hint": "Summarize the conversation so far and seed the branch with it (keeps context small).",
+      "label": "Branch from summary",
+      "placeholder": "The summary will appear here — you can edit it before branching.",
+      "previewLabel": "Summary (editable)",
+      "regenerate": "Regenerate"
+    },
+    "summaryEmpty": "Add a summary before branching",
+    "summaryError": "Failed to generate summary",
+    "title": "Branch conversation"
+  },
+  "canvasInline": {
+    "collapsePreview": "Collapse preview",
+    "expandPreview": "Expand preview",
+    "openInCanvas": "Open in canvas"
+  },
+  "characterMissing": {
+    "action": {
+      "pickAnother": "Pick another character",
+      "reEnablePluginHint": "Re-enable the plugin to restore the original."
+    },
+    "body": "The {source} provider for this conversation is no longer available. Messages now use the app defaults.",
+    "sourceLocalFile": "local pack file",
+    "sourcePlugin": "plugin \"{name}\"",
+    "title": "Character unavailable"
+  },
+  "characterPicker": {
+    "description": "Each character has its own system prompt, model, and tools.",
+    "empty": "No characters match.",
+    "groupBuiltIn": "Built-in",
+    "groupHeading": "Characters",
+    "groupLocalFile": "From local file",
+    "groupPlugin": "From {name}",
+    "groupUser": "Yours",
+    "searchPlaceholder": "Search characters…",
+    "title": "Pick a character"
+  },
+  "compactBoundary": {
+    "auto": "automatic",
+    "detail": "{from} → {to} tokens",
+    "label": "Context compacted",
+    "manual": "manual"
+  },
+  "composer": {
+    "ariaAttachImage": "Attach image",
+    "ariaMessage": "Message",
+    "ariaSend": "Send",
+    "ariaSending": "Sending…",
+    "ariaStop": "Stop",
+    "ariaToggleWebSearch": "Toggle web search",
+    "ariaUploadImage": "Upload image",
+    "attachImageTooltip": "Attach image",
+    "attachments": {
+      "countLimit": "Only {max} attachments allowed.",
+      "fallbackFile": "file",
+      "fallbackName": "attachment",
+      "fileSizeExceeded": "{count, plural, =1 {1 file exceeded} other {# files exceeded}} {max}MB.",
+      "oversizeBody": "These attachments add about {tokens}k tokens of context. Send anyway?",
+      "oversizeCancel": "Cancel",
+      "oversizeConfirm": "Send anyway",
+      "oversizeTitle": "Large attachment",
+      "removeAria": "Remove {filename}",
+      "removeFallback": "Remove attachment",
+      "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type)."
+    },
+    "commands": {
+      "failed": "Command failed",
+      "unavailable": "/{name} is not available yet."
+    },
+    "context": {
+      "ariaLabel": "Attached files and references"
+    },
+    "draftRestore": {
+      "dismiss": "Dismiss",
+      "label": "Re-attach:",
+      "toast": "Draft restored — {count, plural, =1 {1 attachment needs} other {# attachments need}} re-adding."
+    },
+    "draftReview": {
+      "approve": "Approve & send",
+      "noPendingDrafts": "No drafts are waiting for review.",
+      "reject": "Reject",
+      "title": "Review pending drafts"
+    },
+    "dragOverlay": {
+      "dropToAttach": "Drop image to attach"
+    },
+    "enhance": {
+      "modes": {
+        "concise": "Make concise",
+        "detailed": "Add detail",
+        "improve": "Improve",
+        "simpler": "Simplify",
+        "technical": "Make technical",
+        "variants": "Suggest variants"
+      },
+      "preview": {
+        "apply": "Apply",
+        "cancel": "Cancel",
+        "enhanced": "Enhanced",
+        "original": "Original",
+        "title": "Enhanced prompt",
+        "variantsTitle": "Pick a variant"
+      },
+      "toast": {
+        "applied": "Prompt updated.",
+        "empty": "Nothing to enhance yet.",
+        "error": "Couldn't enhance the prompt.",
+        "noModel": "Configure a model in Settings to enhance prompts.",
+        "noOutput": "No improvement suggested.",
+        "pii": "Draft contains sensitive data — enhancement skipped."
+      },
+      "trigger": "Enhance prompt"
+    },
+    "folder": {
+      "aria": "Add a folder",
+      "confirmAdd": "Add folder",
+      "confirmBody": "\"{name}\" contains {count}+ files. The agent will read them on demand. Add as context?",
+      "confirmCancel": "Cancel",
+      "confirmTitle": "Add large folder?",
+      "tooltip": "Add folder as context"
+    },
+    "followUps": {
+      "dismiss": "Dismiss suggestions",
+      "label": "Follow-up suggestions"
+    },
+    "ghostAcceptHint": "Tab",
+    "helperHints": {
+      "dropImages": "Drop / paste images",
+      "send": "⏎ Send · ⇧⏎ New line",
+      "tryPrefix": "Try"
+    },
+    "memory": {
+      "appended": "Appended to {path}",
+      "emptyPreview": "(start typing the memory line)",
+      "failed": "Memory write failed",
+      "needsLine": "Type the memory line after #.",
+      "panelTitle": "Append to memory",
+      "pickScope": "Pick Project or User memory in the popover to save.",
+      "projectLabel": "Project memory",
+      "userLabel": "User memory"
+    },
+    "modelPicker": {
+      "capReasoning": "Reasoning",
+      "capTools": "Tool use",
+      "capVision": "Vision",
+      "contextWindowLabel": "Context window",
+      "liveSwitchFailed": "Couldn't switch the live model",
+      "liveSwitched": "Switched to {model}",
+      "noProviders": "No providers configured",
+      "searchPlaceholder": "Search models…",
+      "switchModelAria": "Switch model"
+    },
+    "paramForm": {
+      "cancel": "Cancel",
+      "insert": "Insert",
+      "missingRequired": "Please fill in “{label}”.",
+      "requiredMark": "required",
+      "selectPlaceholder": "Select…",
+      "title": "Configure /{name}"
+    },
+    "placeholder": "Send a message — try /, @, !, or #",
+    "placeholderDisabled": "Select a session to start chatting…",
+    "popover": {
+      "bashEmpty": "'<empty>'",
+      "bashHintPrefix": "Press",
+      "bashHintSuffix": "to run as a shell command.",
+      "bashTitle": "Run shell command",
+      "comingSoon": "Coming soon",
+      "fileTitle": "Reference a file or folder",
+      "memoryTitle": "Append to memory",
+      "noCommandMatches": "No commands match \"/{query}\".",
+      "noCommands": "No commands available.",
+      "noFiles": "No files match \"{query}\".",
+      "searching": "Searching…",
+      "searchingShort": "searching…",
+      "slashTitle": "Slash command",
+      "workspaceEmpty": "Workspace is empty.",
+      "workspaceMissing": "Set a working directory in session settings to use @-references."
+    },
+    "references": {
+      "removeAria": "Remove reference to {path}"
+    },
+    "sandboxShield": {
+      "label": {
+        "microvm": "Sandbox active — microVM tier",
+        "off": "Sandbox off",
+        "os": "Sandbox active — OS tier"
+      },
+      "tooltip": {
+        "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
+        "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
+        "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
+      }
+    },
+    "screenshot": {
+      "captureAria": "Capture screenshot",
+      "captureFailed": "Screenshot failed",
+      "captureTooltip": "Capture screenshot"
+    },
+    "sendTooltip": "Send",
+    "shell": {
+      "failed": "`$ {cmd}` failed: {error}",
+      "needsCwd": "Set a working directory before running shell commands.",
+      "runningHint": "Running `$ {cmd}` in `{cwd}`…"
+    },
+    "stopTooltip": "Stop",
+    "toolbar": {
+      "breakdownAgents": "Subagents",
+      "breakdownCommands": "Slash commands",
+      "breakdownMcp": "MCP tools",
+      "breakdownMemory": "Memory files",
+      "breakdownSystemPrompt": "System prompt",
+      "breakdownTitle": "Context breakdown",
+      "breakdownTools": "Built-in tools",
+      "compactNow": "Compact now",
+      "compactThreshold": "Auto-compact at {pct}",
+      "contextUsageAria": "Context window {pct} used",
+      "modelTooltip": "Active model · change in Settings → API Key",
+      "moreControls": "More controls",
+      "pluginExtensionOverflow": "More plugin actions",
+      "quickActions": "Plugin quick actions",
+      "sessionTotal": "Session total ({turns} turns)",
+      "usageCached": "Cached",
+      "usageInput": "Input",
+      "usageOutput": "Output",
+      "workflow": {
+        "explain": "Explain",
+        "explainAria": "Explain selected nodes",
+        "explainNoSelection": "Select one or more nodes on the canvas first",
+        "explainTooltip": "Ask the agent to explain the {count} selected node(s)",
+        "suggest": "Suggest",
+        "suggestAria": "Suggest the next node",
+        "suggestTooltip": "Ask the workflow-designer agent for the next node to add",
+        "validate": "Validate",
+        "validateAria": "Validate the current workflow",
+        "validateTooltip": "Run the schema validator and ask the agent to fix any issues"
+      }
+    },
+    "voice": {
+      "holdToTalk": "Hold to talk",
+      "languageLabel": "Language",
+      "microphoneLabel": "Microphone",
+      "selectMicAria": "Select microphone",
+      "voiceSettings": "Voice settings"
+    },
+    "webLabel": "Web"
+  },
+  "concurrent": {
+    "awaitingApproval": "Awaiting approval",
+    "closeTab": "Close {title}",
+    "errored": "Error",
+    "exitSplit": "Exit split view",
+    "newTab": "New conversation",
+    "openConversations": "Open conversations",
+    "overCapacity": "Concurrency limit reached ({max} streaming). Wait for one to finish or stop another conversation.",
+    "splitView": "Split view",
+    "streaming": "Streaming",
+    "untitled": "Untitled"
+  },
+  "copy": {
+    "success": "Copied to clipboard"
+  },
+  "empty": {
+    "brandAlt": "Cognia",
+    "dismiss": "Hide this section",
+    "greeting": {
+      "afternoon": "Good afternoon",
+      "evening": "Good evening",
+      "morning": "Good morning",
+      "named": "{greeting}, {name}",
+      "night": "Working late"
+    },
+    "newChat": "New chat",
+    "samples": {
+      "draftPrompt": "Look at the staged changes (`git diff --cached`) and propose a conventional-commits message.",
+      "draftTitle": "Draft a commit message",
+      "explorePrompt": "List the top-level files in the working directory and summarize what this project does in 3 sentences.",
+      "exploreTitle": "Explore the project",
+      "reviewPrompt": "Run `git diff HEAD~3..HEAD` and tell me what's changed and whether anything looks risky.",
+      "reviewTitle": "Review recent changes",
+      "testsPrompt": "Run the project's tests. If anything fails, list each failure with one-sentence root-cause hypotheses.",
+      "testsTitle": "Run tests and triage"
+    },
+    "sections": {
+      "aiPrompts": "Suggested for you",
+      "characterPrompts": "Try with this character",
+      "continue": "Continue",
+      "tryPrompt": "Try a prompt"
+    },
+    "style": {
+      "minimal": "Minimal",
+      "rich": "Rich",
+      "toggleLabel": "Switch welcome layout"
+    },
+    "subtitle": "Ask anything, jump into a capability, or pick up where you left off.",
+    "title": "What do you want to get done?"
+  },
+  "header": {
+    "accountSwitcher": {
+      "active": "active",
+      "aria": "Switch account for this session",
+      "noOverride": "Inherit",
+      "toast": "Next message will use account {label}"
+    },
+    "ariaSettings": "Session settings",
+    "bareMode": "Bare mode",
+    "briefMode": "Brief output",
+    "cancel": "Cancel",
+    "cwdFallbackHint": "Character default: {path}",
+    "cwdReset": "Reset",
+    "debugMode": "Debug mode",
+    "description": "Override defaults for this chat. Empty = use global.",
+    "flowDisplay": {
+      "aria": "Agent flow display mode",
+      "detailed": "Detailed",
+      "simplified": "Simplified",
+      "standard": "Standard"
+    },
+    "forkAria": "Fork session",
+    "forkSuccess": "Session forked. The new branch is now active.",
+    "forkTooltip": "Fork conversation — branches a new session from this one's history",
+    "forkUnsupported": "This agent doesn't support session forking.",
+    "groups": {
+      "default": "Default",
+      "favorites": "Favorites",
+      "other": "Other"
+    },
+    "modelCustomPlaceholder": "claude-...",
+    "modelLabel": "Model",
+    "modelPresets": {
+      "custom": "Custom",
+      "default": "Default (use global)",
+      "haiku45": "Claude Haiku 4.5",
+      "opus45": "Claude Opus 4.5",
+      "opus47": "Claude Opus 4.7",
+      "sonnet45": "Claude Sonnet 4.5"
+    },
+    "noApiKey": "No API key",
+    "permissionModeAppDefault": "Use app default",
+    "permissionModeLabel": "Permission mode",
+    "pickDirAria": "Pick directory",
+    "pickDirTitle": "Working directory for this session",
+    "presetConflict": {
+      "apply": "Apply",
+      "cancel": "Cancel",
+      "fillEmptyBody": "Keep your existing values; only apply preset fields where the session is currently empty. Safest default.",
+      "fillEmptyTitle": "Only fill empty fields",
+      "mergeBody": "Same as \"fill empty\" for these scalar fields. (Useful when applying through the section editor where array fields are unioned.)",
+      "mergeTitle": "Merge",
+      "overwriteAllBody": "Every preset field replaces the session value, even when the session already has one set.",
+      "overwriteAllTitle": "Overwrite everything",
+      "summary": "This preset would overwrite the following session {count, plural, =1 {field} other {fields}}: {fields}.",
+      "title": "Apply preset \"{name}\"?"
+    },
+    "presetHelp": "Picks system prompt + model + permission mode + working dir from the preset.",
+    "presetLabel": "Apply a preset",
+    "presetNoneOption": "(none)",
+    "presetNonePlaceholder": "(none)",
+    "presetPill": {
+      "ariaLabel": "Active preset — click to switch",
+      "defaultBadge": "Default",
+      "empty": "No presets match.",
+      "manageAll": "Manage all presets…",
+      "none": "No preset",
+      "searchAriaLabel": "Search presets",
+      "searchPlaceholder": "Search presets…"
+    },
+    "save": "Save",
+    "skills": {
+      "aria": "Skills active in this session",
+      "counter": "{active}/{total} skills",
+      "description": "Toggle skills off for this session only. Edit the character to change them permanently.",
+      "title": "Skills",
+      "toggleAria": "Toggle {name}"
+    },
+    "subscriptionBadge": "{tier} plan",
+    "subscriptionBadgeAria": "Active Anthropic subscription: {tier}",
+    "systemPromptLabel": "System prompt",
+    "systemPromptPlaceholder": "Empty = use global default",
+    "title": "Session settings",
+    "tokensLabel": "{input} in / {output} out",
+    "untitledSession": "(untitled)",
+    "workingDirLabel": "Working directory",
+    "workingDirPlaceholder": "/path/to/project"
+  },
+  "history": {
+    "loadError": "Couldn't load this conversation.",
+    "loading": "Loading conversation…",
+    "retry": "Retry"
+  },
+  "inlineError": {
+    "dismiss": "Dismiss",
+    "openSettings": "Open settings",
+    "retry": "Retry",
+    "title": "Failed to send"
+  },
+  "list": {
+    "clear": "Clear",
+    "clearAction": "Delete messages",
+    "clearCancel": "Cancel",
+    "clearDescription": "All messages in this session will be permanently deleted. The session itself will remain.",
+    "clearTitle": "Clear this conversation?",
+    "cleared": "Conversation cleared.",
+    "export": "Export",
+    "exported": "Exported as markdown.",
+    "nothingToExport": "Nothing to export yet.",
+    "thinking": "Claude is thinking…",
+    "tips": [
+      "Type / to run a slash command.",
+      "Mention a teammate with @ in team chats.",
+      "Bookmark any message to find it again later.",
+      "Branch from any reply to explore an alternative.",
+      "Edit one of your messages to resend and steer the answer.",
+      "Export the whole conversation to Markdown anytime."
+    ]
+  },
+  "mcp": {
+    "edit": {
+      "editCount": "{count} edits",
+      "title": "Edit"
+    },
+    "glob": {
+      "noMatches": "No matches"
+    },
+    "grep": {
+      "noMatches": "No matches"
+    },
+    "ls": {
+      "empty": "Empty directory",
+      "title": "List directory"
+    },
+    "plan": {
+      "title": "Plan"
+    },
+    "webFetch": {
+      "empty": "No content returned"
+    },
+    "webSearch": {
+      "noResults": "No results"
+    },
+    "wikiSearch": {
+      "noResults": "No results"
+    },
+    "write": {
+      "lineCount": "{count} lines",
+      "title": "Write",
+      "truncated": "Preview truncated — full content is written to disk."
+    }
+  },
+  "message": {
+    "attachmentAlt": "attachment",
+    "bookmarkLabel": "Toggle bookmark",
+    "bookmarkRemoveTooltip": "Remove bookmark",
+    "bookmarkTooltip": "Bookmark",
+    "branchLabel": "Branch conversation",
+    "branchTooltip": "Branch from here",
+    "copyDone": "Copied!",
+    "copyLabel": "Copy message",
+    "copyTooltip": "Copy message",
+    "editLabel": "Edit and resend",
+    "editTooltip": "Edit & resend",
+    "editingCancel": "Cancel",
+    "editingSubmit": "Send (⌘/Ctrl+Enter)",
+    "errorCategory": {
+      "brokenPipe": "Broken pipe",
+      "connectionRefused": "Connection refused",
+      "connectionReset": "Connection reset",
+      "dispatchFailed": "Dispatch failed",
+      "dnsFailure": "DNS lookup failed",
+      "fetchFailed": "Network request failed",
+      "forbidden": "Forbidden",
+      "invalidRequest": "Invalid request",
+      "modelOverloaded": "Model overloaded",
+      "modelRequired": "Model not set",
+      "networkUnreachable": "Network unreachable",
+      "notFound": "Not found",
+      "payloadTooLarge": "Request too large",
+      "pluginToolMissing": "Tool unavailable",
+      "providerMisconfigured": "Provider misconfigured",
+      "quotaExceeded": "Quota exceeded",
+      "rateLimited": "Rate limited",
+      "serverError": "Server error",
+      "serviceUnavailable": "Service unavailable",
+      "sessionTimeout": "Session timed out",
+      "sidecarExited": "Backend stopped",
+      "timeout": "Request timed out",
+      "unauthorized": "Unauthorized"
+    },
+    "errorCategoryHint": {
+      "brokenPipe": "The connection closed unexpectedly — retry the request.",
+      "connectionRefused": "The server isn't accepting connections — check it's running and the port is right.",
+      "connectionReset": "The connection dropped mid-request — retry; if it persists, check the network or server.",
+      "dispatchFailed": "The request couldn't be dispatched — retry; check the agent or provider configuration.",
+      "dnsFailure": "The host name couldn't be resolved — check the URL and your network/DNS.",
+      "fetchFailed": "The request couldn't be sent — check your connection and the endpoint URL.",
+      "forbidden": "Your account lacks access to this resource or model.",
+      "invalidRequest": "The request was malformed — check the parameters and model name.",
+      "modelOverloaded": "The provider is overloaded — retry in a moment.",
+      "modelRequired": "Select a model for this provider before sending.",
+      "networkUnreachable": "The host can't be reached — check your connection and any proxy or VPN.",
+      "notFound": "The resource or endpoint doesn't exist — check the URL or id.",
+      "payloadTooLarge": "The request exceeds the size limit — shorten the input.",
+      "pluginToolMissing": "The requested tool isn't available — enable the plugin that provides it.",
+      "providerMisconfigured": "This provider needs more setup — set the protocol and credentials in Settings.",
+      "quotaExceeded": "Your plan's quota is used up — check billing or usage limits.",
+      "rateLimited": "You hit a rate limit — wait a moment and retry.",
+      "serverError": "The server failed to handle the request — retry shortly.",
+      "serviceUnavailable": "The service is temporarily unavailable — retry shortly.",
+      "sessionTimeout": "The model didn't respond in time — retry, or check the sidecar and connection.",
+      "sidecarExited": "The Claude sidecar exited mid-run — retry; if it recurs, restart the app.",
+      "timeout": "The request took too long — retry, or raise the timeout.",
+      "unauthorized": "Authentication failed — check your API key or token in Settings."
+    },
+    "pluginMenu": "Plugin actions",
+    "readAloud": "Read aloud",
+    "regenerateLabel": "Regenerate",
+    "regenerateTooltip": "Regenerate",
+    "shareDone": "Shared!",
+    "shareLabel": "Share message",
+    "shareTooltip": "Share",
+    "showParsed": "Show parsed",
+    "showRaw": "Show raw",
+    "stopReading": "Stop reading",
+    "todoPlanTitle": "Plan · {done}/{total} done",
+    "toolCallFailed": "Tool call failed",
+    "usageCacheHit": "Cache hit: {n}",
+    "usageCacheWrite": "Cache write: {n}",
+    "usageCost": "Cost: ${cost}",
+    "usageInput": "Input: {n}",
+    "usageOutput": "Output: {n}",
+    "usageReasoning": "Reasoning: {n}"
+  },
+  "permissionMode": {
+    "acceptEdits": {
+      "label": "Accept edits",
+      "tooltip": "Auto-approve file edits; other tools still prompt."
+    },
+    "aria": "Permission mode: {label}. Click to cycle.",
+    "bypass": {
+      "label": "Bypass",
+      "tooltip": "All tools auto-approved. Use with care — Claude can run any command."
+    },
+    "default": {
+      "label": "Default",
+      "tooltip": "Tools prompt for permission as usual."
+    },
+    "plan": {
+      "label": "Plan",
+      "tooltip": "Read-only planning mode — Claude proposes changes without applying them."
+    },
+    "shiftTabHint": "Shift+Tab to cycle."
+  },
+  "renderers": {
+    "alert": {
+      "caution": "Caution",
+      "important": "Important",
+      "note": "Note",
+      "tip": "Tip",
+      "warning": "Warning"
+    },
+    "audio": {
+      "coverAlt": "Album cover",
+      "defaultFilename": "audio",
+      "download": "Download",
+      "failedToLoad": "Failed to load audio",
+      "loop": "Loop",
+      "mute": "Mute",
+      "skipBack": "-10s",
+      "skipForward": "+10s",
+      "unmute": "Unmute"
+    },
+    "code": {
+      "ariaInLanguage": "Code in {language}",
+      "copy": "Copy",
+      "copyAria": "Copy code",
+      "defaultLabel": "Code",
+      "download": "Download",
+      "downloadAria": "Download code",
+      "figureLabel": "Code block",
+      "figureLabelWithLang": "Code block in {language}",
+      "footer": "{lineCount, plural, =1 {# line} other {# lines}} • {charCount, plural, =1 {# character} other {# characters}}",
+      "fullscreen": "Fullscreen",
+      "fullscreenAria": "View fullscreen",
+      "hideLines": "Hide lines",
+      "hideLinesAria": "Hide line numbers",
+      "plainText": "plain text",
+      "showLines": "Show lines",
+      "showLinesAria": "Show line numbers",
+      "unwrap": "Unwrap",
+      "unwrapAria": "Disable word wrap",
+      "wrap": "Wrap",
+      "wrapAria": "Enable word wrap"
+    },
+    "diff": {
+      "copy": "Copy",
+      "defaultName": "diff",
+      "splitView": "Split view",
+      "unifiedView": "Unified view"
+    },
+    "errorBoundary": {
+      "retry": "Retry",
+      "titleFallback": "Render Error",
+      "titleNamed": "{name} Render Error"
+    },
+    "image": {
+      "close": "Close",
+      "copyUrl": "Copy URL",
+      "defaultFilename": "image",
+      "defaultTitle": "Image",
+      "download": "Download",
+      "failedToLoad": "Failed to load image",
+      "openInNewTab": "Open in new tab",
+      "openUrl": "Open URL",
+      "previewDescription": "Preview the selected image, zoom or rotate it.",
+      "rotate": "Rotate",
+      "viewFullscreen": "View fullscreen",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
+    },
+    "math": {
+      "clickToCopy": "Click to copy LaTeX",
+      "copyLatex": "Copy LaTeX",
+      "copySource": "Copy source",
+      "error": "LaTeX error",
+      "expressionLabel": "Math expression",
+      "expressionLabelInline": "Math: {tex}",
+      "hideSource": "Hide source",
+      "inlineErrorTitle": "LaTeX Error",
+      "invalidLabel": "Invalid math expression: {tex}",
+      "renderError": "Math render error",
+      "retry": "Retry",
+      "showSource": "Show source",
+      "viewFullscreen": "View fullscreen",
+      "viewSource": "View source"
+    },
+    "mermaid": {
+      "copySource": "Copy source",
+      "diagramLabel": "Mermaid diagram",
+      "diagramTitle": "Mermaid diagram",
+      "error": "Mermaid error",
+      "errorFallback": "Failed to render diagram",
+      "exportSvg": "Export SVG",
+      "hideSource": "Hide source",
+      "retry": "Retry",
+      "showSource": "Show source",
+      "viewFullscreen": "View fullscreen",
+      "viewSource": "View source"
+    },
+    "taskList": {
+      "progress": "Progress"
+    },
+    "video": {
+      "bilibiliTitle": "Bilibili video",
+      "defaultFilename": "video",
+      "download": "Download",
+      "failedToLoad": "Failed to load video",
+      "fullscreen": "Fullscreen",
+      "mute": "Mute",
+      "openUrl": "Open URL",
+      "pause": "Pause",
+      "play": "Play",
+      "unmute": "Unmute",
+      "vimeoTitle": "Vimeo video",
+      "youtubeTitle": "YouTube video"
+    }
+  },
+  "sessionCost": {
+    "byModelTitle": "By model",
+    "cache": "Cache",
+    "cacheReadShort": "Read",
+    "cacheWriteShort": "Write",
+    "cost": "Cost",
+    "description": "Persisted per-turn totals from the SDK's result events. Per-model split is sourced from the sessionUsage Dexie table.",
+    "input": "Input",
+    "noModelData": "No persisted usage rows yet — totals above come from in-memory turns.",
+    "output": "Output",
+    "title": "Session cost",
+    "tokensTitle": "Input: {input} · Output: {output}",
+    "trigger": "Session cost",
+    "turns": "Turns"
+  },
+  "sessionNotice": {
+    "permissionDenied": {
+      "detail": "{tool} was not allowed to run",
+      "label": "Tool blocked"
+    },
+    "rateLimit": {
+      "detailWithReset": "{status} · resets {time}",
+      "label": "Rate limit",
+      "status": {
+        "rejected": "limit reached",
+        "warning": "approaching limit"
+      }
+    }
+  },
+  "slashCommand": {
+    "ranSlashCommand": "ran slash command"
+  },
+  "sourcesPart": {
+    "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
+    "originLabel": {
+      "anthropic": "Web",
+      "footnote": "Note",
+      "memory": "Memory",
+      "twinRag": "Twin",
+      "twinStyle": "Style"
+    },
+    "recalledMemoriesHeader": "Recalled memories ({count})",
+    "retrievedChunksHeader": "Retrieved chunks ({count})",
+    "styleSamplesHeader": "Style samples ({count})",
+    "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
+    "viewSource": "View source"
+  },
+  "subagentPart": {
+    "backgroundRunning": "Running in background…",
+    "depthBadge": "depth {n}",
+    "durationMs": "{ms}ms",
+    "noLogsYet": "No log entries yet — sub-agent is initializing.",
+    "openInWorkspace": "Open in workspace",
+    "rejected": {
+      "cycle": "Dispatch rejected — would create a cycle.",
+      "maxDepth": "Dispatch rejected — max nesting depth reached."
+    },
+    "rowAria": "{name} sub-agent — {status}",
+    "title": "Sub-agent",
+    "tokens": "{n} tokens"
+  },
+  "terminalTool": {
+    "bashLabel": "Bash",
+    "runInDock": {
+      "empty": "No tabs match.",
+      "existingTabs": "Existing tabs",
+      "label": "Run in dock",
+      "newTab": "New tab",
+      "searchPlaceholder": "Find a tab",
+      "trustedBadge": "trusted"
+    },
+    "runningStatus": "running"
+  },
+  "timeline": {
+    "collapse": "Collapse timeline",
+    "expand": "Expand conversation timeline",
+    "jumpTo": "Jump to: {label}",
+    "replyCount": "{count} replies",
+    "title": "Timeline"
+  },
+  "toolApproval": {
+    "allowAlways": "Allow always",
+    "allowOnce": "Allow once",
+    "deny": "Deny",
+    "inputLabel": "Input",
+    "titleFallback": "Allow {tool}?",
+    "toolLabel": "Tool"
+  },
+  "twinBadge": {
+    "fewShotOff": "Style few-shot off",
+    "fewShotOn": "Style few-shot on ({k} samples)",
+    "label": "twin · {chunks}",
+    "openWorkbench": "Open twin workbench",
+    "ragOff": "RAG off",
+    "ragOn": "RAG on (top-{topK})",
+    "statSummary": "{sources} sources · {chunks} chunks"
+  },
+  "welcomeDemo": {
+    "analyze": "Analyze",
+    "codeReview": "Code review",
+    "dialogDescription": "A live A2UI surface — pick suggestions, tweak settings, and see the schema render in place.",
+    "dialogTitle": "Interactive A2UI Demo",
+    "explainConcept": "Explain a concept",
+    "generateIdeas": "Generate ideas",
+    "length": "Length",
+    "openDemo": "Try Interactive Demo",
+    "quickActions": "Quick actions",
+    "refresh": "Refresh demo",
+    "responseSettings": "Response settings",
+    "selectLengthPlaceholder": "Pick a length",
+    "selectTonePlaceholder": "Pick a tone",
+    "summarize": "Summarize",
+    "tone": "Tone",
+    "translate": "Translate"
+  },
+  "workspaceRestricted": {
+    "body": "This workspace isn't trusted yet. Agents run read-only — Bash, Edit, Write and Computer-Use are disabled.",
+    "rootsLabel": "Untrusted folders",
+    "title": "Restricted Mode",
+    "trust": "Trust workspace"
+  },
+  "workspaceTrust": {
+    "aboutToRunLabel": "About to run",
+    "actions": {
+      "hooks": "Workspace .claude/settings.json hooks and commands",
+      "tools": "Bash, Edit, Write and Computer-Use tools"
+    },
+    "description": "This project ships configuration that can run commands on your machine. Trust it only if you wrote it or recognise the source.",
+    "dontRun": "Don't run",
+    "revokeHint": "You can revoke this trust later from Settings → Hooks.",
+    "saving": "Saving…",
+    "title": "Trust this workspace?",
+    "trust": "Trust workspace",
+    "workspaceLabel": "Workspace"
+  },
+  "diagnostics": {
+    "contextTitle": "Context",
+    "usageTitle": "Subscription usage",
+    "costTitle": "Cost & usage",
+    "messages": "Messages",
+    "messagesValue": "{user} user · {assistant} assistant",
+    "freshWindow": "No usage metrics yet — the context window is fresh.",
+    "inputTokens": "Input (incl. cache)",
+    "outputTokens": "Output",
+    "cache": "Cache",
+    "cacheValue": "write {write} · read {read}",
+    "compactHint": "Run /compact to summarise older turns and free up the window.",
+    "turns": "Turns",
+    "turnsValue": "{assistant} assistant ({metrics} with metrics)",
+    "cost": "Cost",
+    "estimated": "estimated",
+    "duration": "Duration",
+    "durationValue": "{seconds}s",
+    "fiveHour": "5-hour window",
+    "sevenDay": "7-day window",
+    "windowUsed": "{pct}% used",
+    "resetsIn": "resets in {hours}h {minutes}m",
+    "resetting": "resetting…",
+    "notReported": "not reported",
+    "fallback": "Fallback",
+    "overageDisabled": "Overage disabled",
+    "usageFooter": "See Settings → Subscription → Usage for charts and history."
+  }
+}

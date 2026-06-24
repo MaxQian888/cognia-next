@@ -1,0 +1,28 @@
+{
+  "arrayAdd": "添加条目",
+  "arrayPlaceholder": "每行一个值",
+  "arrayRemove": "删除",
+  "cancel": "取消",
+  "close": "关闭",
+  "deprecated": "已弃用",
+  "description": "插件 manifest.configSchema 中声明的设置。保存后将在下一次激活时生效。",
+  "emptyArray": "暂无条目 — 点击\"添加条目\"开始。",
+  "loading": "正在加载插件配置…",
+  "loadingComponent": "正在加载插件的设置面板…",
+  "noSchema": "此插件未声明 configSchema。下方为原始配置预览。",
+  "oneOfVariant": "变体",
+  "save": "保存",
+  "saving": "保存中…",
+  "unsupportedField": "不支持的字段结构 — 已回退为原始 JSON。",
+  "validation": {
+    "format": "必须是有效的 {format}。",
+    "max": "必须 ≤ {max}。",
+    "maxItems": "最多 {max} 个条目。",
+    "maxLength": "最多 {max} 个字符。",
+    "min": "必须 ≥ {min}。",
+    "minItems": "至少 {min} 个条目。",
+    "minLength": "至少 {min} 个字符。",
+    "notNumber": "必须是数字。",
+    "pattern": "必须匹配模式 {pattern}。"
+  }
+}

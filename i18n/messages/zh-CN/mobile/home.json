@@ -1,0 +1,47 @@
+{
+  "actions": {
+    "agentTeams": "智能体团队",
+    "discover": "发现",
+    "inbox": "收件箱",
+    "me": "我",
+    "newChat": "新建会话",
+    "search": "搜索",
+    "twin": "数字分身",
+    "workflows": "工作流"
+  },
+  "activeRuns": {
+    "empty": "暂无运行中的工作流",
+    "title": "{count, plural, =1 {1 个工作流运行中} other {# 个工作流运行中}}",
+    "viewRuns": "查看运行"
+  },
+  "customize": {
+    "active": "已在首页",
+    "activeEmpty": "暂无快捷操作——从下方添加。",
+    "add": "添加",
+    "available": "添加操作",
+    "availableEmpty": "所有操作都已在首页。",
+    "description": "选择首页要显示的快捷操作与板块。",
+    "dragHint": "拖拽以排序",
+    "remove": "移除",
+    "restoreDefaults": "恢复默认",
+    "sections": "板块",
+    "title": "自定义首页"
+  },
+  "edit": "编辑",
+  "emptyChats": "还没有聊天，点击 + 新建一个。",
+  "emptyFiltered": "没有与「{query}」匹配的聊天。",
+  "pinned": "置顶",
+  "presenceStreaming": "回复中",
+  "quickActions": "快捷操作",
+  "recent": "最近",
+  "search": "搜索聊天…",
+  "searchAria": "搜索聊天",
+  "sections": {
+    "activeRuns": "运行中",
+    "recents": "最近会话"
+  },
+  "swipeDelete": "删除",
+  "swipePin": "置顶",
+  "swipeUnpin": "取消置顶",
+  "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}"
+}

@@ -1,0 +1,284 @@
+{
+  "audit": {
+    "clear": "Clear Log",
+    "columns": {
+      "command": "Command",
+      "decision": "Decision",
+      "duration": "Duration",
+      "surface": "Surface",
+      "target": "Target",
+      "time": "Time"
+    },
+    "description": "Automation call records, newest first.",
+    "empty": "No audit records match the current filters.",
+    "exportCsv": "Export CSV",
+    "filters": {
+      "allDecisions": "All decisions",
+      "allSurfaces": "All surfaces",
+      "decisionAllow": "allow",
+      "decisionConsent": "consent",
+      "decisionDeny": "deny",
+      "surfaceComputerUse": "Computer Use",
+      "surfaceMcp": "MCP",
+      "surfacePlugin": "Plugin",
+      "surfaceWorkflow": "Workflow"
+    },
+    "loading": "Loading audit log…",
+    "title": "Audit Log"
+  },
+  "behavior": {
+    "dedup": {
+      "help": "When consecutive screenshots are identical, send a short text note instead of the duplicate image. Saves tokens on long tasks.",
+      "label": "Skip unchanged screenshots"
+    },
+    "description": "How screenshots and typing are presented to the model.",
+    "pasteThreshold": {
+      "help": "Type actions longer than this many characters paste via the clipboard instead of typing key-by-key. 0 disables.",
+      "label": "Paste threshold (characters)"
+    },
+    "scaling": {
+      "help": "Resize captures to fit the target size before sending to the model. Improves click accuracy and cuts token cost (1280×800 recommended).",
+      "label": "Downscale screenshots",
+      "maxHeight": "Max height",
+      "maxWidth": "Max width"
+    },
+    "title": "Model behavior"
+  },
+  "consent": {
+    "actions": {
+      "allowOnce": "Allow once",
+      "allowSession": "Always allow this session",
+      "close": "Close",
+      "reject": "Reject"
+    },
+    "ariaLabel": "Automation consent prompt",
+    "commands": {
+      "auditSnapshot": "Read audit snapshot",
+      "capabilities": "Read capabilities",
+      "click": "Click on screen",
+      "cursorPosition": "Read cursor position",
+      "drag": "Drag",
+      "find": "Find element",
+      "getFocus": "Read focused element",
+      "holdKey": "Hold key",
+      "invokePattern": "Invoke automation pattern",
+      "keys": "Send keys",
+      "killSwitch": "Trigger kill switch",
+      "mouseMove": "Move mouse",
+      "pickAtPoint": "Pick element at point",
+      "readTree": "Read accessibility tree",
+      "screenshot": "Take screenshot",
+      "scroll": "Scroll",
+      "settingsGet": "Read automation settings",
+      "settingsSet": "Write automation settings",
+      "type": "Type text",
+      "windowOp": "Window operation"
+    },
+    "fields": {
+      "action": "Action:",
+      "autoReject": "Auto-rejecting in {seconds}s",
+      "command": "Command:",
+      "morePending": "(+{count} more pending)",
+      "plugin": "Plugin:",
+      "process": "Process:",
+      "surface": "Surface:",
+      "window": "Window:"
+    },
+    "surfaces": {
+      "computerUse": "Computer Use",
+      "mcp": "MCP",
+      "plugin": "Plugin",
+      "workflow": "Workflow"
+    },
+    "title": "Automation requests your consent"
+  },
+  "header": {
+    "description": "Configure desktop UI automation — screenshots, element finding, clicking, typing, and hotkeys.",
+    "title": "Automation"
+  },
+  "inspector": {
+    "clickToPopulate": "Choose a root and click Refresh to populate the tree.",
+    "copyLocator": "Copy Locator",
+    "copyRef": "Copy Ref",
+    "elementDetails": "Element Details",
+    "elementDetailsDescription": "Properties and test patterns for the selected element.",
+    "elementRef": "Element Ref",
+    "elementRefPlaceholder": "e.g. windows/1234/5678",
+    "emptyResult": "No elements returned for the selected root.",
+    "invokeFailed": "Pattern invocation failed: {error}",
+    "invokeOk": "Pattern '{pattern}' invoked",
+    "locatorJson": "Locator JSON",
+    "maxDepth": "Max Depth",
+    "pickCancelAria": "Cancel point-and-pick countdown",
+    "pickCancelTooltip": "Cancel the countdown",
+    "pickCaptureNow": "Capture now",
+    "pickCaptureNowAria": "Capture cursor target immediately",
+    "pickCaptureNowTooltip": "Skip the countdown and pick the element under the cursor immediately",
+    "pickCountdown": "Cancel ({seconds}s)",
+    "pickFailed": "Pick failed: {error}",
+    "pickOk": "Element picked",
+    "pickStart": "Pick element",
+    "pickStartAria": "Start point-and-pick countdown",
+    "pickStartTooltip": "Start a 3-second countdown, then pick the element under the cursor",
+    "readTree": "Refresh",
+    "reading": "Reading…",
+    "rootMode": {
+      "desktop": "Desktop",
+      "focused": "Focused",
+      "manual": "Manual Ref"
+    },
+    "selectRow": "Select an element from the tree to see details.",
+    "testPatterns": "Test Patterns",
+    "testPatternsHint": "Invoke UIA patterns against the selected element to verify behavior.",
+    "tree": "Accessibility Tree",
+    "treeDescription": "Inspect the UIA/accessibility tree of a target window."
+  },
+  "overview": {
+    "capabilities": {
+      "events": "Events",
+      "inputSimulation": "Input Simulation",
+      "platform": "Platform",
+      "screenshot": "Screenshot",
+      "uia": "UI Automation"
+    },
+    "capabilityProbeFailed": "Failed to read platform capabilities.",
+    "engineStatus": "Engine Status",
+    "engineStatusDescription": "Toggle the automation engine on or off. When off the kill switch is engaged and all calls are rejected at the gate.",
+    "engineToggle": "Enable automation engine",
+    "engineToggleHint": "When enabled, automations respect the permission tiers configured below.",
+    "initFailure": {
+      "body": "The platform automation backend ({platform}) failed to start: {error}. Computer Use calls will return UnsupportedPlatform until the underlying issue is resolved. Check the troubleshooting guide for your OS or restart the app after fixing permissions.",
+      "dismiss": "Dismiss",
+      "title": "Backend initialization failed"
+    },
+    "killSwitch": "Engage Kill Switch",
+    "killSwitchHint": "Immediately rejects all in-flight automation calls. Use when the engine behaves unexpectedly.",
+    "metrics": {
+      "allow": "Allowed",
+      "consent": "Consent",
+      "deny": "Denied",
+      "description": "Activity counters from the audit log. Updates on tab mount and every 60s.",
+      "lastScreenshotDescription": "Time the most recent successful screenshot was captured.",
+      "lastScreenshotHours": "{hours}h ago",
+      "lastScreenshotMinutes": "{minutes}m ago",
+      "lastScreenshotNever": "No screenshot in the last 24h.",
+      "lastScreenshotRelative": "{seconds}s ago",
+      "lastScreenshotTitle": "Last screenshot",
+      "loadFailed": "Failed to read audit log.",
+      "title": "Last 24 hours",
+      "topFailingDescription": "Commands with the most deny / consent-decline outcomes in the last 24h. Investigate when a single command dominates.",
+      "topFailingEmpty": "No denied calls in the last 24h.",
+      "topFailingTitle": "Top failing commands",
+      "total": "Total"
+    },
+    "no": "No",
+    "noPlanned": "Planned",
+    "platformCapabilities": "Platform Capabilities",
+    "yes": "Yes"
+  },
+  "permissions": {
+    "defaultTier": "Default Tier",
+    "defaultTierDescription": "The tier applied when no per-surface override is set.",
+    "perPlugin": {
+      "clearOverride": "Clear",
+      "description": "Plugins that declare native:input or native:screen permissions can be granted a different tier than the catch-all Plugin surface. Useful for trusting one specific automation plugin without loosening every plugin's policy.",
+      "empty": "No installed plugin currently declares native:input. Install or enable a plugin (e.g. cognia-computer-use) to manage per-plugin overrides here.",
+      "rowInheriting": "Inherits the Plugin surface tier above.",
+      "rowOverridden": "Override: {tier}",
+      "title": "Per-Plugin Overrides"
+    },
+    "perSurface": "Per-Surface Overrides",
+    "perSurfaceDescription": "Each automation surface can override the default tier.",
+    "surfaces": {
+      "computerUseDescription": "Anthropic-native computer-use tool calls.",
+      "mcpDescription": "MCP tool invocations from connected servers.",
+      "pluginDescription": "Plugin-initiated automation requests.",
+      "workflowDescription": "Visual workflow executor runs."
+    },
+    "tier": {
+      "off": "Off",
+      "perCall": "Per Call",
+      "whitelist": "Whitelist"
+    }
+  },
+  "sandboxConnections": {
+    "addConnection": "Add connection",
+    "cancel": "Cancel",
+    "checkHealth": "Check health",
+    "delete": "Delete",
+    "description": "Run computer-use actions inside an isolated cua Docker desktop instead of this machine. Requires Docker on the host.",
+    "desktopOnly": "Available in the desktop app only",
+    "empty": "No sandboxes configured yet.",
+    "host": "Host",
+    "image": "Docker image",
+    "name": "Name",
+    "save": "Save",
+    "start": "Start",
+    "statusError": "Error",
+    "statusOk": "Running",
+    "statusStarting": "Starting",
+    "statusUnknown": "Unknown",
+    "statusUnreachable": "Unreachable",
+    "stop": "Stop",
+    "title": "Computer-Use Sandboxes"
+  },
+  "screenOff": {
+    "activeMonitor": {
+      "label": "Virtual monitor"
+    },
+    "description": "Keep Computer Use working when the monitor is off or asleep (the session must stay unlocked). Uses a bundled virtual display so screenshots never go black.",
+    "driverVersion": {
+      "label": "Driver"
+    },
+    "enabledHint": "Enable per character under Computer Use settings (screen-off mode).",
+    "howItWorks": "When a screen-off character drives the computer, a virtual display is created and made primary; it is released after 5 minutes idle, on the kill switch, or when the session closes.",
+    "ipcError": {
+      "label": "Error"
+    },
+    "lastError": {
+      "label": "Last error"
+    },
+    "probeBlack": "Capture returned a black frame — check the driver.",
+    "probeButton": "Test screen-off capture",
+    "probeOk": "Captured {width}×{height} via {monitor} — not black.",
+    "probeRunning": "Testing…",
+    "setupButton": "Set up driver",
+    "setupNote": "Until the driver is installed, screen-off turns error instead of capturing a black screen.",
+    "setupRunning": "Installing…",
+    "status": {
+      "down": "Unavailable",
+      "ok": "Ready",
+      "setup": "Setup required"
+    },
+    "title": "Screen-off mode",
+    "windowsOnlyNote": "Screen-off mode is Windows-only. On this platform Computer Use uses the physical display."
+  },
+  "tabs": {
+    "audit": "Audit",
+    "inspector": "Inspector",
+    "overview": "Overview",
+    "permissions": "Permissions",
+    "sandboxes": "Sandboxes",
+    "whitelist": "Whitelist"
+  },
+  "whitelist": {
+    "add": "Add",
+    "captureFailed": "Failed to read focused window",
+    "captureFocused": "Capture focused window",
+    "emptyProcess": "No process names added yet. Add one above.",
+    "emptyWindow": "No window title patterns added yet. Add one above.",
+    "none": "(none)",
+    "processLabel": "Process:",
+    "processNames": "Process Names",
+    "processNamesHint": "Case-insensitive exact match against the target process name (e.g. notepad.exe).",
+    "processPlaceholder": "e.g. notepad.exe",
+    "quickCapture": "Quick Capture",
+    "quickCaptureHint": "Read the currently focused window and prefill the fields below.",
+    "removeEntryAria": "Remove {entry}",
+    "titleLabel": "Title:",
+    "updateFailed": "Update failed",
+    "windowPlaceholder": "e.g. *Chrome*",
+    "windowTitles": "Window Title Patterns",
+    "windowTitlesHint": "Glob patterns using * as wildcard (e.g. *Excel* or Untitled - Notepad)."
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "autoTitle": {
+    "description": "After the first reply, name the chat with a model.",
+    "heading": "Auto-generate titles",
+    "label": "Generate conversation titles"
+  },
+  "description": "Auto-generate titles and configure the timeline minimap.",
+  "labelModel": {
+    "description": "Background model used for timeline labels.",
+    "heading": "Label model"
+  },
+  "labelSummary": {
+    "description": "Use a model to summarize each turn into a short label (one call per turn).",
+    "heading": "Polish timeline labels",
+    "label": "Generate timeline labels"
+  },
+  "model": "Model",
+  "provider": "Provider",
+  "streaming": {
+    "description": "Stream assistant replies token-by-token as they are generated. Off shows each reply only when complete.",
+    "heading": "Token-level streaming",
+    "label": "Stream replies token-by-token"
+  },
+  "timeline": {
+    "description": "Show a timeline minimap on the right of long chats.",
+    "heading": "Conversation timeline",
+    "label": "Show conversation timeline"
+  },
+  "title": "Conversation",
+  "titleModel": {
+    "description": "Background model used to generate titles. Defaults to the chat model.",
+    "heading": "Title model"
+  },
+  "useDefault": "Use chat default"
+}

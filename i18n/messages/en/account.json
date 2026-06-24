@@ -1,0 +1,46 @@
+{
+  "gate": {
+    "createAccount": "Create account",
+    "displayNameLabel": "Account name",
+    "displayNamePlaceholder": "Local account",
+    "firstRunForm": "Create local account",
+    "firstRunTitle": "Create local account",
+    "loading": "Loading accounts...",
+    "operationFailed": "Local account operation failed.",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Password",
+    "unknownAccount": "account",
+    "unlockAccount": "Unlock",
+    "unlockForm": "Unlock local account",
+    "unlockTitle": "Unlock {name}"
+  },
+  "manage": {
+    "activeBadge": "Active",
+    "confirmDelete": "Confirm delete",
+    "createAccount": "Create account",
+    "delete": "Delete",
+    "description": "Create, rename, and remove local accounts on this device.",
+    "editDisplayNameLabel": "Account name",
+    "empty": "Select an account",
+    "listLabel": "Local accounts",
+    "newDisplayNameLabel": "New account name",
+    "newDisplayNamePlaceholder": "Local account",
+    "newPasswordLabel": "New account password",
+    "newPasswordPlaceholder": "Password",
+    "operationFailed": "Local account operation failed.",
+    "save": "Save",
+    "title": "Local accounts"
+  },
+  "switcher": {
+    "active": "Active account: {name}",
+    "activeBadge": "Active",
+    "confirmSwitch": "Switch",
+    "heading": "Accounts",
+    "lock": "Lock",
+    "manage": "Manage accounts",
+    "noActive": "No active account",
+    "operationFailed": "Local account operation failed.",
+    "switchPasswordLabel": "Password",
+    "switchPasswordPlaceholder": "Password"
+  }
+}

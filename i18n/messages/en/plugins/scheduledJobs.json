@@ -1,0 +1,17 @@
+{
+  "colCron": "Schedule",
+  "colHandler": "Handler",
+  "colLastRun": "Last run",
+  "colNextRun": "Next run",
+  "colPlugin": "Plugin",
+  "colStatus": "Status",
+  "countTotal": "{count} jobs",
+  "empty": "No plugin-contributed scheduled jobs yet.",
+  "loading": "Loading scheduled jobs…",
+  "openScheduler": "Open scheduler",
+  "status": {
+    "active": "Active",
+    "error": "Error",
+    "paused": "Paused"
+  }
+}

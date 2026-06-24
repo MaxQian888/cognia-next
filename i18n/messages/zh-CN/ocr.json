@@ -1,0 +1,537 @@
+{
+  "advanced": {
+    "clearProviderCache": "清空该 provider 的缓存",
+    "description": "留空即使用全局默认值。",
+    "formatInherit": "沿用全局",
+    "formatOverride": "输出格式覆盖",
+    "languagesHint": "逗号分隔，如 en,zh。",
+    "languagesOverride": "语言覆盖",
+    "modelVariant": "模型变体",
+    "promptTemplate": "提示词模板",
+    "region": "区域",
+    "reset": "重置为默认值",
+    "title": "Provider 局部覆盖"
+  },
+  "autoRouter": {
+    "cacheTtlDays": "缓存有效期（天）",
+    "cacheTtlHint": "0 表示永不过期。默认 30。",
+    "clearAllCache": "清空全部 OCR 缓存",
+    "cloudFallback": "云端回退",
+    "cloudFallbackHint": "本地引擎不可用时使用云端 provider。",
+    "cloudFallbackProvider": "云端回退 provider",
+    "confidenceEscalation": "低置信度结果自动升级",
+    "confidenceEscalationHint": "对低置信度结果用云端回退 provider 重新 OCR，并保留更强的输出。",
+    "defaultBadge": "默认",
+    "defaultFormat": "默认输出格式",
+    "defaultLanguages": "默认语言",
+    "defaultProvider": "默认 provider",
+    "description": "未显式指定 provider 时使用以下配置。",
+    "fellBackToCloud": "本地 OCR 引擎不可用，已切换到 {provider}。",
+    "fellBackToWasm": "回退到浏览器内的 Tesseract。",
+    "inboundImages": "对入站图片做 OCR",
+    "inboundImagesHint": "从已连接聊天收到的图片中提取文字，让助手即使没有视觉能力也能读取。",
+    "label": "Auto-Router",
+    "languagesHint": "逗号分隔的语言代码（如 en, zh）。",
+    "maxImageDimension": "最大图像边长（像素）",
+    "maxImageHint": "发送前降采样，用于约束大模型视觉的 token 成本。",
+    "noFallbackProvider": "未选择云端 provider",
+    "pdfFastPath": "PDF 文本层快速路径",
+    "pdfFastPathHint": "PDF 页面已有文本层时跳过 OCR。",
+    "subtitleAuto": "auto → {fallback}",
+    "subtitleFixed": "→ {provider}",
+    "tabs": {
+      "cache": "缓存",
+      "defaults": "默认设置",
+      "platformOverrides": "平台优先级"
+    },
+    "title": "Auto-Router"
+  },
+  "cache": {
+    "actions": {
+      "clearAll": "清空全部",
+      "clearProvider": "清空 {provider} 的缓存",
+      "delete": "删除该条"
+    },
+    "clear": "清空 OCR 缓存",
+    "clearProvider": "清空该 provider 的缓存",
+    "cleared": "OCR 缓存已清空。",
+    "description": "按输入文件、Provider、语言列表的 SHA-256 缓存。",
+    "empty": "暂无 OCR 缓存。",
+    "filterAllProviders": "全部 Provider",
+    "itemsLabel": "{count} 条 · {bytes} 字节",
+    "tableHeaders": {
+      "actions": "操作",
+      "age": "时长",
+      "langs": "语言",
+      "provider": "Provider",
+      "sizeBytes": "大小"
+    },
+    "title": "缓存",
+    "toastAllCleared": "已清空 {count} 条缓存。",
+    "toastProviderCleared": "已清空该 Provider 的 {count} 条缓存。",
+    "toastRowDeleted": "已删除缓存条目。",
+    "totalBytes": "{bytes} 字节",
+    "totalCount": "{count} 条"
+  },
+  "capabilities": {
+    "compareCta": "对比…",
+    "description": "该 Provider 擅长什么、不擅长什么。",
+    "empty": "未注册的 Provider。",
+    "fields": {
+      "cjk": {
+        "description": "支持中文 / 日文 / 韩文。",
+        "label": "中日韩"
+      },
+      "costTier": {
+        "description": "价格区间——免费 / $$ / $$$$ / $$$$$$。",
+        "label": "成本档"
+      },
+      "handwriting": {
+        "description": "草书或印刷手写文字识别。",
+        "label": "手写体"
+      },
+      "layout": {
+        "description": "保留段落、栏目、阅读顺序。",
+        "label": "版面"
+      },
+      "math": {
+        "description": "数学公式 / LaTeX 输出。",
+        "label": "数学公式"
+      },
+      "maxPagesPerCall": {
+        "description": "厂商对单次请求页数的上限。",
+        "label": "单次最大页数"
+      },
+      "multilang": {
+        "description": "厂商声称的可识别语言大致数量。",
+        "label": "支持语言数"
+      },
+      "offline": {
+        "description": "无需联网即可运行。",
+        "label": "离线"
+      },
+      "pdfNative": {
+        "description": "原生支持多页 PDF,不必逐页栅格化。",
+        "label": "原生 PDF"
+      },
+      "structuredOutput": {
+        "description": "除文本外还返回 blocks / JSON。",
+        "label": "结构化输出"
+      },
+      "tables": {
+        "description": "识别表格行/列/单元格结构。",
+        "label": "表格"
+      }
+    },
+    "footnote": "仅供参考——实际效果取决于输入。建议用 “试用” 看真实输出。",
+    "title": "能力",
+    "values": {
+      "free": "免费",
+      "no": "不支持",
+      "partial": "部分",
+      "yes": "支持"
+    }
+  },
+  "categories": {
+    "document-cloud": "文档 OCR（云端）",
+    "lark": "飞书 / Lark",
+    "llm-vision": "大模型视觉（云端）",
+    "local": "本地引擎",
+    "specialist": "专项 OCR（云端）"
+  },
+  "compare": {
+    "abort": "取消",
+    "addProvider": "添加 Provider",
+    "back": "返回",
+    "clearFile": "移除文件",
+    "columnIdle": "拖入文件后点击 “全部运行”。",
+    "confirm": {
+      "body": "{count} 个 Provider × {pages} 页的预估总费用:{cost}。将使用你已配置的 API 凭证。",
+      "cancel": "取消",
+      "cta": "全部运行",
+      "free": "免费",
+      "title": "对 {count} 个 Provider 同时跑 OCR?"
+    },
+    "dropHere": "把图片或 PDF 拖到这里。",
+    "errorColumn": "该 Provider 返回了错误。",
+    "maxSelected": "最多 {max} 个 Provider。",
+    "noProvidersSelected": "请在上方选 2-3 个 Provider 进行并排对比。",
+    "pickFile": "选择文件…",
+    "removeProvider": "移除 {provider}",
+    "runAll": "全部运行",
+    "running": "运行中…",
+    "runtimeNotReady": "OCR 运行时尚未就绪。",
+    "sidebarLabel": "对比",
+    "sidebarSubtitle": "并排对比 OCR 效果",
+    "title": "对比 Provider",
+    "tooManyProviders": "最多选 {max} 个。"
+  },
+  "composer": {
+    "menu": {
+      "extractToInput": "提取文字到输入框",
+      "viewResult": "查看提取结果"
+    },
+    "resultSheet": {
+      "copy": "复制全部",
+      "copyPage": "复制本页",
+      "empty": "没有识别到文字。",
+      "title": "提取出的文字"
+    }
+  },
+  "credentials": {
+    "accessKeyId": "AWS access key ID",
+    "apiKey": "API key",
+    "appId": "App ID",
+    "appKey": "App key",
+    "applicationId": "Application ID",
+    "endpoint": "端点 URL",
+    "hide": "隐藏",
+    "password": "Password",
+    "placeholder": "粘贴凭据",
+    "reusesMainProviderHint": "复用「AI Providers」页面里的 {provider} API key。",
+    "secretAccessKey": "AWS secret access key",
+    "sessionToken": "AWS session token（可选）",
+    "show": "显示"
+  },
+  "defaults": {
+    "auto": "自动（按当前平台优选）",
+    "cloudFallback": "云端回退",
+    "cloudFallbackHint": "本地引擎不可用时使用云端 provider。",
+    "defaultProvider": "默认 provider",
+    "pdfFastPath": "PDF 文本层快速路径",
+    "pdfFastPathHint": "PDF 页面已有文本层时跳过 OCR。",
+    "title": "默认设置"
+  },
+  "detail": {
+    "enable": "启用",
+    "noCredentials": "该引擎无需凭据。",
+    "openDocs": "查看文档",
+    "shellSupportBrowser": "浏览器",
+    "shellSupportDesktop": "桌面",
+    "shellSupportMobile": "移动",
+    "tabsAdvanced": "高级",
+    "tabsCapabilities": "能力",
+    "tabsConfig": "配置",
+    "tabsModels": "模型",
+    "tabsTryIt": "试用"
+  },
+  "errors": {
+    "aborted": "OCR 已取消。",
+    "invalidInput": "OCR 输入不是受支持的图像或 PDF。",
+    "missingCredentials": "请在「设置 → OCR」中为该 provider 添加凭据。",
+    "providerFailed": "OCR provider 失败：{message}",
+    "rateLimited": "OCR provider 达到了速率限制，请稍后重试。",
+    "unsupportedLanguage": "该 OCR provider 不支持所选语言。",
+    "unsupportedShell": "当前应用环境不支持该 OCR provider。"
+  },
+  "health": {
+    "connectionFailed": "连接失败",
+    "connectionOk": "已连接",
+    "lastDurationMs": "上次耗时：{ms} ms"
+  },
+  "langPacks": {
+    "downloadingLabel": "正在下载 {lang}…",
+    "installedLabel": "已安装",
+    "manageButton": "管理语言包"
+  },
+  "modelStatus": {
+    "description": "纯 Rust 的 OCR 引擎不随安装包附带模型权重以保持安装体积；首次使用时会下载到用户数据目录。",
+    "download": "下载模型",
+    "downloadAll": "下载全部模型文件",
+    "downloadComplete": "模型已就绪（共 {bytes} 字节）",
+    "downloadFailed": "下载失败：{message}",
+    "downloading": "正在下载 {file}（{percent}%）",
+    "downloadingDetail": "{bytesDone} / {bytesTotal} 字节 — 第 {index} / {count} 个文件",
+    "emptyNoModelFiles": "该后端没有需要管理的模型文件。",
+    "installed": "模型就绪",
+    "missing": "缺少 {count} 个模型文件",
+    "modelDir": "存储位置：{path}",
+    "redownload": "重新下载",
+    "shellUnavailable": "本地模型管理仅在桌面端可用。",
+    "title": "本地模型"
+  },
+  "overlay": {
+    "ariaLabel": "覆盖在原图上的可选中文字",
+    "imageAlt": "OCR 源页面"
+  },
+  "params": {
+    "apiKey": {
+      "description": "存在时以 Authorization: Bearer 形式发送。无需鉴权的局域网服务器请留空。",
+      "label": "Bearer 令牌（可选）"
+    },
+    "dialect": {
+      "description": "选择自托管服务器的协议。Umi-OCR 使用 JSON；PaddleOCR-Server 使用其 serving API。",
+      "label": "请求方言",
+      "paddleocr-server": "PaddleOCR-Server",
+      "umi-ocr": "Umi-OCR"
+    },
+    "enableForms": {
+      "description": "请求结构化表单 key/value。会提升每页成本。",
+      "label": "抽取表单字段"
+    },
+    "enableTables": {
+      "description": "请求结构化表格输出（Textract / Document AI / Vision）。",
+      "label": "抽取表格"
+    },
+    "endpoint": {
+      "description": "自定义 API 端点 URL。",
+      "label": "端点"
+    },
+    "format": {
+      "blocks": "结构化块",
+      "description": "Markdown 是 2026 的跨 provider 通用标准。纯文本会丢失表格结构。",
+      "label": "输出格式",
+      "markdown": "Markdown",
+      "text": "纯文本"
+    },
+    "languages": {
+      "description": "逗号分隔的语言代码（例如 en, zh）。",
+      "label": "语言"
+    },
+    "maxImageDimension": {
+      "description": "发送前降采样。用于约束大模型视觉的 token 成本。",
+      "label": "最大图像边长（像素）"
+    },
+    "model": {
+      "description": "Provider 专属的模型 id。",
+      "label": "模型"
+    },
+    "pageRange": {
+      "description": "可选。语法如 \"1,3-5\"。留空则处理全部页。",
+      "label": "页码范围"
+    },
+    "promptTemplate": {
+      "description": "供大模型视觉 provider（Claude / GPT / Gemini）使用。",
+      "label": "提示词模板"
+    },
+    "region": {
+      "description": "AWS 区域标识（如 us-east-1）。",
+      "label": "区域"
+    },
+    "timeoutMs": {
+      "description": "超过此毫秒数后中止请求。默认 30 秒。",
+      "label": "超时时间（毫秒）"
+    }
+  },
+  "platformOverrides": {
+    "description": "auto-router 在不同操作系统上使用的本地 OCR 引擎顺序。拖拽调整顺序,移除你不想用的引擎。留空则使用内置默认值。",
+    "dragHint": "拖动行调整优先级,顶部优先级最高。",
+    "emptyBucket": "该系统下没有可用引擎。",
+    "oses": {
+      "android": "Android",
+      "browser": "浏览器",
+      "ios": "iOS",
+      "linux": "Linux",
+      "macos": "macOS",
+      "windows": "Windows"
+    },
+    "resetToDefaults": "恢复默认",
+    "title": "平台优先级",
+    "unsavedChanges": "有未保存的更改",
+    "usingDefault": "当前使用内置默认顺序。",
+    "usingOverride": "当前使用你自定义的顺序。"
+  },
+  "plugin": {
+    "description": "从任意图片或 PDF 提取文字与结构化 Markdown。",
+    "label": "OCR",
+    "tool": {
+      "extract": {
+        "description": "调用已配置的 OCR provider 链，返回逐页 Markdown 与可选 bbox。",
+        "label": "从图片或 PDF 提取文字"
+      }
+    }
+  },
+  "probe": {
+    "button": "探测连接",
+    "failure": "探测失败：{message}",
+    "running": "探测中…",
+    "successWithLatency": "探测成功（{ms} ms）"
+  },
+  "providers": {
+    "abbyy-cloud": {
+      "description": "企业级 OCR，覆盖 200+ 语言。提交 + 轮询两段式 API。",
+      "label": "ABBYY 云 OCR"
+    },
+    "anthropic-vision": {
+      "description": "复用主 Anthropic API key。仅返回 Markdown，无 bbox。",
+      "label": "Claude（视觉）"
+    },
+    "apple-vision": {
+      "description": "Tauri（macOS）经 Swift sidecar；Capacitor（iOS）经 VNRecognizeTextRequest。",
+      "label": "Apple Vision"
+    },
+    "aws-textract": {
+      "description": "图片 OCR 加结构化表单 / 表格识别。使用 SigV4 签名。PDF 需先栅格化。",
+      "label": "AWS Textract"
+    },
+    "azure-document-intelligence": {
+      "description": "异步分析接口，返回 Markdown 和段落块。可选模型：prebuilt-read / prebuilt-layout / prebuilt-invoice / 自定义。",
+      "label": "Azure AI Document Intelligence"
+    },
+    "enabled": "启用",
+    "gemini-vision": {
+      "description": "复用主 Gemini / Google AI API key。仅返回 Markdown，无 bbox。",
+      "label": "Gemini（视觉）"
+    },
+    "google-vision": {
+      "description": "文档级文字检测，返回段落级 bbox 与逐词置信度。",
+      "label": "Google Cloud Vision"
+    },
+    "lark-basic": {
+      "description": "Lark 开放平台 basic_recognize — App ID + App Secret。最适合中英文短文本。",
+      "label": "飞书 / Lark"
+    },
+    "local-http": {
+      "description": "对接自托管 OCR 服务器（Umi-OCR、PaddleOCR-Server）。请配置端点 URL 和请求方言。",
+      "label": "本地 HTTP（自托管）"
+    },
+    "mathpix": {
+      "description": "数学、化学公式与手写专项。输出 LaTeX / Markdown。",
+      "label": "Mathpix"
+    },
+    "mistral-ocr": {
+      "description": "以 Markdown 为主的文档 OCR，对表格保留良好。支持多页 PDF 与手写。",
+      "label": "Mistral OCR"
+    },
+    "mlkit-android": {
+      "description": "仅 Capacitor（Android）。覆盖拉丁、中文、天城文、日文、韩文等脚本。",
+      "label": "ML Kit 文字识别"
+    },
+    "nanonets": {
+      "description": "通用 OCR 模型或自训抽取模型。返回纯文本 + bbox。",
+      "label": "Nanonets"
+    },
+    "ocr-space": {
+      "description": "免费额度大，支持 200+ 语言。Engine 3 覆盖最广。",
+      "label": "OCR.space"
+    },
+    "ocrs": {
+      "description": "纯 Rust 跨平台 OCR，基于 ocrs + RTen。无系统依赖，英文为主。模型（约 12 MB）首次使用时下载。",
+      "label": "ocrs（本地）"
+    },
+    "openai-vision": {
+      "description": "复用主 OpenAI API key。仅返回 Markdown，无 bbox。",
+      "label": "OpenAI（视觉）"
+    },
+    "paddle-ocr": {
+      "description": "通过 oar-ocr + ONNX Runtime 调用 PP-OCRv5。开源方案中中日韩准确率最强。模型（约 17 MB）首次使用时下载。",
+      "label": "PaddleOCR（本地）"
+    },
+    "tesseract-native": {
+      "description": "仅 Tauri 桌面端。通过 tesseract-rs 静态链接 libtesseract + leptonica。",
+      "label": "Tesseract（原生）"
+    },
+    "tesseract-wasm": {
+      "description": "浏览器侧 OCR，基于 tesseract.js。离线可用，核心约 2 MB WASM。",
+      "label": "Tesseract（WASM）"
+    },
+    "title": "Provider 列表",
+    "windows-media-ocr": {
+      "description": "Windows 自带 OCR，经 winocr crate 调用。需要 MSIX 打包的构建。",
+      "label": "Windows.Media.Ocr"
+    }
+  },
+  "sidebar": {
+    "categoryAll": "全部",
+    "clearCache": "清空 OCR 缓存",
+    "mobileTrigger": "Provider 列表",
+    "searchPlaceholder": "搜索 OCR provider",
+    "stats": "已启用 {enabled} · 本地 {local} · 云端 {cloud}"
+  },
+  "slash": {
+    "formatFlag": "输出格式",
+    "langFlag": "逗号分隔的语言代码",
+    "pagesFlag": "页码范围，如 1,3-5",
+    "providerFlag": "Provider id（或 \"auto\"）",
+    "usage": "用法：/ocr '<文件路径或附件 id>' [--provider auto|'<id>'] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]"
+  },
+  "status": {
+    "connected": "已连接",
+    "disabled": "已停用",
+    "error": "异常",
+    "notConfigured": "未配置",
+    "ready": "就绪",
+    "unsupported": "不可用"
+  },
+  "tryIt": {
+    "abort": "取消",
+    "clearFile": "移除文件",
+    "confirm": {
+      "cancel": "取消",
+      "cta": "运行",
+      "estimatedCost": "{provider} 处理 {pages} 页的预估费用:{cost}。将使用你已配置的 API 凭证。",
+      "free": "免费",
+      "title": "用 {provider} 跑 OCR?"
+    },
+    "description": "拖入文件,完整跑一次该 Provider。使用你已配置的凭证。",
+    "dropHere": "把图片或 PDF 拖到这里。",
+    "errors": {
+      "aborted": "已取消。",
+      "noProvider": "请先选择 Provider。",
+      "unsupportedFile": "不支持的文件类型——请选择图片或 PDF。"
+    },
+    "pickFile": "选择文件…",
+    "result": {
+      "cached": "来自缓存",
+      "copyAll": "复制合并后的 Markdown",
+      "copyPage": "复制",
+      "empty": "尚无结果。",
+      "fromTextLayer": "来自 PDF 文本层",
+      "pageHeader": "第 {page} 页"
+    },
+    "runButton": "运行 OCR",
+    "running": "运行中…",
+    "title": "试用"
+  },
+  "wizard": {
+    "apply": "应用预设",
+    "applyDetail": "默认 Provider 将设为 {provider}。云端回退保持开启。所有项后续都可修改。",
+    "applyIntro": "应用此预设到 OCR 设置?",
+    "back": "返回",
+    "description": "选一个使用场景,我们会推荐一组合适的起点配置。",
+    "dismiss": "暂不",
+    "next": "下一步",
+    "openButton": "初始向导",
+    "preset": {
+      "defaultBadge": "默认",
+      "format": "输出格式",
+      "languages": "语言",
+      "providers": "Provider"
+    },
+    "presetIntro": "该场景推荐的 Provider 和默认值:",
+    "reopenLater": "你可以随时从 Auto-Router 面板重新打开本向导。",
+    "step": {
+      "apply": "应用",
+      "preset": "预览",
+      "useCase": "用例"
+    },
+    "title": "OCR 初始设置",
+    "useCasePrompt": "你主要想 OCR 哪类内容?",
+    "useCases": {
+      "chineseReceipts": {
+        "description": "中英文混排,逐行版面,印刷字与盖章混合。",
+        "label": "中文票据 / 发票"
+      },
+      "formulas": {
+        "description": "高质量数学公式 / LaTeX,多栏科技文献版面。",
+        "label": "数学公式 / 科技 PDF"
+      },
+      "handwriting": {
+        "description": "白板、笔记本、表单上的手写或草书文字。",
+        "label": "手写笔记"
+      },
+      "mixed": {
+        "description": "覆盖大多数日常 OCR 场景的合理默认。",
+        "label": "混合 / 拿不准"
+      },
+      "scannedContracts": {
+        "description": "结构化文档,含表格、字段、签名。",
+        "label": "扫描合同 / 表单"
+      },
+      "webScreenshots": {
+        "description": "网站、App、聊天界面的随手截图。",
+        "label": "网页截图 / UI 文字"
+      }
+    }
+  }
+}

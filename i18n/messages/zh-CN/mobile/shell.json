@@ -1,0 +1,16 @@
+{
+  "clearSearch": "清空搜索",
+  "deleteSession": "删除此会话",
+  "directSessionTitle": "与 {name} 的聊天",
+  "exportConversation": "导出 / 分享",
+  "inbox": "收件箱",
+  "memberSheetTitle": "团队成员",
+  "navSheetTitle": "导航",
+  "newChat": "新建聊天",
+  "openMembers": "打开成员列表",
+  "openNav": "打开导航",
+  "search": "搜索",
+  "sessionMenu": "会话菜单",
+  "settings": "设置",
+  "tabBarAria": "主导航"
+}

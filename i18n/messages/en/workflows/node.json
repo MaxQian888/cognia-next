@@ -1,0 +1,28 @@
+{
+  "groupContainer": {
+    "dropHint": "Drag nodes here to group them",
+    "locked": "Locked",
+    "untitled": "Group"
+  },
+  "lastRun": {
+    "failed": "Failed {ago}",
+    "handled": "Failed (handled) {ago}",
+    "skipped": "Skipped {ago}",
+    "succeeded": "Ran {ago} · {duration}",
+    "succeededNoDuration": "Ran {ago}"
+  },
+  "loopContainer": {
+    "dropHint": "Drag nodes here to build the loop body",
+    "mode": {
+      "forEach": "for each",
+      "times": "times",
+      "while": "while"
+    }
+  },
+  "outputHandles": {
+    "default": "default",
+    "false": "false",
+    "true": "true"
+  },
+  "pinnedTitle": "Pinned test data"
+}

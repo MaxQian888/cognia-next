@@ -1,0 +1,59 @@
+{
+  "capabilityGrantSheet": {
+    "allowFsAriaLabel": "允许访问 {path}",
+    "cancel": "取消",
+    "customPermission": "自定义权限",
+    "dangerousWarning": "你正在授予 {count} 项敏感能力。请仅安装你信任的插件。",
+    "description": "该插件以沙箱化 WebAssembly 运行。安装前请审查它申请的能力——授予后运行时调用不会再次询问。",
+    "extraFilesystem": "额外的文件系统访问",
+    "extraFilesystemDescription": "除自身数据目录外，该插件还申请访问以下路径。取消勾选你不希望授予的项。",
+    "groups": {
+      "clipboard": "剪贴板",
+      "filesystem": "文件系统",
+      "network": "网络",
+      "notifications": "通知",
+      "osProcess": "进程与自动化",
+      "other": "其他",
+      "secrets": "密钥"
+    },
+    "install": "安装",
+    "noSensitivePermissions": "该插件未申请任何敏感权限。",
+    "noSignature": "无签名",
+    "optionalPermissions": "可选权限",
+    "requestedPermissions": "申请的权限",
+    "sensitiveBadge": "敏感",
+    "title": "审查 {name} 申请的能力",
+    "togglePermissionAriaLabel": "切换权限 {permission}",
+    "unsignedAuthor": "未签名作者"
+  },
+  "fromLocalButton": {
+    "filePickerTitle": "选择 WASM 插件包",
+    "filterAllFiles": "所有文件",
+    "filterWasmBundle": "WASM 包",
+    "label": "安装本地 WASM 插件",
+    "tauriRequiredError": "安装本地 WASM 插件需要桌面应用。"
+  },
+  "fromUrlDialog": {
+    "alreadyTrusted": "你已信任该作者。",
+    "anonymousAuthor": "匿名作者",
+    "bundleUrlLabel": "包 URL",
+    "bundleUrlPlaceholder": "https://example.com/plugin.zip",
+    "cancel": "取消",
+    "description": "提供已签名 WASM 包的直链。安装前会先获取并验证其清单。",
+    "fetchingManifest": "正在获取清单…",
+    "install": "安装",
+    "installing": "安装中…",
+    "noAuthorKey": "无作者公钥",
+    "preview": "预览",
+    "publicKeyLabel": "作者公钥（可选）",
+    "publicKeyPlaceholder": "base64 编码的 ed25519 公钥",
+    "signatureUrlLabel": "签名 URL（可选）",
+    "signatureUrlPlaceholder": "https://example.com/plugin.zip.sig",
+    "signatureVerified": "签名已验证",
+    "title": "安装已签名的 WASM 插件",
+    "trustAriaLabel": "信任该作者",
+    "trustFirstTime": "信任该作者，用于后续安装。",
+    "trustRequiredError": "安装前请先信任该作者。",
+    "unsignedBundle": "未签名的包"
+  }
+}

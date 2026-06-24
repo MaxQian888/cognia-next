@@ -1,0 +1,237 @@
+{
+  "anchor": {
+    "label": "Position",
+    "options": {
+      "bottom-left": "Bottom left",
+      "bottom-right": "Bottom right",
+      "top-left": "Top left",
+      "top-right": "Top right"
+    }
+  },
+  "careAlerts": {
+    "description": "Send a gentle notification when your pet becomes unwell from neglect.",
+    "label": "Care alerts"
+  },
+  "customBubbles": {
+    "add": "Add catchphrase",
+    "description": "Add your own phrases; the pet sprinkles them into its reactions.",
+    "label": "Catchphrases",
+    "placeholder": "Add a catchphrase…",
+    "remove": "Remove “{phrase}”"
+  },
+  "description": "Your animated desktop companion.",
+  "desktopPet": {
+    "clickThrough": {
+      "description": "Let clicks pass through the pet to whatever is behind it.",
+      "label": "Click-through"
+    },
+    "clickThroughHint": "While click-through is on, the desktop pet ignores the mouse. Turn it back off here or from the tray menu's \"Disable click-through\".",
+    "description": "Float the pet on your desktop in a transparent always-on-top window (desktop app only).",
+    "enabled": {
+      "description": "Show the pet floating on your desktop, outside the app window.",
+      "label": "Desktop pet"
+    },
+    "size": {
+      "label": "Desktop pet size ({size}px)"
+    },
+    "title": "Desktop pet",
+    "wander": {
+      "climbWindows": {
+        "description": "Let the pet climb onto and perch on the top edges of your open windows. Throw it onto a window to sit it there. Experimental; Windows only.",
+        "label": "Climb onto windows"
+      },
+      "description": "Let the desktop pet stroll along the bottom of your screen on its own.",
+      "enabled": {
+        "description": "The pet occasionally walks to a new spot. Throwing it with a quick drag always works.",
+        "label": "Enable wandering"
+      },
+      "frequency": {
+        "label": "Activity level",
+        "options": {
+          "calm": "Calm",
+          "lively": "Lively",
+          "normal": "Normal"
+        }
+      },
+      "onlyAfterInteraction": {
+        "description": "Walks start only within a few minutes of any computer activity — petting the pet, typing, or moving the mouse. When you step away, the pet rests too.",
+        "label": "Only move while you're active"
+      },
+      "range": {
+        "label": "Movement range",
+        "options": {
+          "full": "Whole screen",
+          "near": "Stay nearby"
+        }
+      },
+      "title": "Wandering"
+    }
+  },
+  "enabled": {
+    "description": "Show the floating pet widget.",
+    "label": "Enable pet"
+  },
+  "live2d": {
+    "active": "Active",
+    "config": {
+      "cancel": "Cancel",
+      "columnKey": "State",
+      "description": "Adjust how this model is placed and which motions play for each pet state. Changes preview live and apply on save.",
+      "expression": "Expression",
+      "indexRandom": "Random",
+      "motionGroup": "Motion group",
+      "motionIndex": "Motion",
+      "offsetX": "Horizontal offset",
+      "offsetY": "Vertical offset",
+      "oneShotTag": "one-shot",
+      "optionDefault": "Default",
+      "optionEngine": "Engine default",
+      "optionNoExpression": "No expression",
+      "previewState": "Preview state",
+      "previewUnavailable": "Live preview needs the Live2D runtime — settings still save.",
+      "resetAll": "Reset all",
+      "resetMappings": "Reset all mappings",
+      "resetTransform": "Reset transform",
+      "save": "Save",
+      "scale": "Scale",
+      "tabMotion": "Motion mapping",
+      "tabTransform": "Transform",
+      "test": "Test",
+      "title": "Customize {name}"
+    },
+    "configure": "Configure",
+    "coreMissing": "Live2D runtime isn't ready — the pet will fall back to the SVG skin.",
+    "delete": "Delete",
+    "download": "Download sample",
+    "downloading": "Downloading…",
+    "errors": {
+      "cubism2Unsupported": "Cubism 2 models aren't supported.",
+      "downloadFailed": "The sample model couldn't be downloaded.",
+      "invalidJson": "The settings file isn't valid JSON.",
+      "missingReferenced": "The model is missing files it references.",
+      "multipleSettings": "More than one .model3.json was found — keep just one.",
+      "noSettings": "No .model3.json settings file was found.",
+      "tooLarge": "The model is larger than the 50 MB limit.",
+      "zipFailed": "The .zip couldn't be read."
+    },
+    "import": "Import model",
+    "importFolder": "Import folder",
+    "importHint": "Choose a model folder or a .zip containing a .model3.json.",
+    "noModels": "No Live2D models yet. Import one or download a sample.",
+    "oneShotLabels": {
+      "evolving": "Evolution",
+      "fed": "Fed",
+      "happy": "Cheer",
+      "levelUp": "Level up",
+      "love": "Love",
+      "petted": "Petted",
+      "sad": "Sad",
+      "sleepy": "Sleepy",
+      "surprised": "Surprised",
+      "wave": "Wave"
+    },
+    "setActive": "Set active",
+    "stateLabels": {
+      "error": "Error",
+      "evolving": "Evolving",
+      "greeting": "Greeting",
+      "happy": "Happy",
+      "idle": "Idle",
+      "interacting": "Interacting",
+      "review": "Reviewing",
+      "sad": "Sad",
+      "sleeping": "Sleeping",
+      "thinking": "Thinking",
+      "waiting": "Waiting"
+    },
+    "storageUsage": "{count} models · {size}",
+    "title": "Live2D models"
+  },
+  "llmSpeak": {
+    "description": "Let the pet answer typed talk messages with a tiny AI reply (opt-in, rate-limited, PII-gated).",
+    "label": "Talk with AI",
+    "model": "Model",
+    "modelHint": "Pick a cheap, fast model — replies are one short sentence.",
+    "provider": "Provider",
+    "useDefault": "Use chat default"
+  },
+  "lowPower": {
+    "description": "Cap the Live2D frame rate at 30 fps and make wandering rest longer.",
+    "label": "Low-power mode"
+  },
+  "memory": {
+    "clearAction": "Clear pet memory",
+    "clearDescription": "Forget everything the pet remembers from your talks.",
+    "description": "Remember recent talk exchanges and weave them into replies. Stored locally, capped at 200 turns.",
+    "label": "Conversation memory"
+  },
+  "motion": {
+    "label": "Motion",
+    "options": {
+      "auto": "Follow system",
+      "full": "Full",
+      "reduced": "Reduced"
+    }
+  },
+  "mutedBubbles": {
+    "description": "Keep the pet quiet (it still animates).",
+    "label": "Mute bubbles"
+  },
+  "proactive": {
+    "description": "The pet speaks up on its own — celebrating milestones, chatting when idle, greeting by time of day. Quiet hours are always respected.",
+    "enabled": {
+      "description": "Off by default. Uses the same model as Talk with AI, with a daily cap and minimum gap.",
+      "label": "Let the pet speak up"
+    },
+    "eventComments": {
+      "description": "Level-ups, evolutions, completed goals, achievements, and workflow runs.",
+      "label": "Comment on milestones"
+    },
+    "idleChatter": {
+      "description": "Speak up after you've been away from the computer for a while.",
+      "label": "Idle chatter"
+    },
+    "tier": {
+      "label": "How chatty",
+      "options": {
+        "chatty": "Chatty",
+        "normal": "Normal",
+        "quiet": "Quiet"
+      }
+    },
+    "timeGreetings": {
+      "description": "A morning hello and a late-night reminder to rest, once per day each.",
+      "label": "Time greetings"
+    },
+    "title": "Proactive speech"
+  },
+  "reset": {
+    "action": "Reset",
+    "description": "Delete all pet data and start over.",
+    "label": "Reset pet"
+  },
+  "size": {
+    "label": "Size ({size}px)"
+  },
+  "skin": {
+    "label": "Skin",
+    "options": {
+      "live2d": "Live2D model",
+      "svg": "Vector mascot"
+    }
+  },
+  "sound": {
+    "description": "Play short sounds when you touch the pet or it reacts. Off by default.",
+    "label": "Sound effects",
+    "quietHours": {
+      "description": "Silence pet sounds during this window.",
+      "end": "To",
+      "label": "Quiet hours",
+      "start": "From"
+    },
+    "volume": {
+      "label": "Volume ({value}%)"
+    }
+  },
+  "title": "Pet"
+}

@@ -1,0 +1,228 @@
+{
+  "actions": {
+    "abortMerge": "中止合并",
+    "addToGitignore": "添加到 .gitignore",
+    "copyPath": "复制路径",
+    "discard": "放弃更改",
+    "discardAll": "放弃所有更改",
+    "discardHunk": "放弃此块",
+    "fetch": "获取",
+    "more": "更多操作",
+    "openChanges": "打开更改",
+    "publish": "发布分支",
+    "pull": "拉取",
+    "push": "推送",
+    "refresh": "刷新",
+    "restore": "恢复（到 HEAD）",
+    "stage": "暂存更改",
+    "stageAll": "暂存所有更改",
+    "stageHunk": "暂存此块",
+    "sync": "同步更改",
+    "undoLastCommit": "撤销上次提交",
+    "unstage": "取消暂存",
+    "unstageAll": "取消暂存所有更改",
+    "unstageHunk": "取消暂存此块",
+    "viewBlame": "查看追溯",
+    "viewHistory": "查看文件历史"
+  },
+  "blame": {
+    "empty": "没有追溯信息",
+    "loading": "正在加载追溯…",
+    "title": "追溯 · {path}",
+    "uncommitted": "未提交"
+  },
+  "branches": {
+    "create": "创建分支",
+    "delete": "删除分支",
+    "detached": "游离 HEAD",
+    "empty": "未找到分支",
+    "newName": "新分支名称",
+    "remote": "远程",
+    "rename": "重命名分支",
+    "renameTo": "将当前分支重命名为…",
+    "search": "搜索分支…",
+    "switch": "切换分支"
+  },
+  "commit": {
+    "ai": {
+      "failed": "生成提交信息失败",
+      "generating": "正在生成提交信息…",
+      "noStaged": "请先暂存更改再生成信息",
+      "redacted": "已脱敏敏感数据后再发送给模型"
+    },
+    "amend": "提交（修订）",
+    "autoGenerateAI": "用 AI 生成信息",
+    "commit": "提交",
+    "commitAndPush": "提交并推送",
+    "commitAndSync": "提交并同步",
+    "more": "更多提交操作",
+    "placeholder": "提交信息（Ctrl+Enter 提交）",
+    "signoff": "添加签署"
+  },
+  "commitDetail": {
+    "branchNamePlaceholder": "新分支名称",
+    "checkoutAction": "检出",
+    "checkoutCommit": "检出此提交…",
+    "checkoutCommitDescription": "这将切换到该提交的分离 HEAD 状态。如需修改，请从此处创建分支。",
+    "checkoutCommitTitle": "检出提交？",
+    "createBranchAction": "创建并切换",
+    "createBranchHere": "从此提交创建分支…",
+    "createBranchTitle": "从此提交创建分支"
+  },
+  "compare": {
+    "empty": "所选引用之间没有更改",
+    "menuItem": "对比引用…",
+    "pickBoth": "选择基准和目标引用以进行对比",
+    "selectBase": "基准引用",
+    "selectFile": "选择文件以查看差异",
+    "selectTarget": "目标引用",
+    "title": "对比引用"
+  },
+  "conflicts": {
+    "acceptBoth": "保留双方更改",
+    "acceptOurs": "采用当前更改",
+    "acceptTheirs": "采用传入更改"
+  },
+  "desktopOnly": {
+    "description": "源代码管理需要访问本地文件系统，仅在桌面应用中可用。",
+    "title": "仅桌面端可用"
+  },
+  "diff": {
+    "binary": "二进制文件 — 不显示差异",
+    "hunkCount": "{count, plural, other {# 个差异块}}",
+    "jumpToHunk": "跳转到第 {line} 行的差异块",
+    "loading": "正在加载差异…",
+    "selectFile": "选择一个文件以查看其更改"
+  },
+  "emptyState": {
+    "initRepo": "初始化仓库",
+    "noChanges": "没有更改",
+    "noFolder": "未打开文件夹",
+    "notARepo": "该文件夹不是 Git 仓库",
+    "openFolder": "打开文件夹"
+  },
+  "errors": {
+    "checkoutFailed": "切换分支失败：{message}",
+    "commitFailed": "提交失败：{message}",
+    "generic": "Git 操作失败：{message}",
+    "noRepo": "未绑定仓库——请先打开一个文件夹",
+    "pullFailed": "拉取失败：{message}",
+    "pushFailed": "推送失败：{message}"
+  },
+  "groups": {
+    "changes": "更改",
+    "merge": "合并冲突",
+    "staged": "已暂存的更改"
+  },
+  "irebase": {
+    "action": {
+      "drop": "丢弃 drop",
+      "fixup": "合并 fixup",
+      "pick": "采用 pick",
+      "reword": "改写 reword",
+      "squash": "压缩 squash"
+    },
+    "apply": "开始变基",
+    "cancel": "取消",
+    "description": "重排、改写、压缩或丢弃提交，然后应用。",
+    "empty": "没有可变基的提交",
+    "fromHere": "从此处交互式变基…",
+    "moveDown": "下移",
+    "moveUp": "上移",
+    "rewordPlaceholder": "新的提交信息",
+    "title": "交互式变基"
+  },
+  "remotes": {
+    "add": "添加远程",
+    "copied": "已复制远程 URL",
+    "copyFailed": "复制 URL 失败",
+    "copyUrl": "复制 URL",
+    "description": "管理仓库已配置的远程。",
+    "empty": "未配置远程",
+    "namePlaceholder": "远程名称（如 origin）",
+    "remove": "移除远程",
+    "title": "远程仓库",
+    "urlPlaceholder": "远程 URL"
+  },
+  "reset": {
+    "cancel": "取消",
+    "confirmAction": "Hard 重置",
+    "confirmDescription": "这将把已暂存和工作区的所有更改永久丢弃，回退到所选提交。此操作无法撤销。",
+    "confirmTitle": "执行 Hard 重置？",
+    "hard": "Hard — 丢弃所有更改",
+    "label": "重置",
+    "mixed": "Mixed — 取消暂存更改",
+    "soft": "Soft — 保留已暂存更改"
+  },
+  "restore": {
+    "cancel": "取消",
+    "confirm": "恢复",
+    "description": "从所选来源恢复 {path}。",
+    "source": "来源（分支、标签或提交）",
+    "title": "恢复文件"
+  },
+  "roots": {
+    "primary": "主",
+    "select": "选择根目录",
+    "switchRoot": "切换仓库根目录"
+  },
+  "sequencer": {
+    "abort": "中止",
+    "cherryPick": "拣选此提交",
+    "continue": "继续",
+    "inProgress": {
+      "cherryPick": "拣选进行中——解决冲突后继续。",
+      "merge": "合并进行中——解决冲突后继续。",
+      "rebase": "变基进行中——解决冲突后继续。",
+      "revert": "还原进行中——解决冲突后继续。"
+    },
+    "mergeInto": "将此分支合并到当前分支",
+    "rebaseOnto": "将当前分支变基到此",
+    "revert": "还原此提交"
+  },
+  "stash": {
+    "apply": "应用",
+    "description": "保存并恢复工作区更改。",
+    "drop": "删除",
+    "empty": "没有贮藏",
+    "includeUntracked": "包含未跟踪的文件",
+    "keepIndex": "保留已暂存的更改",
+    "pop": "弹出",
+    "push": "贮藏",
+    "pushMessage": "贮藏信息（可选）",
+    "title": "贮藏"
+  },
+  "status": {
+    "added": "已添加",
+    "conflicted": "存在冲突",
+    "deleted": "已删除",
+    "modified": "已修改",
+    "renamed": "已重命名",
+    "typeChanged": "类型已更改",
+    "untracked": "未跟踪"
+  },
+  "statusBar": {
+    "openSourceControl": "打开源代码管理"
+  },
+  "tags": {
+    "create": "创建标签",
+    "delete": "删除标签",
+    "description": "在此仓库中创建、查看和删除标签。",
+    "empty": "没有标签",
+    "messagePlaceholder": "注释信息（可选）",
+    "namePlaceholder": "标签名称（如 v1.0.0）",
+    "push": "推送标签到远程",
+    "title": "标签"
+  },
+  "timeline": {
+    "empty": "没有历史记录",
+    "filterPlaceholder": "过滤已加载的提交（信息、作者、哈希）",
+    "loadMore": "加载更多",
+    "repository": "仓库",
+    "thisFile": "当前文件",
+    "title": "时间线",
+    "viewGraph": "图形视图",
+    "viewList": "列表视图"
+  },
+  "title": "源代码管理"
+}

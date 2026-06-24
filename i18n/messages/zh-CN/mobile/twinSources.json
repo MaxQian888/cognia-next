@@ -1,0 +1,36 @@
+{
+  "addCta": "添加数据源",
+  "cameraError": {
+    "permissionDenied": "需要相机权限。",
+    "unknown": "相机调用失败，请重试。",
+    "unsupported": "当前平台不支持相机。"
+  },
+  "deleteCta": "删除数据源",
+  "deleteDone": "已删除数据源。",
+  "editSheetDescription": "重命名或删除此数据源。",
+  "empty": "暂无孪生数据源。点击 + 添加。",
+  "pasteCancelled": "已取消",
+  "pasteDialogPrompt": "在此粘贴或输入要喂给孪生的文本",
+  "pasteDialogTitle": "粘贴文本",
+  "pickCamera": "拍文档",
+  "pickFile": "选择文件",
+  "pickPaste": "粘贴文本",
+  "queuedToast": "已入队，桌面联线后将处理。",
+  "redact": {
+    "cancel": "取消",
+    "description": "检测到疑似个人信息，发送出设备前请先确认。",
+    "sendOriginal": "发送原文",
+    "sendRedacted": "发送脱敏版",
+    "title": "发送前确认"
+  },
+  "retitleCta": "重命名",
+  "retitleDone": "已重命名。",
+  "retitlePrompt": "输入新标题",
+  "retitleTitle": "重命名数据源",
+  "statusEmbedding": "向量化",
+  "statusFailed": "失败",
+  "statusParsing": "解析中",
+  "statusQueued": "排队中",
+  "statusReady": "就绪",
+  "title": "孪生数据源"
+}

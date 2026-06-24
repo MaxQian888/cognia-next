@@ -1,0 +1,147 @@
+{
+  "a11y": {
+    "announceErrors": "播报错误",
+    "focusIndicator": "焦点指示器",
+    "highContrast": "高对比度",
+    "reducedMotion": "减少动效",
+    "screenReaderOptimized": "屏幕阅读器优化"
+  },
+  "ai": {
+    "autoSuggestions": "自动建议",
+    "contextLines": "上下文行数",
+    "customProviderUrl": "自定义提供商 URL",
+    "enableInlineCompletion": "启用内联补全",
+    "maxSuggestions": "最大建议数",
+    "showConfidence": "显示置信度",
+    "streamingResponses": "流式响应",
+    "suggestionDelay": "建议延迟",
+    "suggestionProvider": "建议提供商",
+    "suggestionProviderOptions": {
+      "custom": "自定义 URL",
+      "default": "默认（Anthropic）"
+    }
+  },
+  "collab": {
+    "cursorSmoothing": "光标平滑",
+    "enableCollaboration": "启用协作",
+    "presenceTimeout": "在线超时",
+    "showAvatars": "显示头像",
+    "showCursors": "显示光标",
+    "showSelections": "显示选区",
+    "signallingServerUrl": "信令服务器 URL",
+    "syncInterval": "同步间隔"
+  },
+  "description": "配置基于 Monaco 的代码/文档编辑器——字体、AI 建议、版本管理、协作、沙盒执行、无障碍与快捷键。",
+  "domainLabel": "画布文档",
+  "editor": {
+    "autoClosingBrackets": "自动闭合括号",
+    "autoClosingQuotes": "自动闭合引号",
+    "bracketPairColorization": "括号对着色",
+    "bracketPairGuides": "括号对参考线",
+    "cursorBlinking": "光标闪烁",
+    "cursorBlinkingOptions": {
+      "blink": "闪烁",
+      "expand": "展开",
+      "phase": "相位",
+      "smooth": "平滑",
+      "solid": "常亮"
+    },
+    "cursorStyle": "光标样式",
+    "cursorStyleOptions": {
+      "block": "方块",
+      "line": "竖线",
+      "underline": "下划线"
+    },
+    "fontFamily": "字体族",
+    "fontFamilyOptions": {
+      "cascadiaCode": "Cascadia Code",
+      "firaCode": "Fira Code / Cascadia / JetBrains Mono",
+      "ibmPlexMono": "IBM Plex Mono",
+      "jetbrainsMono": "JetBrains Mono",
+      "sourceCodePro": "Source Code Pro",
+      "systemMonospace": "系统等宽字体"
+    },
+    "fontSize": "字体大小",
+    "formatOnPaste": "粘贴时格式化",
+    "formatOnType": "输入时格式化",
+    "indentationGuides": "缩进参考线",
+    "insertSpaces": "插入空格（代替 Tab）",
+    "lineHeight": "行高",
+    "lineNumbers": "行号",
+    "lineNumbersOptions": {
+      "off": "隐藏",
+      "on": "显示",
+      "relative": "相对"
+    },
+    "minimap": "缩略图",
+    "mouseWheelZoom": "滚轮缩放",
+    "renderWhitespace": "显示空白字符",
+    "renderWhitespaceOptions": {
+      "all": "全部",
+      "boundary": "边界",
+      "none": "不显示",
+      "selection": "选中区域",
+      "trailing": "行尾"
+    },
+    "scrollBeyondLastLine": "滚动超出最后一行",
+    "smoothScrolling": "平滑滚动",
+    "tabSize": "Tab 大小",
+    "wordWrap": "自动换行"
+  },
+  "execution": {
+    "autoExecute": "保存时自动执行",
+    "clearOutputOnRun": "每次运行时清空输出",
+    "maxExecutionTime": "最大执行时间",
+    "preserveVariables": "跨运行保留变量",
+    "pythonRequiresDesktop": "Python 执行需要桌面端（Tauri）。运行 `pnpm tauri dev` 以启用。",
+    "pythonRuntime": "Python 运行时",
+    "pythonRuntimeOptions": {
+      "none": "禁用",
+      "tauriSidecar": "Tauri Python sidecar（桌面端）"
+    },
+    "sandboxMode": "沙盒模式",
+    "sandboxModeOptions": {
+      "permissive": "宽松",
+      "strict": "严格（无网络/存储）"
+    },
+    "showOutput": "显示输出面板"
+  },
+  "resetAll": "重置全部",
+  "resetTab": "重置此分页",
+  "tabs": {
+    "a11y": "无障碍",
+    "ai": "AI",
+    "collab": "协作",
+    "editor": "编辑器",
+    "execution": "执行",
+    "keys": "快捷键",
+    "theme": "主题",
+    "version": "版本"
+  },
+  "theme": {
+    "followSystem": "跟随系统主题",
+    "hint": "通过画布插件 API 注册的自定义 Monaco 主题将在运行时出现在此列表中。",
+    "monacoTheme": "Monaco 主题",
+    "monacoThemeOptions": {
+      "auto": "自动（跟随应用主题）",
+      "hcBlack": "hc-black",
+      "hcLight": "hc-light",
+      "vs": "vs（亮色）",
+      "vsDark": "vs-dark"
+    }
+  },
+  "title": "画布",
+  "version": {
+    "autoSaveInterval": "自动保存间隔",
+    "compressOldVersions": "压缩旧版本",
+    "diffViewMode": "差异视图模式",
+    "diffViewModeOptions": {
+      "inline": "内联",
+      "sideBySide": "并排",
+      "unified": "统一"
+    },
+    "keepNamedVersions": "保留命名版本",
+    "maxVersions": "最大版本数",
+    "showVersionTimestamps": "显示版本时间戳"
+  }
+}

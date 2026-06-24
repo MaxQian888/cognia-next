@@ -1,0 +1,9 @@
+{
+  "categoriesButton": "分类",
+  "filteredBadge": "显示 {count}",
+  "filtersButton": "筛选",
+  "resultsCount": "{count} / {total} 个插件",
+  "resultsCountEmpty": "无匹配——已安装 {total} 个插件",
+  "searchPlaceholder": "搜索插件…",
+  "totalBadge": "共 {count}"
+}

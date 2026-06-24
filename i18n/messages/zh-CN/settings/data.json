@@ -1,0 +1,537 @@
+{
+  "apply": "应用",
+  "applying": "应用中…",
+  "backendReadiness": {
+    "description": "本地数据当前的存储位置。",
+    "domains": {
+      "canvas": "画板",
+      "chat": "对话",
+      "settings": "设置",
+      "skills": "技能"
+    },
+    "mirroredDomains": "镜像域",
+    "noMirroring": "单一后端；无需镜像。",
+    "runtimeMode": {
+      "desktop": "桌面运行时",
+      "web": "Web 运行时"
+    },
+    "status": {
+      "completed": "已完成",
+      "degraded": "异常",
+      "pending": "进行中",
+      "unavailable": "不可用"
+    },
+    "summary": {
+      "tauri": "所有域均通过 Dexie 存储在 Tauri 外壳中。",
+      "web": "所有域均通过 Dexie 存储在 IndexedDB 中。"
+    },
+    "title": "本地持久化运行时"
+  },
+  "backup": {
+    "encryptedFileDetected": "检测到加密备份",
+    "encryption": {
+      "autoKey": {
+        "body": "用本设备保存的密钥加密。在其他设备上不可读，除非你同时导出密钥。",
+        "title": "自动密钥（仅本设备）"
+      },
+      "passphrase": {
+        "body": "用你记得的密码短语加密。一旦遗忘文件无法恢复——没有重置入口。",
+        "title": "自定义密码短语"
+      },
+      "plaintext": {
+        "body": "可在任何文本编辑器中查看。如目标位置可信，选此项最便利。",
+        "title": "明文"
+      }
+    },
+    "encryptionLabel": "加密方式",
+    "enterPassphrase": "输入加密时使用的密码短语。我们会先尝试本设备的自动密钥，失败再请你输入。",
+    "hidePassphrase": "隐藏密码短语",
+    "passphrase": "密码短语",
+    "passphraseConfirm": "确认密码短语",
+    "passphraseMismatch": "两次输入的密码短语不一致。",
+    "passphraseRequired": "此模式必须提供密码短语。",
+    "previewBackend": "来自 {backend}（应用 {appVersion}）— 导出于 {exportedAt}",
+    "quickSessionBody": "把一个或多个会话打包为 ZIP（Markdown / JSON / HTML / 纯文本）。",
+    "quickSessionButton": "批量导出…",
+    "quickSessionTitle": "快速会话导出",
+    "reminder": {
+      "bodyKnownLast": "上次成功备份是在 {days} 天前。",
+      "bodyNeverBackedUp": "你还没有备份过。加密备份只需几秒即可完成，可避免 IndexedDB 被重置导致的数据丢失。",
+      "dismiss": "忽略",
+      "title": "距离上次备份已经有一段时间"
+    },
+    "rotateKeyBody": "用新的随机值替换本设备的自动密钥。旧密钥加密的文件将不可读；自定义密码短语加密的文件不受影响。",
+    "rotateKeyButton": "立即轮换",
+    "rotateKeyFailed": "当前环境无法轮换自动密钥。",
+    "rotateKeySuccess": "自动密钥已轮换。",
+    "rotateKeyTitle": "轮换自动密钥",
+    "schedule": {
+      "body": "启用后，Cognia 会每隔 N 天向所选目录写入一份加密备份，并仅保留最新的 M 份。",
+      "enableHint": "应用打开时执行；使用自动密钥加密，无需手动输入密码短语。",
+      "enableLabel": "启用定时备份",
+      "folderLabel": "目标文件夹",
+      "folderPlaceholder": "选择写入备份的文件夹。",
+      "folderSet": "文件夹已更新。",
+      "intervalLabel": "间隔（天，1–30）",
+      "pickFolder": "选择文件夹…",
+      "reminderHint": "若距上次成功备份超过该天数，概览页将显示轻量提醒条。",
+      "reminderLabel": "提醒周期（天，0 表示关闭）",
+      "retainLabel": "保留份数（1–50）",
+      "title": "自动备份计划",
+      "webOnlyNote": "定时写入仅在桌面应用中可用。浏览器模式下仍会显示提醒横幅。"
+    },
+    "showPassphrase": "显示密码短语",
+    "unlockButton": "解锁并预览",
+    "wrongPassphrase": "密码短语不正确，请再核对。"
+  },
+  "breakdown": {
+    "categories": {
+      "backupHistory": "备份历史",
+      "canvas": "画布文档",
+      "character": "角色",
+      "chat": "消息",
+      "mcp": "MCP 服务器",
+      "other": "其他",
+      "preset": "提示词预设",
+      "session": "会话",
+      "settings": "设置",
+      "skill": "技能",
+      "system": "系统",
+      "team": "团队",
+      "trustedWorkspace": "可信工作区",
+      "ttsKey": "TTS 密钥",
+      "vector": "向量库"
+    },
+    "clearCategory": "清理此类别",
+    "cleared": "{count, plural, =0 {未清理任何条目} =1 {已清理 1 条} other {已清理 # 条}}",
+    "noData": "暂无存储数据。",
+    "other": "其他",
+    "refresh": "刷新",
+    "title": "存储分布",
+    "viewDetails": "查看详情"
+  },
+  "cancel": "取消",
+  "cleanup": {
+    "back": "返回",
+    "button": "清理",
+    "complete": "清理完成！",
+    "confirm": "确认清理",
+    "customDesc": "选择要清理的类别。",
+    "deepDesc": "对较旧数据进行深度清理。请谨慎使用。",
+    "deepWarning": "会移除 7 天前的消息和备份历史。",
+    "deletedItems": "已删除条目",
+    "desc": "清理过期或临时数据来释放空间，不会影响你的会话内容。",
+    "done": "完成",
+    "errors": "{count, plural, =1 {发生 1 个错误} other {发生 # 个错误}}",
+    "freedSpace": "已释放空间",
+    "itemsWillBeDeleted": "{count, plural, =1 {将删除 1 条} other {将删除 # 条}}",
+    "preview": "预览",
+    "quickDesc": "清理临时数据（TTS 密钥、系统、其他）。安全且快速。",
+    "runDeep": "执行深度清理",
+    "runQuick": "执行快速清理",
+    "tabs": {
+      "custom": "自定义",
+      "deep": "深度",
+      "quick": "快速"
+    },
+    "title": "存储清理",
+    "willBeFreed": "将被释放"
+  },
+  "clearAllSuccess": "已清空全部数据。正在重新载入…",
+  "clearButton": "清空…",
+  "clearConfirmAction": "永久删除",
+  "clearConfirmBody": "此操作不可撤销。请在下方输入 DELETE 进行确认。",
+  "clearConfirmTitle": "确认永久删除？",
+  "clearHint": "彻底从此设备删除选中的数据。内置角色 / 技能 / 团队会自动重新种子。",
+  "clearSuccess": "已清空。",
+  "clearTargetLabel": "目标",
+  "clearTitle": "清空数据",
+  "clearing": "清空中…",
+  "description": "导出、导入或清空本地数据。所有会话和设置都保存在浏览器 IndexedDB 中，除非你主动选择，否则不会离开设备。",
+  "domain": {
+    "a2ui": {
+      "body": "用户保存的小程序、模板与调试器事件日志。",
+      "importBody": "添加或替换用户保存的小程序与模板。内置应用永远不会被覆盖。",
+      "importTitle": "导入 A2UI 数据",
+      "title": "A2UI 小程序"
+    },
+    "a2uiSurfaces": {
+      "body": "活动画布注册表（panel/fullscreen）与最近的调试器事件。",
+      "importBody": "恢复活动 A2UI 画布注册表。",
+      "importTitle": "导入 A2UI 画布",
+      "title": "A2UI 画布"
+    },
+    "agentRuntime": {
+      "body": "上次活动的 Runtime / 模式 / 外部 Agent 指针。",
+      "importBody": "恢复上次活动的 Agent 与模式。",
+      "importTitle": "导入活动 Agent 状态",
+      "title": "活动 Agent"
+    },
+    "agentTeamsLayout": {
+      "body": "团队模板、默认配置与工作区布局（与 Dexie team 行不同）。",
+      "importBody": "恢复 Agent 团队工作区布局与模板。",
+      "importTitle": "导入 Agent 团队工作区",
+      "title": "Agent 团队工作区"
+    },
+    "artifacts": {
+      "body": "生成产物、版本历史、画布文档与分析结果。",
+      "importBody": "恢复你的生成产物及历史。",
+      "importTitle": "导入 Artifacts",
+      "title": "Artifacts"
+    },
+    "canvas": {
+      "body": "Monaco 编辑的文档、版本快照与行级评论。",
+      "importBody": "添加或替换画布文档及其版本历史和行内评论。",
+      "importTitle": "导入画布数据",
+      "title": "画布文档"
+    },
+    "canvasComments": {
+      "body": "文档→评论缓存，用于快速恢复画布。",
+      "importBody": "恢复画布评论缓存。",
+      "importTitle": "导入画布评论缓存",
+      "title": "画布评论缓存"
+    },
+    "canvasKeybindings": {
+      "body": "画布的个人键盘快捷键自定义。",
+      "importBody": "恢复你的画布键位自定义。",
+      "importTitle": "导入画布键位",
+      "title": "画布键位"
+    },
+    "canvasSettings": {
+      "body": "画布的个人偏好（字体、行号、自动保存等）。",
+      "importBody": "恢复画布偏好。",
+      "importTitle": "导入画布设置",
+      "title": "画布设置"
+    },
+    "characters": {
+      "body": "包含系统提示词与技能集的人格。",
+      "importBody": "添加或替换自定义角色。内置角色受保护。",
+      "importTitle": "导入角色",
+      "title": "角色"
+    },
+    "comingSoon": "即将上线",
+    "customModes": {
+      "body": "用户自定义的聊天模式与工具白名单。",
+      "importBody": "恢复你的自定义模式。",
+      "importTitle": "导入自定义模式",
+      "title": "自定义模式"
+    },
+    "customThemes": {
+      "body": "用户保存的配色方案（与活动外观面分开）。",
+      "importBody": "恢复你的自定义主题列表。",
+      "importTitle": "导入自定义主题",
+      "title": "自定义主题"
+    },
+    "exportRow": "导出",
+    "externalAgents": {
+      "body": "ClaudeCode、Cursor、Codex、Gemini 等已注册 Agent——连接状态、委派规则、最近一次运行快照。",
+      "importBody": "恢复完整的外部 Agent 注册表。导入完成后，运行\"同步到 Agent\"将 MCP 服务器写回各 Agent 的配置文件。",
+      "importTitle": "导入外部 Agent",
+      "title": "外部 Agent"
+    },
+    "externalBody": "拖入 ChatGPT、Claude 或 Gemini 的导出文件，把会话引入 Cognia。ChatGPT 的分支会被线性化，Bard / Gemini 活动日志会按时间间隔分组成单独会话。",
+    "externalTitle": "从其他助手导入",
+    "importDomainMismatch": "文件属于 {actual}，与 {expected} 不匹配。",
+    "importLoaded": "已加载 {domain}（导出于 {exportedAt}）。请选择策略后点击应用。",
+    "importNotADomainFile": "不是 Cognia 分项文件。",
+    "importRow": "导入",
+    "mcp": {
+      "body": "工具级 MCP 服务器配置。",
+      "importBody": "添加或替换 MCP 服务器条目（名称、传输方式、配置）。",
+      "importTitle": "导入 MCP 服务器",
+      "title": "MCP 服务器"
+    },
+    "perDomainBody": "无需整库备份即可迁移单一类别的数据。例如把技能集分享给同事，或在多台机器之间复制 MCP 服务器。",
+    "perDomainTitle": "分项导出与导入",
+    "placeholderBody": "按类别导出/导入（技能、MCP 服务器、预设、主题）。",
+    "placeholderTitle": "分项迁移",
+    "platform": {
+      "chatgpt": {
+        "body": "拖入 openai.com 数据导出中的 conversations.json。",
+        "hint": "在 chat.openai.com → 设置 → 数据控制 → 导出。",
+        "title": "ChatGPT"
+      },
+      "claude": {
+        "body": "拖入 claude.ai 数据导出中的 conversations.json。",
+        "hint": "在 claude.ai → 个人资料 → 设置 → 数据隐私。",
+        "title": "Claude.ai"
+      },
+      "gemini": {
+        "body": "拖入 Google Takeout 的 MyActivity.json（Bard 或 Gemini）。",
+        "hint": "在 takeout.google.com → Bard / Gemini Apps 活动。",
+        "title": "Gemini / Bard"
+      }
+    },
+    "plugins": {
+      "body": "已安装的插件及其权限、定时任务与分析数据。",
+      "importBody": "添加或替换已安装的插件。内置插件不会被覆盖。",
+      "importTitle": "导入插件",
+      "title": "插件"
+    },
+    "presets": {
+      "body": "可复用的系统提示词模板。",
+      "importBody": "添加或替换已保存的系统提示词预设。",
+      "importTitle": "导入预设",
+      "title": "提示词预设"
+    },
+    "schedulerPrefs": {
+      "body": "调度器选项卡的筛选、间隔与策略偏好。",
+      "importBody": "恢复调度器选项卡偏好。",
+      "importTitle": "导入调度器偏好",
+      "title": "调度器偏好"
+    },
+    "skills": {
+      "body": "可复用的指令片段。",
+      "importBody": "添加或替换自定义技能。内置技能不会被覆盖。",
+      "importTitle": "导入技能",
+      "title": "技能"
+    },
+    "teams": {
+      "body": "多角色编排。",
+      "importBody": "添加或替换自定义团队。内置团队受保护。",
+      "importTitle": "导入团队",
+      "title": "团队"
+    },
+    "theme": {
+      "body": "主题、字号、语言、动效偏好。",
+      "importBody": "替换外观设置（主题、字号、语言、减少动效）。",
+      "importTitle": "导入外观",
+      "title": "外观与主题"
+    }
+  },
+  "exportButton": "导出到文件…",
+  "exportHint": "把角色、技能、团队、预设和 MCP 服务器打包成一份 JSON。会话和 API 密钥默认不包含，需要时勾选。",
+  "exportSuccess": "已导出。",
+  "exportTitle": "导出",
+  "exporting": "导出中…",
+  "health": {
+    "allGood": "存储状态良好。",
+    "critical": "严重",
+    "healthy": "健康",
+    "issues": "问题",
+    "potentialSavings": "可释放空间",
+    "recommendations": "建议",
+    "title": "健康状态",
+    "used": "已使用",
+    "warning": "警告"
+  },
+  "importButton": "选择文件…",
+  "importHint": "读取此前导出的 JSON 文件并合并进本地数据。内置角色 / 技能 / 团队永远不会被覆盖。",
+  "importSuccess": "已导入。",
+  "importTitle": "导入",
+  "includeApiKey": "包含 API 密钥",
+  "includeApiKeyHint": "明文嵌入 Anthropic API 密钥，仅用于可信任的备份。",
+  "includeBuiltIns": "包含内置角色 / 技能 / 团队",
+  "includeBuiltInsHint": "默认关闭 —— 导入时内置项会自动重新填充。开启后会保留你对内置项做过的覆写。",
+  "includeSessions": "包含会话",
+  "includeSessionsHint": "把所有会话与消息一起导出，文件可能较大。",
+  "keyringFollowup": "API 密钥存储将在后续版本由 IndexedDB 迁移到系统钥匙串。详见 KEYRING_MIGRATION.md。",
+  "loading": "载入中…",
+  "mergeStrategyLabel": "若 id 已存在",
+  "overview": {
+    "clearHistory": "清空历史",
+    "col": {
+      "encryption": "加密",
+      "size": "大小",
+      "status": "状态",
+      "type": "类型",
+      "when": "时间"
+    },
+    "daysAgo": "{days, plural, =0 {今天} =1 {1 天前} other {# 天前}}",
+    "encryption": {
+      "autoKey": "自动密钥",
+      "none": "明文",
+      "passphrase": "密码短语"
+    },
+    "failed": "失败",
+    "historyEmpty": "尚无备份记录。",
+    "historyTitle": "备份历史",
+    "lastBackup": "上次备份",
+    "lastBackupAt": "上次成功备份：{when}",
+    "neverBackedUp": "你还没有备份过。",
+    "placeholderBody": "存储使用情况、上次备份时间、提醒和历史记录将在后续阶段加入。",
+    "placeholderTitle": "一览",
+    "storageBreakdown": {
+      "row": {
+        "backupHistory": "备份历史",
+        "characters": "角色",
+        "mcpServers": "MCP 服务器",
+        "messages": "消息",
+        "promptPresets": "提示词预设",
+        "sessionState": "会话状态",
+        "sessions": "会话",
+        "skillResources": "技能资源",
+        "skills": "技能",
+        "teams": "团队",
+        "trustedWorkspaces": "受信工作区"
+      },
+      "title": "存储用量",
+      "totalRows": "全部表合计 {count} 行。",
+      "usage": "已使用 {used} / {quota}（{pct}%）",
+      "usageUnavailable": "当前来源不暴露存储配额估算。"
+    },
+    "success": "成功"
+  },
+  "preview": "预览（文件中的条目数）",
+  "privacyTitle": "隐私",
+  "reset": "重置",
+  "retention": {
+    "desc": "超过此天数的 Agent 追踪 span 会在启动时及每天清理一次，避免本地数据库无限增长。",
+    "title": "追踪保留期",
+    "unit": "天",
+    "zeroHint": "设为 0 则永久保留追踪记录。"
+  },
+  "schedule": {
+    "currentCount": "{count, plural, =1 {1 个活跃计划} other {# 个活跃计划}}",
+    "desc": "通过任务调度器以任意 cron 表达式执行加密备份。任务在重启后保留，并可在 设置 → 计划任务 中查看。",
+    "title": "Cron 定时备份"
+  },
+  "snapshots": {
+    "a2uiSurfaces": {
+      "body": "活动画布注册表。",
+      "title": "A2UI 画布"
+    },
+    "agentRuntime": {
+      "body": "上次活动的 Agent / 模式。",
+      "title": "活动 Agent"
+    },
+    "agentTeams": {
+      "body": "团队模板与工作区布局。",
+      "title": "Agent 团队工作区"
+    },
+    "artifacts": {
+      "body": "生成产物及版本历史。",
+      "title": "Artifacts"
+    },
+    "canvasComments": {
+      "body": "文档→评论缓存。",
+      "title": "画布评论缓存"
+    },
+    "canvasKeybindings": {
+      "body": "键盘快捷键自定义。",
+      "title": "画布键位"
+    },
+    "canvasSettings": {
+      "body": "画布偏好。",
+      "title": "画布设置"
+    },
+    "customModes": {
+      "body": "用户自定义的对话模式。",
+      "title": "自定义模式"
+    },
+    "customThemes": {
+      "body": "用户保存的配色方案。",
+      "title": "自定义主题"
+    },
+    "description": "存储在 Dexie 之外的用户状态——外部 Agent、自定义模式、自定义主题、画布键位等 Zustand 持久化数据面。",
+    "externalAgents": {
+      "body": "ClaudeCode、Cursor、Codex、Gemini 等。",
+      "title": "外部 Agent"
+    },
+    "schedulerPrefs": {
+      "body": "调度器选项卡偏好。",
+      "title": "调度器偏好"
+    },
+    "title": "外部状态",
+    "uiPreferences": {
+      "body": "窗口布局偏好。",
+      "title": "界面布局"
+    }
+  },
+  "strategyDuplicate": "作为副本插入（生成新 id）",
+  "strategyOverwrite": "覆盖本地行",
+  "strategySkip": "跳过导入行",
+  "summary": "导入完成",
+  "summaryAdded": "新增",
+  "summaryBuiltIns": "保留内置",
+  "summaryLocalStorage": "已恢复外部状态",
+  "summaryLocalStorageRestored": "出错后已回滚",
+  "summaryLsErrors": "出错 ({count})",
+  "summaryLsSkipped": "已跳过 ({count})",
+  "summaryLsWritten": "已写入 ({count})",
+  "summaryOverwritten": "覆盖",
+  "summarySkipped": "跳过",
+  "summarySyncResults": "Agent 重投影",
+  "syncResults": {
+    "failed": "{agentId}：失败（{reason}）",
+    "notTauri": "请在桌面应用中打开以重新投影 Agent。",
+    "ok": "{agentId}：已重新投影 {count} 个服务器",
+    "skipped": "{agentId}：已跳过（{reason}）",
+    "title": "MCP 服务器重新投影到外部 Agent"
+  },
+  "tabs": {
+    "backup": "备份与恢复",
+    "domain": "分项迁移",
+    "maintenance": "维护",
+    "overview": "概览"
+  },
+  "telemetryHint": "默认关闭。留作未来可选的使用情况统计——当前并未发送任何遥测。",
+  "telemetryLabel": "允许匿名遥测",
+  "title": "数据与隐私",
+  "typeToConfirm": "输入 DELETE 以确认",
+  "webdav": {
+    "clear": "清除",
+    "cleared": "密码已清除。",
+    "description": "定期把加密备份上传到 WebDAV 服务器，另一台设备即可下载并恢复。使用同步口令端到端加密。",
+    "enableLabel": "启用 WebDAV 同步",
+    "folderLabel": "远程文件夹",
+    "lastSync": "上次同步：{time}",
+    "neverSynced": "尚未同步。",
+    "passphraseHint": "默认仅本次会话有效——每次会话需重新输入，或在下方选择记住口令。会对备份加密，服务器看不到明文。",
+    "passphraseLabel": "同步口令",
+    "passphrasePlaceholder": "在你的多台设备间共享",
+    "passphraseRequired": "请先输入同步口令。",
+    "passphraseUnlocked": "本次会话已解锁",
+    "passwordLabel": "密码",
+    "passwordPlaceholder": "服务器密码",
+    "passwordSet": "已保存——留空则保持不变",
+    "phaseBuilding": "正在构建快照…",
+    "phaseDone": "完成。",
+    "phaseEncrypting": "正在加密…",
+    "phaseUploading": "正在上传…",
+    "producedBy": "来自 {device}",
+    "rememberPassphraseDescription": "把口令存入本设备的系统密钥环，重启后定时上传和恢复检测可无人值守运行。但任何能解锁本设备的人都能解密你的同步数据——保持关闭则口令仅保留在内存中。",
+    "rememberPassphraseLabel": "在本设备记住同步口令",
+    "restore": "恢复…",
+    "restoreDialog": {
+      "close": "关闭",
+      "description": "从服务器下载快照并合并到本设备。此操作会覆盖或合并本地数据，请谨慎操作。",
+      "failed": "恢复失败：{error}",
+      "latest": "最新",
+      "loading": "正在加载快照…",
+      "noSnapshots": "服务器上没有找到快照。",
+      "producedBy": "该快照由 {device} 生成。",
+      "producedByUnknown": "无法识别快照来源设备（较旧的备份）。",
+      "restoreButton": "恢复",
+      "restoring": "恢复中…",
+      "snapshotLabel": "快照",
+      "strategyDuplicate": "作为副本导入",
+      "strategyLabel": "若 id 已存在",
+      "strategyOverwrite": "用导入的覆盖",
+      "strategySkip": "保留本地",
+      "title": "从 WebDAV 恢复"
+    },
+    "save": "保存",
+    "saved": "WebDAV 设置已保存。",
+    "startup": {
+      "newerBody": "另一台设备上传了更新的快照。打开备份设置以查看并恢复。",
+      "newerFound": "你的 WebDAV 服务器上有更新的备份。",
+      "restoreAction": "恢复"
+    },
+    "syncFailed": "上传失败：{error}",
+    "syncNow": "立即同步",
+    "syncSuccess": "快照已上传。",
+    "syncing": "同步中…",
+    "testConnection": "测试连接",
+    "testFailed": "连接失败：{error}",
+    "testIncomplete": "请先填写服务器地址、用户名和密码。",
+    "testSuccess": "已成功连接 WebDAV 服务器。",
+    "title": "WebDAV 同步",
+    "unlocked": "已解锁",
+    "unsupported": "WebDAV 同步仅在桌面和移动应用中可用，浏览器中不可用。",
+    "urlLabel": "服务器地址",
+    "urlPlaceholder": "https://dav.example.com",
+    "usernameLabel": "用户名",
+    "usernamePlaceholder": "你的用户名"
+  }
+}

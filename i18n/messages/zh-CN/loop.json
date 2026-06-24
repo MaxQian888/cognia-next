@@ -1,0 +1,76 @@
+{
+  "activity": {
+    "config_updated": "配置已更新",
+    "delay_decided": "约 {minutes} 分钟后进入下一轮 — {reason}",
+    "delay_parse_failed": "尾标解析失败 #{n}",
+    "empty": "暂无活动。",
+    "exit_triggered": "{exit} — {reason}",
+    "interval_fired": "第 {n} 次间隔触发",
+    "iteration_completed": "第 {n} 轮完成（{tokens} tok）",
+    "iteration_started": "第 {n} 轮开始",
+    "loading": "加载中…",
+    "loop_created": "已创建，迭代上限 {iterations}",
+    "noReason": "未给出理由",
+    "user_paused": "用户暂停",
+    "user_resumed": "用户恢复",
+    "user_stopped": "用户停止"
+  },
+  "config": {
+    "maxDelay": "最大延迟（分钟）",
+    "maxDelayHint": "模型自选轮间延迟的上限。",
+    "maxIterations": "最大迭代数",
+    "maxIterationsHint": "硬上限，达到后循环停止。",
+    "maxParseFailures": "尾标解析失败上限",
+    "maxParseFailuresHint": "连续多少次尾标缺失/损坏后循环以错误结束。",
+    "maxTokens": "最大 token 数",
+    "maxTokensHint": "记到该循环账上的累计 token 硬上限。",
+    "minDelay": "最小延迟（分钟）",
+    "minDelayHint": "轮间延迟的下限。",
+    "save": "保存修改",
+    "saving": "保存中…"
+  },
+  "detailSheet": {
+    "tabs": {
+      "activity": "活动",
+      "overview": "概览",
+      "settings": "设置"
+    },
+    "title": "循环 · {status}"
+  },
+  "overview": {
+    "createdBadge": "创建于：{date}",
+    "endedBadge": "结束于：{date}",
+    "expiresBadge": "过期于：{date}",
+    "iterationBudgetAria": "迭代预算使用情况",
+    "iterations": "迭代",
+    "lastDelayReason": "最近的延迟理由",
+    "modeInterval": "每 {minutes} 分钟（调度器）",
+    "modeSelfPaced": "自调度",
+    "prompt": "提示词",
+    "statusBadge": "状态：{status}",
+    "tokenBudgetAria": "Token 预算使用情况",
+    "tokens": "Tokens"
+  },
+  "pill": {
+    "ariaActiveLoop": "循环：{prompt}",
+    "details": "打开循环详情",
+    "moreActions": "更多循环操作",
+    "nextIteration": "约 {minutes} 分钟后进入下一轮（{reason}）",
+    "noReason": "模型未给出理由",
+    "pause": "暂停循环",
+    "progressInterval": "{iterations}/{maxIterations} 轮 · 每 {minutes} 分钟",
+    "progressSelfPaced": "{iterations}/{maxIterations} 轮 · 自调度",
+    "resume": "恢复循环",
+    "stop": "停止循环"
+  },
+  "status": {
+    "active": "运行中",
+    "budget_limited": "预算用尽",
+    "completed": "已完成",
+    "error": "错误",
+    "expired": "已过期",
+    "iteration_limited": "迭代用尽",
+    "paused": "已暂停",
+    "stopped": "已停止"
+  }
+}

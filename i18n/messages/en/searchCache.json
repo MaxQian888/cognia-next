@@ -1,0 +1,12 @@
+{
+  "allProviders": "All providers",
+  "clearCache": "Clear",
+  "description": "LRU cache for search results.",
+  "entries": "Entries",
+  "hitRate": "Hit rate",
+  "hits": "Hits",
+  "maxEntries": "Max entries",
+  "misses": "Misses",
+  "title": "Cache",
+  "ttl": "TTL"
+}

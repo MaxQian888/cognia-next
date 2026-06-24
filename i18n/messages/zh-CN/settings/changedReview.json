@@ -1,0 +1,13 @@
+{
+  "close": "关闭",
+  "count": "已修改 {count} 项",
+  "description": "与默认值不同的设置会显示在这里。",
+  "empty": "所有设置均为默认值。",
+  "otherSection": "其他",
+  "resetAll": "重置全部已显示项",
+  "resetGroup": "重置该组",
+  "resetRow": "重置",
+  "resetRowAria": "将 {name} 恢复为默认",
+  "resetToast": "已恢复默认。",
+  "title": "已修改的设置"
+}

@@ -1,50 +1,4 @@
 {
-  "account": {
-    "gate": {
-      "createAccount": "Create account",
-      "displayNameLabel": "Account name",
-      "displayNamePlaceholder": "Local account",
-      "firstRunForm": "Create local account",
-      "firstRunTitle": "Create local account",
-      "loading": "Loading accounts...",
-      "operationFailed": "Local account operation failed.",
-      "passwordLabel": "Password",
-      "passwordPlaceholder": "Password",
-      "unlockAccount": "Unlock",
-      "unlockForm": "Unlock local account",
-      "unlockTitle": "Unlock {name}",
-      "unknownAccount": "account"
-    },
-    "manage": {
-      "activeBadge": "Active",
-      "confirmDelete": "Confirm delete",
-      "createAccount": "Create account",
-      "delete": "Delete",
-      "description": "Create, rename, and remove local accounts on this device.",
-      "editDisplayNameLabel": "Account name",
-      "empty": "Select an account",
-      "listLabel": "Local accounts",
-      "newDisplayNameLabel": "New account name",
-      "newDisplayNamePlaceholder": "Local account",
-      "newPasswordLabel": "New account password",
-      "newPasswordPlaceholder": "Password",
-      "operationFailed": "Local account operation failed.",
-      "save": "Save",
-      "title": "Local accounts"
-    },
-    "switcher": {
-      "active": "Active account: {name}",
-      "activeBadge": "Active",
-      "confirmSwitch": "Switch",
-      "heading": "Accounts",
-      "lock": "Lock",
-      "manage": "Manage accounts",
-      "noActive": "No active account",
-      "operationFailed": "Local account operation failed.",
-      "switchPasswordLabel": "Password",
-      "switchPasswordPlaceholder": "Password"
-    }
-  },
   "a2ui": {
     "aiGenerate": "AI Generate",
     "aiPaperAnalysis": "AI Paper Analysis",
@@ -275,7 +229,18 @@
     "save": "Save",
     "saveApp": "Save",
     "searchAndManageApps": "Search, sort, and jump back into the apps that already exist.",
+    "searchLoadMore": "Load More Results",
+    "searchLoading": "Loading...",
+    "searchNoPapers": "No papers found",
+    "searchNoPapersHint": "Try different search terms or adjust filters",
+    "searchOpenAccess": "Open Access",
+    "searchPapersCount": "{count} papers",
     "searchPlaceholder": "Search templates and apps...",
+    "searchResultsFor": "Results for “{query}”",
+    "searchSortByPlaceholder": "Sort by",
+    "searchSortCitations": "Citations",
+    "searchSortNewest": "Newest",
+    "searchSortRelevance": "Relevance",
     "searchingPapers": "Searching papers...",
     "selectCategory": "Select Category",
     "selectComponent": "Click a component to inspect its properties",
@@ -358,6 +323,52 @@
     },
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out"
+  },
+  "account": {
+    "gate": {
+      "createAccount": "Create account",
+      "displayNameLabel": "Account name",
+      "displayNamePlaceholder": "Local account",
+      "firstRunForm": "Create local account",
+      "firstRunTitle": "Create local account",
+      "loading": "Loading accounts...",
+      "operationFailed": "Local account operation failed.",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "Password",
+      "unknownAccount": "account",
+      "unlockAccount": "Unlock",
+      "unlockForm": "Unlock local account",
+      "unlockTitle": "Unlock {name}"
+    },
+    "manage": {
+      "activeBadge": "Active",
+      "confirmDelete": "Confirm delete",
+      "createAccount": "Create account",
+      "delete": "Delete",
+      "description": "Create, rename, and remove local accounts on this device.",
+      "editDisplayNameLabel": "Account name",
+      "empty": "Select an account",
+      "listLabel": "Local accounts",
+      "newDisplayNameLabel": "New account name",
+      "newDisplayNamePlaceholder": "Local account",
+      "newPasswordLabel": "New account password",
+      "newPasswordPlaceholder": "Password",
+      "operationFailed": "Local account operation failed.",
+      "save": "Save",
+      "title": "Local accounts"
+    },
+    "switcher": {
+      "active": "Active account: {name}",
+      "activeBadge": "Active",
+      "confirmSwitch": "Switch",
+      "heading": "Accounts",
+      "lock": "Lock",
+      "manage": "Manage accounts",
+      "noActive": "No active account",
+      "operationFailed": "Local account operation failed.",
+      "switchPasswordLabel": "Password",
+      "switchPasswordPlaceholder": "Password"
+    }
   },
   "agentMode": {
     "a2uiTemplatePreviewTitle": "A2UI template preview",
@@ -2055,6 +2066,7 @@
       "ariaAttachImage": "Attach image",
       "ariaMessage": "Message",
       "ariaSend": "Send",
+      "ariaSending": "Sending…",
       "ariaStop": "Stop",
       "ariaToggleWebSearch": "Toggle web search",
       "ariaUploadImage": "Upload image",
@@ -2269,6 +2281,34 @@
     "copy": {
       "success": "Copied to clipboard"
     },
+    "diagnostics": {
+      "cache": "Cache",
+      "cacheValue": "write {write} · read {read}",
+      "compactHint": "Run /compact to summarise older turns and free up the window.",
+      "contextTitle": "Context",
+      "cost": "Cost",
+      "costTitle": "Cost & usage",
+      "duration": "Duration",
+      "durationValue": "{seconds}s",
+      "estimated": "estimated",
+      "fallback": "Fallback",
+      "fiveHour": "5-hour window",
+      "freshWindow": "No usage metrics yet — the context window is fresh.",
+      "inputTokens": "Input (incl. cache)",
+      "messages": "Messages",
+      "messagesValue": "{user} user · {assistant} assistant",
+      "notReported": "not reported",
+      "outputTokens": "Output",
+      "overageDisabled": "Overage disabled",
+      "resetsIn": "resets in {hours}h {minutes}m",
+      "resetting": "resetting…",
+      "sevenDay": "7-day window",
+      "turns": "Turns",
+      "turnsValue": "{assistant} assistant ({metrics} with metrics)",
+      "usageFooter": "See Settings → Subscription → Usage for charts and history.",
+      "usageTitle": "Subscription usage",
+      "windowUsed": "{pct}% used"
+    },
     "empty": {
       "brandAlt": "Cognia",
       "dismiss": "Hide this section",
@@ -2382,6 +2422,8 @@
         "title": "Skills",
         "toggleAria": "Toggle {name}"
       },
+      "subscriptionBadge": "{tier} plan",
+      "subscriptionBadgeAria": "Active Anthropic subscription: {tier}",
       "systemPromptLabel": "System prompt",
       "systemPromptPlaceholder": "Empty = use global default",
       "title": "Session settings",
@@ -2411,7 +2453,15 @@
       "export": "Export",
       "exported": "Exported as markdown.",
       "nothingToExport": "Nothing to export yet.",
-      "thinking": "Claude is thinking…"
+      "thinking": "Claude is thinking…",
+      "tips": [
+        "Type / to run a slash command.",
+        "Mention a teammate with @ in team chats.",
+        "Bookmark any message to find it again later.",
+        "Branch from any reply to explore an alternative.",
+        "Edit one of your messages to resend and steer the answer.",
+        "Export the whole conversation to Markdown anytime."
+      ]
     },
     "mcp": {
       "edit": {
@@ -2427,6 +2477,9 @@
       "ls": {
         "empty": "Empty directory",
         "title": "List directory"
+      },
+      "plan": {
+        "title": "Plan"
       },
       "webFetch": {
         "empty": "No content returned"
@@ -2641,6 +2694,9 @@
         "showSource": "Show source",
         "viewFullscreen": "View fullscreen",
         "viewSource": "View source"
+      },
+      "taskList": {
+        "progress": "Progress"
       },
       "video": {
         "bilibiliTitle": "Bilibili video",
@@ -8220,12 +8276,12 @@
       }
     },
     "actions": {
+      "clean": "Clean",
       "feed": "Feed",
       "pet": "Pet",
       "play": "Play",
-      "talk": "Talk",
       "sleep": "Sleep",
-      "clean": "Clean",
+      "talk": "Talk",
       "treat": "Treat"
     },
     "binding": {
@@ -8236,6 +8292,10 @@
     },
     "bubbles": {
       "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
+      "cleaned": {
+        "0": "Squeaky clean!",
+        "1": "So fresh!"
+      },
       "error": ["Uh oh…", "That hurt.", "Let's retry."],
       "evolved": ["I evolved!", "New me!"],
       "fed": ["Yum!", "Tasty!", "Nom nom."],
@@ -8254,22 +8314,18 @@
       "petted": ["Purr…", "That's nice.", "♥"],
       "played": ["So fun!", "Again!", "Wheee!"],
       "review": ["Take a look?", "Ready for review."],
-      "success": ["Nailed it!", "Done and done.", "Yay!"],
-      "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
-      "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
-      "waiting": ["Your call!", "Waiting on you…"],
       "slept": {
         "0": "Zzz…",
         "1": "So cozy…"
       },
-      "cleaned": {
-        "0": "Squeaky clean!",
-        "1": "So fresh!"
-      },
+      "success": ["Nailed it!", "Done and done.", "Yay!"],
+      "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
+      "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
       "treated": {
         "0": "Yummy! Thank you!",
         "1": "Best treat ever! ♥"
-      }
+      },
+      "waiting": ["Your call!", "Waiting on you…"]
     },
     "care": {
       "unwell": {
@@ -8286,11 +8342,80 @@
       "tabs": {
         "achievements": "Achievements",
         "binding": "Characters",
+        "customize": "Customize",
         "dex": "Dex",
-        "nurture": "Nurture",
-        "customize": "Customize"
+        "nurture": "Nurture"
       },
       "title": "Your Pet"
+    },
+    "customize": {
+      "appearance": {
+        "description": "Dock position, motion, skin, and size.",
+        "title": "Appearance"
+      },
+      "care": {
+        "description": "Low-power mode and care alerts.",
+        "title": "Care & performance"
+      },
+      "cosmetic": {
+        "bodyOptions": {
+          "round": "Round",
+          "tall": "Tall",
+          "wide": "Wide"
+        },
+        "bodyType": "Body",
+        "default": "Default",
+        "eyes": "Eyes",
+        "eyesOptions": {
+          "dot": "Dot",
+          "sleepy": "Sleepy",
+          "spiral": "Spiral",
+          "star": "Star",
+          "wide": "Wide",
+          "wink": "Wink"
+        },
+        "hat": "Hat",
+        "hatOptions": {
+          "beanie": "Beanie",
+          "crown": "Crown",
+          "halo": "Halo",
+          "none": "None",
+          "propeller": "Propeller",
+          "tinyduck": "Tiny duck",
+          "tophat": "Top hat",
+          "wizard": "Wizard"
+        },
+        "hatchFirst": "Hatch your pet first to customize its look.",
+        "palette": "Color",
+        "paletteOptions": {
+          "amber": "Amber",
+          "lime": "Lime",
+          "magenta": "Magenta",
+          "rose": "Rose",
+          "sky": "Sky",
+          "slate": "Slate",
+          "teal": "Teal",
+          "violet": "Violet"
+        },
+        "reset": "Reset to genetics"
+      },
+      "desktop": {
+        "description": "The free-roaming overlay companion.",
+        "title": "Desktop pet"
+      },
+      "interaction": {
+        "description": "Bubbles, talking, and proactive chatter.",
+        "title": "Interaction & speech"
+      },
+      "look": {
+        "description": "Restyle your pet without changing who it is.",
+        "title": "Look"
+      },
+      "openSettings": "Open full pet settings",
+      "sound": {
+        "description": "Sound effects and quiet hours.",
+        "title": "Sound"
+      }
     },
     "live2d": {
       "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."
@@ -8327,6 +8452,12 @@
       "legendary": "Legendary",
       "rare": "Rare",
       "uncommon": "Uncommon"
+    },
+    "rename": {
+      "cancel": "Cancel",
+      "edit": "Rename",
+      "label": "Pet name",
+      "save": "Save name"
     },
     "species": {
       "axolotl": "Axolotl",
@@ -8368,81 +8499,6 @@
       "minimize": "Minimize pet",
       "restore": "Show pet",
       "toggle": "Open pet"
-    },
-    "rename": {
-      "edit": "Rename",
-      "label": "Pet name",
-      "save": "Save name",
-      "cancel": "Cancel"
-    },
-    "customize": {
-      "appearance": {
-        "title": "Appearance",
-        "description": "Dock position, motion, skin, and size."
-      },
-      "look": {
-        "title": "Look",
-        "description": "Restyle your pet without changing who it is."
-      },
-      "interaction": {
-        "title": "Interaction & speech",
-        "description": "Bubbles, talking, and proactive chatter."
-      },
-      "sound": {
-        "title": "Sound",
-        "description": "Sound effects and quiet hours."
-      },
-      "care": {
-        "title": "Care & performance",
-        "description": "Low-power mode and care alerts."
-      },
-      "desktop": {
-        "title": "Desktop pet",
-        "description": "The free-roaming overlay companion."
-      },
-      "openSettings": "Open full pet settings",
-      "cosmetic": {
-        "palette": "Color",
-        "hat": "Hat",
-        "eyes": "Eyes",
-        "bodyType": "Body",
-        "default": "Default",
-        "reset": "Reset to genetics",
-        "hatchFirst": "Hatch your pet first to customize its look.",
-        "paletteOptions": {
-          "rose": "Rose",
-          "amber": "Amber",
-          "lime": "Lime",
-          "teal": "Teal",
-          "sky": "Sky",
-          "violet": "Violet",
-          "magenta": "Magenta",
-          "slate": "Slate"
-        },
-        "hatOptions": {
-          "none": "None",
-          "beanie": "Beanie",
-          "propeller": "Propeller",
-          "tophat": "Top hat",
-          "wizard": "Wizard",
-          "halo": "Halo",
-          "crown": "Crown",
-          "tinyduck": "Tiny duck"
-        },
-        "eyesOptions": {
-          "dot": "Dot",
-          "sleepy": "Sleepy",
-          "wide": "Wide",
-          "wink": "Wink",
-          "star": "Star",
-          "spiral": "Spiral"
-        },
-        "bodyOptions": {
-          "round": "Round",
-          "tall": "Tall",
-          "wide": "Wide"
-        }
-      }
     }
   },
   "plan": {
@@ -8593,6 +8649,7 @@
       "runtimeWarnings": {
         "python-runtime-unavailable": "Python runtime unavailable — desktop only"
       },
+      "selectAria": "Select {name}",
       "status": {
         "disabled": "Disabled",
         "enabled": "Enabled",
@@ -12609,19 +12666,6 @@
           "standard": "Standard"
         }
       },
-      "usageDisplay": {
-        "hint": {
-          "detailed": "Every section expanded with extra columns, per-session detail, and raw snapshots.",
-          "simplified": "Headline stat tiles and current-window gauges only — charts collapse to a summary.",
-          "standard": "The full dashboard with charts and the model and session tables."
-        },
-        "label": "Usage display mode",
-        "mode": {
-          "detailed": "Detailed",
-          "simplified": "Simplified",
-          "standard": "Standard"
-        }
-      },
       "auto": {
         "description": "Switch between light and dark automatically.",
         "enabledHint": "Let Cognia pick light or dark for you based on the trigger below.",
@@ -12823,9 +12867,6 @@
         "agentFlow": {
           "sectionLabel": "Agent flow"
         },
-        "usageDisplay": {
-          "sectionLabel": "Usage display"
-        },
         "density": {
           "comfortable": "Comfortable",
           "compact": "Compact",
@@ -12867,6 +12908,9 @@
           "hint": "Adjusts the roundness of cards, buttons, and inputs.",
           "label": "Radius",
           "sectionLabel": "Corner radius"
+        },
+        "usageDisplay": {
+          "sectionLabel": "Usage display"
         }
       },
       "personalization": {
@@ -12914,6 +12958,19 @@
         "title": "Theme packs"
       },
       "title": "Appearance",
+      "usageDisplay": {
+        "hint": {
+          "detailed": "Every section expanded with extra columns, per-session detail, and raw snapshots.",
+          "simplified": "Headline stat tiles and current-window gauges only — charts collapse to a summary.",
+          "standard": "The full dashboard with charts and the model and session tables."
+        },
+        "label": "Usage display mode",
+        "mode": {
+          "detailed": "Detailed",
+          "simplified": "Simplified",
+          "standard": "Standard"
+        }
+      },
       "vscode": {
         "activateButton": "Apply",
         "activeLabel": "Active",
@@ -16200,6 +16257,13 @@
         "description": "Send a gentle notification when your pet becomes unwell from neglect.",
         "label": "Care alerts"
       },
+      "customBubbles": {
+        "add": "Add catchphrase",
+        "description": "Add your own phrases; the pet sprinkles them into its reactions.",
+        "label": "Catchphrases",
+        "placeholder": "Add a catchphrase…",
+        "remove": "Remove “{phrase}”"
+      },
       "description": "Your animated desktop companion.",
       "desktopPet": {
         "clickThrough": {
@@ -16404,24 +16468,17 @@
       "sound": {
         "description": "Play short sounds when you touch the pet or it reacts. Off by default.",
         "label": "Sound effects",
+        "quietHours": {
+          "description": "Silence pet sounds during this window.",
+          "end": "To",
+          "label": "Quiet hours",
+          "start": "From"
+        },
         "volume": {
           "label": "Volume ({value}%)"
-        },
-        "quietHours": {
-          "label": "Quiet hours",
-          "description": "Silence pet sounds during this window.",
-          "start": "From",
-          "end": "To"
         }
       },
-      "title": "Pet",
-      "customBubbles": {
-        "label": "Catchphrases",
-        "description": "Add your own phrases; the pet sprinkles them into its reactions.",
-        "placeholder": "Add a catchphrase…",
-        "add": "Add catchphrase",
-        "remove": "Remove “{phrase}”"
-      }
+      "title": "Pet"
     },
     "pluginConfig": {
       "description": "Configure each enabled plugin's settings here. These are the same forms surfaced inside each plugin's detail pane; changes are picked up on the plugin's next activation.",
@@ -16529,6 +16586,11 @@
     },
     "profile": {
       "avatarClear": "Remove",
+      "avatarEditAlt": "Image being cropped",
+      "avatarEditDescription": "Drag to reposition and use the slider to zoom. The circle shows your avatar.",
+      "avatarEditReposition": "Drag to reposition the avatar",
+      "avatarEditTitle": "Edit avatar",
+      "avatarEditZoom": "Zoom",
       "avatarHint": "PNG, JPEG, WebP, GIF or AVIF. Downscaled to 128 px and stored locally.",
       "avatarInvalidType": "Unsupported image type — use PNG, JPEG, WebP, GIF or AVIF.",
       "avatarLabel": "Avatar image",
@@ -17375,6 +17437,8 @@
       "fontFamily": {
         "label": "Font family",
         "nerdFontHelper": "oh-my-posh and powerline prompts need a Nerd Font for their icons. Install one (e.g. CaskaydiaCove Nerd Font), then set it here.",
+        "pickerHint": "Pick from monospace fonts detected on this device.",
+        "pickerLabel": "Detected fonts",
         "useNerdFont": "Use recommended Nerd Font stack"
       },
       "fontSize": {
@@ -18969,7 +19033,9 @@
       "closePane": "Close pane",
       "closePanel": "Close panel",
       "newSession": "New terminal",
-      "resize": "Drag to resize the terminal dock (arrow keys also work)"
+      "resize": "Drag to resize the terminal dock (arrow keys also work)",
+      "spawnDenied": "Terminal blocked by a plugin",
+      "spawnError": "Couldn't open terminal: {message}"
     },
     "emptyState": {
       "desktop": {
@@ -19034,10 +19100,13 @@
       "auto": "Default shell",
       "bash": "bash",
       "cmd": "Command Prompt",
+      "fish": "fish",
       "label": "Choose a shell",
+      "nu": "Nushell",
       "powershell": "Windows PowerShell",
       "profilesLabel": "Profiles",
       "pwsh": "PowerShell 7",
+      "sh": "sh",
       "zsh": "zsh"
     },
     "tab": {
@@ -21117,6 +21186,34 @@
           }
         }
       },
+      "goalAnalytics": {
+        "limit": {
+          "hint": "Maximum rows.",
+          "label": "Limit"
+        },
+        "scope": {
+          "label": "Scope",
+          "options": {
+            "all": "All goals",
+            "session": "Goals by session"
+          }
+        },
+        "sessionId": {
+          "hint": "Required for session scope.",
+          "label": "Session id"
+        },
+        "windowDays": {
+          "hint": "Timeline look-back window.",
+          "label": "Window (days)"
+        }
+      },
+      "goalCommon": {
+        "goalId": {
+          "hint": "Target goal id.",
+          "label": "Goal id",
+          "placeholder": "goal_"
+        }
+      },
       "goalCompletedTrigger": {
         "characterId": {
           "label": "Character (optional)"
@@ -21133,13 +21230,6 @@
           "hint": "Limit to one outcome, e.g. completed, stopped, budget, turn, timeout. Empty fires on any.",
           "label": "Terminal status (optional)",
           "placeholder": "completed"
-        }
-      },
-      "goalCommon": {
-        "goalId": {
-          "hint": "Target goal id.",
-          "label": "Goal id",
-          "placeholder": "goal_"
         }
       },
       "goalCreate": {
@@ -21165,6 +21255,12 @@
           "label": "Start paused"
         }
       },
+      "goalEvents": {
+        "limit": {
+          "hint": "Maximum events.",
+          "label": "Limit"
+        }
+      },
       "goalList": {
         "limit": {
           "hint": "Maximum rows.",
@@ -21184,57 +21280,27 @@
           "label": "Session id"
         }
       },
-      "goalEvents": {
-        "limit": {
-          "hint": "Maximum events.",
-          "label": "Limit"
-        }
-      },
-      "goalUpdateObjective": {
-        "rawObjective": {
-          "hint": "Replacement objective.",
-          "label": "New objective"
-        }
-      },
-      "goalUpdateConfig": {
-        "configJson": {
-          "hint": "Partial GoalConfig patch.",
-          "label": "Config JSON"
-        }
-      },
-      "goalToggleSubgoal": {
-        "subgoalId": {
-          "hint": "Checklist item id.",
-          "label": "Subgoal id",
-          "placeholder": "sub_"
-        }
-      },
-      "goalAnalytics": {
-        "limit": {
-          "hint": "Maximum rows.",
-          "label": "Limit"
-        },
-        "scope": {
-          "label": "Scope",
-          "options": {
-            "all": "All goals",
-            "session": "Goals by session"
-          }
-        },
-        "sessionId": {
-          "hint": "Required for session scope.",
-          "label": "Session id"
-        },
-        "windowDays": {
-          "hint": "Timeline look-back window.",
-          "label": "Window (days)"
-        }
-      },
       "goalTemplateCommon": {
         "templateId": {
           "hint": "Target goal template id.",
           "label": "Template id",
           "placeholder": "gtpl_"
+        }
+      },
+      "goalTemplateCreateGoal": {
+        "characterId": {
+          "label": "Character (optional)"
+        },
+        "sessionId": {
+          "hint": "Chat session to drive.",
+          "label": "Session id",
+          "placeholder": "ses_"
+        }
+      },
+      "goalTemplateFavorite": {
+        "isFavorite": {
+          "hint": "Set the template favorite state.",
+          "label": "Favorite"
         }
       },
       "goalTemplateList": {
@@ -21254,16 +21320,6 @@
           "hint": "Match by id, title, or objective text.",
           "label": "Search",
           "placeholder": "release"
-        }
-      },
-      "goalTemplateCreateGoal": {
-        "characterId": {
-          "label": "Character (optional)"
-        },
-        "sessionId": {
-          "hint": "Chat session to drive.",
-          "label": "Session id",
-          "placeholder": "ses_"
         }
       },
       "goalTemplateUpsert": {
@@ -21290,494 +21346,23 @@
           "placeholder": "Release review"
         }
       },
-      "goalTemplateFavorite": {
-        "isFavorite": {
-          "hint": "Set the template favorite state.",
-          "label": "Favorite"
+      "goalToggleSubgoal": {
+        "subgoalId": {
+          "hint": "Checklist item id.",
+          "label": "Subgoal id",
+          "placeholder": "sub_"
         }
       },
-      "planCommon": {
-        "planId": {
-          "hint": "Target AgentPlan id.",
-          "label": "Plan id",
-          "placeholder": "plan_"
-        }
-      },
-      "planCreate": {
-        "characterId": {
-          "label": "Character (optional)"
-        },
+      "goalUpdateConfig": {
         "configJson": {
-          "hint": "Partial PlanConfig override.",
+          "hint": "Partial GoalConfig patch.",
           "label": "Config JSON"
-        },
-        "description": {
-          "hint": "Optional plan context.",
-          "label": "Description"
-        },
-        "executionMode": {
-          "label": "Execution mode",
-          "options": {
-            "auto": "Auto",
-            "in_session": "In session",
-            "orchestrated": "Orchestrated"
-          }
-        },
-        "metadataJson": {
-          "hint": "Structured plan metadata.",
-          "label": "Metadata JSON"
-        },
-        "sessionId": {
-          "hint": "Chat session that owns the plan.",
-          "label": "Session id",
-          "placeholder": "ses_"
-        },
-        "source": {
-          "label": "Source",
-          "options": {
-            "agent_tool": "Agent tool",
-            "exit_plan_mode": "Exit plan mode",
-            "goal_projection": "Goal projection",
-            "manual": "Manual",
-            "planner_llm": "Planner LLM",
-            "team_projection": "Team projection"
-          }
-        },
-        "stepsJson": {
-          "hint": "Array of CreatePlanStepInput rows.",
-          "label": "Steps JSON"
-        },
-        "title": {
-          "hint": "Plan title shown in trackers.",
-          "label": "Title",
-          "placeholder": "Ship feature"
         }
       },
-      "planList": {
-        "limit": {
-          "hint": "Maximum rows.",
-          "label": "Limit"
-        },
-        "mode": {
-          "label": "Read mode",
-          "options": {
-            "all": "All plans",
-            "executingForSession": "Executing for session",
-            "openForSession": "Open for session",
-            "session": "Plans by session"
-          }
-        },
-        "projectId": {
-          "hint": "Override the active workspace scope.",
-          "label": "Project id (optional)"
-        },
-        "sessionId": {
-          "hint": "Required for session-scoped modes.",
-          "label": "Session id"
-        },
-        "status": {
-          "label": "Status filter",
-          "options": {
-            "any": "Any",
-            "approved": "Approved",
-            "awaiting_approval": "Awaiting approval",
-            "cancelled": "Cancelled",
-            "completed": "Completed",
-            "draft": "Draft",
-            "executing": "Executing",
-            "failed": "Failed",
-            "paused": "Paused"
-          }
-        }
-      },
-      "planEvents": {
-        "limit": {
-          "hint": "Maximum events.",
-          "label": "Limit"
-        }
-      },
-      "planUpdateDraft": {
-        "configJson": {
-          "hint": "Partial PlanConfig patch.",
-          "label": "Config JSON"
-        },
-        "description": {
-          "hint": "Replacement description.",
-          "label": "Description"
-        },
-        "executionMode": {
-          "label": "Execution mode",
-          "options": {
-            "auto": "Auto",
-            "in_session": "In session",
-            "orchestrated": "Orchestrated",
-            "unchanged": "Unchanged"
-          }
-        },
-        "metadataJson": {
-          "hint": "Replacement metadata object.",
-          "label": "Metadata JSON"
-        },
-        "stepsJson": {
-          "hint": "Full PlanStep array for draft replacement.",
-          "label": "Steps JSON"
-        },
-        "title": {
-          "hint": "Replacement title.",
-          "label": "Title"
-        }
-      },
-      "planReject": {
-        "feedback": {
-          "hint": "Reason recorded on the rejection event.",
-          "label": "Feedback"
-        }
-      },
-      "planRefine": {
-        "customInstructions": {
-          "hint": "Additional instruction passed to the planner.",
-          "label": "Custom instructions"
-        },
-        "failedStepId": {
-          "hint": "Optional failing step id for repair flows.",
-          "label": "Failed step id"
-        },
-        "refinementType": {
-          "label": "Refinement type",
-          "options": {
-            "expand": "Expand",
-            "optimize": "Optimize",
-            "repair": "Repair",
-            "reorder": "Reorder",
-            "simplify": "Simplify"
-          }
-        },
-        "trigger": {
-          "label": "Trigger",
-          "options": {
-            "judge_deviation": "Judge deviation",
-            "manual": "Manual",
-            "step_failure": "Step failure"
-          }
-        }
-      },
-      "planSetStepStatus": {
-        "attempts": {
-          "hint": "Retry counter.",
-          "label": "Attempts"
-        },
-        "error": {
-          "hint": "Failure summary.",
-          "label": "Error"
-        },
-        "outputJson": {
-          "hint": "Structured step output.",
-          "label": "Output JSON"
-        },
-        "result": {
-          "hint": "Short result summary.",
-          "label": "Result"
-        },
-        "status": {
-          "label": "Status",
-          "options": {
-            "blocked": "Blocked",
-            "completed": "Completed",
-            "failed": "Failed",
-            "in_progress": "In progress",
-            "pending": "Pending",
-            "ready": "Ready",
-            "skipped": "Skipped"
-          }
-        },
-        "stepId": {
-          "hint": "Target plan step id.",
-          "label": "Step id",
-          "placeholder": "step_"
-        }
-      },
-      "schedulerTaskCommon": {
-        "taskId": {
-          "hint": "Target scheduled task id.",
-          "label": "Task id",
-          "placeholder": "task_"
-        }
-      },
-      "schedulerTaskCreate": {
-        "configJson": {
-          "hint": "Partial TaskExecutionConfig override.",
-          "label": "Config JSON"
-        },
-        "cronExpression": {
-          "hint": "Standard five-field cron expression.",
-          "label": "Cron"
-        },
-        "dependsOnRaw": {
-          "hint": "Comma-separated task ids that must complete first.",
-          "label": "Dependencies"
-        },
-        "description": {
-          "hint": "Optional task description.",
-          "label": "Description"
-        },
-        "endAt": {
-          "hint": "Optional ISO date after which the task expires.",
-          "label": "End at"
-        },
-        "eventType": {
-          "hint": "Scheduler event type for event-triggered tasks.",
-          "label": "Event type"
-        },
-        "intervalMs": {
-          "hint": "Milliseconds between interval fires.",
-          "label": "Interval (ms)"
-        },
-        "jitterMs": {
-          "hint": "Maximum random delay added to each armed fire.",
-          "label": "Jitter (ms)"
-        },
-        "name": {
-          "hint": "Scheduled task name.",
-          "label": "Name",
-          "placeholder": "Nightly run"
-        },
-        "notificationJson": {
-          "hint": "Partial TaskNotificationConfig override.",
-          "label": "Notification JSON"
-        },
-        "onFailureTaskIdsRaw": {
-          "hint": "Comma-separated task ids fired after failure.",
-          "label": "On failure"
-        },
-        "onSuccessTaskIdsRaw": {
-          "hint": "Comma-separated task ids fired after success.",
-          "label": "On success"
-        },
-        "payloadJson": {
-          "hint": "ScheduledTaskPayload object passed to the task executor.",
-          "label": "Payload JSON"
-        },
-        "runAt": {
-          "hint": "ISO date for a one-time trigger.",
-          "label": "Run at"
-        },
-        "tagsRaw": {
-          "hint": "Comma-separated task tags.",
-          "label": "Tags"
-        },
-        "timezone": {
-          "hint": "Timezone used by cron expressions.",
-          "label": "Timezone"
-        },
-        "triggerType": {
-          "label": "Trigger",
-          "options": {
-            "cron": "Cron",
-            "event": "Event",
-            "interval": "Interval",
-            "once": "Once"
-          }
-        },
-        "type": {
-          "label": "Task type",
-          "options": {
-            "agent": "Agent",
-            "agent-team": "Agent team",
-            "ai-generation": "AI generation",
-            "backup": "Backup",
-            "chat": "Chat",
-            "connection:outbound:send": "Connector outbound send",
-            "connection:scheduled:digest": "Connector digest",
-            "custom": "Custom",
-            "external-agent": "External agent",
-            "goal": "Goal",
-            "im-push": "IM push",
-            "plan": "Plan",
-            "plugin": "Plugin",
-            "script": "Script",
-            "skill": "Skill",
-            "sync": "Sync",
-            "test": "Test",
-            "twin": "Twin",
-            "wiki-rebuild": "Wiki rebuild",
-            "workflow": "Workflow"
-          }
-        }
-      },
-      "schedulerTaskExecutions": {
-        "limit": {
-          "hint": "Maximum execution rows.",
-          "label": "Limit"
-        }
-      },
-      "schedulerTaskBackfill": {
-        "end": {
-          "hint": "ISO timestamp where the backfill window ends.",
-          "label": "End"
-        },
-        "start": {
-          "hint": "ISO timestamp where the backfill window starts.",
-          "label": "Start"
-        }
-      },
-      "schedulerTaskExport": {
-        "taskIdsRaw": {
-          "hint": "Comma-separated task ids. Leave empty to export every task.",
-          "label": "Task ids"
-        }
-      },
-      "schedulerTaskImport": {
-        "dataJson": {
-          "hint": "Scheduler task export bundle JSON.",
-          "label": "Import JSON"
-        },
-        "mode": {
-          "label": "Mode",
-          "options": {
-            "merge": "Merge",
-            "replace": "Replace"
-          }
-        }
-      },
-      "schedulerUpcoming": {
-        "limit": {
-          "hint": "Maximum upcoming task fires.",
-          "label": "Limit"
-        }
-      },
-      "schedulerExecutionsRecent": {
-        "limit": {
-          "hint": "Maximum recent execution rows.",
-          "label": "Limit"
-        }
-      },
-      "schedulerExecutionGet": {
-        "executionId": {
-          "hint": "Target scheduler execution id.",
-          "label": "Execution id",
-          "placeholder": "exec_"
-        }
-      },
-      "schedulerEventTrigger": {
-        "eventSource": {
-          "hint": "Optional scheduler event source.",
-          "label": "Event source"
-        },
-        "eventType": {
-          "hint": "Scheduler event type to fan out.",
-          "label": "Event type"
-        },
-        "payloadJson": {
-          "hint": "Optional event payload object.",
-          "label": "Payload JSON"
-        }
-      },
-      "schedulerTaskList": {
-        "limit": {
-          "hint": "Maximum tasks.",
-          "label": "Limit"
-        },
-        "search": {
-          "hint": "Match task name or description.",
-          "label": "Search"
-        },
-        "statusesRaw": {
-          "hint": "Comma-separated statuses: active, paused, disabled, expired.",
-          "label": "Statuses"
-        },
-        "tagsRaw": {
-          "hint": "Comma-separated tags.",
-          "label": "Tags"
-        },
-        "typesRaw": {
-          "hint": "Comma-separated task types.",
-          "label": "Types"
-        }
-      },
-      "schedulerTaskUpdate": {
-        "configJson": {
-          "hint": "Partial TaskExecutionConfig patch.",
-          "label": "Config JSON"
-        },
-        "cronExpression": {
-          "hint": "Replacement cron expression.",
-          "label": "Cron"
-        },
-        "dependsOnRaw": {
-          "hint": "Comma-separated dependency task ids.",
-          "label": "Dependencies"
-        },
-        "description": {
-          "hint": "Replacement description.",
-          "label": "Description"
-        },
-        "endAt": {
-          "hint": "Optional ISO date after which the task expires.",
-          "label": "End at"
-        },
-        "eventType": {
-          "hint": "Scheduler event type.",
-          "label": "Event type"
-        },
-        "intervalMs": {
-          "hint": "Replacement interval in milliseconds.",
-          "label": "Interval (ms)"
-        },
-        "jitterMs": {
-          "hint": "Replacement maximum random delay.",
-          "label": "Jitter (ms)"
-        },
-        "name": {
-          "hint": "Replacement task name.",
-          "label": "Name"
-        },
-        "notificationJson": {
-          "hint": "Partial notification patch.",
-          "label": "Notification JSON"
-        },
-        "onFailureTaskIdsRaw": {
-          "hint": "Comma-separated task ids fired after failure.",
-          "label": "On failure"
-        },
-        "onSuccessTaskIdsRaw": {
-          "hint": "Comma-separated task ids fired after success.",
-          "label": "On success"
-        },
-        "payloadJson": {
-          "hint": "Payload patch merged by task type normalization.",
-          "label": "Payload JSON"
-        },
-        "runAt": {
-          "hint": "Replacement ISO run date.",
-          "label": "Run at"
-        },
-        "status": {
-          "label": "Status",
-          "options": {
-            "active": "Active",
-            "disabled": "Disabled",
-            "expired": "Expired",
-            "paused": "Paused",
-            "unchanged": "Unchanged"
-          }
-        },
-        "tagsRaw": {
-          "hint": "Comma-separated replacement tags.",
-          "label": "Tags"
-        },
-        "timezone": {
-          "hint": "Replacement cron timezone.",
-          "label": "Timezone"
-        },
-        "triggerType": {
-          "label": "Trigger",
-          "options": {
-            "cron": "Cron",
-            "event": "Event",
-            "interval": "Interval",
-            "once": "Once",
-            "unchanged": "Unchanged"
-          }
+      "goalUpdateObjective": {
+        "rawObjective": {
+          "hint": "Replacement objective.",
+          "label": "New objective"
         }
       },
       "groupAnnotation": {
@@ -22061,6 +21646,206 @@
         "useExpression": "Use expression",
         "usePicker": "Pick from list"
       },
+      "planCommon": {
+        "planId": {
+          "hint": "Target AgentPlan id.",
+          "label": "Plan id",
+          "placeholder": "plan_"
+        }
+      },
+      "planCreate": {
+        "characterId": {
+          "label": "Character (optional)"
+        },
+        "configJson": {
+          "hint": "Partial PlanConfig override.",
+          "label": "Config JSON"
+        },
+        "description": {
+          "hint": "Optional plan context.",
+          "label": "Description"
+        },
+        "executionMode": {
+          "label": "Execution mode",
+          "options": {
+            "auto": "Auto",
+            "in_session": "In session",
+            "orchestrated": "Orchestrated"
+          }
+        },
+        "metadataJson": {
+          "hint": "Structured plan metadata.",
+          "label": "Metadata JSON"
+        },
+        "sessionId": {
+          "hint": "Chat session that owns the plan.",
+          "label": "Session id",
+          "placeholder": "ses_"
+        },
+        "source": {
+          "label": "Source",
+          "options": {
+            "agent_tool": "Agent tool",
+            "exit_plan_mode": "Exit plan mode",
+            "goal_projection": "Goal projection",
+            "manual": "Manual",
+            "planner_llm": "Planner LLM",
+            "team_projection": "Team projection"
+          }
+        },
+        "stepsJson": {
+          "hint": "Array of CreatePlanStepInput rows.",
+          "label": "Steps JSON"
+        },
+        "title": {
+          "hint": "Plan title shown in trackers.",
+          "label": "Title",
+          "placeholder": "Ship feature"
+        }
+      },
+      "planEvents": {
+        "limit": {
+          "hint": "Maximum events.",
+          "label": "Limit"
+        }
+      },
+      "planList": {
+        "limit": {
+          "hint": "Maximum rows.",
+          "label": "Limit"
+        },
+        "mode": {
+          "label": "Read mode",
+          "options": {
+            "all": "All plans",
+            "executingForSession": "Executing for session",
+            "openForSession": "Open for session",
+            "session": "Plans by session"
+          }
+        },
+        "projectId": {
+          "hint": "Override the active workspace scope.",
+          "label": "Project id (optional)"
+        },
+        "sessionId": {
+          "hint": "Required for session-scoped modes.",
+          "label": "Session id"
+        },
+        "status": {
+          "label": "Status filter",
+          "options": {
+            "any": "Any",
+            "approved": "Approved",
+            "awaiting_approval": "Awaiting approval",
+            "cancelled": "Cancelled",
+            "completed": "Completed",
+            "draft": "Draft",
+            "executing": "Executing",
+            "failed": "Failed",
+            "paused": "Paused"
+          }
+        }
+      },
+      "planRefine": {
+        "customInstructions": {
+          "hint": "Additional instruction passed to the planner.",
+          "label": "Custom instructions"
+        },
+        "failedStepId": {
+          "hint": "Optional failing step id for repair flows.",
+          "label": "Failed step id"
+        },
+        "refinementType": {
+          "label": "Refinement type",
+          "options": {
+            "expand": "Expand",
+            "optimize": "Optimize",
+            "reorder": "Reorder",
+            "repair": "Repair",
+            "simplify": "Simplify"
+          }
+        },
+        "trigger": {
+          "label": "Trigger",
+          "options": {
+            "judge_deviation": "Judge deviation",
+            "manual": "Manual",
+            "step_failure": "Step failure"
+          }
+        }
+      },
+      "planReject": {
+        "feedback": {
+          "hint": "Reason recorded on the rejection event.",
+          "label": "Feedback"
+        }
+      },
+      "planSetStepStatus": {
+        "attempts": {
+          "hint": "Retry counter.",
+          "label": "Attempts"
+        },
+        "error": {
+          "hint": "Failure summary.",
+          "label": "Error"
+        },
+        "outputJson": {
+          "hint": "Structured step output.",
+          "label": "Output JSON"
+        },
+        "result": {
+          "hint": "Short result summary.",
+          "label": "Result"
+        },
+        "status": {
+          "label": "Status",
+          "options": {
+            "blocked": "Blocked",
+            "completed": "Completed",
+            "failed": "Failed",
+            "in_progress": "In progress",
+            "pending": "Pending",
+            "ready": "Ready",
+            "skipped": "Skipped"
+          }
+        },
+        "stepId": {
+          "hint": "Target plan step id.",
+          "label": "Step id",
+          "placeholder": "step_"
+        }
+      },
+      "planUpdateDraft": {
+        "configJson": {
+          "hint": "Partial PlanConfig patch.",
+          "label": "Config JSON"
+        },
+        "description": {
+          "hint": "Replacement description.",
+          "label": "Description"
+        },
+        "executionMode": {
+          "label": "Execution mode",
+          "options": {
+            "auto": "Auto",
+            "in_session": "In session",
+            "orchestrated": "Orchestrated",
+            "unchanged": "Unchanged"
+          }
+        },
+        "metadataJson": {
+          "hint": "Replacement metadata object.",
+          "label": "Metadata JSON"
+        },
+        "stepsJson": {
+          "hint": "Full PlanStep array for draft replacement.",
+          "label": "Steps JSON"
+        },
+        "title": {
+          "hint": "Replacement title.",
+          "label": "Title"
+        }
+      },
       "pluginInvoke": {
         "argsJson": {
           "hint": "Forwarded to the plugin task handler.",
@@ -22086,6 +21871,290 @@
           "empty": "Select a plugin first",
           "label": "Tool",
           "placeholder": "Select a tool"
+        }
+      },
+      "schedulerEventTrigger": {
+        "eventSource": {
+          "hint": "Optional scheduler event source.",
+          "label": "Event source"
+        },
+        "eventType": {
+          "hint": "Scheduler event type to fan out.",
+          "label": "Event type"
+        },
+        "payloadJson": {
+          "hint": "Optional event payload object.",
+          "label": "Payload JSON"
+        }
+      },
+      "schedulerExecutionGet": {
+        "executionId": {
+          "hint": "Target scheduler execution id.",
+          "label": "Execution id",
+          "placeholder": "exec_"
+        }
+      },
+      "schedulerExecutionsRecent": {
+        "limit": {
+          "hint": "Maximum recent execution rows.",
+          "label": "Limit"
+        }
+      },
+      "schedulerTaskBackfill": {
+        "end": {
+          "hint": "ISO timestamp where the backfill window ends.",
+          "label": "End"
+        },
+        "start": {
+          "hint": "ISO timestamp where the backfill window starts.",
+          "label": "Start"
+        }
+      },
+      "schedulerTaskCommon": {
+        "taskId": {
+          "hint": "Target scheduled task id.",
+          "label": "Task id",
+          "placeholder": "task_"
+        }
+      },
+      "schedulerTaskCreate": {
+        "configJson": {
+          "hint": "Partial TaskExecutionConfig override.",
+          "label": "Config JSON"
+        },
+        "cronExpression": {
+          "hint": "Standard five-field cron expression.",
+          "label": "Cron"
+        },
+        "dependsOnRaw": {
+          "hint": "Comma-separated task ids that must complete first.",
+          "label": "Dependencies"
+        },
+        "description": {
+          "hint": "Optional task description.",
+          "label": "Description"
+        },
+        "endAt": {
+          "hint": "Optional ISO date after which the task expires.",
+          "label": "End at"
+        },
+        "eventType": {
+          "hint": "Scheduler event type for event-triggered tasks.",
+          "label": "Event type"
+        },
+        "intervalMs": {
+          "hint": "Milliseconds between interval fires.",
+          "label": "Interval (ms)"
+        },
+        "jitterMs": {
+          "hint": "Maximum random delay added to each armed fire.",
+          "label": "Jitter (ms)"
+        },
+        "name": {
+          "hint": "Scheduled task name.",
+          "label": "Name",
+          "placeholder": "Nightly run"
+        },
+        "notificationJson": {
+          "hint": "Partial TaskNotificationConfig override.",
+          "label": "Notification JSON"
+        },
+        "onFailureTaskIdsRaw": {
+          "hint": "Comma-separated task ids fired after failure.",
+          "label": "On failure"
+        },
+        "onSuccessTaskIdsRaw": {
+          "hint": "Comma-separated task ids fired after success.",
+          "label": "On success"
+        },
+        "payloadJson": {
+          "hint": "ScheduledTaskPayload object passed to the task executor.",
+          "label": "Payload JSON"
+        },
+        "runAt": {
+          "hint": "ISO date for a one-time trigger.",
+          "label": "Run at"
+        },
+        "tagsRaw": {
+          "hint": "Comma-separated task tags.",
+          "label": "Tags"
+        },
+        "timezone": {
+          "hint": "Timezone used by cron expressions.",
+          "label": "Timezone"
+        },
+        "triggerType": {
+          "label": "Trigger",
+          "options": {
+            "cron": "Cron",
+            "event": "Event",
+            "interval": "Interval",
+            "once": "Once"
+          }
+        },
+        "type": {
+          "label": "Task type",
+          "options": {
+            "agent": "Agent",
+            "agent-team": "Agent team",
+            "ai-generation": "AI generation",
+            "backup": "Backup",
+            "chat": "Chat",
+            "connection:outbound:send": "Connector outbound send",
+            "connection:scheduled:digest": "Connector digest",
+            "custom": "Custom",
+            "external-agent": "External agent",
+            "goal": "Goal",
+            "im-push": "IM push",
+            "plan": "Plan",
+            "plugin": "Plugin",
+            "script": "Script",
+            "skill": "Skill",
+            "sync": "Sync",
+            "test": "Test",
+            "twin": "Twin",
+            "wiki-rebuild": "Wiki rebuild",
+            "workflow": "Workflow"
+          }
+        }
+      },
+      "schedulerTaskExecutions": {
+        "limit": {
+          "hint": "Maximum execution rows.",
+          "label": "Limit"
+        }
+      },
+      "schedulerTaskExport": {
+        "taskIdsRaw": {
+          "hint": "Comma-separated task ids. Leave empty to export every task.",
+          "label": "Task ids"
+        }
+      },
+      "schedulerTaskImport": {
+        "dataJson": {
+          "hint": "Scheduler task export bundle JSON.",
+          "label": "Import JSON"
+        },
+        "mode": {
+          "label": "Mode",
+          "options": {
+            "merge": "Merge",
+            "replace": "Replace"
+          }
+        }
+      },
+      "schedulerTaskList": {
+        "limit": {
+          "hint": "Maximum tasks.",
+          "label": "Limit"
+        },
+        "search": {
+          "hint": "Match task name or description.",
+          "label": "Search"
+        },
+        "statusesRaw": {
+          "hint": "Comma-separated statuses: active, paused, disabled, expired.",
+          "label": "Statuses"
+        },
+        "tagsRaw": {
+          "hint": "Comma-separated tags.",
+          "label": "Tags"
+        },
+        "typesRaw": {
+          "hint": "Comma-separated task types.",
+          "label": "Types"
+        }
+      },
+      "schedulerTaskUpdate": {
+        "configJson": {
+          "hint": "Partial TaskExecutionConfig patch.",
+          "label": "Config JSON"
+        },
+        "cronExpression": {
+          "hint": "Replacement cron expression.",
+          "label": "Cron"
+        },
+        "dependsOnRaw": {
+          "hint": "Comma-separated dependency task ids.",
+          "label": "Dependencies"
+        },
+        "description": {
+          "hint": "Replacement description.",
+          "label": "Description"
+        },
+        "endAt": {
+          "hint": "Optional ISO date after which the task expires.",
+          "label": "End at"
+        },
+        "eventType": {
+          "hint": "Scheduler event type.",
+          "label": "Event type"
+        },
+        "intervalMs": {
+          "hint": "Replacement interval in milliseconds.",
+          "label": "Interval (ms)"
+        },
+        "jitterMs": {
+          "hint": "Replacement maximum random delay.",
+          "label": "Jitter (ms)"
+        },
+        "name": {
+          "hint": "Replacement task name.",
+          "label": "Name"
+        },
+        "notificationJson": {
+          "hint": "Partial notification patch.",
+          "label": "Notification JSON"
+        },
+        "onFailureTaskIdsRaw": {
+          "hint": "Comma-separated task ids fired after failure.",
+          "label": "On failure"
+        },
+        "onSuccessTaskIdsRaw": {
+          "hint": "Comma-separated task ids fired after success.",
+          "label": "On success"
+        },
+        "payloadJson": {
+          "hint": "Payload patch merged by task type normalization.",
+          "label": "Payload JSON"
+        },
+        "runAt": {
+          "hint": "Replacement ISO run date.",
+          "label": "Run at"
+        },
+        "status": {
+          "label": "Status",
+          "options": {
+            "active": "Active",
+            "disabled": "Disabled",
+            "expired": "Expired",
+            "paused": "Paused",
+            "unchanged": "Unchanged"
+          }
+        },
+        "tagsRaw": {
+          "hint": "Comma-separated replacement tags.",
+          "label": "Tags"
+        },
+        "timezone": {
+          "hint": "Replacement cron timezone.",
+          "label": "Timezone"
+        },
+        "triggerType": {
+          "label": "Trigger",
+          "options": {
+            "cron": "Cron",
+            "event": "Event",
+            "interval": "Interval",
+            "once": "Once",
+            "unchanged": "Unchanged"
+          }
+        }
+      },
+      "schedulerUpcoming": {
+        "limit": {
+          "hint": "Maximum upcoming task fires.",
+          "label": "Limit"
         }
       },
       "setVariable": {
@@ -22922,6 +22991,90 @@
             "label": "Issue → PR loop"
           }
         },
+        "goal": {
+          "analytics": {
+            "description": "Compute goal completion, status, token, and timeline analytics.",
+            "label": "Goal analytics"
+          },
+          "clearSubgoals": {
+            "description": "Remove the persisted subgoal checklist from a goal.",
+            "label": "Clear subgoals"
+          },
+          "create": {
+            "description": "Create a self-driving /goal for a chat session through the GoalRuntime.",
+            "label": "Create goal"
+          },
+          "decomposeSubgoals": {
+            "description": "Use the configured judge model to decompose a goal into a checklist.",
+            "label": "Decompose subgoals"
+          },
+          "delete": {
+            "description": "Delete a goal and its event log through GoalRuntime cleanup.",
+            "label": "Delete goal"
+          },
+          "events": {
+            "description": "Read a goal's lifecycle event timeline.",
+            "label": "List goal events"
+          },
+          "get": {
+            "description": "Read one goal by id and return a redaction-safe snapshot.",
+            "label": "Get goal"
+          },
+          "list": {
+            "description": "List goals globally, by session, or the active/open goal for a session.",
+            "label": "List goals"
+          },
+          "pause": {
+            "description": "Pause an active goal and abort its in-flight turn driver.",
+            "label": "Pause goal"
+          },
+          "preempt": {
+            "description": "Mark an active goal as superseded by external work.",
+            "label": "Preempt goal"
+          },
+          "resume": {
+            "description": "Resume a paused goal so its turn loop can continue.",
+            "label": "Resume goal"
+          },
+          "stop": {
+            "description": "Stop a non-terminal goal and fire terminal goal side effects.",
+            "label": "Stop goal"
+          },
+          "template": {
+            "createGoal": {
+              "description": "Resolve a goal template and create a GoalRuntime-backed goal for a session.",
+              "label": "Create goal from template"
+            },
+            "delete": {
+              "description": "Delete a user-authored goal template; built-in templates remain protected.",
+              "label": "Delete goal template"
+            },
+            "favorite": {
+              "description": "Set a goal template's favorite flag so it sorts near the top of pickers.",
+              "label": "Favorite goal template"
+            },
+            "list": {
+              "description": "List seeded and user-authored goal templates with favorite/search filters.",
+              "label": "List goal templates"
+            },
+            "upsert": {
+              "description": "Create or update a user goal template while preserving built-in clone semantics.",
+              "label": "Upsert goal template"
+            }
+          },
+          "toggleSubgoal": {
+            "description": "Flip one subgoal checklist item's done state.",
+            "label": "Toggle subgoal"
+          },
+          "updateConfig": {
+            "description": "Patch pacing, budget, judge, and timeout settings on a non-terminal goal.",
+            "label": "Update goal config"
+          },
+          "updateObjective": {
+            "description": "Replace a non-terminal goal objective via the GoalRuntime redaction path.",
+            "label": "Update goal objective"
+          }
+        },
         "mcp": {
           "invokeTool": {
             "description": "Calls a tool on a configured MCP server.",
@@ -22938,10 +23091,150 @@
             "label": "Store memory"
           }
         },
+        "plan": {
+          "approve": {
+            "description": "Move a draft or pending plan into the approved state.",
+            "label": "Approve plan"
+          },
+          "cancel": {
+            "description": "Cancel a non-terminal plan and emit the runtime exit event.",
+            "label": "Cancel plan"
+          },
+          "create": {
+            "description": "Create an AgentPlan for a session through the PlanRuntime lifecycle.",
+            "label": "Create plan"
+          },
+          "delete": {
+            "description": "Delete a plan and its event log through PlanRuntime cleanup.",
+            "label": "Delete plan"
+          },
+          "events": {
+            "description": "Read the newest lifecycle and step events for a plan.",
+            "label": "List plan events"
+          },
+          "get": {
+            "description": "Read one persisted AgentPlan by id.",
+            "label": "Get plan"
+          },
+          "list": {
+            "description": "List plans by workspace or session, with optional status filtering.",
+            "label": "List plans"
+          },
+          "pause": {
+            "description": "Pause an executing plan and abort the active run controller.",
+            "label": "Pause plan"
+          },
+          "refine": {
+            "description": "Use the planner model to repair, expand, simplify, reorder, or optimize a plan.",
+            "label": "Refine plan"
+          },
+          "reject": {
+            "description": "Cancel a pending plan and record rejection feedback.",
+            "label": "Reject plan"
+          },
+          "resume": {
+            "description": "Resume a paused plan into the executing state.",
+            "label": "Resume plan"
+          },
+          "run": {
+            "description": "Execute an approved plan through the orchestrated PlanRuntime path.",
+            "label": "Run plan"
+          },
+          "setStepStatus": {
+            "description": "Update one plan step's status and recompute plan progress counts.",
+            "label": "Set plan step status"
+          },
+          "updateDraft": {
+            "description": "Patch a non-executing plan's title, steps, config, or metadata.",
+            "label": "Update plan draft"
+          }
+        },
         "plugin": {
           "invoke": {
             "description": "Calls a plugin task handler registered in the plugin runtime.",
             "label": "Invoke plugin"
+          }
+        },
+        "scheduler": {
+          "event": {
+            "trigger": {
+              "description": "Fan out an event into event-triggered scheduler tasks.",
+              "label": "Trigger scheduler event"
+            }
+          },
+          "execution": {
+            "get": {
+              "description": "Read one scheduler execution record by id.",
+              "label": "Get scheduler execution"
+            }
+          },
+          "executions": {
+            "recent": {
+              "description": "Read recent scheduler execution rows across all scheduled tasks.",
+              "label": "List recent scheduler executions"
+            }
+          },
+          "statistics": {
+            "description": "Read aggregate scheduler task and execution counters.",
+            "label": "Get scheduler statistics"
+          },
+          "status": {
+            "description": "Read native scheduler daemon health and lifecycle status.",
+            "label": "Get scheduler status"
+          },
+          "task": {
+            "backfill": {
+              "description": "Replay one scheduled task across an explicit time window.",
+              "label": "Backfill scheduled task"
+            },
+            "create": {
+              "description": "Create a native scheduler task through the TaskScheduler lifecycle.",
+              "label": "Create scheduled task"
+            },
+            "delete": {
+              "description": "Delete a scheduler task and its execution records.",
+              "label": "Delete scheduled task"
+            },
+            "executions": {
+              "description": "Read recent execution history for a scheduler task.",
+              "label": "List task executions"
+            },
+            "export": {
+              "description": "Export selected scheduler task definitions for migration or backup.",
+              "label": "Export scheduled tasks"
+            },
+            "get": {
+              "description": "Read one native scheduled task by id.",
+              "label": "Get scheduled task"
+            },
+            "import": {
+              "description": "Import scheduler task definitions from an exported JSON bundle.",
+              "label": "Import scheduled tasks"
+            },
+            "list": {
+              "description": "List native scheduler tasks with optional status, type, tag, and search filters.",
+              "label": "List scheduled tasks"
+            },
+            "pause": {
+              "description": "Pause a native scheduler task and disarm its next run.",
+              "label": "Pause scheduled task"
+            },
+            "resume": {
+              "description": "Resume a paused scheduler task and recalculate its next run.",
+              "label": "Resume scheduled task"
+            },
+            "runNow": {
+              "description": "Execute a scheduler task immediately through its registered task executor.",
+              "label": "Run scheduled task now"
+            },
+            "update": {
+              "description": "Patch a scheduled task's metadata, trigger, payload, config, or lifecycle status.",
+              "label": "Update scheduled task"
+            }
+          },
+          "upcoming": {
+            "description": "Read the next armed scheduler task fires across the task registry.",
+            "label": "List upcoming scheduled tasks"
           }
         },
         "skill": {
@@ -23079,6 +23372,10 @@
         "break": {
           "description": "Stops the innermost loop after the current iteration.",
           "label": "Break"
+        },
+        "catch": {
+          "description": "Runs only when the workflow fails terminally; receives the error and drives a recovery / notify path.",
+          "label": "Catch failure"
         },
         "continue": {
           "description": "Skips the rest of the current loop iteration.",

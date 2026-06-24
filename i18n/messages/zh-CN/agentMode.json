@@ -1,0 +1,71 @@
+{
+  "a2uiTemplatePreviewTitle": "A2UI 模板预览",
+  "agentTeams": "代理团队",
+  "builtInModes": "内置模式",
+  "create": "创建",
+  "createCustomMode": "新建自定义模式",
+  "createCustomModeDesc": "定义一个具有特定行为的自定义代理模式",
+  "createTeam": "创建团队",
+  "customModes": "自定义模式",
+  "deleteMode": "删除模式",
+  "deleteModeConfirm": "确定删除此模式？",
+  "description": "描述",
+  "descriptionPlaceholder": "这个代理是做什么的？",
+  "duplicateMode": "复制模式",
+  "editMode": "编辑模式",
+  "livePreview": "实时预览",
+  "modes": {
+    "academic": {
+      "description": "搜索、分析与学习学术论文",
+      "name": "学术研究"
+    },
+    "build": {
+      "description": "完全访问 —— 实施变更、编辑文件并运行命令",
+      "name": "构建"
+    },
+    "code-gen": {
+      "description": "生成与解释多种语言的代码",
+      "name": "代码生成器"
+    },
+    "data-analysis": {
+      "description": "分析数据并创建可视化",
+      "name": "数据分析师"
+    },
+    "general": {
+      "description": "面向各类任务的通用 AI 助手",
+      "name": "通用助手"
+    },
+    "plan": {
+      "description": "调研并提出分步实施计划，不编辑文件、不执行变更命令",
+      "name": "规划（只读）"
+    },
+    "ppt-generation": {
+      "description": "创建专业的演示文稿与幻灯片",
+      "name": "PPT 生成器"
+    },
+    "research": {
+      "description": "辅助研究与信息搜集",
+      "name": "研究助手"
+    },
+    "web-design": {
+      "description": "设计并构建网页，支持实时预览",
+      "name": "网页设计师"
+    },
+    "workflow": {
+      "description": "执行多步骤工作流与自动化",
+      "name": "工作流执行器"
+    },
+    "writing": {
+      "description": "辅助写作、润色与内容创作",
+      "name": "写作助手"
+    }
+  },
+  "name": "名称",
+  "namePlaceholder": "我的自定义代理",
+  "noCustomModes": "暂无自定义模式",
+  "noTemplateSelected": "未选择模板",
+  "systemPrompt": "系统提示词",
+  "systemPromptPlaceholder": "你是一个能够……",
+  "teammatesCount": "{count, plural, other {# 个队友}}",
+  "title": "代理模式"
+}

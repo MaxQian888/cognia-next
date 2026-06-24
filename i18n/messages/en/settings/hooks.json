@@ -1,0 +1,76 @@
+{
+  "addGroup": "Add group",
+  "builtin": {
+    "description": "Hooks that ship with cognia, merged under your own. Toggle any off; guards default off.",
+    "items": {
+      "auto-context-loader": {
+        "desc": "Inject .cognia/agent-context.md as standing context at session start.",
+        "label": "Auto context (session)"
+      },
+      "auto-context-loader-prompt": {
+        "desc": "Inject .cognia/agent-context.md as standing context on every prompt.",
+        "label": "Auto context (prompt)"
+      },
+      "cost-quota-guard": {
+        "desc": "Deny a turn once the session token budget is exceeded.",
+        "label": "Token budget guard"
+      },
+      "pii-safety-guard": {
+        "desc": "Block a prompt that carries obvious PII or credentials.",
+        "label": "PII guard (prompt)"
+      },
+      "pii-safety-guard-tool": {
+        "desc": "Block a tool call whose input carries obvious PII or credentials.",
+        "label": "PII guard (tool)"
+      }
+    },
+    "off": "Off",
+    "on": "On",
+    "saveError": "Couldn't update built-in hooks: {detail}",
+    "saved": "Built-in hooks updated.",
+    "title": "Built-in hooks"
+  },
+  "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
+  "group": {
+    "addHandler": "Add handler",
+    "emptyHandlers": "No handlers — add one below.",
+    "matcherHint": "Tool-name regex, pipe alternation, or empty / '*' to match every event.",
+    "matcherInvalid": "Invalid regex: {detail}",
+    "matcherLabel": "Matcher",
+    "matcherPlaceholder": "Bash|Write or .* (leave empty to match all)",
+    "removeAria": "Remove this group"
+  },
+  "handler": {
+    "commandLabel": "Shell command",
+    "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME ran\"",
+    "headerKeyPlaceholder": "X-Custom",
+    "headerRemoveAria": "Remove header",
+    "headerValuePlaceholder": "value",
+    "headersAdd": "Add header",
+    "headersEmpty": "No custom headers.",
+    "headersLabel": "Headers",
+    "removeAria": "Remove handler",
+    "timeoutLabel": "Timeout (ms)",
+    "timeoutPlaceholder": "5000",
+    "typeCommand": "Command",
+    "typeLabel": "Type",
+    "typeWebhook": "Webhook",
+    "urlLabel": "URL",
+    "urlPlaceholder": "https://example.com/hook"
+  },
+  "loadError": "Could not read settings: {detail}",
+  "noGroupsForEvent": "No groups configured for {event}. Click \"Add group\" to attach a matcher.",
+  "noTriggerBadge": "No trigger source yet",
+  "noTriggerNote": "This event is recognised and saved, but the runtime has no trigger source for it yet — hooks configured here will not fire.",
+  "revert": "Revert",
+  "save": "Save",
+  "saveError": "Save failed: {detail}",
+  "saved": "Saved.",
+  "saving": "Saving…",
+  "scope": {
+    "local": "Local",
+    "project": "Project",
+    "user": "User"
+  },
+  "title": "Lifecycle hooks"
+}

@@ -1,0 +1,109 @@
+{
+  "dock": {
+    "closePane": "Close pane",
+    "closePanel": "Close panel",
+    "newSession": "New terminal",
+    "resize": "Drag to resize the terminal dock (arrow keys also work)",
+    "spawnDenied": "Terminal blocked by a plugin",
+    "spawnError": "Couldn't open terminal: {message}"
+  },
+  "emptyState": {
+    "desktop": {
+      "action": "+ New terminal",
+      "body": "Spawn a shell with the button below, or press Ctrl+` to toggle the dock anywhere in the app.",
+      "title": "No terminals yet"
+    },
+    "mobile": {
+      "body": "Pair this device with the desktop server to connect to its terminal over LAN.",
+      "title": "Remote terminal not configured"
+    },
+    "unsupported": {
+      "body": "The integrated terminal needs the desktop or mobile shell — it isn't available in the plain browser preview.",
+      "title": "Terminal unavailable"
+    }
+  },
+  "fileViewer": {
+    "description": "Read-only source file preview",
+    "error": "Failed to open file: {message}",
+    "loading": "Loading…",
+    "title": "File viewer"
+  },
+  "ghost": {
+    "acceptHint": "Tab"
+  },
+  "history": {
+    "blank": "(blank)",
+    "close": "Hide command history",
+    "copy": "Copy command",
+    "empty": "No commands yet.",
+    "locateInChat": "Locate in conversation",
+    "open": "Show command history",
+    "rerun": "Re-run command",
+    "status": {
+      "error": "Exited with non-zero code",
+      "ok": "Exited cleanly",
+      "unknown": "No exit code reported"
+    },
+    "title": "Command history"
+  },
+  "popup": {
+    "hint": "↑↓ navigate · Enter accept · Esc close",
+    "label": "Completion suggestions",
+    "safetyAsk": "Needs confirmation before running",
+    "source": {
+      "ai": "AI",
+      "exe": "Command",
+      "history": "History",
+      "path": "Path",
+      "plugin": "Plugin",
+      "spec": "CLI"
+    }
+  },
+  "search": {
+    "caseSensitive": "Match case",
+    "close": "Close find",
+    "next": "Next match",
+    "placeholder": "Find in terminal",
+    "previous": "Previous match"
+  },
+  "shellPicker": {
+    "auto": "Default shell",
+    "bash": "bash",
+    "cmd": "Command Prompt",
+    "fish": "fish",
+    "label": "Choose a shell",
+    "nu": "Nushell",
+    "powershell": "Windows PowerShell",
+    "profilesLabel": "Profiles",
+    "pwsh": "PowerShell 7",
+    "sh": "sh",
+    "zsh": "zsh"
+  },
+  "tab": {
+    "close": "Close terminal",
+    "menu": {
+      "clear": "Clear",
+      "close": "Close",
+      "closeOthers": "Close others",
+      "copy": "Copy",
+      "find": "Find…",
+      "locateInChat": "Locate in conversation",
+      "paste": "Paste",
+      "rename": "Rename tab",
+      "restart": "Restart",
+      "selectAll": "Select all",
+      "trustAgent": "Trust agent in this tab"
+    },
+    "rename": {
+      "inputLabel": "New tab title",
+      "label": "Rename terminal tab",
+      "placeholder": "Tab title"
+    },
+    "status": {
+      "exitedFail": "Exited with non-zero code",
+      "exitedOk": "Exited cleanly",
+      "idle": "Idle",
+      "running": "Running"
+    }
+  }
+}

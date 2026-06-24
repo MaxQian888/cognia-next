@@ -1,0 +1,114 @@
+{
+  "desktopOnly": {
+    "description": "Runtime and process metrics are sampled from the native Rust backend, which only runs in the desktop app.",
+    "title": "Performance panel is desktop-only"
+  },
+  "hotspots": {
+    "columns": {
+      "avg": "Avg",
+      "calls": "Calls",
+      "distribution": "Distribution",
+      "errors": "Errors",
+      "max": "Max",
+      "name": "Operation",
+      "p50": "p50",
+      "p95": "p95",
+      "total": "Total"
+    },
+    "empty": "No hotspots recorded yet.",
+    "hint": "Run an operation (send a message, run an OCR, execute a workflow) to populate the table."
+  },
+  "memoryPressure": {
+    "high": "Critical",
+    "low": "Normal",
+    "moderate": "Moderate",
+    "title": "Memory pressure"
+  },
+  "metrics": {
+    "cpu": "App CPU",
+    "diskIo": "Disk I/O",
+    "memory": "App memory",
+    "runtimeBusy": "Runtime busy",
+    "tasks": "Async tasks"
+  },
+  "overview": {
+    "selectMetric": "Select a metric"
+  },
+  "process": {
+    "columns": {
+      "cpu": "CPU",
+      "diskRead": "Disk read",
+      "diskWrite": "Disk write",
+      "memory": "Memory",
+      "name": "Name",
+      "pid": "PID",
+      "role": "Role",
+      "trend": "Trend",
+      "uptime": "Uptime"
+    },
+    "empty": "No processes sampled yet.",
+    "noMatch": "No processes match your search.",
+    "roles": {
+      "child": "Child",
+      "main": "Main",
+      "sidecar": "Sidecar"
+    },
+    "searchPlaceholder": "Search processes…",
+    "summary": {
+      "processes": "Processes",
+      "totalCpu": "Total CPU",
+      "totalDisk": "Disk I/O",
+      "totalMemory": "Total memory"
+    }
+  },
+  "runtime": {
+    "aliveTasks": "Alive tasks",
+    "blockingQueue": "Blocking queue",
+    "blockingThreads": "Blocking threads",
+    "busy": "Busy",
+    "empty": "Waiting for the first runtime sample…",
+    "forcedYields": "Forced yields",
+    "globalQueue": "Global queue",
+    "groups": {
+      "queues": "Queues",
+      "tasks": "Tasks",
+      "throughput": "Throughput",
+      "workers": "Workers"
+    },
+    "overflow": "Overflows",
+    "park": "Parks",
+    "perWorker": "Per-worker busy",
+    "spawned": "Spawned (total)",
+    "steal": "Steals",
+    "traces": {
+      "description": "dial9 writes binary async traces to disk for offline analysis.",
+      "empty": "No trace files yet.",
+      "open": "Open folder",
+      "title": "Flight-recorder traces"
+    },
+    "workerN": "Worker {n}",
+    "workers": "Worker threads"
+  },
+  "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
+  "tabs": {
+    "hotspots": "Hotspots",
+    "overview": "Performance",
+    "processes": "Processes",
+    "runtime": "Async runtime"
+  },
+  "title": "Performance",
+  "toolbar": {
+    "export": {
+      "done": "Exported {filename}",
+      "hotspots": "Hotspots (CSV)",
+      "json": "Snapshot (JSON)",
+      "label": "Export",
+      "processes": "Processes (CSV)"
+    },
+    "intervalLabel": "Sampling interval",
+    "intervalValue": "{seconds}s",
+    "pause": "Pause",
+    "reset": "Reset hotspots",
+    "resume": "Resume"
+  }
+}

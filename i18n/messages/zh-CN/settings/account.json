@@ -1,0 +1,17 @@
+{
+  "description": "你的身份、用量、资料、订阅与已配对设备，集中于一处。",
+  "devicePaired": "已配对 · {id}",
+  "deviceUnpaired": "尚未配对设备",
+  "devicesManage": "管理",
+  "devicesTitle": "协同设备",
+  "fallbackName": "未登录",
+  "fallbackPlan": "免费",
+  "notSignedIn": "未登录",
+  "pair": "配对设备",
+  "subscriptionManage": "管理",
+  "subscriptionTitle": "订阅",
+  "title": "账户",
+  "usageFiveHour": "5 小时用量",
+  "usageReset": "剩余 {remaining}",
+  "usageSevenDay": "7 天用量"
+}

@@ -1,0 +1,18 @@
+{
+  "actions": {
+    "allowOnce": "Allow once",
+    "allowSession": "Always allow this session",
+    "close": "Close",
+    "reject": "Reject"
+  },
+  "ariaLabel": "Plugin consent dialog",
+  "fields": {
+    "autoReject": "Auto-reject in {seconds}s",
+    "defaultReason": "No reason supplied.",
+    "morePending": "{count} more pending",
+    "permission": "Permission:",
+    "plugin": "Plugin:",
+    "reason": "Reason:"
+  },
+  "title": "Plugin requesting permission"
+}

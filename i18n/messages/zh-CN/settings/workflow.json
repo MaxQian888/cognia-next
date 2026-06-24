@@ -1,0 +1,18 @@
+{
+  "fanout": {
+    "adapterLabel": "适配器",
+    "adapterPlaceholder": "选择已连接的适配器",
+    "addButton": "添加订阅",
+    "addMissingFields": "适配器和会话键都是必填项。",
+    "addSectionLabel": "添加镜像",
+    "addSuccess": "已添加订阅。",
+    "conversationKeyLabel": "会话键",
+    "conversationKeyPlaceholder": "例如 lark:lark:ad1:oc_xxx",
+    "empty": "尚未配置任何镜像。运行只推送到发起会话。",
+    "enabledAria": "切换订阅",
+    "help": "运维配置的镜像规则：该工作流的每次运行都会把 step 进度和终态推送到所列的频道。发起会话自动包含——重复添加无效果。",
+    "removeAria": "移除订阅",
+    "removeSuccess": "已移除订阅。",
+    "title": "运行进度同步"
+  }
+}

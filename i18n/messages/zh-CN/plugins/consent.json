@@ -1,0 +1,18 @@
+{
+  "actions": {
+    "allowOnce": "仅本次允许",
+    "allowSession": "本次会话始终允许",
+    "close": "关闭",
+    "reject": "拒绝"
+  },
+  "ariaLabel": "插件授权对话框",
+  "fields": {
+    "autoReject": "{seconds} 秒后自动拒绝",
+    "defaultReason": "未提供理由。",
+    "morePending": "还有 {count} 个待处理",
+    "permission": "权限：",
+    "plugin": "插件：",
+    "reason": "理由："
+  },
+  "title": "插件请求权限"
+}

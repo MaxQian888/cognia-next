@@ -1,0 +1,12 @@
+{
+  "branch": "分支对话",
+  "copy": "复制文本",
+  "copyFailed": "复制失败：{message}",
+  "copySuccess": "已复制到剪贴板。",
+  "description": "选择一项操作。",
+  "share": "分享…",
+  "shareDialogTitle": "分享至",
+  "shareFailed": "分享失败：{message}",
+  "shareUnsupported": "此设备不支持分享。",
+  "title": "消息"
+}

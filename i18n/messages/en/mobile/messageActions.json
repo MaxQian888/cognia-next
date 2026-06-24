@@ -1,0 +1,12 @@
+{
+  "branch": "Branch conversation",
+  "copy": "Copy text",
+  "copyFailed": "Copy failed: {message}",
+  "copySuccess": "Copied to clipboard.",
+  "description": "Pick an action.",
+  "share": "Share…",
+  "shareDialogTitle": "Share via",
+  "shareFailed": "Share failed: {message}",
+  "shareUnsupported": "Sharing isn't supported on this device.",
+  "title": "Message"
+}

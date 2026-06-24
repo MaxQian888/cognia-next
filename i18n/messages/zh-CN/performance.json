@@ -1,0 +1,114 @@
+{
+  "desktopOnly": {
+    "description": "运行时与进程指标来自原生 Rust 后端，仅在桌面应用中运行。",
+    "title": "性能面板仅在桌面端可用"
+  },
+  "hotspots": {
+    "columns": {
+      "avg": "平均",
+      "calls": "调用次数",
+      "distribution": "分布",
+      "errors": "错误",
+      "max": "最大",
+      "name": "操作",
+      "p50": "p50",
+      "p95": "p95",
+      "total": "合计"
+    },
+    "empty": "尚未记录到热点。",
+    "hint": "执行一次操作（发送消息、运行 OCR、执行工作流）即可填充该表。"
+  },
+  "memoryPressure": {
+    "high": "严重",
+    "low": "正常",
+    "moderate": "中等",
+    "title": "内存压力"
+  },
+  "metrics": {
+    "cpu": "应用 CPU",
+    "diskIo": "磁盘 I/O",
+    "memory": "应用内存",
+    "runtimeBusy": "运行时繁忙",
+    "tasks": "异步任务"
+  },
+  "overview": {
+    "selectMetric": "选择指标"
+  },
+  "process": {
+    "columns": {
+      "cpu": "CPU",
+      "diskRead": "磁盘读",
+      "diskWrite": "磁盘写",
+      "memory": "内存",
+      "name": "名称",
+      "pid": "PID",
+      "role": "角色",
+      "trend": "趋势",
+      "uptime": "运行时长"
+    },
+    "empty": "尚未采样到进程。",
+    "noMatch": "没有匹配的进程。",
+    "roles": {
+      "child": "子进程",
+      "main": "主进程",
+      "sidecar": "侧载进程"
+    },
+    "searchPlaceholder": "搜索进程…",
+    "summary": {
+      "processes": "进程数",
+      "totalCpu": "总 CPU",
+      "totalDisk": "磁盘 I/O",
+      "totalMemory": "总内存"
+    }
+  },
+  "runtime": {
+    "aliveTasks": "存活任务",
+    "blockingQueue": "阻塞队列",
+    "blockingThreads": "阻塞线程",
+    "busy": "繁忙",
+    "empty": "正在等待首个运行时采样…",
+    "forcedYields": "强制让出",
+    "globalQueue": "全局队列",
+    "groups": {
+      "queues": "队列",
+      "tasks": "任务",
+      "throughput": "吞吐",
+      "workers": "工作线程"
+    },
+    "overflow": "溢出",
+    "park": "驻留",
+    "perWorker": "各工作线程繁忙度",
+    "spawned": "累计派生",
+    "steal": "窃取",
+    "traces": {
+      "description": "dial9 将二进制异步 trace 写入磁盘以供离线分析。",
+      "empty": "暂无 trace 文件。",
+      "open": "打开文件夹",
+      "title": "飞行记录 trace"
+    },
+    "workerN": "工作线程 {n}",
+    "workers": "工作线程"
+  },
+  "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
+  "tabs": {
+    "hotspots": "热点",
+    "overview": "性能",
+    "processes": "进程",
+    "runtime": "异步运行时"
+  },
+  "title": "性能",
+  "toolbar": {
+    "export": {
+      "done": "已导出 {filename}",
+      "hotspots": "热点（CSV）",
+      "json": "快照（JSON）",
+      "label": "导出",
+      "processes": "进程（CSV）"
+    },
+    "intervalLabel": "采样间隔",
+    "intervalValue": "{seconds} 秒",
+    "pause": "暂停",
+    "reset": "重置热点",
+    "resume": "继续"
+  }
+}

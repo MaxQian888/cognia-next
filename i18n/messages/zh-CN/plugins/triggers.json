@@ -1,0 +1,39 @@
+{
+  "badge": {
+    "ariaLabel": "本消息触发的工作流",
+    "empty": "没有触发。",
+    "label": "{count, plural, one {# 个工作流触发} other {# 个工作流触发}}",
+    "pluginPrefix": "插件：",
+    "popoverTitle": "工作流触发",
+    "workflowPrefix": "工作流："
+  },
+  "detailSubscriptions": {
+    "colKind": "触发类型",
+    "colWorkflow": "工作流",
+    "empty": "尚无工作流订阅该插件的触发。",
+    "muteHint": "静音会停止派发，但保留订阅。",
+    "muteToggle": "静音",
+    "title": "订阅的工作流"
+  },
+  "devtools": {
+    "clear": "全部清空",
+    "colError": "错误",
+    "colKind": "类型",
+    "colPlugin": "插件",
+    "colStatus": "状态",
+    "colTime": "时间",
+    "colWorkflow": "工作流",
+    "empty": "暂无触发事件。",
+    "filterKind": "按类型筛选",
+    "filterKindAll": "全部类型",
+    "filterPlugin": "按插件筛选",
+    "filterPluginAll": "全部插件",
+    "filterPluginBuiltin": "— 内置 —",
+    "title": "触发记录"
+  },
+  "status": {
+    "dispatched": "已派发",
+    "error": "错误",
+    "rejected": "已拒绝"
+  }
+}

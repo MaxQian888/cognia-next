@@ -1,0 +1,284 @@
+{
+  "audit": {
+    "clear": "清除日志",
+    "columns": {
+      "command": "命令",
+      "decision": "裁决",
+      "duration": "耗时",
+      "surface": "界面",
+      "target": "目标",
+      "time": "时间"
+    },
+    "description": "自动化调用记录，最新在前。",
+    "empty": "当前筛选条件下无审计记录。",
+    "exportCsv": "导出 CSV",
+    "filters": {
+      "allDecisions": "全部裁决",
+      "allSurfaces": "全部界面",
+      "decisionAllow": "allow",
+      "decisionConsent": "consent",
+      "decisionDeny": "deny",
+      "surfaceComputerUse": "桌面自动化",
+      "surfaceMcp": "MCP",
+      "surfacePlugin": "插件",
+      "surfaceWorkflow": "工作流"
+    },
+    "loading": "正在加载审计日志……",
+    "title": "审计日志"
+  },
+  "behavior": {
+    "dedup": {
+      "help": "连续截图内容相同时，发送一条简短文本说明而不是重复图片。长任务可大幅节省 token。",
+      "label": "跳过未变化的截图"
+    },
+    "description": "控制截图与输入以何种形式呈现给模型。",
+    "pasteThreshold": {
+      "help": "超过该字符数的输入操作改走剪贴板粘贴，而不是逐键输入。0 表示禁用。",
+      "label": "粘贴阈值（字符数）"
+    },
+    "scaling": {
+      "help": "发送给模型前将截图缩放到目标尺寸内。可提升点击精度并降低 token 成本（推荐 1280×800）。",
+      "label": "截图降采样",
+      "maxHeight": "最大高度",
+      "maxWidth": "最大宽度"
+    },
+    "title": "模型行为"
+  },
+  "consent": {
+    "actions": {
+      "allowOnce": "本次允许",
+      "allowSession": "本会话总是允许",
+      "close": "关闭",
+      "reject": "拒绝"
+    },
+    "ariaLabel": "自动化操作确认",
+    "commands": {
+      "auditSnapshot": "读取审计快照",
+      "capabilities": "读取能力清单",
+      "click": "点击屏幕",
+      "cursorPosition": "读取光标位置",
+      "drag": "拖拽",
+      "find": "查找元素",
+      "getFocus": "读取焦点元素",
+      "holdKey": "长按按键",
+      "invokePattern": "调用自动化模式",
+      "keys": "发送按键",
+      "killSwitch": "触发紧急停止",
+      "mouseMove": "移动鼠标",
+      "pickAtPoint": "拾取指定坐标元素",
+      "readTree": "读取无障碍树",
+      "screenshot": "截屏",
+      "scroll": "滚动",
+      "settingsGet": "读取自动化设置",
+      "settingsSet": "写入自动化设置",
+      "type": "输入文本",
+      "windowOp": "窗口操作"
+    },
+    "fields": {
+      "action": "操作：",
+      "autoReject": "{seconds} 秒后自动拒绝",
+      "command": "命令：",
+      "morePending": "（还有 {count} 个待处理）",
+      "plugin": "插件：",
+      "process": "进程：",
+      "surface": "界面：",
+      "window": "窗口："
+    },
+    "surfaces": {
+      "computerUse": "桌面自动化",
+      "mcp": "MCP",
+      "plugin": "插件",
+      "workflow": "工作流"
+    },
+    "title": "自动化操作请求授权"
+  },
+  "header": {
+    "description": "配置桌面 UI 自动化 —— 截屏、查找元素、点击、键入与热键。",
+    "title": "自动化"
+  },
+  "inspector": {
+    "clickToPopulate": "选择根并点击刷新以填充树。",
+    "copyLocator": "复制定位器",
+    "copyRef": "复制引用",
+    "elementDetails": "元素详情",
+    "elementDetailsDescription": "所选元素的属性与测试模式。",
+    "elementRef": "元素引用",
+    "elementRefPlaceholder": "如 windows/1234/5678",
+    "emptyResult": "所选根未返回任何元素。",
+    "invokeFailed": "模式调用失败：{error}",
+    "invokeOk": "模式“{pattern}”已调用",
+    "locatorJson": "定位器 JSON",
+    "maxDepth": "最大深度",
+    "pickCancelAria": "取消点选倒计时",
+    "pickCancelTooltip": "取消倒计时",
+    "pickCaptureNow": "立即捕获",
+    "pickCaptureNowAria": "立即捕获鼠标位置的目标",
+    "pickCaptureNowTooltip": "跳过倒计时，立即拾取当前鼠标位置下的元素",
+    "pickCountdown": "取消（{seconds} 秒）",
+    "pickFailed": "拾取失败：{error}",
+    "pickOk": "元素已拾取",
+    "pickStart": "拾取元素",
+    "pickStartAria": "开始点选倒计时",
+    "pickStartTooltip": "启动 3 秒倒计时，结束后拾取光标所在元素",
+    "readTree": "刷新",
+    "reading": "读取中……",
+    "rootMode": {
+      "desktop": "桌面",
+      "focused": "焦点窗口",
+      "manual": "手动输入"
+    },
+    "selectRow": "从树中选择一个元素以查看详情。",
+    "testPatterns": "测试模式",
+    "testPatternsHint": "对所选元素调用 UIA 模式以验证行为。",
+    "tree": "无障碍树",
+    "treeDescription": "检查目标窗口的 UIA/无障碍树。"
+  },
+  "overview": {
+    "capabilities": {
+      "events": "事件",
+      "inputSimulation": "输入模拟",
+      "platform": "平台",
+      "screenshot": "截屏",
+      "uia": "UI 自动化"
+    },
+    "capabilityProbeFailed": "读取平台能力失败。",
+    "engineStatus": "引擎状态",
+    "engineStatusDescription": "开启或关闭自动化引擎。关闭时紧急停止生效，所有调用在网关层被拒绝。",
+    "engineToggle": "启用自动化引擎",
+    "engineToggleHint": "启用后，自动化操作遵循下方配置的权限策略。",
+    "initFailure": {
+      "body": "平台自动化后端（{platform}）启动失败：{error}。在底层问题修复前，Computer Use 调用都会返回 UnsupportedPlatform。请查阅你操作系统的故障排查文档，或在调整权限后重启应用。",
+      "dismiss": "知道了",
+      "title": "后端初始化失败"
+    },
+    "killSwitch": "紧急停止",
+    "killSwitchHint": "立即拒绝所有正在进行的自动化调用。当引擎行为异常时使用。",
+    "metrics": {
+      "allow": "允许",
+      "consent": "同意",
+      "deny": "拒绝",
+      "description": "来自审计日志的活动计数。打开该标签页时刷新，并每 60 秒自动更新。",
+      "lastScreenshotDescription": "最近一次成功截屏的时间。",
+      "lastScreenshotHours": "{hours} 小时前",
+      "lastScreenshotMinutes": "{minutes} 分钟前",
+      "lastScreenshotNever": "最近 24 小时未截屏。",
+      "lastScreenshotRelative": "{seconds} 秒前",
+      "lastScreenshotTitle": "最近一次截屏",
+      "loadFailed": "读取审计日志失败。",
+      "title": "最近 24 小时",
+      "topFailingDescription": "最近 24 小时拒绝 / 同意被否决最多的命令。若集中在某条命令，应当排查原因。",
+      "topFailingEmpty": "最近 24 小时无被拒绝的调用。",
+      "topFailingTitle": "失败率最高的命令",
+      "total": "总数"
+    },
+    "no": "否",
+    "noPlanned": "计划中",
+    "platformCapabilities": "平台能力",
+    "yes": "是"
+  },
+  "permissions": {
+    "defaultTier": "默认等级",
+    "defaultTierDescription": "未设置界面级覆盖时使用的权限等级。",
+    "perPlugin": {
+      "clearOverride": "清除",
+      "description": "声明了 native:input 或 native:screen 权限的插件，可以单独设置一个与 Plugin 界面默认值不同的等级。适合只信任某个具体插件，但不想放宽全部插件策略的场景。",
+      "empty": "当前没有任何已启用的插件声明 native:input。安装或启用一个相关插件（例如 cognia-computer-use）后，即可在此为单个插件设定覆盖等级。",
+      "rowInheriting": "继承上方 Plugin 界面的等级。",
+      "rowOverridden": "已覆盖：{tier}",
+      "title": "按插件覆盖"
+    },
+    "perSurface": "按界面覆盖",
+    "perSurfaceDescription": "每个自动化界面可单独覆盖默认等级。",
+    "surfaces": {
+      "computerUseDescription": "Anthropic 原生 computer-use 工具调用。",
+      "mcpDescription": "来自已连接 MCP 服务器的工具调用。",
+      "pluginDescription": "插件发起的自动化请求。",
+      "workflowDescription": "可视化工作流执行器运行。"
+    },
+    "tier": {
+      "off": "关闭",
+      "perCall": "每次询问",
+      "whitelist": "白名单"
+    }
+  },
+  "sandboxConnections": {
+    "addConnection": "添加连接",
+    "cancel": "取消",
+    "checkHealth": "检查健康",
+    "delete": "删除",
+    "description": "让 computer-use 动作在隔离的 cua Docker 桌面里运行，而不是本机。需要宿主机安装 Docker。",
+    "desktopOnly": "仅在桌面应用中可用",
+    "empty": "尚未配置任何沙箱。",
+    "host": "主机",
+    "image": "Docker 镜像",
+    "name": "名称",
+    "save": "保存",
+    "start": "启动",
+    "statusError": "错误",
+    "statusOk": "运行中",
+    "statusStarting": "启动中",
+    "statusUnknown": "未知",
+    "statusUnreachable": "无法连接",
+    "stop": "停止",
+    "title": "Computer-Use 沙箱"
+  },
+  "screenOff": {
+    "activeMonitor": {
+      "label": "虚拟显示器"
+    },
+    "description": "在显示器关闭或休眠（会话需保持解锁）时让 Computer Use 持续可用。通过捆绑的虚拟显示器保证截图不会黑屏。",
+    "driverVersion": {
+      "label": "驱动"
+    },
+    "enabledHint": "在角色的 Computer Use 设置中按角色开启（熄屏模式）。",
+    "howItWorks": "当启用熄屏模式的角色驱动电脑时，会创建一块虚拟显示器并置为主显示；空闲 5 分钟、触发 kill switch 或会话关闭时自动释放。",
+    "ipcError": {
+      "label": "错误"
+    },
+    "lastError": {
+      "label": "最近错误"
+    },
+    "probeBlack": "截图返回黑帧 —— 请检查驱动。",
+    "probeButton": "测试熄屏截图",
+    "probeOk": "已通过 {monitor} 截取 {width}×{height} —— 非黑屏。",
+    "probeRunning": "测试中…",
+    "setupButton": "安装驱动",
+    "setupNote": "驱动未安装前，熄屏动作会直接报错，而不会拍出黑屏。",
+    "setupRunning": "安装中…",
+    "status": {
+      "down": "不可用",
+      "ok": "就绪",
+      "setup": "需要安装"
+    },
+    "title": "熄屏模式",
+    "windowsOnlyNote": "熄屏模式仅支持 Windows。在当前平台上 Computer Use 使用物理显示器。"
+  },
+  "tabs": {
+    "audit": "审计",
+    "inspector": "检查器",
+    "overview": "概览",
+    "permissions": "权限",
+    "sandboxes": "沙箱",
+    "whitelist": "白名单"
+  },
+  "whitelist": {
+    "add": "添加",
+    "captureFailed": "读取焦点窗口失败",
+    "captureFocused": "捕获当前焦点窗口",
+    "emptyProcess": "尚未添加任何进程名称。请在上方添加。",
+    "emptyWindow": "尚未添加任何窗口标题模式。请在上方添加。",
+    "none": "（无）",
+    "processLabel": "进程：",
+    "processNames": "进程名称",
+    "processNamesHint": "不区分大小写的精确匹配目标进程名（例如 notepad.exe）。",
+    "processPlaceholder": "如 notepad.exe",
+    "quickCapture": "快速捕获",
+    "quickCaptureHint": "读取当前焦点窗口并自动填入下方字段。",
+    "removeEntryAria": "移除 {entry}",
+    "titleLabel": "标题：",
+    "updateFailed": "更新失败",
+    "windowPlaceholder": "如 *Chrome*",
+    "windowTitles": "窗口标题模式",
+    "windowTitlesHint": "使用 * 作为通配符的 Glob 模式（例如 *Excel* 或 *记事本*）。"
+  }
+}

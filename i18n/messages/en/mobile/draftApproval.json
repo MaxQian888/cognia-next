@@ -1,0 +1,7 @@
+{
+  "approve": "Approve",
+  "empty": "No drafts pending approval.",
+  "queueLabelApprove": "Approve connector draft",
+  "queueLabelReject": "Reject connector draft",
+  "reject": "Reject"
+}

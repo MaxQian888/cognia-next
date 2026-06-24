@@ -1,0 +1,144 @@
+{
+  "autocomplete": {
+    "debounce": {
+      "label": "Debounce (ms)"
+    },
+    "exe": {
+      "label": "Command names"
+    },
+    "helper": "Show GitHub-Copilot-style inline command suggestions as you type. Tab or → accepts; Esc dismisses. Accepting only fills the line — it never runs the command.",
+    "label": "AI command autocomplete",
+    "path": {
+      "label": "File paths"
+    },
+    "persistHistory": {
+      "helper": "Store executed commands locally so suggestions survive restarts. Lines that look like secrets are never stored.",
+      "label": "Persist command history"
+    },
+    "popup": {
+      "helper": "Ctrl+Space or a second Tab opens a keyboard-navigable list of candidates at the cursor.",
+      "label": "Candidate popup"
+    },
+    "privacy": "When AI is enabled, the current command, working directory, and recent history are sent to your configured model to generate a suggestion. Context that looks like a secret (API keys, tokens, credentials) is detected and skipped. Plugin-contributed providers are unaffected by this setting.",
+    "source": {
+      "ai": "AI only",
+      "both": "History + AI",
+      "history": "History only",
+      "label": "Suggestion source"
+    },
+    "spec": {
+      "label": "CLI flags"
+    }
+  },
+  "colorScheme": {
+    "auto": "Auto (follow app theme)",
+    "label": "Color scheme"
+  },
+  "copyOnSelect": {
+    "helper": "When on, every text selection in a terminal is auto-copied to the clipboard. Off by default so accidental selection doesn't overwrite your clipboard.",
+    "label": "Copy on selection"
+  },
+  "cursor": {
+    "bar": "Bar",
+    "blink": "Cursor blink",
+    "block": "Block",
+    "label": "Cursor style",
+    "underline": "Underline"
+  },
+  "exposeDockToAgents": {
+    "helper": "Lets the chat agent drive your visible terminal tabs via the synthetic terminal_dock_* MCP tools. The agent shares the same PTY you see — one shell, one cwd, one history. Each tab requires per-session consent. Off by default.",
+    "label": "Expose dock to agents"
+  },
+  "fontFamily": {
+    "label": "Font family",
+    "nerdFontHelper": "oh-my-posh and powerline prompts need a Nerd Font for their icons. Install one (e.g. CaskaydiaCove Nerd Font), then set it here.",
+    "pickerHint": "Pick from monospace fonts detected on this device.",
+    "pickerLabel": "Detected fonts",
+    "useNerdFont": "Use recommended Nerd Font stack"
+  },
+  "fontSize": {
+    "label": "Font size"
+  },
+  "forceUtf8": {
+    "helper": "Pin PowerShell / cmd console output to UTF-8 so powerline glyphs and CJK text render correctly on non-UTF-8 system codepages (e.g. GBK on Chinese Windows). Leave on unless you depend on the legacy codepage.",
+    "label": "Force UTF-8 output"
+  },
+  "heading": "Integrated terminal",
+  "ligatures": {
+    "helper": "Render programming-font ligatures (Cascadia Code, JetBrains Mono, Fira Code). Off by default; toggling reloads the terminal.",
+    "label": "Font ligatures"
+  },
+  "profiles": {
+    "add": "Add profile",
+    "cwdLabel": "Working directory",
+    "cwdPlaceholder": "Working directory (optional)",
+    "empty": "No profiles yet.",
+    "helper": "Named shell presets (shell + working directory) the new-tab menu can launch. Set one as default for the plain \"+ New\" button.",
+    "isDefault": "Default",
+    "nameLabel": "Profile name",
+    "namePlaceholder": "Profile name",
+    "newName": "New profile",
+    "remove": "Remove profile",
+    "setDefault": "Set as default",
+    "shellLabel": "Shell",
+    "title": "Launch profiles"
+  },
+  "projectOverride": {
+    "cwdLabel": "Working directory",
+    "cwdPlaceholder": "/path/to/cwd",
+    "emptyProjects": "No projects yet — overrides become available once you create one.",
+    "helper": "Pick a project to override its shell or cwd. Empty fields fall back to the global default.",
+    "selectProject": "Select a project…",
+    "shellLabel": "Shell",
+    "shellPlaceholder": "/usr/local/bin/fish",
+    "title": "Per-project override"
+  },
+  "renderer": {
+    "auto": "Auto",
+    "canvas": "Canvas",
+    "dom": "DOM",
+    "helper": "Auto picks GPU-accelerated WebGL, falling back to Canvas then DOM. Switch to Canvas or DOM if the terminal renders blank or garbled.",
+    "label": "Renderer",
+    "webgl": "WebGL"
+  },
+  "runInDockTimeout": {
+    "helper": "How long the chat 'Run in dock' affordance and the agent's terminal_dock_write tool wait for a command_end OSC 633 event before timing out. Per-call overrides win; this is the floor. Range 5–600, default 60.",
+    "label": "Run-in-dock timeout (seconds)"
+  },
+  "sandboxed": {
+    "helper": "Launch dock terminals inside the OS sandbox (bwrap / sandbox-exec): writes are confined to the session working directory, your home stays read-only, network stays on. Experimental; off by default and not yet available on Windows.",
+    "label": "Sandboxed terminal"
+  },
+  "scrollback": {
+    "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000.",
+    "label": "Scrollback lines"
+  },
+  "shell": {
+    "auto": "Auto-detect (recommended)",
+    "bash": "bash",
+    "cmd": "Command Prompt (cmd.exe)",
+    "custom": "Custom path…",
+    "customLabel": "Custom shell path",
+    "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-project overrides win when set. cmd.exe spawns without OSC 633 integration.",
+    "label": "Default shell",
+    "powershell": "Windows PowerShell (powershell.exe)",
+    "pwsh": "PowerShell 7 (pwsh.exe)",
+    "zsh": "zsh"
+  },
+  "shellIntegration": {
+    "helper": "Injects OSC 633 prompt markers (bash / zsh / pwsh) so the dock can show command status and cwd badges. Disable for shells that mis-parse the sequences.",
+    "label": "Enable shell integration"
+  },
+  "subheading": "Default shell, font and scrollback for the bottom dock. Per-project overrides take precedence over these defaults.",
+  "unattended": {
+    "askPolicy": {
+      "consent": "Ask in the terminal dock",
+      "fail": "Fail the step",
+      "helper": "Applies to commands the safety classifier is unsure about (verdict \"ask\").",
+      "label": "When a command needs confirmation",
+      "run": "Run anyway"
+    },
+    "helper": "Let workflow terminal steps run shell commands headlessly — no visible terminal tab, no consent prompt. Every command is screened by the safety classifier first; clearly dangerous commands are always blocked.",
+    "label": "Allow unattended execution"
+  }
+}

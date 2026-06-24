@@ -1,0 +1,17 @@
+{
+  "diagnostics": {
+    "errors": "错误",
+    "nextProblem": "下一个问题",
+    "noProblems": "无问题",
+    "previousProblem": "上一个问题",
+    "toggleProblems": "切换问题面板",
+    "warnings": "警告"
+  },
+  "lspHint": {
+    "broken": "{serverId} 语言服务器持续崩溃，已被停用。请到 设置 → 语言服务器 → 日志 查看原因。",
+    "dismissAriaLabel": "关闭语言服务器提示",
+    "install": "安装",
+    "installing": "安装中…",
+    "missing": "{serverId} 语言服务器未安装 — 此文件的补全与诊断不可用。"
+  }
+}

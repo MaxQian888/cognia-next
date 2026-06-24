@@ -1,0 +1,88 @@
+{
+  "filters": {
+    "clear": "清除",
+    "dims": {
+      "model": "模型",
+      "operation": "操作",
+      "session": "会话",
+      "surface": "来源",
+      "tool": "工具"
+    },
+    "empty": "无可选项",
+    "search": "搜索…"
+  },
+  "noData": "该时间窗口内暂无数据",
+  "panels": {
+    "byModel": "按模型分布",
+    "bySurface": "按来源分布",
+    "cacheHitRate": "缓存命中率",
+    "costOverTime": "成本走势",
+    "errorRate": "错误率",
+    "errorRateOverTime": "错误率",
+    "latencyPercentiles": "延迟分位",
+    "p95Latency": "延迟 (p95)",
+    "recentTraces": "最近 Trace",
+    "requestRate": "请求速率",
+    "tokenThroughput": "Token 吞吐",
+    "totalCost": "总成本",
+    "totalSpans": "Span 总数"
+  },
+  "range": {
+    "absolute": "绝对范围",
+    "apply": "应用",
+    "custom": "自定义范围",
+    "from": "起始",
+    "presets": {
+      "15m": "近 15 分钟",
+      "1h": "近 1 小时",
+      "24h": "近 24 小时",
+      "30d": "近 30 天",
+      "5m": "近 5 分钟",
+      "6h": "近 6 小时",
+      "7d": "近 7 天"
+    },
+    "quickRanges": "快捷范围",
+    "to": "结束"
+  },
+  "refresh": {
+    "label": "自动刷新",
+    "off": "关闭"
+  },
+  "series": {
+    "cacheCreation": "缓存写入",
+    "cacheRead": "缓存读取",
+    "cost": "成本",
+    "errorRate": "错误率",
+    "input": "输入",
+    "output": "输出",
+    "p50": "p50",
+    "p95": "p95",
+    "p99": "p99",
+    "perSec": "请求/秒"
+  },
+  "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
+  "title": "可观测性",
+  "toolbar": {
+    "edit": "编辑布局",
+    "lock": "锁定布局",
+    "resetLayout": "重置布局"
+  },
+  "traces": {
+    "cost": "成本",
+    "duration": "耗时",
+    "empty": "该时间窗口内暂无 Trace",
+    "root": "Trace",
+    "spans": "Span 数",
+    "started": "开始时间",
+    "surface": "来源"
+  },
+  "waterfall": {
+    "cost": "成本 {value}",
+    "empty": "该 Trace 暂无 span",
+    "spanCount": "{count} 个 span",
+    "title": "Trace 详情",
+    "toggleEvents": "展开/收起 span 详情",
+    "tokens": "{count} tokens",
+    "totalDuration": "耗时 {value}"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "description": "Load on-disk instruction files (CLAUDE.md / AGENTS.md / AGENT.md) from the active workspace into the agent's system prompt, with nested directory discovery and @import expansion.",
+  "enabled": "Enable instruction files",
+  "enabledHint": "When on, the agent reads project instruction files on every turn (skipped in bare mode).",
+  "extraPaths": "Extra instruction paths",
+  "extraPathsHint": "One path or glob per line, relative to the workspace root (e.g. CONTRIBUTING.md or .cursor/rules/*.md).",
+  "extraPathsPlaceholder": "docs/guidelines.md",
+  "globalPath": "Global instruction file",
+  "globalPathPlaceholder": "Leave blank for ~/.cognia/AGENTS.md",
+  "includeGlobal": "Include global file",
+  "includeGlobalHint": "Also load a user-level instruction file that applies to every workspace.",
+  "loadProjectAgents": "Load project subagents",
+  "loadProjectAgentsHint": "Discover .cognia/agents/*.md markdown subagents and expose them to the agent.",
+  "mode": {
+    "hint": "Layered collects every instruction file from the workspace root down to the working directory; nearest stops at the closest one.",
+    "label": "Nesting mode",
+    "layered": "Layered (collect all, Claude Code)",
+    "nearest": "Nearest only (opencode)"
+  },
+  "save": "Save",
+  "saved": "Instruction settings saved.",
+  "title": "Project instructions"
+}

@@ -1,0 +1,10 @@
+{
+  "abort": "Abort",
+  "continue": "Continue anyway",
+  "description": "Review the conflicts below before continuing.",
+  "highCount": "{count} high",
+  "lowCount": "{count} low",
+  "mediumCount": "{count} medium",
+  "relatedPlugin": "Related plugin:",
+  "title": "Conflicts detected for {id}"
+}

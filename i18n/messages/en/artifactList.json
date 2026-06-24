@@ -1,0 +1,20 @@
+{
+  "delete": "Delete",
+  "deleteConfirmBatchDesc": "Are you sure you want to delete {count} artifacts? This action cannot be undone.",
+  "deleteConfirmDesc": "This artifact will be permanently deleted. This action cannot be undone.",
+  "deleteConfirmTitle": "Delete Artifact",
+  "noArtifacts": "No artifacts yet",
+  "noArtifactsDesc": "Code snippets and content will appear here",
+  "open": "Open",
+  "types": {
+    "chart": "Chart",
+    "code": "Code",
+    "document": "Document",
+    "html": "HTML",
+    "jupyter": "Jupyter",
+    "math": "Math",
+    "mermaid": "Diagram",
+    "react": "React",
+    "svg": "SVG"
+  }
+}

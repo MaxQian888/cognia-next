@@ -1,0 +1,71 @@
+{
+  "actions": {
+    "goToPair": "Pair new device",
+    "reconnect": "Reconnect now",
+    "scanLan": "Scan local network",
+    "switchServer": "Switch paired server",
+    "webrtcTier": "WebRTC tier"
+  },
+  "aria": {
+    "menu": "Connection: {label} — open menu"
+  },
+  "live": "Live",
+  "menu": {
+    "title": "Connection"
+  },
+  "offline": "Offline",
+  "reconnecting": "Reconnecting",
+  "repairNeeded": "Re-pair needed",
+  "scan": {
+    "empty": "No desktops found yet. Make sure one is running on the same Wi-Fi.",
+    "fingerprintMismatch": {
+      "description": "{count} server(s) returned a different TLS fingerprint than the paired record. This can mean a legitimate cert rotation — or a different desktop on the same address.",
+      "dismiss": "Dismiss",
+      "title": "Fingerprint changed"
+    },
+    "mdnsDenied": "Local network permission denied",
+    "openSettings": "Open Settings",
+    "portLabel": "port",
+    "scanning": "Scanning…",
+    "source": {
+      "history": "history",
+      "mdns": "mDNS",
+      "paired": "paired",
+      "pairedTag": "Last paired",
+      "probe": "probe"
+    },
+    "title": "Find a desktop on this network"
+  },
+  "switch": {
+    "daysAgo": "{n}d",
+    "empty": "No previously paired desktops yet.",
+    "hoursAgo": "{n}h",
+    "justNow": "just now",
+    "lastSeen": "last seen",
+    "minutesAgo": "{n}m",
+    "never": "never",
+    "switchingTo": "Switching to {name}…",
+    "title": "Paired desktops"
+  },
+  "sync": {
+    "daysAgo": "{n}d ago",
+    "heading": "Last sync",
+    "hoursAgo": "{n}h ago",
+    "justNow": "just now",
+    "minutesAgo": "{n}m ago",
+    "never": "never"
+  },
+  "tiers": {
+    "offline": "offline",
+    "rtc-direct": "RTC direct",
+    "rtc-relay": "RTC relay",
+    "ws-lan": "WS LAN",
+    "ws-tunnel": "WS tunnel"
+  },
+  "toasts": {
+    "reconnectStarted": "Re-handshaking…",
+    "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
+    "syncFailed": "Sync failed ({message}).",
+    "syncKicked": "Synced."
+  }
+}

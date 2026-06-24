@@ -1,0 +1,37 @@
+{
+  "approval": {
+    "approve": "批准并运行",
+    "feedbackPlaceholder": "拒绝或优化的可选反馈…",
+    "noSteps": "此计划没有步骤。",
+    "progressLabel": "进度",
+    "refineExpand": "细化",
+    "refineOptimize": "优化",
+    "refineReorder": "重排",
+    "refineRepair": "修复",
+    "refineSimplify": "简化",
+    "reject": "拒绝",
+    "sourceLabel": "来源：{source}",
+    "title": "审阅计划"
+  },
+  "status": {
+    "approved": "已批准",
+    "awaiting_approval": "待批准",
+    "cancelled": "已取消",
+    "completed": "已完成",
+    "draft": "草稿",
+    "executing": "执行中",
+    "failed": "失败",
+    "paused": "已暂停"
+  },
+  "tracker": {
+    "empty": "当前没有运行中的计划。",
+    "progress": "{total} 步中已完成 {completed} 步",
+    "statusBlocked": "受阻",
+    "statusCompleted": "已完成",
+    "statusFailed": "失败",
+    "statusInProgress": "进行中",
+    "statusPending": "待处理",
+    "statusReady": "就绪",
+    "statusSkipped": "已跳过"
+  }
+}

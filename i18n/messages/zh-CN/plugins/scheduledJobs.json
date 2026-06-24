@@ -1,0 +1,17 @@
+{
+  "colCron": "调度",
+  "colHandler": "处理器",
+  "colLastRun": "上次运行",
+  "colNextRun": "下次运行",
+  "colPlugin": "插件",
+  "colStatus": "状态",
+  "countTotal": "{count} 项任务",
+  "empty": "尚无插件贡献的定时任务。",
+  "loading": "加载定时任务中…",
+  "openScheduler": "打开调度器",
+  "status": {
+    "active": "活动",
+    "error": "错误",
+    "paused": "已暂停"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "ariaLabel": "Batch actions",
+  "clearSelection": "Clear selection",
+  "disableAll": "Disable all",
+  "enableAll": "Enable all",
+  "refresh": "Refresh",
+  "selected": "{count} selected",
+  "uninstall": "Uninstall"
+}

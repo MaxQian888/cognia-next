@@ -1,0 +1,29 @@
+{
+  "emptySection": "Nothing in this section yet.",
+  "error": "Marketplace error: {message}",
+  "installCancelled": {
+    "config": "Install cancelled at the configuration step.",
+    "conflict": "Install cancelled at the conflict-review step.",
+    "permission": "Install cancelled at the permission-review step."
+  },
+  "installFailed": "Install failed: {message}",
+  "installSucceeded": "{name} installed.",
+  "loadMore": "Load more ({shown}/{total})",
+  "loading": "Loading marketplace…",
+  "manageSources": "GitHub sources",
+  "modeBanner": {
+    "degradedHint": "Showing cached entries from your last successful sync. Install and update actions are disabled until the connection recovers.",
+    "degradedTitle": "Marketplace is unreachable",
+    "demoHint": "You're browsing a sample catalog. Installs in this mode are simulated and won't run real plugin code.",
+    "demoTitle": "Demo marketplace"
+  },
+  "retry": "Retry",
+  "searchPlaceholder": "Search the marketplace…",
+  "sections": {
+    "all": "All",
+    "builtin": "Built-in",
+    "featured": "Featured",
+    "popular": "Popular",
+    "recent": "Recent"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "description": "用 LLM 帮你撰写消息——润色、行内补全与建议。",
+  "enhance": {
+    "hint": "在 composer 工具栏用模型改写或生成草稿的多个版本。",
+    "label": "提示词润色"
+  },
+  "followUps": {
+    "hint": "助手回复后推荐可发送的追问。",
+    "label": "追问建议"
+  },
+  "ghostText": {
+    "debounceLabel": "防抖(毫秒)",
+    "hint": "打字时显示灰色 AI 续写，按 Tab 接受。默认关闭。",
+    "label": "行内自动补全"
+  },
+  "starters": {
+    "hint": "在空聊天页推荐起始提示。",
+    "label": "AI 起始提示"
+  },
+  "title": "Composer AI 辅助"
+}

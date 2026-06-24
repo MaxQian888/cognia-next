@@ -1,0 +1,10 @@
+{
+  "compare": "对比",
+  "description": "对同一查询并行调用两个 Provider 进行对比。",
+  "noResult": "暂无结果",
+  "providerA": "Provider A",
+  "providerB": "Provider B",
+  "query": "查询",
+  "queryPlaceholder": "输入查询…",
+  "title": "Provider 对比"
+}

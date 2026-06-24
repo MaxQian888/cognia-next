@@ -1,0 +1,8 @@
+{
+  "lsp": {
+    "description": "When enabled, the VS Code extension LSP binary policy lets unsigned servers spawn after one in-session consent prompt instead of refusing them outright. Useful when developing your own .vsix.",
+    "title": "Allow unsigned LSP binaries",
+    "toggleAriaLabel": "Toggle unsigned LSP binary allow",
+    "warning": "Never enable on a machine where you install third-party .vsix files you have not audited. Every spawn is still recorded in the automation audit log."
+  }
+}

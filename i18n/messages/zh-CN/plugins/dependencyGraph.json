@@ -1,0 +1,10 @@
+{
+  "conflictsTitle": "{count} 个冲突",
+  "cyclesTitle": "{count} 个依赖循环",
+  "loading": "解析依赖中…",
+  "missing": "缺失",
+  "root": "根",
+  "title": "依赖图",
+  "unresolved": "未解决",
+  "warningsTitle": "{count} 个警告"
+}

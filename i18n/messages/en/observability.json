@@ -1,0 +1,88 @@
+{
+  "filters": {
+    "clear": "Clear",
+    "dims": {
+      "model": "Model",
+      "operation": "Operation",
+      "session": "Session",
+      "surface": "Surface",
+      "tool": "Tool"
+    },
+    "empty": "No options",
+    "search": "Search…"
+  },
+  "noData": "No data in this window",
+  "panels": {
+    "byModel": "Spans by model",
+    "bySurface": "Spans by surface",
+    "cacheHitRate": "Cache hit rate",
+    "costOverTime": "Cost over time",
+    "errorRate": "Error rate",
+    "errorRateOverTime": "Error rate",
+    "latencyPercentiles": "Latency percentiles",
+    "p95Latency": "Latency (p95)",
+    "recentTraces": "Recent traces",
+    "requestRate": "Request rate",
+    "tokenThroughput": "Token throughput",
+    "totalCost": "Total cost",
+    "totalSpans": "Total spans"
+  },
+  "range": {
+    "absolute": "Absolute range",
+    "apply": "Apply",
+    "custom": "Custom range",
+    "from": "From",
+    "presets": {
+      "15m": "Last 15m",
+      "1h": "Last 1h",
+      "24h": "Last 24h",
+      "30d": "Last 30d",
+      "5m": "Last 5m",
+      "6h": "Last 6h",
+      "7d": "Last 7d"
+    },
+    "quickRanges": "Quick ranges",
+    "to": "To"
+  },
+  "refresh": {
+    "label": "Auto-refresh",
+    "off": "Off"
+  },
+  "series": {
+    "cacheCreation": "Cache write",
+    "cacheRead": "Cache read",
+    "cost": "Cost",
+    "errorRate": "Error rate",
+    "input": "Input",
+    "output": "Output",
+    "p50": "p50",
+    "p95": "p95",
+    "p99": "p99",
+    "perSec": "Requests/s"
+  },
+  "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
+  "title": "Observability",
+  "toolbar": {
+    "edit": "Edit layout",
+    "lock": "Lock layout",
+    "resetLayout": "Reset layout"
+  },
+  "traces": {
+    "cost": "Cost",
+    "duration": "Duration",
+    "empty": "No traces in this window",
+    "root": "Trace",
+    "spans": "Spans",
+    "started": "Started",
+    "surface": "Surface"
+  },
+  "waterfall": {
+    "cost": "Cost {value}",
+    "empty": "No spans for this trace",
+    "spanCount": "{count} spans",
+    "title": "Trace detail",
+    "toggleEvents": "Toggle span details",
+    "tokens": "{count} tokens",
+    "totalDuration": "Duration {value}"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "all": "All capabilities",
+  "capability": {
+    "agentPresets": "Agent presets",
+    "ai-provider": "AI provider",
+    "canvas": "Canvas",
+    "commands": "Commands",
+    "components": "Components",
+    "exporters": "Exporters",
+    "hooks": "Hooks",
+    "importers": "Importers",
+    "media": "Media",
+    "modes": "Modes",
+    "python": "Python",
+    "scheduler": "Scheduler",
+    "themes": "Themes",
+    "tools": "Tools"
+  }
+}

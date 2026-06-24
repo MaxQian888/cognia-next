@@ -1,0 +1,32 @@
+{
+  "autoFilterLow": "Auto-filter low credibility",
+  "autoFilterLowDesc": "Drop sources below the threshold automatically",
+  "autoFilterWarning": "Sources below {percentage}% credibility will be silently dropped.",
+  "blocked": "blocked",
+  "blockedDomainPlaceholder": "example.com",
+  "blockedDomains": "Blocked",
+  "description": "Score search results by credibility before injecting into chat.",
+  "domainManagement": "Trusted / blocked domains",
+  "enableCrossValidation": "Cross-validation",
+  "enableCrossValidationDesc": "Compare claims across sources",
+  "loose": "Loose",
+  "minimumThreshold": "Minimum credibility",
+  "mode": {
+    "ask": "Ask",
+    "askDesc": "Show a confirmation dialog",
+    "auto": "Auto",
+    "autoDesc": "Auto-verify silently",
+    "disabled": "Off",
+    "disabledDesc": "Skip verification entirely"
+  },
+  "removeDomain": "Remove {domain}",
+  "rules": "rules",
+  "showBadges": "Show badges",
+  "showBadgesDesc": "Render credibility badges on results",
+  "strict": "Strict",
+  "title": "Source verification",
+  "trusted": "trusted",
+  "trustedDomainPlaceholder": "example.com",
+  "trustedDomains": "Trusted",
+  "verificationMode": "Mode"
+}

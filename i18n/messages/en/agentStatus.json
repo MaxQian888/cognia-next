@@ -1,0 +1,14 @@
+{
+  "cancelled": "Cancelled",
+  "completed": "Completed",
+  "failed": "Failed",
+  "idle": "Idle",
+  "initializing": "Initializing",
+  "paused": "Paused",
+  "pending": "Pending",
+  "queued": "Queued",
+  "rejected": "Rejected",
+  "running": "Running",
+  "timeout": "Timeout",
+  "waiting": "Waiting"
+}

@@ -1,0 +1,29 @@
+{
+  "categories": {
+    "action": "动作",
+    "ai": "AI",
+    "annotation": "注释",
+    "data": "数据",
+    "flow": "流程",
+    "io": "I/O",
+    "plugin": "插件",
+    "trigger": "触发器"
+  },
+  "commands": {
+    "autoLayout": "自动布局",
+    "backToLibrary": "返回工作流库",
+    "exportJson": "导出工作流 JSON",
+    "importJson": "导入工作流 JSON",
+    "redo": "重做",
+    "run": "运行工作流",
+    "save": "保存工作流",
+    "undo": "撤销"
+  },
+  "empty": "没有匹配结果。",
+  "headings": {
+    "addCategory": "添加{category}节点",
+    "editorActions": "编辑器操作",
+    "recent": "切换到最近的工作流"
+  },
+  "searchPlaceholder": "输入命令、搜索节点、跳转到工作流…"
+}

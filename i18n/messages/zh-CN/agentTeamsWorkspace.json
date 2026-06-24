@@ -1,0 +1,575 @@
+{
+  "activity": {
+    "empty": "暂无事件。",
+    "eventKind": {
+      "approval_requested": "已请求审批",
+      "budget_exceeded": "预算超限",
+      "deadlock_resolved": "死锁已解决",
+      "delegation_completed": "委派已完成",
+      "delegation_failed": "委派失败",
+      "delegation_started": "委派已开始",
+      "message_sent": "消息已发送",
+      "pattern_selected": "已选择协作模式",
+      "plan_approved": "计划已批准",
+      "plan_rejected": "计划被拒绝",
+      "plan_submitted": "计划已提交",
+      "progress_update": "进度更新",
+      "routing_assessed": "路由已评估",
+      "task_claimed": "任务已认领",
+      "task_completed": "任务已完成",
+      "task_created": "任务已创建",
+      "task_failed": "任务失败",
+      "task_retried": "任务已重试",
+      "task_started": "任务已开始",
+      "team_cancelled": "团队已取消",
+      "team_completed": "团队已完成",
+      "team_created": "团队已创建",
+      "team_failed": "团队失败",
+      "team_started": "团队已启动",
+      "teammate_added": "已添加队友",
+      "teammate_completed": "队友已完成",
+      "teammate_failed": "队友失败",
+      "teammate_shutdown": "队友已关闭",
+      "teammate_started": "队友已启动"
+    },
+    "liveProgress": "工作中 — {tools} 个工具 · {chars} 字符 · {secs} 秒",
+    "liveProgressStarting": "启动中…",
+    "progressPhase": {
+      "done": "完成",
+      "failed": "失败",
+      "running": "工作中",
+      "start": "启动中"
+    },
+    "report": {
+      "checkpoints": {
+        "toggle": "检查点时间线"
+      },
+      "emptyCheckpoints": "本次运行尚未记录任何检查点。",
+      "kpi": {
+        "duration": "时长",
+        "escalations": "升级次数",
+        "successRate": "成功率",
+        "tokens": "总 Token"
+      },
+      "pluginSlot": {
+        "placeholder": "插件可在此渲染自定义分析。可从插件市场安装。"
+      },
+      "status": "状态：{status}",
+      "taskline": {
+        "empty": "未记录委派分段。",
+        "title": "任务时间线",
+        "tooltip": "{title} · {start} → {end}"
+      },
+      "title": "执行报告",
+      "tokenBurn": {
+        "empty": "尚未记录 Token 使用。",
+        "title": "Token 消耗"
+      }
+    }
+  },
+  "allCategories": "全部",
+  "autoCompose": {
+    "approve": "创建团队",
+    "cancel": "取消",
+    "compose": "组建",
+    "composing": "组建中…",
+    "confidence": "置信度 {pct}%",
+    "created": "团队已组建。",
+    "dependsOn": "依赖 {deps}",
+    "description": "描述一个目标，系统将提出专家阵容和任务计划，供你审阅。",
+    "failed": "自动组建失败：{error}",
+    "lead": "组长",
+    "noClient": "自动组建需要一个在渲染端可用 API 密钥的提供方——请在设置中配置。",
+    "objectiveLabel": "目标",
+    "objectivePlaceholder": "例如：审计认证层的安全问题并撰写修复报告",
+    "objectiveRequired": "请先输入一个目标。",
+    "openButton": "自动组建",
+    "piiRefused": "已拒绝：脱敏后目标仍包含敏感数据。",
+    "reject": "返回",
+    "rosterLabel": "阵容（{count}）",
+    "tasksLabel": "任务（{count}）",
+    "teamNameLabel": "团队名称",
+    "teamNamePlaceholder": "为团队命名",
+    "title": "自动组建团队"
+  },
+  "builtInBadge": "内置",
+  "cancel": "取消",
+  "cancelRename": "取消重命名",
+  "chat": {
+    "composer": {
+      "imageNotSupported": "团队对话暂不支持图片附件。",
+      "mentionTitle": "提及一个智能体",
+      "missingMention": "请用 @<智能体名> 开头的方式发送消息。",
+      "missingPrompt": "在 @ 提及之后请输入消息内容。",
+      "noAgents": "暂无可用智能体 —— 请先添加队友",
+      "noMatches": "没有匹配 \"{query}\" 的智能体",
+      "placeholder": "输入 @ 提及智能体 —— 试试 @claude 或 @codex",
+      "sendingFailed": "发送给 {agent} 失败：{reason}",
+      "stop": "停止",
+      "unknownAgent": "未知的智能体：@{name}"
+    },
+    "empty": "暂无消息。",
+    "emptyHint": "试试 @claude、@codex 或 @<成员名> 把消息发给对应的智能体。",
+    "errorGeneric": "出错了",
+    "errorReason": "错误详情",
+    "mentionAgents": "@ 提及智能体",
+    "messageActions": {
+      "copied": "已复制到剪贴板",
+      "copy": "复制",
+      "delete": "删除",
+      "deleteFailed": "删除消息失败",
+      "open": "消息操作",
+      "retry": "重试",
+      "retrying": "正在重试…"
+    },
+    "messageTypes": {
+      "broadcast": "广播",
+      "consensus": "共识",
+      "direct": "私聊",
+      "idle": "空闲",
+      "plan_approval": "计划审批",
+      "plan_feedback": "计划反馈",
+      "result_share": "结果分享",
+      "shutdown": "关闭",
+      "system": "系统",
+      "task_assignment": "任务分配",
+      "task_update": "任务更新"
+    },
+    "runtime": {
+      "claude": "Claude",
+      "claudeCode": "Claude Code",
+      "codex": "Codex",
+      "cursorCli": "Cursor",
+      "geminiCli": "Gemini"
+    },
+    "runtimeStatus": {
+      "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。",
+      "missingKey": "请在「设置 → Providers」配置 Anthropic API Key 后再使用 @claude。",
+      "noAgent": "尚未为 {runtime} 配置外部 Agent。请到「设置 → 外部 Agent」添加。"
+    },
+    "streaming": "思考中…",
+    "structuredPayload": "载荷",
+    "tokenUsage": {
+      "input": "输入",
+      "label": "Token",
+      "output": "输出",
+      "total": "总计"
+    },
+    "toolCall": {
+      "complete": "完成",
+      "error": "出错",
+      "input": "输入",
+      "output": "输出",
+      "running": "运行中",
+      "toggleDetails": "展开 / 折叠 {name} 的详情"
+    },
+    "virtualTag": "虚拟"
+  },
+  "clearSearch": "清除搜索",
+  "confirmRename": "确认重命名",
+  "consensus": {
+    "cancel": "取消",
+    "description": "活跃和最近解决的成员投票。",
+    "empty": "该团队暂无共识投票。",
+    "forceResolve": "领队裁决",
+    "status": {
+      "cancelled": "已取消",
+      "open": "进行中",
+      "resolved": "已解决",
+      "timeout": "超时"
+    },
+    "title": "共识投票",
+    "type": "类型：{type}",
+    "vote": "投票",
+    "voteCount": "{count} 票"
+  },
+  "createFromScratch": "从零创建",
+  "createFromTemplate": "使用模板",
+  "createTeam": "创建团队",
+  "createTeamDescription": "从模板快速开始，或从零自定义配置。",
+  "createTeamTitle": "创建新团队",
+  "creating": "创建中…",
+  "defaultTeamDescription": "新的智能体团队",
+  "delegations": {
+    "approve": "批准",
+    "cancel": "取消",
+    "description": "委派给后台 Agent、外部 Agent 或其他团队的工作。",
+    "empty": "该团队暂无委派。",
+    "status": {
+      "active": "进行中",
+      "awaiting_approval": "等待批准",
+      "cancelled": "已取消",
+      "completed": "已完成",
+      "failed": "失败",
+      "pending": "待处理",
+      "timeout": "超时"
+    },
+    "target": "目标：{type}（{id}）",
+    "title": "委派"
+  },
+  "delete": "删除",
+  "deleteConfirm": "确定要永久删除 \"{name}\" 吗？",
+  "deleteTeam": "删除团队",
+  "deleteWarning": "此操作不可撤销。所有任务、消息和成员数据将被删除。",
+  "descriptionTaskLabel": "描述 / 任务",
+  "descriptionTaskPlaceholder": "这个团队要完成什么？",
+  "duplicate": "复制",
+  "duplicatedName": "{name}（副本）",
+  "editableField": {
+    "cancelAriaLabel": "取消",
+    "editAriaLabel": "编辑",
+    "editDescription": "编辑描述",
+    "editName": "编辑名称",
+    "emptyHint": "添加描述…",
+    "saveAriaLabel": "保存"
+  },
+  "listDescription": "多智能体团队：规划、分工并并行执行。",
+  "listEmpty": "暂无团队。从模板快速创建，或从零开始搭建。",
+  "listTitle": "智能体团队",
+  "members": {
+    "addMember": "添加队友",
+    "addMemberTitle": "添加新队友",
+    "cancel": "取消",
+    "configOverrides": "配置覆盖",
+    "configure": "配置",
+    "description": "描述",
+    "descriptionPlaceholder": "该队友负责什么？",
+    "empty": "暂无成员。添加第一个队友吧。",
+    "lead": "领队",
+    "model": "模型",
+    "name": "名称",
+    "namePlaceholder": "例如：安全审查员",
+    "provider": "模型提供商",
+    "removeAction": "移除",
+    "removeBody": "\"{name}\" 将被移出团队。",
+    "removeTitle": "移除队友？",
+    "removed": "\"{name}\" 已移除。",
+    "role": "角色",
+    "runtime": "运行时",
+    "runtimeUpdated": "{name} 的运行时已更新。",
+    "save": "添加",
+    "saved": "\"{name}\" 已添加。",
+    "specialization": "专长",
+    "specializationPlaceholder": "例如：安全、性能、测试",
+    "teammate": "队员",
+    "title": "团队成员"
+  },
+  "membersCount": "{count} 名成员",
+  "missing": "未找到团队。",
+  "myTeams": "我的团队",
+  "newFromTemplate": "快速开始模板",
+  "noResults": "没有匹配的结果。",
+  "noTemplatesAvailable": "暂无可用模板。",
+  "openWorkspace": "打开工作区",
+  "overview": {
+    "abortTeam": "停止",
+    "budget": "预算",
+    "concurrency": "并发数",
+    "configSummary": "配置摘要",
+    "duration": "运行时长",
+    "editDescription": "编辑描述",
+    "editName": "编辑名称",
+    "finalResult": "最终结果",
+    "lead": "领队",
+    "mode": "模式",
+    "no": "否",
+    "noLead": "未指定领队",
+    "pattern": "协作模式",
+    "planApproval": "计划审批",
+    "routing": {
+      "confidence": "置信度：{pct}%",
+      "pattern": "模式：{pattern}",
+      "title": "编排评估",
+      "ultracodeOff": "ultracode 关闭",
+      "ultracodeOn": "ultracode 开启"
+    },
+    "runtime": "运行时",
+    "startTeam": "启动团队",
+    "startTeamUltracode": "以 Ultracode 运行",
+    "status": "状态",
+    "teammates": "成员",
+    "tokenInput": "输入",
+    "tokenOutput": "输出",
+    "tokenUsage": "Token 用量",
+    "unlimited": "无限制",
+    "yes": "是"
+  },
+  "planApproval": {
+    "approve": "通过",
+    "feedbackPlaceholder": "（可选）反馈给领队",
+    "noPlan": "尚未提交计划。",
+    "reject": "驳回",
+    "title": "等待计划审批"
+  },
+  "rename": "重命名",
+  "requirePlanApproval": "需要计划审批",
+  "sampleTeamCreated": "示例研究小队已就绪 — 在概览页点击「运行」即可启动。",
+  "searchTeams": "搜索团队...",
+  "settings": {
+    "accordion": {
+      "governance": "治理",
+      "memory": "共享内存",
+      "overview": "概览",
+      "plugins": "插件与能力",
+      "ultracode": "Ultracode"
+    },
+    "autoShutdown": "完成后自动关闭",
+    "cancel": "取消",
+    "confirm": {
+      "cancelLabel": "取消",
+      "clearMemory": {
+        "description": "此操作会永久删除该团队的所有共享内存条目。",
+        "title": "清空共享内存？"
+      },
+      "confirmLabel": "确认",
+      "forceResolve": {
+        "description": "将以 lead 的强制裁定解决该投票，忽略未投出的票。",
+        "title": "强制解决共识？"
+      },
+      "onCritical": {
+        "description": "选择\"暂停以待审核\"或\"切换到后台\"会改变运行时在严重预算阈值处的阻断方式。",
+        "title": "更改严重阈值动作？"
+      },
+      "removeTeammate": {
+        "description": "此操作会将该队友移出团队，其认领的任务将被释放。",
+        "title": "移除队友？"
+      },
+      "typeToConfirm": "输入 \"{value}\" 以确认"
+    },
+    "dangerZone": "危险区域",
+    "deleteAction": "永久删除",
+    "deleteWarning": "将永久删除该团队及其所有成员、任务和消息。",
+    "description": "描述",
+    "enableMessaging": "智能体间消息",
+    "executionMode": "执行模式",
+    "executionModeOption": {
+      "autonomous": "自主",
+      "coordinated": "协同",
+      "delegate": "委派"
+    },
+    "executionPattern": "执行策略",
+    "executionPatternOption": {
+      "backgroundHandoff": "后台转交",
+      "externalHandoff": "外部转交",
+      "managerWorker": "经理/工人",
+      "parallelSpecialists": "并行专家",
+      "singleAgent": "单一智能体（推荐）"
+    },
+    "governance": {
+      "adaptiveReplan": {
+        "description": "在每一波运行之间，组长会复盘结果，并可对剩余任务进行新增、取消、重排或提前结束。",
+        "enabled": "启用自适应重规划",
+        "heading": "自适应重规划",
+        "requireApproval": "应用重规划前需要审批"
+      },
+      "approval": {
+        "heading": "审批",
+        "requireDelegationApproval": "向外部智能体委派前需要审批",
+        "requirePlanApproval": "运行前需要计划审批"
+      },
+      "budget": {
+        "criticalThreshold": "严重阈值（0–1）",
+        "heading": "Token 预算",
+        "onCritical": "触发严重时",
+        "tokenBudget": "Token 预算（0 = 无限）",
+        "warningThreshold": "警告阈值（0–1）"
+      },
+      "description": "审批门、预算阈值、升级行为以及拒答检测。",
+      "escalation": {
+        "allowOperatorPatternOverride": "允许操作员覆盖执行模式",
+        "heading": "升级",
+        "pauseOnHighRisk": "路由评估标记高风险时自动暂停"
+      },
+      "escalationOption": {
+        "handoff_to_background": "切换到后台",
+        "notify": "仅通知",
+        "pause_for_review": "暂停以待审核",
+        "reduce_concurrency": "并发降到 1"
+      },
+      "refusal": {
+        "detect": "在队员输出中检测拒答模式",
+        "heading": "拒答检测",
+        "patterns": "拒答模式（每行一条）",
+        "patternsPlaceholder": "我无法协助\n我没办法"
+      },
+      "title": "治理策略"
+    },
+    "maxConcurrent": "最大并发数",
+    "maxRetries": "最大重试次数",
+    "memory": {
+      "acl": {
+        "aclHint": "\"可读成员\"留空表示所有队友都可读取该条目。",
+        "operatorBadge": "操作员视图 — 全部条目"
+      },
+      "adapter": {
+        "configure": "配置",
+        "label": "后端存储",
+        "noAdapter": "仅本地",
+        "pickerTitle": "共享内存后端存储",
+        "sync": "立即同步",
+        "syncFailed": "同步失败",
+        "synced": "已同步 {count} 条",
+        "unset": "（无）"
+      },
+      "addEntry": "新增条目",
+      "clearAll": "清空",
+      "composer": {
+        "cancel": "取消",
+        "expiresAt": "过期时间（可选）",
+        "invalidJson": "值不是有效的 JSON。",
+        "key": "键",
+        "parseJson": "按 JSON 解析值",
+        "piiBlocked": "写入被拦截：值中包含 PII。",
+        "readableBy": "可读成员",
+        "readableByAll": "全部队友（留空）",
+        "submit": "保存条目",
+        "tags": "标签",
+        "tagsPlaceholder": "输入标签后按回车",
+        "titleCreate": "新建内存条目",
+        "titleEdit": "编辑内存条目",
+        "value": "值"
+      },
+      "deleteEntry": "删除 \"{key}\"",
+      "description": "由队员在运行期间写入的键值条目。写入受 PII 网关保护。",
+      "detail": {
+        "copied": "已复制",
+        "copy": "复制值",
+        "delete": "删除",
+        "edit": "编辑",
+        "title": "内存条目"
+      },
+      "empty": "暂无共享内存条目。",
+      "filter": {
+        "dateRange": "时间范围",
+        "empty": "没有条目匹配当前筛选。",
+        "reset": "重置筛选",
+        "tags": "标签",
+        "text": "搜索键或值",
+        "writer": "写入者"
+      },
+      "title": "共享内存",
+      "writtenBy": "由 {name} 写入 · {when}"
+    },
+    "name": "团队名称",
+    "plugins": {
+      "intro": "这些插件能力将被团队所有队友继承。在队员配置中可以单独覆盖。"
+    },
+    "requirePlanApproval": "需要计划审批",
+    "save": "保存",
+    "saveIndicator": {
+      "auditCompleted": "审核完成 · {count} 个失效 id",
+      "auditNow": "立即审核",
+      "auditUnavailable": "审核器未就绪",
+      "savedJustNow": "已保存",
+      "savedSecondsAgo": "已保存 · {seconds} 秒前",
+      "unsaved": "未变更"
+    },
+    "saved": "设置已保存。",
+    "saving": "保存中…",
+    "sectionControls": "控制项",
+    "sectionExecution": "执行",
+    "streamProgress": "实时显示队友进度",
+    "title": "团队设置",
+    "tokenBudget": "Token 预算（0 = 无限）",
+    "typeToConfirm": "输入 \"{name}\" 确认",
+    "ultracode": {
+      "autoMode": {
+        "hint": {
+          "always": "该团队每次运行都编排。",
+          "auto": "仅当路由评估判定任务复杂时才编排。",
+          "never": "不自动编排；改用「以 Ultracode 运行」手动触发。"
+        },
+        "label": "自动触发",
+        "option": {
+          "always": "始终",
+          "auto": "自动（复杂任务）",
+          "never": "从不"
+        }
+      },
+      "description": "用多智能体质量模式（多模态扫描、loop-until-dry、对抗式校验、评审团、完整性批判、综合）替代扁平任务清单运行。带工具的队友走桌面 sidecar；Web/移动端降级为纯文本推理。",
+      "dryRoundsToStop": "连续空轮停止数",
+      "enabled": "启用 Ultracode 编排",
+      "judgesPerAttempt": "每个方案的评委数",
+      "maxFinderRounds": "最大查找轮数",
+      "skepticsPerFinding": "每个发现的质疑者数",
+      "title": "Ultracode 编排",
+      "workingDir": {
+        "hint": "带工具的队友读取并执行命令的仓库路径（仅桌面）。",
+        "label": "工作目录",
+        "placeholder": "/仓库的绝对路径"
+      }
+    }
+  },
+  "stats": {
+    "activeTeams": "活跃中",
+    "totalTeammates": "成员总数",
+    "totalTeams": "团队总数"
+  },
+  "tabs": {
+    "activity": "活动",
+    "chat": "对话",
+    "members": "成员",
+    "overview": "概览",
+    "settings": "设置",
+    "tasks": "任务"
+  },
+  "tasks": {
+    "addTask": "新建任务",
+    "assignee": "负责人",
+    "cancel": "取消",
+    "createTask": "创建任务",
+    "delete": "删除",
+    "deleteBody": "该任务将被永久删除，且无法撤销。",
+    "deleteTitle": "删除任务？",
+    "dependencies": "依赖",
+    "description": "描述",
+    "empty": "暂无任务。",
+    "expectedOutput": "预期输出",
+    "priority": "优先级",
+    "save": "保存",
+    "tags": "标签",
+    "taskCreated": "任务已创建。",
+    "taskDeleted": "任务已删除。",
+    "taskDescriptionPlaceholder": "需要完成什么？",
+    "taskTitlePlaceholder": "任务标题",
+    "tasksCount": "{count} 个任务",
+    "title": "标题",
+    "unassigned": "未分配"
+  },
+  "teamCreated": "团队 \"{name}\" 已创建。",
+  "teamDeleted": "团队 \"{name}\" 已删除。",
+  "teamDuplicated": "已复制为 \"{name}\"。",
+  "teamNameLabel": "团队名称",
+  "teamNamePlaceholder": "例如：安全审计团队",
+  "teamNameRequired": "请填写团队名称。",
+  "teamUpdated": "团队已更新。",
+  "teammateConfig": {
+    "description": "编辑该队友的身份、提示词、工具与插件能力。",
+    "rosterSection": {
+      "description": "存在于队员行而非预设配置上的字段。",
+      "runtime": "运行时",
+      "specialization": "专长",
+      "temperature": "温度（{value}）",
+      "title": "队员字段"
+    },
+    "save": "保存",
+    "title": "配置 {name}"
+  },
+  "teammatesCount": "{count} 名队员",
+  "templates": {
+    "categories": {
+      "analysis": "分析",
+      "debugging": "调试",
+      "development": "开发",
+      "documentation": "文档",
+      "general": "通用",
+      "research": "研究",
+      "review": "评审",
+      "security": "安全"
+    },
+    "missingDependencies": "缺失 {count} 项依赖"
+  },
+  "templatesTab": "模板",
+  "trySampleTeam": "试用示例团队",
+  "viewWorkspace": "查看工作区"
+}

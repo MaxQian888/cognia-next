@@ -1,0 +1,11 @@
+{
+  "availableCount": "{count} 个可用",
+  "checking": "检查中…",
+  "close": "关闭",
+  "description": "从市场拉取的更新列表。",
+  "install": "安装",
+  "installAll": "全部安装",
+  "recheck": "重新检查",
+  "title": "插件更新",
+  "upToDate": "全部插件均为最新版本。"
+}

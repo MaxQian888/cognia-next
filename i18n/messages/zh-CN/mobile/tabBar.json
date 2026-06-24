@@ -1,0 +1,12 @@
+{
+  "customize": {
+    "description": "拖拽以重新排序底部标签，隐藏不需要的标签，并选择启动时打开的标签。",
+    "dragHint": "拖拽以排序",
+    "landing": "启动标签",
+    "restoreDefaults": "恢复默认",
+    "rowDescription": "重新排序、隐藏并选择启动标签",
+    "tabs": "标签",
+    "title": "自定义标签栏"
+  },
+  "unread": "{count} 未读"
+}

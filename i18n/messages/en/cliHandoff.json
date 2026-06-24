@@ -1,0 +1,4 @@
+{
+  "failed": "Failed to import the handed-off session",
+  "received": "Session \"{title}\" handed off from the CLI"
+}

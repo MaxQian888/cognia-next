@@ -1,0 +1,31 @@
+{
+  "dropzone": {
+    "hint": "拖入包含 plugin.json 的目录，或点击选择。安装会经过与插件市场相同的冲突、权限与配置审查。",
+    "title": "将插件目录拖到这里"
+  },
+  "hotReload": {
+    "clear": "清空",
+    "empty": "本次会话尚无重载记录。运行 `cognia plugin dev` 查看实时更新。",
+    "kindHotReload": "已热重载",
+    "kindInstall": "已安装",
+    "kindUninstall": "已卸载",
+    "statusFailed": "失败",
+    "statusInProgress": "进行中",
+    "statusSuccess": "成功",
+    "title": "热重载活动"
+  },
+  "validator": {
+    "description": "在不安装的前提下，校验 plugin.json 是否符合宿主 schema。",
+    "errorsHeading": "错误",
+    "invalid": "清单存在 {count, plural, other {# 个错误}}。",
+    "noPermissions": "未声明任何权限。",
+    "permissionsHeading": "声明的权限",
+    "pickButton": "选择 plugin.json 或目录",
+    "readError": "无法读取清单：{message}",
+    "tauriRequiredError": "清单校验器需要在桌面应用中使用。",
+    "title": "清单校验器",
+    "valid": "清单校验通过。",
+    "validating": "校验中…",
+    "warningsHeading": "警告"
+  }
+}

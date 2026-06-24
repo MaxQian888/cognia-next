@@ -1,0 +1,12 @@
+{
+  "offline": "离线",
+  "offlineDescription": "两条传输都不可达。外发请求会本地排队并自动重试。",
+  "rtcDirect": "WebRTC（直连）",
+  "rtcDirectDescription": "手机与桌面之间的直连 DataChannel，延迟最低。",
+  "rtcRelay": "WebRTC（TURN 中继）",
+  "rtcRelayDescription": "因直连 NAT 打洞失败，DataChannel 经过 TURN 服务器转发。",
+  "wsLan": "局域网（HTTPS）",
+  "wsLanDescription": "与桌面同一局域网，无需隧道。",
+  "wsTunnel": "隧道（HTTPS）",
+  "wsTunnelDescription": "通过 Cloudflared 公共隧道访问桌面，多一跳。"
+}

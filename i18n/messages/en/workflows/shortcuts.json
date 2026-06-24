@@ -1,0 +1,26 @@
+{
+  "group": {
+    "canvas": "Canvas",
+    "editor": "Editor",
+    "inspector": "Inspector",
+    "run": "Run"
+  },
+  "items": {
+    "closeInspector": "Close inspector",
+    "commands": "Open command palette",
+    "copy": "Copy selection",
+    "cut": "Cut selection",
+    "deleteNode": "Delete selected nodes",
+    "duplicate": "Duplicate",
+    "group": "Group selection",
+    "panCanvas": "Pan canvas",
+    "paste": "Paste",
+    "redo": "Redo",
+    "run": "Run workflow",
+    "save": "Save",
+    "selectAll": "Select all nodes",
+    "shortcuts": "Show keyboard shortcuts",
+    "undo": "Undo"
+  },
+  "title": "Keyboard shortcuts"
+}

@@ -1,0 +1,30 @@
+{
+  "conversation": {
+    "allowedListLabel": "Allowed skill IDs",
+    "description": "Per-conversation gating for code-reviewed lark-cli skills.",
+    "requireHitlForWritesLabel": "Require confirm card for write actions",
+    "title": "Built-in skills"
+  },
+  "description": "Code-reviewed first-party MCP tools the assistant can call from desktop chat or IM channels.",
+  "lark": {
+    "emptyHint": "No Lark skills are registered.",
+    "intro": {
+      "body": "These skills wrap lark-cli subcommands behind typed MCP tools. The assistant calls them directly; execution runs in the desktop sidecar.",
+      "gates": "Read skills run without confirmation. Write skills surface an A2UI confirm card by default in IM channels. Destructive skills require explicit opt-in via the conversation settings panel.",
+      "title": "Lark productivity skills (lark-cli)"
+    }
+  },
+  "mutation": {
+    "destructive": "destructive",
+    "read": "read",
+    "write": "write"
+  },
+  "surfaceSkills": {
+    "description": "Auto-activate the built-in guidance skill for whichever surface a turn runs on — IM auto-reply, computer use, workflow authoring, agent teams, the digital twin, and goal/loop runs.",
+    "title": "Surface guidance skills"
+  },
+  "tabs": {
+    "lark": "Lark"
+  },
+  "title": "Built-in Skills"
+}

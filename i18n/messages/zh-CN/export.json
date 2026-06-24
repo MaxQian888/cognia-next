@@ -1,0 +1,59 @@
+{
+  "batch": {
+    "deselectAll": "清除选择",
+    "empty": "没有可导出的会话。",
+    "exportButton": "导出 ZIP",
+    "exporting": "正在打包 ZIP…",
+    "progress": "正在导出 {completed}/{total} — {current}",
+    "selectAll": "全选",
+    "selectedCount": "已选 {count} / {total}",
+    "sessionsLabel": "会话",
+    "someSelected": "部分选择",
+    "success": "已导出 {count} 个会话。"
+  },
+  "batchDescription": "选择要打包到一个 ZIP 中的会话。",
+  "batchTitle": "批量导出",
+  "exportButton": "导出",
+  "exporting": "导出中…",
+  "format": {
+    "animated": "动画 HTML",
+    "html": "HTML（精美）",
+    "json": "JSON（无损）",
+    "jsonl": "JSONL（逐条消息）",
+    "jsonlChat": "JSONL（逐段对话）",
+    "markdown": "Markdown (.md)",
+    "text": "纯文本",
+    "zip": "ZIP 归档"
+  },
+  "formatHint": {
+    "jsonl": "每行一个 JSON 对象——用于归档，保留所有重新生成的分支。",
+    "jsonlChat": "每行一段对话 {messages:[…]}——用于 OpenAI/Anthropic 训练与互通。"
+  },
+  "formatLabel": "格式",
+  "location": {
+    "exportFailed": "导出失败：{message}",
+    "revealInFolder": "在文件夹中显示",
+    "savedToDownloads": "已下载到下载文件夹 — {filename}",
+    "savedToPath": "已保存到 {path}",
+    "shareFile": "分享"
+  },
+  "options": {
+    "includeAllBranches": "包含所有分支",
+    "includeMetadata": "包含会话信息",
+    "includeTimestamps": "包含时间戳",
+    "includeTokens": "包含令牌用量"
+  },
+  "optionsLabel": "选项",
+  "singleDescription": "将“{title}”导出为可分享或归档的文件。",
+  "singleTitle": "导出会话",
+  "theme": {
+    "customTitle": "自定义主题",
+    "deleteTheme": "删除主题",
+    "namePlaceholder": "主题名称",
+    "saveNew": "保存",
+    "savedThemes": "已保存的主题",
+    "seedFrom": "从内置主题派生",
+    "update": "更新"
+  },
+  "themeLabel": "主题"
+}

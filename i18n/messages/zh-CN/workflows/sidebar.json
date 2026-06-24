@@ -1,0 +1,34 @@
+{
+  "addToFavorites": "加入收藏",
+  "category": {
+    "action": "动作",
+    "ai": "AI",
+    "annotation": "注释",
+    "data": "数据",
+    "flow": "流程",
+    "io": "I/O",
+    "plugin": "插件节点",
+    "trigger": "触发器"
+  },
+  "desktopOnly": "仅桌面端",
+  "dragHint": "把任意节点拖到画布上，或点击放置到视图中心。",
+  "favorites": "收藏",
+  "favoritesHint": "你加星标以便快速取用的节点。",
+  "hint": {
+    "action": "副作用：发送、保存、调用。",
+    "ai": "调用 LLM。",
+    "annotation": "画布上的说明 — 不参与执行。",
+    "data": "重塑、模板、代码。",
+    "flow": "分支、循环、等待、分组。",
+    "io": "与外部世界通信。",
+    "plugin": "由启用的插件贡献的节点。",
+    "trigger": "工作流的启动方式。"
+  },
+  "noFavorites": "还没有收藏 — 给节点加星标即可固定到这里。",
+  "noMatches": "无匹配节点。",
+  "noRecent": "还没有最近使用的节点。",
+  "recent": "最近使用",
+  "recentHint": "你最近添加的节点。",
+  "removeFromFavorites": "取消收藏",
+  "searchPlaceholder": "搜索节点…"
+}

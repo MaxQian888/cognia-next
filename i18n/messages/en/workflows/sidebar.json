@@ -1,0 +1,34 @@
+{
+  "addToFavorites": "Add to favorites",
+  "category": {
+    "action": "Actions",
+    "ai": "AI",
+    "annotation": "Annotations",
+    "data": "Data",
+    "flow": "Flow",
+    "io": "I/O",
+    "plugin": "Plugin nodes",
+    "trigger": "Triggers"
+  },
+  "desktopOnly": "Desktop only",
+  "dragHint": "Drag any node onto the canvas, or click to drop at the viewport center.",
+  "favorites": "Favorites",
+  "favoritesHint": "Nodes you've starred for quick access.",
+  "hint": {
+    "action": "Side effects: send, save, invoke.",
+    "ai": "LLM calls.",
+    "annotation": "Documentation on the canvas — no execution.",
+    "data": "Reshape, template, code.",
+    "flow": "Branch, loop, wait, group.",
+    "io": "Talk to the outside world.",
+    "plugin": "Nodes contributed by enabled plugins.",
+    "trigger": "How the workflow starts."
+  },
+  "noFavorites": "No favorites yet — star a node to pin it here.",
+  "noMatches": "No nodes match.",
+  "noRecent": "No recently-used nodes yet.",
+  "recent": "Recently used",
+  "recentHint": "Nodes you've added most recently.",
+  "removeFromFavorites": "Remove from favorites",
+  "searchPlaceholder": "Search nodes…"
+}

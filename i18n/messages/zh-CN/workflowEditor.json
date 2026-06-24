@@ -1,0 +1,212 @@
+{
+  "chat": {
+    "ariaLabel": "{name} 的工作流 AI 对话",
+    "changelog": {
+      "empty": "尚未有任何应用或丢弃的提案。",
+      "loading": "正在加载变更历史…",
+      "noWorkflow": "打开一个工作流以查看变更历史。",
+      "openSnapshot": "聚焦相关节点",
+      "opsCount": "{count} 项",
+      "reveal": "在对话中定位",
+      "status": {
+        "applied": "已应用",
+        "discarded": "已丢弃"
+      }
+    },
+    "clear": "清空对话",
+    "clearCancel": "取消",
+    "clearConfirm": "清空",
+    "clearConfirmDescription": "这个工作流的副驾驶会话中的所有消息都将被删除。下一次发送时会开启一个新的 agent 会话。",
+    "clearConfirmTitle": "清空这个工作流的对话？",
+    "loading": "正在准备对话…",
+    "mention": {
+      "edgesHeading": "边",
+      "noEdges": "工作流里还没有边。",
+      "noNodes": "工作流里还没有节点。",
+      "noResults": "没有匹配。",
+      "nodesHeading": "节点"
+    },
+    "noWorkflow": "打开一个工作流以启动 AI 协作会话。",
+    "placeholder": "让工作流 AI 帮你构建、重构或诊断这张图。",
+    "proposal": {
+      "apply": "应用",
+      "banner": {
+        "applyAll": "应用",
+        "discard": "丢弃",
+        "ops": "{count} 项",
+        "revealInChat": "定位"
+      },
+      "discard": "丢弃",
+      "errorEditorNotOpen": "对应的工作流编辑器未打开。",
+      "errorNotFound": "这个提案已不可用——可能已被更新的提案替代。",
+      "hideOps": "收起操作",
+      "showOps": "展开 {count} 项操作",
+      "status": {
+        "applied": "已应用",
+        "discarded": "已丢弃",
+        "open": "待确认"
+      },
+      "toast": {
+        "applied": "已应用：{summary}",
+        "discarded": "已丢弃：{summary}",
+        "proposed": "新提案：{summary}"
+      }
+    },
+    "rename": {
+      "cancel": "取消",
+      "description": "起一个方便日后定位这条线索的名字。",
+      "empty": "名称不能为空",
+      "placeholder": "会话名称",
+      "save": "保存",
+      "success": "会话已重命名",
+      "title": "重命名会话"
+    },
+    "session": {
+      "cleared": "对话已清空",
+      "created": "已创建新会话",
+      "defaultTag": "默认",
+      "delete": "删除会话",
+      "deleteDefaultBlocked": "默认工作流会话不能删除——请改用清空。",
+      "deleted": "会话已删除",
+      "handlerDefault": "Copilot",
+      "new": "新建会话",
+      "newDefault": "工作流对话",
+      "newSuffixed": "{name} — 额外",
+      "placeholder": "选择一个会话",
+      "rename": "重命名会话",
+      "switchLabel": "切换会话"
+    },
+    "starters": {
+      "buildPrompt": "帮我搭建这个工作流。先问我它要完成什么，再给出节点和连线方案。",
+      "buildTitle": "搭建工作流",
+      "explainPrompt": "逐个节点讲解当前工作流在做什么，以及数据如何在节点间流动。",
+      "explainTitle": "解释当前流程",
+      "heading": "工作流流程",
+      "subtitle": "描述你想构建的流程，或让我解释、校验、修复当前的图。",
+      "suggestPrompt": "根据当前的工作流图，建议接下来应该添加哪些节点。",
+      "suggestTitle": "建议下一步",
+      "title": "搭建或优化这个工作流",
+      "validatePrompt": "校验当前工作流图，列出所有问题并给出修复建议。",
+      "validateTitle": "校验并修复"
+    }
+  },
+  "rightSidebar": {
+    "chatLoading": "正在加载对话…",
+    "tabs": {
+      "changelog": "变更",
+      "chat": "对话",
+      "inspector": "检查器",
+      "problems": "问题",
+      "runs": "运行记录",
+      "settings": "设置",
+      "templates": "模板"
+    }
+  },
+  "runs": {
+    "backToList": "返回运行列表",
+    "deadLetter": {
+      "dismiss": "忽略",
+      "replay": "重放",
+      "replayStarted": "已开始重放",
+      "replayedBadge": "已重放 ×{count}",
+      "resume": "续跑",
+      "resumeStarted": "已开始续跑",
+      "title": "失败的运行（{count}）",
+      "unknownError": "运行失败"
+    },
+    "empty": "暂无运行记录。运行工作流后将在此显示执行历史。",
+    "notFound": "未找到该运行。",
+    "revealOnCanvas": "在画布中定位"
+  },
+  "settings": {
+    "concurrency": {
+      "hint": "针对本工作流。",
+      "label": "并发运行数"
+    },
+    "credentials": {
+      "addButton": "添加凭据引用",
+      "empty": "暂无凭据引用。",
+      "hint": "运行时从操作系统密钥环解析的引用。",
+      "idPlaceholder": "keyring:ns:key",
+      "kindPlaceholder": "类型",
+      "namePlaceholder": "显示名称",
+      "refOnlyNote": "仅引用——密钥值绝不会存入工作流。",
+      "removeAria": "删除凭据引用",
+      "title": "凭据"
+    },
+    "errorPolicy": {
+      "branch": "走错误分支",
+      "continue": "继续（跳过失败分支）",
+      "label": "出错时",
+      "stop": "停止运行"
+    },
+    "maxConcurrency": {
+      "hint": "单次运行内并行的节点数。",
+      "label": "运行内最大节点数"
+    },
+    "onFailure": {
+      "hint": "当运行终态失败（重试耗尽、未画错误分支）时的兜底行为。",
+      "notify": {
+        "hint": "在运行时间线上记录一条失败通知。",
+        "label": "失败时通知"
+      },
+      "runCatchNodes": {
+        "hint": "执行所有“捕获失败”节点及其下游作为恢复路径。",
+        "label": "运行捕获节点"
+      },
+      "title": "失败处理"
+    },
+    "plugins": {
+      "contributedBy": "由 {plugin} 提供",
+      "empty": "尚未安装插件贡献的工作流能力。",
+      "hint": "由已安装插件贡献的工作流节点、触发器与模板。",
+      "missingDep": "缺少：{id}",
+      "sections": {
+        "nodes": "节点",
+        "templates": "模板",
+        "triggers": "触发器"
+      },
+      "title": "插件与能力",
+      "useTemplate": "使用"
+    },
+    "retry": {
+      "attempts": "次数",
+      "backoff": "退避",
+      "baseMs": "基准（毫秒）",
+      "exponential": "指数",
+      "fixed": "固定",
+      "maxMs": "上限（毫秒）",
+      "title": "默认重试"
+    },
+    "runPolicy": {
+      "title": "运行策略"
+    },
+    "timeoutMs": {
+      "hint": "单次运行的墙钟时间上限。",
+      "label": "运行超时"
+    },
+    "timezone": {
+      "hint": "默认 cron 时区；缺省时回退到应用设置。",
+      "label": "时区"
+    },
+    "variables": {
+      "addButton": "添加变量",
+      "duplicateKey": "键重复。",
+      "empty": "暂无变量。",
+      "hint": "在表达式中以 '{{ $vars.KEY }}' 引用的作者期取值。",
+      "invalidKey": "请使用合法标识符（字母、数字、下划线；不能以数字开头）。",
+      "keyPlaceholder": "KEY",
+      "removeAria": "删除变量",
+      "title": "变量",
+      "valuePlaceholder": "值"
+    }
+  },
+  "templates": {
+    "applyCta": "应用模板",
+    "cancel": "取消",
+    "emptyState": "尚未注册任何模板。",
+    "slotRequiredMissing": "填好所有必填项才能应用模板。",
+    "tabHeading": "模板",
+    "tabHelp": "用 slot 填空脚手架，通过提案流程合并进当前工作流——不会替换已有内容。"
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "bulk": {
+    "builtinSkipped": "{count, plural, other {已跳过 # 个内置工作流}}",
+    "clear": "清除",
+    "delete": "删除",
+    "deleteConfirm": {
+      "cancel": "取消",
+      "confirm": "删除",
+      "description": "将永久删除所选工作流及其运行历史；内置工作流会被跳过。",
+      "title": "确认删除 {count, plural, other {# 个工作流}}？"
+    },
+    "deleteFailed": "删除工作流失败",
+    "deleted": "{count, plural, other {已删除 # 个工作流}}",
+    "export": "导出",
+    "exported": "已导出 {count} 个工作流",
+    "move": "移动",
+    "select": "选择",
+    "selectAll": "全选",
+    "selected": "{count, plural, other {已选 # 项}}",
+    "tag": "添加标签"
+  },
+  "createDialog": {
+    "cancel": "取消",
+    "create": "创建",
+    "description": "先取个名字即可 —— 描述和图谱都能在编辑器里继续完善。",
+    "descriptionLabel": "描述",
+    "descriptionPlaceholder": "（可选）一句话简介",
+    "name": "名称",
+    "namePlaceholder": "未命名工作流",
+    "title": "创建工作流"
+  },
+  "empty": {
+    "clearFilters": "清空筛选",
+    "cta": "创建工作流",
+    "description": "创建第一个工作流，把多步流程串联到聊天、触发器和工具之上。",
+    "descriptionQuery": "试试其它关键词，或清空筛选条件。",
+    "filterDescription": "换个搜索词，或清空筛选条件。",
+    "filterTitle": "未找到匹配的工作流",
+    "folderDescription": "在这里新建工作流，或把已有的工作流移进来。",
+    "folderTitle": "此文件夹为空",
+    "title": "暂无工作流",
+    "titleQuery": "未找到匹配的工作流"
+  },
+  "filter": {
+    "active": "{count, plural, other {# 个筛选}}",
+    "clear": "清空筛选",
+    "hasTrigger": "含触发器",
+    "label": "筛选",
+    "recentlyFailed": "最近失败",
+    "type": "类型",
+    "typeAll": "全部",
+    "typeBuiltin": "内置",
+    "typeTemplate": "模板",
+    "typeUser": "我的工作流"
+  },
+  "folders": {
+    "cancel": "取消",
+    "create": "新建文件夹",
+    "createCta": "创建",
+    "createFailed": "创建文件夹失败",
+    "createTitle": "新建文件夹",
+    "created": "文件夹已创建",
+    "delete": "删除文件夹",
+    "deleteConfirm": {
+      "cancel": "取消",
+      "confirm": "删除文件夹",
+      "description": "其中的内容会上移到父级 —— 不会删除任何工作流。",
+      "title": "确认删除「{name}」？"
+    },
+    "deleted": "文件夹已删除",
+    "namePlaceholder": "文件夹名称",
+    "open": "打开文件夹",
+    "removedToast": "该文件夹已被移除。",
+    "rename": "重命名",
+    "renameTitle": "重命名文件夹",
+    "renamed": "文件夹已重命名",
+    "root": "全部工作流",
+    "save": "保存",
+    "section": "文件夹"
+  },
+  "import": {
+    "button": "导入",
+    "empty": "未找到有效的工作流",
+    "failed": "{count} 个文件导入失败",
+    "success": "已导入 {count} 个工作流"
+  },
+  "move": {
+    "cancel": "取消",
+    "confirm": "移动到这里",
+    "description": "选择一个目标文件夹。",
+    "moveFailed": "移动失败",
+    "moved": "已移动 {count, plural, other {# 个工作流}}",
+    "root": "全部工作流（根目录）",
+    "title": "移动到文件夹"
+  },
+  "new": "新建工作流",
+  "newFolder": "新建文件夹",
+  "pinned": {
+    "section": "已收藏"
+  },
+  "searchPlaceholder": "搜索工作流…",
+  "sort": {
+    "created": "最近创建",
+    "label": "排序",
+    "nameAsc": "名称（A–Z）",
+    "nameDesc": "名称（Z–A）",
+    "runCount": "运行最多",
+    "updated": "最近修改"
+  },
+  "statBar": {
+    "activeWorkflows": "活跃工作流",
+    "failedToday": "今日失败",
+    "runs7d": "近 7 天运行",
+    "successRate": "成功率"
+  },
+  "subtitle": "围绕触发器、AI 和连接器的可视化编排。",
+  "tag": {
+    "add": "添加标签",
+    "addFailed": "添加标签失败",
+    "added": "标签已添加",
+    "cancel": "取消",
+    "description": "给所选工作流添加一个标签。",
+    "placeholder": "标签名称",
+    "title": "添加标签"
+  },
+  "title": "工作流",
+  "view": {
+    "grid": "网格视图",
+    "list": "列表视图",
+    "toggleAria": "切换布局"
+  }
+}

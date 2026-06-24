@@ -1,0 +1,237 @@
+{
+  "anchor": {
+    "label": "位置",
+    "options": {
+      "bottom-left": "左下",
+      "bottom-right": "右下",
+      "top-left": "左上",
+      "top-right": "右上"
+    }
+  },
+  "careAlerts": {
+    "description": "当宠物因疏于照顾而变得不适时，发送一条温和的通知。",
+    "label": "照护提醒"
+  },
+  "customBubbles": {
+    "add": "添加口头禅",
+    "description": "添加你自己的短语，宠物会在反应时偶尔说出来。",
+    "label": "口头禅",
+    "placeholder": "添加一句口头禅…",
+    "remove": "移除“{phrase}”"
+  },
+  "description": "你的桌面动画伙伴。",
+  "desktopPet": {
+    "clickThrough": {
+      "description": "让鼠标点击穿过宠物，作用到其后方的内容。",
+      "label": "鼠标穿透"
+    },
+    "clickThroughHint": "开启鼠标穿透后，桌宠将忽略鼠标。只能通过此处或托盘菜单的“关闭鼠标穿透”恢复。",
+    "description": "在透明、置顶的独立窗口中将宠物悬浮到桌面上（仅桌面应用）。",
+    "enabled": {
+      "description": "在应用窗口之外，将宠物悬浮显示在桌面上。",
+      "label": "桌面宠物"
+    },
+    "size": {
+      "label": "桌宠大小（{size}px）"
+    },
+    "title": "桌面宠物",
+    "wander": {
+      "climbWindows": {
+        "description": "让桌宠爬上并停在你打开的窗口顶部边缘。把它甩到窗口上就能让它坐在那里。实验性；仅 Windows。",
+        "label": "爬上窗口"
+      },
+      "description": "让桌宠沿屏幕底部自行散步。",
+      "enabled": {
+        "description": "桌宠会不时走到新位置。快速拖拽甩出始终可用。",
+        "label": "启用漫游"
+      },
+      "frequency": {
+        "label": "活跃程度",
+        "options": {
+          "calm": "安静",
+          "lively": "活泼",
+          "normal": "普通"
+        }
+      },
+      "onlyAfterInteraction": {
+        "description": "只有在你使用电脑（抚摸宠物、打字或移动鼠标）后的几分钟内才会开始散步。你离开时，宠物也会休息。",
+        "label": "仅在你活跃时移动"
+      },
+      "range": {
+        "label": "移动范围",
+        "options": {
+          "full": "整个屏幕",
+          "near": "就近活动"
+        }
+      },
+      "title": "自主漫游"
+    }
+  },
+  "enabled": {
+    "description": "显示浮动宠物挂件。",
+    "label": "启用宠物"
+  },
+  "live2d": {
+    "active": "当前",
+    "config": {
+      "cancel": "取消",
+      "columnKey": "状态",
+      "description": "调整模型的摆放方式，以及每个宠物状态播放的动作。修改会实时预览，保存后生效。",
+      "expression": "表情",
+      "indexRandom": "随机",
+      "motionGroup": "动作组",
+      "motionIndex": "动作",
+      "offsetX": "水平偏移",
+      "offsetY": "垂直偏移",
+      "oneShotTag": "一次性",
+      "optionDefault": "默认",
+      "optionEngine": "引擎默认",
+      "optionNoExpression": "无表情",
+      "previewState": "预览状态",
+      "previewUnavailable": "实时预览需要 Live2D 运行时 —— 设置仍可保存。",
+      "resetAll": "全部重置",
+      "resetMappings": "重置全部映射",
+      "resetTransform": "重置变换",
+      "save": "保存",
+      "scale": "缩放",
+      "tabMotion": "动作映射",
+      "tabTransform": "变换",
+      "test": "测试",
+      "title": "自定义 {name}"
+    },
+    "configure": "配置",
+    "coreMissing": "Live2D 运行时未就绪，将回退到 SVG 皮肤。",
+    "delete": "删除",
+    "download": "下载示例模型",
+    "downloading": "下载中…",
+    "errors": {
+      "cubism2Unsupported": "暂不支持 Cubism 2 模型。",
+      "downloadFailed": "无法下载示例模型。",
+      "invalidJson": "配置文件不是有效的 JSON。",
+      "missingReferenced": "模型缺少其引用的文件。",
+      "multipleSettings": "找到多个 .model3.json，请只保留一个。",
+      "noSettings": "未找到 .model3.json 配置文件。",
+      "tooLarge": "模型超过 50 MB 上限。",
+      "zipFailed": "无法读取 .zip 压缩包。"
+    },
+    "import": "导入模型",
+    "importFolder": "导入文件夹",
+    "importHint": "选择模型文件夹，或包含 .model3.json 的 .zip 压缩包。",
+    "noModels": "暂无 Live2D 模型，请导入或下载示例。",
+    "oneShotLabels": {
+      "evolving": "进化",
+      "fed": "进食",
+      "happy": "欢呼",
+      "levelUp": "升级",
+      "love": "爱心",
+      "petted": "被抚摸",
+      "sad": "难过",
+      "sleepy": "困倦",
+      "surprised": "惊讶",
+      "wave": "挥手"
+    },
+    "setActive": "设为当前",
+    "stateLabels": {
+      "error": "出错",
+      "evolving": "进化中",
+      "greeting": "打招呼",
+      "happy": "开心",
+      "idle": "待机",
+      "interacting": "互动中",
+      "review": "审阅中",
+      "sad": "难过",
+      "sleeping": "睡觉",
+      "thinking": "思考中",
+      "waiting": "等待中"
+    },
+    "storageUsage": "{count} 个模型 · {size}",
+    "title": "Live2D 模型"
+  },
+  "llmSpeak": {
+    "description": "让宠物用一句简短的 AI 回复来回应你输入的话（需主动开启，有频率限制和隐私门控）。",
+    "label": "AI 对话",
+    "model": "模型",
+    "modelHint": "建议选择便宜、快速的模型——回复只有一句话。",
+    "provider": "服务商",
+    "useDefault": "使用聊天默认值"
+  },
+  "lowPower": {
+    "description": "将 Live2D 帧率限制为 30 fps，并让漫游休息更久。",
+    "label": "低功耗模式"
+  },
+  "memory": {
+    "clearAction": "清空宠物记忆",
+    "clearDescription": "清除宠物记住的所有对话内容。",
+    "description": "记住最近的对话并融入回复。仅存本地，上限 200 条。",
+    "label": "对话记忆"
+  },
+  "motion": {
+    "label": "动效",
+    "options": {
+      "auto": "跟随系统",
+      "full": "完整",
+      "reduced": "减弱"
+    }
+  },
+  "mutedBubbles": {
+    "description": "让宠物保持安静（仍会动画）。",
+    "label": "静音气泡"
+  },
+  "proactive": {
+    "description": "宠物会自己开口——庆祝里程碑、空闲时闲聊、按时间问候。始终遵守勿扰时段。",
+    "enabled": {
+      "description": "默认关闭。与「AI 对话」使用同一个模型，有每日上限和最小间隔。",
+      "label": "允许宠物主动开口"
+    },
+    "eventComments": {
+      "description": "升级、进化、目标完成、成就解锁和工作流运行。",
+      "label": "评论里程碑"
+    },
+    "idleChatter": {
+      "description": "你离开电脑一段时间后，宠物会说说话。",
+      "label": "空闲闲聊"
+    },
+    "tier": {
+      "label": "话多程度",
+      "options": {
+        "chatty": "话多",
+        "normal": "适中",
+        "quiet": "安静"
+      }
+    },
+    "timeGreetings": {
+      "description": "早间问好和深夜提醒休息，每天各一次。",
+      "label": "时间问候"
+    },
+    "title": "主动说话"
+  },
+  "reset": {
+    "action": "重置",
+    "description": "删除所有宠物数据并重新开始。",
+    "label": "重置宠物"
+  },
+  "size": {
+    "label": "大小（{size}px）"
+  },
+  "skin": {
+    "label": "皮肤",
+    "options": {
+      "live2d": "Live2D 模型",
+      "svg": "矢量吉祥物"
+    }
+  },
+  "sound": {
+    "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
+    "label": "音效",
+    "quietHours": {
+      "description": "在此时间段内静音宠物音效。",
+      "end": "到",
+      "label": "免打扰时段",
+      "start": "从"
+    },
+    "volume": {
+      "label": "音量（{value}%）"
+    }
+  },
+  "title": "宠物"
+}

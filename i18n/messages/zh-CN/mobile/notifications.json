@@ -1,0 +1,28 @@
+{
+  "permissionCta": {
+    "description": "Cognia 可以在长时任务或定时备份需要关注时通知你。",
+    "descriptionDenied": "通知权限被拒绝。请前往 设置 → Cognia → 通知 开启。",
+    "enableButton": "启用",
+    "enableInProgress": "请求中…",
+    "settingsButton": "前往设置",
+    "title": "启用后台提醒"
+  },
+  "queue": {
+    "cancel": "取消",
+    "cancelFailed": "取消失败：{message}",
+    "empty": "暂无已排队通知。",
+    "errorTitle": "无法加载通知列表",
+    "loading": "加载中…",
+    "refresh": "刷新",
+    "scheduledAt": "在 {time}",
+    "title": "已排队通知",
+    "unsupportedDescription": "本地通知仅在 iOS / Android 上可用。",
+    "unsupportedTitle": "当前平台不支持"
+  },
+  "section": {
+    "description": "用于备份提醒和长时任务的后台通知。",
+    "queueRowDescription": "查看或取消待发送的提醒。",
+    "queueRowTitle": "已排队通知",
+    "title": "通知"
+  }
+}

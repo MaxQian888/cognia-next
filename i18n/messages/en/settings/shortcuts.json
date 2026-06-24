@@ -1,0 +1,13 @@
+{
+  "bindFailed": "Failed to bind shortcut",
+  "cancel": "Cancel",
+  "conflictBlocked": "Chord already bound",
+  "conflictWith": "Conflicts with",
+  "description": "Rebind the global hot-keys. Recording captures the next key combo you press.",
+  "desktopOnly": "Global shortcuts are only available in the desktop build.",
+  "pressKey": "Press any key…",
+  "record": "Record",
+  "resetItem": "Reset to default",
+  "save": "Save",
+  "title": "Global shortcuts"
+}

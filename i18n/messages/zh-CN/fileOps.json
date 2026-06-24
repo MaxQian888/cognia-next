@@ -1,0 +1,6 @@
+{
+  "auditCleared": "已清空文件活动日志。",
+  "denied": "访问被拒绝：{detail}",
+  "deniedTitle": "文件访问被拒绝",
+  "failed": "文件操作失败：{message}"
+}

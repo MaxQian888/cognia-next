@@ -1,0 +1,22 @@
+{
+  "any": "任意",
+  "apply": "应用",
+  "capability": "能力",
+  "description": "按能力、权限、来源或状态精细筛选已安装插件。",
+  "hasUpdate": "有更新",
+  "permission": "权限",
+  "query": "搜索",
+  "queryPlaceholder": "名称、id、描述…",
+  "reset": "重置",
+  "signedOnly": "仅签名插件",
+  "sort": "排序",
+  "sortMode": {
+    "name": "名称",
+    "rating": "评分",
+    "updated": "最近更新",
+    "usage": "最近使用"
+  },
+  "source": "来源",
+  "status": "状态",
+  "title": "插件筛选"
+}

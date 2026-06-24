@@ -1,0 +1,37 @@
+{
+  "panel": {
+    "accessedRelative": "{time}使用",
+    "cancelEdit": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "editLabel": "编辑记忆内容",
+    "empty": {
+      "description": "随着对话进行，关于你的耐久事实会保存在这里。也可以用 /remember。",
+      "title": "暂无记忆"
+    },
+    "invalidated": "已归档",
+    "pin": "置顶",
+    "saveEdit": "保存",
+    "searchLabel": "搜索记忆",
+    "searchPlaceholder": "搜索记忆…",
+    "showInvalidated": "显示已归档",
+    "sort": {
+      "accessed": "最近使用",
+      "importance": "重要性",
+      "recent": "最近更新"
+    },
+    "sortLabel": "排序",
+    "stats": {
+      "active": "活跃"
+    },
+    "subtitle": "助手记住的关于你的内容。",
+    "title": "记忆",
+    "unpin": "取消置顶",
+    "viewSource": "查看来源"
+  },
+  "types": {
+    "episodic": "事件",
+    "procedural": "偏好",
+    "semantic": "事实"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "searchFailed": "Web search failed: {message}",
+  "searchedVia": "Searched via {provider} — {count} results",
+  "tooltipDisabled": "Enable in Settings → Web search and configure a provider",
+  "tooltipOff": "Web search off",
+  "tooltipOn": "Web search on — using {provider}"
+}

@@ -1,0 +1,9 @@
+{
+  "categoriesButton": "Categories",
+  "filteredBadge": "{count} shown",
+  "filtersButton": "Filters",
+  "resultsCount": "{count} of {total} plugins",
+  "resultsCountEmpty": "No matches — {total} plugins installed",
+  "searchPlaceholder": "Search plugins…",
+  "totalBadge": "{count} total"
+}

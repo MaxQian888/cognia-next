@@ -1,0 +1,15 @@
+{
+  "bridgeDown": "Bridge offline",
+  "bridgeRunning": "Bridge connected",
+  "chipBridgeDown": "cognia CLI installed (bridge offline)",
+  "chipMissing": "cognia CLI not installed",
+  "chipReady": "cognia CLI ready",
+  "description": "The plugin-author CLI scaffolds, builds, signs, and hot-reloads plugins.",
+  "docs": "Docs",
+  "install": "Install cognia CLI",
+  "installedUnknownVersion": "Installed",
+  "missingHint": "Not found on your PATH. Install it to scaffold and hot-reload plugins.",
+  "probing": "Checking…",
+  "reveal": "Reveal",
+  "title": "cognia CLI"
+}

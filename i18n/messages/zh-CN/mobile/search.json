@@ -1,0 +1,20 @@
+{
+  "actions": {
+    "newChat": "新建会话",
+    "openSettings": "打开设置"
+  },
+  "description": "搜索会话、角色与工作流，或执行快捷操作。",
+  "empty": "无结果。",
+  "groups": {
+    "actions": "操作",
+    "characters": "角色",
+    "sessions": "会话",
+    "teams": "团队",
+    "workflows": "工作流"
+  },
+  "placeholder": "搜索或快速跳转…",
+  "title": "搜索",
+  "titles": {
+    "chatWith": "与 {name} 对话"
+  }
+}

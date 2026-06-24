@@ -1,0 +1,21 @@
+{
+  "author": "Author",
+  "capabilities": "Capabilities",
+  "clearAll": "Clear",
+  "close": "Close",
+  "count": "{count, plural, =0 {nothing queued} =1 {1 plugin} other {# plugins}}",
+  "dangerousCount": "{count, plural, other {# dangerous}}",
+  "downloads": "Downloads",
+  "empty": "No plugins queued for comparison.",
+  "install": "Install",
+  "installed": "Installed",
+  "no": "No",
+  "permissions": "Permissions",
+  "permissionsCount": "{count, plural, =0 {none} =1 {1 permission} other {# permissions}}",
+  "rating": "Rating",
+  "removeAria": "Remove {name} from comparison",
+  "signed": "Signed",
+  "title": "Compare plugins",
+  "triggerLabel": "Compare ({count})",
+  "yes": "Yes"
+}

@@ -1,0 +1,6 @@
+{
+  "linkCardDescription": "List, dashboard, trace views — search, filter, group, export and bookmark logs in real time.",
+  "linkCardFooter": "Closes the settings dialog and navigates to /logs.",
+  "linkCardTitle": "Open the full Log Panel",
+  "openPanel": "Open Log Panel"
+}

@@ -1,0 +1,42 @@
+{
+  "actions": {
+    "abort": "Abort",
+    "pause": "Pause",
+    "resume": "Resume"
+  },
+  "description": "Every live and recent goal, team, plan, and scheduled agent run in one place.",
+  "detail": {
+    "error": "Error",
+    "finished": "Finished",
+    "kind": "Kind",
+    "progress": "Progress",
+    "result": "Result",
+    "selectPrompt": "Select a run to see its details.",
+    "started": "Started",
+    "status": "Status",
+    "tokens": "Tokens used"
+  },
+  "empty": "No agent runs yet.",
+  "filters": {
+    "all": "All",
+    "goal": "Goals",
+    "plan": "Plans",
+    "scheduledTask": "Scheduled",
+    "team": "Teams"
+  },
+  "kind": {
+    "goal": "Goal",
+    "plan": "Plan",
+    "scheduledTask": "Scheduled task",
+    "team": "Team"
+  },
+  "live": "Live",
+  "status": {
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "paused": "Paused",
+    "running": "Running",
+    "succeeded": "Succeeded"
+  },
+  "title": "Agent Runs"
+}

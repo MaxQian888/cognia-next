@@ -1,0 +1,16 @@
+{
+  "backToChat": "Back to chat",
+  "close": "Close",
+  "customModes": "Custom Agent Modes",
+  "customModesDesc": "Create and manage custom agent modes with specific tools, prompts, and behaviors.",
+  "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
+  "groupAi": "AI Core",
+  "groupData": "Data",
+  "groupExtensions": "Extensions",
+  "groupInterface": "Interface",
+  "groupObservability": "Observability",
+  "groupSystem": "System",
+  "noSettingsFound": "No settings match your search.",
+  "searchPlaceholder": "Search settings…",
+  "title": "Settings"
+}

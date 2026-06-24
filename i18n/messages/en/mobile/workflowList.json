@@ -1,0 +1,30 @@
+{
+  "actions": {
+    "delete": "Delete",
+    "favorite": "Pin",
+    "graph": "View graph",
+    "pause": "Pause schedule",
+    "pauseDeferred": "Pause/resume from the desktop for now — server-side mirror lands in Wave 5.",
+    "pinned": "Pinned.",
+    "resume": "Resume schedule",
+    "run": "Run now",
+    "runQueued": "Triggered {name} — queued for desktop.",
+    "title": "Workflow actions",
+    "unpin": "Unpin",
+    "unpinned": "Unpinned."
+  },
+  "deleteConfirm": {
+    "body": "Removes the workflow from this device and mirrors the deletion to the paired desktop so it stays gone after the next sync.",
+    "cancel": "Cancel",
+    "confirm": "Delete",
+    "queueLabel": "Delete workflow {name}",
+    "title": "Delete {name}?",
+    "toast": "Deleted {name}."
+  },
+  "swipe": {
+    "favorite": "★",
+    "run": "Run",
+    "runQueued": "Triggered {name} — queued for desktop.",
+    "unfavorite": "Unpin"
+  }
+}

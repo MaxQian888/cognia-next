@@ -1,0 +1,46 @@
+{
+  "about": {
+    "checkUpdates": "Check for updates…",
+    "copyDiagnostics": "Copy diagnostics",
+    "docs": "Documentation",
+    "openDataFolder": "Open data folder",
+    "reportIssue": "Report an issue",
+    "title": "About"
+  },
+  "allCommands": "All Commands",
+  "automationKill": "🛑 Engage automation kill switch",
+  "autostart": "Launch at login",
+  "categories": {
+    "chat": "Chat",
+    "diagnostics": "Diagnostics",
+    "goal": "Goal",
+    "help": "Help",
+    "other": "Other",
+    "plugins": "Plugins",
+    "system": "System",
+    "template": "Templates"
+  },
+  "iconState": {
+    "busy": "Busy",
+    "error": "Error",
+    "idle": "Idle",
+    "muted": "Muted"
+  },
+  "newChat": "New Chat",
+  "openLogs": "Open Log Panel",
+  "petClickThroughOff": "Disable desktop pet click-through",
+  "petToggle": "Toggle desktop pet",
+  "quickGoal": "/goal …",
+  "quit": "Quit",
+  "settings": "Settings",
+  "show": "Show Cognia",
+  "status": {
+    "automationRunning": "Automation running",
+    "goalPaused": "Goal paused",
+    "goalRunning": "Goal running",
+    "idle": "Idle",
+    "placeholder": "Status",
+    "streaming": "Responding…"
+  },
+  "toggleWindow": "Show / hide window"
+}

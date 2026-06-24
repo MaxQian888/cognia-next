@@ -1,0 +1,12 @@
+{
+  "customize": {
+    "description": "Drag to reorder the bottom tabs, hide the ones you don't need, and choose which tab opens on launch.",
+    "dragHint": "Drag to reorder",
+    "landing": "Launch tab",
+    "restoreDefaults": "Restore defaults",
+    "rowDescription": "Reorder, hide, and pick your launch tab",
+    "tabs": "Tabs",
+    "title": "Customize tabs"
+  },
+  "unread": "{count} unread"
+}

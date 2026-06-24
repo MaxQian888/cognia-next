@@ -1,0 +1,20 @@
+{
+  "detailSheetLabel": "Plugin detail",
+  "devtools": "Devtools",
+  "discover": "Discover",
+  "governance": "Governance",
+  "governanceSub": {
+    "analytics": "Analytics",
+    "audit": "Audit log",
+    "permissions": "Permissions",
+    "scheduled": "Scheduled"
+  },
+  "library": "Library",
+  "librarySub": {
+    "all": "All",
+    "configurable": "Configurable",
+    "enabled": "Enabled",
+    "errored": "Errored",
+    "updates": "Updates available"
+  }
+}

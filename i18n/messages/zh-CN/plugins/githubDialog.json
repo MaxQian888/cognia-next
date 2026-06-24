@@ -1,0 +1,16 @@
+{
+  "cancel": "取消",
+  "description": "粘贴一个公开仓库——owner/repo、owner/repo@ref、/子目录，或完整的 github.com 链接。仓库需包含符合规范的 plugin.json 并自带构建产物（不会在本机执行构建）。",
+  "desktopOnly": "从 GitHub 安装需要 Cognia 桌面应用。",
+  "emptyError": "请输入仓库。",
+  "fetch": "获取",
+  "fetchError": "无法加载插件：{message}",
+  "install": "安装",
+  "installCancelled": "已取消安装。",
+  "installFailed": "安装失败：{message}",
+  "installSucceeded": "已从 GitHub 安装 {name}。",
+  "label": "GitHub 仓库",
+  "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
+  "readme": "README",
+  "title": "从 GitHub 安装"
+}

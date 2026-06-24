@@ -1,0 +1,109 @@
+{
+  "dock": {
+    "closePane": "关闭分屏",
+    "closePanel": "关闭面板",
+    "newSession": "新建终端",
+    "resize": "拖动调整终端 dock 高度（方向键亦可）",
+    "spawnDenied": "终端被插件拦截",
+    "spawnError": "无法打开终端：{message}"
+  },
+  "emptyState": {
+    "desktop": {
+      "action": "+ 新建终端",
+      "body": "点击下方按钮启动 shell，或按 Ctrl+` 在任意页面切换面板。",
+      "title": "暂无终端"
+    },
+    "mobile": {
+      "body": "在本设备和桌面服务器之间完成配对，即可通过 LAN 连接桌面终端。",
+      "title": "尚未配置远程终端"
+    },
+    "unsupported": {
+      "body": "集成终端需要桌面或移动 shell，在纯浏览器预览中不可用。",
+      "title": "终端不可用"
+    }
+  },
+  "fileViewer": {
+    "description": "只读源码预览",
+    "error": "打开文件失败：{message}",
+    "loading": "加载中…",
+    "title": "文件查看器"
+  },
+  "ghost": {
+    "acceptHint": "Tab"
+  },
+  "history": {
+    "blank": "（空）",
+    "close": "收起命令历史",
+    "copy": "复制命令",
+    "empty": "暂无命令。",
+    "locateInChat": "在对话中定位",
+    "open": "展开命令历史",
+    "rerun": "重新运行",
+    "status": {
+      "error": "退出码非零",
+      "ok": "已正常退出",
+      "unknown": "未报告退出码"
+    },
+    "title": "命令历史"
+  },
+  "popup": {
+    "hint": "↑↓ 选择 · Enter 接受 · Esc 关闭",
+    "label": "补全候选",
+    "safetyAsk": "执行前需要确认",
+    "source": {
+      "ai": "AI",
+      "exe": "命令",
+      "history": "历史",
+      "path": "路径",
+      "plugin": "插件",
+      "spec": "CLI"
+    }
+  },
+  "search": {
+    "caseSensitive": "区分大小写",
+    "close": "关闭查找",
+    "next": "下一个匹配",
+    "placeholder": "在终端中查找",
+    "previous": "上一个匹配"
+  },
+  "shellPicker": {
+    "auto": "默认 Shell",
+    "bash": "bash",
+    "cmd": "命令提示符",
+    "fish": "fish",
+    "label": "选择 Shell",
+    "nu": "Nushell",
+    "powershell": "Windows PowerShell",
+    "profilesLabel": "配置文件",
+    "pwsh": "PowerShell 7",
+    "sh": "sh",
+    "zsh": "zsh"
+  },
+  "tab": {
+    "close": "关闭终端",
+    "menu": {
+      "clear": "清屏",
+      "close": "关闭",
+      "closeOthers": "关闭其他",
+      "copy": "复制",
+      "find": "查找…",
+      "locateInChat": "在对话中定位",
+      "paste": "粘贴",
+      "rename": "重命名 tab",
+      "restart": "重启",
+      "selectAll": "全选",
+      "trustAgent": "信任此 tab 的智能体"
+    },
+    "rename": {
+      "inputLabel": "新 tab 名称",
+      "label": "重命名终端 tab",
+      "placeholder": "Tab 名称"
+    },
+    "status": {
+      "exitedFail": "退出码非零",
+      "exitedOk": "已正常退出",
+      "idle": "空闲",
+      "running": "运行中"
+    }
+  }
+}

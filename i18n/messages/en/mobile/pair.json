@@ -1,0 +1,129 @@
+{
+  "baseUrlLabel": "Server URL",
+  "biometricFailed": "Biometric check failed ({reason}); did not sign out.",
+  "checkingTitle": "Re-checking link",
+  "codeError": {
+    "invalid_pair_code": "Pair code must be exactly 6 digits.",
+    "malformed": "Enter the 6-digit code shown on the desktop.",
+    "malformed_request": "The server could not parse the request. Update the app and try again.",
+    "pair_code_expired": "That code has expired (5-minute lifetime). Generate a new one in desktop Settings → Companion.",
+    "pair_code_not_found": "That code is unknown or has already been used — request a fresh one on the desktop."
+  },
+  "codeHint": "Find this code on the desktop PairDeviceCard, beside the QR. Useful when the camera can't focus on the QR (e.g. Android emulator).",
+  "codeLabel": "6-digit pair code",
+  "connectedSubtitle": "Live link — your desktop accepts requests from this phone.",
+  "connectedTitle": "Connected to desktop",
+  "diagnostics": {
+    "collapse": "Hide diagnostics",
+    "expand": "Show diagnostics",
+    "rpcResultLabel": "RPC response",
+    "rpcWaiting": "Tap “Test RPC” to send a status RPC.",
+    "subtitle": "Run an RPC and a streaming-event probe end-to-end.",
+    "testRpc": "Test RPC connection",
+    "testWs": "Test event subscription",
+    "title": "Diagnostics",
+    "wsResultLabel": "Event payload",
+    "wsWaiting": "Tap “Test event” to subscribe for 5 seconds."
+  },
+  "discover": {
+    "backToDiscover": "Back to discover",
+    "baseUrlLocked": "URL locked from discovery",
+    "emptyDescription": "Make sure the desktop is on the same network with the companion server enabled.",
+    "emptyTitle": "No servers detected",
+    "foundCount": "{count, plural, =0 {No servers found} =1 {1 server} other {# servers}}",
+    "help": {
+      "docsCta": "Read the setup guide",
+      "openSettings": "Open system settings",
+      "tipEnableServer": "Turn on the companion server in desktop Settings → Companion.",
+      "tipFirewall": "Allow Cognia through the desktop firewall.",
+      "tipSameNetwork": "Both devices must be on the same Wi-Fi network.",
+      "trigger": "Can't find your desktop?"
+    },
+    "latencyMs": "{ms} ms",
+    "nearbyTitle": "On this network",
+    "precheckOk": "Reachable · v{version} · {ms} ms",
+    "precheckUnreachable": "Couldn't reach this server. Make sure it's online.",
+    "recentTitle": "Recent",
+    "rescanCta": "Rescan",
+    "scanQrCta": "Scan QR code",
+    "scanning": "Scanning the local network…",
+    "skipToManual": "Enter manually",
+    "subtitle": "Pick a server below, or skip to enter details manually.",
+    "title": "Find your desktop",
+    "tlsMismatch": "Identity changed",
+    "tlsPinned": "Identity verified",
+    "tlsUnverified": "Unverified",
+    "viaHistory": "History",
+    "viaMdns": "mDNS",
+    "viaPaired": "Paired",
+    "viaProbe": "LAN probe"
+  },
+  "errorTitle": "Pairing failed",
+  "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
+  "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). Re-pair from the desktop's current QR.",
+  "fingerprintPinned": "Desktop identity pinned",
+  "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
+  "formCardTitle": "Pair this phone",
+  "health": {
+    "checking": "Checking",
+    "continueToChat": "Continue to chat",
+    "device": "Device",
+    "lastHeartbeat": "Last heartbeat",
+    "latency": "Latency",
+    "live": "Live",
+    "noHeartbeat": "—",
+    "offline": "Offline",
+    "refresh": "Refresh status",
+    "server": "Server"
+  },
+  "httpError": {
+    "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
+    "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
+    "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
+    "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
+    "generic": "Pairing failed (HTTP {status})."
+  },
+  "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+  "loadingTitle": "Checking for an existing pairing…",
+  "manualDivider": "or paste manually",
+  "offlineSubtitle": "Couldn't reach the desktop — verify the desktop is awake and on the same network.",
+  "offlineTitle": "Connection lost",
+  "permissions": {
+    "localNetwork": {
+      "description": "Grant local-network access so the phone can find the desktop on your Wi-Fi.",
+      "title": "Local network access required"
+    }
+  },
+  "scanCta": "Scan QR",
+  "scanError": {
+    "failed": "Scan failed: {message}",
+    "notPairCode": "That QR code isn't a Cognia pair code.",
+    "openSettings": "Open Settings",
+    "permissionDenied": "Camera permission denied. Enable it in system settings to scan QR codes.",
+    "unsupported": "This device can't scan QR codes. Paste the pair token manually below."
+  },
+  "scanning": "Scanning…",
+  "signOut": {
+    "cardDescription": "Sign out and clear the device JWT. You'll need to scan a fresh QR to reconnect.",
+    "cardTitle": "Disconnect",
+    "cta": "Sign out / re-pair"
+  },
+  "signOutDescription": "You'll need to scan the QR again to reconnect.",
+  "signOutReason": "Confirm sign out",
+  "signOutTitle": "Sign out",
+  "step": {
+    "ariaLabel": "Pairing progress",
+    "discover": "Discover",
+    "pair": "Pair",
+    "paired": "Connected"
+  },
+  "submit": "Complete pairing",
+  "submitInProgress": "Pairing…",
+  "tabs": {
+    "code": "6-digit code",
+    "jwt": "Pair JWT"
+  },
+  "title": "Connect to desktop",
+  "tokenLabel": "Pair token",
+  "transportLabel": "Transport"
+}

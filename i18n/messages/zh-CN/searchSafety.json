@@ -1,0 +1,11 @@
+{
+  "description": "过滤搜索结果中的不当内容。",
+  "level": "级别",
+  "moderate": "适中",
+  "moderateDesc": "过滤明显不当",
+  "off": "关闭",
+  "offDesc": "不过滤",
+  "strict": "严格",
+  "strictDesc": "过滤所有成人内容",
+  "title": "安全过滤"
+}

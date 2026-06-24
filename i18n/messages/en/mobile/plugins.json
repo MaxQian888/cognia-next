@@ -1,0 +1,8 @@
+{
+  "disabled": "Disabled",
+  "empty": "No plugins installed.",
+  "enabled": "Enabled",
+  "queueLabel": "Queued — desktop will apply when online.",
+  "toggleAria": "Toggle plugin",
+  "toggleFailed": "Toggle failed: {message}"
+}

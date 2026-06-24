@@ -1,0 +1,20 @@
+{
+  "copied": "Command copied.",
+  "copy": "Copy command",
+  "copyFailed": "Couldn't copy to clipboard.",
+  "description": "Pick the install method that fits your setup.",
+  "downloadButton": "Download & install",
+  "downloadHint": "Download a prebuilt binary for your platform, verified by checksum and signature.",
+  "downloadStarting": "Starting…",
+  "downloadSuccess": "cognia CLI installed.",
+  "downloadSuccessSigned": "cognia CLI installed and signature-verified.",
+  "openReleases": "Open releases page",
+  "sourceHint": "Build and install with Cargo:",
+  "sourcePrereq": "Requires Rust 1.82+ on your PATH.",
+  "tabDownload": "Download",
+  "tabSource": "Build from source",
+  "tabTarball": "Release page",
+  "tarballHint": "Download a release archive manually from GitHub.",
+  "title": "Install the cognia CLI",
+  "verifyNote": "Downloads are checksum-verified; signature verification activates once a release key is published."
+}

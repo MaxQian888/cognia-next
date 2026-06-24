@@ -1,0 +1,8 @@
+{
+  "cancel": "Cancel",
+  "description": "Do you want to minimize Cognia to the system tray, or quit completely?",
+  "minimizeToTray": "Minimize to tray",
+  "quit": "Quit",
+  "remember": "Remember my choice and don't ask again",
+  "title": "Quit Cognia?"
+}

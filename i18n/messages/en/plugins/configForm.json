@@ -1,0 +1,28 @@
+{
+  "arrayAdd": "Add item",
+  "arrayPlaceholder": "One value per line",
+  "arrayRemove": "Remove",
+  "cancel": "Cancel",
+  "close": "Close",
+  "deprecated": "Deprecated",
+  "description": "Settings declared in the plugin's manifest.configSchema. Save to apply the new values on next activation.",
+  "emptyArray": "No items yet — use \"Add item\" to start.",
+  "loading": "Loading plugin configuration…",
+  "loadingComponent": "Loading the plugin's settings panel…",
+  "noSchema": "This plugin doesn't declare a configuration schema. Its raw config is shown below for reference.",
+  "oneOfVariant": "Variant",
+  "save": "Save",
+  "saving": "Saving…",
+  "unsupportedField": "Unsupported field shape — fall back to raw JSON.",
+  "validation": {
+    "format": "Must be a valid {format}.",
+    "max": "Must be ≤ {max}.",
+    "maxItems": "Must have at most {max} items.",
+    "maxLength": "Must be at most {max} characters.",
+    "min": "Must be ≥ {min}.",
+    "minItems": "Must have at least {min} items.",
+    "minLength": "Must be at least {min} characters.",
+    "notNumber": "Must be a number.",
+    "pattern": "Must match pattern {pattern}."
+  }
+}

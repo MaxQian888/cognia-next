@@ -1,0 +1,16 @@
+{
+  "cancel": "Cancel",
+  "description": "Paste a public repository — owner/repo, owner/repo@ref, a /sub/dir, or a full github.com URL. The repo must contain a conforming plugin.json and ship its built artifacts (no build runs on your machine).",
+  "desktopOnly": "Installing from GitHub requires the Cognia desktop app.",
+  "emptyError": "Please enter a repository.",
+  "fetch": "Fetch",
+  "fetchError": "Could not load the plugin: {message}",
+  "install": "Install",
+  "installCancelled": "Installation cancelled.",
+  "installFailed": "Installation failed: {message}",
+  "installSucceeded": "{name} installed from GitHub.",
+  "label": "GitHub repository",
+  "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
+  "readme": "README",
+  "title": "Install from GitHub"
+}

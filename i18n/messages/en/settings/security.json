@@ -1,0 +1,26 @@
+{
+  "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
+  "rows": {
+    "deletePairing": {
+      "help": "Re-prompt biometric before revoking a paired device or signing out.",
+      "label": "Confirm before deleting a pairing"
+    },
+    "exportBackup": {
+      "help": "Re-prompt biometric before exporting an encrypted backup package.",
+      "label": "Confirm before exporting a backup"
+    },
+    "revealSecrets": {
+      "help": "Re-prompt biometric before showing API keys or OAuth tokens in the UI.",
+      "label": "Confirm before revealing secrets"
+    },
+    "signOut": {
+      "help": "Re-prompt biometric before clearing the pairing token and stored credentials.",
+      "label": "Confirm before signing out"
+    }
+  },
+  "testCta": "Test biometric prompt",
+  "testDescription": "This is a no-op check to confirm your device biometric works.",
+  "testReason": "Verify your biometric is working",
+  "testTitle": "Test biometric prompt",
+  "title": "Security & Privacy"
+}

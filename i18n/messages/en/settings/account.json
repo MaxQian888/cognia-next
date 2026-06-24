@@ -1,0 +1,17 @@
+{
+  "description": "Your identity, plan usage, profile, subscription and paired devices.",
+  "devicePaired": "Paired · {id}",
+  "deviceUnpaired": "No device paired",
+  "devicesManage": "Manage",
+  "devicesTitle": "Companion devices",
+  "fallbackName": "Signed-out",
+  "fallbackPlan": "Free",
+  "notSignedIn": "Not signed in",
+  "pair": "Pair a device",
+  "subscriptionManage": "Manage",
+  "subscriptionTitle": "Subscription",
+  "title": "Account",
+  "usageFiveHour": "5-hour usage",
+  "usageReset": "{remaining} left",
+  "usageSevenDay": "7-day usage"
+}

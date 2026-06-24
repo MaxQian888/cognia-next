@@ -1,0 +1,20 @@
+{
+  "copied": "命令已复制。",
+  "copy": "复制命令",
+  "copyFailed": "无法复制到剪贴板。",
+  "description": "选择适合你环境的安装方式。",
+  "downloadButton": "下载并安装",
+  "downloadHint": "下载适配当前平台的预编译二进制，经校验和与签名验证。",
+  "downloadStarting": "开始中…",
+  "downloadSuccess": "cognia CLI 已安装。",
+  "downloadSuccessSigned": "cognia CLI 已安装并通过签名验证。",
+  "openReleases": "打开发布页",
+  "sourceHint": "使用 Cargo 构建并安装：",
+  "sourcePrereq": "需要 PATH 上有 Rust 1.82+。",
+  "tabDownload": "下载",
+  "tabSource": "从源码构建",
+  "tabTarball": "发布页",
+  "tarballHint": "从 GitHub 手动下载发布归档。",
+  "title": "安装 cognia CLI",
+  "verifyNote": "下载会做校验和验证；发布签名密钥上线后将启用签名验证。"
+}

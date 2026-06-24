@@ -1,0 +1,160 @@
+{
+  "detail": {
+    "backToRuns": "Back to runs",
+    "breakdown": {
+      "attempts": "Attempts",
+      "cost": "Cost",
+      "duration": "Duration",
+      "empty": "No steps ran yet.",
+      "retried": "Retried {count}×",
+      "slowest": "Slowest",
+      "sortByDuration": "Sort by duration",
+      "status": "Status",
+      "step": "Step",
+      "title": "Step breakdown",
+      "tokens": "Tokens"
+    },
+    "export": "Export",
+    "notFound": {
+      "description": "This run may have been deleted, or the URL is incorrect.",
+      "title": "Run not found"
+    },
+    "rerun": "Re-run",
+    "rerunFromStep": "Re-run from step",
+    "rerunFromStepHint": "Select a step in the timeline to re-run from it",
+    "rerunning": "Re-running…",
+    "running": "Running…",
+    "sparkline": {
+      "title": "Duration trend"
+    },
+    "totalCost": "{cost} est.",
+    "totalTokens": "{tokens} tok"
+  },
+  "list": {
+    "backToEditor": "Back to editor",
+    "bulk": {
+      "clear": "Clear selection",
+      "delete": "Delete",
+      "deleteDescription": "This permanently deletes {count} run(s) and their step logs. This cannot be undone.",
+      "deleteTitle": "Delete selected runs?",
+      "selected": "{count} selected"
+    },
+    "cancel": "Cancel",
+    "clearFilters": "Clear filters",
+    "clearHistory": {
+      "button": "Clear history",
+      "description": "This permanently deletes every run and its step logs for this workflow. This cannot be undone.",
+      "title": "Clear all run history?"
+    },
+    "columns": {
+      "duration": "Duration",
+      "open": "Open",
+      "started": "Started",
+      "status": "Status",
+      "trigger": "Trigger"
+    },
+    "confirmDelete": "Delete",
+    "deleteFailed": "Couldn’t delete runs",
+    "deleteSuccess": "Run history updated",
+    "description": "Every execution of this workflow, newest first.",
+    "empty": {
+      "description": "Click <strong>Run</strong> in the editor toolbar, or attach a trigger that fires automatically.",
+      "title": "No runs yet"
+    },
+    "export": {
+      "button": "Export",
+      "csv": "Export as CSV",
+      "json": "Export as JSON"
+    },
+    "filter": {
+      "allStatuses": "All statuses",
+      "allTriggers": "All triggers",
+      "status": "Filter by status",
+      "trigger": "Filter by trigger",
+      "window": "Filter by date"
+    },
+    "filteredEmpty": {
+      "description": "Adjust or clear the filters to see runs.",
+      "title": "No runs match"
+    },
+    "loadMore": "Load {count} more",
+    "openRun": "Open run {id}",
+    "rerunning": "Re-running…",
+    "row": {
+      "actions": "Run {id} actions",
+      "delete": "Delete",
+      "deleteDescription": "This permanently deletes the run and its step logs. This cannot be undone.",
+      "deleteTitle": "Delete this run?",
+      "open": "Open",
+      "rerun": "Re-run"
+    },
+    "search": {
+      "placeholder": "Search runs…"
+    },
+    "selectAll": "Select all runs",
+    "selectRow": "Select run {id}",
+    "stats": {
+      "avgDuration": "Avg duration",
+      "failed": "Failed",
+      "successRate": "Success rate",
+      "total": "Total runs"
+    },
+    "title": "Runs",
+    "window": {
+      "24h": "Last 24h",
+      "30d": "Last 30 days",
+      "7d": "Last 7 days",
+      "all": "All time"
+    }
+  },
+  "logs": {
+    "levelFilter": "Filter log levels",
+    "levels": {
+      "debug": "debug",
+      "error": "error",
+      "info": "info",
+      "warn": "warn"
+    },
+    "noResults": "No log entries match.",
+    "searchPlaceholder": "Search logs…",
+    "stackToggleHide": "Hide stack trace",
+    "stackToggleShow": "Show stack trace"
+  },
+  "status": {
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "paused": "Paused",
+    "pending": "Pending",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "waiting": "Waiting"
+  },
+  "step": {
+    "attemptBadge": "#{attempt}/{max}",
+    "attempts": "Retry attempts",
+    "cost": "Cost",
+    "costEstimateSuffix": "est.",
+    "duration": "Duration",
+    "ended": "Ended",
+    "error": "Error",
+    "logs": "Logs",
+    "noValue": "(no value)",
+    "nonRetryable": "This error is marked non-retryable; retries were skipped.",
+    "notInSnapshot": "Step {stepId} is not in the workflow snapshot.",
+    "output": "Output",
+    "resolvedParams": "Resolved params",
+    "retryIn": "· retried after {delay}",
+    "selectPrompt": "Select a step in the timeline to inspect.",
+    "servedBy": "Served by",
+    "skipReason": "Skip reason",
+    "started": "Started",
+    "statusLabel": "Status",
+    "stepIdLabel": "Step id:",
+    "streaming": "Live output",
+    "tokens": "Tokens (in / out)"
+  },
+  "timeline": {
+    "retried": "{count, plural, one {Retried # time} other {Retried # times}}",
+    "waiting": "Waiting for events…"
+  }
+}

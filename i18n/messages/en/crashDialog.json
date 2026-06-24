@@ -1,0 +1,8 @@
+{
+  "description": "A session started {time} (version {version}) ended in a crash. A crash report was saved with the details.",
+  "dismiss": "Dismiss",
+  "noReport": "The report file could not be read.",
+  "openFolder": "Open folder",
+  "title": "Cognia closed unexpectedly",
+  "viewReport": "View report"
+}

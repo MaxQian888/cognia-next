@@ -1,0 +1,18 @@
+{
+  "addItem": "Add item",
+  "description": "Customise the items shown in the system tray menu.",
+  "desktopOnly": "The system tray is only available in the desktop build.",
+  "emptyPicker": "No commands available — install plugins or start a chat.",
+  "hide": "Hide",
+  "moveDown": "Move down",
+  "moveUp": "Move up",
+  "pickCommand": "Pick a command",
+  "pickHint": "Choose a slash command or plugin command to pin to the tray menu.",
+  "pin": "Pin",
+  "remove": "Remove",
+  "rename": "Rename",
+  "reset": "Reset",
+  "separator": "separator",
+  "show": "Show",
+  "title": "Tray"
+}

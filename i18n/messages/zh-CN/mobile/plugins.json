@@ -1,0 +1,8 @@
+{
+  "disabled": "已禁用",
+  "empty": "尚未安装任何插件。",
+  "enabled": "已启用",
+  "queueLabel": "已排队——桌面上线后会同步。",
+  "toggleAria": "切换插件状态",
+  "toggleFailed": "切换失败：{message}"
+}

@@ -1,0 +1,116 @@
+{
+  "add": {
+    "cancel": "Cancel",
+    "description": "Point cognia at an LSP-compatible binary on your machine. Cognia spawns the binary in the sidecar and bridges its diagnostics into the editor.",
+    "editTitle": "Edit Language Server",
+    "error": {
+      "command": "Command is required.",
+      "duplicate": "A server with this id already exists.",
+      "languages": "At least one language is required.",
+      "name": "Name is required.",
+      "settings": "Settings must be a valid JSON object."
+    },
+    "field": {
+      "args": "Arguments",
+      "command": "Command",
+      "enabled": "Enabled",
+      "env": "Environment variables",
+      "extensions": "File extensions",
+      "languages": "Languages",
+      "name": "Display name",
+      "rootMarkers": "Root markers",
+      "settings": "Settings (JSON)",
+      "workspaceFolderRequired": "Requires on-disk workspace"
+    },
+    "hint": {
+      "args": "One argument per line.  substitution is supported.",
+      "command": "Absolute path or a path relative to your cognia install.  substitution is supported.",
+      "env": "One KEY=VALUE per line, merged onto the spawned process environment.",
+      "extensions": "Comma-separated, with or without the leading dot. Used by the agent runtime to match files.",
+      "languages": "Comma-separated list of Monaco language ids.",
+      "rootMarkers": "Comma-separated marker files — the agent starts the server at the nearest directory containing one (e.g. Cargo.toml).",
+      "settings": "Server-specific configuration served for workspace/configuration pulls."
+    },
+    "placeholder": {
+      "args": "one argument per line, e.g. --stdio",
+      "command": "/usr/local/bin/eslint-server or node_modules/.bin/eslint-server",
+      "env": "RA_LOG=info",
+      "extensions": ".ts, .tsx",
+      "languages": "typescript, javascript",
+      "name": "ESLint",
+      "rootMarkers": "package.json, tsconfig.json",
+      "settings": "{ \"rust-analyzer\": { \"cargo\": { \"features\": \"all\" } } }"
+    },
+    "save": "Save",
+    "submit": "Add",
+    "title": "Add Language Server"
+  },
+  "addAriaLabel": "Add a new Language Server",
+  "addButton": "Add server",
+  "badge": {
+    "builtin": "Built-in",
+    "overridden": "Overridden"
+  },
+  "builtinGroup": "Built-in servers",
+  "builtinHint": "Shipped defaults the agent starts on demand. Disable one, or edit it to override its command, arguments, or settings — overrides also run in the editor.",
+  "col": {
+    "actions": "Actions",
+    "command": "Command",
+    "enabled": "Enabled",
+    "languages": "Languages",
+    "name": "Name"
+  },
+  "customGroup": "Your servers",
+  "description": "Add Language Server Protocol (LSP) servers — they power completion, hover, diagnostics, and go-to-definition in the Skills, Canvas, and Artifact editors. Servers added here run on every cognia launch.",
+  "editAriaLabel": "Edit {name}",
+  "effectivePreview": {
+    "description": "What actually runs after merging built-in defaults, your servers, and the active project's .cognia/lsp.json.",
+    "empty": "No servers left after resolution — everything is disabled.",
+    "overridden": "Overridden",
+    "overridesBuiltin": "Overrides built-in",
+    "source": {
+      "builtin": "Built-in",
+      "plugin": "Plugin",
+      "project": "Project",
+      "user": "User"
+    },
+    "title": "Effective configuration"
+  },
+  "empty": "No Language Servers configured yet. Click \"Add server\" to point cognia at a binary you have installed (e.g. eslint-server, pyright-langserver, rust-analyzer).",
+  "enabledAriaLabel": "Toggle {name}",
+  "health": {
+    "broken": "Broken",
+    "crashed": "Crashed",
+    "running": "Running",
+    "starting": "Starting",
+    "stopped": "Stopped"
+  },
+  "install": {
+    "ariaLabel": "Install {name}",
+    "button": "Install",
+    "phase": {
+      "done": "Installed",
+      "error": "Install failed",
+      "installing": "Installing…",
+      "resolving": "Resolving…"
+    }
+  },
+  "logs": {
+    "button": "Logs",
+    "description": "Server stderr and lifecycle events from the LSP sidecar (most recent last).",
+    "empty": "No log entries yet — logs appear once a language server starts.",
+    "openAriaLabel": "Open Language Server logs",
+    "refreshAriaLabel": "Refresh logs",
+    "title": "Language Server logs"
+  },
+  "overrideAriaLabel": "Override {name}",
+  "removeAriaLabel": "Remove {name}",
+  "resetAriaLabel": "Reset {name} to default",
+  "status": {
+    "installed": "Installed",
+    "managed": "Managed",
+    "missing": "Not installed"
+  },
+  "tableAriaLabel": "Configured Language Servers",
+  "title": "Language Servers"
+}

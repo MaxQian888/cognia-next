@@ -1,0 +1,650 @@
+{
+  "action": {
+    "agent": {
+      "turn": {
+        "description": "Run one full agent turn — tool-enabled via the desktop sidecar (approval-gated), text-only fallback on web.",
+        "label": "Agent turn"
+      }
+    },
+    "character": {
+      "create": {
+        "description": "Creates a new character (employee) row.",
+        "label": "Create character"
+      },
+      "send": {
+        "description": "Sends a message as a chosen character into a session.",
+        "label": "Send as character"
+      },
+      "update": {
+        "description": "Patches fields on an existing character.",
+        "label": "Update character"
+      }
+    },
+    "connector": {
+      "draft": {
+        "description": "Stores the proposed reply for human review in the Inbox.",
+        "label": "Save as draft"
+      },
+      "send": {
+        "description": "Pushes a message through the outbound queue of a connected adapter.",
+        "label": "Send via connector"
+      }
+    },
+    "desktop": {
+      "click": {
+        "description": "Click an element or absolute screen coordinate.",
+        "label": "Click"
+      },
+      "findElement": {
+        "description": "Locate a UI element by name / automation id / control type.",
+        "label": "Find element"
+      },
+      "invokePattern": {
+        "description": "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …).",
+        "label": "Invoke pattern"
+      },
+      "keys": {
+        "description": "Send a keyboard chord like ctrl+shift+t.",
+        "label": "Send keys"
+      },
+      "launchApp": {
+        "description": "Launch an application by path/name, or focus an existing window by process.",
+        "label": "Launch app"
+      },
+      "paste": {
+        "description": "Paste text via the clipboard (saves + restores the user clipboard).",
+        "label": "Paste text"
+      },
+      "readTree": {
+        "description": "Snapshot the accessibility subtree as JSON for downstream nodes.",
+        "label": "Read tree"
+      },
+      "screenshot": {
+        "description": "Capture the primary monitor or a region. Returns PNG bytes + dims.",
+        "label": "Screenshot"
+      },
+      "type": {
+        "description": "Type a string into the focused element via SendInput.",
+        "label": "Type text"
+      },
+      "wait": {
+        "description": "Block until an element appears, disappears, or matches a property.",
+        "label": "Wait for element"
+      },
+      "windowClose": {
+        "description": "Close a window via the UIA Window pattern.",
+        "label": "Close window"
+      },
+      "windowFocus": {
+        "description": "Bring a window to the foreground.",
+        "label": "Focus window"
+      },
+      "windowResize": {
+        "description": "Move/resize a window via the UIA Transform pattern.",
+        "label": "Resize window"
+      }
+    },
+    "git": {
+      "branch": {
+        "description": "Create or switch to a branch.",
+        "label": "Git branch"
+      },
+      "commit": {
+        "description": "Commit staged changes with a message (optionally signed off).",
+        "label": "Git commit"
+      },
+      "push": {
+        "description": "Push commits to a remote (optionally set upstream).",
+        "label": "Git push"
+      },
+      "stage": {
+        "description": "Stage paths in the repo (git add). Defaults to the active workspace root.",
+        "label": "Git stage"
+      }
+    },
+    "github": {
+      "closeIssue": {
+        "description": "Closes an issue with optional reason (completed / not_planned).",
+        "label": "Close Issue"
+      },
+      "closePr": {
+        "description": "Closes an open pull request without merging.",
+        "label": "Close GitHub PR"
+      },
+      "commentIssue": {
+        "description": "Posts a comment on an issue.",
+        "label": "Comment on Issue"
+      },
+      "commentPr": {
+        "description": "Posts a comment on a pull request.",
+        "label": "Comment on PR"
+      },
+      "createRelease": {
+        "description": "Creates a Release. Drafts always allowed; published releases gated.",
+        "label": "Create Release"
+      },
+      "generateChangelog": {
+        "description": "Computes Conventional-Commit semver bump + Markdown release notes.",
+        "label": "Generate changelog"
+      },
+      "labelIssue": {
+        "description": "Adds or removes labels on an issue or pull request.",
+        "label": "Label Issue/PR"
+      },
+      "mergePr": {
+        "description": "Merges a pull request. Requires CI green + human approval per policy.",
+        "label": "Merge GitHub PR"
+      },
+      "openPr": {
+        "description": "Opens a pull request via the GitHub Delivery plugin (policy-gated).",
+        "label": "Open GitHub PR"
+      },
+      "pushTag": {
+        "description": "Pushes a git tag to the repo.",
+        "label": "Push tag"
+      },
+      "reviewPr": {
+        "description": "Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a PR.",
+        "label": "Review GitHub PR"
+      },
+      "reviewPrInline": {
+        "description": "Uses an LLM to produce a structured review (overall body + line-anchored inline comments) for a PR.",
+        "label": "Inline review with AI"
+      },
+      "runIssueLoop": {
+        "description": "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR.",
+        "label": "Issue → PR loop"
+      }
+    },
+    "mcp": {
+      "invokeTool": {
+        "description": "Calls a tool on a configured MCP server.",
+        "label": "Invoke MCP tool"
+      }
+    },
+    "memory": {
+      "recall": {
+        "description": "Hybrid-search the long-term memory store (BM25 + vectors when configured).",
+        "label": "Recall memory"
+      },
+      "store": {
+        "description": "Store one durable fact into long-term memory via the shared consolidator (PII-gated).",
+        "label": "Store memory"
+      }
+    },
+    "plugin": {
+      "invoke": {
+        "description": "Calls a plugin task handler registered in the plugin runtime.",
+        "label": "Invoke plugin"
+      }
+    },
+    "skill": {
+      "invoke": {
+        "description": "Renders a skill into the prompt of the next AI step.",
+        "label": "Invoke skill"
+      },
+      "upsert": {
+        "description": "Creates or updates a skill with the given markdown body.",
+        "label": "Upsert skill"
+      }
+    },
+    "system": {
+      "terminal": {
+        "description": "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream.",
+        "label": "Run terminal command"
+      }
+    },
+    "team": {
+      "create": {
+        "description": "Creates a new agent team row.",
+        "label": "Create team"
+      },
+      "run": {
+        "description": "Starts an agent team's lifecycle and waits for completion.",
+        "label": "Run team"
+      },
+      "task": {
+        "dispatch": {
+          "description": "Internal node emitted by the agent-team synthesizer. One node per team task. Not hand-authored.",
+          "label": "Dispatch team task"
+        }
+      },
+      "update": {
+        "description": "Patches an existing team's roster or orchestration mode.",
+        "label": "Update team"
+      }
+    },
+    "terminal": {
+      "readRecent": {
+        "description": "Read the recent-commands ring (command, exit code, ended-at) of a terminal dock tab.",
+        "label": "Read terminal history"
+      },
+      "script": {
+        "description": "Run a script file (.sh / .ps1 / .py / .js / …) under the right interpreter, detected from its extension or overridden explicitly.",
+        "label": "Run script file"
+      },
+      "session": {
+        "close": {
+          "description": "Close a terminal session opened earlier in this run. Leftover sessions are closed automatically when the run ends.",
+          "label": "Close terminal session"
+        },
+        "open": {
+          "description": "Open a persistent terminal session (visible dock tab, or a headless private shell with unattended mode) for multi-step command runs.",
+          "label": "Open terminal session"
+        },
+        "run": {
+          "description": "Run one command in a session opened earlier in this run and wait for its exit code.",
+          "label": "Run in terminal session"
+        }
+      },
+      "waitForExit": {
+        "description": "Block until the command currently running in a terminal dock tab finishes, then route on its exit code.",
+        "label": "Wait for terminal exit"
+      }
+    },
+    "twin": {
+      "ingest": {
+        "description": "Queues a new source for the twin's ingest pipeline.",
+        "label": "Twin ingest"
+      },
+      "rag": {
+        "description": "Runs RAG over a twin's vector store and returns the top-K chunks.",
+        "label": "Twin RAG"
+      }
+    },
+    "goal": {
+      "analytics": {
+        "description": "Compute goal completion, status, token, and timeline analytics.",
+        "label": "Goal analytics"
+      },
+      "clearSubgoals": {
+        "description": "Remove the persisted subgoal checklist from a goal.",
+        "label": "Clear subgoals"
+      },
+      "create": {
+        "description": "Create a self-driving /goal for a chat session through the GoalRuntime.",
+        "label": "Create goal"
+      },
+      "decomposeSubgoals": {
+        "description": "Use the configured judge model to decompose a goal into a checklist.",
+        "label": "Decompose subgoals"
+      },
+      "delete": {
+        "description": "Delete a goal and its event log through GoalRuntime cleanup.",
+        "label": "Delete goal"
+      },
+      "events": {
+        "description": "Read a goal's lifecycle event timeline.",
+        "label": "List goal events"
+      },
+      "get": {
+        "description": "Read one goal by id and return a redaction-safe snapshot.",
+        "label": "Get goal"
+      },
+      "list": {
+        "description": "List goals globally, by session, or the active/open goal for a session.",
+        "label": "List goals"
+      },
+      "pause": {
+        "description": "Pause an active goal and abort its in-flight turn driver.",
+        "label": "Pause goal"
+      },
+      "preempt": {
+        "description": "Mark an active goal as superseded by external work.",
+        "label": "Preempt goal"
+      },
+      "resume": {
+        "description": "Resume a paused goal so its turn loop can continue.",
+        "label": "Resume goal"
+      },
+      "stop": {
+        "description": "Stop a non-terminal goal and fire terminal goal side effects.",
+        "label": "Stop goal"
+      },
+      "template": {
+        "createGoal": {
+          "description": "Resolve a goal template and create a GoalRuntime-backed goal for a session.",
+          "label": "Create goal from template"
+        },
+        "delete": {
+          "description": "Delete a user-authored goal template; built-in templates remain protected.",
+          "label": "Delete goal template"
+        },
+        "favorite": {
+          "description": "Set a goal template's favorite flag so it sorts near the top of pickers.",
+          "label": "Favorite goal template"
+        },
+        "list": {
+          "description": "List seeded and user-authored goal templates with favorite/search filters.",
+          "label": "List goal templates"
+        },
+        "upsert": {
+          "description": "Create or update a user goal template while preserving built-in clone semantics.",
+          "label": "Upsert goal template"
+        }
+      },
+      "toggleSubgoal": {
+        "description": "Flip one subgoal checklist item's done state.",
+        "label": "Toggle subgoal"
+      },
+      "updateConfig": {
+        "description": "Patch pacing, budget, judge, and timeout settings on a non-terminal goal.",
+        "label": "Update goal config"
+      },
+      "updateObjective": {
+        "description": "Replace a non-terminal goal objective via the GoalRuntime redaction path.",
+        "label": "Update goal objective"
+      }
+    },
+    "plan": {
+      "approve": {
+        "description": "Move a draft or pending plan into the approved state.",
+        "label": "Approve plan"
+      },
+      "cancel": {
+        "description": "Cancel a non-terminal plan and emit the runtime exit event.",
+        "label": "Cancel plan"
+      },
+      "create": {
+        "description": "Create an AgentPlan for a session through the PlanRuntime lifecycle.",
+        "label": "Create plan"
+      },
+      "delete": {
+        "description": "Delete a plan and its event log through PlanRuntime cleanup.",
+        "label": "Delete plan"
+      },
+      "events": {
+        "description": "Read the newest lifecycle and step events for a plan.",
+        "label": "List plan events"
+      },
+      "get": {
+        "description": "Read one persisted AgentPlan by id.",
+        "label": "Get plan"
+      },
+      "list": {
+        "description": "List plans by workspace or session, with optional status filtering.",
+        "label": "List plans"
+      },
+      "pause": {
+        "description": "Pause an executing plan and abort the active run controller.",
+        "label": "Pause plan"
+      },
+      "refine": {
+        "description": "Use the planner model to repair, expand, simplify, reorder, or optimize a plan.",
+        "label": "Refine plan"
+      },
+      "reject": {
+        "description": "Cancel a pending plan and record rejection feedback.",
+        "label": "Reject plan"
+      },
+      "resume": {
+        "description": "Resume a paused plan into the executing state.",
+        "label": "Resume plan"
+      },
+      "run": {
+        "description": "Execute an approved plan through the orchestrated PlanRuntime path.",
+        "label": "Run plan"
+      },
+      "setStepStatus": {
+        "description": "Update one plan step's status and recompute plan progress counts.",
+        "label": "Set plan step status"
+      },
+      "updateDraft": {
+        "description": "Patch a non-executing plan's title, steps, config, or metadata.",
+        "label": "Update plan draft"
+      }
+    },
+    "scheduler": {
+      "event": {
+        "trigger": {
+          "description": "Fan out an event into event-triggered scheduler tasks.",
+          "label": "Trigger scheduler event"
+        }
+      },
+      "execution": {
+        "get": {
+          "description": "Read one scheduler execution record by id.",
+          "label": "Get scheduler execution"
+        }
+      },
+      "executions": {
+        "recent": {
+          "description": "Read recent scheduler execution rows across all scheduled tasks.",
+          "label": "List recent scheduler executions"
+        }
+      },
+      "statistics": {
+        "description": "Read aggregate scheduler task and execution counters.",
+        "label": "Get scheduler statistics"
+      },
+      "status": {
+        "description": "Read native scheduler daemon health and lifecycle status.",
+        "label": "Get scheduler status"
+      },
+      "task": {
+        "backfill": {
+          "description": "Replay one scheduled task across an explicit time window.",
+          "label": "Backfill scheduled task"
+        },
+        "create": {
+          "description": "Create a native scheduler task through the TaskScheduler lifecycle.",
+          "label": "Create scheduled task"
+        },
+        "delete": {
+          "description": "Delete a scheduler task and its execution records.",
+          "label": "Delete scheduled task"
+        },
+        "executions": {
+          "description": "Read recent execution history for a scheduler task.",
+          "label": "List task executions"
+        },
+        "export": {
+          "description": "Export selected scheduler task definitions for migration or backup.",
+          "label": "Export scheduled tasks"
+        },
+        "get": {
+          "description": "Read one native scheduled task by id.",
+          "label": "Get scheduled task"
+        },
+        "import": {
+          "description": "Import scheduler task definitions from an exported JSON bundle.",
+          "label": "Import scheduled tasks"
+        },
+        "list": {
+          "description": "List native scheduler tasks with optional status, type, tag, and search filters.",
+          "label": "List scheduled tasks"
+        },
+        "pause": {
+          "description": "Pause a native scheduler task and disarm its next run.",
+          "label": "Pause scheduled task"
+        },
+        "resume": {
+          "description": "Resume a paused scheduler task and recalculate its next run.",
+          "label": "Resume scheduled task"
+        },
+        "runNow": {
+          "description": "Execute a scheduler task immediately through its registered task executor.",
+          "label": "Run scheduled task now"
+        },
+        "update": {
+          "description": "Patch a scheduled task's metadata, trigger, payload, config, or lifecycle status.",
+          "label": "Update scheduled task"
+        }
+      },
+      "upcoming": {
+        "description": "Read the next armed scheduler task fires across the task registry.",
+        "label": "List upcoming scheduled tasks"
+      }
+    }
+  },
+  "ai": {
+    "classify": {
+      "description": "LLM-based classification into one of N labels.",
+      "label": "Classify"
+    },
+    "embed": {
+      "description": "Generate an embedding vector for semantic similarity.",
+      "label": "Embed text"
+    },
+    "extract": {
+      "description": "Structured extraction (JSON schema) from free-form text.",
+      "label": "Extract data"
+    },
+    "prompt": {
+      "description": "Direct LLM call. Uses the configured provider routing.",
+      "label": "AI prompt"
+    }
+  },
+  "annotation": {
+    "group": {
+      "description": "Visual group around several nodes. Has no execution.",
+      "label": "Group frame"
+    },
+    "note": {
+      "description": "Free-text note placed on the canvas. Has no execution.",
+      "label": "Sticky note"
+    }
+  },
+  "data": {
+    "code": {
+      "description": "Custom JS expression with a 5s timeout.",
+      "label": "Code"
+    },
+    "template": {
+      "description": "Render a mustache-style template string against the upstream data.",
+      "label": "Template"
+    },
+    "transform": {
+      "description": "Map / filter / reduce / sort over an input array or object.",
+      "label": "Transform"
+    }
+  },
+  "eval": {
+    "gate": {
+      "description": "Pass/fail verdict for an eval run against thresholds; branches on pass / fail.",
+      "label": "Eval gate"
+    },
+    "run": {
+      "description": "Run an eval dataset against a chat / team / workflow target and output pass rates.",
+      "label": "Run eval"
+    }
+  },
+  "flow": {
+    "branch": {
+      "description": "Routes execution down one of two branches based on a condition.",
+      "label": "If / else"
+    },
+    "break": {
+      "description": "Stops the innermost loop after the current iteration.",
+      "label": "Break"
+    },
+    "continue": {
+      "description": "Skips the rest of the current loop iteration.",
+      "label": "Continue"
+    },
+    "join": {
+      "description": "Joins parallel branches with all/any/race semantics.",
+      "label": "Join"
+    },
+    "loop": {
+      "description": "Repeats a sub-graph for-each / while / N times.",
+      "label": "Loop"
+    },
+    "set": {
+      "description": "Assigns a value to a workflow-scoped variable.",
+      "label": "Set variable"
+    },
+    "split": {
+      "description": "Fans out to multiple branches that run concurrently.",
+      "label": "Split (parallel)"
+    },
+    "subworkflow": {
+      "description": "Invokes another workflow as a step.",
+      "label": "Run subworkflow"
+    },
+    "switch": {
+      "description": "Multi-way branch on the value of an expression.",
+      "label": "Switch"
+    },
+    "wait": {
+      "description": "Pauses for a fixed duration or until a wake-up event arrives.",
+      "label": "Wait"
+    },
+    "catch": {
+      "description": "Runs only when the workflow fails terminally; receives the error and drives a recovery / notify path.",
+      "label": "Catch failure"
+    }
+  },
+  "io": {
+    "http": {
+      "description": "Call an external HTTP API with retries and timeout.",
+      "label": "HTTP request"
+    },
+    "webhook": {
+      "respond": {
+        "description": "Respond to the inbound webhook trigger with a payload.",
+        "label": "Webhook respond"
+      }
+    }
+  },
+  "ocr": {
+    "extract": {
+      "description": "Run OCR on an image or PDF (URL, base64, or screen) and output its text.",
+      "label": "Extract text (OCR)"
+    }
+  },
+  "trigger": {
+    "chat": {
+      "message": {
+        "description": "Fires when a user sends a message in a bound character session.",
+        "label": "On chat message"
+      }
+    },
+    "connector": {
+      "inbound": {
+        "description": "Fires when a message arrives on a connected platform (Telegram, Slack, ...).",
+        "label": "Incoming message"
+      }
+    },
+    "cron": {
+      "description": "Fires on a cron schedule. Backed by the Tauri scheduler when running.",
+      "label": "On schedule"
+    },
+    "desktop": {
+      "event": {
+        "description": "Fire when a UIA focus / structure / property event matches.",
+        "label": "On UIA event"
+      }
+    },
+    "github": {
+      "webhook": {
+        "description": "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256.",
+        "label": "On GitHub event"
+      }
+    },
+    "goal": {
+      "completed": {
+        "description": "Fires when a /goal reaches a terminal status (completed, stopped, budget/turn/timeout).",
+        "label": "On goal completed"
+      }
+    },
+    "manual": {
+      "description": "Fires when you click Run in the editor.",
+      "label": "Run manually"
+    },
+    "team": {
+      "description": "Internal trigger fired by the agent-team synthesizer when a team run starts. Not hand-authored.",
+      "label": "On team run start"
+    },
+    "terminal": {
+      "command": {
+        "description": "Fires when a command finishes in a user-spawned terminal dock tab. Scope by session, project, exit status, or a command substring.",
+        "label": "On terminal command"
+      }
+    },
+    "webhook": {
+      "description": "Fires when an HTTP request hits the workflow's webhook path.",
+      "label": "On webhook"
+    }
+  }
+}

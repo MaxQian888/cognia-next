@@ -1,0 +1,18 @@
+{
+  "fanout": {
+    "adapterLabel": "Adapter",
+    "adapterPlaceholder": "Pick a connected adapter",
+    "addButton": "Add subscription",
+    "addMissingFields": "Adapter and conversation key are required.",
+    "addSectionLabel": "Add a mirror",
+    "addSuccess": "Subscription added.",
+    "conversationKeyLabel": "Conversation key",
+    "conversationKeyPlaceholder": "e.g. lark:lark:ad1:oc_xxx",
+    "empty": "No mirrors configured. Runs only push progress to the originating channel.",
+    "enabledAria": "Toggle subscription",
+    "help": "Operator-configured mirror: every run of this workflow pushes its step progress + terminal status into the listed channels. Originating channel is included automatically — adding it again has no effect.",
+    "removeAria": "Remove subscription",
+    "removeSuccess": "Subscription removed.",
+    "title": "Run progress fan-out"
+  }
+}

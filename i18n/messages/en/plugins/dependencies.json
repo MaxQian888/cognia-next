@@ -1,0 +1,13 @@
+{
+  "binaries": "Required tools",
+  "checking": "checking…",
+  "detected": "found",
+  "installed": "Installed",
+  "minVersion": "≥ {version}",
+  "missing": "Missing",
+  "notFound": "not found",
+  "optional": "optional",
+  "pluginDeps": "Plugins",
+  "pythonDeps": "Python packages",
+  "title": "Dependencies"
+}

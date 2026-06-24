@@ -1,0 +1,22 @@
+{
+  "bridgeHint": "Bridge offline: install / dev-reload won't reach the running app until it's connected.",
+  "bridgeWarning": "The cognia CLI bridge isn't running — this command may not reach the app.",
+  "bundleFilter": "Plugin bundle",
+  "cmd": {
+    "build": "Build",
+    "dev": "Dev",
+    "install": "Install…",
+    "lint": "Lint",
+    "new": "New"
+  },
+  "description": "Run the cognia CLI against a plugin project in a terminal tab.",
+  "invalidProject": "No valid plugin.json found in that folder.",
+  "launchDenied": "Terminal launch was denied.",
+  "launchFailed": "Couldn't start the command: {message}",
+  "needsCli": "Install the cognia CLI above to enable these commands.",
+  "noProject": "No project selected.",
+  "pickBundleTitle": "Select a plugin bundle to install",
+  "pickProject": "Choose project…",
+  "pickProjectTitle": "Select a plugin project directory",
+  "title": "Run cognia commands"
+}

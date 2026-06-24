@@ -1,0 +1,7 @@
+{
+  "searchFailed": "联网搜索失败：{message}",
+  "searchedVia": "通过 {provider} 搜索 — {count} 条结果",
+  "tooltipDisabled": "请前往设置 → 联网搜索 启用并配置 Provider",
+  "tooltipOff": "联网搜索：关闭",
+  "tooltipOn": "联网搜索：开启 — 使用 {provider}"
+}

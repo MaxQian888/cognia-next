@@ -1,0 +1,16 @@
+{
+  "ariaLabel": "Active filters",
+  "chip": {
+    "capability": "Capability: {value}",
+    "configurable": "Configurable",
+    "hasUpdate": "Has update",
+    "permission": "Permission: {value}",
+    "query": "Search: {value}",
+    "signedOnly": "Signed only",
+    "sort": "Sort: {value}",
+    "source": "Source: {value}",
+    "status": "Status: {value}"
+  },
+  "clearAll": "Clear all",
+  "removeAria": "Remove {name}"
+}

@@ -1,0 +1,55 @@
+{
+  "audit": {
+    "kind": {
+      "adapter": {
+        "error": "Adapter error",
+        "started": "Adapter started",
+        "stopped": "Adapter stopped"
+      },
+      "circuit": {
+        "closed": "Circuit closed",
+        "half_opened": "Circuit half-opened",
+        "opened": "Circuit opened"
+      },
+      "credential": {
+        "refreshed": "Credentials refreshed"
+      },
+      "delivery": {
+        "deadlettered": "Delivery dead-lettered",
+        "downgraded": "Delivery downgraded",
+        "error": "Delivery error",
+        "success": "Delivered"
+      },
+      "inbound": {
+        "deduped": "Inbound deduped",
+        "deferred_manual_mode": "Deferred (manual mode)",
+        "deferred_muted": "Deferred (muted)",
+        "deferred_quiet_hours": "Deferred (quiet hours)",
+        "deleted": "Inbound deleted",
+        "edited": "Inbound edited",
+        "member_added": "Member joined",
+        "member_removed": "Member left",
+        "policy_blocked": "Blocked by policy",
+        "read_indicator": "Read indicator",
+        "received": "Inbound received",
+        "signature_failed": "Signature mismatch"
+      },
+      "outbound": {
+        "ai_run_enqueued": "AI reply queued",
+        "enqueued": "Outbound queued"
+      },
+      "rate_limit": {
+        "tripped": "Rate limit tripped"
+      }
+    }
+  },
+  "identityMerge": {
+    "cancel": "Cancel",
+    "description": "Select which identity to keep as primary. The secondary identity's id will be recorded in the primary's merge history.",
+    "merge": "Merge",
+    "primary": "Primary:",
+    "primaryBadge": "Primary",
+    "secondary": "Secondary:",
+    "title": "Merge platform identities"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "permissionCta": {
+    "description": "Cognia can notify you when a long-running task or scheduled backup needs attention.",
+    "descriptionDenied": "Notifications were denied. Open Settings → Cognia → Notifications to allow them.",
+    "enableButton": "Enable",
+    "enableInProgress": "Requesting…",
+    "settingsButton": "Open Settings",
+    "title": "Enable background reminders"
+  },
+  "queue": {
+    "cancel": "Cancel",
+    "cancelFailed": "Cancel failed: {message}",
+    "empty": "No notifications scheduled.",
+    "errorTitle": "Could not load notifications",
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "scheduledAt": "at {time}",
+    "title": "Scheduled notifications",
+    "unsupportedDescription": "Local notifications run on iOS and Android only.",
+    "unsupportedTitle": "Not supported on this platform"
+  },
+  "section": {
+    "description": "Background reminders for scheduled backups and long-running tasks.",
+    "queueRowDescription": "Review or cancel pending reminders.",
+    "queueRowTitle": "Scheduled notifications",
+    "title": "Notifications"
+  }
+}

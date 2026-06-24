@@ -1,0 +1,21 @@
+{
+  "action": "配置",
+  "actionAria": "配置 {name}",
+  "col": {
+    "action": "",
+    "plugin": "插件",
+    "state": "状态",
+    "version": "版本"
+  },
+  "empty": "尚未安装任何插件。",
+  "emptyFiltered": "没有插件匹配当前搜索。",
+  "hint": "为任意插件打开配置表单。未声明 manifest.configSchema 的插件无法在此处配置。",
+  "loading": "正在加载插件…",
+  "search": "搜索插件…",
+  "state": {
+    "configured": "已配置",
+    "noSchema": "无 schema",
+    "unconfigured": "未配置"
+  },
+  "title": "配置"
+}

@@ -1,0 +1,11 @@
+{
+  "workflow": {
+    "debug": "通过 workflow-debugger 子代理诊断失败的运行",
+    "delegate": "显式移交给四位工作流专家之一",
+    "explain": "解释选中或 @ 提及的节点",
+    "refactor": "通过 workflow-refactorer 子代理重构子图",
+    "run": "运行工作流（或从指定步骤运行）。需要批准。",
+    "suggest": "提议下一个节点（不会自动添加）",
+    "validate": "运行本地校验并让 agent 修复"
+  }
+}

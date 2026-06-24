@@ -1,0 +1,16 @@
+{
+  "ariaLabel": "已激活的筛选条件",
+  "chip": {
+    "capability": "能力：{value}",
+    "configurable": "可配置",
+    "hasUpdate": "可更新",
+    "permission": "权限：{value}",
+    "query": "搜索：{value}",
+    "signedOnly": "仅签名",
+    "sort": "排序：{value}",
+    "source": "来源：{value}",
+    "status": "状态：{value}"
+  },
+  "clearAll": "全部清除",
+  "removeAria": "移除 {name}"
+}

@@ -1,0 +1,76 @@
+{
+  "addGroup": "新建分组",
+  "builtin": {
+    "description": "随 cognia 自带的 Hook,合并在你自己的 Hook 之下。可逐个关闭;防护类默认关闭。",
+    "items": {
+      "auto-context-loader": {
+        "desc": "会话开始时注入 .cognia/agent-context.md 作为常驻上下文。",
+        "label": "自动上下文(会话)"
+      },
+      "auto-context-loader-prompt": {
+        "desc": "每次提交提示时注入 .cognia/agent-context.md 作为常驻上下文。",
+        "label": "自动上下文(每轮)"
+      },
+      "cost-quota-guard": {
+        "desc": "会话 Token 用量超过预算后拦截本轮。",
+        "label": "Token 预算守卫"
+      },
+      "pii-safety-guard": {
+        "desc": "拦截携带明显 PII 或凭据的提示。",
+        "label": "PII 守卫(提示)"
+      },
+      "pii-safety-guard-tool": {
+        "desc": "拦截输入中携带明显 PII 或凭据的工具调用。",
+        "label": "PII 守卫(工具)"
+      }
+    },
+    "off": "关",
+    "on": "开",
+    "saveError": "更新内置 Hook 失败:{detail}",
+    "saved": "内置 Hook 已更新。",
+    "title": "内置 Hook"
+  },
+  "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
+  "group": {
+    "addHandler": "新建处理器",
+    "emptyHandlers": "尚无处理器 — 点击下方按钮添加。",
+    "matcherHint": "工具名正则、用 | 分隔的备选项,或留空 / '*' 匹配所有。",
+    "matcherInvalid": "正则无效：{detail}",
+    "matcherLabel": "Matcher",
+    "matcherPlaceholder": "Bash|Write 或 .* (留空匹配所有)",
+    "removeAria": "移除该分组"
+  },
+  "handler": {
+    "commandLabel": "Shell 命令",
+    "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME 已运行\"",
+    "headerKeyPlaceholder": "X-Custom",
+    "headerRemoveAria": "移除头部",
+    "headerValuePlaceholder": "value",
+    "headersAdd": "新建头部",
+    "headersEmpty": "暂无自定义头部。",
+    "headersLabel": "请求头",
+    "removeAria": "移除处理器",
+    "timeoutLabel": "超时 (ms)",
+    "timeoutPlaceholder": "5000",
+    "typeCommand": "命令",
+    "typeLabel": "类型",
+    "typeWebhook": "Webhook",
+    "urlLabel": "URL",
+    "urlPlaceholder": "https://example.com/hook"
+  },
+  "loadError": "读取设置失败：{detail}",
+  "noGroupsForEvent": "{event} 事件下还没有任何分组,点击\"新建分组\"添加 matcher。",
+  "noTriggerBadge": "暂无触发源",
+  "noTriggerNote": "该事件可被识别并保存,但运行时暂无对应的触发源——在此配置的 hook 不会被触发。",
+  "revert": "还原",
+  "save": "保存",
+  "saveError": "保存失败：{detail}",
+  "saved": "已保存。",
+  "saving": "正在保存…",
+  "scope": {
+    "local": "本地",
+    "project": "项目",
+    "user": "用户"
+  },
+  "title": "生命周期钩子"
+}

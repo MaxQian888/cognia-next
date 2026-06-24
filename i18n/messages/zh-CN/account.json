@@ -1,0 +1,46 @@
+{
+  "gate": {
+    "createAccount": "创建账户",
+    "displayNameLabel": "账户名称",
+    "displayNamePlaceholder": "本地账户",
+    "firstRunForm": "创建本地账户",
+    "firstRunTitle": "创建本地账户",
+    "loading": "正在加载账户...",
+    "operationFailed": "本地账户操作失败。",
+    "passwordLabel": "密码",
+    "passwordPlaceholder": "密码",
+    "unknownAccount": "账户",
+    "unlockAccount": "解锁",
+    "unlockForm": "解锁本地账户",
+    "unlockTitle": "解锁 {name}"
+  },
+  "manage": {
+    "activeBadge": "当前",
+    "confirmDelete": "确认删除",
+    "createAccount": "创建账户",
+    "delete": "删除",
+    "description": "创建、重命名和移除此设备上的本地账户。",
+    "editDisplayNameLabel": "账户名称",
+    "empty": "选择账户",
+    "listLabel": "本地账户",
+    "newDisplayNameLabel": "新账户名称",
+    "newDisplayNamePlaceholder": "本地账户",
+    "newPasswordLabel": "新账户密码",
+    "newPasswordPlaceholder": "密码",
+    "operationFailed": "本地账户操作失败。",
+    "save": "保存",
+    "title": "本地账户"
+  },
+  "switcher": {
+    "active": "当前账户：{name}",
+    "activeBadge": "当前",
+    "confirmSwitch": "切换",
+    "heading": "账户",
+    "lock": "锁定",
+    "manage": "管理账户",
+    "noActive": "无当前账户",
+    "operationFailed": "本地账户操作失败。",
+    "switchPasswordLabel": "密码",
+    "switchPasswordPlaceholder": "密码"
+  }
+}

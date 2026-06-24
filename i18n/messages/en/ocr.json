@@ -1,0 +1,537 @@
+{
+  "advanced": {
+    "clearProviderCache": "Clear this provider's cache",
+    "description": "Leave empty to inherit the global default.",
+    "formatInherit": "Inherit global",
+    "formatOverride": "Output format override",
+    "languagesHint": "Comma-separated, e.g. en,zh.",
+    "languagesOverride": "Languages override",
+    "modelVariant": "Model variant",
+    "promptTemplate": "Prompt template",
+    "region": "Region",
+    "reset": "Reset to defaults",
+    "title": "Per-provider overrides"
+  },
+  "autoRouter": {
+    "cacheTtlDays": "Cache TTL (days)",
+    "cacheTtlHint": "0 = no expiry. Default 30.",
+    "clearAllCache": "Clear all OCR cache",
+    "cloudFallback": "Cloud fallback",
+    "cloudFallbackHint": "Use a cloud provider when local engines are unavailable.",
+    "cloudFallbackProvider": "Cloud fallback provider",
+    "confidenceEscalation": "Escalate low-confidence results",
+    "confidenceEscalationHint": "Re-OCR a low-confidence result with the cloud fallback provider and keep the stronger output.",
+    "defaultBadge": "Default",
+    "defaultFormat": "Default output format",
+    "defaultLanguages": "Default languages",
+    "defaultProvider": "Default provider",
+    "description": "These settings apply when callers don't pick a provider explicitly.",
+    "fellBackToCloud": "Local OCR engine unavailable. Using {provider}.",
+    "fellBackToWasm": "Falling back to in-browser Tesseract.",
+    "inboundImages": "OCR inbound images",
+    "inboundImagesHint": "Extract text from images received in connected chats so the assistant can read them even without vision.",
+    "label": "Auto-Router",
+    "languagesHint": "Comma-separated language codes (e.g. en, zh).",
+    "maxImageDimension": "Max image dimension (px)",
+    "maxImageHint": "Downscale before sending. Bounds LLM-vision token cost.",
+    "noFallbackProvider": "No cloud provider selected",
+    "pdfFastPath": "PDF text-layer fast-path",
+    "pdfFastPathHint": "Skip OCR on PDF pages that already have a text layer.",
+    "subtitleAuto": "auto → {fallback}",
+    "subtitleFixed": "→ {provider}",
+    "tabs": {
+      "cache": "Cache",
+      "defaults": "Defaults",
+      "platformOverrides": "Platform overrides"
+    },
+    "title": "Auto-Router"
+  },
+  "cache": {
+    "actions": {
+      "clearAll": "Clear all",
+      "clearProvider": "Clear cache for {provider}",
+      "delete": "Delete row"
+    },
+    "clear": "Clear OCR cache",
+    "clearProvider": "Clear cache for this provider",
+    "cleared": "OCR cache cleared.",
+    "description": "Cached by SHA-256 of the input file, provider, and language list.",
+    "empty": "No cached OCR results yet.",
+    "filterAllProviders": "All providers",
+    "itemsLabel": "{count} entries · {bytes} bytes",
+    "tableHeaders": {
+      "actions": "Actions",
+      "age": "Age",
+      "langs": "Languages",
+      "provider": "Provider",
+      "sizeBytes": "Size"
+    },
+    "title": "Cache",
+    "toastAllCleared": "Cleared {count} cache entr(y/ies).",
+    "toastProviderCleared": "Cleared {count} cache entr(y/ies) for this provider.",
+    "toastRowDeleted": "Cache entry deleted.",
+    "totalBytes": "{bytes} bytes total",
+    "totalCount": "{count} entries"
+  },
+  "capabilities": {
+    "compareCta": "Compare with…",
+    "description": "What this provider does well, and where it falls short.",
+    "empty": "This provider is not registered.",
+    "fields": {
+      "cjk": {
+        "description": "Chinese / Japanese / Korean script support.",
+        "label": "CJK"
+      },
+      "costTier": {
+        "description": "Pricing band — Free / $$ / $$$$ / $$$$$$.",
+        "label": "Cost tier"
+      },
+      "handwriting": {
+        "description": "Cursive or printed handwriting recognition.",
+        "label": "Handwriting"
+      },
+      "layout": {
+        "description": "Preserves paragraphs, columns, reading order.",
+        "label": "Layout"
+      },
+      "math": {
+        "description": "Mathematical formulas / LaTeX output.",
+        "label": "Math"
+      },
+      "maxPagesPerCall": {
+        "description": "Vendor cap on pages submitted per request.",
+        "label": "Max pages per call"
+      },
+      "multilang": {
+        "description": "Approximate count of vendor-supported languages.",
+        "label": "Languages supported"
+      },
+      "offline": {
+        "description": "Runs without a network call.",
+        "label": "Offline"
+      },
+      "pdfNative": {
+        "description": "Multi-page PDFs accepted without rasterization.",
+        "label": "Native PDF"
+      },
+      "structuredOutput": {
+        "description": "Returns blocks / JSON in addition to text.",
+        "label": "Structured output"
+      },
+      "tables": {
+        "description": "Detects row / column / cell structure.",
+        "label": "Tables"
+      }
+    },
+    "footnote": "Heuristic guidance only — actual quality depends on your input. Use Try It to see real output.",
+    "title": "Capabilities",
+    "values": {
+      "free": "Free",
+      "no": "No",
+      "partial": "Partial",
+      "yes": "Yes"
+    }
+  },
+  "categories": {
+    "document-cloud": "Document OCR (cloud)",
+    "lark": "Feishu / Lark",
+    "llm-vision": "LLM vision (cloud)",
+    "local": "On-device",
+    "specialist": "Specialist (cloud)"
+  },
+  "compare": {
+    "abort": "Cancel",
+    "addProvider": "Add provider",
+    "back": "Back",
+    "clearFile": "Remove file",
+    "columnIdle": "Drop a file and press Run to extract.",
+    "confirm": {
+      "body": "Estimated total for {pages} page(s) across {count} providers: {cost}. Uses your configured API credentials.",
+      "cancel": "Cancel",
+      "cta": "Run all",
+      "free": "Free",
+      "title": "Run OCR across {count} providers?"
+    },
+    "dropHere": "Drop an image or PDF here.",
+    "errorColumn": "This provider returned an error.",
+    "maxSelected": "Up to {max} providers.",
+    "noProvidersSelected": "Pick 2-3 providers above to compare them side by side.",
+    "pickFile": "Pick a file…",
+    "removeProvider": "Remove {provider}",
+    "runAll": "Run all",
+    "running": "Running…",
+    "runtimeNotReady": "OCR runtime is not ready.",
+    "sidebarLabel": "Compare",
+    "sidebarSubtitle": "Side-by-side OCR runs",
+    "title": "Compare providers",
+    "tooManyProviders": "Selection capped at {max}."
+  },
+  "composer": {
+    "menu": {
+      "extractToInput": "Extract text to input",
+      "viewResult": "View extracted text"
+    },
+    "resultSheet": {
+      "copy": "Copy all",
+      "copyPage": "Copy page",
+      "empty": "No text was recognized.",
+      "title": "Extracted text"
+    }
+  },
+  "credentials": {
+    "accessKeyId": "AWS access key ID",
+    "apiKey": "API key",
+    "appId": "App ID",
+    "appKey": "App key",
+    "applicationId": "Application ID",
+    "endpoint": "Endpoint URL",
+    "hide": "Hide",
+    "password": "Password",
+    "placeholder": "Paste credential",
+    "reusesMainProviderHint": "Uses your {provider} API key from the AI Providers page.",
+    "secretAccessKey": "AWS secret access key",
+    "sessionToken": "AWS session token (optional)",
+    "show": "Show"
+  },
+  "defaults": {
+    "auto": "Auto (pick best for current platform)",
+    "cloudFallback": "Cloud fallback",
+    "cloudFallbackHint": "Use a cloud provider when local engines are unavailable.",
+    "defaultProvider": "Default provider",
+    "pdfFastPath": "PDF text-layer fast-path",
+    "pdfFastPathHint": "Skip OCR on PDF pages that already have a text layer.",
+    "title": "Defaults"
+  },
+  "detail": {
+    "enable": "Enabled",
+    "noCredentials": "No credentials required for this engine.",
+    "openDocs": "Open docs",
+    "shellSupportBrowser": "Browser",
+    "shellSupportDesktop": "Desktop",
+    "shellSupportMobile": "Mobile",
+    "tabsAdvanced": "Advanced",
+    "tabsCapabilities": "Capabilities",
+    "tabsConfig": "Config",
+    "tabsModels": "Models",
+    "tabsTryIt": "Try it"
+  },
+  "errors": {
+    "aborted": "OCR cancelled.",
+    "invalidInput": "OCR input is not a supported image or PDF.",
+    "missingCredentials": "Add credentials for this OCR provider in Settings → OCR.",
+    "providerFailed": "OCR provider failed: {message}",
+    "rateLimited": "OCR provider rate limit hit. Try again later.",
+    "unsupportedLanguage": "Language not supported by this OCR provider.",
+    "unsupportedShell": "This OCR provider is not available in the current app shell."
+  },
+  "health": {
+    "connectionFailed": "Connection failed",
+    "connectionOk": "Connected",
+    "lastDurationMs": "Last call: {ms} ms"
+  },
+  "langPacks": {
+    "downloadingLabel": "Downloading {lang}…",
+    "installedLabel": "Installed",
+    "manageButton": "Manage language packs"
+  },
+  "modelStatus": {
+    "description": "Pure-Rust OCR engines ship without weights to keep the installer slim. Models are downloaded to your user data directory on first use.",
+    "download": "Download models",
+    "downloadAll": "Download all model files",
+    "downloadComplete": "Models ready ({bytes} bytes total)",
+    "downloadFailed": "Download failed: {message}",
+    "downloading": "Downloading {file} ({percent}%)",
+    "downloadingDetail": "{bytesDone} / {bytesTotal} bytes — file {index} of {count}",
+    "emptyNoModelFiles": "No managed model files for this backend.",
+    "installed": "Models ready",
+    "missing": "{count} model file(s) missing",
+    "modelDir": "Stored in: {path}",
+    "redownload": "Re-download",
+    "shellUnavailable": "Local model management is only available in the desktop app.",
+    "title": "Local models"
+  },
+  "overlay": {
+    "ariaLabel": "Selectable extracted text over the source image",
+    "imageAlt": "OCR source page"
+  },
+  "params": {
+    "apiKey": {
+      "description": "Sent as Authorization: Bearer when present. Leave empty for unauthenticated LAN servers.",
+      "label": "Bearer token (optional)"
+    },
+    "dialect": {
+      "description": "Which self-hosted server protocol to speak. Umi-OCR uses JSON; PaddleOCR-Server uses its serving API.",
+      "label": "Request dialect",
+      "paddleocr-server": "PaddleOCR-Server",
+      "umi-ocr": "Umi-OCR"
+    },
+    "enableForms": {
+      "description": "Request structured form output. Increases per-page cost.",
+      "label": "Extract form key/value pairs"
+    },
+    "enableTables": {
+      "description": "Request structured table output (Textract / Document AI / Vision).",
+      "label": "Extract tables"
+    },
+    "endpoint": {
+      "description": "Custom API endpoint URL.",
+      "label": "Endpoint"
+    },
+    "format": {
+      "blocks": "Structured blocks",
+      "description": "Markdown is the 2026 cross-provider standard. Plain text drops table structure.",
+      "label": "Output format",
+      "markdown": "Markdown",
+      "text": "Plain text"
+    },
+    "languages": {
+      "description": "Comma-separated language codes (e.g. en, zh).",
+      "label": "Languages"
+    },
+    "maxImageDimension": {
+      "description": "Downscale before sending. Bounds LLM-vision token cost.",
+      "label": "Max image dimension (px)"
+    },
+    "model": {
+      "description": "Provider-specific model id.",
+      "label": "Model"
+    },
+    "pageRange": {
+      "description": "Optional. \"1,3-5\" syntax. Leave empty to process every page.",
+      "label": "Page range"
+    },
+    "promptTemplate": {
+      "description": "Used by LLM-vision providers (Claude / GPT / Gemini) to instruct the model.",
+      "label": "Prompt template"
+    },
+    "region": {
+      "description": "AWS region identifier (e.g. us-east-1).",
+      "label": "Region"
+    },
+    "timeoutMs": {
+      "description": "Abort the request after this many milliseconds. Default 30 seconds.",
+      "label": "Timeout (ms)"
+    }
+  },
+  "platformOverrides": {
+    "description": "Per-OS local-engine ordering used by the auto-router. Drag to reorder; remove engines you don't want. Empty buckets fall back to the built-in defaults.",
+    "dragHint": "Drag a row to change priority. Highest priority is on top.",
+    "emptyBucket": "No engines configured for this OS.",
+    "oses": {
+      "android": "Android",
+      "browser": "Browser",
+      "ios": "iOS",
+      "linux": "Linux",
+      "macos": "macOS",
+      "windows": "Windows"
+    },
+    "resetToDefaults": "Reset to defaults",
+    "title": "Platform overrides",
+    "unsavedChanges": "Unsaved changes",
+    "usingDefault": "Using built-in defaults for this OS.",
+    "usingOverride": "Custom order in effect for this OS."
+  },
+  "plugin": {
+    "description": "Extract text and structured Markdown from any image or PDF.",
+    "label": "OCR",
+    "tool": {
+      "extract": {
+        "description": "Calls the configured OCR provider chain and returns per-page Markdown plus optional bounding boxes.",
+        "label": "Extract text from an image or PDF"
+      }
+    }
+  },
+  "probe": {
+    "button": "Probe connection",
+    "failure": "Probe failed: {message}",
+    "running": "Probing…",
+    "successWithLatency": "Probe OK ({ms} ms)"
+  },
+  "providers": {
+    "abbyy-cloud": {
+      "description": "Enterprise-grade OCR with 200+ languages. Two-stage submit + poll API.",
+      "label": "ABBYY Cloud OCR"
+    },
+    "anthropic-vision": {
+      "description": "Uses your main Anthropic API key. Returns Markdown only — no bounding boxes.",
+      "label": "Claude (vision)"
+    },
+    "apple-vision": {
+      "description": "Tauri (macOS) via a Swift sidecar, or Capacitor (iOS) via VNRecognizeTextRequest.",
+      "label": "Apple Vision"
+    },
+    "aws-textract": {
+      "description": "Image OCR plus structured forms / tables. Uses SigV4 signing. PDFs must be rasterized first.",
+      "label": "AWS Textract"
+    },
+    "azure-document-intelligence": {
+      "description": "Asynchronous analyze API with Markdown + paragraph blocks. Models: prebuilt-read, prebuilt-layout, prebuilt-invoice, custom.",
+      "label": "Azure AI Document Intelligence"
+    },
+    "enabled": "Enabled",
+    "gemini-vision": {
+      "description": "Uses your main Gemini / Google AI API key. Returns Markdown only — no bounding boxes.",
+      "label": "Gemini (vision)"
+    },
+    "google-vision": {
+      "description": "Document text detection with paragraph-level bounding boxes and per-word confidence.",
+      "label": "Google Cloud Vision"
+    },
+    "lark-basic": {
+      "description": "Lark Open Platform basic_recognize — App ID + App Secret. Best for Chinese + English short text.",
+      "label": "Feishu / Lark"
+    },
+    "local-http": {
+      "description": "Adapter for self-hosted OCR servers (Umi-OCR, PaddleOCR-Server). Configure the endpoint URL and request dialect.",
+      "label": "Local HTTP (self-hosted)"
+    },
+    "mathpix": {
+      "description": "Math, chemistry, and handwriting specialist. Outputs LaTeX/Markdown.",
+      "label": "Mathpix"
+    },
+    "mistral-ocr": {
+      "description": "Markdown-first document OCR with strong table preservation. Handles multi-page PDFs and handwritten text.",
+      "label": "Mistral OCR"
+    },
+    "mlkit-android": {
+      "description": "Capacitor (Android) only. Latin, Chinese, Devanagari, Japanese, and Korean scripts.",
+      "label": "ML Kit Text Recognition"
+    },
+    "nanonets": {
+      "description": "Generic OCR model or custom-trained extraction. Returns plain text plus bounding boxes.",
+      "label": "Nanonets"
+    },
+    "ocr-space": {
+      "description": "Generous free tier; 200+ languages. Engine 3 supports the broadest language set.",
+      "label": "OCR.space"
+    },
+    "ocrs": {
+      "description": "Pure-Rust cross-platform OCR via ocrs + RTen. No system dependencies; English-biased. Models (~12 MB) download on first use.",
+      "label": "ocrs (local)"
+    },
+    "openai-vision": {
+      "description": "Uses your main OpenAI API key. Returns Markdown only — no bounding boxes.",
+      "label": "OpenAI (vision)"
+    },
+    "paddle-ocr": {
+      "description": "PP-OCRv5 via oar-ocr + ONNX Runtime. Strongest open CJK accuracy. Models (~17 MB) download on first use.",
+      "label": "PaddleOCR (local)"
+    },
+    "tesseract-native": {
+      "description": "Tauri desktop only. Statically linked libtesseract + leptonica via tesseract-rs.",
+      "label": "Tesseract (native)"
+    },
+    "tesseract-wasm": {
+      "description": "Browser-side OCR powered by tesseract.js. Works offline; ships ~2 MB WASM core.",
+      "label": "Tesseract (WASM)"
+    },
+    "title": "Providers",
+    "windows-media-ocr": {
+      "description": "Windows-bundled OCR via the winocr crate. Requires an MSIX-packaged build.",
+      "label": "Windows.Media.Ocr"
+    }
+  },
+  "sidebar": {
+    "categoryAll": "All",
+    "clearCache": "Clear OCR cache",
+    "mobileTrigger": "Providers",
+    "searchPlaceholder": "Search OCR providers",
+    "stats": "{enabled} enabled · {local} local · {cloud} cloud"
+  },
+  "slash": {
+    "formatFlag": "Output format",
+    "langFlag": "Comma-separated language codes",
+    "pagesFlag": "Page range, e.g. 1,3-5",
+    "providerFlag": "Provider id (or \"auto\")",
+    "usage": "Usage: /ocr '<file path or attachment id>' [--provider auto|'<id>'] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]"
+  },
+  "status": {
+    "connected": "Connected",
+    "disabled": "Disabled",
+    "error": "Error",
+    "notConfigured": "Not configured",
+    "ready": "Ready",
+    "unsupported": "Unsupported"
+  },
+  "tryIt": {
+    "abort": "Cancel",
+    "clearFile": "Remove file",
+    "confirm": {
+      "cancel": "Cancel",
+      "cta": "Run",
+      "estimatedCost": "Estimated cost for {pages} page(s) on {provider}: {cost}. Uses your configured API credentials.",
+      "free": "Free",
+      "title": "Run OCR with {provider}?"
+    },
+    "description": "Drop a file and run this provider end-to-end. Uses your configured credentials.",
+    "dropHere": "Drop an image or PDF here.",
+    "errors": {
+      "aborted": "Cancelled.",
+      "noProvider": "Select a provider first.",
+      "unsupportedFile": "Unsupported file type — pick an image or PDF."
+    },
+    "pickFile": "Pick a file…",
+    "result": {
+      "cached": "Cached",
+      "copyAll": "Copy combined Markdown",
+      "copyPage": "Copy",
+      "empty": "No result yet.",
+      "fromTextLayer": "from PDF text layer",
+      "pageHeader": "Page {page}"
+    },
+    "runButton": "Run OCR",
+    "running": "Running…",
+    "title": "Try it"
+  },
+  "wizard": {
+    "apply": "Apply preset",
+    "applyDetail": "Default provider will become {provider}. Cloud fallback stays enabled. You can change everything later.",
+    "applyIntro": "Apply this preset to your OCR settings?",
+    "back": "Back",
+    "description": "Pick a use-case and we'll suggest a sensible starting configuration.",
+    "dismiss": "Not now",
+    "next": "Next",
+    "openButton": "Setup wizard",
+    "preset": {
+      "defaultBadge": "default",
+      "format": "Output format",
+      "languages": "Languages",
+      "providers": "Providers"
+    },
+    "presetIntro": "Suggested providers and defaults for this use case:",
+    "reopenLater": "You can reopen this wizard from the Auto-Router panel.",
+    "step": {
+      "apply": "Apply",
+      "preset": "Preview",
+      "useCase": "Use case"
+    },
+    "title": "OCR setup",
+    "useCasePrompt": "What do you mostly want to OCR?",
+    "useCases": {
+      "chineseReceipts": {
+        "description": "Bilingual zh/en, line-item layout, mixed printed and stamped text.",
+        "label": "Chinese receipts / invoices"
+      },
+      "formulas": {
+        "description": "LaTeX-quality math, multi-column scientific layouts.",
+        "label": "Math formulas / scientific PDFs"
+      },
+      "handwriting": {
+        "description": "Cursive or printed handwriting on whiteboards, notebooks, forms.",
+        "label": "Handwritten notes"
+      },
+      "mixed": {
+        "description": "Reasonable defaults that cover most everyday OCR needs.",
+        "label": "Mixed / not sure"
+      },
+      "scannedContracts": {
+        "description": "Structured documents with tables, fields, and signatures.",
+        "label": "Scanned contracts / forms"
+      },
+      "webScreenshots": {
+        "description": "Casual screenshots of websites, apps, and chat messages.",
+        "label": "Web screenshots / UI text"
+      }
+    }
+  }
+}

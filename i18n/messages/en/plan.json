@@ -1,0 +1,37 @@
+{
+  "approval": {
+    "approve": "Approve & run",
+    "feedbackPlaceholder": "Optional feedback for rejection or refinement…",
+    "noSteps": "This plan has no steps.",
+    "progressLabel": "Progress",
+    "refineExpand": "Expand",
+    "refineOptimize": "Optimize",
+    "refineReorder": "Reorder",
+    "refineRepair": "Repair",
+    "refineSimplify": "Simplify",
+    "reject": "Reject",
+    "sourceLabel": "Source: {source}",
+    "title": "Review plan"
+  },
+  "status": {
+    "approved": "Approved",
+    "awaiting_approval": "Awaiting approval",
+    "cancelled": "Cancelled",
+    "completed": "Completed",
+    "draft": "Draft",
+    "executing": "Executing",
+    "failed": "Failed",
+    "paused": "Paused"
+  },
+  "tracker": {
+    "empty": "No plan is running.",
+    "progress": "{completed} of {total} steps",
+    "statusBlocked": "Blocked",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "statusInProgress": "In progress",
+    "statusPending": "Pending",
+    "statusReady": "Ready",
+    "statusSkipped": "Skipped"
+  }
+}

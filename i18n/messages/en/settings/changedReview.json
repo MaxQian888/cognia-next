@@ -1,0 +1,13 @@
+{
+  "close": "Close",
+  "count": "{count} changed from defaults",
+  "description": "Settings that differ from their defaults appear here.",
+  "empty": "All settings are at their default values.",
+  "otherSection": "Other",
+  "resetAll": "Reset all shown",
+  "resetGroup": "Reset group",
+  "resetRow": "Reset",
+  "resetRowAria": "Reset {name} to default",
+  "resetToast": "Reset to defaults.",
+  "title": "Changed settings"
+}

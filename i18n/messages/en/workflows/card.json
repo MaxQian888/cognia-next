@@ -1,0 +1,53 @@
+{
+  "action": "{count, plural, one {# action} other {# actions}}",
+  "builtin": "Built-in",
+  "delete": "Delete",
+  "deleteConfirm": {
+    "cancel": "Cancel",
+    "confirm": "Delete",
+    "description": "This permanently deletes \"{name}\" along with its run history. This cannot be undone.",
+    "title": "Delete workflow?"
+  },
+  "deleteFailed": "Failed to delete workflow",
+  "deleted": "Workflow deleted",
+  "duplicate": "Duplicate",
+  "duplicateFailed": "Failed to duplicate workflow",
+  "duplicated": "Workflow duplicated",
+  "edit": "Edit",
+  "editTags": "Edit tags",
+  "lastRun": "Last run: {status}",
+  "moreActions": "More actions",
+  "moveTo": "Move to…",
+  "node": "{count, plural, one {# node} other {# nodes}}",
+  "open": "Open",
+  "pin": "Pin",
+  "pinned": "Pinned",
+  "rename": "Rename",
+  "renameDialog": {
+    "cancel": "Cancel",
+    "namePlaceholder": "Workflow name",
+    "save": "Save",
+    "title": "Rename workflow"
+  },
+  "renameFailed": "Failed to rename workflow",
+  "renamed": "Workflow renamed",
+  "runCountBadge": "{count} runs",
+  "saveAsTemplate": "Save as template",
+  "saveAsTemplateFailed": "Couldn’t save as template",
+  "savedAsTemplate": "Saved as template",
+  "select": "Select",
+  "tagsDialog": {
+    "cancel": "Cancel",
+    "description": "Comma-separated tags.",
+    "placeholder": "tag1, tag2",
+    "save": "Save",
+    "title": "Edit tags"
+  },
+  "tagsFailed": "Failed to update tags",
+  "tagsSaved": "Tags updated",
+  "template": "Template",
+  "trigger": "{count, plural, one {# trigger} other {# triggers}}",
+  "unpin": "Unpin",
+  "updated": "Updated {ago}",
+  "viewRuns": "View runs"
+}

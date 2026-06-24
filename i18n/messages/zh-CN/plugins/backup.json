@@ -1,0 +1,10 @@
+{
+  "create": "创建备份",
+  "createFailed": "备份失败。",
+  "creating": "创建中…",
+  "delete": "删除",
+  "desktopOnlyHint": "备份通过原生桥接写入，仅在桌面端可写。",
+  "empty": "暂无备份。",
+  "restore": "恢复",
+  "title": "备份"
+}

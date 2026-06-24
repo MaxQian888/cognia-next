@@ -1,0 +1,16 @@
+{
+  "colAction": "动作",
+  "colPermission": "权限",
+  "colPlugin": "插件",
+  "colReason": "原因",
+  "colTime": "时间",
+  "description": "近期所有插件的授权/拒绝/撤销决策。缓冲区只保留最近 200 条记录，更早的事件会被丢弃。",
+  "empty": "暂无审计记录。",
+  "exportCsv": "导出 CSV",
+  "exportFilename": "plugin-audit-log.csv",
+  "filterPermissionAll": "全部权限",
+  "filterPermissionLabel": "权限",
+  "filterPluginAll": "全部插件",
+  "filterPluginLabel": "插件",
+  "title": "审计日志"
+}

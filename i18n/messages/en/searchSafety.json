@@ -1,0 +1,11 @@
+{
+  "description": "Filter explicit content from search results.",
+  "level": "Level",
+  "moderate": "Moderate",
+  "moderateDesc": "Filter explicit",
+  "off": "Off",
+  "offDesc": "No filtering",
+  "strict": "Strict",
+  "strictDesc": "Filter all adult",
+  "title": "Safe search"
+}

@@ -1,0 +1,19 @@
+{
+  "defaultModel": "默认模型",
+  "fontScale": "字号",
+  "fontScaleLg": "大",
+  "fontScaleMd": "中",
+  "fontScaleSm": "小",
+  "language": "语言",
+  "queueLabel": "已排队——桌面上线后会自动同步。",
+  "reconnectButton": "重连 WebRTC",
+  "reconnectFailed": "重连失败（{reason}）。",
+  "reconnectInactive": "WebRTC 通道当前未启用。",
+  "reconnectSuccess": "已发起重连。",
+  "reconnectThrottled": "操作过于频繁，请稍等几秒再试。",
+  "theme": "主题",
+  "themeDark": "深色",
+  "themeLight": "浅色",
+  "themeSystem": "跟随系统",
+  "transportTier": "传输通道"
+}

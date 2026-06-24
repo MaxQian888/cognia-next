@@ -1,0 +1,23 @@
+{
+  "blockedRunTitle": "请先修复校验问题再运行",
+  "blockedSaveTitle": "工作流已保存，但仍有 {count} 个未解决的问题",
+  "cronExpr": "请使用五字段 cron 表达式（分 时 日 月 周）",
+  "invalid": "无效值",
+  "invalidFormat": "格式无效",
+  "invalidType": "应为 {expected}",
+  "invalidUrl": "请输入有效的 http(s) URL 或 '{{ }}' 表达式",
+  "loopBatchSizeMode": "批次大小仅适用于「遍历数组」循环",
+  "loopBodyRequired": "请按所选循环模式提供输入表达式或迭代次数",
+  "loopConditionTimingMode": "条件判断时机仅适用于「条件循环」",
+  "maxValue": "数值至多为 {max}",
+  "minItems": "至少添加 {min} 项",
+  "minLength": "长度至少为 {min} 个字符",
+  "minValue": "数值至少为 {min}",
+  "required": "此项为必填",
+  "splitBranchesRequired": "至少添加两条分支标签",
+  "summary": "{count} 个校验问题",
+  "switchCasesRequired": "至少添加一个 case",
+  "twinIngestSourceRequired": "请提供内容（粘贴模式）或 URL（拉取模式）",
+  "variableName": "请使用合法标识符（字母 / 数字 / 下划线，且不能以数字开头）",
+  "webhookPath": "仅支持字母、数字、短划线、下划线和斜杠"
+}

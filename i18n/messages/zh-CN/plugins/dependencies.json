@@ -1,0 +1,13 @@
+{
+  "binaries": "所需工具",
+  "checking": "检测中…",
+  "detected": "已检测",
+  "installed": "已安装",
+  "minVersion": "≥ {version}",
+  "missing": "缺失",
+  "notFound": "未找到",
+  "optional": "可选",
+  "pluginDeps": "插件",
+  "pythonDeps": "Python 包",
+  "title": "依赖"
+}

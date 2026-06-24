@@ -1,0 +1,575 @@
+{
+  "activity": {
+    "empty": "No events yet.",
+    "eventKind": {
+      "approval_requested": "Approval requested",
+      "budget_exceeded": "Budget exceeded",
+      "deadlock_resolved": "Deadlock resolved",
+      "delegation_completed": "Delegation completed",
+      "delegation_failed": "Delegation failed",
+      "delegation_started": "Delegation started",
+      "message_sent": "Message sent",
+      "pattern_selected": "Pattern selected",
+      "plan_approved": "Plan approved",
+      "plan_rejected": "Plan rejected",
+      "plan_submitted": "Plan submitted",
+      "progress_update": "Progress update",
+      "routing_assessed": "Routing assessed",
+      "task_claimed": "Task claimed",
+      "task_completed": "Task completed",
+      "task_created": "Task created",
+      "task_failed": "Task failed",
+      "task_retried": "Task retried",
+      "task_started": "Task started",
+      "team_cancelled": "Team cancelled",
+      "team_completed": "Team completed",
+      "team_created": "Team created",
+      "team_failed": "Team failed",
+      "team_started": "Team started",
+      "teammate_added": "Teammate added",
+      "teammate_completed": "Teammate completed",
+      "teammate_failed": "Teammate failed",
+      "teammate_shutdown": "Teammate shut down",
+      "teammate_started": "Teammate started"
+    },
+    "liveProgress": "Working — {tools} tools · {chars} chars · {secs}s",
+    "liveProgressStarting": "Starting…",
+    "progressPhase": {
+      "done": "done",
+      "failed": "failed",
+      "running": "working",
+      "start": "starting"
+    },
+    "report": {
+      "checkpoints": {
+        "toggle": "Checkpoint timeline"
+      },
+      "emptyCheckpoints": "No checkpoints recorded for this run yet.",
+      "kpi": {
+        "duration": "Duration",
+        "escalations": "Escalations",
+        "successRate": "Success rate",
+        "tokens": "Total tokens"
+      },
+      "pluginSlot": {
+        "placeholder": "Plugins can render custom analytics here. Install one from the Plugin Marketplace."
+      },
+      "status": "Status: {status}",
+      "taskline": {
+        "empty": "No delegation segments recorded.",
+        "title": "Task timeline",
+        "tooltip": "{title} · {start} → {end}"
+      },
+      "title": "Execution report",
+      "tokenBurn": {
+        "empty": "No token usage recorded yet.",
+        "title": "Token burn"
+      }
+    }
+  },
+  "allCategories": "All",
+  "autoCompose": {
+    "approve": "Create team",
+    "cancel": "Cancel",
+    "compose": "Compose",
+    "composing": "Composing…",
+    "confidence": "{pct}% confidence",
+    "created": "Team composed.",
+    "dependsOn": "after {deps}",
+    "description": "Describe an objective and let the system propose a specialist roster and task plan for your review.",
+    "failed": "Auto-compose failed: {error}",
+    "lead": "lead",
+    "noClient": "Auto-compose needs a provider with a renderer-side API key — configure one in settings.",
+    "objectiveLabel": "Objective",
+    "objectivePlaceholder": "e.g. Audit the authentication layer for security issues and write a remediation report",
+    "objectiveRequired": "Enter an objective first.",
+    "openButton": "Auto-compose",
+    "piiRefused": "Refused: the objective still contains sensitive data after redaction.",
+    "reject": "Back",
+    "rosterLabel": "Roster ({count})",
+    "tasksLabel": "Tasks ({count})",
+    "teamNameLabel": "Team name",
+    "teamNamePlaceholder": "Name this team",
+    "title": "Auto-compose a team"
+  },
+  "builtInBadge": "Built-in",
+  "cancel": "Cancel",
+  "cancelRename": "Cancel rename",
+  "chat": {
+    "composer": {
+      "imageNotSupported": "Image attachments aren't supported in team chat yet.",
+      "mentionTitle": "Mention an agent",
+      "missingMention": "Start your message with @'<agent-name>' to dispatch it.",
+      "missingPrompt": "Add a message after the mention.",
+      "noAgents": "No agents available — add a teammate first",
+      "noMatches": "No agent matches \"{query}\"",
+      "placeholder": "Type @ to mention an agent — try @claude or @codex",
+      "sendingFailed": "Failed to send to {agent}: {reason}",
+      "stop": "Stop",
+      "unknownAgent": "Unknown agent: @{name}"
+    },
+    "empty": "No messages yet.",
+    "emptyHint": "Try @claude, @codex, or @'<member-name>' to dispatch this message to that agent.",
+    "errorGeneric": "Something went wrong",
+    "errorReason": "Error details",
+    "mentionAgents": "Mention an agent",
+    "messageActions": {
+      "copied": "Copied to clipboard",
+      "copy": "Copy",
+      "delete": "Delete",
+      "deleteFailed": "Couldn't delete this message",
+      "open": "Message actions",
+      "retry": "Retry",
+      "retrying": "Retrying…"
+    },
+    "messageTypes": {
+      "broadcast": "Broadcast",
+      "consensus": "Consensus",
+      "direct": "Direct",
+      "idle": "Idle",
+      "plan_approval": "Plan",
+      "plan_feedback": "Feedback",
+      "result_share": "Result",
+      "shutdown": "Shutdown",
+      "system": "System",
+      "task_assignment": "Assignment",
+      "task_update": "Task update"
+    },
+    "runtime": {
+      "claude": "Claude",
+      "claudeCode": "Claude Code",
+      "codex": "Codex",
+      "cursorCli": "Cursor",
+      "geminiCli": "Gemini"
+    },
+    "runtimeStatus": {
+      "disconnected": "{runtime} is configured but not connected. Open Settings → External Agents to connect.",
+      "missingKey": "Set an Anthropic API key in Settings → Providers to enable @claude.",
+      "noAgent": "No external agent configured for {runtime}. Add one in Settings → External Agents."
+    },
+    "streaming": "Thinking…",
+    "structuredPayload": "Payload",
+    "tokenUsage": {
+      "input": "in",
+      "label": "Tokens",
+      "output": "out",
+      "total": "total"
+    },
+    "toolCall": {
+      "complete": "complete",
+      "error": "error",
+      "input": "Input",
+      "output": "Output",
+      "running": "running",
+      "toggleDetails": "Toggle details for {name}"
+    },
+    "virtualTag": "Virtual"
+  },
+  "clearSearch": "Clear search",
+  "confirmRename": "Confirm rename",
+  "consensus": {
+    "cancel": "Cancel",
+    "description": "Active and recently resolved votes among teammates.",
+    "empty": "No consensus requests in this team.",
+    "forceResolve": "Resolve as lead",
+    "status": {
+      "cancelled": "Cancelled",
+      "open": "Open",
+      "resolved": "Resolved",
+      "timeout": "Timed out"
+    },
+    "title": "Consensus",
+    "type": "Type: {type}",
+    "vote": "Vote",
+    "voteCount": "{count} votes"
+  },
+  "createFromScratch": "From scratch",
+  "createFromTemplate": "From template",
+  "createTeam": "Create team",
+  "createTeamDescription": "Start from a template or build from scratch.",
+  "createTeamTitle": "Create new team",
+  "creating": "Creating…",
+  "defaultTeamDescription": "A new agent team",
+  "delegations": {
+    "approve": "Approve",
+    "cancel": "Cancel",
+    "description": "Work handed off to background agents, external agents, or other teams.",
+    "empty": "No delegations in this team.",
+    "status": {
+      "active": "Active",
+      "awaiting_approval": "Awaiting approval",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "failed": "Failed",
+      "pending": "Pending",
+      "timeout": "Timed out"
+    },
+    "target": "Target: {type} ({id})",
+    "title": "Delegations"
+  },
+  "delete": "Delete",
+  "deleteConfirm": "Permanently delete \"{name}\"?",
+  "deleteTeam": "Delete team",
+  "deleteWarning": "This cannot be undone. All tasks, messages, and member data will be removed.",
+  "descriptionTaskLabel": "Description / Task",
+  "descriptionTaskPlaceholder": "What should this team accomplish?",
+  "duplicate": "Duplicate",
+  "duplicatedName": "{name} (copy)",
+  "editableField": {
+    "cancelAriaLabel": "Cancel",
+    "editAriaLabel": "Edit",
+    "editDescription": "Edit description",
+    "editName": "Edit name",
+    "emptyHint": "Add a description…",
+    "saveAriaLabel": "Save"
+  },
+  "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
+  "listEmpty": "No teams yet. Create one from scratch or pick a template below.",
+  "listTitle": "Agent Teams",
+  "members": {
+    "addMember": "Add teammate",
+    "addMemberTitle": "Add new teammate",
+    "cancel": "Cancel",
+    "configOverrides": "Configuration overrides",
+    "configure": "Configure",
+    "description": "Description",
+    "descriptionPlaceholder": "What does this teammate do?",
+    "empty": "No members yet.",
+    "lead": "Lead",
+    "model": "Model",
+    "name": "Name",
+    "namePlaceholder": "e.g., Security Reviewer",
+    "provider": "Provider",
+    "removeAction": "Remove",
+    "removeBody": "\"{name}\" will be removed from the team.",
+    "removeTitle": "Remove teammate?",
+    "removed": "\"{name}\" removed.",
+    "role": "Role",
+    "runtime": "Runtime",
+    "runtimeUpdated": "{name}'s runtime updated.",
+    "save": "Add",
+    "saved": "\"{name}\" added.",
+    "specialization": "Specialization",
+    "specializationPlaceholder": "e.g., security, testing",
+    "teammate": "Teammate",
+    "title": "Team Members"
+  },
+  "membersCount": "{count, plural, one {# member} other {# members}}",
+  "missing": "Team not found.",
+  "myTeams": "My Teams",
+  "newFromTemplate": "Quick start templates",
+  "noResults": "No results found.",
+  "noTemplatesAvailable": "No templates available.",
+  "openWorkspace": "Open workspace",
+  "overview": {
+    "abortTeam": "Stop",
+    "budget": "Budget",
+    "concurrency": "Concurrency",
+    "configSummary": "Configuration",
+    "duration": "Duration",
+    "editDescription": "Edit description",
+    "editName": "Edit name",
+    "finalResult": "Final result",
+    "lead": "Lead",
+    "mode": "Mode",
+    "no": "No",
+    "noLead": "No lead assigned",
+    "pattern": "Pattern",
+    "planApproval": "Plan approval",
+    "routing": {
+      "confidence": "Confidence: {pct}%",
+      "pattern": "Pattern: {pattern}",
+      "title": "Routing assessment",
+      "ultracodeOff": "ultracode off",
+      "ultracodeOn": "ultracode on"
+    },
+    "runtime": "Runtime",
+    "startTeam": "Run team",
+    "startTeamUltracode": "Run with ultracode",
+    "status": "Status",
+    "teammates": "Teammates",
+    "tokenInput": "Prompt",
+    "tokenOutput": "Completion",
+    "tokenUsage": "Token usage",
+    "unlimited": "Unlimited",
+    "yes": "Yes"
+  },
+  "planApproval": {
+    "approve": "Approve",
+    "feedbackPlaceholder": "(Optional) feedback for the lead",
+    "noPlan": "No plan submitted yet.",
+    "reject": "Reject",
+    "title": "Plan awaiting approval"
+  },
+  "rename": "Rename",
+  "requirePlanApproval": "Require plan approval",
+  "sampleTeamCreated": "Demo Research Squad ready — click Run on the Overview tab.",
+  "searchTeams": "Search teams...",
+  "settings": {
+    "accordion": {
+      "governance": "Governance",
+      "memory": "Shared memory",
+      "overview": "Overview",
+      "plugins": "Plugins & capabilities",
+      "ultracode": "Ultracode"
+    },
+    "autoShutdown": "Auto-shutdown on completion",
+    "cancel": "Cancel",
+    "confirm": {
+      "cancelLabel": "Cancel",
+      "clearMemory": {
+        "description": "This permanently drops every shared-memory entry for this team.",
+        "title": "Clear shared memory?"
+      },
+      "confirmLabel": "Confirm",
+      "forceResolve": {
+        "description": "This resolves the poll with the lead's override, ignoring outstanding votes.",
+        "title": "Force-resolve consensus?"
+      },
+      "onCritical": {
+        "description": "Selecting \"pause for review\" or \"hand off to background\" changes how the runtime blocks at the critical budget threshold.",
+        "title": "Change critical action?"
+      },
+      "removeTeammate": {
+        "description": "This removes the teammate from the team. Tasks they claimed will be released.",
+        "title": "Remove teammate?"
+      },
+      "typeToConfirm": "Type \"{value}\" to confirm"
+    },
+    "dangerZone": "Danger zone",
+    "deleteAction": "Delete permanently",
+    "deleteWarning": "This permanently removes the team, all members, tasks, and messages.",
+    "description": "Description",
+    "enableMessaging": "Inter-agent messaging",
+    "executionMode": "Execution mode",
+    "executionModeOption": {
+      "autonomous": "Autonomous",
+      "coordinated": "Coordinated",
+      "delegate": "Delegate"
+    },
+    "executionPattern": "Execution pattern",
+    "executionPatternOption": {
+      "backgroundHandoff": "Background handoff",
+      "externalHandoff": "External handoff",
+      "managerWorker": "Manager / worker",
+      "parallelSpecialists": "Parallel specialists",
+      "singleAgent": "Single agent (recommended)"
+    },
+    "governance": {
+      "adaptiveReplan": {
+        "description": "Between waves of a run, the lead reviews results and can inject, cancel, reorder, or finish the remaining tasks.",
+        "enabled": "Enable adaptive re-planning",
+        "heading": "Adaptive re-planning",
+        "requireApproval": "Require approval before applying a re-plan"
+      },
+      "approval": {
+        "heading": "Approvals",
+        "requireDelegationApproval": "Require approval before delegating to an external agent",
+        "requirePlanApproval": "Require plan approval before run starts"
+      },
+      "budget": {
+        "criticalThreshold": "Critical threshold (0–1)",
+        "heading": "Token budget",
+        "onCritical": "On critical",
+        "tokenBudget": "Token budget (0 = unlimited)",
+        "warningThreshold": "Warning threshold (0–1)"
+      },
+      "description": "Approval gates, budget thresholds, escalation behavior, and refusal detection.",
+      "escalation": {
+        "allowOperatorPatternOverride": "Allow operator to override the execution pattern",
+        "heading": "Escalation",
+        "pauseOnHighRisk": "Pause automatically when the routing assessment flags high risk"
+      },
+      "escalationOption": {
+        "handoff_to_background": "Hand off to background",
+        "notify": "Notify only",
+        "pause_for_review": "Pause for review",
+        "reduce_concurrency": "Reduce concurrency to 1"
+      },
+      "refusal": {
+        "detect": "Detect refusal patterns in teammate output",
+        "heading": "Refusal detection",
+        "patterns": "Refusal patterns (one per line)",
+        "patternsPlaceholder": "I cannot help with that\nI'm not able to"
+      },
+      "title": "Governance policy"
+    },
+    "maxConcurrent": "Max concurrent",
+    "maxRetries": "Max task retries",
+    "memory": {
+      "acl": {
+        "aclHint": "Empty \"readable by\" means every teammate can read this entry.",
+        "operatorBadge": "Operator view — all entries"
+      },
+      "adapter": {
+        "configure": "Configure",
+        "label": "Backing store",
+        "noAdapter": "Local only",
+        "pickerTitle": "Shared-memory backing store",
+        "sync": "Sync now",
+        "syncFailed": "Sync failed",
+        "synced": "{count} entries synced",
+        "unset": "(none)"
+      },
+      "addEntry": "Add entry",
+      "clearAll": "Clear all",
+      "composer": {
+        "cancel": "Cancel",
+        "expiresAt": "Expires at (optional)",
+        "invalidJson": "Value is not valid JSON.",
+        "key": "Key",
+        "parseJson": "Parse value as JSON",
+        "piiBlocked": "Write blocked: the value contains PII.",
+        "readableBy": "Readable by",
+        "readableByAll": "All teammates (leave empty)",
+        "submit": "Save entry",
+        "tags": "Tags",
+        "tagsPlaceholder": "Add a tag and press Enter",
+        "titleCreate": "New memory entry",
+        "titleEdit": "Edit memory entry",
+        "value": "Value"
+      },
+      "deleteEntry": "Delete \"{key}\"",
+      "description": "Key/value entries written by teammates during a run. Writes are PII-gated.",
+      "detail": {
+        "copied": "Copied",
+        "copy": "Copy value",
+        "delete": "Delete",
+        "edit": "Edit",
+        "title": "Memory entry"
+      },
+      "empty": "No shared-memory entries yet.",
+      "filter": {
+        "dateRange": "Date range",
+        "empty": "No entries match the current filters.",
+        "reset": "Reset filters",
+        "tags": "Tags",
+        "text": "Search key or value",
+        "writer": "Writer"
+      },
+      "title": "Shared memory",
+      "writtenBy": "Written by {name} · {when}"
+    },
+    "name": "Team name",
+    "plugins": {
+      "intro": "These plugin capabilities are inherited by every teammate. Use per-teammate overlays to override them on a specific member."
+    },
+    "requirePlanApproval": "Require plan approval",
+    "save": "Save",
+    "saveIndicator": {
+      "auditCompleted": "Audit complete · {count} stale id(s)",
+      "auditNow": "Audit now",
+      "auditUnavailable": "Auditor not available",
+      "savedJustNow": "Saved",
+      "savedSecondsAgo": "Saved · {seconds}s ago",
+      "unsaved": "No changes"
+    },
+    "saved": "Settings saved.",
+    "saving": "Saving…",
+    "sectionControls": "Controls",
+    "sectionExecution": "Execution",
+    "streamProgress": "Live teammate progress",
+    "title": "Team Settings",
+    "tokenBudget": "Token budget (0 = unlimited)",
+    "typeToConfirm": "Type \"{name}\" to confirm",
+    "ultracode": {
+      "autoMode": {
+        "hint": {
+          "always": "Orchestrate every run for this team.",
+          "auto": "Orchestrate only when routing judges the task complex.",
+          "never": "Never auto-orchestrate; use Run with ultracode manually."
+        },
+        "label": "Auto-trigger",
+        "option": {
+          "always": "Always",
+          "auto": "Auto (complex tasks)",
+          "never": "Never"
+        }
+      },
+      "description": "Run the multi-agent quality patterns (sweep, loop-until-dry, adversarial verify, judge panel, completeness critic, synthesize) instead of a flat task list. Tool-enabled teammates run on the desktop sidecar; the web/mobile shells fall back to text-only reasoning.",
+      "dryRoundsToStop": "Dry rounds to stop",
+      "enabled": "Enable ultracode orchestration",
+      "judgesPerAttempt": "Judges / attempt",
+      "maxFinderRounds": "Max finder rounds",
+      "skepticsPerFinding": "Skeptics / finding",
+      "title": "Ultracode orchestration",
+      "workingDir": {
+        "hint": "Repo path tool-enabled teammates read and run commands in (desktop only).",
+        "label": "Working directory",
+        "placeholder": "/absolute/path/to/repo"
+      }
+    }
+  },
+  "stats": {
+    "activeTeams": "Active",
+    "totalTeammates": "Teammates",
+    "totalTeams": "Total teams"
+  },
+  "tabs": {
+    "activity": "Activity",
+    "chat": "Chat",
+    "members": "Members",
+    "overview": "Overview",
+    "settings": "Settings",
+    "tasks": "Tasks"
+  },
+  "tasks": {
+    "addTask": "Add task",
+    "assignee": "Assignee",
+    "cancel": "Cancel",
+    "createTask": "Create task",
+    "delete": "Delete",
+    "deleteBody": "This task will be permanently removed. This cannot be undone.",
+    "deleteTitle": "Delete task?",
+    "dependencies": "Dependencies",
+    "description": "Description",
+    "empty": "No tasks yet.",
+    "expectedOutput": "Expected output",
+    "priority": "Priority",
+    "save": "Save",
+    "tags": "Tags",
+    "taskCreated": "Task created.",
+    "taskDeleted": "Task deleted.",
+    "taskDescriptionPlaceholder": "What needs to be done?",
+    "taskTitlePlaceholder": "Task title",
+    "tasksCount": "{count, plural, one {# task} other {# tasks}}",
+    "title": "Title",
+    "unassigned": "Unassigned"
+  },
+  "teamCreated": "Team \"{name}\" created.",
+  "teamDeleted": "Team \"{name}\" deleted.",
+  "teamDuplicated": "Team duplicated as \"{name}\".",
+  "teamNameLabel": "Team name",
+  "teamNamePlaceholder": "e.g., Security Audit Team",
+  "teamNameRequired": "Team name is required.",
+  "teamUpdated": "Team updated.",
+  "teammateConfig": {
+    "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
+    "rosterSection": {
+      "description": "Fields that live on the teammate row, not on its preset config.",
+      "runtime": "Runtime",
+      "specialization": "Specialization",
+      "temperature": "Temperature ({value})",
+      "title": "Roster fields"
+    },
+    "save": "Save",
+    "title": "Configure {name}"
+  },
+  "teammatesCount": "{count, plural, one {# teammate} other {# teammates}}",
+  "templates": {
+    "categories": {
+      "analysis": "Analysis",
+      "debugging": "Debugging",
+      "development": "Development",
+      "documentation": "Documentation",
+      "general": "General",
+      "research": "Research",
+      "review": "Review",
+      "security": "Security"
+    },
+    "missingDependencies": "{count} missing dep(s)"
+  },
+  "templatesTab": "Templates",
+  "trySampleTeam": "Try sample team",
+  "viewWorkspace": "View workspace"
+}

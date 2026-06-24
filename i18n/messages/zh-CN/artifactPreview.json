@@ -1,0 +1,14 @@
+{
+  "cdnLoadDescription": "无法从 CDN 加载 React 依赖，请检查网络连接。",
+  "cdnLoadTitle": "CDN 加载失败",
+  "failedToParseChart": "图表数据解析失败",
+  "iframeLoadError": "加载预览 iframe 失败",
+  "invalidChartFormat": "无效的图表数据格式",
+  "loadingPreview": "正在加载预览...",
+  "noChartData": "暂无图表数据",
+  "noComponentFound": "未找到组件。请导出名为 App、Component 或 Main 的函数。",
+  "notebookParseError": "Jupyter Notebook 解析失败",
+  "previewError": "预览错误",
+  "previewFailed": "预览渲染失败",
+  "previewTitle": "预览：{title}"
+}

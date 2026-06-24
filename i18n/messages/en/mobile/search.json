@@ -1,0 +1,20 @@
+{
+  "actions": {
+    "newChat": "New chat",
+    "openSettings": "Open settings"
+  },
+  "description": "Search chats, characters, and workflows, or run a quick action.",
+  "empty": "No results.",
+  "groups": {
+    "actions": "Actions",
+    "characters": "Characters",
+    "sessions": "Chats",
+    "teams": "Teams",
+    "workflows": "Workflows"
+  },
+  "placeholder": "Search or jump to…",
+  "title": "Search",
+  "titles": {
+    "chatWith": "Chat with {name}"
+  }
+}

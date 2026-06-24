@@ -1,0 +1,5 @@
+{
+  "hint": "Plugin-contributed scheduled jobs are governed alongside other scheduled tasks. The shared treatment lives in the scheduler section.",
+  "openSchedulerButton": "Open scheduler",
+  "title": "Scheduled jobs"
+}

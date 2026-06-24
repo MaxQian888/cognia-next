@@ -1,0 +1,104 @@
+{
+  "automationPolicy": {
+    "add": "添加一行",
+    "allowedProcessNames": {
+      "description": "目标必须匹配的进程名（大小写不敏感）。",
+      "label": "允许的进程",
+      "placeholder": "Chrome"
+    },
+    "allowedUrlPatterns": {
+      "description": "对目标浏览器标签页的 URL 做正则匹配。",
+      "label": "允许的 URL",
+      "placeholder": "^https://"
+    },
+    "allowedWindowTitlePatterns": {
+      "description": "对目标窗口标题做正则匹配。",
+      "label": "允许的窗口标题",
+      "placeholder": "^Visual Studio Code"
+    },
+    "description": "Computer Use 在权限闸门 + 用户同意之后还会过这一层。空列表表示不附加约束；任一非空白名单都会硬性拒绝事实不匹配的动作。",
+    "emptyNote": "未配置任何约束 —— Computer Use 动作仅经过权限闸门和同意代理。",
+    "forbiddenScreenRegions": {
+      "description": "落入这些像素矩形内的点击/拖拽会被拒绝（密码管理器弹窗、系统托盘机密等）。",
+      "height": "高",
+      "label": "禁止的屏幕区域",
+      "width": "宽",
+      "x": "X",
+      "y": "Y"
+    },
+    "regexInvalid": "正则无效",
+    "remove": "删除该行",
+    "rowAriaLabel": "{label} 第 {index} 项",
+    "saveError": "无法保存策略：{error}",
+    "title": "动作级策略"
+  },
+  "backend": {
+    "label": "后端"
+  },
+  "description": "为高风险工具 (Bash / Edit / Write / text_editor) 提供按平台的 OS 沙盒。沙盒不可用时严格模式拒绝这些工具调用,不会绕过隔离。",
+  "enable": {
+    "description": "在每个会话中默认让高风险工具经由 OS 沙盒执行。单个会话与角色仍可覆盖此默认值。",
+    "label": "默认启用沙盒",
+    "note": "严格模式:沙盒后端不可用时,沙盒工具调用会被拒绝,而不是不受约束地执行。",
+    "title": "默认沙盒"
+  },
+  "ipcError": {
+    "label": "IPC 错误"
+  },
+  "lastError": {
+    "label": "最近错误"
+  },
+  "policy": {
+    "allowlist": {
+      "description": "每行一个主机。仅在上限为「白名单」时生效。前缀 *. 可匹配子域名。",
+      "label": "允许的主机",
+      "placeholder": "api.anthropic.com\n*.github.com"
+    },
+    "description": "沙盒 shell 可请求的资源与网络上限。模型只能请求更少，绝不能超过。角色可覆盖此默认值。",
+    "maxCpu": {
+      "description": "每次 shell 调用的 CPU 秒数上限。0 = 后端默认。",
+      "label": "最大 CPU 秒数"
+    },
+    "maxMemory": {
+      "description": "每次 shell 调用的内存上限。0 = 后端默认。",
+      "label": "最大内存（MB）"
+    },
+    "network": {
+      "allowlist": "仅白名单",
+      "description": "沙盒 shell 可触达的最大范围。「关闭」强制所有 shell 离线；「白名单」将出口限制为下方主机；「开启」由模型按调用自行决定。",
+      "label": "网络上限",
+      "off": "关闭（无网络）",
+      "on": "开启（模型决定）"
+    },
+    "title": "资源与网络上限",
+    "writableRoots": {
+      "description": "每行一个绝对目录。设置后，沙盒写入将被限制在这些根目录（及其子目录）内——之外的路径会被丢弃。留空则允许任意非系统位置。系统目录与应用数据目录始终被禁止。",
+      "errorForbidden": "{path} 不能作为可写根目录。请选择工作区或临时区内的非系统目录。",
+      "label": "可写根目录（上限）",
+      "placeholder": "/home/me/projects\n/tmp/cognia-work"
+    }
+  },
+  "retryButton": "运行健康探测",
+  "status": {
+    "down": "不可用",
+    "ok": "已激活",
+    "setup": "需要配置"
+  },
+  "strictModeNote": "严格模式: 沙盒不可用时,沙盒化工具调用一律被拒 —— 没有 bypass 选项。",
+  "tier": {
+    "description": "当会话启用沙盒时，决定由哪一层执行 Bash / Edit / Write。角色可以覆盖。",
+    "microvm": {
+      "description": "通过 cognia-e2b-sandbox 插件，将调用路由到临时 Firecracker microVM。需要安装 @e2b/sdk 并配置 E2B_API_KEY。",
+      "label": "microVM（e2b Firecracker）"
+    },
+    "os": {
+      "description": "macOS 上是 sandbox-exec，Linux 上是 bwrap，Windows 上是 codex-windows-sandbox。延迟最低。",
+      "label": "OS 沙盒（默认）"
+    },
+    "title": "默认沙盒层级"
+  },
+  "title": "沙盒",
+  "version": {
+    "label": "版本"
+  }
+}

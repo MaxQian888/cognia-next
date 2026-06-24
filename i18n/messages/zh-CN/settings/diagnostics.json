@@ -1,0 +1,70 @@
+{
+  "crashReports": {
+    "delete": "删除报告",
+    "description": "由 Rust 崩溃处理器（panic）和进程外 minidump 监控（原生崩溃）写出的自包含报告。每份报告含完整 backtrace 或 .dmp、系统信息以及脱敏后的配置快照。",
+    "desktopOnly": "原生崩溃报告仅在桌面应用中可用。",
+    "dialogTitle": "崩溃报告",
+    "empty": "暂无崩溃报告 —— 一切正常。",
+    "kindNative": "原生崩溃",
+    "kindPanic": "Panic",
+    "kindUnknown": "报告",
+    "openFolder": "打开文件夹",
+    "refresh": "刷新",
+    "title": "原生崩溃报告",
+    "view": "查看报告"
+  },
+  "developer": {
+    "chatMiddleware": "插件聊天中间件",
+    "chatMiddlewareHint": "实验性。允许已启用的插件通过其注册的聊天中间件包裹每次发送。默认关闭——没有插件提供中间件时不产生任何影响。",
+    "debugMode": "调试模式",
+    "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
+    "description": "用于调试与实验性插件行为的底层开关。",
+    "title": "开发者选项"
+  },
+  "inboxTelemetry": {
+    "description": "最近 inbox 事件的面包屑日志（入站、出站、熔断、静默时段、A2UI 降级）。环形缓冲，最多 3000 条，先入先淘汰。",
+    "emptyExport": "无数据可导出 — 遥测缓冲为空。",
+    "exportCsv": "导出 CSV",
+    "exportJson": "导出 JSON",
+    "exported": "已导出 {filename}",
+    "loadingCount": "正在统计事件…",
+    "refresh": "刷新",
+    "rowCount": "{count, plural, =0 {暂无事件} =1 {1 条事件} other {# 条事件}}",
+    "title": "Inbox 遥测"
+  },
+  "pluginMessaging": {
+    "degradedTitle": "降级的 RPC 端点",
+    "description": "实时插件间通信——IPC 与事件总线单例上暴露的 RPC 方法、活动通道及熔断器健康状态。",
+    "exposedEmpty": "尚无插件暴露任何 RPC 方法。",
+    "exposedTitle": "已暴露的 RPC 方法",
+    "refresh": "刷新",
+    "stats": {
+      "busSubscriptions": "事件总线订阅",
+      "channels": "IPC 通道",
+      "exposedMethods": "暴露的方法",
+      "ipcMessages": "IPC 消息",
+      "ipcSubscriptions": "IPC 订阅"
+    },
+    "title": "插件通信"
+  },
+  "sandboxAudit": {
+    "description": "最近的 sandbox_exec 调用：allow / deny / error、命令、耗时。镜像自内存审计环。",
+    "empty": "暂无沙盒事件。",
+    "refresh": "刷新",
+    "title": "沙盒事件日志"
+  },
+  "sidecarRestart": {
+    "count": "次数",
+    "description": "应用启动以来 Node sidecar 已经 spawn 过的次数。数字持续增长通常意味着 SDK 在自动重启。",
+    "lastChecked": "最近探测",
+    "lastRestart": "最近一次重启",
+    "noRestart": "尚未发生",
+    "title": "Sidecar 重启"
+  },
+  "tabs": {
+    "crashLogs": "崩溃日志",
+    "label": "诊断分区",
+    "nativeReports": "原生报告",
+    "system": "系统"
+  }
+}

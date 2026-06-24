@@ -1,0 +1,212 @@
+{
+  "chat": {
+    "ariaLabel": "Workflow AI chat for {name}",
+    "changelog": {
+      "empty": "No proposals applied or discarded yet.",
+      "loading": "Loading change history…",
+      "noWorkflow": "Open a workflow to see its change history.",
+      "openSnapshot": "Focus affected nodes",
+      "opsCount": "{count} ops",
+      "reveal": "Reveal in chat",
+      "status": {
+        "applied": "Applied",
+        "discarded": "Discarded"
+      }
+    },
+    "clear": "Clear conversation",
+    "clearCancel": "Cancel",
+    "clearConfirm": "Clear",
+    "clearConfirmDescription": "Every message in this workflow's co-pilot session will be deleted. The next message you send starts a fresh agent session.",
+    "clearConfirmTitle": "Clear this workflow's chat?",
+    "loading": "Preparing chat…",
+    "mention": {
+      "edgesHeading": "Edges",
+      "noEdges": "No edges in this workflow yet.",
+      "noNodes": "No nodes in this workflow yet.",
+      "noResults": "No matches.",
+      "nodesHeading": "Nodes"
+    },
+    "noWorkflow": "Open a workflow to start a co-pilot session.",
+    "placeholder": "Ask the workflow AI to build, refactor, or diagnose this graph.",
+    "proposal": {
+      "apply": "Apply",
+      "banner": {
+        "applyAll": "Apply",
+        "discard": "Discard",
+        "ops": "{count} ops",
+        "revealInChat": "Reveal"
+      },
+      "discard": "Discard",
+      "errorEditorNotOpen": "The editor for this workflow is not open.",
+      "errorNotFound": "This proposal is no longer available — it may have been replaced by a newer one.",
+      "hideOps": "Hide ops",
+      "showOps": "Show {count} ops",
+      "status": {
+        "applied": "Applied",
+        "discarded": "Discarded",
+        "open": "Pending"
+      },
+      "toast": {
+        "applied": "Applied: {summary}",
+        "discarded": "Discarded: {summary}",
+        "proposed": "Proposed: {summary}"
+      }
+    },
+    "rename": {
+      "cancel": "Cancel",
+      "description": "Pick a name that helps you find this thread later.",
+      "empty": "Name cannot be empty",
+      "placeholder": "Session name",
+      "save": "Save",
+      "success": "Session renamed",
+      "title": "Rename session"
+    },
+    "session": {
+      "cleared": "Conversation cleared",
+      "created": "New session created",
+      "defaultTag": "Default",
+      "delete": "Delete session",
+      "deleteDefaultBlocked": "The default workflow session can't be deleted — clear it instead.",
+      "deleted": "Session deleted",
+      "handlerDefault": "Copilot",
+      "new": "New session",
+      "newDefault": "Workflow chat",
+      "newSuffixed": "{name} — extra",
+      "placeholder": "Pick a session",
+      "rename": "Rename session",
+      "switchLabel": "Switch session"
+    },
+    "starters": {
+      "buildPrompt": "Help me build this workflow. Ask me what it should accomplish, then propose the nodes and connections.",
+      "buildTitle": "Scaffold a workflow",
+      "explainPrompt": "Walk me through what the current workflow does, node by node, and how data flows between them.",
+      "explainTitle": "Explain this workflow",
+      "heading": "Workflow starters",
+      "subtitle": "Describe a flow to scaffold, or ask me to explain, validate, or fix the current graph.",
+      "suggestPrompt": "Based on the current graph, suggest which nodes I should add next.",
+      "suggestTitle": "Suggest next steps",
+      "title": "Build or refine this workflow",
+      "validatePrompt": "Validate the current workflow graph and list any problems with suggested fixes.",
+      "validateTitle": "Validate and fix"
+    }
+  },
+  "rightSidebar": {
+    "chatLoading": "Loading chat…",
+    "tabs": {
+      "changelog": "Changes",
+      "chat": "Chat",
+      "inspector": "Inspector",
+      "problems": "Problems",
+      "runs": "Runs",
+      "settings": "Settings",
+      "templates": "Templates"
+    }
+  },
+  "runs": {
+    "backToList": "Back to runs",
+    "deadLetter": {
+      "dismiss": "Dismiss",
+      "replay": "Replay",
+      "replayStarted": "Replay started",
+      "replayedBadge": "replayed ×{count}",
+      "resume": "Resume",
+      "resumeStarted": "Resume started",
+      "title": "Failed runs ({count})",
+      "unknownError": "Run failed"
+    },
+    "empty": "No runs yet. Run the workflow to see its execution history here.",
+    "notFound": "Run not found.",
+    "revealOnCanvas": "Reveal on canvas"
+  },
+  "settings": {
+    "concurrency": {
+      "hint": "Of this workflow.",
+      "label": "Concurrent runs"
+    },
+    "credentials": {
+      "addButton": "Add credential ref",
+      "empty": "No credential references yet.",
+      "hint": "References resolved from the OS keyring at run time.",
+      "idPlaceholder": "keyring:ns:key",
+      "kindPlaceholder": "kind",
+      "namePlaceholder": "Display name",
+      "refOnlyNote": "Refs only — secret values are never stored in the workflow.",
+      "removeAria": "Remove credential ref",
+      "title": "Credentials"
+    },
+    "errorPolicy": {
+      "branch": "Route to error branch",
+      "continue": "Continue (skip failed branch)",
+      "label": "On error",
+      "stop": "Stop the run"
+    },
+    "maxConcurrency": {
+      "hint": "Parallel nodes per run.",
+      "label": "Max in-run nodes"
+    },
+    "onFailure": {
+      "hint": "What happens when a run fails terminally (retries exhausted, no error branch).",
+      "notify": {
+        "hint": "Record a failure notice on the run timeline.",
+        "label": "Notify on failure"
+      },
+      "runCatchNodes": {
+        "hint": "Execute any Catch failure nodes and their downstream as a recovery path.",
+        "label": "Run catch nodes"
+      },
+      "title": "Failure handling"
+    },
+    "plugins": {
+      "contributedBy": "Provided by {plugin}",
+      "empty": "No plugin-contributed workflow capabilities installed.",
+      "hint": "Workflow nodes, triggers, and templates contributed by installed plugins.",
+      "missingDep": "Missing: {id}",
+      "sections": {
+        "nodes": "Nodes",
+        "templates": "Templates",
+        "triggers": "Triggers"
+      },
+      "title": "Plugins & capabilities",
+      "useTemplate": "Use"
+    },
+    "retry": {
+      "attempts": "Attempts",
+      "backoff": "Backoff",
+      "baseMs": "Base (ms)",
+      "exponential": "Exponential",
+      "fixed": "Fixed",
+      "maxMs": "Max (ms)",
+      "title": "Retry defaults"
+    },
+    "runPolicy": {
+      "title": "Run policy"
+    },
+    "timeoutMs": {
+      "hint": "Hard ceiling on a single run's wall-clock time.",
+      "label": "Run timeout"
+    },
+    "timezone": {
+      "hint": "Default cron timezone; falls back to the app setting.",
+      "label": "Timezone"
+    },
+    "variables": {
+      "addButton": "Add variable",
+      "duplicateKey": "Duplicate key.",
+      "empty": "No variables yet.",
+      "hint": "Author-time values referenced in expressions as '{{ $vars.KEY }}'.",
+      "invalidKey": "Use a valid identifier (letters, digits, underscores; not starting with a digit).",
+      "keyPlaceholder": "KEY",
+      "removeAria": "Remove variable",
+      "title": "Variables",
+      "valuePlaceholder": "value"
+    }
+  },
+  "templates": {
+    "applyCta": "Apply template",
+    "cancel": "Cancel",
+    "emptyState": "No templates registered.",
+    "slotRequiredMissing": "Fill every required field to apply this template.",
+    "tabHeading": "Templates",
+    "tabHelp": "Apply a slot-filled scaffold via the proposal flow. Templates merge into the current workflow — they don't replace it."
+  }
+}

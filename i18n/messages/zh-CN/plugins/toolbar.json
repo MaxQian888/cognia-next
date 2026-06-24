@@ -1,0 +1,28 @@
+{
+  "checkUpdates": "检查更新",
+  "fromFile": "从文件…",
+  "fromFileSourceLabel": "本地文件 ({count})",
+  "fromGithub": "从 GitHub…",
+  "fromLocalWasm": "从本地文件…",
+  "fromUrl": "从 URL…",
+  "fromUrlDialog": {
+    "cancel": "取消",
+    "description": "提供插件清单（plugin.json）的直链。清单将先经过审查再安装。",
+    "emptyError": "请输入 URL。",
+    "error": "获取清单失败：{message}",
+    "label": "清单 URL",
+    "placeholder": "https://example.com/plugin.json",
+    "submit": "获取",
+    "title": "从 URL 安装"
+  },
+  "fromUrlPrompt": "插件清单 URL",
+  "fromUrlSigned": "从已签名 URL…",
+  "groupGit": "Git",
+  "groupLocal": "本地插件",
+  "groupManifest": "清单",
+  "groupWasm": "WASM 包",
+  "install": "安装",
+  "loadUnpacked": "加载本地目录…",
+  "syncRegistry": "同步注册表",
+  "syncRegistryAria": "刷新市场注册表并检查已安装插件的更新"
+}

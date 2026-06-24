@@ -1,0 +1,16 @@
+{
+  "deletePairing": {
+    "help": "Ask for biometric before clearing the pairing on this phone.",
+    "label": "Sign out / un-pair"
+  },
+  "description": "Require Face ID / fingerprint before sensitive actions.",
+  "exportBackup": {
+    "help": "Ask for biometric before writing a backup file.",
+    "label": "Export encrypted backup"
+  },
+  "revealSecrets": {
+    "help": "Ask for biometric before showing API keys or tokens.",
+    "label": "Reveal stored secrets"
+  },
+  "title": "Biometric protection"
+}

@@ -1,0 +1,11 @@
+{
+  "empty": "No twin profile yet. Add a source on the desktop to start.",
+  "entities": "{count, plural, =0 {No entities} =1 {1 entity} other {# entities}}",
+  "loadFailed": "Couldn't load twin profile: {message}",
+  "loading": "Loading twin profile…",
+  "noUpdates": "Not yet generated",
+  "samples": "{count, plural, =0 {No samples} =1 {1 sample} other {# samples}}",
+  "style": "Style",
+  "title": "Twin profile",
+  "updatedAt": "Updated {when}"
+}

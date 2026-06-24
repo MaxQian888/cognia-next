@@ -1,0 +1,36 @@
+{
+  "addCta": "Add source",
+  "cameraError": {
+    "permissionDenied": "Camera permission required.",
+    "unknown": "Camera failed. Please try again.",
+    "unsupported": "Camera not supported on this platform."
+  },
+  "deleteCta": "Delete source",
+  "deleteDone": "Source removed.",
+  "editSheetDescription": "Rename or remove this source.",
+  "empty": "No twin sources yet. Tap + to add one.",
+  "pasteCancelled": "Cancelled",
+  "pasteDialogPrompt": "Paste or type text to feed the twin",
+  "pasteDialogTitle": "Paste text",
+  "pickCamera": "Capture document",
+  "pickFile": "Pick file",
+  "pickPaste": "Paste text",
+  "queuedToast": "Queued — desktop will process when online.",
+  "redact": {
+    "cancel": "Cancel",
+    "description": "We found data that looks personal. Review before it leaves your device.",
+    "sendOriginal": "Send original",
+    "sendRedacted": "Send redacted",
+    "title": "Review before sending"
+  },
+  "retitleCta": "Rename",
+  "retitleDone": "Renamed.",
+  "retitlePrompt": "Enter a new title",
+  "retitleTitle": "Rename source",
+  "statusEmbedding": "Embedding",
+  "statusFailed": "Failed",
+  "statusParsing": "Parsing",
+  "statusQueued": "Queued",
+  "statusReady": "Ready",
+  "title": "Twin sources"
+}

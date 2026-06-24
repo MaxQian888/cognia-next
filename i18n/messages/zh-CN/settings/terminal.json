@@ -1,0 +1,144 @@
+{
+  "autocomplete": {
+    "debounce": {
+      "label": "防抖（毫秒）"
+    },
+    "exe": {
+      "label": "命令名"
+    },
+    "helper": "输入时显示类似 GitHub Copilot 的内联命令建议。Tab 或 → 接受，Esc 取消。接受只会补全当前行，绝不会自动执行命令。",
+    "label": "AI 命令自动补全",
+    "path": {
+      "label": "文件路径"
+    },
+    "persistHistory": {
+      "helper": "在本地保存已执行的命令，重启后建议依然可用。形似密钥的命令行绝不会被保存。",
+      "label": "持久化命令历史"
+    },
+    "popup": {
+      "helper": "按 Ctrl+Space 或再次按 Tab，在光标处打开可用键盘导航的候选列表。",
+      "label": "候选弹窗"
+    },
+    "privacy": "启用 AI 后，当前命令、工作目录与近期历史会发送给你配置的模型以生成建议。形似密钥的内容（API key、令牌、凭据）会被检测并跳过该次请求。插件提供的补全源不受此设置影响。",
+    "source": {
+      "ai": "仅 AI",
+      "both": "历史 + AI",
+      "history": "仅历史",
+      "label": "建议来源"
+    },
+    "spec": {
+      "label": "CLI 参数"
+    }
+  },
+  "colorScheme": {
+    "auto": "自动（跟随应用主题）",
+    "label": "配色方案"
+  },
+  "copyOnSelect": {
+    "helper": "开启后，终端中的任何文本选区都会自动复制到剪贴板。默认关闭，避免误选覆盖剪贴板。",
+    "label": "选中即复制"
+  },
+  "cursor": {
+    "bar": "竖线",
+    "blink": "光标闪烁",
+    "block": "方块",
+    "label": "光标样式",
+    "underline": "下划线"
+  },
+  "exposeDockToAgents": {
+    "helper": "允许聊天智能体通过合成的 terminal_dock_* MCP 工具驱动你可见的终端标签。智能体与你共用同一个 PTY —— 同一个 shell、同一个 cwd、同一份历史。每个标签按会话需要单独授权。默认关闭。",
+    "label": "向智能体开放终端"
+  },
+  "fontFamily": {
+    "label": "字体",
+    "nerdFontHelper": "oh-my-posh 和 powerline 提示符的图标需要 Nerd Font。请先安装一款（如 CaskaydiaCove Nerd Font），再在此处填写。",
+    "pickerHint": "从本机检测到的等宽字体中选择。",
+    "pickerLabel": "检测到的字体",
+    "useNerdFont": "使用推荐的 Nerd Font 字体栈"
+  },
+  "fontSize": {
+    "label": "字号"
+  },
+  "forceUtf8": {
+    "helper": "将 PowerShell / cmd 的控制台输出锁定为 UTF-8，使 powerline 字形与中文在非 UTF-8 系统代码页（如中文 Windows 的 GBK）下正常显示。除非依赖旧代码页，否则保持开启。",
+    "label": "强制 UTF-8 输出"
+  },
+  "heading": "集成终端",
+  "ligatures": {
+    "helper": "渲染编程字体连字（Cascadia Code、JetBrains Mono、Fira Code）。默认关闭；切换会重新加载终端。",
+    "label": "字体连字"
+  },
+  "profiles": {
+    "add": "添加配置文件",
+    "cwdLabel": "工作目录",
+    "cwdPlaceholder": "工作目录（可选）",
+    "empty": "暂无配置文件。",
+    "helper": "命名的 Shell 预设（shell + 工作目录），新建标签菜单可直接启动。可将其中一个设为默认，供普通“+ 新建”按钮使用。",
+    "isDefault": "默认",
+    "nameLabel": "配置文件名称",
+    "namePlaceholder": "配置文件名称",
+    "newName": "新配置文件",
+    "remove": "删除配置文件",
+    "setDefault": "设为默认",
+    "shellLabel": "Shell",
+    "title": "启动配置文件"
+  },
+  "projectOverride": {
+    "cwdLabel": "工作目录",
+    "cwdPlaceholder": "/path/to/cwd",
+    "emptyProjects": "暂无项目 — 创建项目后即可在此覆盖。",
+    "helper": "选择项目以覆盖其 shell 或工作目录。留空则回退到全局默认。",
+    "selectProject": "选择一个项目…",
+    "shellLabel": "Shell",
+    "shellPlaceholder": "/usr/local/bin/fish",
+    "title": "按项目覆盖"
+  },
+  "renderer": {
+    "auto": "自动",
+    "canvas": "Canvas",
+    "dom": "DOM",
+    "helper": "自动优先 GPU 加速的 WebGL，失败时回退到 Canvas 再到 DOM。若终端渲染为空白或花屏，可切换到 Canvas 或 DOM。",
+    "label": "渲染器",
+    "webgl": "WebGL"
+  },
+  "runInDockTimeout": {
+    "helper": "聊天中的「Run in dock」与智能体 terminal_dock_write 等候 command_end OSC 633 事件的时间上限。每次调用可单独覆盖，此处是默认值。范围 5–600，默认 60。",
+    "label": "Run-in-dock 超时（秒）"
+  },
+  "sandboxed": {
+    "helper": "在 OS 沙盒（bwrap / sandbox-exec）中启动 dock 终端：写入限制在会话工作目录内、主目录只读、网络保持开启。实验功能，默认关闭，Windows 暂不支持。",
+    "label": "沙盒终端"
+  },
+  "scrollback": {
+    "helper": "xterm 历史缓冲区保留的行数。范围 1000–100000。",
+    "label": "回滚行数"
+  },
+  "shell": {
+    "auto": "自动检测（推荐）",
+    "bash": "bash",
+    "cmd": "命令提示符 (cmd.exe)",
+    "custom": "自定义路径…",
+    "customLabel": "自定义 shell 路径",
+    "helper": "自动检测在 Windows 上选用 pwsh，macOS 上选用 zsh，Linux 上选用 bash。按项目覆盖若已设置，优先采用。cmd.exe 启动时不附带 OSC 633 集成。",
+    "label": "默认 shell",
+    "powershell": "Windows PowerShell (powershell.exe)",
+    "pwsh": "PowerShell 7 (pwsh.exe)",
+    "zsh": "zsh"
+  },
+  "shellIntegration": {
+    "helper": "向 bash / zsh / pwsh 注入 OSC 633 提示符标记，让面板能展示命令状态和 cwd 徽章。若 shell 会解析错误，请关闭。",
+    "label": "启用 shell 集成"
+  },
+  "subheading": "底部终端面板的默认 shell、字体和回滚行数。按项目覆盖优先于全局默认。",
+  "unattended": {
+    "askPolicy": {
+      "consent": "在终端面板中询问",
+      "fail": "使该步骤失败",
+      "helper": "适用于安全分类器无法确定的命令（判定为 \"ask\"）。",
+      "label": "当命令需要确认时",
+      "run": "仍然执行"
+    },
+    "helper": "允许工作流的终端步骤在后台无界面执行 shell 命令 — 不占用终端标签页、无需逐条确认。每条命令都会先经过安全分类器筛查；明确危险的命令始终被拦截。",
+    "label": "允许无人值守执行"
+  }
+}

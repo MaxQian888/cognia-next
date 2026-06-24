@@ -1,0 +1,22 @@
+{
+  "any": "Any",
+  "apply": "Apply",
+  "capability": "Capability",
+  "description": "Narrow the installed list by capability, permission, source, or status.",
+  "hasUpdate": "Has update",
+  "permission": "Permission",
+  "query": "Search",
+  "queryPlaceholder": "name, id, description…",
+  "reset": "Reset",
+  "signedOnly": "Signed only",
+  "sort": "Sort by",
+  "sortMode": {
+    "name": "Name",
+    "rating": "Rating",
+    "updated": "Last updated",
+    "usage": "Last used"
+  },
+  "source": "Source",
+  "status": "Status",
+  "title": "Plugin filters"
+}

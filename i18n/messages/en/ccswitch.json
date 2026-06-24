@@ -1,0 +1,135 @@
+{
+  "agents": {
+    "claude-code": "Claude Code (~/.claude/settings.json)",
+    "claude-desktop": "Claude Desktop",
+    "codex": "Codex",
+    "gemini": "Gemini CLI",
+    "opencode": "OpenCode (~/.local/share/opencode/auth.json)"
+  },
+  "counts": {
+    "mcpServers": "MCP",
+    "prompts": "Prompts",
+    "providers": "Providers",
+    "skills": "Skills"
+  },
+  "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates cognia-next's bundled SDK and (optionally) propagates to selected external agents.",
+  "dialog": {
+    "agentsSection": "Also write to",
+    "apiKey": "API key",
+    "baseUrl": "Base URL",
+    "body": "Review what the switch will change before confirming.",
+    "bodyFor": "Switch to {name}. Review what changes before confirming.",
+    "cancel": "Cancel",
+    "close": "Close",
+    "cogniaApplied": "Cognia-next updated.",
+    "cogniaSection": "Cognia-next",
+    "confirm": "Apply switch",
+    "noChange": "Cognia-next's API key and base URL already match this provider — no sidecar restart needed.",
+    "notYetSupported": "not yet supported",
+    "title": "Switch provider",
+    "willRestart": "The bundled SDK sidecar will be restarted so the new env takes effect.",
+    "willWrite": "Will write to {count, plural, =1 {1 agent file} other {# agent files}}."
+  },
+  "mcp": {
+    "emptyBody": "CCSwitch's mcp_servers table is empty.",
+    "emptyTitle": "No MCP servers in CCSwitch",
+    "errorTitle": "Could not list MCP servers",
+    "headerHint": "Selected MCP servers are imported into cognia-next's MCP store using the existing 'skip / overwrite / duplicate' semantics.",
+    "importBtn": "Import {count, plural, =0 {nothing} =1 {1 server} other {# servers}}",
+    "importing": "Importing…",
+    "listTitle": "MCP servers in CCSwitch",
+    "resultSummary": "Imported {imported}, updated {updated}, skipped {skipped}, errored {errored}.",
+    "strategy": {
+      "duplicate": "Duplicate",
+      "duplicateDesc": "Add the import with a ' (imported)' suffix on the name.",
+      "overwrite": "Overwrite",
+      "overwriteDesc": "Replace command/args/url with CCSwitch's values.",
+      "skip": "Keep existing",
+      "skipDesc": "Don't touch existing rows. Recommended."
+    },
+    "strategyBody": "When a server with the same name already exists in cognia-next.",
+    "strategyTitle": "On name collision"
+  },
+  "overview": {
+    "activeBody": "The provider whose API key + base URL match cognia-next's current settings.",
+    "activeTitle": "Active in cognia-next",
+    "dbPath": "Database",
+    "detectedBody": "cognia-next will read this database read-only. CCSwitch remains the editor.",
+    "detectedTitle": "CCSwitch detected",
+    "driftBody": "cognia-next and at least one external agent disagree on the active provider. Pick one in the Providers tab to reconcile.",
+    "driftTitle": "Drift detected",
+    "errorTitle": "Could not read CCSwitch's database",
+    "noActive": "No CCSwitch provider matches",
+    "noActiveBody": "cognia-next is using a manually-entered API key, or a provider whose key/URL don't match any CCSwitch record.",
+    "notFoundBody": "We couldn't find ~/.cc-switch/cc-switch.db. Install CCSwitch and add at least one provider, then come back.",
+    "notFoundTitle": "CCSwitch not detected",
+    "recheck": "Re-check",
+    "resolutionSource": {
+      "env": "From CC_SWITCH_HOME",
+      "manual": "Manual override",
+      "redirect": "From CCSwitch redirect"
+    },
+    "webModeBody": "CCSwitch interop reads a local SQLite database. Run cognia-next in desktop mode (`pnpm tauri dev`) to use this section.",
+    "webModeTitle": "Desktop only"
+  },
+  "prompts": {
+    "emptyBody": "CCSwitch's prompts table is empty.",
+    "emptyTitle": "No prompts in CCSwitch",
+    "errorTitle": "Could not list prompts",
+    "headerHint": "Each selected prompt becomes a new cognia-next prompt preset (category 'custom').",
+    "importBtn": "Import {count, plural, =0 {nothing} =1 {1 prompt} other {# prompts}}",
+    "importing": "Importing…",
+    "listTitle": "Prompts in CCSwitch",
+    "resultSummary": "Imported {imported}, errored {errored}."
+  },
+  "providers": {
+    "activeBadge": "Active",
+    "emptyBody": "Add a provider in CCSwitch first.",
+    "emptyTitle": "No providers in CCSwitch",
+    "errorTitle": "Could not list providers",
+    "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
+    "model": "Model",
+    "officialEndpoint": "Official Anthropic endpoint",
+    "refresh": "Refresh",
+    "useHere": "Use here",
+    "useHereAndIn": "Use here & in…"
+  },
+  "skills": {
+    "emptyBody": "CCSwitch's skills table is empty.",
+    "emptyTitle": "No skills in CCSwitch",
+    "errorTitle": "Could not list skills",
+    "externalBadge": "external file",
+    "headerHint": "Skills with inline content become new cognia-next skills. Rows pointing at an external file (greyed) need to be re-imported via Settings → Skills.",
+    "importBtn": "Import {count, plural, =0 {nothing} =1 {1 skill} other {# skills}}",
+    "importing": "Importing…",
+    "listTitle": "Skills in CCSwitch",
+    "resultSummary": "Imported {imported}, skipped {skipped}, errored {errored}."
+  },
+  "sync": {
+    "enabledBody": "When off, the section is hidden from the sidebar and no IPC is issued.",
+    "enabledLabel": "Enable CCSwitch integration",
+    "flagsBody": "Master toggle and refresh behaviour for the CCSwitch section.",
+    "flagsTitle": "CCSwitch interop",
+    "manualDirBody": "Override where cognia looks for cc-switch.db. Use this when your CCSwitch data folder lives somewhere we can't auto-detect (e.g. a synced drive).",
+    "manualDirClear": "Clear",
+    "manualDirHint": "Takes priority over CCSwitch's own redirect, but below the CC_SWITCH_HOME environment variable. Leave blank to auto-detect.",
+    "manualDirLabel": "Folder containing cc-switch.db",
+    "manualDirPlaceholder": "e.g. ~/Dropbox/cc-switch",
+    "manualDirTitle": "Manual data directory",
+    "propagationBody": "These agents are pre-checked when you open the 'Use here & in…' dialog. Per-switch selection still wins.",
+    "propagationTitle": "Default propagation",
+    "save": "Save",
+    "saving": "Saving…",
+    "watchDbBody": "Re-poll cc-switch.db whenever the cognia-next window regains focus, so the active provider badge stays fresh.",
+    "watchDbLabel": "Re-check on focus"
+  },
+  "tabs": {
+    "mcp": "MCP servers",
+    "overview": "Overview",
+    "prompts": "Prompts",
+    "providers": "Providers",
+    "skills": "Skills",
+    "sync": "Sync settings"
+  },
+  "title": "CCSwitch"
+}

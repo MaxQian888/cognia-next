@@ -1,0 +1,15 @@
+{
+  "completed": "Workflow completed",
+  "exported": "Workflow JSON downloaded",
+  "extracted": "Extracted selection into a new sub-workflow",
+  "imageExportFailed": "Failed to export workflow image",
+  "imageExported": "Workflow image downloaded",
+  "importFailed": "Failed to import workflow JSON",
+  "imported": "Workflow imported",
+  "layoutUnavailable": "Auto-layout unavailable",
+  "runFailed": "Run failed",
+  "running": "Running…",
+  "saveFailed": "Failed to save workflow",
+  "savedOk": "Workflow saved",
+  "startFailed": "Failed to start run"
+}

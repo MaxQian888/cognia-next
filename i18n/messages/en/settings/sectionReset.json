@@ -1,0 +1,8 @@
+{
+  "button": "Reset section",
+  "cancel": "Cancel",
+  "confirm": "Reset",
+  "description": "Restore this section's settings to their defaults. This cannot be undone.",
+  "title": "Reset this section?",
+  "toast": "Section reset to defaults."
+}

@@ -1,0 +1,7 @@
+{
+  "approve": "通过",
+  "empty": "没有待审批的草稿。",
+  "queueLabelApprove": "通过连接器草稿",
+  "queueLabelReject": "拒绝连接器草稿",
+  "reject": "拒绝"
+}

@@ -1,0 +1,25 @@
+{
+  "comment": "Comment",
+  "commentHint": "A private note on this connection. Shown as an icon on the canvas.",
+  "commentPlaceholder": "Why does this connection exist?",
+  "delete": "Delete connection",
+  "deleteAll": "Delete connections",
+  "errorHandleHint": "This edge leaves the node's error handle — it fires when the node fails.",
+  "kind": "Type",
+  "kindHint": "How the runtime treats this connection.",
+  "kindOption": {
+    "conditional": "Conditional",
+    "default": "Default",
+    "error": "Error",
+    "loop": "Loop",
+    "parallel": "Parallel"
+  },
+  "label": "Label",
+  "labelHint": "Optional text shown on the edge midpoint.",
+  "labelPlaceholder": "e.g. true / retry",
+  "multiSelected": "{count, plural, one {# connection selected} other {# connections selected}}",
+  "reverse": "Reverse direction",
+  "source": "From",
+  "target": "To",
+  "title": "Connection"
+}

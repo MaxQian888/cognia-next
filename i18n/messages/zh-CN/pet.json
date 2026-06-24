@@ -1,0 +1,293 @@
+{
+  "achievements": {
+    "adult": {
+      "description": "达到 10 级。",
+      "title": "成年"
+    },
+    "bestFriends": {
+      "description": "亲密度拉满。",
+      "title": "挚友"
+    },
+    "chaosGremlin": {
+      "description": "在密集的工作冲刺中把混沌值练满。",
+      "title": "混沌小妖"
+    },
+    "devotedCaretaker": {
+      "description": "长期把宠物的照护质量保持在高位。",
+      "title": "尽责饲主"
+    },
+    "elder": {
+      "description": "达到 20 级。",
+      "title": "长老"
+    },
+    "firstXp": {
+      "description": "获得了第一点经验。",
+      "title": "初次成长"
+    },
+    "goalGetter": {
+      "description": "完成 10 个目标。",
+      "title": "目标达人"
+    },
+    "hatched": {
+      "description": "你的宠物诞生了。",
+      "title": "破壳而出"
+    },
+    "juvenile": {
+      "description": "达到 5 级。",
+      "title": "幼年期"
+    },
+    "legendary": {
+      "description": "你拥有一只传说宠物。",
+      "title": "传说"
+    },
+    "masterDebugger": {
+      "description": "把调试值练到了顶峰。",
+      "title": "调试大师"
+    },
+    "nursedBack": {
+      "description": "在宠物不适之后把它照护回健康状态。",
+      "title": "妙手回春"
+    },
+    "playful": {
+      "description": "玩耍 50 次。",
+      "title": "爱玩耍"
+    },
+    "shinyOwner": {
+      "description": "你拥有一只闪光宠物。",
+      "title": "闪光！"
+    },
+    "wellFed": {
+      "description": "喂食 50 次。",
+      "title": "吃得好"
+    },
+    "zenMaster": {
+      "description": "把耐心值练到了顶峰。",
+      "title": "禅心宗师"
+    }
+  },
+  "actions": {
+    "clean": "洗澡",
+    "feed": "喂食",
+    "pet": "抚摸",
+    "play": "玩耍",
+    "sleep": "睡觉",
+    "talk": "聊天",
+    "treat": "奖励"
+  },
+  "binding": {
+    "clear": "清除",
+    "empty": "还没有角色。",
+    "speciesFor": "{name} 的物种",
+    "useGlobal": "使用全局宠物"
+  },
+  "bubbles": {
+    "achievementUnlocked": ["我们拿到徽章啦！", "成就达成！"],
+    "cleaned": {
+      "0": "干干净净！",
+      "1": "好清爽！"
+    },
+    "error": ["糟糕…", "好痛。", "再试一次吧。"],
+    "evolved": ["我进化了！", "全新的我！"],
+    "fed": ["好吃！", "美味！", "吧唧吧唧。"],
+    "goalComplete": ["目标达成！", "我们做到了！", "胜利！"],
+    "greeting": ["嗨！", "欢迎回来！", "嘿！"],
+    "hatched": ["你好，世界！", "我来啦！"],
+    "idle": {
+      "content": ["…", "随便晃晃。", "一切都好。"],
+      "grumpy": ["哼。", "现在不行。"],
+      "happy": ["今天真棒！", "好开心！", "☀"],
+      "lonely": ["想你了…", "有人吗？"],
+      "tired": ["好困…", "哈欠…"]
+    },
+    "inboundMessage": ["来消息了！", "叮！"],
+    "levelUp": ["升级啦！", "变强了！"],
+    "petted": ["呼噜…", "真舒服。", "♥"],
+    "played": ["真好玩！", "再来！", "哇哦！"],
+    "review": ["来看看？", "可以检查啦。"],
+    "slept": {
+      "0": "呼呼…",
+      "1": "好舒服…"
+    },
+    "success": ["搞定！", "完成啦。", "耶！"],
+    "talked": ["我在听呢！", "再多说点？", "嘿嘿，好哦！"],
+    "thinking": ["唔，处理中…", "让我想想…", "计算中…"],
+    "treated": {
+      "0": "好吃！谢谢你！",
+      "1": "最棒的奖励！♥"
+    },
+    "waiting": ["看你的了！", "等你一下…"]
+  },
+  "care": {
+    "unwell": {
+      "body": "{name} 需要你照顾一下。喂食、玩耍或抚摸一下让它打起精神吧。",
+      "bodyNoName": "你的宠物需要照顾一下。喂食、玩耍或抚摸一下让它打起精神吧。",
+      "title": "你的宠物不太舒服"
+    }
+  },
+  "console": {
+    "hatch": "孵化",
+    "hatchPrompt": "你的蛋可以孵化了。",
+    "loading": "正在唤醒你的宠物…",
+    "subtitle": "养育它、装扮它，一起成长。",
+    "tabs": {
+      "achievements": "成就",
+      "binding": "角色",
+      "customize": "自定义",
+      "dex": "图鉴",
+      "nurture": "养育"
+    },
+    "title": "你的宠物"
+  },
+  "customize": {
+    "appearance": {
+      "description": "停靠位置、动效、皮肤与尺寸。",
+      "title": "外观"
+    },
+    "care": {
+      "description": "低功耗模式与照护提醒。",
+      "title": "照护与性能"
+    },
+    "cosmetic": {
+      "bodyOptions": {
+        "round": "圆润",
+        "tall": "高挑",
+        "wide": "宽厚"
+      },
+      "bodyType": "体型",
+      "default": "默认",
+      "eyes": "眼睛",
+      "eyesOptions": {
+        "dot": "圆点",
+        "sleepy": "睡眼",
+        "spiral": "漩涡眼",
+        "star": "星星眼",
+        "wide": "大眼",
+        "wink": "眨眼"
+      },
+      "hat": "帽子",
+      "hatOptions": {
+        "beanie": "毛线帽",
+        "crown": "皇冠",
+        "halo": "光环",
+        "none": "无",
+        "propeller": "竹蜻蜓帽",
+        "tinyduck": "小鸭子",
+        "tophat": "礼帽",
+        "wizard": "巫师帽"
+      },
+      "hatchFirst": "先孵化宠物才能自定义外观。",
+      "palette": "颜色",
+      "paletteOptions": {
+        "amber": "琥珀",
+        "lime": "青柠",
+        "magenta": "品红",
+        "rose": "玫红",
+        "sky": "天蓝",
+        "slate": "石板灰",
+        "teal": "蓝绿",
+        "violet": "紫罗兰"
+      },
+      "reset": "恢复原始外观"
+    },
+    "desktop": {
+      "description": "自由漫游的悬浮伙伴。",
+      "title": "桌面宠物"
+    },
+    "interaction": {
+      "description": "气泡、对话与主动闲聊。",
+      "title": "互动与说话"
+    },
+    "look": {
+      "description": "在不改变身份的前提下重新装扮宠物。",
+      "title": "造型"
+    },
+    "openSettings": "打开完整宠物设置",
+    "sound": {
+      "description": "音效与免打扰时段。",
+      "title": "声音"
+    }
+  },
+  "live2d": {
+    "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"
+  },
+  "needs": {
+    "bond": "亲密",
+    "energy": "精力",
+    "mood": "心情"
+  },
+  "overlay": {
+    "petLabel": "桌面宠物",
+    "talkPlaceholder": "对宠物说点什么…",
+    "talkSend": "发送"
+  },
+  "panel": {
+    "level": "等级 {level}"
+  },
+  "quickMenu": {
+    "clickThrough": "鼠标穿透",
+    "feed": "喂食",
+    "hideDesktopPet": "隐藏桌宠",
+    "minimize": "最小化",
+    "openConsole": "打开宠物面板",
+    "openSettings": "打开设置",
+    "pet": "抚摸",
+    "play": "玩耍",
+    "showDesktopPet": "显示桌宠",
+    "showMainWindow": "显示主窗口",
+    "talk": "聊天"
+  },
+  "rarity": {
+    "common": "普通",
+    "epic": "史诗",
+    "legendary": "传说",
+    "rare": "稀有",
+    "uncommon": "罕见"
+  },
+  "rename": {
+    "cancel": "取消",
+    "edit": "重命名",
+    "label": "宠物名字",
+    "save": "保存名字"
+  },
+  "species": {
+    "axolotl": "六角恐龙",
+    "blob": "史莱姆",
+    "cactus": "仙人掌",
+    "capybara": "水豚",
+    "cat": "猫",
+    "chonk": "胖墩",
+    "dragon": "龙",
+    "duck": "鸭子",
+    "fox": "狐狸",
+    "ghost": "幽灵",
+    "mushroom": "蘑菇",
+    "octopus": "章鱼",
+    "owl": "猫头鹰",
+    "penguin": "企鹅",
+    "rabbit": "兔子",
+    "robot": "机器人",
+    "snail": "蜗牛",
+    "turtle": "乌龟"
+  },
+  "stat": {
+    "chaos": "混乱",
+    "debugging": "调试",
+    "patience": "耐心",
+    "snark": "毒舌",
+    "wisdom": "智慧"
+  },
+  "statCard": {
+    "grew": "因和你一起工作而成长",
+    "shiny": "闪光",
+    "unhatched": "未孵化"
+  },
+  "talkInput": {
+    "placeholder": "对宠物说点什么…",
+    "send": "发送"
+  },
+  "widget": {
+    "minimize": "最小化宠物",
+    "restore": "显示宠物",
+    "toggle": "打开宠物"
+  }
+}

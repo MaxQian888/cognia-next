@@ -1,0 +1,13 @@
+{
+  "album": "Album",
+  "camera": "Camera",
+  "file": "File",
+  "permissionDeniedCamera": "Camera permission required.",
+  "permissionDeniedMic": "Microphone permission required.",
+  "toggleAria": "Attachments",
+  "unsupported": "Not supported on this platform.",
+  "voice": "Voice",
+  "voiceCannotStart": "Cannot start recording",
+  "voiceStop": "Stop recording",
+  "voiceStopFailed": "Failed to stop recording."
+}

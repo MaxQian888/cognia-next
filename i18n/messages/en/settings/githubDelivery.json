@@ -1,0 +1,99 @@
+{
+  "audit": {
+    "all": "All",
+    "allActions": "All actions",
+    "allRepos": "All repos",
+    "allowed": "Allowed",
+    "clear": "Clear",
+    "count": "{shown} of {total}",
+    "denied": "Denied",
+    "disabled": "Audit log requires the GitHub Delivery plugin to be enabled.",
+    "emptyFiltered": "No entries match the current filters.",
+    "emptyNone": "No audit entries yet. Allow / deny decisions are recorded automatically as workflows run.",
+    "loading": "Loading audit log…",
+    "run": "run: {id}"
+  },
+  "common": {
+    "pluginDisabled": "The GitHub Delivery plugin is not enabled."
+  },
+  "credentials": {
+    "appIdLabel": "App ID",
+    "appKeyAlertDesc": "Stored in IndexedDB (origin-isolated). On desktop builds it is mirrored to the OS keyring on first activation.",
+    "appKeyAlertTitle": "The private key never leaves your machine",
+    "appTitle": "GitHub App setup",
+    "back": "Back",
+    "errIdsNumeric": "App ID and Installation ID must be numbers.",
+    "errPatEmpty": "PAT cannot be empty.",
+    "errPkEmpty": "App private key (PEM) cannot be empty.",
+    "errRepoFormat": "Repo must be in `owner/name` format.",
+    "installLabel": "Installation ID",
+    "patAlertDesc": "Pick \"Only select repositories\" and specific permissions (issues: read/write, pull-requests: read/write, contents: read).",
+    "patAlertTitle": "Use a fine-scoped token",
+    "patTitle": "Personal Access Token (PAT)",
+    "pickerAppCta": "Set up App",
+    "pickerAppDesc": "Higher rate limits, granular installation scopes, audit trail per installation.",
+    "pickerAppTitle": "GitHub App (recommended)",
+    "pickerPatCta": "Set up PAT",
+    "pickerPatDesc": "Faster to set up. Tied to your account; use for personal repos and trial runs.",
+    "pickerPatTitle": "Personal Access Token (kickstart)",
+    "pkLabel": "Private key (PEM)",
+    "repoLabel": "Repository (owner/name)",
+    "save": "Save",
+    "savedToast": "Saved {repo}. It now appears in the Repos tab.",
+    "tokenLabel": "Token"
+  },
+  "description": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",
+  "policies": {
+    "allowedAuthors": "Allowed authors",
+    "defaultHint": "Every action the bot takes is checked against this policy. Per-repo overrides take precedence; per-node inspector overrides take final precedence.",
+    "defaultTitle": "Default policy",
+    "maxDailyMerges": "Max daily merges",
+    "off": "off",
+    "perDay": "{count} / day",
+    "protectedBranches": "Protected branches (regex)",
+    "quietHoursDesc": "Bot actions are suspended during quiet hours. None configured globally — set per repo if you want to mute weekend / nightly activity.",
+    "quietHoursTitle": "Quiet hours",
+    "requireGreenCi": "Require green CI",
+    "requireHumanApproval": "Require human approval",
+    "required": "required"
+  },
+  "repos": {
+    "addCta": "Add a repo",
+    "badgeApp": "App",
+    "badgePat": "PAT",
+    "disabledHint": "Install or enable the plugin from Settings → Plugins → Marketplace, then return here.",
+    "disabledTitle": "The GitHub Delivery plugin is not enabled.",
+    "loading": "Loading repos…",
+    "noEvents": "no events yet",
+    "noneHint": "Add a repo via the Setup Wizard (Credentials tab) to start receiving events.",
+    "noneTitle": "No repos configured yet.",
+    "polling": "polling",
+    "tunnel": {
+      "copied": "Copied",
+      "copyAria": "Copy public URL",
+      "localLabel": "Local webhook:",
+      "publicLabel": "Public:",
+      "start": "Start cloudflared tunnel",
+      "starting": "Starting…",
+      "stop": "Stop tunnel",
+      "webOnly": "Public tunnels require desktop mode (cloudflared binary on PATH)."
+    },
+    "webhook": "webhook",
+    "worktree": "worktree: {mode}"
+  },
+  "tabs": {
+    "audit": "Audit",
+    "credentials": "Credentials",
+    "policies": "Policies",
+    "repos": "Repos",
+    "usage": "Usage"
+  },
+  "title": "GitHub Delivery",
+  "usage": {
+    "addRepoHint": "Add a repo from the Credentials tab to start tracking API quota usage.",
+    "disabled": "API quota requires the GitHub Delivery plugin to be enabled.",
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "updated": "Updated {time}"
+  }
+}

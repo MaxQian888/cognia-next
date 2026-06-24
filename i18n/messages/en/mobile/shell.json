@@ -1,0 +1,16 @@
+{
+  "clearSearch": "Clear search",
+  "deleteSession": "Delete this session",
+  "directSessionTitle": "Chat with {name}",
+  "exportConversation": "Export / share",
+  "inbox": "Inbox",
+  "memberSheetTitle": "Team members",
+  "navSheetTitle": "Navigation",
+  "newChat": "New chat",
+  "openMembers": "Open team members",
+  "openNav": "Open navigation",
+  "search": "Search",
+  "sessionMenu": "Session menu",
+  "settings": "Settings",
+  "tabBarAria": "Main navigation"
+}

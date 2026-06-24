@@ -1,0 +1,160 @@
+{
+  "detail": {
+    "backToRuns": "返回运行列表",
+    "breakdown": {
+      "attempts": "尝试次数",
+      "cost": "成本",
+      "duration": "耗时",
+      "empty": "尚无步骤运行。",
+      "retried": "重试 {count} 次",
+      "slowest": "最慢",
+      "sortByDuration": "按耗时排序",
+      "status": "状态",
+      "step": "步骤",
+      "title": "步骤明细",
+      "tokens": "Token"
+    },
+    "export": "导出",
+    "notFound": {
+      "description": "该运行可能已被删除，或链接不正确。",
+      "title": "未找到运行记录"
+    },
+    "rerun": "重跑",
+    "rerunFromStep": "从此步重跑",
+    "rerunFromStepHint": "在时间线中选择一个步骤以从该步重跑",
+    "rerunning": "正在重跑…",
+    "running": "运行中…",
+    "sparkline": {
+      "title": "时长趋势"
+    },
+    "totalCost": "{cost} 估算",
+    "totalTokens": "{tokens} tok"
+  },
+  "list": {
+    "backToEditor": "返回编辑器",
+    "bulk": {
+      "clear": "清除选择",
+      "delete": "删除",
+      "deleteDescription": "这将永久删除 {count} 条运行记录及其步骤日志，且无法撤销。",
+      "deleteTitle": "删除所选运行？",
+      "selected": "已选 {count} 项"
+    },
+    "cancel": "取消",
+    "clearFilters": "清除筛选",
+    "clearHistory": {
+      "button": "清空历史",
+      "description": "这将永久删除该工作流的所有运行记录及其步骤日志，且无法撤销。",
+      "title": "清空全部运行历史？"
+    },
+    "columns": {
+      "duration": "时长",
+      "open": "打开",
+      "started": "开始时间",
+      "status": "状态",
+      "trigger": "触发"
+    },
+    "confirmDelete": "删除",
+    "deleteFailed": "删除运行失败",
+    "deleteSuccess": "运行历史已更新",
+    "description": "本工作流的每次执行，最新优先。",
+    "empty": {
+      "description": "在编辑器工具栏中点击<strong>运行</strong>，或绑定一个自动触发的触发器。",
+      "title": "暂无运行记录"
+    },
+    "export": {
+      "button": "导出",
+      "csv": "导出为 CSV",
+      "json": "导出为 JSON"
+    },
+    "filter": {
+      "allStatuses": "全部状态",
+      "allTriggers": "全部触发类型",
+      "status": "按状态筛选",
+      "trigger": "按触发类型筛选",
+      "window": "按日期筛选"
+    },
+    "filteredEmpty": {
+      "description": "调整或清除筛选条件以查看运行。",
+      "title": "没有匹配的运行"
+    },
+    "loadMore": "再加载 {count} 条",
+    "openRun": "打开运行 {id}",
+    "rerunning": "重新运行中…",
+    "row": {
+      "actions": "运行 {id} 操作",
+      "delete": "删除",
+      "deleteDescription": "这将永久删除该运行记录及其步骤日志，且无法撤销。",
+      "deleteTitle": "删除此运行？",
+      "open": "打开",
+      "rerun": "重新运行"
+    },
+    "search": {
+      "placeholder": "搜索运行…"
+    },
+    "selectAll": "全选运行",
+    "selectRow": "选择运行 {id}",
+    "stats": {
+      "avgDuration": "平均耗时",
+      "failed": "失败数",
+      "successRate": "成功率",
+      "total": "总运行数"
+    },
+    "title": "运行记录",
+    "window": {
+      "24h": "最近 24 小时",
+      "30d": "最近 30 天",
+      "7d": "最近 7 天",
+      "all": "全部时间"
+    }
+  },
+  "logs": {
+    "levelFilter": "筛选日志级别",
+    "levels": {
+      "debug": "调试",
+      "error": "错误",
+      "info": "信息",
+      "warn": "警告"
+    },
+    "noResults": "没有匹配的日志。",
+    "searchPlaceholder": "搜索日志…",
+    "stackToggleHide": "隐藏调用栈",
+    "stackToggleShow": "显示调用栈"
+  },
+  "status": {
+    "cancelled": "已取消",
+    "failed": "已失败",
+    "paused": "已暂停",
+    "pending": "待运行",
+    "running": "运行中",
+    "succeeded": "已完成",
+    "waiting": "等待中"
+  },
+  "step": {
+    "attemptBadge": "#{attempt}/{max}",
+    "attempts": "重试记录",
+    "cost": "费用",
+    "costEstimateSuffix": "估算",
+    "duration": "时长",
+    "ended": "结束",
+    "error": "错误",
+    "logs": "日志",
+    "noValue": "（无）",
+    "nonRetryable": "该错误被标记为不可重试；已跳过重试。",
+    "notInSnapshot": "步骤 {stepId} 不在工作流快照中。",
+    "output": "输出",
+    "resolvedParams": "解析后的参数",
+    "retryIn": "· {delay} 后重试",
+    "selectPrompt": "在时间线中选择一个步骤来查看详情。",
+    "servedBy": "实际提供方",
+    "skipReason": "跳过原因",
+    "started": "开始",
+    "statusLabel": "状态",
+    "stepIdLabel": "步骤 ID：",
+    "streaming": "实时输出",
+    "tokens": "Token（入 / 出）"
+  },
+  "timeline": {
+    "retried": "已重试 {count} 次",
+    "waiting": "等待事件…"
+  }
+}

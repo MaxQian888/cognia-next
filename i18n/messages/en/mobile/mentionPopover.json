@@ -1,0 +1,7 @@
+{
+  "count": "{count} {count, plural, one {match} other {matches}}",
+  "dismiss": "Dismiss",
+  "empty": "No members in this team yet.",
+  "noMatches": "No matches for \"{query}\"",
+  "title": "Mention a teammate"
+}

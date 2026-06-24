@@ -1,0 +1,11 @@
+{
+  "empty": "尚未生成分身画像。请在桌面端添加资料源后再试。",
+  "entities": "{count, plural, =0 {无实体} other {# 个实体}}",
+  "loadFailed": "无法加载分身画像。",
+  "loading": "加载分身画像…",
+  "noUpdates": "尚未生成",
+  "samples": "{count, plural, =0 {无样本} other {# 个样本}}",
+  "style": "风格",
+  "title": "数字分身画像",
+  "updatedAt": "更新于 {when}"
+}

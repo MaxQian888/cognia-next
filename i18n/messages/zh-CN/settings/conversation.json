@@ -1,0 +1,35 @@
+{
+  "autoTitle": {
+    "description": "首次回复后用模型为对话命名。",
+    "heading": "自动生成标题",
+    "label": "生成对话标题"
+  },
+  "description": "自动生成标题并配置时间线缩略图。",
+  "labelModel": {
+    "description": "用于时间线标签的后台模型。",
+    "heading": "标签模型"
+  },
+  "labelSummary": {
+    "description": "用模型把每个回合概括成短标签（每回合一次调用）。",
+    "heading": "美化时间线标签",
+    "label": "生成时间线标签"
+  },
+  "model": "模型",
+  "provider": "服务商",
+  "streaming": {
+    "description": "在助手生成回复时逐 token 实时显示。关闭后仅在回复完成时整条显示。",
+    "heading": "逐字流式输出",
+    "label": "逐 token 流式显示回复"
+  },
+  "timeline": {
+    "description": "在长对话右侧显示时间线缩略图。",
+    "heading": "对话时间线",
+    "label": "显示对话时间线"
+  },
+  "title": "会话",
+  "titleModel": {
+    "description": "用于生成标题的后台模型，默认使用对话模型。",
+    "heading": "标题模型"
+  },
+  "useDefault": "使用对话默认"
+}

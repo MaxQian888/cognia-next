@@ -1,0 +1,18 @@
+{
+  "addItem": "添加项目",
+  "description": "自定义系统托盘菜单中显示的项目。",
+  "desktopOnly": "系统托盘仅在桌面端可用。",
+  "emptyPicker": "暂无可用命令——请安装插件或开启对话。",
+  "hide": "隐藏",
+  "moveDown": "下移",
+  "moveUp": "上移",
+  "pickCommand": "选择一个命令",
+  "pickHint": "选择一个 slash 命令或插件命令钉到托盘菜单。",
+  "pin": "钉到托盘",
+  "remove": "移除",
+  "rename": "重命名",
+  "reset": "重置",
+  "separator": "分隔符",
+  "show": "显示",
+  "title": "系统托盘"
+}

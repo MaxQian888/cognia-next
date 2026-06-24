@@ -1,0 +1,8 @@
+{
+  "body": "\"{name}\" will be removed from your installed plugins. This action can be reversed by re-installing the plugin.",
+  "cancel": "Cancel",
+  "cascadeHint": "Remove this plugin's saved configuration, analytics counters, and scheduled jobs as well.",
+  "cascadeLabel": "Also wipe stored data",
+  "confirm": "Uninstall",
+  "title": "Uninstall plugin?"
+}

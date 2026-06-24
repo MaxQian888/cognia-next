@@ -1,0 +1,30 @@
+{
+  "actions": {
+    "delete": "删除",
+    "favorite": "置顶",
+    "graph": "查看图",
+    "pause": "暂停计划",
+    "pauseDeferred": "请暂时从桌面端暂停 / 恢复 —— 服务端镜像将在 Wave 5 上线。",
+    "pinned": "已置顶。",
+    "resume": "恢复计划",
+    "run": "立即运行",
+    "runQueued": "已触发 {name} — 已加入桌面端队列。",
+    "title": "工作流操作",
+    "unpin": "取消置顶",
+    "unpinned": "已取消置顶。"
+  },
+  "deleteConfirm": {
+    "body": "在本设备移除该工作流，并把删除同步到已配对的桌面端，下次同步后不会再被拉回。",
+    "cancel": "取消",
+    "confirm": "删除",
+    "queueLabel": "删除工作流 {name}",
+    "title": "删除 {name}？",
+    "toast": "已删除 {name}。"
+  },
+  "swipe": {
+    "favorite": "★",
+    "run": "运行",
+    "runQueued": "已触发 {name} — 已加入桌面端队列。",
+    "unfavorite": "取消置顶"
+  }
+}

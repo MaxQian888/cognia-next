@@ -1,0 +1,109 @@
+{
+  "debugger": {
+    "allSurfaces": "All surfaces",
+    "allTypes": "All types",
+    "clear": "Clear",
+    "confirmClear": "Clear all event history?",
+    "description": "userAction + dataModelChange events from every surface.",
+    "empty": "No events match the current filter.",
+    "filterSurface": "Filter by surface",
+    "refresh": "Refresh",
+    "selectHint": "Select an event to inspect its payload.",
+    "title": "Live event stream"
+  },
+  "description": "Configure how agents render interactive surfaces and review the live event stream.",
+  "mcpBridge": {
+    "notSeeded": "a2ui-bridge row not seeded yet — restart the app to upgrade to schema v13.",
+    "projection": {
+      "agentHelp": "Project a2ui-bridge into the {agent} config file.",
+      "description": "Mirror the bridge into the user-scope MCP config of each writable agent.",
+      "readOnly": "Read-only — config path is not writable.",
+      "title": "External agent projection"
+    },
+    "status": {
+      "description": "In-process MCP server registered with every Claude Agent SDK session.",
+      "liveSurfaces": "Live surfaces",
+      "sidecarDir": "Sidecar directory",
+      "socketPath": "Bridge socket",
+      "testConnection": "Test connection",
+      "title": "Bridge status",
+      "toolsCount": "Tools",
+      "toolsListTitle": "Registered tools",
+      "webModeNotice": "Bridge runtime paths are only available in the desktop app (Tauri). Web mode is read-only."
+    },
+    "toast": {
+      "testOk": "Self-test dispatched ✓"
+    }
+  },
+  "overview": {
+    "recent": {
+      "builtIn": "Built-in",
+      "empty": "No saved apps yet — create one from the Hub.",
+      "favorite": "Favorite",
+      "noDescription": "No description",
+      "openHub": "Open Hub",
+      "title": "Recent apps"
+    },
+    "stats": {
+      "appsHelp": "Mini-apps in your library.",
+      "appsTitle": "Saved apps",
+      "eventsHelp": "Persisted in the debugger ledger.",
+      "eventsTitle": "Recent events",
+      "surfacesHelp": "Ready / total active surfaces.",
+      "surfacesTitle": "Live surfaces"
+    }
+  },
+  "runtime": {
+    "global": {
+      "catalogHelp": "Used when a surface omits catalogId.",
+      "catalogLabel": "Default catalog",
+      "catalogPlaceholder": "Pick a catalog",
+      "description": "Applied to new characters and surfaces.",
+      "enabledHelp": "New characters inherit this value.",
+      "enabledLabel": "Enable A2UI by default",
+      "title": "Global defaults"
+    },
+    "loading": "Loading…",
+    "persistence": {
+      "description": "How many surfaces survive a reload.",
+      "limitHelp": "Higher values keep more state across reloads.",
+      "limitLabel": "LRU limit",
+      "title": "Persistence"
+    },
+    "widget": {
+      "description": "Used when a surface widget omits the field.",
+      "hostStrategyLabel": "Host strategy",
+      "themeLabel": "Theme",
+      "title": "Widget defaults"
+    }
+  },
+  "tabs": {
+    "debugger": "Debugger",
+    "mcpBridge": "MCP Bridge",
+    "overview": "Overview",
+    "runtime": "Runtime",
+    "templates": "Templates"
+  },
+  "templates": {
+    "builtIn": {
+      "description": "Read-only — duplicate from the Hub to customize.",
+      "title": "Built-in templates ({count})"
+    },
+    "builtInBadge": "Built-in",
+    "confirmDelete": "Delete \"{name}\"?",
+    "imported": "Imported",
+    "toast": {
+      "deleted": "Deleted \"{name}\"",
+      "importFailed": "Template import failed",
+      "importSuccess": "Imported \"{name}\""
+    },
+    "user": {
+      "description": "Templates you have authored or imported.",
+      "empty": "No user templates yet.",
+      "import": "Import JSON",
+      "openHub": "Open Hub",
+      "title": "User templates"
+    }
+  },
+  "title": "A2UI"
+}

@@ -1,0 +1,37 @@
+{
+  "panel": {
+    "accessedRelative": "used {time}",
+    "cancelEdit": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "editLabel": "Edit memory text",
+    "empty": {
+      "description": "As you chat, durable facts about you are saved here. You can also use /remember.",
+      "title": "No memories yet"
+    },
+    "invalidated": "archived",
+    "pin": "Pin",
+    "saveEdit": "Save",
+    "searchLabel": "Search memories",
+    "searchPlaceholder": "Search memories…",
+    "showInvalidated": "Show archived",
+    "sort": {
+      "accessed": "Recently used",
+      "importance": "Importance",
+      "recent": "Recently updated"
+    },
+    "sortLabel": "Sort",
+    "stats": {
+      "active": "Active"
+    },
+    "subtitle": "What the assistant remembers about you.",
+    "title": "Memory",
+    "unpin": "Unpin",
+    "viewSource": "View source"
+  },
+  "types": {
+    "episodic": "Event",
+    "procedural": "Preference",
+    "semantic": "Fact"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "consent": {
+    "biometricBlocked": "批准未完成（{reason}）。",
+    "biometricDescription": "允许后，已连接的桌面将执行此操作。",
+    "biometricReason": "批准桌面的 computer-use 操作",
+    "biometricTitle": "确认远程操作",
+    "sheetDescription": "已连接的桌面请求执行一个操作。请确认后选择允许或拒绝。"
+  }
+}

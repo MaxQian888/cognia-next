@@ -1,0 +1,7 @@
+{
+  "count": "{count} 个匹配",
+  "dismiss": "关闭",
+  "empty": "该团队暂无成员。",
+  "noMatches": "未找到匹配「{query}」的成员",
+  "title": "提及队友"
+}

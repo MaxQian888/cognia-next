@@ -1,0 +1,10 @@
+{
+  "avgResponse": "Avg time",
+  "description": "Per-provider counts and response times.",
+  "errors": "errors",
+  "mostUsed": "Most used",
+  "noData": "No usage data yet.",
+  "reset": "Reset",
+  "title": "Usage statistics",
+  "totalSearches": "Total"
+}

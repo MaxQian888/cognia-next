@@ -1,0 +1,25 @@
+{
+  "comment": "备注",
+  "commentHint": "对这条连线的私有备注。会在画布上显示为一个图标。",
+  "commentPlaceholder": "这条连线为什么存在？",
+  "delete": "删除连线",
+  "deleteAll": "删除连线",
+  "errorHandleHint": "这条连线从节点的错误句柄引出 — 节点失败时触发。",
+  "kind": "类型",
+  "kindHint": "运行时如何处理这条连线。",
+  "kindOption": {
+    "conditional": "条件",
+    "default": "默认",
+    "error": "错误",
+    "loop": "循环",
+    "parallel": "并行"
+  },
+  "label": "标签",
+  "labelHint": "显示在连线中点的可选文本。",
+  "labelPlaceholder": "例如 true / retry",
+  "multiSelected": "已选择 {count} 条连线",
+  "reverse": "反转方向",
+  "source": "从",
+  "target": "到",
+  "title": "连线"
+}

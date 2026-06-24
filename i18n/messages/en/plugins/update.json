@@ -1,0 +1,11 @@
+{
+  "availableCount": "{count} available",
+  "checking": "Checking…",
+  "close": "Close",
+  "description": "Updates fetched from the marketplace.",
+  "install": "Install",
+  "installAll": "Install all",
+  "recheck": "Re-check",
+  "title": "Plugin updates",
+  "upToDate": "All plugins are up to date."
+}

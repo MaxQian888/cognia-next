@@ -1,0 +1,147 @@
+{
+  "a11y": {
+    "announceErrors": "Announce errors",
+    "focusIndicator": "Focus indicator",
+    "highContrast": "High contrast",
+    "reducedMotion": "Reduced motion",
+    "screenReaderOptimized": "Screen reader optimised"
+  },
+  "ai": {
+    "autoSuggestions": "Auto suggestions",
+    "contextLines": "Context lines",
+    "customProviderUrl": "Custom provider URL",
+    "enableInlineCompletion": "Enable inline completion",
+    "maxSuggestions": "Max suggestions",
+    "showConfidence": "Show confidence",
+    "streamingResponses": "Streaming responses",
+    "suggestionDelay": "Suggestion delay",
+    "suggestionProvider": "Suggestion provider",
+    "suggestionProviderOptions": {
+      "custom": "Custom URL",
+      "default": "Default (Anthropic)"
+    }
+  },
+  "collab": {
+    "cursorSmoothing": "Cursor smoothing",
+    "enableCollaboration": "Enable collaboration",
+    "presenceTimeout": "Presence timeout",
+    "showAvatars": "Show avatars",
+    "showCursors": "Show cursors",
+    "showSelections": "Show selections",
+    "signallingServerUrl": "Signalling server URL",
+    "syncInterval": "Sync interval"
+  },
+  "description": "Configure the Monaco-based code/document editor — fonts, AI suggestions, versioning, collaboration, sandbox execution, accessibility and keybindings.",
+  "domainLabel": "Canvas documents",
+  "editor": {
+    "autoClosingBrackets": "Auto-close brackets",
+    "autoClosingQuotes": "Auto-close quotes",
+    "bracketPairColorization": "Bracket pair colorization",
+    "bracketPairGuides": "Bracket pair guides",
+    "cursorBlinking": "Cursor blinking",
+    "cursorBlinkingOptions": {
+      "blink": "Blink",
+      "expand": "Expand",
+      "phase": "Phase",
+      "smooth": "Smooth",
+      "solid": "Solid"
+    },
+    "cursorStyle": "Cursor style",
+    "cursorStyleOptions": {
+      "block": "Block",
+      "line": "Line",
+      "underline": "Underline"
+    },
+    "fontFamily": "Font family",
+    "fontFamilyOptions": {
+      "cascadiaCode": "Cascadia Code",
+      "firaCode": "Fira Code / Cascadia / JetBrains Mono",
+      "ibmPlexMono": "IBM Plex Mono",
+      "jetbrainsMono": "JetBrains Mono",
+      "sourceCodePro": "Source Code Pro",
+      "systemMonospace": "System monospace"
+    },
+    "fontSize": "Font size",
+    "formatOnPaste": "Format on paste",
+    "formatOnType": "Format on type",
+    "indentationGuides": "Indentation guides",
+    "insertSpaces": "Insert spaces (vs. tabs)",
+    "lineHeight": "Line height",
+    "lineNumbers": "Line numbers",
+    "lineNumbersOptions": {
+      "off": "Off",
+      "on": "On",
+      "relative": "Relative"
+    },
+    "minimap": "Minimap",
+    "mouseWheelZoom": "Mouse-wheel zoom",
+    "renderWhitespace": "Render whitespace",
+    "renderWhitespaceOptions": {
+      "all": "All",
+      "boundary": "Boundary",
+      "none": "None",
+      "selection": "Selection",
+      "trailing": "Trailing"
+    },
+    "scrollBeyondLastLine": "Scroll beyond last line",
+    "smoothScrolling": "Smooth scrolling",
+    "tabSize": "Tab size",
+    "wordWrap": "Word wrap"
+  },
+  "execution": {
+    "autoExecute": "Auto-execute on save",
+    "clearOutputOnRun": "Clear output on each run",
+    "maxExecutionTime": "Max execution time",
+    "preserveVariables": "Preserve variables across runs",
+    "pythonRequiresDesktop": "Python execution requires the desktop build (Tauri). Run `pnpm tauri dev` to enable.",
+    "pythonRuntime": "Python runtime",
+    "pythonRuntimeOptions": {
+      "none": "Disabled",
+      "tauriSidecar": "Tauri Python sidecar (desktop)"
+    },
+    "sandboxMode": "Sandbox mode",
+    "sandboxModeOptions": {
+      "permissive": "Permissive",
+      "strict": "Strict (no network/storage)"
+    },
+    "showOutput": "Show output panel"
+  },
+  "resetAll": "Reset all",
+  "resetTab": "Reset this tab",
+  "tabs": {
+    "a11y": "Accessibility",
+    "ai": "AI",
+    "collab": "Collaboration",
+    "editor": "Editor",
+    "execution": "Execution",
+    "keys": "Keybindings",
+    "theme": "Theme",
+    "version": "Versioning"
+  },
+  "theme": {
+    "followSystem": "Follow system theme",
+    "hint": "Custom Monaco themes registered through the canvas plugin API will appear in this list at runtime.",
+    "monacoTheme": "Monaco theme",
+    "monacoThemeOptions": {
+      "auto": "Auto (follow app theme)",
+      "hcBlack": "hc-black",
+      "hcLight": "hc-light",
+      "vs": "vs (light)",
+      "vsDark": "vs-dark"
+    }
+  },
+  "title": "Canvas",
+  "version": {
+    "autoSaveInterval": "Auto-save interval",
+    "compressOldVersions": "Compress old versions",
+    "diffViewMode": "Diff view mode",
+    "diffViewModeOptions": {
+      "inline": "Inline",
+      "sideBySide": "Side-by-side",
+      "unified": "Unified"
+    },
+    "keepNamedVersions": "Keep named versions",
+    "maxVersions": "Max versions",
+    "showVersionTimestamps": "Show version timestamps"
+  }
+}

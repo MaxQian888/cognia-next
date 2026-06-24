@@ -1,0 +1,49 @@
+{
+  "autoExtract": {
+    "description": "After each turn, quietly extract durable facts from what you said.",
+    "heading": "Learn automatically",
+    "label": "Learn automatically"
+  },
+  "cap": {
+    "label": "Max active memories per scope"
+  },
+  "clearAll": {
+    "button": "Clear all",
+    "cancel": "Cancel",
+    "confirm": "Delete everything",
+    "description": "This permanently deletes every stored memory. This cannot be undone.",
+    "title": "Clear all memories?"
+  },
+  "cloudEmbedding": {
+    "description": "Let memory text be embedded by a cloud provider. Off keeps it on-device (keyword-only).",
+    "heading": "Allow cloud embeddings",
+    "label": "Allow cloud embeddings"
+  },
+  "description": "What the assistant remembers about you across sessions.",
+  "enabled": {
+    "description": "Recall durable facts about you and inject them into future chats.",
+    "heading": "Enable long-term memory",
+    "label": "Enable long-term memory"
+  },
+  "hybrid": {
+    "description": "Combine semantic (vector) and keyword search when recalling.",
+    "heading": "Hybrid retrieval",
+    "label": "Hybrid retrieval"
+  },
+  "manage": "Manage memories",
+  "scope": {
+    "character": "Per character",
+    "description": "Where new memories are stored. Global is shared across all characters.",
+    "global": "Global (all characters)",
+    "heading": "Default scope"
+  },
+  "temporary": {
+    "description": "Pause memory for now — neither read nor write this session.",
+    "heading": "Temporary mode",
+    "label": "Temporary mode"
+  },
+  "title": "Memory",
+  "topK": {
+    "label": "Memories injected per turn"
+  }
+}

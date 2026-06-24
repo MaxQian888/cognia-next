@@ -1,0 +1,31 @@
+{
+  "approval": {
+    "allow": "允许一次",
+    "allowAlways": "本会话始终允许",
+    "blocked": "批准未完成（{reason}）。",
+    "deny": "拒绝",
+    "description": "宿主 agent 想要运行一个工具。允许后它将在已连接的桌面上执行。",
+    "heading": "允许使用 {tool}？",
+    "reason": "确认允许在桌面上使用 {tool} 工具",
+    "title": "批准工具调用"
+  },
+  "back": "返回会话列表",
+  "detail": {
+    "composerAria": "追问消息",
+    "composerPlaceholder": "发送追问…",
+    "empty": "还没有消息。",
+    "interruptAria": "打断当前回合",
+    "observeOnly": "仅观察",
+    "sendAria": "发送",
+    "streaming": "流式输出中",
+    "title": "实时会话"
+  },
+  "list": {
+    "empty": "已连接的桌面上还没有会话。",
+    "error": "加载会话失败（{reason}）。",
+    "loading": "正在加载会话…",
+    "openAria": "打开 {title}",
+    "untitled": "未命名会话"
+  },
+  "title": "远程会话"
+}

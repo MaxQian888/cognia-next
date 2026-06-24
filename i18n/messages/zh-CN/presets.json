@@ -1,0 +1,195 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "clearDefault": "取消默认",
+    "create": "创建预设",
+    "delete": "删除",
+    "doneReorder": "完成",
+    "duplicate": "复制",
+    "edit": "编辑",
+    "export": "导出预设…",
+    "favorite": "添加到收藏",
+    "import": "导入预设…",
+    "new": "新建预设",
+    "reorder": "排序",
+    "reset": "重置为内置预设",
+    "save": "保存",
+    "setDefault": "设为默认",
+    "toggleSelection": "切换选择",
+    "unfavorite": "从收藏中移除"
+  },
+  "applyDialog": {
+    "description": "此预设将覆盖以下会话字段：{fields}。",
+    "fillEmpty": "仅填充空字段",
+    "fillEmptyDescription": "保留你已设置的值，只在会话当前为空的字段写入预设。最安全的默认。",
+    "merge": "合并",
+    "mergeDescription": "对标量字段等同于“仅填充空字段”。在通过设置编辑器应用时，数组字段会取并集。",
+    "overwriteAll": "全部覆盖",
+    "overwriteAllDescription": "即使会话已有值，预设的每个字段都会替换会话的值。",
+    "title": "应用预设“{name}”？"
+  },
+  "bulk": {
+    "builtInsSkipped": "选择项中的内置预设将被跳过。",
+    "deleteAll": "批量删除",
+    "deleteConfirmDescription": "所选预设将从你的预设库中移除。选择项中的内置预设会被自动跳过。此操作不可撤销。",
+    "deleteConfirmTitle": "删除 {count} 条预设？",
+    "exitSelectMode": "完成",
+    "favoriteAll": "批量收藏",
+    "selectMode": "选择",
+    "unfavoriteAll": "取消收藏"
+  },
+  "card": {
+    "builtIn": "内置",
+    "clearDefault": "取消 {name} 的默认状态",
+    "default": "默认",
+    "dragHandle": "拖动重新排序",
+    "favorite": "收藏 {name}",
+    "setDefault": "将 {name} 设为默认",
+    "unfavorite": "取消收藏 {name}",
+    "usedNTimes": "已使用 {count} 次"
+  },
+  "category": {
+    "business": "商务",
+    "coding": "编程",
+    "creative": "创意",
+    "education": "教育",
+    "general": "通用",
+    "productivity": "效率",
+    "research": "研究",
+    "uncategorized": "未分类",
+    "writing": "写作"
+  },
+  "deleteConfirmDescription": "“{name}”将从你的预设库中移除。当前正在使用它的会话仍保留各自的系统提示词副本。",
+  "deleteConfirmTitle": "删除预设？",
+  "editor": {
+    "agentMode": "代理模式",
+    "allowedTools": "允许的工具（逗号分隔）",
+    "category": "分类",
+    "customModelPlaceholder": "或粘贴自定义模型 ID",
+    "description": "描述",
+    "descriptionPlaceholder": "（可选）一句话简介",
+    "disallowedTools": "禁止的工具（逗号分隔）",
+    "effort": "推理强度",
+    "favorite": "收藏",
+    "favoriteHelp": "置顶到预设库顶部。",
+    "icon": "图标 emoji",
+    "mcpServers": "MCP 服务器",
+    "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
+    "mcpServersHelp": "全部不选表示“使用所有已启用的服务器”。",
+    "model": "模型",
+    "name": "名称",
+    "namePlaceholder": "代码评审助手",
+    "permissionMode": "权限模式",
+    "pickColor": "选择颜色",
+    "pickWorkingDir": "选择目录",
+    "saving": "保存中…",
+    "sections": {
+      "advanced": {
+        "description": "工作目录、代理模式覆盖与预设库标记。",
+        "title": "高级"
+      },
+      "capability": {
+        "description": "系统提示词，以及应用此预设的会话所采用的模型 / 权限 / 推理强度覆盖。",
+        "title": "能力"
+      },
+      "character": {
+        "description": "为此对象投射人物设定。插件角色包与本地角色一并展示。",
+        "inherit": "继承（无）",
+        "pickerLabel": "角色",
+        "title": "角色"
+      },
+      "externalPreset": {
+        "description": "可选的转交目标 — Claude Code / Codex / Gemini-CLI 等。",
+        "inherit": "继承（无）",
+        "pickerLabel": "预设",
+        "title": "外部代理预设"
+      },
+      "identity": {
+        "description": "在选择器中展示的名称、分类与视觉样式。",
+        "title": "身份"
+      },
+      "nativeTools": {
+        "description": "由插件贡献的 computer use / bash / text editor 等原生工具。",
+        "empty": "尚未注册任何原生 Anthropic 工具。",
+        "requiresNativeInputPermission": "需要 native input/screen 权限。",
+        "title": "原生 Anthropic 工具"
+      },
+      "subagent": {
+        "builtinBadge": "内置",
+        "description": "内置 workflow-* 子代理及由插件注册的子代理。",
+        "empty": "暂无可用子代理。",
+        "pluginBadge": "插件",
+        "title": "子代理"
+      },
+      "teamCapabilityOverlay": {
+        "addedLabel": "新增",
+        "description": "显示哪些能力 id 来自团队默认池、哪些是该队员新增、哪些被移除。",
+        "inheritedLabel": "继承",
+        "mcpServers": "MCP 服务器",
+        "nativeTools": "原生工具",
+        "removedLabel": "移除",
+        "skills": "技能",
+        "subagents": "子代理",
+        "title": "继承与覆盖"
+      },
+      "tools": {
+        "description": "工具白名单、有序的技能栈与 MCP 服务器子集。",
+        "title": "工具"
+      }
+    },
+    "setDefault": "设为默认",
+    "setDefaultHelp": "未指定角色的新会话将自动应用此预设。",
+    "skills": "技能",
+    "skillsEmptyHint": "（未选择技能）",
+    "skillsHelp": "顺序很重要——靠前的技能会先被追加到系统提示词。",
+    "systemPrompt": "系统提示词",
+    "systemPromptPlaceholder": "你是…",
+    "uncategorized": "未分类",
+    "useAppDefault": "使用应用默认",
+    "workingDir": "工作目录",
+    "workingDirPlaceholder": "/path/to/project（可选）"
+  },
+  "emptyFiltered": "没有预设匹配当前筛选条件。",
+  "emptyState": "暂无预设。首次启动时,12 条内置预设会自动出现在这里。",
+  "filter": {
+    "all": "全部",
+    "builtIn": "内置",
+    "custom": "自定义",
+    "favorites": "收藏",
+    "hasMcp": "含 MCP",
+    "hasSkills": "含技能",
+    "recent": "最近使用"
+  },
+  "pickWorkingDir": "选择工作目录",
+  "readOnlyDeleteTooltip": "内置预设无法删除",
+  "readOnlyTooltip": "内置预设——请先复制再编辑",
+  "resetConfirmDescription": "所有预设——包括你创建的自定义预设——都会被移除并恢复内置预设。此操作不可撤销。",
+  "resetConfirmTitle": "重置为内置预设？",
+  "searchPlaceholder": "搜索预设…",
+  "subtitle": "可复用的会话配置——系统提示词加上模型、工具、MCP 与技能覆盖。可按会话单独应用，或将某条预设设为新会话的默认值。",
+  "title": "预设",
+  "toast": {
+    "created": "已创建预设“{name}”。",
+    "defaultCleared": "已清除默认预设。",
+    "defaultSet": "“{name}”已设为默认预设。",
+    "deleted": "已删除“{name}”。",
+    "duplicated": "已复制为“{name}”。",
+    "exported": "已导出 {count} 条预设。",
+    "importInvalid": "未识别的预设导出文件。",
+    "imported": "导入 {added} 条新预设（跳过 {skipped} 条）。",
+    "reset": "已重置为内置预设。",
+    "updated": "已更新预设“{name}”。"
+  },
+  "toolbar": {
+    "bulkAriaLabel": "批量预设操作",
+    "clearSelection": "清除选择",
+    "filterGroupAriaLabel": "筛选预设",
+    "searchAriaLabel": "搜索预设",
+    "searchPlaceholder": "搜索预设…",
+    "selected": "已选 {count} 项"
+  },
+  "validation": {
+    "contentRequired": "系统提示词不能为空。",
+    "nameRequired": "预设名称不能为空。"
+  }
+}

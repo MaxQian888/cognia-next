@@ -1,0 +1,47 @@
+{
+  "actions": {
+    "agentTeams": "Agent teams",
+    "discover": "Discover",
+    "inbox": "Inbox",
+    "me": "Me",
+    "newChat": "New chat",
+    "search": "Search",
+    "twin": "Digital twin",
+    "workflows": "Workflows"
+  },
+  "activeRuns": {
+    "empty": "No active runs",
+    "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
+    "viewRuns": "View runs"
+  },
+  "customize": {
+    "active": "On your home",
+    "activeEmpty": "No quick actions — add some below.",
+    "add": "Add",
+    "available": "Add actions",
+    "availableEmpty": "Every action is on your home.",
+    "description": "Pick which quick actions and sections show on your home screen.",
+    "dragHint": "Drag to reorder",
+    "remove": "Remove",
+    "restoreDefaults": "Restore defaults",
+    "sections": "Sections",
+    "title": "Customize home"
+  },
+  "edit": "Edit",
+  "emptyChats": "No chats yet. Tap + to start one.",
+  "emptyFiltered": "No chats match “{query}”.",
+  "pinned": "Pinned",
+  "presenceStreaming": "Streaming",
+  "quickActions": "Quick actions",
+  "recent": "Recent",
+  "search": "Search chats…",
+  "searchAria": "Search chats",
+  "sections": {
+    "activeRuns": "Active runs",
+    "recents": "Recent chats"
+  },
+  "swipeDelete": "Delete",
+  "swipePin": "Pin",
+  "swipeUnpin": "Unpin",
+  "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}"
+}

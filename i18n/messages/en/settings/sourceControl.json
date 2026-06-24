@@ -1,0 +1,21 @@
+{
+  "commitAi": {
+    "conventional": {
+      "description": "Constrain the generated message to the type(scope): summary format.",
+      "heading": "Conventional Commits"
+    },
+    "customInstructions": {
+      "heading": "Custom instructions",
+      "placeholder": "Extra guidance for the model (tone, scope conventions, language…)"
+    },
+    "description": "Show a button in the commit box to draft a message from the staged diff.",
+    "heading": "AI commit messages",
+    "model": {
+      "model": "Model",
+      "provider": "Provider",
+      "useDefault": "Use chat default"
+    }
+  },
+  "description": "AI commit-message generation and other Git panel preferences.",
+  "title": "Source Control"
+}

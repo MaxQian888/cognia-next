@@ -1,0 +1,32 @@
+{
+  "description": "压缩较早的对话轮次，让长对话保持在模型的上下文窗口内。",
+  "enabled": {
+    "description": "当上下文窗口接近占满时，自动压缩较早的对话轮次。",
+    "heading": "自动压缩",
+    "label": "启用自动压缩"
+  },
+  "focus": {
+    "description": "引导压缩时保留哪些内容，并作为 /compact 的默认聚焦项。",
+    "heading": "压缩指令",
+    "label": "压缩指令",
+    "placeholder": "例如：聚焦于决策、文件路径与未解决的问题。"
+  },
+  "keepRecent": {
+    "description": "保留多少条最近的对话轮次不被压缩、原样保留。",
+    "heading": "保留最近轮次",
+    "label": "保留的最近轮次数"
+  },
+  "strategy": {
+    "builtin": "内置",
+    "description": "选择插件贡献的压缩策略，或使用内置默认策略。",
+    "heading": "策略",
+    "label": "压缩策略"
+  },
+  "threshold": {
+    "description": "上下文窗口占用达到该比例时触发自动压缩。",
+    "heading": "触发阈值",
+    "label": "触发阈值百分比",
+    "suffix": "% 窗口"
+  },
+  "title": "上下文压缩"
+}

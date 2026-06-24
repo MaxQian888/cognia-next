@@ -1,0 +1,514 @@
+{
+  "a11y": {
+    "colorblind": {
+      "deuter": "绿色弱视（红绿）",
+      "hint": "将强调色与状态色调整为所选色觉缺陷下可区分的调色板。",
+      "label": "色盲调色板",
+      "off": "关闭",
+      "protan": "红色弱视（红弱）",
+      "tritan": "蓝色弱视（蓝黄）"
+    },
+    "highContrast": {
+      "dark": "高对比度深色",
+      "hint": "在当前主题之上叠加一层高对比度配色。",
+      "label": "高对比度预设",
+      "light": "高对比度浅色",
+      "off": "关闭"
+    },
+    "motion": {
+      "reduceHint": "在整个应用中尽量减少动画与过渡效果。",
+      "reduceLabel": "减弱动态效果",
+      "speed": {
+        "fast": "快速（1.5×）",
+        "normal": "正常（1×）",
+        "slow": "慢速（0.5×）"
+      },
+      "speedLabel": "动画速度"
+    },
+    "wcag": {
+      "enforcement": {
+        "warn": "仅提示",
+        "warnFix": "提示并自动修复"
+      },
+      "enforcementHint": "选择审计发现违规时仅提示还是同时自动修复。",
+      "enforcementLabel": "对比度强制策略",
+      "target": {
+        "AA": "AA（4.5:1）",
+        "AAA": "AAA（7:1）",
+        "off": "关闭"
+      },
+      "targetHint": "主题审计检查颜色时使用的对比度等级。",
+      "targetLabel": "WCAG 对比度目标"
+    }
+  },
+  "advanced": {
+    "description": "向应用注入自定义 CSS。保存时会移除远程 @import / url(http)。错误的 CSS 可能让界面显示异常，请谨慎使用。",
+    "enabledLabel": "启用自定义 CSS",
+    "monacoLink": {
+      "description": "控制 Monaco/Canvas 编辑器如何跟随应用主题。",
+      "enabledLabel": "跟随应用主题",
+      "lock": {
+        "hcBlack": "高对比深色",
+        "hcLight": "高对比浅色",
+        "none": "不锁定（跟随上方设置）",
+        "vs": "浅色 (vs)",
+        "vsDark": "深色 (vs-dark)"
+      },
+      "lockHint": "将 Monaco 固定为指定的基础主题，忽略应用主题。",
+      "lockLabel": "锁定编辑器主题",
+      "title": "编辑器主题联动"
+    },
+    "placeholder": "/* 在此填写 CSS */\nbody '{' letter-spacing: 0.2px; '}'",
+    "removed": "保存时已移除 {count} 条远程规则。",
+    "saveButton": "保存",
+    "scope": {
+      "app": "仅应用内",
+      "global": "整个文档",
+      "hint": "“仅应用内”会把 CSS 包裹在 @scope (#app) 中；“整个文档”则全页生效。",
+      "label": "自定义 CSS 作用域"
+    },
+    "title": "自定义 CSS"
+  },
+  "agentFlow": {
+    "hint": {
+      "detailed": "每个工具调用、推理块和子代理都完整展开，显示全部输入与输出。",
+      "simplified": "单行工具摘要，按需点击展开。",
+      "standard": "运行时展开、完成后折叠的卡片。"
+    },
+    "label": "Agent 流程展示模式",
+    "mode": {
+      "detailed": "详细",
+      "simplified": "简化",
+      "standard": "标准"
+    }
+  },
+  "auto": {
+    "description": "根据触发条件自动在浅色与深色之间切换。",
+    "enabledHint": "让 Cognia 依据下方触发条件自动选择浅色或深色。",
+    "enabledLabel": "自动浅色/深色",
+    "schedule": {
+      "darkAt": "切换到深色的时间",
+      "lightAt": "切换到浅色的时间"
+    },
+    "snoozeNote": "手动更改主题后，自动切换将暂停 30 分钟。",
+    "sunset": {
+      "currentLocation": "{lat}, {lng}",
+      "hint": "坐标仅保存在本地，不会发送到任何地方。",
+      "latitude": "纬度",
+      "longitude": "经度",
+      "noLocation": "未设置位置",
+      "unavailable": "此环境不支持地理定位——请手动输入坐标。",
+      "useLocation": "使用我的位置"
+    },
+    "trigger": {
+      "hint": "决定浅色/深色阶段的方式。",
+      "label": "触发方式",
+      "schedule": "时间计划",
+      "sunset": "日出与日落",
+      "system": "跟随系统"
+    }
+  },
+  "colorPresetLabel": "配色预设",
+  "colorPresets": {
+    "amber": "琥珀",
+    "default": "默认",
+    "forest": "森林",
+    "lavender": "薰衣草",
+    "ocean": "海洋",
+    "rose": "玫瑰",
+    "slate": "石板",
+    "sunset": "日落"
+  },
+  "componentCustomize": {
+    "axis": {
+      "elevation": "阴影",
+      "elevationFor": "{name} 的阴影",
+      "radius": "圆角",
+      "radiusFor": "{name} 的圆角",
+      "tonality": "透明度",
+      "tonalityFor": "{name} 的透明度"
+    },
+    "description": "逐个自定义面板类组件。透明度控制组件在壁纸之上的呈现；阴影与圆角始终生效。",
+    "elevation": {
+      "default": "默认"
+    },
+    "groups": {
+      "chat": "对话界面",
+      "modals": "弹窗与抽屉",
+      "overlays": "浮层",
+      "surfaces": "面板"
+    },
+    "items": {
+      "aiArtifact": "工件面板 Artifact",
+      "aiCodeBlock": "代码块 Code block",
+      "aiContext": "上下文用量 Context",
+      "aiConversation": "滚动按钮 Scroll button",
+      "aiErrorTrace": "错误堆栈 Error trace",
+      "aiMessage": "消息气泡 Message",
+      "aiTask": "任务文件 Task",
+      "aiTerminal": "终端 Terminal",
+      "aiTool": "工具调用 Tool",
+      "alert": "提示 Alert",
+      "alertDialog": "警告对话框 Alert dialog",
+      "card": "卡片 Card",
+      "combobox": "组合框 Combobox",
+      "command": "命令面板 Command",
+      "contextMenu": "右键菜单 Context menu",
+      "dialog": "对话框 Dialog",
+      "drawer": "抽屉 Drawer",
+      "dropdownMenu": "下拉菜单 Dropdown",
+      "hoverCard": "悬浮卡片 Hover card",
+      "menubar": "菜单栏 Menubar",
+      "navigationMenu": "导航菜单 Navigation",
+      "popover": "气泡 Popover",
+      "select": "选择器 Select",
+      "sheet": "侧拉面板 Sheet",
+      "sidebar": "侧边栏 Sidebar",
+      "table": "表格 Table",
+      "tabs": "标签页 Tabs",
+      "tooltip": "工具提示 Tooltip"
+    },
+    "radius": {
+      "inherit": "默认"
+    },
+    "resetAll": "全部重置",
+    "tonality": {
+      "default": "默认",
+      "frosted": "毛玻璃",
+      "glass": "玻璃",
+      "solid": "实心",
+      "translucent": "半透明"
+    },
+    "tonalityHint": "透明度仅在启用壁纸时生效。"
+  },
+  "customTheme": {
+    "actions": {
+      "export": "导出",
+      "import": "导入主题 JSON"
+    },
+    "activateButton": "应用",
+    "audit": {
+      "allPass": "对比度：全部通过",
+      "cancel": "取消",
+      "failuresCount": "{count} / {total} 组对未通过 WCAG AA",
+      "lowContrast": "对比度不足",
+      "saveAnyway": "仍然保存",
+      "saveWarningBody": "有 {count} 组颜色对未通过 WCAG AA 对比度检查。仍然保存？",
+      "saveWarningTitle": "对比度不足的主题"
+    },
+    "darkLabel": "深色变体",
+    "deactivateButton": "改用配色预设",
+    "deleteButton": "删除",
+    "deleteDialog": {
+      "body": "确定删除“{name}”？此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "title": "删除主题"
+    },
+    "description": "直接编辑 cognia 颜色 token。激活的自定义主题会覆盖配色预设。",
+    "discardDialog": {
+      "body": "当前草稿有未保存的修改，切换后将会丢失。",
+      "cancel": "继续编辑",
+      "discard": "放弃修改",
+      "title": "放弃未保存的修改？"
+    },
+    "groupFailures": "{count} 项未通过",
+    "groups": {
+      "brand": "品牌",
+      "sidebar": "侧边栏",
+      "state": "状态",
+      "surface": "表面",
+      "text": "文字"
+    },
+    "import": {
+      "failure": "导入失败：{message}",
+      "success": "主题已导入。"
+    },
+    "namePlaceholder": "主题名称",
+    "newButton": "新建主题",
+    "noSaved": "还没有自定义主题。",
+    "previewLabel": "实时预览",
+    "rail": {
+      "activeBadgeAria": "当前应用的主题",
+      "copySuffix": "{name}（副本）",
+      "darkSwatchAria": "深色变体色板",
+      "duplicate": "复制",
+      "lightSwatchAria": "浅色变体色板",
+      "more": "更多操作"
+    },
+    "saveButton": "保存",
+    "savedLabel": "已保存的主题",
+    "title": "自定义主题",
+    "tokens": {
+      "accent": "强调色",
+      "accentForeground": "强调色文字",
+      "aria": {
+        "hex": "{label} 十六进制值",
+        "swatch": "{label} 色块"
+      },
+      "background": "背景",
+      "border": "边框",
+      "card": "卡片",
+      "cardForeground": "卡片文字",
+      "destructive": "破坏性",
+      "destructiveForeground": "破坏性文字",
+      "foreground": "前景",
+      "input": "输入框",
+      "muted": "弱化色",
+      "mutedForeground": "弱化色文字",
+      "popover": "弹出层",
+      "popoverForeground": "弹出层文字",
+      "primary": "主色",
+      "primaryForeground": "主色文字",
+      "ring": "聚焦环",
+      "secondary": "次要色",
+      "secondaryForeground": "次要色文字",
+      "sidebar": "侧栏",
+      "sidebarAccent": "侧栏强调色",
+      "sidebarAccentForeground": "侧栏强调色文字",
+      "sidebarBorder": "侧栏边框",
+      "sidebarForeground": "侧栏文字",
+      "sidebarPrimary": "侧栏主色",
+      "sidebarPrimaryForeground": "侧栏主色文字",
+      "sidebarRing": "侧栏聚焦环"
+    },
+    "unsavedBadge": "未保存的修改",
+    "updateButton": "更新"
+  },
+  "description": "调整应用的视觉风格，所有改动会立即保存。",
+  "fontScaleHint": "整体缩放界面。默认 16px。",
+  "fontScaleLabel": "字号",
+  "languageLabel": "语言",
+  "layoutType": {
+    "agentFlow": {
+      "sectionLabel": "Agent 流程"
+    },
+    "density": {
+      "comfortable": "舒适",
+      "compact": "紧凑",
+      "globalHint": "控制整个应用的间距和组件尺寸。",
+      "globalLabel": "全局密度",
+      "inherit": "继承",
+      "overrideHint": "可为特定区域单独设置不同的密度。",
+      "overrideLabel": "按区域覆盖",
+      "sectionLabel": "密度",
+      "spacious": "宽松",
+      "surface": {
+        "chat": "对话",
+        "sidebar": "侧边栏",
+        "table": "表格"
+      }
+    },
+    "fine": {
+      "letterSpacing": "字间距",
+      "lineHeight": "行高",
+      "sectionLabel": "精细调整"
+    },
+    "font": {
+      "inherit": "继承（默认）",
+      "monoLabel": "等宽字体",
+      "sansHint": "应用于整个界面。「继承」保留 cognia 默认字体。",
+      "sansLabel": "界面字体",
+      "sectionLabel": "字体",
+      "serifLabel": "衬线字体"
+    },
+    "motion": {
+      "sectionLabel": "动效速度",
+      "speed": {
+        "fast": "快速",
+        "normal": "正常",
+        "slow": "慢速"
+      }
+    },
+    "radius": {
+      "hint": "调整卡片、按钮和输入框的圆角程度。",
+      "label": "圆角半径",
+      "sectionLabel": "圆角"
+    },
+    "usageDisplay": {
+      "sectionLabel": "用量展示"
+    }
+  },
+  "personalization": {
+    "description": "聊天欢迎页如何称呼你、展示多少内容。",
+    "nameLabel": "你的称呼",
+    "namePlaceholder": "例如 Max",
+    "restoreSections": "恢复已隐藏的欢迎区块",
+    "styleHint": "丰富版带动态背景与能力卡片；精简版更紧凑。移动端始终使用精简版。",
+    "styleLabel": "欢迎页布局",
+    "styleMinimal": "精简",
+    "styleRich": "丰富",
+    "title": "个性化"
+  },
+  "reduceMotionHint": "关闭非必要的动画和过渡。",
+  "reduceMotionLabel": "减少动效",
+  "reset": {
+    "body": "将清空所有自定义主题、自定义 CSS、和背景设置。已上传的壁纸图片不会被删除。",
+    "button": "重置外观",
+    "cancel": "取消",
+    "confirm": "重置",
+    "title": "确认重置外观设置？"
+  },
+  "tabs": {
+    "a11y": "无障碍",
+    "advanced": "高级",
+    "auto": "自动",
+    "components": "组件",
+    "custom": "自定义主题",
+    "import": "导入",
+    "theme": "主题",
+    "themePack": "主题包",
+    "typography": "字体",
+    "wallpaper": "壁纸"
+  },
+  "theme": {
+    "dark": "深色",
+    "light": "浅色",
+    "system": "跟随系统"
+  },
+  "themeLabel": "主题",
+  "themePack": {
+    "apply": "应用",
+    "description": "插件贡献的一键套装——主题、字体、壁纸、密度、圆角与动效一起应用。",
+    "empty": "暂无可用主题包。启用一个贡献 themePacks 的插件后会显示在这里。",
+    "title": "主题包"
+  },
+  "title": "外观",
+  "usageDisplay": {
+    "hint": {
+      "detailed": "全部区块展开，附带额外列、每会话明细与原始快照。",
+      "simplified": "仅显示关键统计卡片与当前窗口仪表，图表折叠为摘要。",
+      "standard": "完整仪表盘，含图表与模型、会话表格。"
+    },
+    "label": "用量展示模式",
+    "mode": {
+      "detailed": "详细",
+      "simplified": "简化",
+      "standard": "标准"
+    }
+  },
+  "vscode": {
+    "activateButton": "应用",
+    "activeLabel": "使用中",
+    "browse": "浏览文件",
+    "cancelButton": "取消",
+    "deactivateButton": "使用预设",
+    "description": "拖入 VSCode 配色 JSON 或 .vsix 包。仅读取颜色 token，扩展代码会被忽略。",
+    "disablePlugin": {
+      "body": "禁用插件「{name}」？该插件提供的主题会从画廊中移除。已经激活并复制到本地的自定义主题会保留。",
+      "cancel": "取消",
+      "confirm": "禁用",
+      "title": "禁用插件？"
+    },
+    "drop": "拖入 .json 或 .vsix 文件",
+    "errorParse": "无法解析主题文件。",
+    "errorTitle": "导入失败",
+    "errorVsix": "无法读取 .vsix 包。",
+    "filter": {
+      "all": "全部",
+      "dark": "深色",
+      "light": "浅色"
+    },
+    "history": "历史",
+    "importButton": "导入",
+    "importShort": "导入…",
+    "imported": "已导入 {count} 个主题。",
+    "legend": "VSCode 风格预设",
+    "manifestTitle": "已从 VSCode 导入",
+    "menu": {
+      "aria": "{name} 操作菜单",
+      "delete": "删除导入",
+      "disablePlugin": "禁用来源插件",
+      "editCopy": "编辑副本",
+      "setActive": "设为活跃"
+    },
+    "noResults": "没有匹配当前筛选的主题。",
+    "noThemes": "包内没有主题。",
+    "removeButton": "移除",
+    "search": {
+      "placeholder": "搜索 VSCode 主题…"
+    },
+    "selectThemes": "选择要导入的主题",
+    "source": {
+      "builtin": "内置",
+      "fromPlugin": "来自插件「{name}」",
+      "imported": "已导入"
+    },
+    "timeout": "解析超时，可能是文件损坏。请尝试更小的 .vsix 文件。",
+    "title": "导入 VSCode 主题",
+    "variant": {
+      "dark": "深色",
+      "light": "浅色"
+    }
+  },
+  "wallpaper": {
+    "addCustom": "自定义",
+    "aria": {
+      "delete": "删除 {name}"
+    },
+    "blurLabel": "模糊",
+    "browse": "浏览文件",
+    "deleteLabel": "删除壁纸",
+    "description": "把图片、渐变或纯色用作背景。内置预设已自带，上传的文件保留在本机。",
+    "dropHint": "把图片拖到这里，或点击下方按钮",
+    "enabledLabel": "启用背景",
+    "formats": "PNG、JPEG、WebP、GIF、AVIF · 不超过 32 MB",
+    "galleryTitle": "图库",
+    "gradient": {
+      "angle": "角度",
+      "end": "结束色",
+      "namePlaceholder": "渐变名称",
+      "save": "加入图库",
+      "start": "起始色",
+      "title": "构建渐变"
+    },
+    "invalidType": "不支持的文件类型，请使用 PNG / JPEG / WebP / GIF / AVIF。",
+    "noActive": "未选择壁纸。",
+    "opacity": {
+      "autoFix": "一键修复",
+      "contrastLabel": "估算文字对比度",
+      "fail": "文字几乎无法辨认，请降低不透明度以恢复对比度。",
+      "warn": "低于 WCAG AA 标准 — 文字可能难以阅读"
+    },
+    "opacityLabel": "不透明度",
+    "pluginBadge": "插件",
+    "positionCenter": "居中",
+    "positionContain": "适应",
+    "positionCover": "覆盖",
+    "positionLabel": "位置",
+    "positionTile": "平铺",
+    "scope": {
+      "all": {
+        "desc": "包含侧栏在内的全部界面",
+        "label": "整个应用"
+      },
+      "canvas": {
+        "desc": "仅工作台 / 画布",
+        "label": "画布"
+      },
+      "chat": {
+        "desc": "仅聊天面板",
+        "label": "聊天区"
+      },
+      "global": {
+        "desc": "不含侧栏",
+        "label": "主内容区"
+      },
+      "legend": "背景作用范围",
+      "sidebar": {
+        "desc": "仅导航侧栏",
+        "label": "侧栏"
+      }
+    },
+    "scopeAll": "整个应用",
+    "scopeCanvas": "画布面板",
+    "scopeChat": "聊天面板",
+    "scopeGlobal": "全局",
+    "scopeLabel": "作用范围",
+    "scopeSidebar": "侧栏",
+    "title": "壁纸",
+    "tooLarge": "文件过大（不超过 32 MB）。",
+    "uploadHint": "把图片拖到这里或点击浏览",
+    "uploading": "上传中…"
+  }
+}

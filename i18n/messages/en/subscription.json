@@ -1,0 +1,568 @@
+{
+  "account": {
+    "errorTitle": "Action failed",
+    "expiresLabel": "Token expires",
+    "keychainNoticeBody": "Tokens are stored in your OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Cognia-next never writes to ~/.claude/.credentials.json — that file is owned by the official Claude Code CLI.",
+    "keychainNoticeTitle": "About your credentials",
+    "modeLine": "{mode} flow",
+    "planLine": "{plan} · {mode}",
+    "refresh": "Refresh now",
+    "scopeLabel": "Scope",
+    "signInCta": "Sign in",
+    "signOut": "Sign out",
+    "signedOutBody": "Authorize cognia-next with your Claude account.",
+    "signedOutTitle": "Not signed in",
+    "unknownEmail": "Signed in (no email reported)"
+  },
+  "balance": {
+    "description": "Remaining credit / quota for this account's provider.",
+    "empty": "No balance fetched yet. Click Refresh.",
+    "error": "Balance query failed: {message}",
+    "fetchedAt": "Updated {time}",
+    "noValue": "—",
+    "refresh": "Refresh",
+    "remaining": "remaining",
+    "total": "Total {value}",
+    "unavailable": "Balance lookup isn't available for this provider.",
+    "used": "Used {value}"
+  },
+  "codex": {
+    "account": {
+      "expiresLabel": "Token expires",
+      "planLine": "{plan} · {mode}",
+      "refresh": "Refresh token now",
+      "revokeOnSignOut": "Revoke server-side",
+      "revokeOnSignOutHint": "Also tells auth.openai.com to invalidate this token. Off by default — local-only sign out is reversible.",
+      "signedOutBody": "Sign in to use Codex as an external agent.",
+      "signedOutTitle": "No accounts yet",
+      "unknownEmail": "(no email reported)"
+    },
+    "description": "Sign in with your ChatGPT account or paste an OpenAI API key. The active account is used by the codex external agent.",
+    "login": {
+      "actions": {
+        "cancel": "Cancel",
+        "close": "Close",
+        "startOauth": "Start OAuth"
+      },
+      "modeGroupLabel": "Sign-in mode",
+      "modes": {
+        "oauth": {
+          "description": "Start a fresh sign-in with ChatGPT. Opens auth.openai.com with the codex-cli first-party client_id.",
+          "label": "Device-code OAuth"
+        },
+        "reuse": {
+          "description": "Adopt an existing credential from `~/.codex/auth.json` or codex-cli's keyring entry. Read-only — we never write back.",
+          "label": "Reuse codex-cli"
+        }
+      },
+      "oauth": {
+        "accessDenied": "Sign-in cancelled at the OpenAI side.",
+        "expired": "The device code expired. Restart the sign-in.",
+        "granted": "Signed in.",
+        "openVerificationUri": "Open verification page",
+        "pasteHint": "Visit the page, paste the user code shown above, and wait. We're polling for you.",
+        "polling": "Waiting for the OAuth server to confirm…",
+        "saveFailed": "Couldn't save the credential: {error}",
+        "starting": "Requesting a device code from auth.openai.com…",
+        "userCodeLabel": "User code",
+        "verificationUriLabel": "Verification URL"
+      },
+      "reuse": {
+        "adopt": "Adopt this credential",
+        "adoptFailed": "Couldn't adopt the credential: {error}",
+        "adopted": "Adopted.",
+        "authJsonPath": "auth.json path",
+        "authMode": "Auth mode",
+        "email": "Email",
+        "lastRefresh": "Last refresh",
+        "noneFound": "No codex-cli credential found. Either install codex-cli and run `codex login`, or switch to the OAuth flow.",
+        "notAdoptable": "This credential has neither a ChatGPT bearer nor an OpenAI API key — we can't adopt it. Run `codex login` to refresh.",
+        "plan": "Plan",
+        "rescan": "Re-scan",
+        "scanning": "Looking for codex-cli credentials…",
+        "sourceFile": "~/.codex/auth.json",
+        "sourceKeyring": "codex-cli OS keyring entry",
+        "sourceLabel": "Source"
+      },
+      "title": "Sign in with Codex"
+    },
+    "overview": {
+      "activeTitle": "Active Codex account",
+      "authMode": "Auth mode",
+      "authModeApiKey": "API key",
+      "authModeChatGpt": "ChatGPT",
+      "noUsageBody": "OpenAI doesn't expose the unified rate-limit headers Claude does. The Account tab still shows the credential's plan + expiry.",
+      "noUsageTitle": "Usage isn't surfaced for Codex",
+      "signInCta": "Add account",
+      "signedOutBody": "Add a Codex account to enable the codex external agent.",
+      "signedOutTitle": "No active Codex account"
+    },
+    "settings": {
+      "autoRefresh": {
+        "description": "Refresh ChatGPT bearers automatically when ~5 minutes remain. Off uses lazy refresh on the next 401.",
+        "label": "Refresh automatically near expiry",
+        "title": "Refresh tokens near expiry"
+      },
+      "cardDescription": "Auto-refresh behavior and codex-cli reuse for this provider.",
+      "cardTitle": "Connection settings",
+      "preferDiscovered": {
+        "description": "When no Codex account is registered in cognia, read `~/.codex/auth.json` on each agent spawn. Kept as a UX hint — the runtime no longer auto-adopts; the Account tab still surfaces the discovered credential.",
+        "label": "Show codex-cli credentials in the Reuse flow",
+        "title": "Reuse codex-cli when our vault is empty"
+      },
+      "probe": {
+        "cardDescription": "Background polling of your Codex 5-hour and weekly limits.",
+        "cardTitle": "Usage tracking",
+        "enableDescription": "Periodically read the active Codex account's rate-limit windows and show them as meters. Off by default.",
+        "enableTitle": "Track usage in the background",
+        "idleHelp": "How often to refresh while the app is hidden. Minimum 60 seconds.",
+        "idleLabel": "Idle poll interval (seconds)",
+        "visibleHelp": "How often to refresh while the app is focused. Minimum 60 seconds.",
+        "visibleLabel": "Active poll interval (seconds)",
+        "warnHelp": "Highlight a window once usage reaches this percentage.",
+        "warnLabel": "Warning threshold (%)"
+      }
+    },
+    "title": "Codex (OpenAI)",
+    "webModeBanner": "Codex credentials are stored in your OS keychain — only available in the desktop app."
+  },
+  "common": {
+    "accountList": {
+      "active": "Active",
+      "addAccount": "Add account",
+      "cancel": "Cancel",
+      "confirm": "Save",
+      "empty": "No accounts yet. Add one to start using this provider.",
+      "inUseByCharacter": "Char: {name}",
+      "inUseBySession": "Session: {name}",
+      "remove": "Remove",
+      "removeConfirm": "Remove",
+      "removeDialogBody": "The credential will be deleted from the OS keychain. You can sign in again at any time.",
+      "removeDialogTitle": "Remove this account?",
+      "rename": "Rename",
+      "renameClearHint": "Leave blank to fall back to the default plan-derived label.",
+      "renameDialogTitle": "Rename account",
+      "renameLabel": "Label",
+      "renamePlaceholder": "e.g. Company Pro",
+      "secretsHidden": "Token is hidden — view the OS keychain to inspect.",
+      "setActive": "Set active",
+      "title": "Accounts"
+    },
+    "accountPreset": {
+      "ariaLabel": "Endpoint preset for this account",
+      "useDefault": "Use default"
+    },
+    "cloudSync": {
+      "cancel": "Cancel",
+      "connectionHint": "Configure the WebDAV server connection in Settings → Data → WebDAV Sync first — the subscription sync shares it.",
+      "description": "Mirror an encrypted copy of your subscription vaults (accounts, presets, active pointers) to your WebDAV server. Zero-knowledge: the server only ever sees ciphertext.",
+      "expand": "Cloud sync options",
+      "lastSyncAt": "Last synced {time}",
+      "passphraseField": "Sync passphrase",
+      "passphraseHint": "Independent from the data-backup passphrase. With “remember passphrase” enabled in Data settings it is kept in the OS keyring for unattended syncs.",
+      "passphraseRequired": "Enter the sync passphrase first.",
+      "passphraseUnlockedPlaceholder": "Unlocked — leave blank to reuse the cached passphrase",
+      "passphraseWrong": "Wrong passphrase for this snapshot.",
+      "phase": {
+        "building": "Snapshotting…",
+        "done": "Done",
+        "encrypting": "Encrypting…",
+        "uploading": "Uploading…"
+      },
+      "restoreAccountCount": "{count} account(s)",
+      "restoreApply": "Restore",
+      "restoreButton": "Restore…",
+      "restoreCreatedAt": "Snapshot from {time}",
+      "restoreDialogBody": "Download the latest subscription snapshot from WebDAV and unlock it for preview. Nothing is written until you confirm.",
+      "restoreDialogTitle": "Restore subscriptions",
+      "restoreEmpty": "The snapshot contains no vaults.",
+      "restoreFailed": "Restore failed: {error}",
+      "restoreFromDevice": "from {device}",
+      "restorePreviewBody": "Review what will be written into this device’s keyring. Existing accounts with the same id are replaced.",
+      "restorePreviewTitle": "Restore preview",
+      "restoreSuccess": "Restored {count} account(s).",
+      "restoreUnlock": "Unlock",
+      "syncFailed": "Sync failed: {error}",
+      "syncNow": "Sync now",
+      "syncSuccess": "Subscription vaults synced.",
+      "synced": "Synced",
+      "syncing": "Syncing…",
+      "title": "Cloud sync (WebDAV)"
+    },
+    "importExport": {
+      "cancel": "Cancel",
+      "confirmImport": "Import",
+      "description": "Export your subscription vaults as an encrypted file so you can restore them on another machine.",
+      "downloading": "Preparing download…",
+      "exportButton": "Export…",
+      "exportDialogBody": "Pick a passphrase. The file is encrypted with AES-GCM using PBKDF2-SHA256 (600 000 iterations) so the passphrase is the only thing standing between this backup and your tokens.",
+      "exportDialogTitle": "Export subscription vaults",
+      "exportFailed": "Export failed: {error}",
+      "exportSuccess": "Saved encrypted backup.",
+      "fileField": "Backup file",
+      "fileFieldHint": "Drop a `.cogniabak` file here or click to choose.",
+      "importButton": "Import…",
+      "importDialogBody": "Pick an encrypted backup file and enter the passphrase used when it was created.",
+      "importDialogTitle": "Import subscription vaults",
+      "importFailed": "Import failed: {error}",
+      "importSuccess": "Imported {count, plural, =1 {1 account} other {# accounts}}.",
+      "passphraseConfirmField": "Confirm passphrase",
+      "passphraseEmpty": "Passphrase must not be empty.",
+      "passphraseField": "Passphrase",
+      "passphraseMismatch": "Passphrases do not match.",
+      "passphraseWrong": "The passphrase didn't decrypt this file.",
+      "preview": {
+        "apply": "Apply import",
+        "decrypting": "Decrypting (PBKDF2 600 000 iterations)…",
+        "description": "Review what this file will write back before applying. Existing accounts with the same id are upserted; presets and active-account pointers are restored from the file.",
+        "empty": "This backup is empty — no accounts or presets to import.",
+        "hasPreset": "Preset",
+        "noAccounts": "No accounts (preset / pointer only).",
+        "title": "Preview the backup",
+        "unlock": "Decrypt & preview"
+      },
+      "title": "Backup"
+    },
+    "preset": {
+      "addPreset": "Add preset",
+      "baseUrlField": "Base URL",
+      "baseUrlPlaceholder": "https://bedrock-runtime.us-west-2.amazonaws.com",
+      "cancel": "Cancel",
+      "customTemplate": "Custom endpoint",
+      "defaultBadge": "Default",
+      "defaultModelField": "Default model (optional)",
+      "defaultModelPlaceholder": "e.g. claude-sonnet-4-5",
+      "description": "Override the upstream base URL. Useful for AWS Bedrock, Azure OpenAI, OpenRouter, and other relays.",
+      "editPreset": "Edit preset",
+      "fastModelField": "Fast model (optional)",
+      "fastModelPlaceholder": "e.g. claude-haiku-4-5",
+      "headersField": "Extra headers (optional)",
+      "headersHint": "One per line, `Key: Value`. Sent on every request.",
+      "labelField": "Label",
+      "labelPlaceholder": "e.g. AWS Bedrock",
+      "modelMappingHint": "Remaps the model env vars passed to the provider. Leave blank to keep the upstream default.",
+      "newFromTemplate": "New from template",
+      "noPreset": "No preset configured.",
+      "presetActive": "Preset active",
+      "presetInactive": "Direct endpoint",
+      "removeConfirmDescription": "\"{label}\" will be cleared and the provider will use its built-in endpoint. You can re-add it any time.",
+      "removeConfirmTitle": "Remove this preset?",
+      "removePreset": "Remove preset",
+      "save": "Save preset",
+      "setDefault": "Set default",
+      "title": "Third-party endpoint",
+      "validationEmptyBaseUrl": "Base URL is required.",
+      "validationEmptyKey": "Header keys must not be blank.",
+      "validationInvalidUrl": "Base URL must be a valid URL."
+    },
+    "switchToast": {
+      "cleared": "Active account cleared.",
+      "switchFailed": "Couldn't switch active account: {error}",
+      "switched": "Active account switched to {label}."
+    }
+  },
+  "customSources": {
+    "add": "Add custom source",
+    "cancel": "Cancel",
+    "description": "Wire any coding-plan or relay provider into the limits panel by describing its balance/usage endpoint — no code needed.",
+    "edit": "Edit",
+    "empty": "No custom sources yet.",
+    "fields": {
+      "auth": "Authorization",
+      "authBearer": "Bearer token",
+      "authRaw": "Raw key (no scheme)",
+      "baseUrl": "Base URL",
+      "extraHeaderName": "Extra header (name)",
+      "extraHeaderValue": "Extra header (value)",
+      "kind": "Reading type",
+      "kindBalance": "Credit balance",
+      "kindWindow": "Usage window",
+      "name": "Name",
+      "namePlaceholder": "My relay",
+      "path": "Request path",
+      "remainingPath": "Remaining field path",
+      "resetAtPath": "Reset time path",
+      "scale": "Scale",
+      "token": "Token",
+      "tokenPlaceholder": "API key / access token",
+      "totalPath": "Total field path",
+      "unit": "Unit",
+      "usedPath": "Used field path",
+      "usedPctPath": "Used-percent path",
+      "windowLabel": "Window label"
+    },
+    "presets": {
+      "codingPlanCount": "Coding plan (count windows)",
+      "custom": "Custom (blank)",
+      "genericBalance": "Generic credit balance",
+      "githubCopilot": "GitHub Copilot",
+      "label": "Preset",
+      "newApi": "New-API relay (one-api)"
+    },
+    "remove": "Remove",
+    "save": "Save",
+    "securityCaveat": "Tokens for custom sources are stored locally in app settings, not the OS keychain.",
+    "test": "Test",
+    "testError": "Test failed: {error}",
+    "testNoData": "No usable data returned — check your paths.",
+    "testOk": "Got: {summary}",
+    "testing": "Testing…",
+    "title": "Custom sources",
+    "webModeHint": "Custom sources require the desktop build — queries run through the native HTTP bridge."
+  },
+  "description": "Sign in with your Claude Pro/Max subscription or Anthropic Console account to use OAuth authentication and monitor your 5-hour and 7-day rate-limit windows in real time.",
+  "limits": {
+    "amountLeft": "{amount} left",
+    "description": "Subscription limits and usage for this account.",
+    "empty": "No limit data fetched yet. Click Refresh.",
+    "error": "Limit query failed: {message}",
+    "fetchedAt": "Updated {time}",
+    "meter": {
+      "credit": "Credit balance",
+      "overage": "Pay-as-you-go overage",
+      "session": "Current session",
+      "weekly": "Current week (all models)",
+      "weekly_opus": "Current week (Opus only)",
+      "weekly_sonnet": "Current week (Sonnet only)"
+    },
+    "noMeters": "No limit windows reported for this account.",
+    "noValue": "—",
+    "percentUsed": "{pct}% used",
+    "refresh": "Refresh",
+    "resetExpired": "Resets shortly",
+    "resetsInHm": "Resets in {hours}h {minutes}m",
+    "resetsInM": "Resets in {minutes}m",
+    "unavailable": "Limit lookup isn't available for this provider."
+  },
+  "login": {
+    "actions": {
+      "cancel": "Cancel",
+      "openAuthorize": "Open authorization page",
+      "signIn": "Sign in"
+    },
+    "awaitingCode": "Authorize cognia-next on the page that just opened, then paste the displayed code back here.",
+    "chooseMode": "Choose which Claude account to authorize.",
+    "codeFieldLabel": "Authorization code (or full callback URL)",
+    "codeFieldPlaceholder": "Paste the code or URL the redirect page showed you",
+    "done": "Signed in.",
+    "errors": {
+      "codeMalformed": "Couldn't find a code in that input. Paste either the code or the full callback URL.",
+      "flowStateMissing": "Lost the OAuth flow state — please restart the sign-in.",
+      "stateMismatch": "OAuth state mismatch — possible CSRF. Restart the sign-in."
+    },
+    "exchanging": "Exchanging the code for a token…",
+    "modeGroupLabel": "OAuth flow",
+    "modes": {
+      "console": {
+        "description": "Authorize via console.anthropic.com. Uses your billed API credits.",
+        "label": "Console (API billing)"
+      },
+      "subscription": {
+        "description": "Authorize via claude.ai. Uses your subscription's 5h / 7d rolling quota.",
+        "label": "Subscription (Pro / Max)"
+      }
+    },
+    "pasteHint": "If the page didn't open automatically, click the link below. After authorizing, copy the code or the full callback URL into the box.",
+    "reopenLink": "Re-open authorization page",
+    "title": "Sign in with Claude"
+  },
+  "migration": {
+    "toastBody": "Migrated {count, plural, =1 {1 legacy account} other {# legacy accounts}} into the new vault.",
+    "toastTitle": "Subscription module upgraded"
+  },
+  "opencode": {
+    "description": "Discover credentials from `~/.local/share/opencode/auth.json` and paste an OpenCode-Zen subscription key. OpenCode itself manages many providers; we surface only the whitelisted ones.",
+    "discovery": {
+      "description": "Read-only probe of the OpenCode CLI's auth.json. We never write back.",
+      "empty": "No whitelisted entries in auth.json. Run opencode auth for one of: Anthropic, OpenAI, OpenCode Zen, or OpenCode Go.",
+      "kindApiKey": "API key",
+      "kindLabel": "Kind",
+      "kindOauth": "OAuth",
+      "kindUnknown": "Unknown",
+      "pathLabel": "auth.json",
+      "rescan": "Re-scan",
+      "scanning": "Scanning auth.json…",
+      "subProviderLabel": "Provider",
+      "title": "Discovered in OpenCode"
+    },
+    "title": "OpenCode",
+    "webModeBanner": "OpenCode credentials are stored in your OS keychain — only available in the desktop app.",
+    "zen": {
+      "accessTokenField": "Zen API key",
+      "accessTokenPlaceholder": "Paste the key opencode.ai/auth showed you",
+      "addKey": "Add Zen key",
+      "baseUrlField": "Base URL (optional)",
+      "baseUrlPlaceholder": "Leave blank to use the default Zen endpoint",
+      "cancel": "Cancel",
+      "description": "Paste the API key from opencode.ai (Zen pay-per-request or Go flat-rate). Full OAuth is on the roadmap once the endpoint surface is documented.",
+      "labelField": "Label (optional)",
+      "labelPlaceholder": "OpenCode Zen",
+      "labelPlaceholderGo": "OpenCode Go",
+      "pasteKey": "Paste Zen API key",
+      "planField": "Plan",
+      "planGo": "Go (flat-rate)",
+      "planZen": "Zen (pay per request)",
+      "save": "Save Zen key",
+      "saveFailed": "Couldn't save the key: {error}",
+      "title": "OpenCode subscription key"
+    }
+  },
+  "overview": {
+    "approachingLimit": "Approaching limit",
+    "authoritative": "authoritative",
+    "fiveHourTitle": "5-hour window",
+    "noSampleBody": "Send a chat message to populate usage, or run a probe from Settings.",
+    "noSampleTitle": "Waiting for first sample",
+    "sevenDayTitle": "7-day window",
+    "signInCta": "Sign in",
+    "signedOutBody": "Sign in with your Claude account to monitor 5h/7d rate-limit windows.",
+    "signedOutTitle": "Not signed in",
+    "status": {
+      "allowed": "All clear",
+      "allowed_warning": "Warning",
+      "rate_limited": "Rate limited",
+      "unknown": "Status unknown"
+    },
+    "statusFetched": "Last sample {when}",
+    "windowMissing": "No data for this window yet."
+  },
+  "providers": {
+    "anthropic": "Claude",
+    "codex": "Codex",
+    "opencode": "OpenCode"
+  },
+  "settings": {
+    "actions": {
+      "reset": "Reset to defaults",
+      "save": "Save"
+    },
+    "probe": {
+      "description": "Periodically send a near-empty /v1/messages request and persist the rate-limit headers. Each probe consumes ~10 input + 1 output tokens of your quota.",
+      "enableHelp": "Off by default. Passive collection from your real chat traffic always runs and is preferred.",
+      "enableLabel": "Enable active probe",
+      "idleHelp": "Floor 60 seconds. Use a higher value to save quota in the background.",
+      "idleLabel": "Cadence when this page is hidden (seconds)",
+      "title": "Active probe",
+      "visibleHelp": "Floor 60 seconds.",
+      "visibleLabel": "Cadence when this page is visible (seconds)"
+    },
+    "threshold": {
+      "description": "Highlights the Overview tab when utilization crosses this percentage.",
+      "help": "0–100. Default 90.",
+      "label": "Warn at (%)",
+      "title": "Warning threshold"
+    }
+  },
+  "tabs": {
+    "account": "Account",
+    "overview": "Overview",
+    "settings": "Settings",
+    "usage": "Usage"
+  },
+  "title": "Claude Subscription",
+  "usage": {
+    "col": {
+      "fetchedAt": "Fetched at",
+      "fiveHour": "5h",
+      "sevenDay": "7d",
+      "source": "Source",
+      "status": "Status"
+    },
+    "collapseAll": "Collapse all",
+    "costOverTime": {
+      "description": "Estimated daily spend across the selected range.",
+      "empty": "No usage in this range yet.",
+      "title": "Cost over time"
+    },
+    "display": {
+      "aria": "Usage display mode",
+      "detailed": "Detailed",
+      "simplified": "Simplified",
+      "standard": "Standard"
+    },
+    "emptyBody": "Send a chat message or enable the active probe to populate this table.",
+    "emptyTitle": "No usage samples yet",
+    "expandAll": "Expand all",
+    "export": {
+      "csv": "Download CSV",
+      "json": "Download JSON",
+      "label": "Export"
+    },
+    "loading": "Loading…",
+    "models": {
+      "cacheHitRate": "Cache hit rate",
+      "colCache": "Cache read",
+      "colCacheWrite": "Cache write",
+      "colCost": "Cost",
+      "colInput": "Input",
+      "colModel": "Model",
+      "colOutput": "Output",
+      "colTurns": "Turns",
+      "description": "Per-model tokens and estimated cost. Costs the SDK did not report are back-filled from model pricing.",
+      "donutCenter": "Total",
+      "empty": "No usage in this range yet.",
+      "title": "Cost by model",
+      "totalCost": "Total cost",
+      "totalTokens": "Total tokens",
+      "totalTurns": "Total turns"
+    },
+    "range": {
+      "30d": "Last 30 days",
+      "7d": "Last 7 days",
+      "all": "All time",
+      "label": "Time range"
+    },
+    "surface": {
+      "agentTeam": "Agent Team",
+      "all": "All",
+      "chat": "Chat",
+      "label": "Surface",
+      "workflow": "Workflow"
+    },
+    "tableDescription": "Newest 200 entries. Passive samples come from real chat traffic; probe samples are generated by the optional active probe.",
+    "tableTitle": "Recent samples",
+    "topSessions": {
+      "colActions": "Actions",
+      "colCost": "Cost",
+      "colInput": "Input",
+      "colOutput": "Output",
+      "colSession": "Session",
+      "colTokens": "Tokens",
+      "colTurns": "Turns",
+      "description": "Aggregated from sessionUsage rows persisted on each SDK result event. Helps spot which conversations are running up the bill.",
+      "empty": "No persisted usage rows yet. Run a chat to populate.",
+      "loading": "Loading…",
+      "resume": "Resume",
+      "title": "Top sessions by cost",
+      "untitled": "(untitled)"
+    },
+    "trend": {
+      "description": "5-hour and 7-day window utilization over the selected range.",
+      "empty": "No snapshots in this range yet.",
+      "fiveHour": "5h",
+      "sevenDay": "7d",
+      "title": "Utilization trend"
+    },
+    "window": {
+      "description": "Live utilization from the newest rate-limit snapshot, with time until each window resets.",
+      "fallback": "Fallback buffer at {pct}%.",
+      "fiveHour": "5-hour window",
+      "level": {
+        "crit": "At limit",
+        "ok": "Healthy",
+        "warn": "Approaching limit"
+      },
+      "noData": "not reported",
+      "noSnapshot": "No quota snapshot yet. Send a chat message or enable the active probe.",
+      "overageDisabled": "Overage disabled: {reason}.",
+      "representative": "Representative",
+      "resetExpired": "Resetting now",
+      "resetUnknown": "Reset time unknown",
+      "resetsInHm": "Resets in {hours}h {minutes}m",
+      "resetsInM": "Resets in {minutes}m",
+      "sevenDay": "7-day window",
+      "title": "Current quota windows"
+    }
+  },
+  "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app."
+}

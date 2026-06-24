@@ -1,0 +1,467 @@
+{
+  "channelList": {
+    "bulk": {
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
+      "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
+      "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
+      "pin": "Pin",
+      "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
+      "selectedCount": "{count, plural, one {# selected} other {# selected}}",
+      "unpin": "Unpin",
+      "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
+    },
+    "conversationsTitle": "Conversations",
+    "directMessages": "Direct Messages",
+    "emptyDm": "No chats yet. Pick a character to begin.",
+    "emptyTeam": "No conversations yet. Start one above.",
+    "groupOther": "Other",
+    "newChat": "New chat",
+    "newConversation": "New conversation",
+    "openSessions": "Open sessions",
+    "teamFallback": "Team"
+  },
+  "commandPalette": {
+    "actions": {
+      "checkUpdates": "Check for updates",
+      "clearChat": "Clear current conversation",
+      "exportMd": "Export current chat as Markdown",
+      "manageApiKey": "Manage API key",
+      "manageCharacters": "Manage characters",
+      "manageMcp": "Manage MCP servers",
+      "manageSkills": "Manage skills",
+      "manageTeams": "Manage teams",
+      "newChat": "New chat",
+      "newChatHint": "new",
+      "openFolder": "Open folder as workspace…",
+      "openSettings": "Open settings",
+      "toggleTheme": "Toggle theme"
+    },
+    "description": "Search for commands and sessions",
+    "empty": "No matches found.",
+    "groups": {
+      "actions": "Actions",
+      "newChat": "New chat with character",
+      "pluginActions": "Plugin actions",
+      "sessions": "Sessions",
+      "settings": "Settings",
+      "switchTeam": "Switch to team",
+      "workspaces": "Switch workspace"
+    },
+    "placeholder": "Type a command or session name…",
+    "title": "Command palette",
+    "titles": {
+      "chatWith": "Chat with {name}"
+    },
+    "toasts": {
+      "conversationCleared": "Conversation cleared.",
+      "nothingToExport": "Nothing to export — start a conversation first.",
+      "openFolderDesktopOnly": "Opening folders as workspaces is only available in the desktop build.",
+      "upToDate": "You're on the latest version.",
+      "updateAvailable": "Update available: {version}",
+      "updateFailed": "Update check failed: {message}",
+      "updatesDesktopOnly": "Updates are only available in the desktop build."
+    }
+  },
+  "guildRail": {
+    "agentRuns": "Agent runs",
+    "agentTeams": "Agent teams",
+    "auxiliaryGroup": "Profile and logs",
+    "canvas": "Canvas",
+    "createTeam": "Create team",
+    "customize": {
+      "description": "Pin the items you use most to the rail; the rest collapse into the More menu. Drag to reorder, or hide items you never use.",
+      "dragHint": "Drag to reorder",
+      "hidden": "Hidden",
+      "hiddenEmpty": "Nothing hidden.",
+      "hideItem": "Hide",
+      "more": "In More menu",
+      "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
+      "moveToMore": "Move to More",
+      "pin": "Pin to rail",
+      "pinned": "Pinned",
+      "pinnedEmpty": "No pinned items — everything is in the More menu.",
+      "restoreDefaults": "Restore defaults",
+      "showItem": "Show",
+      "title": "Customize sidebar"
+    },
+    "directMessages": "Direct Messages",
+    "discover": "Discover",
+    "eval": "Evaluation",
+    "featuresGroup": "Features",
+    "goals": "Goals",
+    "inbox": "Inbox",
+    "label": "Guild rail",
+    "logs": "Logs",
+    "me": "Me",
+    "memory": "Memory",
+    "more": "More",
+    "observability": "Observability",
+    "openSettings": "Open settings",
+    "performance": "Performance",
+    "pet": "Pet",
+    "plugins": "Plugins",
+    "scheduler": "Scheduler",
+    "settings": "Settings",
+    "skills": "Skills",
+    "sourceControl": "Source Control",
+    "twin": "Digital twin",
+    "workflows": "Workflows",
+    "workspacesGroup": "Workspaces"
+  },
+  "jobCenter": {
+    "actions": {
+      "cancel": "Cancel",
+      "cancelAria": "Cancel background run {runId}",
+      "clearSettled": "Clear settled",
+      "collect": "Collect",
+      "collectAria": "Collect background run {runId}"
+    },
+    "description": "Background subagent runs started by dispatch_agent.",
+    "duration": {
+      "minutesSeconds": "{minutes}m {seconds}s",
+      "seconds": "{seconds}s"
+    },
+    "empty": {
+      "activeDescription": "Detached subagents will appear here while they are still running.",
+      "activeTitle": "No active background jobs",
+      "historyDescription": "Done, failed, and interrupted runs remain here until cleared.",
+      "historyTitle": "No background history"
+    },
+    "fields": {
+      "elapsed": "Elapsed: {value}",
+      "startedAt": "Started: {value}"
+    },
+    "open": "Open Job Center",
+    "status": {
+      "done": "Done",
+      "error": "Error",
+      "interrupted": "Interrupted",
+      "running": "Running"
+    },
+    "tabs": {
+      "active": "Active",
+      "history": "History"
+    },
+    "title": "Job Center",
+    "toast": {
+      "cancelUnavailable": "This background run is no longer cancellable.",
+      "cancelled": "Background run cancelled.",
+      "clearFailed": "Could not clear settled jobs: {error}",
+      "cleared": "Settled background jobs cleared.",
+      "collectFailed": "Could not collect background result: {error}",
+      "collectMissing": "That background run is no longer available.",
+      "collected": "Background result collected."
+    },
+    "trigger": "Jobs"
+  },
+  "memberList": {
+    "charsCount": "{count} chars",
+    "empty": "No members.",
+    "heading": "Members — {count}",
+    "hide": "Hide member list",
+    "label": "Team members",
+    "mentionTitle": "Mention {name}",
+    "notesPlaceholder": "Notes injected into every member's transcript on each turn…",
+    "sharedNotes": "Shared notes",
+    "show": "Show member list",
+    "statusLabel": "Status: {status}",
+    "stopMember": "Stop this member"
+  },
+  "menu": {
+    "edit": {
+      "copy": "Copy",
+      "cut": "Cut",
+      "find": "Find…",
+      "label": "Edit",
+      "paste": "Paste",
+      "redo": "Redo",
+      "selectAll": "Select All",
+      "undo": "Undo"
+    },
+    "file": {
+      "label": "File",
+      "newAgentTeam": "New Agent Team",
+      "newCharacter": "New Character",
+      "newChat": "New Chat",
+      "newWorkflow": "New Workflow",
+      "openLogs": "Open Logs",
+      "openSettings": "Settings…",
+      "openWorkspace": "Open Workspace…",
+      "quit": "Quit Cognia",
+      "recentSessions": "Recent Sessions",
+      "recentSessionsEmpty": "No recent sessions"
+    },
+    "go": {
+      "a2ui": "Mini-Apps",
+      "agentTeams": "Agent Teams",
+      "canvas": "Canvas",
+      "discover": "Discover",
+      "dms": "Direct Messages",
+      "inbox": "Inbox",
+      "label": "Go",
+      "logs": "Logs",
+      "plugins": "Plugins",
+      "scheduler": "Scheduler",
+      "settings": "Settings",
+      "skills": "Skills",
+      "twin": "Twin Workbench",
+      "workflows": "Workflows"
+    },
+    "help": {
+      "about": "About Cognia",
+      "documentation": "Documentation",
+      "keyboardShortcuts": "Keyboard Shortcuts…",
+      "keyboardShortcutsClose": "Close",
+      "keyboardShortcutsDescription": "All shortcuts surfaced by the Cognia desktop chrome.",
+      "keyboardShortcutsTitle": "Keyboard Shortcuts",
+      "label": "Help"
+    },
+    "run": {
+      "agentTeams": "Agent Teams",
+      "killSwitch": "Automation Kill-Switch",
+      "label": "Run",
+      "newWorkflowRun": "New Workflow Run",
+      "openScheduler": "Open Scheduler"
+    },
+    "shortcut": {
+      "cmdOrCtrl0": "Ctrl+0",
+      "cmdOrCtrl1": "Ctrl+1",
+      "cmdOrCtrl2": "Ctrl+2",
+      "cmdOrCtrl3": "Ctrl+3",
+      "cmdOrCtrl4": "Ctrl+4",
+      "cmdOrCtrl5": "Ctrl+5",
+      "cmdOrCtrl6": "Ctrl+6",
+      "cmdOrCtrl7": "Ctrl+7",
+      "cmdOrCtrl8": "Ctrl+8",
+      "cmdOrCtrlAltI": "Ctrl+Alt+I",
+      "cmdOrCtrlB": "Ctrl+B",
+      "cmdOrCtrlComma": "Ctrl+,",
+      "cmdOrCtrlF": "Ctrl+F",
+      "cmdOrCtrlMinus": "Ctrl+-",
+      "cmdOrCtrlN": "Ctrl+N",
+      "cmdOrCtrlO": "Ctrl+O",
+      "cmdOrCtrlPlus": "Ctrl+=",
+      "cmdOrCtrlR": "Ctrl+R",
+      "cmdOrCtrlShiftL": "Ctrl+Shift+L",
+      "cmdOrCtrlShiftN": "Ctrl+Shift+N",
+      "cmdOrCtrlShiftP": "Ctrl+Shift+P",
+      "ctrlAltK": "Ctrl+Alt+K",
+      "f11": "F11"
+    },
+    "terminal": {
+      "label": "Terminal",
+      "new": "New Terminal",
+      "restartSidecar": "Restart Sidecar",
+      "togglePanel": "Toggle Terminal Panel"
+    },
+    "tools": {
+      "automationKillSwitch": "Automation Kill-Switch",
+      "automationKillSwitchToastDone": "Automation halted.",
+      "automationKillSwitchToastFail": "Kill-switch failed: {message}",
+      "clearCache": "Clear Cache…",
+      "clearCacheConfirm": "Clear cached search results, TTS audio, and request snapshots? Settings and conversations are untouched.",
+      "clearCacheToastDone": "Cache cleared.",
+      "clearCacheToastFail": "Clear cache failed: {message}",
+      "commandPalette": "Command Palette…",
+      "label": "Tools",
+      "manageConnectors": "Manage Connectors…",
+      "manageMcpServer": "Manage MCP Server…",
+      "pluginDevtools": "Plugin DevTools",
+      "sidecarRestart": "Restart Sidecar",
+      "sidecarRestartToastDone": "Sidecar restarted.",
+      "sidecarRestartToastFail": "Sidecar restart failed: {message}"
+    },
+    "view": {
+      "commandPalette": "Command Palette…",
+      "label": "View",
+      "language": "Language",
+      "languageChinese": "简体中文",
+      "languageEnglish": "English",
+      "openLogs": "Open Logs",
+      "reduceMotion": "Reduce Motion",
+      "reload": "Reload",
+      "theme": "Theme",
+      "themeDark": "Dark",
+      "themeLight": "Light",
+      "themeSystem": "System",
+      "toggleDevtools": "Toggle Developer Tools",
+      "toggleFullscreen": "Toggle Full Screen",
+      "toggleGuildRail": "Toggle Guild Rail",
+      "toggleSidebar": "Toggle Sidebar",
+      "toggleStatusBar": "Toggle Status Bar",
+      "zoomIn": "Zoom In",
+      "zoomOut": "Zoom Out",
+      "zoomReset": "Reset Zoom"
+    },
+    "window": {
+      "alwaysOnTop": "Always on Top",
+      "close": "Close",
+      "label": "Window",
+      "maximize": "Maximize",
+      "minimize": "Minimize",
+      "restore": "Restore"
+    }
+  },
+  "onboarding": {
+    "apiKeyHintHost": "console.anthropic.com",
+    "apiKeyHintPrefix": "Get one at ",
+    "apiKeyHintSuffix": ". The key never leaves your machine.",
+    "apiKeyLabel": "Anthropic API key",
+    "apiKeyPlaceholder": "sk-ant-…",
+    "back": "Back",
+    "continue": "Continue",
+    "done": "Done",
+    "provider": {
+      "apiKey": {
+        "cta": "Use API key",
+        "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
+        "title": "Paste an Anthropic API key"
+      },
+      "backToChooser": "Choose a different sign-in method",
+      "claude": {
+        "cta": "Sign in with Anthropic",
+        "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
+        "title": "Claude Pro / Max"
+      },
+      "codex": {
+        "cta": "Sign in with ChatGPT",
+        "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
+        "title": "ChatGPT Plus / Pro (Codex)"
+      },
+      "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
+      "loggedInBadge": "Connected",
+      "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
+      "opencode": {
+        "cta": "Paste OpenCode key",
+        "description": "Paste an OpenCode Zen API key. Optional region override available.",
+        "title": "OpenCode Zen"
+      },
+      "title": "How do you want to sign in?"
+    },
+    "saving": "Saving…",
+    "skip": "Skip for now",
+    "step1Description": "Pick how you want to sign in. Subscription logins live in your OS keyring; pasted API keys live in your browser's IndexedDB and the embedded Node sidecar.",
+    "step1Title": "Welcome to Cognia",
+    "step2Description": "Each character carries its own system prompt and tools. You can edit, duplicate, or create more later in Settings → Characters.",
+    "step2Title": "Pick a character to start",
+    "toastNeedKey": "Paste your Anthropic API key to continue.",
+    "tour": {
+      "computerUse": {
+        "cta": "Open automation settings",
+        "description": "Computer Use is off by default. Enable it per character and pick a permission tier (off / whitelist / per-call).",
+        "title": "Let the AI drive the desktop"
+      },
+      "connectors": {
+        "cta": "Configure connectors",
+        "description": "Run the assistant as a bot in your favorite messaging platform with auto / manual / draft modes.",
+        "title": "Bridge to Telegram, Discord, Slack, Lark, OneBot"
+      },
+      "description": "These ship with Cognia today. Skip if you'd rather discover them yourself.",
+      "done": "Done",
+      "mobile": {
+        "cta": "Open companion settings",
+        "description": "Generate a 5-minute pair token, then scan it from the mobile app. Falls back from mDNS to WebRTC to Cloudflare tunnel automatically.",
+        "title": "Pair your phone over LAN or WAN"
+      },
+      "next": "Next",
+      "ocr": {
+        "cta": "Configure OCR",
+        "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
+        "title": "Extract text from images and PDFs"
+      },
+      "openSettings": "Open settings",
+      "previous": "Previous",
+      "progress": "{current} of {total}",
+      "sandbox": {
+        "cta": "Open sandbox settings",
+        "description": "Bash / Edit / Write can be routed through an OS sandbox (sandbox-exec / bwrap / Windows synthetic-user) or an opt-in e2b microVM. Strict mode refuses calls when no backend is healthy — no bypass.",
+        "title": "Shell tools run inside a sandbox"
+      },
+      "skip": "Skip tour",
+      "title": "What you can do next",
+      "twin": {
+        "cta": "Open twin settings",
+        "description": "Upload documents and the distill pipeline builds a redacted style profile you can bind to any character.",
+        "title": "Train a digital twin on your writing"
+      }
+    }
+  },
+  "sessionRow": {
+    "actionsMenu": "Session actions",
+    "branchedFrom": "Branched conversation — open parent",
+    "delete": "Delete",
+    "openInTerminal": "Open in terminal",
+    "openInTerminalFailed": "Could not export this session for the terminal",
+    "openedInTerminal": "Run in your terminal: {command}",
+    "pin": "Pin",
+    "pinned": "Pinned",
+    "rename": "Rename",
+    "unpin": "Unpin",
+    "untitled": "(untitled)"
+  },
+  "shell": {
+    "desktopOnlyBodyMiddle": " rather than ",
+    "desktopOnlyBodyPrefix": "The Claude Code agent runs in a Node sidecar that ships with the desktop build. To use the chat, launch the app with ",
+    "desktopOnlyBodySuffix": ".",
+    "desktopOnlyTitle": "Run inside Tauri",
+    "emptyTitle": "Cognia"
+  },
+  "statusBar": {
+    "awaitingApproval": "Awaiting approval",
+    "error": "Error",
+    "idle": "Idle",
+    "locale": "Language",
+    "noSession": "No session",
+    "openCommandPalette": "Open command palette",
+    "openLogs": "Open logs",
+    "permissionAcceptEdits": "Auto-accept",
+    "permissionBypass": "Bypass",
+    "permissionDefault": "Default",
+    "permissionMode": "Permission",
+    "permissionPlan": "Plan",
+    "streaming": "Streaming",
+    "switchLocale": "Switch language",
+    "tauri": "Desktop",
+    "themeDark": "Dark theme",
+    "themeLight": "Light theme",
+    "themeNext": "Switch theme",
+    "themeSystem": "System theme",
+    "toggleSidebar": "Toggle sidebar",
+    "web": "Web",
+    "zoom": "Zoom",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomReset": "Reset zoom"
+  },
+  "titleBar": {
+    "alwaysOnTop": "Always on top",
+    "appName": "Cognia",
+    "back": "Go back",
+    "close": "Close",
+    "commandCenter": {
+      "goToView": "Go to View",
+      "menuLabel": "Command center menu",
+      "noRecent": "No recent sessions",
+      "recentSessions": "Recent Sessions",
+      "untitled": "Untitled"
+    },
+    "forward": "Go forward",
+    "kbdHint": "Ctrl+K",
+    "layout": {
+      "customize": "Customize layout",
+      "title": "Customize Layout",
+      "toggleGuildRail": "Toggle Guild Rail",
+      "toggleSidebar": "Toggle Sidebar",
+      "toggleStatusBar": "Toggle Status Bar",
+      "toggleTerminal": "Toggle Terminal"
+    },
+    "maximize": "Maximize",
+    "minimize": "Minimize",
+    "openMenus": "Open menus",
+    "restore": "Restore",
+    "searchPlaceholder": "Search or run command…",
+    "separator": " — "
+  }
+}

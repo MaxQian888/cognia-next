@@ -1,0 +1,69 @@
+{
+  "candidates": {
+    "clash": "Clash / Mihomo",
+    "http": "HTTP proxy",
+    "socks5": "SOCKS5 proxy"
+  },
+  "description": "Route every outbound HTTP, HTTPS, and WebSocket request through a local proxy — Clash Verge, Mihomo, V2Ray, Shadowsocks, or any HTTP/SOCKS5 proxy.",
+  "detection": {
+    "apply": "Apply",
+    "button": "Detect now",
+    "controllerSecured": "Controller API requires a secret",
+    "currentBadge": "Active",
+    "empty": "No local proxy found on the well-known ports. Configure one manually in the General tab.",
+    "heading": "Detect a local proxy",
+    "quickClash": "Clash / Mihomo core v{version} detected on 127.0.0.1:9090 — run a detection to list its ports.",
+    "results": "Candidates",
+    "running": "Probing local ports…",
+    "source": {
+      "config": "Port read from the client's config file",
+      "port": "Found by open-port probe",
+      "process": "Client process detected, using its default port"
+    },
+    "subheading": "Discovers FlClash, Clash Verge Rev, Mihomo, and v2rayN via running processes and config files, then probes the well-known loopback ports.",
+    "webUnsupported": "Auto-detection requires the Tauri desktop app."
+  },
+  "form": {
+    "addBypass": "Add",
+    "bypass": "Bypass list",
+    "bypassHint": "Hosts and domain suffixes that should skip the proxy. Add a leading dot to match a domain suffix (e.g. \".internal\").",
+    "host": "Host",
+    "optionalPlaceholder": "Optional",
+    "password": "Password",
+    "port": "Port",
+    "protocol": "Protocol",
+    "proxyWebsocketsHint": "Tunnel Discord Gateway, Slack Socket Mode, and other WSS connections through the proxy via HTTP CONNECT or SOCKS5.",
+    "proxyWebsocketsLabel": "Proxy WebSocket connections",
+    "removeBypass": "Remove {entry} from bypass list",
+    "username": "Username"
+  },
+  "mode": {
+    "auto": "Auto-detected",
+    "manual": "Manual",
+    "off": "Off"
+  },
+  "modeHint": {
+    "auto": "Filled in via Auto-detect; behaves the same as Manual once set.",
+    "manual": "Use the host/port/credentials below.",
+    "off": "Direct connections — ignore any proxy settings."
+  },
+  "modeLabel": "Proxy mode",
+  "tabs": {
+    "detection": "Auto-detect",
+    "general": "General",
+    "test": "Test"
+  },
+  "test": {
+    "directConnection": "Direct connection — no proxy applied.",
+    "failure": "Failed",
+    "latencyMs": "Latency",
+    "proxyUrl": "Routed via",
+    "run": "Send test",
+    "running": "Sending…",
+    "statusLabel": "HTTP status",
+    "success": "Reachable",
+    "urlLabel": "Test URL",
+    "webUnsupported": "Live proxy testing requires the Tauri desktop app."
+  },
+  "title": "Network Proxy"
+}

@@ -1,0 +1,132 @@
+{
+  "bulk": {
+    "builtinSkipped": "{count, plural, one {# built-in skipped} other {# built-in skipped}}",
+    "clear": "Clear",
+    "delete": "Delete",
+    "deleteConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "description": "Permanently deletes the selected workflows and their run history. Built-in workflows are skipped.",
+      "title": "Delete {count, plural, one {# workflow} other {# workflows}}?"
+    },
+    "deleteFailed": "Failed to delete workflows",
+    "deleted": "{count, plural, one {# workflow deleted} other {# workflows deleted}}",
+    "export": "Export",
+    "exported": "Exported {count} workflow(s)",
+    "move": "Move",
+    "select": "Select",
+    "selectAll": "Select all",
+    "selected": "{count, plural, one {# selected} other {# selected}}",
+    "tag": "Add tag"
+  },
+  "createDialog": {
+    "cancel": "Cancel",
+    "create": "Create",
+    "description": "Pick a name to get started — you can refine the description and graph in the editor.",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "(optional) one-line summary",
+    "name": "Name",
+    "namePlaceholder": "Untitled workflow",
+    "title": "Create workflow"
+  },
+  "empty": {
+    "clearFilters": "Clear filters",
+    "cta": "Create workflow",
+    "description": "Build your first workflow to automate a multi-step flow across chat, triggers, and tools.",
+    "descriptionQuery": "Try a different search term or clear the filter.",
+    "filterDescription": "Try a different search or clear the filters.",
+    "filterTitle": "No matching workflows",
+    "folderDescription": "Add a workflow here, or move existing ones into this folder.",
+    "folderTitle": "This folder is empty",
+    "title": "No workflows yet",
+    "titleQuery": "No matching workflows"
+  },
+  "filter": {
+    "active": "{count, plural, one {# filter} other {# filters}}",
+    "clear": "Clear filters",
+    "hasTrigger": "Has trigger",
+    "label": "Filter",
+    "recentlyFailed": "Recently failed",
+    "type": "Type",
+    "typeAll": "All",
+    "typeBuiltin": "Built-in",
+    "typeTemplate": "Templates",
+    "typeUser": "My workflows"
+  },
+  "folders": {
+    "cancel": "Cancel",
+    "create": "New folder",
+    "createCta": "Create",
+    "createFailed": "Failed to create folder",
+    "createTitle": "Create folder",
+    "created": "Folder created",
+    "delete": "Delete folder",
+    "deleteConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete folder",
+      "description": "Its contents move up to the parent — nothing is deleted.",
+      "title": "Delete \"{name}\"?"
+    },
+    "deleted": "Folder deleted",
+    "namePlaceholder": "Folder name",
+    "open": "Open folder",
+    "removedToast": "This folder was removed.",
+    "rename": "Rename",
+    "renameTitle": "Rename folder",
+    "renamed": "Folder renamed",
+    "root": "All workflows",
+    "save": "Save",
+    "section": "Folders"
+  },
+  "import": {
+    "button": "Import",
+    "empty": "No valid workflows found",
+    "failed": "Couldn’t import {count} file(s)",
+    "success": "Imported {count} workflow(s)"
+  },
+  "move": {
+    "cancel": "Cancel",
+    "confirm": "Move here",
+    "description": "Choose a destination folder.",
+    "moveFailed": "Failed to move",
+    "moved": "Moved {count, plural, one {# workflow} other {# workflows}}",
+    "root": "All workflows (root)",
+    "title": "Move to folder"
+  },
+  "new": "New workflow",
+  "newFolder": "New folder",
+  "pinned": {
+    "section": "Pinned"
+  },
+  "searchPlaceholder": "Search workflows…",
+  "sort": {
+    "created": "Recently created",
+    "label": "Sort",
+    "nameAsc": "Name (A–Z)",
+    "nameDesc": "Name (Z–A)",
+    "runCount": "Most runs",
+    "updated": "Recently updated"
+  },
+  "statBar": {
+    "activeWorkflows": "Active workflows",
+    "failedToday": "Failed today",
+    "runs7d": "Runs (7d)",
+    "successRate": "Success rate"
+  },
+  "subtitle": "Visual orchestrations across triggers, AI, and connectors.",
+  "tag": {
+    "add": "Add tag",
+    "addFailed": "Failed to add tag",
+    "added": "Tag added",
+    "cancel": "Cancel",
+    "description": "Add a tag to the selected workflows.",
+    "placeholder": "Tag name",
+    "title": "Add tag"
+  },
+  "title": "Workflows",
+  "view": {
+    "grid": "Grid view",
+    "list": "List view",
+    "toggleAria": "Switch layout"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "defaultModel": "Default model",
+  "fontScale": "Font scale",
+  "fontScaleLg": "L",
+  "fontScaleMd": "M",
+  "fontScaleSm": "S",
+  "language": "Language",
+  "queueLabel": "Queued — desktop will apply this when online.",
+  "reconnectButton": "Reconnect WebRTC",
+  "reconnectFailed": "Reconnect failed ({reason}).",
+  "reconnectInactive": "WebRTC tier isn't active right now.",
+  "reconnectSuccess": "Reconnect requested.",
+  "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
+  "theme": "Theme",
+  "themeDark": "Dark",
+  "themeLight": "Light",
+  "themeSystem": "System",
+  "transportTier": "Transport"
+}

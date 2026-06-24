@@ -1,0 +1,69 @@
+{
+  "approvalGate": {
+    "approve": "批准",
+    "budget": {
+      "body": "本次运行已用满预算。批准以追加预算继续运行。",
+      "extraTokensLabel": "追加 tokens",
+      "extraTokensPlaceholder": "例如：50000",
+      "title": "Token 预算到达临界"
+    },
+    "cancel": "取消",
+    "deadlock": {
+      "body": "全部 teammate 因连续失败而被熔断。请选择恢复操作。",
+      "resetAll": "重置全部 teammate",
+      "resetSelected": "仅重置选中的 teammate",
+      "title": "所有 teammate 被熔断"
+    },
+    "plan": {
+      "body": "请审阅 lead 提出的方案。",
+      "title": "等待方案审批"
+    },
+    "reject": "拒绝",
+    "replan": {
+      "body": "组长根据已有结果建议调整剩余计划。批准以应用，或拒绝以按原计划继续。",
+      "title": "重新规划检查点"
+    },
+    "teammateFix": {
+      "body": "某个 teammate 出现严重错误。修复配置后重新加入，或跳过该成员。",
+      "rejoin": "重新加入",
+      "skip": "永久跳过",
+      "title": "Teammate 被禁用"
+    }
+  },
+  "defaultTeamLeadName": "组长",
+  "runs": {
+    "completedAt": "完成时间",
+    "empty": "暂无运行记录",
+    "startedAt": "开始时间"
+  },
+  "status": {
+    "cancelled": "已取消",
+    "completed": "已完成",
+    "executing": "执行中",
+    "failed": "失败",
+    "idle": "空闲",
+    "paused": "已暂停",
+    "planning": "规划中"
+  },
+  "taskStatus": {
+    "blocked": "阻塞",
+    "cancelled": "已取消",
+    "claimed": "已认领",
+    "completed": "已完成",
+    "failed": "失败",
+    "inProgress": "进行中",
+    "pending": "等待中",
+    "review": "审查中"
+  },
+  "teammateStatus": {
+    "awaitingApproval": "等待审批",
+    "cancelled": "已取消",
+    "completed": "已完成",
+    "executing": "执行中",
+    "failed": "失败",
+    "idle": "空闲",
+    "paused": "已暂停",
+    "planning": "规划中",
+    "shutdown": "已关闭"
+  }
+}

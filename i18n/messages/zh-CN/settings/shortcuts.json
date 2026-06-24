@@ -1,0 +1,13 @@
+{
+  "bindFailed": "绑定快捷键失败",
+  "cancel": "取消",
+  "conflictBlocked": "该组合键已被占用",
+  "conflictWith": "与之冲突：",
+  "description": "重新绑定全局快捷键。点击录制后按下你想要的键位组合。",
+  "desktopOnly": "全局快捷键仅在桌面端可用。",
+  "pressKey": "按下任意键…",
+  "record": "录制",
+  "resetItem": "恢复默认",
+  "save": "保存",
+  "title": "全局快捷键"
+}

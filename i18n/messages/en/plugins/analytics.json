@@ -1,0 +1,8 @@
+{
+  "colDistinctKeys": "Keys",
+  "colLastEvent": "Last event",
+  "colPlugin": "Plugin",
+  "colTotalEvents": "Total",
+  "empty": "No analytics events have been recorded yet.",
+  "loading": "Loading analytics…"
+}

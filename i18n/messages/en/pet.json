@@ -1,0 +1,293 @@
+{
+  "achievements": {
+    "adult": {
+      "description": "Reached level 10.",
+      "title": "All Grown Up"
+    },
+    "bestFriends": {
+      "description": "Maxed your bond.",
+      "title": "Best Friends"
+    },
+    "chaosGremlin": {
+      "description": "Maxed the chaos stat through frantic bursts of work.",
+      "title": "Chaos Gremlin"
+    },
+    "devotedCaretaker": {
+      "description": "Kept your pet's care quality consistently high.",
+      "title": "Devoted Caretaker"
+    },
+    "elder": {
+      "description": "Reached level 20.",
+      "title": "Elder"
+    },
+    "firstXp": {
+      "description": "Earned your first XP.",
+      "title": "First Steps"
+    },
+    "goalGetter": {
+      "description": "Completed 10 goals.",
+      "title": "Goal Getter"
+    },
+    "hatched": {
+      "description": "Your pet was born.",
+      "title": "Hatched"
+    },
+    "juvenile": {
+      "description": "Reached level 5.",
+      "title": "Juvenile"
+    },
+    "legendary": {
+      "description": "You own a legendary pet.",
+      "title": "Legendary"
+    },
+    "masterDebugger": {
+      "description": "Grew the debugging stat to its peak.",
+      "title": "Master Debugger"
+    },
+    "nursedBack": {
+      "description": "Nursed your pet back to health after it fell unwell.",
+      "title": "Nursed Back to Health"
+    },
+    "playful": {
+      "description": "Played 50 times.",
+      "title": "Playful"
+    },
+    "shinyOwner": {
+      "description": "You own a shiny pet.",
+      "title": "Shiny!"
+    },
+    "wellFed": {
+      "description": "Fed your pet 50 times.",
+      "title": "Well Fed"
+    },
+    "zenMaster": {
+      "description": "Grew the patience stat to its peak.",
+      "title": "Zen Master"
+    }
+  },
+  "actions": {
+    "clean": "Clean",
+    "feed": "Feed",
+    "pet": "Pet",
+    "play": "Play",
+    "sleep": "Sleep",
+    "talk": "Talk",
+    "treat": "Treat"
+  },
+  "binding": {
+    "clear": "Clear",
+    "empty": "No characters yet.",
+    "speciesFor": "Species for {name}",
+    "useGlobal": "Use global pet"
+  },
+  "bubbles": {
+    "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
+    "cleaned": {
+      "0": "Squeaky clean!",
+      "1": "So fresh!"
+    },
+    "error": ["Uh oh…", "That hurt.", "Let's retry."],
+    "evolved": ["I evolved!", "New me!"],
+    "fed": ["Yum!", "Tasty!", "Nom nom."],
+    "goalComplete": ["Goal smashed!", "We did it!", "Victory!"],
+    "greeting": ["Hi there!", "Welcome back!", "Hey!"],
+    "hatched": ["Hello world!", "I'm here!"],
+    "idle": {
+      "content": ["…", "Just vibing.", "All good."],
+      "grumpy": ["Hmph.", "Not now."],
+      "happy": ["Best day!", "So happy!", "☀"],
+      "lonely": ["Miss you…", "Hello?"],
+      "tired": ["So sleepy…", "Yawn…"]
+    },
+    "inboundMessage": ["You've got mail!", "Ping!"],
+    "levelUp": ["Level up!", "Getting stronger!"],
+    "petted": ["Purr…", "That's nice.", "♥"],
+    "played": ["So fun!", "Again!", "Wheee!"],
+    "review": ["Take a look?", "Ready for review."],
+    "slept": {
+      "0": "Zzz…",
+      "1": "So cozy…"
+    },
+    "success": ["Nailed it!", "Done and done.", "Yay!"],
+    "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
+    "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
+    "treated": {
+      "0": "Yummy! Thank you!",
+      "1": "Best treat ever! ♥"
+    },
+    "waiting": ["Your call!", "Waiting on you…"]
+  },
+  "care": {
+    "unwell": {
+      "body": "{name} could use some care. Feed, play, or pet to cheer them up.",
+      "bodyNoName": "Your pet could use some care. Feed, play, or pet to cheer them up.",
+      "title": "Your pet isn't feeling great"
+    }
+  },
+  "console": {
+    "hatch": "Hatch",
+    "hatchPrompt": "Your egg is ready to hatch.",
+    "loading": "Waking up your pet…",
+    "subtitle": "Raise it, dress it, grow together.",
+    "tabs": {
+      "achievements": "Achievements",
+      "binding": "Characters",
+      "customize": "Customize",
+      "dex": "Dex",
+      "nurture": "Nurture"
+    },
+    "title": "Your Pet"
+  },
+  "customize": {
+    "appearance": {
+      "description": "Dock position, motion, skin, and size.",
+      "title": "Appearance"
+    },
+    "care": {
+      "description": "Low-power mode and care alerts.",
+      "title": "Care & performance"
+    },
+    "cosmetic": {
+      "bodyOptions": {
+        "round": "Round",
+        "tall": "Tall",
+        "wide": "Wide"
+      },
+      "bodyType": "Body",
+      "default": "Default",
+      "eyes": "Eyes",
+      "eyesOptions": {
+        "dot": "Dot",
+        "sleepy": "Sleepy",
+        "spiral": "Spiral",
+        "star": "Star",
+        "wide": "Wide",
+        "wink": "Wink"
+      },
+      "hat": "Hat",
+      "hatOptions": {
+        "beanie": "Beanie",
+        "crown": "Crown",
+        "halo": "Halo",
+        "none": "None",
+        "propeller": "Propeller",
+        "tinyduck": "Tiny duck",
+        "tophat": "Top hat",
+        "wizard": "Wizard"
+      },
+      "hatchFirst": "Hatch your pet first to customize its look.",
+      "palette": "Color",
+      "paletteOptions": {
+        "amber": "Amber",
+        "lime": "Lime",
+        "magenta": "Magenta",
+        "rose": "Rose",
+        "sky": "Sky",
+        "slate": "Slate",
+        "teal": "Teal",
+        "violet": "Violet"
+      },
+      "reset": "Reset to genetics"
+    },
+    "desktop": {
+      "description": "The free-roaming overlay companion.",
+      "title": "Desktop pet"
+    },
+    "interaction": {
+      "description": "Bubbles, talking, and proactive chatter.",
+      "title": "Interaction & speech"
+    },
+    "look": {
+      "description": "Restyle your pet without changing who it is.",
+      "title": "Look"
+    },
+    "openSettings": "Open full pet settings",
+    "sound": {
+      "description": "Sound effects and quiet hours.",
+      "title": "Sound"
+    }
+  },
+  "live2d": {
+    "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."
+  },
+  "needs": {
+    "bond": "Bond",
+    "energy": "Energy",
+    "mood": "Mood"
+  },
+  "overlay": {
+    "petLabel": "Desktop pet",
+    "talkPlaceholder": "Say something to your pet…",
+    "talkSend": "Send"
+  },
+  "panel": {
+    "level": "Level {level}"
+  },
+  "quickMenu": {
+    "clickThrough": "Click-through",
+    "feed": "Feed",
+    "hideDesktopPet": "Hide desktop pet",
+    "minimize": "Minimize",
+    "openConsole": "Open pet panel",
+    "openSettings": "Open settings",
+    "pet": "Pet",
+    "play": "Play",
+    "showDesktopPet": "Show desktop pet",
+    "showMainWindow": "Show main window",
+    "talk": "Talk"
+  },
+  "rarity": {
+    "common": "Common",
+    "epic": "Epic",
+    "legendary": "Legendary",
+    "rare": "Rare",
+    "uncommon": "Uncommon"
+  },
+  "rename": {
+    "cancel": "Cancel",
+    "edit": "Rename",
+    "label": "Pet name",
+    "save": "Save name"
+  },
+  "species": {
+    "axolotl": "Axolotl",
+    "blob": "Blob",
+    "cactus": "Cactus",
+    "capybara": "Capybara",
+    "cat": "Cat",
+    "chonk": "Chonk",
+    "dragon": "Dragon",
+    "duck": "Duck",
+    "fox": "Fox",
+    "ghost": "Ghost",
+    "mushroom": "Mushroom",
+    "octopus": "Octopus",
+    "owl": "Owl",
+    "penguin": "Penguin",
+    "rabbit": "Rabbit",
+    "robot": "Robot",
+    "snail": "Snail",
+    "turtle": "Turtle"
+  },
+  "stat": {
+    "chaos": "Chaos",
+    "debugging": "Debugging",
+    "patience": "Patience",
+    "snark": "Snark",
+    "wisdom": "Wisdom"
+  },
+  "statCard": {
+    "grew": "Grew from working with you",
+    "shiny": "Shiny",
+    "unhatched": "Unhatched"
+  },
+  "talkInput": {
+    "placeholder": "Say something to your pet…",
+    "send": "Send"
+  },
+  "widget": {
+    "minimize": "Minimize pet",
+    "restore": "Show pet",
+    "toggle": "Open pet"
+  }
+}

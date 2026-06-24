@@ -1,0 +1,27 @@
+{
+  "bulkHeading": "按插件审查",
+  "col": {
+    "holders": "持有者",
+    "permission": "权限",
+    "plugins": "插件"
+  },
+  "dangerousSection": "敏感权限",
+  "emptyAll": "尚未安装任何插件。",
+  "groups": {
+    "clipboard": "剪贴板",
+    "dangerous": "危险权限",
+    "database": "数据库",
+    "filesystem": "文件系统",
+    "media": "媒体",
+    "network": "网络",
+    "session": "会话",
+    "settings": "设置"
+  },
+  "hint": "插件 manifest 中声明的权限会在安装时静默授权；可选权限与运行时新申请会弹窗提示。危险权限（shell:execute、process:spawn、python:execute、filesystem:write）会高亮显示。",
+  "holders": "{count} 个持有者",
+  "loading": "正在加载插件权限…",
+  "noPermissions": "当前没有任何已安装插件使用权限。",
+  "normalSection": "标准权限",
+  "reviewAria": "审查 {name} 的权限",
+  "title": "权限"
+}

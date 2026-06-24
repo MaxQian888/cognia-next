@@ -1,0 +1,113 @@
+{
+  "channel": {
+    "alpha": "内测版",
+    "beta": "测试版",
+    "dev": "开发版",
+    "rc": "候选版",
+    "stable": "稳定版"
+  },
+  "crashLogs": {
+    "crashReports": "崩溃报告",
+    "globalErrorHandlers": "全局错误捕获",
+    "lastCrash": "最近崩溃",
+    "logFootprint": "日志占用",
+    "nativeLogging": "原生日志",
+    "ready": "已就绪",
+    "retention": "保留策略",
+    "retentionValue": "{days} 天 / {reports} 份，保留 {logs} 个日志",
+    "title": "崩溃与日志"
+  },
+  "description": "应用版本、构建详情、诊断信息、更新与致谢。",
+  "iconAlt": "{name} 应用图标",
+  "legal": {
+    "acknowledgements": "基于开源构建",
+    "copyright": "© {year} {holder}。保留所有权利。",
+    "license": "许可证",
+    "privacy": "隐私",
+    "title": "法律与致谢",
+    "viewLicense": "查看许可证",
+    "viewPrivacy": "隐私政策"
+  },
+  "metadataLoadFailed": "加载应用元数据失败。",
+  "resources": {
+    "community": {
+      "description": "提问与分享想法",
+      "label": "社区"
+    },
+    "docs": {
+      "description": "指南、参考与教程",
+      "label": "文档"
+    },
+    "issues": {
+      "description": "提交缺陷或功能请求",
+      "label": "反馈问题"
+    },
+    "releases": {
+      "description": "版本历史与下载",
+      "label": "版本发布"
+    },
+    "repo": {
+      "description": "在 GitHub 上浏览项目",
+      "label": "源代码"
+    },
+    "title": "资源"
+  },
+  "system": {
+    "arch": "架构",
+    "copy": "复制诊断信息",
+    "copyFailed": "复制失败：{error}",
+    "copySuccess": "诊断信息已复制到剪贴板。",
+    "dataDir": "数据目录",
+    "locale": "区域设置",
+    "os": "操作系统",
+    "reveal": "打开数据目录",
+    "revealFailed": "无法打开数据目录：{error}",
+    "title": "系统",
+    "unavailable": "不可用"
+  },
+  "tagline": "面向 Claude Code 的 AI 桌面助手",
+  "title": "关于",
+  "updates": {
+    "alreadyLatest": "你已是最新版本。",
+    "autoCheckDescription": "启动时及应用运行期间定期检查新版本。",
+    "autoCheckLabel": "自动检查更新",
+    "checkUpdates": "检查更新",
+    "checking": "检查中…",
+    "desktopOnly": "更新通过桌面版应用推送。",
+    "goInstallAction": "去安装",
+    "install": "安装 {version}",
+    "lastChecked": "上次检查",
+    "title": "更新",
+    "updateAvailable": "{version} 版本可用",
+    "updateAvailableBackground": "{version} 版本可用 —— 打开「关于」即可安装。",
+    "updateAvailableToast": "可用更新：{version}",
+    "updateCheckFailed": "检查更新失败：{error}",
+    "updateInstallFailed": "安装更新失败：{error}",
+    "updateNoLongerAvailable": "更新已不可用。"
+  },
+  "versionCard": {
+    "build": "构建号",
+    "builtAt": "构建于",
+    "commit": "提交",
+    "engine": "网页引擎",
+    "hideAdvanced": "隐藏运行时详情",
+    "react": "React",
+    "showAdvanced": "显示运行时详情",
+    "tauri": "Tauri",
+    "title": "版本与构建",
+    "version": "版本"
+  },
+  "versionLine": "版本",
+  "versionUnknown": "—",
+  "webBadge": "网页预览",
+  "whatsNew": {
+    "highlights": {
+      "claudeCodeClient": "完整的 Claude Code 桌面客户端，含对话、智能体与工作流",
+      "crossPlatform": "一套代码同时覆盖桌面（Tauri）、网页与移动端（Capacitor）",
+      "foundation": "首个公开基础版本发布",
+      "pluginSystem": "可扩展插件系统，内置应用内市场"
+    },
+    "title": "更新日志",
+    "viewAll": "查看全部版本"
+  }
+}

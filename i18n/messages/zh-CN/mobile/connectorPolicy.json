@@ -1,0 +1,20 @@
+{
+  "defaultMode": "默认模式",
+  "defaultModeHelp": "Auto：AI 自动回复；Draft：起草草稿等你确认；Manual：完全手动。",
+  "description": "选择此会话如何处理收到的消息。",
+  "from": "起始",
+  "modeAuto": "自动",
+  "modeDraft": "草稿",
+  "modeManual": "手动",
+  "muted": "静音此会话",
+  "mutedHelp": "仍能收到消息，但不会自动回复。",
+  "queueLabel": "已排队——桌面上线后会同步。",
+  "quietHours": "免打扰时段",
+  "quietHoursHelp": "此时段内不发出自动回复。",
+  "save": "保存",
+  "saveFailed": "保存失败：{message}",
+  "saved": "已保存。",
+  "saving": "保存中…",
+  "title": "会话设置",
+  "to": "结束"
+}

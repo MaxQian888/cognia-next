@@ -1,0 +1,28 @@
+{
+  "checkUpdates": "Check for updates",
+  "fromFile": "From file…",
+  "fromFileSourceLabel": "Local files ({count})",
+  "fromGithub": "From GitHub…",
+  "fromLocalWasm": "From local file…",
+  "fromUrl": "From URL…",
+  "fromUrlDialog": {
+    "cancel": "Cancel",
+    "description": "Provide a direct link to a plugin manifest (plugin.json). The manifest will be staged for review before installation.",
+    "emptyError": "Please enter a URL.",
+    "error": "Failed to fetch manifest: {message}",
+    "label": "Manifest URL",
+    "placeholder": "https://example.com/plugin.json",
+    "submit": "Fetch",
+    "title": "Install from URL"
+  },
+  "fromUrlPrompt": "Plugin manifest URL",
+  "fromUrlSigned": "From signed URL…",
+  "groupGit": "Git",
+  "groupLocal": "Local plugin",
+  "groupManifest": "Manifest",
+  "groupWasm": "WASM bundle",
+  "install": "Install",
+  "loadUnpacked": "Load unpacked…",
+  "syncRegistry": "Sync registry",
+  "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates"
+}

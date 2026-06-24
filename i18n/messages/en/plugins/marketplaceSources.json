@@ -1,0 +1,11 @@
+{
+  "add": "Add source",
+  "addError": "Could not add source: {message}",
+  "description": "Add a repository that ships a marketplace.json catalog. Its plugins appear in the browse grid, just like Claude Code's plugin marketplaces.",
+  "empty": "No sources added yet.",
+  "emptyError": "Please enter a repository.",
+  "label": "Marketplace repository",
+  "placeholder": "owner/repo",
+  "remove": "Remove {name}",
+  "title": "GitHub marketplace sources"
+}

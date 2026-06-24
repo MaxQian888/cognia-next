@@ -1,0 +1,23 @@
+{
+  "blockedRunTitle": "Fix validation issues before running",
+  "blockedSaveTitle": "Workflow saved with {count, plural, one {# unresolved issue} other {# unresolved issues}}",
+  "cronExpr": "Use a 5-field cron expression (minute hour day month weekday)",
+  "invalid": "Invalid value",
+  "invalidFormat": "Invalid format",
+  "invalidType": "Expected {expected}",
+  "invalidUrl": "Enter a valid http(s) URL or a '{{ }}' expression",
+  "loopBatchSizeMode": "Batch size only applies to \"for each\" loops",
+  "loopBodyRequired": "Provide the input expression / iteration count required by this loop mode",
+  "loopConditionTimingMode": "Condition timing only applies to \"while\" loops",
+  "maxValue": "Must be at most {max}",
+  "minItems": "Add at least {min} item(s)",
+  "minLength": "Must be at least {min} characters",
+  "minValue": "Must be at least {min}",
+  "required": "This field is required",
+  "splitBranchesRequired": "Add at least two branch labels",
+  "summary": "{count, plural, one {# validation issue} other {# validation issues}}",
+  "switchCasesRequired": "Add at least one case",
+  "twinIngestSourceRequired": "Provide content (paste mode) or a URL (fetch mode)",
+  "variableName": "Use a valid identifier (letters, digits, underscores; not starting with a digit)",
+  "webhookPath": "Use letters, digits, dashes, underscores, and slashes only"
+}

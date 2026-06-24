@@ -1,0 +1,8 @@
+{
+  "accept": "接受",
+  "accepted": "已接受为 {kind}",
+  "queueAcceptLabel": "接受孪生草稿",
+  "queueRejectLabel": "拒绝孪生草稿",
+  "reject": "拒绝",
+  "rejected": "已拒绝"
+}

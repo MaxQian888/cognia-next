@@ -1,0 +1,32 @@
+{
+  "description": "Summarise older turns so long chats stay within the model's context window.",
+  "enabled": {
+    "description": "Automatically summarise older turns when the context window fills.",
+    "heading": "Auto-compaction",
+    "label": "Enable auto-compaction"
+  },
+  "focus": {
+    "description": "Steer what a compaction preserves and seed the default for /compact.",
+    "heading": "Compact instructions",
+    "label": "Compact instructions",
+    "placeholder": "e.g. Focus on decisions, file paths, and unresolved threads."
+  },
+  "keepRecent": {
+    "description": "How many of the most recent turns are kept verbatim, never summarised.",
+    "heading": "Keep recent turns",
+    "label": "Recent turns to keep"
+  },
+  "strategy": {
+    "builtin": "Built-in",
+    "description": "Choose a plugin-contributed compaction strategy, or the built-in default.",
+    "heading": "Strategy",
+    "label": "Compaction strategy"
+  },
+  "threshold": {
+    "description": "Fraction of the context window at which auto-compaction triggers.",
+    "heading": "Trigger threshold",
+    "label": "Trigger threshold percentage",
+    "suffix": "% of window"
+  },
+  "title": "Context compaction"
+}

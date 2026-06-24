@@ -1,0 +1,11 @@
+{
+  "add": "添加源",
+  "addError": "无法添加源：{message}",
+  "description": "添加一个包含 marketplace.json 目录清单的仓库，其插件会像 Claude Code 的插件市场一样出现在浏览网格中。",
+  "empty": "尚未添加任何源。",
+  "emptyError": "请输入仓库。",
+  "label": "市场仓库",
+  "placeholder": "owner/repo",
+  "remove": "移除 {name}",
+  "title": "GitHub 市场源"
+}

@@ -1,0 +1,9 @@
+{
+  "consent": {
+    "biometricBlocked": "Approval not completed ({reason}).",
+    "biometricDescription": "Allowing lets the connected desktop run this action.",
+    "biometricReason": "Approve the desktop computer-use action",
+    "biometricTitle": "Confirm remote action",
+    "sheetDescription": "The connected desktop wants to run an action. Review it, then allow or reject."
+  }
+}

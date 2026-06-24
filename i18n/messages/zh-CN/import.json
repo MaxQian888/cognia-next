@@ -1,0 +1,35 @@
+{
+  "dialog": {
+    "applyButton": "应用",
+    "applying": "应用中…",
+    "cancel": "取消",
+    "description": "把其他 AI 助手的聊天记录导入到 Cognia。选择文件后我们会自动识别格式。",
+    "done": "完成",
+    "loading": "读取文件中…",
+    "pickButton": "选择文件…",
+    "pickPrompt": "选择 JSON 导出文件以开始。",
+    "title": "导入会话",
+    "tryAgain": "重新选择文件"
+  },
+  "platform": {
+    "chatgpt": {
+      "hint": "ChatGPT 数据导出 → conversations.json"
+    },
+    "claude": {
+      "hint": "Claude.ai 数据导出 → conversations.json"
+    },
+    "gemini": {
+      "hint": "Google Takeout → Bard 或 Gemini → MyActivity.json"
+    }
+  },
+  "preview": {
+    "detected": "识别到格式：{format}",
+    "row": "{count} 条消息",
+    "summary": "{sessions} 个会话 · {messages} 条消息"
+  },
+  "summary": {
+    "body": "已从 {format} 添加 {sessions} 个会话 / {messages} 条消息。",
+    "success": "已导入 {sessions} 个会话（{messages} 条消息）。",
+    "title": "导入完成"
+  }
+}

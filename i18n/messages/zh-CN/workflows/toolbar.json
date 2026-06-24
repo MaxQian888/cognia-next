@@ -1,0 +1,26 @@
+{
+  "namePlaceholder": "工作流名称",
+  "revert": "还原到已保存",
+  "revertCancel": "取消",
+  "revertConfirm": "还原",
+  "revertConfirmDescription": "放弃所有未保存的更改并恢复到该工作流上次保存的版本？此操作无法撤销。",
+  "revertConfirmTitle": "还原未保存的更改？",
+  "reverted": "已还原到上次保存的版本",
+  "run": "运行",
+  "save": "保存",
+  "saved": "已保存",
+  "saving": "保存中…",
+  "tooltip": {
+    "autoLayout": "自动布局",
+    "back": "返回工作流库",
+    "commands": "命令面板（Ctrl+K）",
+    "exportImage": "导出为 PNG",
+    "exportJson": "导出为 JSON",
+    "importJson": "导入 JSON",
+    "more": "更多",
+    "redo": "重做（Ctrl+Shift+Z）",
+    "shortcuts": "键盘快捷键（Ctrl+/）",
+    "undo": "撤销（Ctrl+Z）"
+  },
+  "unsavedChanges": "有未保存更改"
+}
