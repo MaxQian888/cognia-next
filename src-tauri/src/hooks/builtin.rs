@@ -136,7 +136,15 @@ fn overrides_from(settings: &ClaudeSettings) -> Map<String, Value> {
 }
 
 /// Resolve the bundled `hooks/builtin/` dir: the Tauri resource dir in a packaged
-/// app, else a dev fallback relative to the current working directory.
+/// app, else a dev fallback anchored at the repo root.
+///
+/// The dev binary's CWD is `src-tauri/` (cargo / `tauri dev`), so a
+/// CWD-relative `hooks/builtin` resolves to the non-existent
+/// `src-tauri/hooks/builtin` — `node` then dies with a "Cannot find module"
+/// (`cjs/loader`) crash on every SessionStart / UserPromptSubmit. Anchor on the
+/// compile-time manifest dir's parent (the repo root) instead — the same
+/// resource-dir-then-manifest-parent pattern `sidecar::sidecar_dir` uses — and
+/// fall back to the CWD-relative path only as a last resort.
 fn builtin_base_dir() -> PathBuf {
     #[cfg(not(test))]
     if let Some(app) = crate::crash::app_handle() {
@@ -146,6 +154,13 @@ fn builtin_base_dir() -> PathBuf {
             if cand.is_dir() {
                 return cand;
             }
+        }
+    }
+    // Dev: walk up from the Cargo manifest dir (`src-tauri/`) to the repo root.
+    if let Some(root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent() {
+        let cand = root.join("hooks").join("builtin");
+        if cand.is_dir() {
+            return cand;
         }
     }
     std::env::current_dir()
@@ -246,5 +261,23 @@ mod tests {
         let builtin = build_builtin_hooks(Path::new("/b"), "node", &Map::new());
         let merged = merge_builtin_under(None, builtin);
         assert!(merged["SessionStart"].is_array());
+    }
+
+    #[test]
+    fn builtin_base_dir_resolves_to_existing_repo_root_scripts() {
+        // Regression: the dev fallback must point at the repo-root `hooks/builtin`
+        // (where the scripts live), NOT `src-tauri/hooks/builtin` (the old
+        // CWD-relative path that made `node` crash with "Cannot find module").
+        let dir = builtin_base_dir();
+        assert!(
+            dir.ends_with("hooks/builtin"),
+            "unexpected base dir: {}",
+            dir.display()
+        );
+        assert!(
+            dir.join("auto-context-loader.mjs").is_file(),
+            "default-on hook script not found under {}",
+            dir.display()
+        );
     }
 }
