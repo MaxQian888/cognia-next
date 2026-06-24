@@ -724,6 +724,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         reason: result.reason,
         ...(result.overBudgetWarning ? { overBudgetWarning: result.overBudgetWarning } : {}),
       }
+      // Activate the Claude Agent SDK's NATIVE in-turn model fallback. When the
+      // alias resolved to Anthropic and the chain has a sibling Anthropic model,
+      // hand it to the SDK so a mid-turn overload / 5xx retries against that
+      // model WITHOUT a renderer round-trip. The renderer-side
+      // `attemptRoutingFallback` still covers cross-provider + cross-request
+      // failover; this is purely the cheap same-provider in-turn path. Only the
+      // Anthropic dispatcher reads `fallbackModel`; the ai-sdk path ignores it,
+      // so we skip non-Anthropic resolutions to keep the wire shape honest.
+      if (result.providerId === "anthropic") {
+        const sibling = result.fallbackEntries.find(
+          (e) => e.providerId === "anthropic" && e.modelId !== result.modelId
+        )
+        if (sibling) opts.fallbackModel = sibling.modelId
+      }
     }
   }
 

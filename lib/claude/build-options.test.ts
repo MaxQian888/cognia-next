@@ -305,6 +305,73 @@ describe("resolveSendOptions — semantic tool routing exempts flow-control tool
   })
 })
 
+describe("resolveSendOptions — Anthropic native fallbackModel activation", () => {
+  const routingConfig = {
+    strategy: "quality",
+    allowPerRequestOverride: true,
+    providerConstraints: [],
+    requestTimeoutMs: 30000,
+    maxFallbackAttempts: 3,
+  }
+
+  it("sets fallbackModel to the next sibling Anthropic entry in the alias chain", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "anthropic", model: "powerful" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        routingConfig,
+        modelMappings: [
+          {
+            id: "m-powerful",
+            alias: "powerful",
+            providers: [
+              { providerId: "anthropic", modelId: "claude-opus-4-8" },
+              { providerId: "anthropic", modelId: "claude-opus-4-7" },
+            ],
+            distribution: "priority",
+            enabled: true,
+            isDefault: true,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("anthropic")
+    expect(opts.model).toBe("claude-opus-4-8")
+    expect(opts.fallbackModel).toBe("claude-opus-4-7")
+  })
+
+  it("does NOT set fallbackModel when the resolved provider is not Anthropic", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c2", providerId: "openai", model: "fast" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: { openai: { apiKey: "sk-test" } },
+        routingConfig,
+        modelMappings: [
+          {
+            id: "m-fast",
+            alias: "fast",
+            providers: [
+              { providerId: "openai", modelId: "gpt-4o-mini" },
+              { providerId: "openai", modelId: "gpt-4o" },
+            ],
+            distribution: "priority",
+            enabled: true,
+            isDefault: true,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("openai")
+    expect(opts.fallbackModel).toBeUndefined()
+  })
+})
+
 describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)", () => {
   it("forwards the resolved protocol + modelParams for a configured built-in provider", async () => {
     const opts = await resolveSendOptions({
