@@ -86,6 +86,7 @@ import {
   wouldCreateTeamCycle,
 } from "./delegation-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import type { AgentTeam } from "@/types/agent/agent-team"
 
 /** Flush pending microtasks + a macrotask so async re-dispatch settles. */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -291,20 +292,31 @@ describe("delegation-orchestrator", () => {
     it("re-dispatches a deferred external run on approval", async () => {
       isInQuietHoursMock.mockReturnValue(true)
       const team = useAgentTeamStore.getState().createTeam({ name: "Quiet", task: "t" })
-      useAgentTeamStore.setState((s) => ({
-        teams: {
-          ...s.teams,
-          [team.id]: {
-            ...s.teams[team.id],
-            config: {
-              ...s.teams[team.id].config,
-              governancePolicy: {
-                delivery: { quietHours: { from: "00:00", to: "23:59", tz: "UTC" } },
+      useAgentTeamStore.setState((s) => {
+        const existing = s.teams[team.id]
+        const updated: AgentTeam = {
+          ...existing,
+          config: {
+            ...existing.config,
+            // `config.governancePolicy` is optional, so spreading it would
+            // widen the required approval/budget/escalation fields to
+            // `| undefined`. Provide a complete policy literal instead; the
+            // orchestrator only reads `delivery.quietHours`.
+            governancePolicy: {
+              approval: { requirePlanApproval: false, requireDelegationApproval: false },
+              budget: {
+                tokenBudget: 0,
+                warningThreshold: 0.8,
+                criticalThreshold: 0.95,
+                onCritical: "notify",
               },
+              escalation: { allowOperatorPatternOverride: true, pauseOnHighRisk: false },
+              delivery: { quietHours: { from: "00:00", to: "23:59", tz: "UTC" } },
             },
           },
-        },
-      }))
+        }
+        return { teams: { ...s.teams, [team.id]: updated } }
+      })
       const { delegation } = delegateToExternal({
         sourceTeamId: team.id,
         sourceTaskId: "task-q",
