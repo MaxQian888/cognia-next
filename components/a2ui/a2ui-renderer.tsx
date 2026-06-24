@@ -66,6 +66,7 @@ import { A2UIList } from "./data/a2ui-list"
 
 // Import academic adapter for withA2UIContext integration
 import { A2UIAnalysisAdapter } from "./academic/a2ui-analysis-adapter"
+import { A2UISearchResultsAdapter } from "./academic/a2ui-search-results-adapter"
 import { A2UIStepperShell } from "./layout/a2ui-stepper-shell"
 import { A2UIMockupFrame } from "./layout/a2ui-mockup-frame"
 
@@ -167,6 +168,10 @@ const builtInComponents = new Map<string, A2UIComponentType>([
   ["InteractiveGuide", A2UIInteractiveGuide as A2UIComponentType],
   // Academic components (wrapped with withA2UIContext bridge)
   ["AcademicAnalysis", withA2UIContext(A2UIAnalysisAdapter) as unknown as A2UIComponentType],
+  [
+    "AcademicSearchResults",
+    withA2UIContext(A2UISearchResultsAdapter) as unknown as A2UIComponentType,
+  ],
   // P0 display
   ["Avatar", A2UIAvatar as A2UIComponentType],
   ["Skeleton", A2UISkeleton as A2UIComponentType],

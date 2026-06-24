@@ -33,6 +33,35 @@ describe("A2UI_SYSTEM_PROMPT", () => {
     expect(A2UI_SYSTEM_PROMPT).toContain("surface")
     expect(A2UI_SYSTEM_PROMPT).toContain("components")
   })
+
+  it("documents the RichOutput component and its advanced profiles", () => {
+    expect(A2UI_SYSTEM_PROMPT).toContain("RichOutput")
+    expect(A2UI_SYSTEM_PROMPT).toContain("profileId")
+    // One profile id per advanced renderer family must be advertised so the
+    // model actually produces payloads the rich-output renderers can show.
+    for (const profile of [
+      "trends-over-time",
+      "category-comparison",
+      "part-of-whole",
+      "network-graph",
+      "3d-visualization",
+      "music-audio",
+      "physics-math-simulation",
+    ]) {
+      expect(A2UI_SYSTEM_PROMPT).toContain(profile)
+    }
+    // ...and the payload field each family reads.
+    for (const field of [
+      "chartData",
+      "networkNodes",
+      "networkEdges",
+      "scenePrompt",
+      "audioPrompt",
+      "simulationConfig",
+    ]) {
+      expect(A2UI_SYSTEM_PROMPT).toContain(field)
+    }
+  })
 })
 
 describe("A2UI_TEMPLATES", () => {

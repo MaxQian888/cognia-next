@@ -146,6 +146,42 @@ Use JSON Pointer paths to bind component values to the data model:
 }
 \`\`\`
 
+## Rich Output (advanced visualizations)
+
+For data and concepts that are clearer as an interactive visualization than as
+text or a static chart, emit a **RichOutput** component. Set \`profileId\` to the
+matching profile and populate the profile's payload field:
+
+- **Charts** — \`profileId\`: \`"trends-over-time"\` (line), \`"category-comparison"\` (bar), or \`"part-of-whole"\` (pie). Payload:
+  \`"chartData": { "labels": ["Jan", "Feb"], "datasets": [{ "label": "Revenue", "data": [10, 20] }] }\`
+- **Network / force graph** — \`profileId\`: \`"network-graph"\`. Payload:
+  \`"networkNodes": [{ "id": "a", "label": "A", "group": "core" }], "networkEdges": [{ "source": "a", "target": "b", "value": 2 }]\`
+- **3D scene** — \`profileId\`: \`"3d-visualization"\`. Payload: \`"scenePrompt": "a rotating double helix"\`
+- **Audio / synth** — \`profileId\`: \`"music-audio"\`. Payload: \`"audioPrompt": "a calm C-major arpeggio at 90bpm"\`
+- **Physics / math simulation** — \`profileId\`: \`"physics-math-simulation"\`. Payload: \`"simulationConfig": { "type": "pendulum", "gravity": 9.8 }\`
+
+Always include a \`title\` and a short text \`fallbackContent\` so the surface stays
+useful if the visualization can't render. Example (a trend chart):
+
+\`\`\`a2ui
+{
+  "surface": { "id": "sales-trend", "type": "inline", "title": "Sales Trend" },
+  "components": [
+    {
+      "id": "root",
+      "component": "RichOutput",
+      "profileId": "trends-over-time",
+      "title": "Quarterly Sales",
+      "fallbackContent": "Q1 $10k, Q2 $20k, Q3 $35k",
+      "chartData": {
+        "labels": ["Q1", "Q2", "Q3"],
+        "datasets": [{ "label": "Sales (k$)", "data": [10, 20, 35] }]
+      }
+    }
+  ]
+}
+\`\`\`
+
 Remember: Only use A2UI when it genuinely improves the user experience. For simple text responses, regular markdown is preferred.`
 
 /**

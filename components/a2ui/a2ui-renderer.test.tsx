@@ -458,6 +458,9 @@ describe("getRegisteredComponentTypes", () => {
     expect(types).toContain("StepperShell")
     expect(types).toContain("MockupFrame")
     expect(types).toContain("WidgetStatus")
+    // Academic components are bridged in via withA2UIContext adapters.
+    expect(types).toContain("AcademicAnalysis")
+    expect(types).toContain("AcademicSearchResults")
   })
 
   it("should return an array", () => {
