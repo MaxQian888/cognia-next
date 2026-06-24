@@ -25,6 +25,7 @@ import { AudioBlock } from "@/components/chat/renderers/audio-block"
 import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderers/alert-block"
 import { DetailsBlock } from "@/components/chat/renderers/details-block"
 import { KbdInline } from "@/components/chat/renderers/kbd-inline"
+import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 
 // Heavy block renderers are code-split via next/dynamic so the initial
@@ -77,6 +78,20 @@ const A2UIBlock = dynamic(
     loading: () => <div className="my-3 h-24 animate-pulse rounded bg-muted" aria-hidden="true" />,
   }
 )
+
+// Each non-trivial block renderer is wrapped in an error boundary so one
+// malformed fence (bad mermaid graph, unparseable diff/a2ui, broken media
+// URL) degrades to an inline error instead of unmounting the whole message.
+// The math pair keeps its dedicated `withMathErrorBoundary`; everything else
+// routes through the shared renderer boundary here.
+const SafeMermaidBlock = withRendererErrorBoundary(MermaidBlock, "Mermaid")
+const SafeDiffBlock = withRendererErrorBoundary(DiffBlock, "Diff")
+const SafeA2UIBlock = withRendererErrorBoundary(A2UIBlock, "A2UI")
+const SafeAlertBlock = withRendererErrorBoundary(AlertBlock, "Alert")
+const SafeDetailsBlock = withRendererErrorBoundary(DetailsBlock, "Details")
+const SafeImageBlock = withRendererErrorBoundary(ImageBlock, "Image")
+const SafeVideoBlock = withRendererErrorBoundary(VideoBlock, "Video")
+const SafeAudioBlock = withRendererErrorBoundary(AudioBlock, "Audio")
 
 /**
  * Sanitization schema extended with KaTeX MathML and a small set of safe
@@ -352,15 +367,15 @@ function buildComponents(
       }
 
       if (enableMermaid && language === "mermaid") {
-        return <MermaidBlock content={codeContent} />
+        return <SafeMermaidBlock content={codeContent} />
       }
 
       if (enableDiff && language === "diff") {
-        return <DiffBlock content={codeContent} />
+        return <SafeDiffBlock content={codeContent} />
       }
 
       if (language === "a2ui") {
-        return <A2UIBlock content={codeContent} messageId={messageId} />
+        return <SafeA2UIBlock content={codeContent} messageId={messageId} />
       }
 
       const showArtifactButton = codeContent.split("\n").length > 1
@@ -422,7 +437,7 @@ function buildComponents(
         const textContent = extractTextContent(children)
         const alertInfo = parseAlertFromBlockquote(textContent)
         if (alertInfo) {
-          return <AlertBlock type={alertInfo.type}>{alertInfo.content}</AlertBlock>
+          return <SafeAlertBlock type={alertInfo.type}>{alertInfo.content}</SafeAlertBlock>
         }
       }
       return (
@@ -461,13 +476,13 @@ function buildComponents(
     img({ src, alt, title }) {
       if (!src || typeof src !== "string") return null
       if (enableVideoEmbed && isVideoUrl(src)) {
-        return <VideoBlock src={src} title={title || alt} />
+        return <SafeVideoBlock src={src} title={title || alt} />
       }
       if (enableAudioEmbed && isAudioUrl(src)) {
-        return <AudioBlock src={src} title={title || alt} />
+        return <SafeAudioBlock src={src} title={title || alt} />
       }
       if (enableEnhancedImages) {
-        return <ImageBlock src={src} alt={alt || ""} title={title} />
+        return <SafeImageBlock src={src} alt={alt || ""} title={title} />
       }
 
       return (
@@ -493,7 +508,7 @@ function buildComponents(
           restContent.push(child)
         }
       })
-      return <DetailsBlock summary={summaryContent}>{restContent}</DetailsBlock>
+      return <SafeDetailsBlock summary={summaryContent}>{restContent}</SafeDetailsBlock>
     },
     kbd({ children }) {
       return <KbdInline>{children}</KbdInline>

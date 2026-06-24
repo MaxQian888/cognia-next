@@ -57,6 +57,9 @@ const REGISTRY: Record<string, CardComponent> = {
   glob: GlobCard,
   grep: GrepCard,
   ls: LsCard,
+  // Native Anthropic directory-listing tool is PascalCase `LS`; the card
+  // tolerates the same newline-delimited string output as bare `ls`.
+  LS: LsCard,
   edit: EditCard,
   multi_edit: EditCard,
   write: WriteCard,
@@ -65,8 +68,14 @@ const REGISTRY: Record<string, CardComponent> = {
   Write: WriteCard,
   // Workflow Copilot — proposal card (wf_propose_batch + wf_apply_template
   // share the same payload shape: { proposalId, summary, opCount, ... }).
+  // These are plugin tools: the ai-sdk path keys them bare, but the default
+  // Anthropic path namespaces them `mcp__cognia-plugin-tools__*`. Register
+  // both forms (like computer_use below) so the proposal card renders on
+  // every provider instead of falling back to the generic tool body.
   wf_propose_batch: WorkflowProposalCard,
   wf_apply_template: WorkflowProposalCard,
+  "mcp__cognia-plugin-tools__wf_propose_batch": WorkflowProposalCard,
+  "mcp__cognia-plugin-tools__wf_apply_template": WorkflowProposalCard,
   // ADR-0020 W3 — Computer Use plugin MCP tool. Inline screenshot
   // rendering + compact action chip. Registered under both the bare
   // `computer_use` name and the cognia-plugin-tools-prefixed name so

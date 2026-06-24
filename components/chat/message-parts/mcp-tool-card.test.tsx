@@ -58,6 +58,17 @@ describe("isStructuredMcpToolType", () => {
     }
   })
 
+  it("recognises the native Anthropic PascalCase LS tool", () => {
+    expect(isStructuredMcpToolType("tool-LS")).toBe(true)
+  })
+
+  it("recognises the workflow proposal plugin tools — bare and plugin-namespaced", () => {
+    for (const name of ["wf_propose_batch", "wf_apply_template"]) {
+      expect(isStructuredMcpToolType(`tool-${name}`)).toBe(true)
+      expect(isStructuredMcpToolType(`tool-mcp__cognia-plugin-tools__${name}`)).toBe(true)
+    }
+  })
+
   it("normalizeToolName strips only the cognia-tools prefix", () => {
     expect(normalizeToolName("mcp__cognia-tools__grep")).toBe("grep")
     expect(normalizeToolName("grep")).toBe("grep")
@@ -93,6 +104,11 @@ describe("MCPToolCard — coreFiles routing", () => {
 
   it("routes core ls to the LsCard", () => {
     render(<MCPToolCard part={part("tool-ls", "D:/proj\nsrc/\nfile.ts", { path: "." })} />)
+    expect(screen.getAllByTestId("mcp-ls-entry")).toHaveLength(2)
+  })
+
+  it("routes the native Anthropic LS to the same LsCard", () => {
+    render(<MCPToolCard part={part("tool-LS", "D:/proj\nsrc/\nfile.ts", { path: "." })} />)
     expect(screen.getAllByTestId("mcp-ls-entry")).toHaveLength(2)
   })
 
