@@ -106,10 +106,36 @@ function pickSpawnForTransport(): typeof TerminalSession.spawn | null {
 }
 
 /**
+ * Hard ceiling on how long the underlying `terminal_spawn` may take before
+ * we give up and surface an error. The Rust spawn is near-instant; a stall
+ * means something is wedged (the historical "stuck terminal blocks all new
+ * terminals" bug). Resolving to an `error` outcome lets the caller show a
+ * toast instead of hanging forever with no feedback.
+ */
+const SPAWN_TIMEOUT_MS = 15_000
+
+/** Reject if `p` hasn't settled within `ms`. Clears its timer on settle. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    p.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+}
+
+/**
  * Spawn a terminal end-to-end. Returns:
  *   * `spawned` with the new session id on success,
  *   * `denied` when a plugin's `onTerminalWillSpawn` returned "deny",
- *   * `error` for any other failure (Tauri command threw, etc.).
+ *   * `error` for any other failure (Tauri command threw, timed out, etc.).
  */
 export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOutcome> {
   const hooks = input.hooks ?? getPluginEventHooks()
@@ -124,10 +150,11 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
     return { kind: "denied" }
   }
 
-  // 2. Spawn.
+  // 2. Spawn. Bounded by a timeout so a wedged backend surfaces as an
+  // error the dock can toast, never an indefinite silent hang.
   let session: TerminalSession
   try {
-    session = await spawnFn(req as SpawnRequest)
+    session = await withTimeout(spawnFn(req as SpawnRequest), SPAWN_TIMEOUT_MS, "terminal spawn")
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { kind: "error", message }

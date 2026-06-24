@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::thread;
@@ -245,7 +246,11 @@ pub struct PtySession {
     /// reaching for unsafe or duplicating the spawn path. Not part of
     /// the public crate surface.
     pub(super) master: StdMutex<Box<dyn MasterPty + Send>>,
-    pub(super) writer: StdMutex<Box<dyn Write + Send>>,
+    /// Stdin pump. Bytes are handed to a dedicated per-session writer thread
+    /// (see [`spawn_writer_thread`]) rather than written inline, so the
+    /// synchronous `terminal_write` IPC command never blocks on a stuck
+    /// child. See that function's docs for the full rationale.
+    pub(super) write_tx: SyncSender<Vec<u8>>,
     pub(super) killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
     pub(super) tempdir: Option<PathBuf>,
     /// Wave 2 — timestamped + monotonic-seq replay buffer. Every event
@@ -558,6 +563,7 @@ pub fn spawn_session_with_sink(
     let killer = child.clone_killer();
     let id = Uuid::new_v4().to_string();
     let replay = Arc::new(ReplayBuffer::new());
+    let write_tx = spawn_writer_thread(&id, writer);
 
     let reader_sink = sink.clone();
     let reader_replay = replay.clone();
@@ -583,12 +589,57 @@ pub fn spawn_session_with_sink(
         origin: req.origin,
         shell: req.shell,
         master: StdMutex::new(pair.master),
-        writer: StdMutex::new(writer),
+        write_tx,
         killer: StdMutex::new(killer),
         tempdir: setup.tempdir,
         replay,
         channel_slot,
     })
+}
+
+/// Bound on the per-session stdin queue (number of pending write chunks).
+/// A stuck child stops draining its PTY; once this many chunks are queued,
+/// further [`PtySession::write`] calls fail fast with `WouldBlock` instead
+/// of growing memory without limit. 4096 is far above any interactive
+/// burst (paste, bracketed-paste) yet small enough to cap a runaway.
+const WRITE_QUEUE_CAPACITY: usize = 4096;
+
+/// Spawn the per-session stdin pump.
+///
+/// `terminal_write` is a **synchronous** Tauri command, so it runs on the
+/// IPC/main thread. Writing to the PTY master inline (`write_all` + `flush`)
+/// blocks when the child has stopped reading stdin and the kernel buffer is
+/// full — and a blocked synchronous command freezes the IPC thread, so every
+/// later command (including new `terminal_spawn`s) hangs with no error ever
+/// surfaced. That is exactly the "one stuck terminal wedges all new
+/// terminals, silently" failure.
+///
+/// Instead, `write` hands bytes to this bounded channel and returns
+/// immediately; a dedicated thread performs the blocking `write_all`. A
+/// single FIFO consumer preserves stdin byte order. The thread exits when
+/// the session is dropped (sender gone) or the PTY closes (write/flush
+/// errors — e.g. the child was killed), so it never outlives the session.
+pub(super) fn spawn_writer_thread(
+    id: &str,
+    mut writer: Box<dyn Write + Send>,
+) -> SyncSender<Vec<u8>> {
+    let (tx, rx) = sync_channel::<Vec<u8>>(WRITE_QUEUE_CAPACITY);
+    let spawned = thread::Builder::new()
+        .name(format!("pty-writer-{id}"))
+        .spawn(move || {
+            while let Ok(bytes) = rx.recv() {
+                if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
+                    break;
+                }
+            }
+        });
+    if spawned.is_err() {
+        // Extremely rare (OS thread-limit). With no consumer the channel
+        // fills after `WRITE_QUEUE_CAPACITY` chunks and `write` then fails
+        // fast — degraded, but never a hang.
+        debug_assert!(false, "pty-writer thread spawn failed");
+    }
+    tx
 }
 
 fn pty_reader_loop(
@@ -635,13 +686,21 @@ fn pty_waiter_loop(
 }
 
 impl PtySession {
+    /// Queue bytes for the PTY's stdin. Non-blocking: the bytes are handed
+    /// to the per-session writer thread (preserving order) and the actual
+    /// blocking `write_all` happens there, off the IPC thread. Returns
+    /// `WouldBlock` if the queue is full (a child that has stopped draining
+    /// stdin) and `BrokenPipe` if the writer thread is gone.
     pub fn write(&self, data: &[u8]) -> std::io::Result<()> {
-        let mut writer = self
-            .writer
-            .lock()
-            .map_err(|_| std::io::Error::other("writer mutex poisoned"))?;
-        writer.write_all(data)?;
-        writer.flush()
+        self.write_tx.try_send(data.to_vec()).map_err(|e| match e {
+            TrySendError::Full(_) => std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "terminal write buffer full (shell not draining stdin)",
+            ),
+            TrySendError::Disconnected(_) => {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "terminal writer closed")
+            }
+        })
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> std::io::Result<()> {
@@ -1039,6 +1098,53 @@ mod tests {
             "expected to see the echoed payload, got: {events:?}"
         );
         assert!(saw_exit, "expected an Exit event, got: {events:?}");
+    }
+
+    /// A `Write` that blocks forever on first write — models a child that
+    /// has stopped draining its PTY (the kernel buffer is full).
+    struct StuckWriter;
+    impl Write for StuckWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            loop {
+                std::thread::park();
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_never_blocks_when_child_stops_draining() {
+        // Regression: a stuck child used to block `write_all` inline on the
+        // synchronous `terminal_write` IPC thread, wedging every later
+        // command (new spawns included) with no error. The writer thread +
+        // bounded queue must make `write` (via the channel) fail fast
+        // instead of blocking the producer.
+        let tx = spawn_writer_thread("stuck-test", Box::new(StuckWriter));
+        // First chunk is pulled by the writer thread, which then blocks
+        // forever inside `write` — so the queue can no longer drain.
+        tx.send(vec![b'a']).expect("first send");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Fill the queue from a watchdog thread. If `try_send` ever blocked
+        // the producer, `recv_timeout` below would fire and fail the test.
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut hit_full = false;
+            for _ in 0..(WRITE_QUEUE_CAPACITY + 16) {
+                if matches!(tx.try_send(vec![b'b']), Err(TrySendError::Full(_))) {
+                    hit_full = true;
+                    break;
+                }
+            }
+            let _ = done_tx.send(hit_full);
+        });
+
+        let hit_full = done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("producer must not block when the child is stuck");
+        assert!(hit_full, "the bounded queue should report Full once stuck");
     }
 
     #[test]

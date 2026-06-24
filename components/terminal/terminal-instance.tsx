@@ -134,10 +134,14 @@ function paintMarkerDecoration(decoration: IDecoration | undefined, exitCode: nu
   if (!decoration || typeof decoration.onRender !== "function") return
   const color = exitMarkerColor(exitCode)
   decoration.onRender((el) => {
-    el.style.position = "absolute"
+    // xterm already positions the element at the command's start row and
+    // sizes it to a single cell-row (inline `top` + `height`). Only restyle
+    // the cosmetics here. Do NOT set `height: 100%`: that stretches every
+    // marker from its row to the bottom of the viewport, so with `left: 0`
+    // they stack and overlap into one solid bar down the left edge instead
+    // of a per-command gutter tick.
     el.style.left = "0"
     el.style.width = "3px"
-    el.style.height = "100%"
     el.style.backgroundColor = color
     el.style.pointerEvents = "none"
   })

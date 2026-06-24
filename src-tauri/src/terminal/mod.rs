@@ -119,7 +119,7 @@ mod tests {
             origin: SessionOrigin::Local,
             shell: "/test/stub".to_string(),
             master: std::sync::Mutex::new(pair.master),
-            writer: std::sync::Mutex::new(writer),
+            write_tx: session::spawn_writer_thread(id, writer),
             // Test-only: build a dummy killer that's a no-op. We can't
             // construct a real `ChildKiller` without spawning a child, so
             // we wrap a tiny adapter. Easiest is to spawn `sh -c true` /

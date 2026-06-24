@@ -547,6 +547,43 @@ describe("TerminalInstance", () => {
     expect(created[0]!.dispose).toHaveBeenCalled()
   })
 
+  it("paints a per-row gutter tick, never a full-height bar (1B)", async () => {
+    let cb: IntegrationCb | null = null
+    sessionRegistry.current!.onIntegration = jest.fn((fn: IntegrationCb) => {
+      cb = fn
+      return () => undefined
+    })
+    // Simulate xterm invoking onRender with the decoration element so the
+    // styling runs. Each element starts with the geometry xterm sets inline
+    // (a single cell-row tall); the fix must not stomp `height` to "100%".
+    const painted: Array<Record<string, string>> = []
+    mockTermInstance.registerDecoration = jest.fn(() => ({
+      dispose: jest.fn(),
+      onRender: (fn: (el: { style: Record<string, string> }) => void) => {
+        const el = {
+          style: { top: "34px", height: "17px", width: "8px" } as Record<string, string>,
+        }
+        fn(el)
+        painted.push(el.style)
+      },
+    }))
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    act(() => {
+      cb!({ kind: "command_start" }) // running → neutral
+      cb!({ kind: "command_end", exit_code: 1 }) // failed → red
+    })
+    expect(painted).toHaveLength(2)
+    // Running marker: neutral colour, thin, and crucially row-height (not 100%).
+    expect(painted[0]!.backgroundColor).toBe("#a1a1aa")
+    expect(painted[0]!.width).toBe("3px")
+    expect(painted[0]!.height).not.toBe("100%")
+    expect(painted[0]!.height).toBe("17px") // xterm's per-row height is preserved
+    // Recoloured marker after a non-zero exit.
+    expect(painted[1]!.backgroundColor).toBe("#ef4444")
+    expect(painted[1]!.height).not.toBe("100%")
+  })
+
   it("jumpToNextCommand scrolls to the next marker below the viewport (1B)", async () => {
     let cb: IntegrationCb | null = null
     sessionRegistry.current!.onIntegration = jest.fn((fn: IntegrationCb) => {

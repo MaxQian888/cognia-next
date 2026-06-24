@@ -99,6 +99,15 @@ describe("TerminalCard", () => {
     })
   })
 
+  it("mounts the detected-fonts picker alongside the custom font input", () => {
+    render(<TerminalCard />)
+    // The picker's label (resolved via the mocked translator to the key)
+    // proves the FontFamilyPicker is wired with the terminal namespace…
+    expect(screen.getByText("pickerLabel")).toBeInTheDocument()
+    // …and the free-text input for custom stacks is still present.
+    expect(screen.getByPlaceholderText('"JetBrains Mono", monospace')).toBeInTheDocument()
+  })
+
   it("toggles enableShellIntegration via the switch", async () => {
     render(<TerminalCard />)
     const toggle = screen.getByRole("switch", {

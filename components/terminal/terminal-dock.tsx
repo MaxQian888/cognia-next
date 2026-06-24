@@ -25,6 +25,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { XIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
@@ -112,6 +113,23 @@ export function TerminalDock() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
 
+  // Spawn + surface failures. Without this, an `error`/`denied` outcome was
+  // dropped silently — the user clicked "+ New" and nothing happened, no
+  // toast. Now every spawn path reports why it failed (incl. the spawn
+  // timeout that guards against a wedged backend).
+  const spawnWithFeedback = useCallback(
+    async (input: Parameters<typeof spawnFromDock>[0]) => {
+      const outcome = await spawnFromDock(input)
+      if (outcome.kind === "error") {
+        toast.error(t("spawnError", { message: outcome.message }))
+      } else if (outcome.kind === "denied") {
+        toast.error(t("spawnDenied"))
+      }
+      return outcome
+    },
+    [t]
+  )
+
   const handleNewWithShell = useCallback(
     async (shellOverride?: string) => {
       // An explicit override (from the new-tab shell picker) wins over the
@@ -125,7 +143,7 @@ export function TerminalDock() {
             })
       const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
       const env = project?.terminalConfig?.env
-      await spawnFromDock({
+      await spawnWithFeedback({
         req: {
           shell,
           rows: 24,
@@ -140,7 +158,14 @@ export function TerminalDock() {
         store: useTerminalStore.getState(),
       })
     },
-    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8, settingsSandboxed]
+    [
+      project,
+      activeProjectId,
+      settingsTerminalShell,
+      settingsForceUtf8,
+      settingsSandboxed,
+      spawnWithFeedback,
+    ]
   )
 
   const handleNewFromProfile = useCallback(
@@ -152,7 +177,7 @@ export function TerminalDock() {
         await handleNewWithShell()
         return
       }
-      await spawnFromDock({
+      await spawnWithFeedback({
         req: {
           ...fields,
           rows: 24,
@@ -165,7 +190,14 @@ export function TerminalDock() {
         store: useTerminalStore.getState(),
       })
     },
-    [settingsProfiles, activeProjectId, settingsForceUtf8, settingsSandboxed, handleNewWithShell]
+    [
+      settingsProfiles,
+      activeProjectId,
+      settingsForceUtf8,
+      settingsSandboxed,
+      handleNewWithShell,
+      spawnWithFeedback,
+    ]
   )
 
   // Plain "+ New": launch the default profile when one is set, else resolve
@@ -234,7 +266,7 @@ export function TerminalDock() {
         settingShell: settingsTerminalShell,
       })
       const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
-      const outcome = await spawnFromDock({
+      const outcome = await spawnWithFeedback({
         req: {
           shell,
           rows: 24,
@@ -260,6 +292,7 @@ export function TerminalDock() {
       settingsSandboxed,
       projectKey,
       addPaneToGroup,
+      spawnWithFeedback,
     ]
   )
 

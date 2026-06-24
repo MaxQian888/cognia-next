@@ -31,6 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 
+import { FontFamilyPicker } from "@/components/settings/appearance/components/font-family-picker"
 import { TerminalProfiles } from "./terminal-profiles"
 import { TerminalProjectOverride } from "./terminal-project-override"
 
@@ -166,6 +167,17 @@ export function TerminalCard() {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
           <Label className="text-xs">{t("settings.terminal.fontFamily.label")}</Label>
+          {/* Quick-pick from monospace fonts detected on this device. Writes
+              into the same `fontFamily` value as the text input below, which
+              stays for custom stacks / the Nerd Font preset. */}
+          <FontFamilyPicker
+            namespace="settings.terminal.fontFamily"
+            labelKey="pickerLabel"
+            hintKey="pickerHint"
+            monoOnly
+            value={terminal.fontFamily || undefined}
+            onChange={(next) => update({ fontFamily: next ?? "" })}
+          />
           <Input
             value={terminal.fontFamily ?? ""}
             placeholder='"JetBrains Mono", monospace'
