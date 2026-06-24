@@ -21,13 +21,6 @@ export {
 } from "./provider-routing-engine"
 
 export {
-  executeFallbackChain,
-  type FallbackConfig,
-  type FallbackExecutorDeps,
-  type ProviderAttemptResult,
-} from "./fallback-executor"
-
-export {
   generateDefaultMappings,
   getTierDisplayName,
   getDefaultTierAliases,
