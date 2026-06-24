@@ -1,21 +1,23 @@
 "use client"
 
 /**
- * Avatar file picker for the user profile. Routes every picked file through
- * `lib/profile/avatar-image.ts:downscaleToDataUrl` so only a downscaled,
- * size-capped data URL ever reaches the settings row — never a raw
- * FileReader result (the profile blob syncs to companion devices and rides
- * WebDAV backups).
+ * Avatar file picker for the user profile. A picked file opens the crop/zoom
+ * edit dialog ({@link AvatarEditDialog}); only that dialog's output — a
+ * downscaled, size-capped data URL from `lib/profile/avatar-image.ts` — ever
+ * reaches the settings row, never a raw FileReader result (the profile blob
+ * syncs to companion devices and rides WebDAV backups).
  */
 
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { ImagePlusIcon, Loader2Icon, Trash2Icon } from "lucide-react"
+import { ImagePlusIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
-import { downscaleToDataUrl, isAcceptedAvatarType } from "@/lib/profile/avatar-image"
+import { isAcceptedAvatarType } from "@/lib/profile/avatar-image"
+
+import { AvatarEditDialog } from "./avatar-edit-dialog"
 
 export interface ProfileAvatarPickerProps {
   /** Current avatar data URL (null → glyph fallback). */
@@ -34,23 +36,18 @@ export function ProfileAvatarPicker({
 }: ProfileAvatarPickerProps) {
   const t = useTranslations("settings.profile")
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const [busy, setBusy] = useState(false)
+  // The file currently being cropped in the edit dialog (null → dialog closed).
+  const [editing, setEditing] = useState<File | null>(null)
 
-  const handleFile = async (file: File) => {
+  const handleFile = (file: File) => {
     if (!isAcceptedAvatarType(file.type)) {
       toast.error(t("avatarInvalidType"))
       return
     }
-    setBusy(true)
-    try {
-      const dataUrl = await downscaleToDataUrl(file)
-      await onChange(dataUrl)
-    } catch {
-      toast.error(t("avatarProcessFailed"))
-    } finally {
-      setBusy(false)
-    }
+    setEditing(file)
   }
+
+  const busy = editing != null
 
   return (
     <div className="flex items-center gap-4" data-testid="profile-avatar-picker">
@@ -69,11 +66,7 @@ export function ProfileAvatarPicker({
             onClick={() => inputRef.current?.click()}
             data-testid="profile-avatar-upload"
           >
-            {busy ? (
-              <Loader2Icon className="size-4 animate-spin" />
-            ) : (
-              <ImagePlusIcon className="size-4" />
-            )}
+            <ImagePlusIcon className="size-4" />
             {t("avatarUpload")}
           </Button>
           {value ? (
@@ -101,9 +94,17 @@ export function ProfileAvatarPicker({
         data-testid="profile-avatar-input"
         onChange={(e) => {
           const file = e.target.files?.[0]
-          // Allow re-picking the same file after a failure.
+          // Allow re-picking the same file after cancel/failure.
           e.target.value = ""
-          if (file) void handleFile(file)
+          if (file) handleFile(file)
+        }}
+      />
+      <AvatarEditDialog
+        file={editing}
+        onCancel={() => setEditing(null)}
+        onConfirm={async (dataUrl) => {
+          await onChange(dataUrl)
+          setEditing(null)
         }}
       />
     </div>

@@ -11,25 +11,43 @@ jest.mock("sonner", () => ({
   toast: { error: jest.fn() },
 }))
 
-jest.mock("@/lib/profile/avatar-image", () => {
-  const actual = jest.requireActual("@/lib/profile/avatar-image")
-  return {
-    ...actual,
-    downscaleToDataUrl: jest.fn(),
-  }
-})
+// Stub the crop/zoom dialog so these tests stay focused on the picker's own
+// job: validate the picked file and hand it to the editor. The dialog renders
+// only when `file` is non-null and exposes confirm/cancel hooks.
+jest.mock("./avatar-edit-dialog", () => ({
+  AvatarEditDialog: ({
+    file,
+    onCancel,
+    onConfirm,
+  }: {
+    file: File | null
+    onCancel: () => void
+    onConfirm: (dataUrl: string) => void | Promise<void>
+  }) =>
+    file ? (
+      <div data-testid="mock-edit-dialog">
+        <span data-testid="mock-edit-file">{file.name}</span>
+        <button
+          data-testid="mock-edit-confirm"
+          onClick={() => void onConfirm("data:image/webp;base64,XX")}
+        >
+          confirm
+        </button>
+        <button data-testid="mock-edit-cancel" onClick={onCancel}>
+          cancel
+        </button>
+      </div>
+    ) : null,
+}))
 
 import { toast } from "sonner"
-import { downscaleToDataUrl } from "@/lib/profile/avatar-image"
 
 import { ProfileAvatarPicker } from "./profile-avatar-picker"
 
-const mockDownscale = downscaleToDataUrl as jest.Mock
 const mockToastError = (toast as unknown as { error: jest.Mock }).error
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockDownscale.mockResolvedValue("data:image/webp;base64,AA")
 })
 
 const pickFile = async (file: File) => {
@@ -40,30 +58,40 @@ const pickFile = async (file: File) => {
 }
 
 describe("ProfileAvatarPicker", () => {
-  it("processes a valid image through the downscale pipeline", async () => {
-    const onChange = jest.fn()
-    render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={onChange} />)
+  it("opens the edit dialog for a valid image", async () => {
+    render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={() => {}} />)
     await pickFile(new File([new Uint8Array([1])], "a.png", { type: "image/png" }))
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith("data:image/webp;base64,AA"))
-    expect(mockDownscale).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("mock-edit-dialog")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-edit-file")).toHaveTextContent("a.png")
   })
 
-  it("rejects unsupported mime types with a toast and no onChange", async () => {
-    const onChange = jest.fn()
-    render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={onChange} />)
+  it("rejects unsupported mime types with a toast and no dialog", async () => {
+    render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={() => {}} />)
     await pickFile(new File([new Uint8Array([1])], "a.svg", { type: "image/svg+xml" }))
-    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("mock-edit-dialog")).not.toBeInTheDocument()
     expect(mockToastError).toHaveBeenCalledWith("avatarInvalidType")
-    expect(mockDownscale).not.toHaveBeenCalled()
   })
 
-  it("toasts when the downscale pipeline fails", async () => {
-    mockDownscale.mockRejectedValueOnce(new Error("avatar image too large after downscale"))
+  it("persists the cropped data URL and closes the dialog on confirm", async () => {
+    const onChange = jest.fn().mockResolvedValue(undefined)
+    render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={onChange} />)
+    await pickFile(new File([new Uint8Array([1])], "a.png", { type: "image/png" }))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-edit-confirm"))
+    })
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith("data:image/webp;base64,XX"))
+    await waitFor(() => expect(screen.queryByTestId("mock-edit-dialog")).not.toBeInTheDocument())
+  })
+
+  it("closes the dialog without saving on cancel", async () => {
     const onChange = jest.fn()
     render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={onChange} />)
     await pickFile(new File([new Uint8Array([1])], "a.png", { type: "image/png" }))
-    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("avatarProcessFailed"))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mock-edit-cancel"))
+    })
     expect(onChange).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("mock-edit-dialog")).not.toBeInTheDocument()
   })
 
   it("opens the file picker from the upload button", () => {
@@ -103,6 +131,12 @@ describe("ProfileAvatarPicker", () => {
     )
     expect(screen.getByTestId("profile-avatar-upload")).toBeDisabled()
     expect(screen.getByTestId("profile-avatar-clear")).toBeDisabled()
+  })
+
+  it("disables the buttons while the edit dialog is open", async () => {
+    render(<ProfileAvatarPicker value={null} fallbackName="Max" onChange={() => {}} />)
+    await pickFile(new File([new Uint8Array([1])], "a.png", { type: "image/png" }))
+    expect(screen.getByTestId("profile-avatar-upload")).toBeDisabled()
   })
 
   it("renders the avatar image when a value is present", () => {

@@ -46,6 +46,19 @@ export function dataUrlByteLength(dataUrl: string): number {
   return Math.floor((payload.length * 3) / 4)
 }
 
+/**
+ * A square crop region expressed in the source image's pixel space. Fed
+ * straight into `ctx.drawImage` as the source rectangle.
+ */
+export interface CropRegion {
+  /** Left edge of the crop square, in source pixels. */
+  sx: number
+  /** Top edge of the crop square, in source pixels. */
+  sy: number
+  /** Side length of the (square) crop, in source pixels. */
+  size: number
+}
+
 function decodeImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file)
@@ -60,6 +73,55 @@ function decodeImage(file: File): Promise<HTMLImageElement> {
     }
     img.src = url
   })
+}
+
+/**
+ * Draw `region` of `img` into an `edge`×`edge` canvas and encode it to the
+ * smallest acceptable `data:` URL (webp → jpeg → png, quality descending).
+ * Shared by the forced-center-crop path ({@link downscaleToDataUrl}) and the
+ * user-chosen-crop path ({@link encodeAvatarRegion}). Throws when the canvas
+ * is unavailable or no encoder attempt fits under {@link MAX_AVATAR_BYTES}.
+ */
+function encodeSquare(img: HTMLImageElement, region: CropRegion, edge: number): string {
+  const canvas = document.createElement("canvas")
+  canvas.width = edge
+  canvas.height = edge
+  const ctx = canvas.getContext("2d")
+  if (!ctx) {
+    throw new Error("canvas 2d context unavailable")
+  }
+
+  ctx.drawImage(img, region.sx, region.sy, region.size, region.size, 0, 0, edge, edge)
+
+  for (const attempt of ENCODE_ATTEMPTS) {
+    const dataUrl =
+      attempt.quality === undefined
+        ? canvas.toDataURL(attempt.mime)
+        : canvas.toDataURL(attempt.mime, attempt.quality)
+    // Browsers silently fall back to PNG for unsupported encoders — only
+    // accept the attempt when the prefix matches what we asked for (the
+    // final PNG attempt always matches itself).
+    if (!dataUrl.startsWith(`data:${attempt.mime}`)) continue
+    if (dataUrlByteLength(dataUrl) <= MAX_AVATAR_BYTES) return dataUrl
+  }
+  throw new Error("avatar image too large after downscale")
+}
+
+/**
+ * Encode a caller-chosen square `region` of an already-decoded image to a
+ * size-capped avatar `data:` URL. Used by the crop/zoom edit dialog, which
+ * tracks the region in source pixels from the user's pan/zoom. Throws on an
+ * empty/inverted region, a missing canvas, or an un-shrinkable payload.
+ */
+export function encodeAvatarRegion(
+  img: HTMLImageElement,
+  region: CropRegion,
+  edge: number = AVATAR_EDGE_PX
+): string {
+  if (!(region.size > 0)) {
+    throw new Error("invalid crop region")
+  }
+  return encodeSquare(img, region, edge)
 }
 
 /**
@@ -82,30 +144,11 @@ export async function downscaleToDataUrl(
     throw new Error("could not decode image")
   }
 
-  const canvas = document.createElement("canvas")
-  canvas.width = edge
-  canvas.height = edge
-  const ctx = canvas.getContext("2d")
-  if (!ctx) {
-    throw new Error("canvas 2d context unavailable")
-  }
-
   // Center-crop the larger axis so the avatar fills the square.
   const cropSize = Math.min(sourceW, sourceH)
-  const sx = (sourceW - cropSize) / 2
-  const sy = (sourceH - cropSize) / 2
-  ctx.drawImage(img, sx, sy, cropSize, cropSize, 0, 0, edge, edge)
-
-  for (const attempt of ENCODE_ATTEMPTS) {
-    const dataUrl =
-      attempt.quality === undefined
-        ? canvas.toDataURL(attempt.mime)
-        : canvas.toDataURL(attempt.mime, attempt.quality)
-    // Browsers silently fall back to PNG for unsupported encoders — only
-    // accept the attempt when the prefix matches what we asked for (the
-    // final PNG attempt always matches itself).
-    if (!dataUrl.startsWith(`data:${attempt.mime}`)) continue
-    if (dataUrlByteLength(dataUrl) <= MAX_AVATAR_BYTES) return dataUrl
-  }
-  throw new Error("avatar image too large after downscale")
+  return encodeSquare(
+    img,
+    { sx: (sourceW - cropSize) / 2, sy: (sourceH - cropSize) / 2, size: cropSize },
+    edge
+  )
 }

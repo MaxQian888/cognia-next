@@ -6,6 +6,7 @@ import {
   MAX_AVATAR_BYTES,
   dataUrlByteLength,
   downscaleToDataUrl,
+  encodeAvatarRegion,
   isAcceptedAvatarType,
 } from "./avatar-image"
 
@@ -201,5 +202,60 @@ describe("downscaleToDataUrl", () => {
     await expect(downscaleToDataUrl(pngFile())).rejects.toThrow(/context unavailable/)
     canvas.restore()
     restoreImage()
+  })
+})
+
+describe("encodeAvatarRegion", () => {
+  const fakeImg = {} as unknown as HTMLImageElement
+
+  it("draws the caller-chosen region and encodes a capped data URL", () => {
+    const canvas = installCanvasMock()
+    const result = encodeAvatarRegion(fakeImg, { sx: 128, sy: 0, size: 256 }, 64)
+    expect(canvas.drawImage).toHaveBeenCalledWith(fakeImg, 128, 0, 256, 256, 0, 0, 64, 64)
+    expect(result.startsWith("data:image/webp")).toBe(true)
+    expect(dataUrlByteLength(result)).toBeLessThanOrEqual(MAX_AVATAR_BYTES)
+    canvas.restore()
+  })
+
+  it("defaults the edge to AVATAR_EDGE_PX", () => {
+    const canvas = installCanvasMock()
+    encodeAvatarRegion(fakeImg, { sx: 0, sy: 0, size: 300 })
+    expect(canvas.drawImage).toHaveBeenCalledWith(
+      fakeImg,
+      0,
+      0,
+      300,
+      300,
+      0,
+      0,
+      AVATAR_EDGE_PX,
+      AVATAR_EDGE_PX
+    )
+    canvas.restore()
+  })
+
+  it("rejects a non-positive region before touching the canvas", () => {
+    const canvas = installCanvasMock()
+    expect(() => encodeAvatarRegion(fakeImg, { sx: 0, sy: 0, size: 0 })).toThrow(
+      /invalid crop region/
+    )
+    expect(canvas.drawImage).not.toHaveBeenCalled()
+    canvas.restore()
+  })
+
+  it("throws when no encoder attempt fits the cap", () => {
+    const canvas = installCanvasMock({
+      encode: (mime) => dataUrlOfBytes(mime, MAX_AVATAR_BYTES + 4096),
+    })
+    expect(() => encodeAvatarRegion(fakeImg, { sx: 0, sy: 0, size: 256 })).toThrow(/too large/)
+    canvas.restore()
+  })
+
+  it("throws when the canvas 2d context is unavailable", () => {
+    const canvas = installCanvasMock({ noContext: true })
+    expect(() => encodeAvatarRegion(fakeImg, { sx: 0, sy: 0, size: 256 })).toThrow(
+      /context unavailable/
+    )
+    canvas.restore()
   })
 })
