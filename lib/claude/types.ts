@@ -620,6 +620,19 @@ export interface SessionEndedEvent {
   sessionId: string
   result?: SDKResultMessage
   error?: string
+  /**
+   * Real HTTP status from the failing provider response, captured by the
+   * sidecar (`extractHttpErrorMeta`) when the SDK error exposed it. Lets the
+   * routing classifier + circuit breaker act on the true status instead of
+   * string-matching `error`. Absent when the error carried no HTTP status.
+   */
+  httpStatus?: number
+  /**
+   * Real Retry-After delay (ms) parsed from the failing response header by the
+   * sidecar. Feeds the breaker's dynamic cooldown; absent → the classifier
+   * falls back to extracting a hint from the `error` text.
+   */
+  retryAfterMs?: number
 }
 
 /**
@@ -1140,6 +1153,37 @@ export interface ChatSession {
    * filter for this conversation only. See {@link ToolFilterConfig}.
    */
   toolFilter?: ToolFilterConfig
+  /**
+   * Archive marker (conversation-list overhaul). Presence = archived; the
+   * value is the archive timestamp. Non-indexed (no Dexie schema bump): the
+   * conversation-list model filters on it in memory. Undefined = active.
+   * Written by `archiveSession` / `unarchiveSession` (lib/db/sessions.ts).
+   */
+  archivedAt?: number
+  /**
+   * Lightweight folder membership (conversation-list overhaul). References a
+   * {@link SessionFolder} id within the same workspace, or undefined = loose
+   * (shown under date buckets). Non-indexed; the table lives in Dexie v90
+   * (`sessionFolders`). Written by `assignSessionToFolder` (lib/db/sessions.ts).
+   */
+  folderId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * A user-defined folder for organizing conversations within a workspace
+ * (conversation-list overhaul). Orthogonal to the workspace (Project) scope:
+ * folders live inside a workspace and group its sessions. Persisted in the
+ * Dexie `sessionFolders` table (v90) and managed via lib/db/session-folders.ts.
+ */
+export interface SessionFolder {
+  id: string
+  /** Owning workspace — scoped exactly like {@link ChatSession.projectId}. */
+  projectId?: string
+  name: string
+  /** Manual sort position among sibling folders (ascending). */
+  order: number
   createdAt: number
   updatedAt: number
 }
@@ -2239,6 +2283,12 @@ export interface AppSettings {
     defaultPanelMode?: "preview" | "code"
     /** When false, artifacts are wiped when the session is cleared. */
     persistAcrossSessions?: boolean
+    /**
+     * When not `false` (default on), AI revisions to an existing artifact are
+     * staged as a pending diff proposal for per-hunk review instead of
+     * overwriting the artifact directly.
+     */
+    reviewBeforeApply?: boolean
   }
 
   // ---- Backup reminders & scheduling ----

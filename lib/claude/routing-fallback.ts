@@ -16,8 +16,9 @@ import { useSettingsStore } from "@/stores/settings"
 import type { SendOptions } from "@/lib/claude/types"
 import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import {
-  classifyProviderError,
+  classifyProviderErrorInfo,
   isTransientErrorClass,
+  type ProviderErrorMeta,
 } from "@cognia/provider-routing/error-classifier"
 import { toast } from "sonner"
 
@@ -129,7 +130,8 @@ async function issueRetry(
  */
 export async function attemptRoutingFallback(
   sessionId: string,
-  errorMessage: string
+  errorMessage: string,
+  meta: ProviderErrorMeta = {}
 ): Promise<boolean> {
   const settings = useSettingsStore.getState().settings
   // Default-on: only `=== false` disables. `?? true` would also match the
@@ -139,7 +141,12 @@ export async function attemptRoutingFallback(
   const cached = useChatStore.getState().lastSendBySession[sessionId]
   if (!cached) return false
 
-  const errorClass = classifyProviderError(errorMessage)
+  // Use the structured meta (real HTTP status) when the sidecar captured it so
+  // an unclassifiable message ("upstream connect error" with a 429) still
+  // routes correctly. No backoff is applied here: the fallback targets a
+  // DIFFERENT provider, so the failed provider's Retry-After is irrelevant —
+  // that delay is honoured by the breaker cooldown in `recordProviderOutcome`.
+  const errorClass = classifyProviderErrorInfo(errorMessage, meta).errorClass
 
   // ── Special classes: dedicated chains (LiteLLM context_window /
   // content_policy fallbacks). A same-sized model fails a context overflow

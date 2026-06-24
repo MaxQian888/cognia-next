@@ -132,6 +132,41 @@ describe("recordProviderOutcome", () => {
       expect(b.state.state).toBe("open")
       expect(b.state.dynamicCooldownMs).toBe(120_000)
     })
+
+    it("prefers the structured retryAfterMs over the string-extracted one", () => {
+      for (let i = 0; i < 2; i++) {
+        recordProviderOutcome({
+          providerId: "openai",
+          ok: false,
+          latencyMs: 10,
+          modelId: "gpt-4o",
+          // The text says 120s, but the real Retry-After header was 45s.
+          errorMessage: "429 rate limit exceeded, retry-after: 120",
+          httpStatus: 429,
+          retryAfterMs: 45_000,
+        })
+      }
+      const b = useCircuitBreakerStore.getState().breakers["openai::gpt-4o"]
+      expect(b.state.state).toBe("open")
+      expect(b.state.dynamicCooldownMs).toBe(45_000)
+    })
+
+    it("classifies off the real status when the message is unhelpful", () => {
+      for (let i = 0; i < 2; i++) {
+        recordProviderOutcome({
+          providerId: "openai",
+          ok: false,
+          latencyMs: 10,
+          modelId: "gpt-4o",
+          errorMessage: "upstream connect error",
+          httpStatus: 429,
+          retryAfterMs: 30_000,
+        })
+      }
+      const b = useCircuitBreakerStore.getState().breakers["openai::gpt-4o"]
+      expect(b.state.state).toBe("open")
+      expect(b.state.dynamicCooldownMs).toBe(30_000)
+    })
   })
 
   describe("session affinity", () => {

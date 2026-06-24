@@ -117,4 +117,43 @@ describe("classifyProviderErrorInfo", () => {
       errorClass: "rate-limit",
     })
   })
+
+  describe("structured HTTP metadata", () => {
+    it("rescues classification from httpStatus when the message is unhelpful", () => {
+      // The message matches no pattern, but the real status says 429.
+      const info = classifyProviderErrorInfo("upstream connect error", { httpStatus: 429 })
+      expect(info.errorClass).toBe("rate-limit")
+    })
+
+    it("maps 5xx status to server-error and 401 to auth", () => {
+      expect(classifyProviderErrorInfo("boom", { httpStatus: 503 }).errorClass).toBe("server-error")
+      expect(classifyProviderErrorInfo("boom", { httpStatus: 401 }).errorClass).toBe("auth")
+    })
+
+    it("never lets status OVERRIDE a message-derived special class", () => {
+      // A context-window error is usually HTTP 400; the message must win so it
+      // routes to the dedicated chain, not get demoted to invalid-request.
+      const info = classifyProviderErrorInfo("prompt is too long: 300000 tokens", {
+        httpStatus: 400,
+      })
+      expect(info.errorClass).toBe("context-window-exceeded")
+    })
+
+    it("prefers a real retryAfterMs over the string-extracted one", () => {
+      const info = classifyProviderErrorInfo("429 rate limit, retry-after: 10", {
+        retryAfterMs: 2500,
+      })
+      expect(info.errorClass).toBe("rate-limit")
+      expect(info.retryAfterMs).toBe(2500)
+    })
+
+    it("ignores retryAfterMs for a non-retryable class", () => {
+      const info = classifyProviderErrorInfo("invalid api key", {
+        httpStatus: 401,
+        retryAfterMs: 9000,
+      })
+      expect(info.errorClass).toBe("auth")
+      expect(info.retryAfterMs).toBeUndefined()
+    })
+  })
 })

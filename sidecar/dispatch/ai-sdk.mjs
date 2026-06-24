@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto"
 import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "./input-stream.mjs"
+import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
@@ -880,7 +881,15 @@ export function dispatchAiSdk({
               : typeof streamError === "string"
                 ? streamError
                 : (streamError?.message ?? JSON.stringify(streamError))
-          emit({ type: "session_ended", sessionId, error: msg })
+          emit({
+            type: "session_ended",
+            sessionId,
+            error: msg,
+            // Forward the real HTTP status + Retry-After from the ai-sdk
+            // APICallError so the renderer classifies + cools down off
+            // authoritative data, not string-matching.
+            ...extractHttpErrorMeta(streamError),
+          })
           return
         }
         // An error after we already have content from this/an earlier leg: stop

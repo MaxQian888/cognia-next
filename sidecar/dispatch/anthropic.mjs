@@ -22,6 +22,7 @@ import {
   SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
 } from "../builtin-tools/plugin-tools.mjs"
 import { makeInputStream } from "./input-stream.mjs"
+import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import {
@@ -450,6 +451,10 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         type: "session_ended",
         sessionId,
         error: err?.message ?? String(err),
+        // Forward the real HTTP status + Retry-After so the renderer classifies
+        // the failure and times the breaker cooldown off authoritative data
+        // instead of string-matching the message.
+        ...extractHttpErrorMeta(err),
       })
     } finally {
       session._ended = true

@@ -146,25 +146,60 @@ export function extractRetryAfterMs(
 }
 
 /**
+ * Structured error metadata captured by the sidecar from the real provider
+ * HTTP response (`session_ended.httpStatus` / `retryAfterMs`). When present it
+ * makes classification + Retry-After authoritative instead of string-derived;
+ * absent fields fall back to the message-text heuristics.
+ */
+export interface ProviderErrorMeta {
+  /** Real HTTP status code from the provider response. */
+  httpStatus?: number
+  /** Real Retry-After delay (ms) parsed from the response header. */
+  retryAfterMs?: number
+}
+
+/**
+ * Map a raw HTTP status to an error class. Returns undefined for statuses that
+ * the message text classifies better (e.g. 400, which may be a context-window
+ * or content-policy error the status alone cannot disambiguate).
+ */
+function classifyFromStatus(status: number): ProviderErrorClass | undefined {
+  if (status === 429) return "rate-limit"
+  if (status === 408) return "timeout"
+  if (status >= 500) return "server-error"
+  if (status === 401 || status === 403) return "auth"
+  return undefined
+}
+
+/**
  * Classify a provider error AND extract its Retry-After hint when the class
  * may carry one. `classifyProviderError` stays the plain-class wrapper.
+ *
+ * When the sidecar threaded structured `meta` (real HTTP status + Retry-After),
+ * it takes precedence over the noisy message text: the status RESCUES an
+ * otherwise-unclassifiable message (but never overrides a message-derived
+ * special class like context-window), and a real Retry-After header always
+ * wins over the string-extracted one.
  */
 export function classifyProviderErrorInfo(
   message: string,
+  meta: ProviderErrorMeta = {},
   now: () => number = Date.now
 ): ProviderErrorInfo {
-  const errorClass = classifyProviderError(message)
+  let errorClass = classifyProviderError(message)
+  if (errorClass === "unknown" && typeof meta.httpStatus === "number") {
+    const fromStatus = classifyFromStatus(meta.httpStatus)
+    if (fromStatus) errorClass = fromStatus
+  }
   if (!RETRY_HINT_CLASSES.has(errorClass)) return { errorClass }
-  const retryAfterMs = extractRetryAfterMs(message, now)
+  const retryAfterMs =
+    typeof meta.retryAfterMs === "number" && meta.retryAfterMs > 0
+      ? meta.retryAfterMs
+      : extractRetryAfterMs(message, now)
   return retryAfterMs !== undefined && retryAfterMs > 0
     ? { errorClass, retryAfterMs }
     : { errorClass }
 }
-
-// Deferred stretch (sidecar protocol change + tauri-smoke): forward the real
-// `retry-after` HTTP header + status code from sidecar/fetch-interceptor.mjs
-// session-scoped into `session_ended` so this string extraction becomes a
-// fallback instead of the primary path.
 
 /** Whether a class is worth retrying against another main-chain provider. */
 export function isTransientErrorClass(errorClass: ProviderErrorClass): boolean {

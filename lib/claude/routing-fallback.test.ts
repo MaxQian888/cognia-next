@@ -149,6 +149,29 @@ describe("attemptRoutingFallback", () => {
     })
   })
 
+  it("retries using the structured httpStatus when the message is unclassifiable", async () => {
+    seedCache("s1", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    ])
+    // Message matches no transient pattern, but the real status is 429.
+    const result = await attemptRoutingFallback("s1", "upstream connect error", {
+      httpStatus: 429,
+    })
+    expect(result).toBe(true)
+    expect(sendPromptMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT retry an unclassifiable message with no structured status", async () => {
+    seedCache("s1", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    ])
+    const result = await attemptRoutingFallback("s1", "upstream connect error")
+    expect(result).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
   it("bumps attemptIndex in the cache before issuing the IPC", async () => {
     seedCache("s1", [
       { providerId: "openai", modelId: "gpt-4o-mini" },

@@ -35,6 +35,18 @@ export interface ProviderOutcome {
   latencyMs: number
   errorMessage?: string
   /**
+   * Real HTTP status from the failing response (`session_ended.httpStatus`),
+   * when the sidecar captured it. Lets the classifier rescue an otherwise
+   * unclassifiable error message.
+   */
+  httpStatus?: number
+  /**
+   * Real Retry-After delay (ms) from the failing response header
+   * (`session_ended.retryAfterMs`). Feeds the breaker's dynamic cooldown,
+   * preferred over the value string-extracted from the message.
+   */
+  retryAfterMs?: number
+  /**
    * SDK-reported turn cost (USD). Authoritative when present (it bakes in cache
    * tiers). Absent/0 on the ai-sdk / non-Anthropic path — the sink then
    * estimates from the token breakdown below so the durable rollup isn't blank.
@@ -85,6 +97,8 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     cacheReadTokens,
     cacheCreationTokens,
     sessionId,
+    httpStatus,
+    retryAfterMs,
   } = outcome
   if (!providerId) return
   // Effective cost: the SDK figure wins; otherwise estimate from the token
@@ -133,7 +147,9 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     } else {
       // Classify once: the breaker gets the Retry-After hint (dynamic
       // cooldown) and permanent failures release the session's affinity pin.
-      const info = classifyProviderErrorInfo(errorMessage ?? "")
+      // The structured meta (real status + Retry-After header) takes precedence
+      // over the string-derived hint when the sidecar captured it.
+      const info = classifyProviderErrorInfo(errorMessage ?? "", { httpStatus, retryAfterMs })
       cb.recordFailure(providerId, { modelId, retryAfterMs: info.retryAfterMs })
       if (sessionId && !isTransientErrorClass(info.errorClass)) {
         releaseSessionDeployment(sessionId)

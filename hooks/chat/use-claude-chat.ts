@@ -35,7 +35,7 @@ import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
-import { frameSteerQueue } from "@/lib/claude/steer"
+import { buildSteerPayload, steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
 import {
   approveTool,
   closeSession,
@@ -133,6 +133,7 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { routeAiRevision } from "@/lib/artifacts/route-ai-revision"
 import { isTauri } from "@/lib/tauri"
 import { mark as perfMark } from "@/lib/perf"
 import type { UIMessage } from "ai"
@@ -609,7 +610,12 @@ export function useClaudeChat() {
   const [registry] = useState(
     () =>
       new SessionCoalescingRegistry({
-        onCommit: (sid, msgs) => useChatStore.getState().replaceSessionMessages(sid, msgs),
+        onCommit: (sid, msgs) => {
+          useChatStore.getState().replaceSessionMessages(sid, msgs)
+          // Stamp per-tool start/end times off the freshly-committed parts so the
+          // Run Panel can show per-tool elapsed (no-op when nothing transitioned).
+          useChatStore.getState().syncToolTimestamps(sid, msgs)
+        },
         onPersist: (sid, msgs) =>
           void persistMessages(sid, msgs).catch((err) =>
             console.error("debounced persistMessages failed", err)
@@ -724,7 +730,14 @@ export function useClaudeChat() {
         const st = sessionStatusOf(sessionId)
         if (st === "streaming" || st === "awaiting_approval") {
           const text = steerTextOf(content)
-          if (text) useChatStore.getState().enqueueSteer(sessionId, text)
+          const blocks = steerBlocksOf(content)
+          if (text || blocks.length > 0) {
+            useChatStore.getState().enqueueSteer(sessionId, {
+              id: crypto.randomUUID(),
+              text,
+              blocks: blocks.length > 0 ? blocks : undefined,
+            })
+          }
           return
         }
       }
@@ -1216,6 +1229,16 @@ export function useClaudeChat() {
     }
   }, [])
 
+  // Replay a session's queued steer NOW, without a turn boundary. Used by the
+  // Run Panel after an errored settle, where the queue is preserved but no
+  // settle event is coming — `interruptAndSteer` can't help (nothing to
+  // interrupt), so we drain directly. No-op when the queue is empty.
+  const flushSteer = useCallback((targetSessionId?: string) => {
+    const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+    if (!sessionId) return
+    maybeDrainSteer(sessionId, sendRef)
+  }, [])
+
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
       // Persist always-allow choice.
@@ -1380,6 +1403,7 @@ export function useClaudeChat() {
     send,
     stop,
     interruptAndSteer,
+    flushSteer,
     respondToApproval,
     close,
     editAndResend,
@@ -1560,24 +1584,20 @@ function sessionStatusOf(sessionId: string): ChatStatus {
   return s.sessions[sessionId]?.status ?? (sessionId === s.activeSessionId ? s.status : "idle")
 }
 
-/** Plain text of a send for the steer queue (text-only; attachments dropped). */
-function steerTextOf(content: SendContent): string {
-  if (typeof content === "string") return content.trim()
-  const block = content.find((b) => b.type === "text") as { text?: string } | undefined
-  return (block?.text ?? "").trim()
-}
-
 /**
  * Replay a session's queued steer messages as one fresh, framed turn. No-op
  * when the queue is empty. Called only once the turn has settled (idle/error),
  * so `send`'s busy-gate sees a non-streaming session and won't re-enqueue it.
+ *
+ * The payload is built by `buildSteerPayload` — texts joined into one framed
+ * steer, attachments of all entries aggregated ahead of it so they survive.
  */
 function maybeDrainSteer(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
   steerArmed.delete(sessionId)
   const queue = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
   if (queue.length === 0) return
   useChatStore.getState().clearSteerQueue(sessionId)
-  void sendRef.current?.(frameSteerQueue(queue), undefined, { sessionId })
+  void sendRef.current?.(buildSteerPayload(queue), undefined, { sessionId })
 }
 
 async function handleEvent(
@@ -1648,6 +1668,10 @@ async function handleEvent(
               ok: false,
               latencyMs: 0,
               errorMessage: evt.error,
+              // Real HTTP status + Retry-After captured by the sidecar — drive
+              // the breaker's dynamic cooldown off authoritative data.
+              httpStatus: evt.httpStatus,
+              retryAfterMs: evt.retryAfterMs,
               modelId: failedSend?.options.model,
               sessionId: evt.sessionId,
               // Provider child span nests under this turn's root span.
@@ -1661,7 +1685,10 @@ async function handleEvent(
           // error class is transient. `attemptRoutingFallback` returns
           // `true` when a retry was scheduled — in that case suppress
           // the error toast so the UI stays in `streaming`.
-          const retried = await attemptRoutingFallback(evt.sessionId, evt.error)
+          const retried = await attemptRoutingFallback(evt.sessionId, evt.error, {
+            httpStatus: evt.httpStatus,
+            retryAfterMs: evt.retryAfterMs,
+          })
           if (!retried) {
             // Permanent failure — commit + persist the final partial and drop
             // the mirror. (A retry re-issues `send`, which clears it itself.)
@@ -2126,10 +2153,52 @@ async function handleEvent(
         try {
           const settings = useSettingsStore.getState().settings
           const artifactsCfg = settings?.artifacts
-          if (artifactsCfg?.autoCreate !== false) {
-            const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
-            const text = extractAssistantText(lastAssistant)
-            if (text && lastAssistant) {
+          const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+          const text = extractAssistantText(lastAssistant)
+          if (text && lastAssistant) {
+            const reviewEnabled = artifactsCfg?.reviewBeforeApply !== false
+            const editTarget =
+              useChatStore.getState().pendingArtifactEditTarget?.[sessionId] ?? null
+
+            // Codex-style review gate: when the user aimed this turn at an
+            // existing artifact (via a selection chip) and review is on, stage
+            // the revision as a pending diff proposal instead of auto-creating
+            // a duplicate artifact.
+            let routedToReview = false
+            if (editTarget && reviewEnabled) {
+              const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
+                await import("@/lib/ai/generation/artifact-detector")
+              // Low line threshold so even a small targeted edit surfaces.
+              const detected = detectArtifacts(text, {
+                ...DEFAULT_DETECTION_CONFIG,
+                autoCreate: true,
+                minLines: 1,
+              })
+              const targetArtifact = useArtifactStore.getState().getArtifact(editTarget.artifactId)
+              const route = routeAiRevision({
+                reviewEnabled,
+                target: editTarget,
+                targetArtifactType: targetArtifact?.type,
+                detected,
+              })
+              // The target is single-use — consume it regardless of outcome.
+              useChatStore.getState().setPendingArtifactEditTarget(sessionId, null)
+              if (route.action === "propose") {
+                const proposal = useArtifactStore
+                  .getState()
+                  .proposeArtifactUpdate(route.artifactId, route.content, {
+                    requestId: route.requestId,
+                  })
+                // A null proposal (artifact gone / identical content) falls
+                // through to the normal auto-create path below — no lost work.
+                routedToReview = proposal !== null
+              }
+            }
+
+            // Auto-detect artifacts in the assistant turn that just sealed.
+            // Honors the artifacts settings block; off by default for
+            // power-users that flip the toggle.
+            if (!routedToReview && artifactsCfg?.autoCreate !== false) {
               void useArtifactStore.getState().autoCreateFromContent({
                 sessionId,
                 messageId: lastAssistant.id,
@@ -2144,7 +2213,7 @@ async function handleEvent(
             }
           }
         } catch (err) {
-          console.warn("autoCreateFromContent failed", err)
+          console.warn("artifact turn-complete routing failed", err)
         }
 
         // Background utility-model work: upgrade the auto title to an
