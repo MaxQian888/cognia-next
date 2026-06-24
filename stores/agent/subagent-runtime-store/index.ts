@@ -42,6 +42,7 @@ interface RuntimeSlice {
   setStatus: (id: string, status: SubAgentStatus) => void
   setProgress: (id: string, progress: number) => void
   appendLog: (id: string, log: SubAgentLog) => void
+  pushStreamText: (id: string, text: string) => void
   remove: (id: string) => void
   clearRuntime: () => void
 }
@@ -107,7 +108,36 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
           return {
             subAgents: {
               ...s.subAgents,
-              [id]: { ...sa, logs: [...sa.logs, log] },
+              [id]: { ...sa, logs: [...sa.logs, log].slice(-50), lastActivityAt: new Date() },
+            },
+          }
+        }),
+      // Coalesce a growing streaming-text line into ONE log entry (marked
+      // `data.stream === "text"`): replace a trailing stream-text entry, else
+      // append a fresh one. Keeps live token streaming from flooding the cap.
+      pushStreamText: (id, text) =>
+        set((s) => {
+          const sa = s.subAgents[id]
+          if (!sa) return s
+          const logs = sa.logs.slice()
+          const last = logs[logs.length - 1]
+          const entry: SubAgentLog = {
+            timestamp: new Date(),
+            level: "info",
+            message: text,
+            data: { stream: "text" },
+          }
+          const isStreamText =
+            !!last &&
+            typeof last.data === "object" &&
+            last.data !== null &&
+            (last.data as { stream?: unknown }).stream === "text"
+          if (isStreamText) logs[logs.length - 1] = entry
+          else logs.push(entry)
+          return {
+            subAgents: {
+              ...s.subAgents,
+              [id]: { ...sa, logs: logs.slice(-50), lastActivityAt: new Date() },
             },
           }
         }),

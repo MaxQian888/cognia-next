@@ -178,6 +178,36 @@ describe("subagent-runtime-store — runtime slice", () => {
     expect(snapshot().subAgents.missing).toBeUndefined()
   })
 
+  it("appendLog caps the log at the last 50 entries", () => {
+    snapshot().upsert(makeSubAgent({ logs: [] }))
+    for (let i = 0; i < 60; i++) {
+      snapshot().appendLog("sa-1", { timestamp: new Date(), level: "info", message: `m${i}` })
+    }
+    const logs = snapshot().subAgents["sa-1"]!.logs
+    expect(logs).toHaveLength(50)
+    expect(logs[0].message).toBe("m10")
+    expect(logs[49].message).toBe("m59")
+  })
+
+  it("pushStreamText coalesces consecutive streaming text into one entry", () => {
+    snapshot().upsert(makeSubAgent({ logs: [] }))
+    snapshot().pushStreamText("sa-1", "Hel")
+    snapshot().pushStreamText("sa-1", "Hello")
+    let logs = snapshot().subAgents["sa-1"]!.logs
+    expect(logs).toHaveLength(1)
+    expect(logs[0].message).toBe("Hello")
+    // A non-text log breaks the run; the next text starts a fresh entry.
+    snapshot().appendLog("sa-1", { timestamp: new Date(), level: "info", message: "Read" })
+    snapshot().pushStreamText("sa-1", "World")
+    logs = snapshot().subAgents["sa-1"]!.logs
+    expect(logs.map((l) => l.message)).toEqual(["Hello", "Read", "World"])
+  })
+
+  it("pushStreamText is a no-op when the subagent is unknown", () => {
+    expect(() => snapshot().pushStreamText("missing", "x")).not.toThrow()
+    expect(snapshot().subAgents.missing).toBeUndefined()
+  })
+
   it("remove drops a single subagent", () => {
     snapshot().upsert(makeSubAgent())
     snapshot().remove("sa-1")
