@@ -19,6 +19,16 @@ describe("DEFAULT_ROUTING_CONFIG", () => {
       providerConstraints: [],
       requestTimeoutMs: 30000,
       maxFallbackAttempts: 3,
+      // Reliability default: breaker ships enabled with conservative thresholds.
+      circuitBreaker: {
+        enabled: true,
+        failureThreshold: 5,
+        windowDurationMs: 60000,
+        cooldownMs: 30000,
+        successThreshold: 1,
+        failureRateThreshold: 0.5,
+        minRequestVolume: 10,
+      },
     })
   })
 })

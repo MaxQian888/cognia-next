@@ -289,6 +289,18 @@ describe("applyCircuitBreakerSettings", () => {
     expect(circuitEnabled).toBe(false)
   })
 
+  it("ships enabled with conservative thresholds in DEFAULT_ROUTING_CONFIG", async () => {
+    const { applyCircuitBreakerSettings } = await import("./build-preview-engine")
+    const { DEFAULT_ROUTING_CONFIG } = await import("@cognia/provider-types/model-mapping")
+    expect(DEFAULT_ROUTING_CONFIG.circuitBreaker).toBeDefined()
+    expect(DEFAULT_ROUTING_CONFIG.circuitBreaker?.enabled).toBe(true)
+    expect(DEFAULT_ROUTING_CONFIG.circuitBreaker?.failureRateThreshold).toBe(0.5)
+    expect(DEFAULT_ROUTING_CONFIG.circuitBreaker?.minRequestVolume).toBe(10)
+    circuitEnabled = false
+    applyCircuitBreakerSettings(DEFAULT_ROUTING_CONFIG)
+    expect(circuitEnabled).toBe(true)
+  })
+
   it("leaves the store untouched when no circuitBreaker block is persisted", async () => {
     const { applyCircuitBreakerSettings } = await import("./build-preview-engine")
     circuitEnabled = true

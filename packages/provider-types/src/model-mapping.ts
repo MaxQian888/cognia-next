@@ -175,4 +175,20 @@ export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
   providerConstraints: [],
   requestTimeoutMs: 30000,
   maxFallbackAttempts: 3,
+  // Reliability default: the breaker ships ENABLED with conservative
+  // thresholds so a flapping provider is routed around and auto-recovers. A
+  // 50% failure-rate trip needs ≥10 requests in the 60s window, so it never
+  // fires on a cold start or a single transient blip. Users who explicitly
+  // persisted a routingConfig WITHOUT a circuitBreaker block keep their
+  // historical opt-in-off behavior (this default applies only when no
+  // routingConfig is persisted at all).
+  circuitBreaker: {
+    enabled: true,
+    failureThreshold: 5,
+    windowDurationMs: 60000,
+    cooldownMs: 30000,
+    successThreshold: 1,
+    failureRateThreshold: 0.5,
+    minRequestVolume: 10,
+  },
 }
