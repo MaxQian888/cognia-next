@@ -50,7 +50,7 @@ const definition: PluginDefinition = {
         id: "browser-tools:availability",
         name: "Browser tools availability",
         provide: () =>
-          "Browser tools are available for the in-app preview: browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs), browser_click/type/fill_form/select/hover (target by ref), browser_wait_for (wait for text to appear/disappear), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot.",
+          "Browser tools are available for the in-app preview: browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs), browser_click/type/fill_form/select/hover (target by ref), browser_wait_for (wait for text to appear/disappear), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot.",
       })
     )
 
@@ -200,6 +200,25 @@ const definition: PluginDefinition = {
           timeoutMs: a.timeoutMs,
         })
         return withSnapshot({ result })
+      },
+    })
+
+    reg({
+      name: "browser_screenshot",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "browser_screenshot",
+        description:
+          "Capture a PNG of the current preview (vision fallback — prefer browser_snapshot for structure). Returns base64 PNG bytes.",
+        parametersSchema: { type: "object", properties: {} },
+      },
+      execute: async () => {
+        try {
+          const shot = await engineFor().engine.screenshot()
+          return { ok: true, base64: shot.bytes, width: shot.width, height: shot.height }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
       },
     })
 

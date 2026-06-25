@@ -4,8 +4,10 @@
  * The trust tier (`resolveTrustTier`) decides routing and whether the page
  * content must be treated as untrusted. See ADR-0055.
  */
+import type { Screenshot } from "@/lib/automation/types"
 import { emitAgentActivity } from "@/lib/browser/agent-activity"
 import { browserClient } from "@/lib/browser/client"
+import { getActivePaneRect } from "@/lib/browser/pane-rect"
 import {
   resolveTrustTier,
   type BrowserActionResult,
@@ -31,6 +33,7 @@ export interface BrowserEngine {
   stop(): Promise<void>
   getPage(): Promise<{ url: string; title: string }>
   waitForText(text: string, opts?: WaitForOptions): Promise<WaitForResult>
+  screenshot(): Promise<Screenshot>
 }
 
 export interface WaitForOptions {
@@ -100,6 +103,12 @@ export class EmbeddedEngine implements BrowserEngine {
       if (Date.now() >= deadline) return { ok: false, timedOut: true }
       await new Promise((resolve) => setTimeout(resolve, intervalMs))
     }
+  }
+  screenshot(): Promise<Screenshot> {
+    const rect = getActivePaneRect()
+    if (!rect) return Promise.reject(new Error("preview is not open"))
+    emitAgentActivity("screenshot")
+    return browserClient.embedCapture(rect)
   }
 }
 

@@ -12,11 +12,13 @@ jest.mock("@/lib/browser/client", () => ({
     embedGetUrl: jest.fn(async () => "http://localhost/"),
     embedGetTitle: jest.fn(async () => "Home"),
     embedHasText: jest.fn(async () => true),
+    embedCapture: jest.fn(async () => ({ bytes: "AAAA", width: 10, height: 10, capturedAt: 0 })),
   },
 }))
 
 import { browserClient } from "@/lib/browser/client"
 import { routeEngine, EmbeddedEngine } from "@/lib/browser/agent-engine"
+import { setActivePaneRect } from "@/lib/browser/pane-rect"
 
 const mockClient = browserClient as unknown as Record<string, jest.Mock>
 
@@ -105,5 +107,21 @@ describe("EmbeddedEngine.waitForText", () => {
     const res = await p
     expect(res.ok).toBe(true)
     jest.useRealTimers()
+  })
+})
+
+describe("EmbeddedEngine.screenshot", () => {
+  afterEach(() => setActivePaneRect(null))
+
+  it("captures the published pane rect", async () => {
+    setActivePaneRect({ x: 1, y: 2, width: 3, height: 4 })
+    const shot = await new EmbeddedEngine().screenshot()
+    expect(mockClient.embedCapture).toHaveBeenCalledWith({ x: 1, y: 2, width: 3, height: 4 })
+    expect(shot.bytes).toBe("AAAA")
+  })
+
+  it("rejects when no preview is open", async () => {
+    setActivePaneRect(null)
+    await expect(new EmbeddedEngine().screenshot()).rejects.toThrow(/not open/)
   })
 })

@@ -16,6 +16,7 @@ jest.mock("@/lib/browser/agent-engine", () => {
     reload: jest.fn(async () => {}),
     stop: jest.fn(async () => {}),
     waitForText: jest.fn(async () => ({ ok: true, timedOut: false })),
+    screenshot: jest.fn(async () => ({ bytes: "AAAA", width: 10, height: 10, capturedAt: 0 })),
   }
   return {
     __engine: engine,
@@ -150,6 +151,21 @@ describe("browser-tools plugin", () => {
     expect(engine.waitForText).toHaveBeenCalledWith("Done", { mode: "appear", timeoutMs: 1000 })
     expect(res.result.ok).toBe(true)
     expect(res.snapshot.generation).toBe(3)
+  })
+
+  it("browser_screenshot returns ok + base64 on success", async () => {
+    const tools = await collectTools()
+    const res = (await tools.browser_screenshot({})) as { ok: boolean; base64: string }
+    expect(engine.screenshot).toHaveBeenCalled()
+    expect(res).toMatchObject({ ok: true, base64: "AAAA", width: 10, height: 10 })
+  })
+
+  it("browser_screenshot returns ok:false when no preview is open", async () => {
+    engine.screenshot.mockRejectedValueOnce(new Error("preview is not open"))
+    const tools = await collectTools()
+    const res = (await tools.browser_screenshot({})) as { ok: boolean; error: string }
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/not open/)
   })
 
   it("browser_read_network and browser_get_page delegate", async () => {

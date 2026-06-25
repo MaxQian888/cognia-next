@@ -50,13 +50,15 @@ WebKitGTK）上均可用。`eval_embed_with_result` 通过 oneshot + 10 秒超�
 - `snapshot → 操作 → 重新 snapshot`：每个变更类工具内联返回新快照；ref 携带 `generation`。
 - 协议白名单仍为 http(s)；`public` 等级标记为 `untrusted`（防提示注入），智能体绝不自动填入密钥。
 - `browser_evaluate`（裸 JS，RCE 级）在第一阶段**不注册**，后续作为独立门控、默认关闭的工具。
-- `browser_screenshot`（面向智能体的截图）**暂缓**：按嵌入式 webview 自身边界截图所需的
-  物理/逻辑坐标换算无法在不启动真实桌面壳的情况下验证，且模型按设计以结构化快照为主
-  （截图仅作视觉兜底）；人工仍可通过既有的选区→对话流程获得截图。作为后续项跟踪。
+- `browser_screenshot` 复用已通过单测的、基于区域的 `browser_embed_capture`
+  （即人工选区→对话流程已依赖的 `compute_embed_capture_region` 几何），而非重新推导截图边界：
+  预览面板把保留区域 rect 发布到 `lib/browser/pane-rect` 单例，引擎据此截图。仅作视觉兜底——
+  模型按设计以结构化快照为主。
 
 第一阶段已暴露的工具：`browser_navigate`（含 `browser_back/forward/reload/stop`）、
 `browser_snapshot`、`browser_click/type/fill_form/select/hover`、`browser_wait_for`
-（等待文本出现/消失）、`browser_read_console/read_network`、`browser_get_page`。
+（等待文本出现/消失）、`browser_screenshot`（PNG 视觉兜底）、
+`browser_read_console/read_network`、`browser_get_page`。
 
 ## 第一阶段诚实的能力边界（注入 JS 上限）
 

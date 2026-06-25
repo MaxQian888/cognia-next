@@ -2,7 +2,7 @@
 
 import { MousePointerSquareDashedIcon, RotateCwIcon, SendIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { type FormEvent, useCallback, useRef, useState } from "react"
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import {
@@ -17,6 +17,7 @@ import { useBrowserPaneWebview } from "@/hooks/browser/use-browser-pane-webview"
 import { useElementSelection } from "@/hooks/browser/use-element-selection"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { browserClient } from "@/lib/browser/client"
+import { setActivePaneRect } from "@/lib/browser/pane-rect"
 import { normalizePreviewUrl } from "@/lib/browser/protocol"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
@@ -40,6 +41,13 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
   })
   const { sendComment } = useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
+
+  // Publish the reserved-region rect so the agent's browser_screenshot tool can
+  // reuse the verified region-based capture path. Cleared on unmount.
+  useEffect(() => {
+    setActivePaneRect(committedUrl ? (rect ?? null) : null)
+    return () => setActivePaneRect(null)
+  }, [rect, committedUrl])
 
   const commitUrl = useCallback(
     (e: FormEvent) => {
