@@ -26,6 +26,7 @@ beforeEach(() => {
     artifacts: {},
     activeArtifactId: null,
     artifactVersions: {},
+    pendingReviews: {},
     artifactWorkspace: {
       scope: "session",
       sessionId: null,
@@ -126,6 +127,46 @@ describe("useArtifactPanelState", () => {
     const { result } = renderHook(() => useArtifactPanelState())
     act(() => result.current.handleOpenInCanvas())
     expect(Object.keys(useArtifactStore.getState().canvasDocuments).length).toBeGreaterThan(0)
+  })
+
+  it("auto-enters review mode when a pending proposal appears and exposes it", () => {
+    const a = makeArtifact()
+    const { result } = renderHook(() => useArtifactPanelState())
+    expect(result.current.viewMode).toBe("code")
+    act(() => {
+      useArtifactStore
+        .getState()
+        .proposeArtifactUpdate(a.id, "<!DOCTYPE html><html><body>changed</body></html>")
+    })
+    expect(result.current.viewMode).toBe("review")
+    expect(result.current.pendingReview).not.toBeNull()
+  })
+
+  it("leaves review mode for code once the proposal is resolved", () => {
+    const a = makeArtifact()
+    const { result } = renderHook(() => useArtifactPanelState())
+    act(() => {
+      useArtifactStore
+        .getState()
+        .proposeArtifactUpdate(a.id, "<!DOCTYPE html><html><body>changed</body></html>")
+    })
+    expect(result.current.viewMode).toBe("review")
+    act(() => useArtifactStore.getState().rejectArtifactReview(a.id))
+    expect(result.current.viewMode).toBe("code")
+    expect(result.current.pendingReview).toBeNull()
+  })
+
+  it("does not yank the user out of edit mode when a proposal appears", () => {
+    const a = makeArtifact()
+    const { result } = renderHook(() => useArtifactPanelState())
+    act(() => result.current.handleEditMode())
+    expect(result.current.viewMode).toBe("edit")
+    act(() => {
+      useArtifactStore
+        .getState()
+        .proposeArtifactUpdate(a.id, "<!DOCTYPE html><html><body>changed</body></html>")
+    })
+    expect(result.current.viewMode).toBe("edit")
   })
 
   it("handleDownload triggers a blob download", () => {

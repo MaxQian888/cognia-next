@@ -15,6 +15,8 @@
   "persistAcrossSessionsHint": "开启后 Artifact 通过 localStorage 持久化；关闭则随会话清理。",
   "persistAcrossSessionsLabel": "跨会话保留",
   "resetDefaults": "恢复默认",
+  "reviewBeforeApplyHint": "开启后，助手对已有 Artifact 的修改会先暂存为差异提案，由你逐块（hunk）审阅后再应用；关闭则直接覆盖 Artifact。",
+  "reviewBeforeApplyLabel": "应用前审阅 AI 修改",
   "showNotificationHint": "新 Artifact 创建时显示简短的 sonner 提示。",
   "showNotificationLabel": "自动创建时弹出提示",
   "title": "作品"

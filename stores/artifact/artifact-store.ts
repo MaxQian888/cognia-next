@@ -18,6 +18,12 @@ import { getPluginEventHooks } from "@/lib/plugin"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import { loggers } from "@/lib/logging"
 import { useProjectStore } from "@/stores/project/project-store"
+// Pure diff → hunk → apply engine (no `ai`/provider imports — safe for this
+// persisted, widely-imported store). See lib/ai/generation/canvas-review.ts.
+import {
+  buildCanvasReview,
+  applyAcceptedCanvasReviewItems,
+} from "@/lib/ai/generation/canvas-review"
 
 /**
  * Active workspace id for stamping new work products (Workspace isolation,
@@ -48,6 +54,9 @@ import type {
   CanvasDocument,
   CanvasDocumentVersion,
   CanvasSuggestion,
+  CanvasPendingReview,
+  CanvasReviewItemStatus,
+  CanvasWorkbenchActionType,
   AnalysisResult,
   ArtifactDetectionConfig,
   DetectedArtifact,
@@ -409,6 +418,12 @@ interface ArtifactState {
   activeArtifactId: string | null
   artifactVersions: Record<string, ArtifactVersion[]>
   artifactWorkspace: ArtifactWorkspaceState
+  /**
+   * Open AI-revision proposals awaiting per-hunk review, keyed by artifactId
+   * (at most one per artifact). Transient — deliberately excluded from
+   * `partialize` so a stale-baseline proposal can never survive a reload.
+   */
+  pendingReviews: Record<string, CanvasPendingReview>
 
   // Canvas
   canvasDocuments: Record<string, CanvasDocument>
@@ -460,6 +475,29 @@ interface ArtifactActions {
     content: string
     config?: Partial<ArtifactDetectionConfig>
   }) => Promise<Artifact[]>
+
+  // AI-revision review (Codex-style per-hunk diff review)
+  /**
+   * Stage an AI revision of an existing artifact as a pending proposal instead
+   * of overwriting it. Builds per-hunk review items via `buildCanvasReview`.
+   * Returns `null` (no-op) when the artifact is missing or the proposed content
+   * is identical to current (no hunks to review).
+   */
+  proposeArtifactUpdate: (
+    id: string,
+    proposedContent: string,
+    meta?: { requestId?: string; actionType?: CanvasWorkbenchActionType }
+  ) => CanvasPendingReview | null
+  setReviewItemStatus: (id: string, itemId: string, status: CanvasReviewItemStatus) => void
+  /**
+   * Apply only the accepted hunks: snapshots the current content as a version,
+   * merges accepted items via `applyAcceptedCanvasReviewItems`, writes the
+   * result through `updateArtifact`, then clears the proposal. Items left
+   * `pending` are treated as rejected.
+   */
+  applyArtifactReview: (id: string, changeDescription?: string) => void
+  rejectArtifactReview: (id: string) => void
+  getPendingReview: (id: string) => CanvasPendingReview | null
 
   // Artifact version history
   saveArtifactVersion: (id: string, description?: string) => ArtifactVersion | null
@@ -548,6 +586,7 @@ const initialState: ArtifactState = {
   activeArtifactId: null,
   artifactVersions: {},
   artifactWorkspace: INITIAL_ARTIFACT_WORKSPACE,
+  pendingReviews: {},
   canvasDocuments: {},
   activeCanvasId: null,
   canvasOpen: false,
@@ -613,6 +652,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           const canvasDocuments = Object.fromEntries(
             Object.entries(state.canvasDocuments).filter(([, d]) => d.projectId !== projectId)
           )
+          const pendingReviews = Object.fromEntries(
+            Object.entries(state.pendingReviews).filter(([artifactId]) => artifacts[artifactId])
+          )
           const removedActiveArtifact =
             state.activeArtifactId != null && !artifacts[state.activeArtifactId]
           const removedActiveCanvas =
@@ -620,6 +662,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           return {
             artifacts,
             canvasDocuments,
+            pendingReviews,
             activeArtifactId: removedActiveArtifact ? null : state.activeArtifactId,
             activeCanvasId: removedActiveCanvas ? null : state.activeCanvasId,
           }
@@ -645,8 +688,20 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             fieldsChanged: Object.keys(updates),
           })
 
+          // If a proposal is open against this artifact and the content moved
+          // out from under it, mark the proposal stale so the review surface
+          // can prompt the user to re-diff or discard. Content-only check: a
+          // metadata-only update (e.g. lastAccessedAt) shouldn't invalidate.
+          const contentMoved = "content" in updates && updates.content !== artifact.content
+          const openReview = state.pendingReviews[id]
+          const pendingReviews =
+            contentMoved && openReview && !openReview.isStale
+              ? { ...state.pendingReviews, [id]: { ...openReview, isStale: true } }
+              : state.pendingReviews
+
           return {
             artifacts: { ...state.artifacts, [id]: updated },
+            pendingReviews,
           }
         })
       },
@@ -654,6 +709,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
       deleteArtifact: (id) => {
         set((state) => {
           const { [id]: _removed, ...rest } = state.artifacts
+          const { [id]: _removedReview, ...pendingReviews } = state.pendingReviews
           const recentArtifactIds = state.artifactWorkspace.recentArtifactIds.filter(
             (artifactId) => artifactId !== id
           )
@@ -676,6 +732,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           })
           return {
             artifacts: rest,
+            pendingReviews,
             artifactWorkspace: nextWorkspace,
             activeArtifactId: nextActiveArtifactId,
           }
@@ -874,6 +931,104 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         return createdArtifacts
       },
 
+      // AI-revision review (Codex-style per-hunk diff review)
+      proposeArtifactUpdate: (id, proposedContent, meta) => {
+        const artifact = get().artifacts[id]
+        if (!artifact) return null
+        if (proposedContent === artifact.content) return null
+
+        const review = buildCanvasReview({
+          requestId: meta?.requestId ?? nanoid(),
+          actionType: meta?.actionType ?? "custom",
+          originalContent: artifact.content,
+          proposedContent,
+        })
+        if (review.items.length === 0) return null
+
+        set((state) => ({
+          pendingReviews: { ...state.pendingReviews, [id]: review },
+          activeArtifactId: id,
+          panelOpen: true,
+          panelView: "artifact",
+          artifactWorkspace: {
+            ...state.artifactWorkspace,
+            sessionId: artifact.sessionId,
+            recentArtifactIds: updateRecentArtifactIds(
+              state.artifactWorkspace.recentArtifactIds,
+              id
+            ),
+          },
+        }))
+
+        getPluginEventHooks().dispatchArtifactOpen(id)
+        loggers.store.info("artifacts.review.propose", {
+          artifactId: id,
+          hunks: review.items.length,
+        })
+
+        return review
+      },
+
+      setReviewItemStatus: (id, itemId, status) => {
+        set((state) => {
+          const review = state.pendingReviews[id]
+          if (!review) return state
+          return {
+            pendingReviews: {
+              ...state.pendingReviews,
+              [id]: {
+                ...review,
+                items: review.items.map((item) =>
+                  item.id === itemId ? { ...item, status } : item
+                ),
+              },
+            },
+          }
+        })
+      },
+
+      applyArtifactReview: (id, changeDescription) => {
+        const state = get()
+        const review = state.pendingReviews[id]
+        const artifact = state.artifacts[id]
+        if (!review || !artifact) return
+
+        // Refuse to apply a stale proposal: its diff baseline no longer matches
+        // the live content, so merging would clobber the intervening change.
+        // The review surface forces re-diff / discard before reaching here.
+        if (review.isStale) {
+          loggers.store.warn("artifacts.review.apply-skipped-stale", { artifactId: id })
+          return
+        }
+
+        // Snapshot current content as a version, then merge accepted hunks
+        // (against the diff's own baseline) and write through updateArtifact.
+        get().saveArtifactVersion(id, changeDescription)
+        const merged = applyAcceptedCanvasReviewItems(review.originalContent, review.items)
+        get().updateArtifact(id, { content: merged })
+
+        set((s) => {
+          const { [id]: _applied, ...pendingReviews } = s.pendingReviews
+          return { pendingReviews }
+        })
+
+        loggers.store.info("artifacts.review.apply", {
+          artifactId: id,
+          accepted: review.items.filter((item) => item.status === "accepted").length,
+          total: review.items.length,
+        })
+      },
+
+      rejectArtifactReview: (id) => {
+        set((state) => {
+          if (!state.pendingReviews[id]) return state
+          const { [id]: _rejected, ...pendingReviews } = state.pendingReviews
+          return { pendingReviews }
+        })
+      },
+
+      getPendingReview: (id) => get().pendingReviews[id] ?? null,
+
       // Artifact version history
       saveArtifactVersion: (id, description) => {
         const state = get()
@@ -925,21 +1080,29 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           changeDescription: autoSaveDescription ?? "Auto-saved before restore",
         }
 
-        set((s) => ({
-          artifacts: {
-            ...s.artifacts,
-            [id]: {
-              ...artifact,
-              content: version.content,
-              version: artifact.version + 1,
-              updatedAt: new Date(),
+        set((s) => {
+          const openReview = s.pendingReviews[id]
+          const pendingReviews =
+            openReview && !openReview.isStale
+              ? { ...s.pendingReviews, [id]: { ...openReview, isStale: true } }
+              : s.pendingReviews
+          return {
+            artifacts: {
+              ...s.artifacts,
+              [id]: {
+                ...artifact,
+                content: version.content,
+                version: artifact.version + 1,
+                updatedAt: new Date(),
+              },
             },
-          },
-          artifactVersions: {
-            ...s.artifactVersions,
-            [id]: [...(s.artifactVersions[id] || []), currentVersion],
-          },
-        }))
+            artifactVersions: {
+              ...s.artifactVersions,
+              [id]: [...(s.artifactVersions[id] || []), currentVersion],
+            },
+            pendingReviews,
+          }
+        })
 
         loggers.store.info("artifacts.version.restore", {
           artifactId: id,
@@ -1381,10 +1544,12 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         set((state) => {
           const artifacts = { ...state.artifacts }
           const artifactVersions = { ...state.artifactVersions }
+          const pendingReviews = { ...state.pendingReviews }
 
           for (const id of ids) {
             delete artifacts[id]
             delete artifactVersions[id]
+            delete pendingReviews[id]
           }
 
           const recentArtifactIds = state.artifactWorkspace.recentArtifactIds.filter(
@@ -1412,6 +1577,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           return {
             artifacts,
             artifactVersions,
+            pendingReviews,
             artifactWorkspace: nextWorkspace,
             activeArtifactId: nextActiveArtifactId,
           }
@@ -1498,6 +1664,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           const artifactVersions = Object.fromEntries(
             Object.entries(state.artifactVersions).filter(([id]) => artifacts[id])
           )
+          const pendingReviews = Object.fromEntries(
+            Object.entries(state.pendingReviews).filter(([id]) => artifacts[id])
+          )
           const canvasDocuments = Object.fromEntries(
             Object.entries(state.canvasDocuments).filter(([, d]) => d.sessionId !== sessionId)
           )
@@ -1508,6 +1677,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           return {
             artifacts,
             artifactVersions,
+            pendingReviews,
             artifactWorkspace: {
               ...state.artifactWorkspace,
               recentArtifactIds: state.artifactWorkspace.recentArtifactIds.filter(

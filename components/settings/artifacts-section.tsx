@@ -27,6 +27,7 @@ type ArtifactSettingsShape = {
   showNotification: boolean
   defaultPanelMode: "code" | "preview"
   persistAcrossSessions: boolean
+  reviewBeforeApply: boolean
 }
 
 const DEFAULTS: ArtifactSettingsShape = {
@@ -36,6 +37,7 @@ const DEFAULTS: ArtifactSettingsShape = {
   showNotification: true,
   defaultPanelMode: "code",
   persistAcrossSessions: true,
+  reviewBeforeApply: true,
 }
 
 export function ArtifactsSection() {
@@ -51,6 +53,7 @@ export function ArtifactsSection() {
   const showNotification = cfg.showNotification ?? DEFAULTS.showNotification
   const defaultPanelMode = cfg.defaultPanelMode ?? DEFAULTS.defaultPanelMode
   const persistAcrossSessions = cfg.persistAcrossSessions ?? DEFAULTS.persistAcrossSessions
+  const reviewBeforeApply = cfg.reviewBeforeApply ?? DEFAULTS.reviewBeforeApply
 
   const update = (patch: Partial<ArtifactSettingsShape>) => {
     void save({
@@ -61,6 +64,7 @@ export function ArtifactsSection() {
         showNotification,
         defaultPanelMode,
         persistAcrossSessions,
+        reviewBeforeApply,
         ...patch,
       },
     })
@@ -168,6 +172,17 @@ export function ArtifactsSection() {
         <Switch
           checked={persistAcrossSessions}
           onCheckedChange={(checked) => update({ persistAcrossSessions: checked })}
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4 border-t pt-4">
+        <div className="space-y-1">
+          <Label className="text-sm">{t("reviewBeforeApplyLabel")}</Label>
+          <p className="text-xs text-muted-foreground">{t("reviewBeforeApplyHint")}</p>
+        </div>
+        <Switch
+          checked={reviewBeforeApply}
+          onCheckedChange={(checked) => update({ reviewBeforeApply: checked })}
         />
       </div>
 

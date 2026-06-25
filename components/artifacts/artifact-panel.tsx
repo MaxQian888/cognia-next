@@ -55,6 +55,8 @@ import {
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { ArtifactPreview } from "./artifact-preview"
 import { ArtifactList } from "./artifact-list"
+import { ArtifactReviewView } from "./artifact-review-view"
+import { SelectionCommentButton } from "./selection-comment-button"
 import { PanelVersionHistory } from "./panel-version-history"
 import { ArtifactDesignerWrapper } from "./panel-designer-wrapper"
 import {
@@ -92,6 +94,7 @@ export function ArtifactPanel() {
     panelOpen,
     panelView,
     activeArtifact,
+    pendingReview,
     theme,
     viewMode,
     setViewMode,
@@ -283,6 +286,9 @@ export function ArtifactPanel() {
 
     return (
       <>
+        {activeArtifact && (viewMode === "code" || viewMode === "review") && (
+          <SelectionCommentButton artifact={activeArtifact} className="h-8 px-2 text-xs" />
+        )}
         {primaryActions.map((action) => renderPrimaryAction(action))}
         {renderOverflowMenu()}
       </>
@@ -301,6 +307,14 @@ export function ArtifactPanel() {
           <ArtifactTitle className="truncate">{activeArtifact.title}</ArtifactTitle>
           <span className="text-xs text-muted-foreground">{artifactMetadata}</span>
         </div>
+        {pendingReview && (
+          <span
+            data-testid="artifact-review-badge"
+            className="ml-1 shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+          >
+            {t("review.title")}
+          </span>
+        )}
       </div>
     )
   }
@@ -341,7 +355,9 @@ export function ArtifactPanel() {
             </ArtifactHeader>
 
             <ArtifactContent className="min-h-0 flex-1 overflow-hidden p-0">
-              {viewMode === "edit" ? (
+              {viewMode === "review" && pendingReview ? (
+                <ArtifactReviewView artifact={activeArtifact} panelMode={panelMode} />
+              ) : viewMode === "edit" ? (
                 panelMode === "mobile" ? (
                   // Mobile edit mode: the CodeMirror light editor — Monaco
                   // (and with it the LSP workbench mount) stays desktop-only,

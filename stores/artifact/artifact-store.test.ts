@@ -1848,3 +1848,153 @@ describe("account storage isolation", () => {
     expect(useArtifactStore.getState().artifacts).toEqual({})
   })
 })
+
+describe("AI-revision review (pending reviews)", () => {
+  const makeArtifact = (content: string) =>
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s1",
+      messageId: "m1",
+      type: "code",
+      title: "Snippet",
+      content,
+      language: "javascript",
+    })
+
+  it("proposeArtifactUpdate stages a review, activates the artifact, and opens the panel", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    const review = useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+    expect(review).not.toBeNull()
+    expect(review!.items.length).toBeGreaterThanOrEqual(2)
+    const s = useArtifactStore.getState()
+    expect(s.pendingReviews[a.id]).toBeDefined()
+    expect(s.activeArtifactId).toBe(a.id)
+    expect(s.panelOpen).toBe(true)
+    expect(s.panelView).toBe("artifact")
+    // content is NOT applied yet
+    expect(s.artifacts[a.id].content).toBe("a\nb\nc\nd")
+  })
+
+  it("proposeArtifactUpdate returns null for unknown id or identical content", () => {
+    const a = makeArtifact("a\nb")
+    expect(useArtifactStore.getState().proposeArtifactUpdate("nope", "x")).toBeNull()
+    expect(useArtifactStore.getState().proposeArtifactUpdate(a.id, "a\nb")).toBeNull()
+    expect(useArtifactStore.getState().pendingReviews[a.id]).toBeUndefined()
+  })
+
+  it("setReviewItemStatus flips a single item", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    const review = useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")!
+    const itemId = review.items[0].id
+    useArtifactStore.getState().setReviewItemStatus(a.id, itemId, "accepted")
+    const updated = useArtifactStore.getState().pendingReviews[a.id]
+    expect(updated.items.find((i) => i.id === itemId)!.status).toBe("accepted")
+    expect(updated.items[1].status).toBe("pending")
+  })
+
+  it("applyArtifactReview applies only accepted hunks, snapshots a version, and clears the proposal", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    const review = useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")!
+    // Accept only the first hunk (a -> A); leave the last (d -> D) pending.
+    useArtifactStore.getState().setReviewItemStatus(a.id, review.items[0].id, "accepted")
+    useArtifactStore.getState().applyArtifactReview(a.id, "applied review")
+
+    const s = useArtifactStore.getState()
+    expect(s.pendingReviews[a.id]).toBeUndefined()
+    expect(s.artifacts[a.id].content).toBe("A\nb\nc\nd") // only accepted hunk applied
+    const versions = useArtifactStore.getState().getArtifactVersions(a.id)
+    expect(versions.some((v) => v.content === "a\nb\nc\nd")).toBe(true) // pre-apply snapshot
+  })
+
+  it("applyArtifactReview is a no-op for unknown ids", () => {
+    expect(() => useArtifactStore.getState().applyArtifactReview("nope")).not.toThrow()
+  })
+
+  it("applyArtifactReview refuses to apply a stale proposal", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    const review = useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")!
+    useArtifactStore.getState().setReviewItemStatus(a.id, review.items[0].id, "accepted")
+    // Manual edit moves the baseline -> proposal goes stale.
+    useArtifactStore.getState().updateArtifact(a.id, { content: "manual\nedit" })
+    expect(useArtifactStore.getState().pendingReviews[a.id].isStale).toBe(true)
+    useArtifactStore.getState().applyArtifactReview(a.id)
+    // content unchanged from the manual edit; proposal still present (not applied)
+    expect(useArtifactStore.getState().artifacts[a.id].content).toBe("manual\nedit")
+    expect(useArtifactStore.getState().pendingReviews[a.id]).toBeDefined()
+  })
+
+  it("rejectArtifactReview clears the proposal without changing content", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+    useArtifactStore.getState().rejectArtifactReview(a.id)
+    expect(useArtifactStore.getState().pendingReviews[a.id]).toBeUndefined()
+    expect(useArtifactStore.getState().artifacts[a.id].content).toBe("a\nb\nc\nd")
+    // no-op when nothing to reject
+    expect(() => useArtifactStore.getState().rejectArtifactReview(a.id)).not.toThrow()
+  })
+
+  it("getPendingReview returns the review or null", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    expect(useArtifactStore.getState().getPendingReview(a.id)).toBeNull()
+    useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+    expect(useArtifactStore.getState().getPendingReview(a.id)).not.toBeNull()
+  })
+
+  it("a metadata-only updateArtifact does not mark an open review stale", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+    useArtifactStore.getState().updateArtifact(a.id, { title: "Renamed" })
+    expect(useArtifactStore.getState().pendingReviews[a.id].isStale).toBeFalsy()
+  })
+
+  it("restoreArtifactVersion marks an open review stale", () => {
+    const a = makeArtifact("v1\nbody")
+    const v = useArtifactStore.getState().saveArtifactVersion(a.id)!
+    useArtifactStore.getState().updateArtifact(a.id, { content: "v2\nbody" })
+    useArtifactStore.getState().proposeArtifactUpdate(a.id, "v2\nBODY")
+    useArtifactStore.getState().restoreArtifactVersion(a.id, v.id)
+    expect(useArtifactStore.getState().pendingReviews[a.id].isStale).toBe(true)
+  })
+
+  it("orphan cleanup drops proposals on delete / batch-delete / clearSessionData / purgeProject", () => {
+    // single delete
+    const a1 = makeArtifact("a\nb\nc")
+    useArtifactStore.getState().proposeArtifactUpdate(a1.id, "A\nb\nc")
+    useArtifactStore.getState().deleteArtifact(a1.id)
+    expect(useArtifactStore.getState().pendingReviews[a1.id]).toBeUndefined()
+
+    // batch delete
+    const a2 = makeArtifact("a\nb\nc")
+    useArtifactStore.getState().proposeArtifactUpdate(a2.id, "A\nb\nc")
+    useArtifactStore.getState().deleteArtifacts([a2.id])
+    expect(useArtifactStore.getState().pendingReviews[a2.id]).toBeUndefined()
+
+    // clearSessionData
+    const a3 = makeArtifact("a\nb\nc")
+    useArtifactStore.getState().proposeArtifactUpdate(a3.id, "A\nb\nc")
+    useArtifactStore.getState().clearSessionData("s1")
+    expect(useArtifactStore.getState().pendingReviews[a3.id]).toBeUndefined()
+
+    // purgeProject
+    mockActiveProjectId = "proj_x"
+    const a4 = makeArtifact("a\nb\nc")
+    useArtifactStore.getState().proposeArtifactUpdate(a4.id, "A\nb\nc")
+    useArtifactStore.getState().purgeProject("proj_x")
+    expect(useArtifactStore.getState().pendingReviews[a4.id]).toBeUndefined()
+  })
+
+  it("excludes pendingReviews from the persisted partition", () => {
+    const a = makeArtifact("a\nb\nc\nd")
+    useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+    // partialize governs what zustand writes to storage, regardless of the
+    // active storage key (account-scoped tests rename it).
+    const partialize = (
+      useArtifactStore.persist.getOptions() as {
+        partialize?: (s: ReturnType<typeof useArtifactStore.getState>) => Record<string, unknown>
+      }
+    ).partialize
+    expect(partialize).toBeDefined()
+    const persisted = partialize!(useArtifactStore.getState())
+    expect(persisted.pendingReviews).toBeUndefined()
+    expect((persisted.artifacts as Record<string, unknown>)[a.id]).toBeDefined()
+  })
+})

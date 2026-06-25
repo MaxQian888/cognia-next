@@ -67,6 +67,20 @@ export interface ArtifactWorkspaceReturnContext {
   workingRevisionUpdatedAt?: Date
 }
 
+/**
+ * A snippet selected inside an artifact, staged as a chat context chip. Carries
+ * the selected text, the user's comment, and the line range, plus the owning
+ * `artifactId` so the assistant's reply can route back into a review proposal
+ * against that artifact. See `lib/artifacts/format-selection-context.ts`.
+ */
+export interface ArtifactSelectionRef {
+  artifactId: string
+  title: string
+  snapshot: string
+  comment: string
+  range: { startLine: number; endLine: number }
+}
+
 export interface ArtifactWorkspaceState {
   scope: ArtifactWorkspaceScope
   sessionId?: string | null

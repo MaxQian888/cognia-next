@@ -15,7 +15,11 @@ import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { MarkdownRenderer as ChatMarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
-import { resolveRegisteredArtifactRenderer, type PluginArtifactRenderer } from "@/lib/artifacts"
+import {
+  getShikiLanguage,
+  resolveRegisteredArtifactRenderer,
+  type PluginArtifactRenderer,
+} from "@/lib/artifacts"
 import type { Artifact, ArtifactRuntimeHealth } from "@/types"
 import type { ChartDataPoint } from "./chart-renderer"
 import { getArtifactRuntimeAdapter } from "./runtime-adapters"
@@ -179,7 +183,13 @@ export function ArtifactRenderer({
           artifact={artifact}
           renderer={plan.pluginRenderer}
           className={className}
-          fallback={<CodeBlock code={artifact.content} className={className} />}
+          fallback={
+            <CodeBlock
+              code={artifact.content}
+              language={getShikiLanguage(artifact.language)}
+              className={className}
+            />
+          }
         />
       )
     }
@@ -202,8 +212,20 @@ export function ArtifactRenderer({
     case "document":
       return <ChatMarkdownRenderer content={content} className={className} />
     case "code":
-      return <CodeBlock code={content} className={className} />
+      return (
+        <CodeBlock
+          code={content}
+          language={getShikiLanguage(artifact?.language)}
+          className={className}
+        />
+      )
     default:
-      return <CodeBlock code={content} className={className} />
+      return (
+        <CodeBlock
+          code={content}
+          language={getShikiLanguage(artifact?.language)}
+          className={className}
+        />
+      )
   }
 }

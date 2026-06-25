@@ -10,7 +10,7 @@
 
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { useMediaQuery } from "@/hooks/ui"
@@ -56,6 +56,12 @@ export function useArtifactPanelState() {
       artifactWorkspace: state.artifactWorkspace,
     }))
   )
+  // Subscribe to only the active artifact's pending review — selecting the
+  // whole `pendingReviews` map would re-render the panel whenever a proposal
+  // lands/resolves on any *other* artifact.
+  const pendingReview = useArtifactStore((state) =>
+    activeArtifactId ? (state.pendingReviews[activeArtifactId] ?? null) : null
+  )
 
   // Store actions - using useShallow for stable references
   const {
@@ -87,7 +93,7 @@ export function useArtifactPanelState() {
   const canOpenEmbeddedDesigner = runtimeAdapter?.authoring.embeddedDesigner ?? false
 
   // Local state
-  const [viewMode, setViewMode] = useState<"code" | "preview" | "edit">("code")
+  const [viewMode, setViewMode] = useState<"code" | "preview" | "edit" | "review">("code")
   const [copied, setCopied] = useState(false)
   const [designerOpen, setDesignerOpen] = useState(false)
   const [editContent, setEditContent] = useState("")
@@ -146,6 +152,21 @@ export function useArtifactPanelState() {
     saveArtifactVersion,
     t,
   ])
+
+  // Auto-enter the review surface when a fresh AI-revision proposal appears,
+  // and leave it once the proposal is resolved (applied/rejected). Keyed on the
+  // review id so the user can still click the code/preview tabs to peek without
+  // being yanked back, and a re-diff (new id) re-enters review.
+  const lastReviewIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const reviewId = pendingReview?.id ?? null
+    if (reviewId && reviewId !== lastReviewIdRef.current && viewMode !== "edit") {
+      setViewMode("review")
+    } else if (!reviewId && lastReviewIdRef.current && viewMode === "review") {
+      setViewMode("code")
+    }
+    lastReviewIdRef.current = reviewId
+  }, [pendingReview, viewMode])
 
   const buildReturnContext = useCallback(
     (authoringOrigin: ArtifactAuthoringOrigin): ArtifactWorkspaceReturnContext | null => {
@@ -343,6 +364,7 @@ export function useArtifactPanelState() {
     panelOpen,
     panelView,
     activeArtifact,
+    pendingReview,
     theme,
     isDesktop,
     // Local state

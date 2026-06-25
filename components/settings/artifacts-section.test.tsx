@@ -25,7 +25,7 @@ beforeEach(() => {
 })
 
 describe("ArtifactsSection", () => {
-  it("renders all 7 control rows", () => {
+  it("renders all 8 control rows", () => {
     render(<ArtifactsSection />)
     expect(screen.getByText("autoCreateLabel")).toBeInTheDocument()
     expect(screen.getByText("minLinesLabel")).toBeInTheDocument()
@@ -33,7 +33,19 @@ describe("ArtifactsSection", () => {
     expect(screen.getByText("showNotificationLabel")).toBeInTheDocument()
     expect(screen.getByText("defaultPanelModeLabel")).toBeInTheDocument()
     expect(screen.getByText("persistAcrossSessionsLabel")).toBeInTheDocument()
+    expect(screen.getByText("reviewBeforeApplyLabel")).toBeInTheDocument()
     expect(screen.getByText("resetDefaults")).toBeInTheDocument()
+  })
+
+  it("toggling review-before-apply persists the patch", () => {
+    render(<ArtifactsSection />)
+    // reviewBeforeApply is the last switch (after auto-create, 9 type toggles,
+    // show-notification, and persist-across-sessions).
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[switches.length - 1])
+    expect(saveMock).toHaveBeenCalled()
+    const patch = saveMock.mock.calls[0][0]
+    expect(patch.artifacts.reviewBeforeApply).toBe(false)
   })
 
   it("toggling auto-create persists the patch", () => {
