@@ -145,6 +145,33 @@ const definition: PluginDefinition = {
     )
     actTool("browser_hover", "hover", {}, ["ref"], "Hover the ref'd element.")
 
+    type Engine = ReturnType<typeof engineFor>["engine"]
+    const navTool = (name: string, desc: string, run: (engine: Engine) => Promise<void>) =>
+      reg({
+        name,
+        pluginId: ctx.pluginId,
+        definition: {
+          name,
+          description: desc,
+          parametersSchema: { type: "object", properties: {} },
+        },
+        execute: async () => {
+          await run(engineFor().engine)
+          return withSnapshot({ ok: true })
+        },
+      })
+
+    navTool("browser_back", "Go back in the preview's history; returns a fresh snapshot.", (e) =>
+      e.back()
+    )
+    navTool(
+      "browser_forward",
+      "Go forward in the preview's history; returns a fresh snapshot.",
+      (e) => e.forward()
+    )
+    navTool("browser_reload", "Reload the preview; returns a fresh snapshot.", (e) => e.reload())
+    navTool("browser_stop", "Stop the preview's current load.", (e) => e.stop())
+
     reg({
       name: "browser_read_console",
       pluginId: ctx.pluginId,

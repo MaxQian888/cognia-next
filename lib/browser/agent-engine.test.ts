@@ -8,6 +8,7 @@ jest.mock("@/lib/browser/client", () => ({
     embedBack: jest.fn(async () => {}),
     embedForward: jest.fn(async () => {}),
     embedReload: jest.fn(async () => {}),
+    embedStop: jest.fn(async () => {}),
     embedGetUrl: jest.fn(async () => "http://localhost/"),
     embedGetTitle: jest.fn(async () => "Home"),
   },
@@ -64,8 +65,10 @@ describe("EmbeddedEngine", () => {
     await e.back()
     await e.forward()
     await e.reload()
+    await e.stop()
     expect(mockClient.embedBack).toHaveBeenCalled()
     expect(mockClient.embedForward).toHaveBeenCalled()
     expect(mockClient.embedReload).toHaveBeenCalled()
+    expect(mockClient.embedStop).toHaveBeenCalled()
   })
 })

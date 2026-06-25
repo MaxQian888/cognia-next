@@ -11,6 +11,10 @@ jest.mock("@/lib/browser/agent-engine", () => {
     readConsole: jest.fn(async () => [{ level: "warn", text: "x", ts: 1 }]),
     readNetwork: jest.fn(async () => []),
     getPage: jest.fn(async () => ({ url: "http://localhost/", title: "t" })),
+    back: jest.fn(async () => {}),
+    forward: jest.fn(async () => {}),
+    reload: jest.fn(async () => {}),
+    stop: jest.fn(async () => {}),
   }
   return {
     __engine: engine,
@@ -116,6 +120,20 @@ describe("browser-tools plugin", () => {
     expect(engine.act).toHaveBeenNthCalledWith(1, "e1", "type", { text: "hi" })
     expect(engine.act).toHaveBeenNthCalledWith(2, "e2", "select", { value: "v" })
     expect(engine.act).toHaveBeenNthCalledWith(3, "e3", "hover", {})
+  })
+
+  it("nav tools (back/forward/reload/stop) run and return a fresh snapshot", async () => {
+    const tools = await collectTools()
+    const back = (await tools.browser_back({})) as { ok: boolean; snapshot: { generation: number } }
+    expect(engine.back).toHaveBeenCalled()
+    expect(back.ok).toBe(true)
+    expect(back.snapshot.generation).toBe(3)
+    await tools.browser_forward({})
+    await tools.browser_reload({})
+    await tools.browser_stop({})
+    expect(engine.forward).toHaveBeenCalled()
+    expect(engine.reload).toHaveBeenCalled()
+    expect(engine.stop).toHaveBeenCalled()
   })
 
   it("browser_read_network and browser_get_page delegate", async () => {

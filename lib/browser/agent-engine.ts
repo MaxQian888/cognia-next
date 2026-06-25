@@ -28,6 +28,7 @@ export interface BrowserEngine {
   back(): Promise<void>
   forward(): Promise<void>
   reload(): Promise<void>
+  stop(): Promise<void>
   getPage(): Promise<{ url: string; title: string }>
 }
 
@@ -51,13 +52,20 @@ export class EmbeddedEngine implements BrowserEngine {
     return browserClient.embedReadNetwork()
   }
   back() {
+    emitAgentActivity("back")
     return browserClient.embedBack()
   }
   forward() {
+    emitAgentActivity("forward")
     return browserClient.embedForward()
   }
   reload() {
+    emitAgentActivity("reload")
     return browserClient.embedReload()
+  }
+  stop() {
+    emitAgentActivity("stop")
+    return browserClient.embedStop()
   }
   async getPage() {
     const [url, title] = await Promise.all([
