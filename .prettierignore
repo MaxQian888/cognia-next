@@ -18,6 +18,11 @@ public/monaco
 # `skills:build` codegen (pnpm skills:build) owns both.
 skills/built-in
 lib/skills/built-in-catalog.generated.ts
+# Generated i18n message bundles — built from the per-namespace split sources
+# by `pnpm i18n:build`. Prettier collapses the build's expanded arrays, which
+# desyncs the committed bundle from `i18n:build:check`; the codegen owns format.
+i18n/messages/en.json
+i18n/messages/zh-CN.json
 # CommonJS mocks for Jest; intentionally hand-written, not Prettier-shaped.
 __mocks__
 # Capacitor mobile shell — separate package, has its own conventions.

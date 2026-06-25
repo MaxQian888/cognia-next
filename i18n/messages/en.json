@@ -2254,12 +2254,14 @@
       "placeholder": "Send a message — try /, @, !, or #",
       "placeholderDisabled": "Select a session to start chatting…",
       "popover": {
+        "agentsSection": "Agents",
         "bashEmpty": "'<empty>'",
         "bashHintPrefix": "Press",
         "bashHintSuffix": "to run as a shell command.",
         "bashTitle": "Run shell command",
         "comingSoon": "Coming soon",
         "fileTitle": "Reference a file or folder",
+        "filesSection": "Files",
         "memoryTitle": "Append to memory",
         "noCommandMatches": "No commands match \"/{query}\".",
         "noCommands": "No commands available.",
@@ -8442,41 +8444,115 @@
       "useGlobal": "Use global pet"
     },
     "bubbles": {
-      "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
+      "achievementUnlocked": [
+        "We earned a badge!",
+        "Achievement get!"
+      ],
       "cleaned": {
         "0": "Squeaky clean!",
         "1": "So fresh!"
       },
-      "error": ["Uh oh…", "That hurt.", "Let's retry."],
-      "evolved": ["I evolved!", "New me!"],
-      "fed": ["Yum!", "Tasty!", "Nom nom."],
-      "goalComplete": ["Goal smashed!", "We did it!", "Victory!"],
-      "greeting": ["Hi there!", "Welcome back!", "Hey!"],
-      "hatched": ["Hello world!", "I'm here!"],
+      "error": [
+        "Uh oh…",
+        "That hurt.",
+        "Let's retry."
+      ],
+      "evolved": [
+        "I evolved!",
+        "New me!"
+      ],
+      "fed": [
+        "Yum!",
+        "Tasty!",
+        "Nom nom."
+      ],
+      "goalComplete": [
+        "Goal smashed!",
+        "We did it!",
+        "Victory!"
+      ],
+      "greeting": [
+        "Hi there!",
+        "Welcome back!",
+        "Hey!"
+      ],
+      "hatched": [
+        "Hello world!",
+        "I'm here!"
+      ],
       "idle": {
-        "content": ["…", "Just vibing.", "All good."],
-        "grumpy": ["Hmph.", "Not now."],
-        "happy": ["Best day!", "So happy!", "☀"],
-        "lonely": ["Miss you…", "Hello?"],
-        "tired": ["So sleepy…", "Yawn…"]
+        "content": [
+          "…",
+          "Just vibing.",
+          "All good."
+        ],
+        "grumpy": [
+          "Hmph.",
+          "Not now."
+        ],
+        "happy": [
+          "Best day!",
+          "So happy!",
+          "☀"
+        ],
+        "lonely": [
+          "Miss you…",
+          "Hello?"
+        ],
+        "tired": [
+          "So sleepy…",
+          "Yawn…"
+        ]
       },
-      "inboundMessage": ["You've got mail!", "Ping!"],
-      "levelUp": ["Level up!", "Getting stronger!"],
-      "petted": ["Purr…", "That's nice.", "♥"],
-      "played": ["So fun!", "Again!", "Wheee!"],
-      "review": ["Take a look?", "Ready for review."],
+      "inboundMessage": [
+        "You've got mail!",
+        "Ping!"
+      ],
+      "levelUp": [
+        "Level up!",
+        "Getting stronger!"
+      ],
+      "petted": [
+        "Purr…",
+        "That's nice.",
+        "♥"
+      ],
+      "played": [
+        "So fun!",
+        "Again!",
+        "Wheee!"
+      ],
+      "review": [
+        "Take a look?",
+        "Ready for review."
+      ],
       "slept": {
         "0": "Zzz…",
         "1": "So cozy…"
       },
-      "success": ["Nailed it!", "Done and done.", "Yay!"],
-      "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
-      "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
+      "success": [
+        "Nailed it!",
+        "Done and done.",
+        "Yay!"
+      ],
+      "talked": [
+        "I'm listening!",
+        "Tell me more?",
+        "Hehe, okay!"
+      ],
+      "thinking": [
+        "Hmm, working on it…",
+        "Let me think…",
+        "Crunching…"
+      ],
       "treated": {
         "0": "Yummy! Thank you!",
         "1": "Best treat ever! ♥"
       },
-      "waiting": ["Your call!", "Waiting on you…"]
+      "waiting": [
+        "Your call!",
+        "Waiting on you…"
+      ]
     },
     "care": {
       "unwell": {
