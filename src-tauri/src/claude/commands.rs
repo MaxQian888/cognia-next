@@ -686,6 +686,26 @@ mod tests {
     }
 
     #[test]
+    fn agent_field_rides_the_flatten_catchall_to_the_sidecar() {
+        // `@agent` single-turn routing: `resolveSendOptions` sets a top-level
+        // `agent` field that is NOT a named struct field here — it must ride the
+        // `extra` flatten map untouched (renderer → Rust → sidecar), where the
+        // anthropic dispatcher reads `sendOptions.agent`. A dropped/renamed field
+        // would silently disable routing on the desktop path.
+        let input = json!({
+            "cwd": "/w",
+            "agent": "template:my-reviewer",
+            "agents": { "template:my-reviewer": { "prompt": "you review" } }
+        });
+        let opts: SendOptions =
+            serde_json::from_value(input.clone()).expect("valid SendOptions JSON");
+        assert_eq!(opts.extra.get("agent"), input.get("agent"));
+        let out = serde_json::to_value(&opts).expect("serializable");
+        assert_eq!(out.get("agent"), input.get("agent"));
+        assert_eq!(out.get("agents"), input.get("agents"));
+    }
+
+    #[test]
     fn validate_rejects_unknown_protocol() {
         let opts = parse(
             r#"{

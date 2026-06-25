@@ -59,4 +59,33 @@ describe("TeamRunContext registry", () => {
     expect(getTeamRunContext("run-A")).toBe(a)
     expect(getTeamRunContext("run-B")).toBe(b)
   })
+
+  describe("leak guards", () => {
+    let warn: jest.SpyInstance
+
+    beforeEach(() => {
+      warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    })
+    afterEach(() => {
+      warn.mockRestore()
+    })
+
+    it("warns when re-registering a still-live runId (un-unregistered)", () => {
+      registerTeamRunContext(fakeCtx("dup"))
+      registerTeamRunContext(fakeCtx("dup"))
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/already registered/i))
+    })
+
+    it("does not warn on a normal register → unregister → register cycle", () => {
+      registerTeamRunContext(fakeCtx("cycle"))
+      unregisterTeamRunContext("cycle")
+      registerTeamRunContext(fakeCtx("cycle"))
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it("warns once the registry grows past the soft limit (leak signal)", () => {
+      for (let i = 0; i < 70; i++) registerTeamRunContext(fakeCtx(`run-${i}`))
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/registry size|leak/i))
+    })
+  })
 })

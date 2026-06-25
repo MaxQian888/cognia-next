@@ -1,5 +1,6 @@
-import { synthesizeTeamWorkflow, SynthesizeError } from "./synthesize-workflow"
-import type { AgentTeam, AgentTeamTask } from "@/types/agent/agent-team"
+import { synthesizeTeamWorkflow, SynthesizeError, resolveRetryPolicy } from "./synthesize-workflow"
+import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
+import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
 
 const team: AgentTeam = {
   id: "team-1",
@@ -159,6 +160,30 @@ describe("synthesizeTeamWorkflow", () => {
     expect(edgeKeys).toEqual(["a->b", "a->c", "b->d", "c->d"])
   })
 
+  it("threads team.config.maxRetries into settings.retryDefaults.attempts", () => {
+    const retryTeam = { ...team, config: { ...team.config, maxRetries: 4 } } as AgentTeam
+    const { workflow } = synthesizeTeamWorkflow({
+      team: retryTeam,
+      tasks: [task("t1")],
+      initialConcurrency: 1,
+    })
+    // attempts = maxRetries + 1 (initial try + retries)
+    expect(workflow.settings.retryDefaults?.attempts).toBe(5)
+  })
+
+  it("collapses retryDefaults to a single attempt when enableTaskRetry is false", () => {
+    const noRetryTeam = {
+      ...team,
+      config: { ...team.config, maxRetries: 4, enableTaskRetry: false },
+    } as AgentTeam
+    const { workflow } = synthesizeTeamWorkflow({
+      team: noRetryTeam,
+      tasks: [task("t1")],
+      initialConcurrency: 1,
+    })
+    expect(workflow.settings.retryDefaults?.attempts).toBe(1)
+  })
+
   it("synthesized workflow passes orchestrator validateWorkflow", () => {
     const { workflow } = synthesizeTeamWorkflow({
       team,
@@ -170,6 +195,47 @@ describe("synthesizeTeamWorkflow", () => {
     expect(workflow.settings.errorPolicy).toBe("stop")
     expect(workflow.settings.concurrency).toBeGreaterThanOrEqual(1)
     expect(workflow.settings.retryDefaults).toBeDefined()
+  })
+
+  describe("resolveRetryPolicy", () => {
+    const cfg = (over: Partial<AgentTeamConfig> = {}): AgentTeamConfig => ({
+      maxTeammates: 5,
+      maxConcurrentTeammates: 3,
+      executionMode: "coordinated",
+      displayMode: "expanded",
+      ...over,
+    })
+
+    it("defaults to DEFAULT_RETRY_POLICY when no retry config is set", () => {
+      expect(resolveRetryPolicy(cfg())).toEqual(DEFAULT_RETRY_POLICY)
+    })
+
+    it("is null-safe when the whole config is undefined", () => {
+      expect(resolveRetryPolicy(undefined)).toEqual(DEFAULT_RETRY_POLICY)
+    })
+
+    it("maps maxRetries=0 to a single attempt (no retry)", () => {
+      expect(resolveRetryPolicy(cfg({ maxRetries: 0 })).attempts).toBe(1)
+    })
+
+    it("maps maxRetries=N to N+1 attempts", () => {
+      expect(resolveRetryPolicy(cfg({ maxRetries: 5 })).attempts).toBe(6)
+    })
+
+    it("forces a single attempt when enableTaskRetry is false, ignoring maxRetries", () => {
+      expect(resolveRetryPolicy(cfg({ maxRetries: 5, enableTaskRetry: false })).attempts).toBe(1)
+    })
+
+    it("keeps enableTaskRetry=true honoring maxRetries", () => {
+      expect(resolveRetryPolicy(cfg({ maxRetries: 2, enableTaskRetry: true })).attempts).toBe(3)
+    })
+
+    it("preserves backoff shape from DEFAULT_RETRY_POLICY", () => {
+      const p = resolveRetryPolicy(cfg({ maxRetries: 1 }))
+      expect(p.backoff).toBe(DEFAULT_RETRY_POLICY.backoff)
+      expect(p.baseMs).toBe(DEFAULT_RETRY_POLICY.baseMs)
+      expect(p.maxMs).toBe(DEFAULT_RETRY_POLICY.maxMs)
+    })
   })
 
   describe("satisfiedDependencyIds (wave subsets)", () => {

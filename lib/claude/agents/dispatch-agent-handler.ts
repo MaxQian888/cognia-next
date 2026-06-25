@@ -30,6 +30,7 @@ import {
   recordDispatchComplete,
   recordDispatchFailed,
   recordDispatchRejected,
+  createDispatchEventSink,
 } from "./dispatch-runtime"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
 
@@ -155,6 +156,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       _maxDepth: caller.maxDepth,
       _parentChain: caller.parentChain,
       _budgetRootRunId: caller.budgetRoot,
+      _onEvent: createDispatchEventSink(childRunId),
       ...(backgroundAbort ? { abortSignal: backgroundAbort.signal } : {}),
       ...(caller.deadlineMs ? { _deadlineMs: caller.deadlineMs } : {}),
       ...(caller.parentCeiling ? { _permissionCeiling: caller.parentCeiling } : {}),

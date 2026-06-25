@@ -309,6 +309,27 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
   })
 
+  it("engages the wave path when only the progress ledger is enabled (no adaptiveReplan)", async () => {
+    // Progress is made each wave, so the ledger never reaches its stall judge;
+    // the continue-JSON mock serves dispatch + the ledger's wrapped re-plan.
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: '```json\n{"action":"continue","reasoning":"steady"}\n```',
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const ledgerTeam = {
+      ...baseTeam,
+      config: { ...baseTeam.config, progressLedger: { enabled: true } },
+    } as AgentTeam
+    const deps = buildDeps(
+      ledgerTeam,
+      [task("t1"), task("t2", ["t1"])],
+      [lead, worker("w1"), worker("w2")]
+    )
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
+  })
+
   it("prevents double-start of the same team", async () => {
     ;(executeAgent as jest.Mock).mockImplementation(
       () =>

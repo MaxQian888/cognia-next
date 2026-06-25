@@ -3,6 +3,10 @@ import {
   recordDispatchComplete,
   recordDispatchFailed,
   recordDispatchRejected,
+  recordDispatchProgress,
+  recordDispatchLog,
+  dispatchProgressForToolCount,
+  createDispatchEventSink,
 } from "./dispatch-runtime"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 
@@ -73,6 +77,19 @@ describe("dispatch-runtime producer", () => {
     expect(sa.error).toBe("boom")
   })
 
+  it("ignores failure for an unknown run", () => {
+    recordDispatchFailed("ghost", "boom")
+    expect(read("ghost")).toBeUndefined()
+  })
+
+  it("completes a run without usage (no token snapshot)", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    recordDispatchComplete("n1", { text: "ok" })
+    const sa = read("n1")
+    expect(sa.status).toBe("completed")
+    expect(sa.result?.tokenUsage).toBeUndefined()
+  })
+
   it("records a rejected dispatch with the rejection reason", () => {
     recordDispatchRejected({
       id: "n1",
@@ -84,5 +101,64 @@ describe("dispatch-runtime producer", () => {
     const sa = read("n1")
     expect(sa.status).toBe("rejected")
     expect(sa.rejection?.reason).toBe("max-depth")
+  })
+
+  it("records live progress (clamped) for a known run", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    recordDispatchProgress("n1", 42)
+    expect(read("n1").progress).toBe(42)
+    recordDispatchProgress("n1", 999)
+    expect(read("n1").progress).toBe(100)
+  })
+
+  it("appends a timestamped log line for a known run", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    recordDispatchLog("n1", "info", "Running Bash")
+    const logs = read("n1").logs
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({ level: "info", message: "Running Bash" })
+    expect(logs[0].timestamp).toBeInstanceOf(Date)
+  })
+})
+
+describe("dispatchProgressForToolCount", () => {
+  it("is 0 for no tools and rises monotonically, capped below 100", () => {
+    expect(dispatchProgressForToolCount(0)).toBe(0)
+    expect(dispatchProgressForToolCount(1)).toBe(10)
+    expect(dispatchProgressForToolCount(5)).toBe(50)
+    expect(dispatchProgressForToolCount(99)).toBeLessThan(100)
+    expect(dispatchProgressForToolCount(99)).toBeGreaterThanOrEqual(dispatchProgressForToolCount(5))
+  })
+})
+
+describe("createDispatchEventSink", () => {
+  beforeEach(() => useSubagentRuntimeStore.getState().clearRuntime())
+
+  it("logs and advances progress on each tool-call", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const sink = createDispatchEventSink("n1")
+    sink({ type: "tool-call", toolName: "Bash", input: {} })
+    sink({ type: "tool-call", toolName: "Read", input: {} })
+    const sa = read("n1")
+    expect(sa.logs.map((l) => l.message)).toEqual(["Running Bash", "Running Read"])
+    expect(sa.progress).toBe(20)
+  })
+
+  it("logs tool results, warning on errors", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const sink = createDispatchEventSink("n1")
+    sink({ type: "tool-result", toolName: "Bash", result: "ok" })
+    sink({ type: "tool-result", toolName: "Read", result: "no", isError: true })
+    const logs = read("n1").logs
+    expect(logs[0]).toMatchObject({ level: "info" })
+    expect(logs[1]).toMatchObject({ level: "warn" })
+  })
+
+  it("ignores non-tool events", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const sink = createDispatchEventSink("n1")
+    sink({ type: "text-delta", delta: "hello" })
+    sink({ type: "usage", usage: {} as never })
+    expect(read("n1").logs).toHaveLength(0)
   })
 })

@@ -362,6 +362,13 @@
         "heading": "自适应重规划",
         "requireApproval": "应用重规划前需要审批"
       },
+      "progressLedger": {
+        "allowAutonomousConsensus": "停滞时允许自主发起共识",
+        "allowAutonomousDelegation": "停滞时允许自主委派任务",
+        "description": "当某一波停滞（无新完成任务或新产出）时，由判断器诊断运行状态，并可重新规划、发起共识或委派以打破停滞。",
+        "enabled": "启用进度账本",
+        "heading": "自主进度账本"
+      },
       "approval": {
         "heading": "审批",
         "requireDelegationApproval": "向外部智能体委派前需要审批",

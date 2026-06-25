@@ -134,7 +134,8 @@ async function runToolEnabled(
   systemPrompt: string,
   modelHint: string | undefined,
   signal: AbortSignal,
-  onCaptureEvent?: (event: CaptureStreamEvent) => void
+  onCaptureEvent?: (event: CaptureStreamEvent) => void,
+  maxSteps?: number
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const cwd = teamCtx.team.config?.workingDir
   const character = teammateToCharacter({
@@ -186,6 +187,10 @@ async function runToolEnabled(
       appSettings: appSettings ?? null,
       ...(ceiling ? { permissionCeiling: ceiling } : {}),
     })
+    // Apply the resolved step budget as an explicit per-dispatch turn cap. The
+    // sidecar dispatcher honors `maxTurns` (an explicit value takes precedence
+    // over its default 256-turn budget).
+    if (typeof maxSteps === "number" && maxSteps > 0) sendOptions.maxTurns = maxSteps
     const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
       signal,
       ...(onCaptureEvent ? { onEvent: onCaptureEvent } : {}),
@@ -256,12 +261,14 @@ async function runTextOnly(
   prompt: string,
   systemPrompt: string,
   modelHint: string | undefined,
-  signal: AbortSignal
+  signal: AbortSignal,
+  maxSteps?: number
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const { executeAgent } = await import("../agent-executor")
   const result = await executeAgent(prompt, {
     systemPrompt,
     ...(modelHint ? { model: modelHint } : {}),
+    ...(typeof maxSteps === "number" && maxSteps > 0 ? { maxSteps } : {}),
     abortSignal: signal,
   })
   return { text: result.text ?? "", usage: readUsage(result) }
@@ -355,6 +362,14 @@ export async function dispatchTeammate(
   const modelHint = teamCtx.modelPref.get().modelHint
   const promptText = typeof args.prompt === "function" ? args.prompt(teammate) : args.prompt
 
+  // Resolved agentic step budget: a teammate's own `maxSteps` overrides the
+  // team-level `defaultMaxSteps`. Undefined → the channel keeps its own default
+  // (executeAgent's internal cap / the sidecar dispatcher's 256-turn budget).
+  const positive = (v: unknown): number | undefined =>
+    typeof v === "number" && v > 0 ? v : undefined
+  const maxSteps =
+    positive(teammate.config?.maxSteps) ?? positive(teamCtx.team.config?.defaultMaxSteps)
+
   const runtime = teammate.config?.runtime ?? "claude"
   let channel: TeammateChannel = "text"
   let externalAgentId: string | null = null
@@ -428,10 +443,11 @@ export async function dispatchTeammate(
         combinedSignal,
         // Real per-event streaming only on the sidecar path; external + text
         // channels surface start/terminal markers via the reporter instead.
-        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined
+        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
+        maxSteps
       )
     } else {
-      turn = await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal)
+      turn = await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal, maxSteps)
     }
   } catch (err) {
     reporter?.finalize("failed")

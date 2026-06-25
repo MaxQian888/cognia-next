@@ -180,9 +180,47 @@ describe("dispatchTeammate — text-only fallback", () => {
 
     expect(executeAgentMock).toHaveBeenCalledWith("hello Skeptic", expect.any(Object))
   })
+
+  it("forwards the team defaultMaxSteps to executeAgent", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate(), { defaultMaxSteps: 7 })
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+    expect(executeAgentMock).toHaveBeenCalledWith("do it", expect.objectContaining({ maxSteps: 7 }))
+  })
+
+  it("prefers the teammate's maxSteps over the team default", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate({ config: { maxSteps: 3 } }), { defaultMaxSteps: 7 })
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+    expect(executeAgentMock).toHaveBeenCalledWith("do it", expect.objectContaining({ maxSteps: 3 }))
+  })
+
+  it("omits maxSteps when neither teammate nor team set it", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate())
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+    expect(executeAgentMock.mock.calls[0][1]).not.toHaveProperty("maxSteps")
+  })
 })
 
 describe("dispatchTeammate — tool-enabled sidecar path", () => {
+  it("sets sendOptions.maxTurns from the resolved maxSteps", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "tool result" })
+    const { ctx } = makeCtx(makeTeammate(), { defaultMaxSteps: 9 })
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit" })
+
+    expect(runAndCaptureMock).toHaveBeenCalledWith(
+      "sess1",
+      "edit",
+      expect.objectContaining({ maxTurns: 9 }),
+      expect.any(Object)
+    )
+  })
+
   it("creates a team session and drives runAndCapture on desktop", async () => {
     isTauriMock.mockReturnValue(true)
     createSessionMock.mockResolvedValue({ id: "sess1" })

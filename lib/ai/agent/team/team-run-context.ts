@@ -93,8 +93,29 @@ export interface TeamRunContext {
 
 const registry = new Map<string, TeamRunContext>()
 
+/**
+ * Soft cap on live run contexts. The registry is keyed by string runId, so a
+ * WeakMap (the ADR-0022 §3.1 aspiration) is not applicable — there is no shared
+ * object token between the synthesizer that `register`s and the executor that
+ * looks up by `ctx.runId` string. Correctness instead rests on the lifecycle's
+ * `finally`-block `unregister`; these two warnings make a leak observable rather
+ * than silent: a still-live re-register (missing unregister) or unbounded
+ * growth. They never throw — a warning is a diagnostic, not a gate.
+ */
+const SOFT_LIMIT = 64
+
 export function registerTeamRunContext(ctx: TeamRunContext): void {
+  if (registry.has(ctx.runId)) {
+    console.warn(
+      `TeamRunContext: runId "${ctx.runId}" is already registered (missing unregister?) — overwriting.`
+    )
+  }
   registry.set(ctx.runId, ctx)
+  if (registry.size > SOFT_LIMIT) {
+    console.warn(
+      `TeamRunContext: registry size ${registry.size} exceeds soft limit ${SOFT_LIMIT} — possible context leak (unbalanced register/unregister).`
+    )
+  }
 }
 
 export function getTeamRunContext(runId: string): TeamRunContext | undefined {

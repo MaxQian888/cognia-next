@@ -11,9 +11,11 @@ import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 import { fuzzyFilterSort } from "@/lib/chat/completion/fuzzy-match"
+import { Badge } from "@/components/ui/badge"
 import { senderColor } from "./sender-color"
 import { RuntimeBadge } from "./runtime-badge"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
 export interface AgentMentionRowProps {
   target: MentionTarget
@@ -58,6 +60,66 @@ export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
       </div>
     </div>
   )
+}
+
+export interface SubagentMentionRowProps {
+  target: SubagentMentionTarget
+  /** Highlight (current arrow-key selection or hover). */
+  highlighted?: boolean
+}
+
+/**
+ * Row for a `@`-mentionable SUBAGENT in the general chat composer's combined
+ * popover. Mirrors {@link AgentMentionRow}'s rhythm/visuals (avatar + name +
+ * description) but shows a MODEL badge (the subagent's identity is a model, not
+ * a team runtime) instead of the team `RuntimeBadge`.
+ */
+export function SubagentMentionRow({ target, highlighted }: SubagentMentionRowProps) {
+  const initial = target.name.charAt(0).toUpperCase() || "?"
+  return (
+    <div
+      data-testid={`subagent-mention-row-${target.id}`}
+      className={cn(
+        "flex w-full items-center gap-2 text-sm",
+        highlighted && "bg-accent text-accent-foreground"
+      )}
+    >
+      <span
+        aria-hidden
+        className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+        style={{ backgroundColor: senderColor(target.name) }}
+      >
+        {initial}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-2 text-xs font-medium">
+          <span className="truncate">@{target.handle}</span>
+          {target.model ? (
+            <Badge variant="secondary" className="px-1 text-[9px]">
+              {target.model}
+            </Badge>
+          ) : null}
+        </span>
+        {target.description ? (
+          <span className="truncate text-[11px] text-muted-foreground">{target.description}</span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Filter subagent mention targets by query using the shared fuzzy matcher,
+ * matching the picked-handle (primary) + description (secondary) so the search
+ * lines up with what gets inserted (`@<handle>`).
+ */
+export function filterSubagents(
+  targets: readonly SubagentMentionTarget[],
+  query: string
+): SubagentMentionTarget[] {
+  return fuzzyFilterSort(targets, query, (t) => t.handle, {
+    secondaryText: (t) => t.description,
+  })
 }
 
 /**

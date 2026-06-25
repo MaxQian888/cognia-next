@@ -401,6 +401,24 @@ export interface AgentTeamConfig {
     maxInjectedTasksPerCheckpoint?: number
   }
   /**
+   * Autonomous progress ledger (Magentic-One style). Layered on the adaptive
+   * wave runner: after each wave a deterministic check detects whether the team
+   * is stalling (no new completed tasks / no net new output). After
+   * `stallThreshold` consecutive stalled waves an LLM judge diagnoses the run and
+   * may escalate beyond a plain re-plan — autonomously opening a consensus round
+   * or delegating — when the matching `allow*` flag is set. Default OFF; the
+   * legacy lead-only re-plan checkpoint is used when disabled.
+   */
+  progressLedger?: {
+    enabled?: boolean
+    /** Consecutive stalled waves before the LLM judge runs. Default 2. */
+    stallThreshold?: number
+    /** Allow the ledger to autonomously open a consensus round on stall. */
+    allowAutonomousConsensus?: boolean
+    /** Allow the ledger to autonomously delegate work on stall. */
+    allowAutonomousDelegation?: boolean
+  }
+  /**
    * Stream live teammate progress (tool calls + accumulated output) into the
    * workspace activity panel during a run. Default ON; set false to keep the
    * panel quiet (only start/done/failed markers are emitted). Cheap — forwards
@@ -449,6 +467,12 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
     enabled: false,
     requireApproval: false,
     maxInjectedTasksPerCheckpoint: 5,
+  },
+  progressLedger: {
+    enabled: false,
+    stallThreshold: 2,
+    allowAutonomousConsensus: false,
+    allowAutonomousDelegation: false,
   },
   streamProgress: true,
 }

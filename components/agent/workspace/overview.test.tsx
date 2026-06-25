@@ -22,8 +22,17 @@ jest.mock("@/hooks/usage/use-usage-display-mode", () => ({
   useUsageDisplayMode: () => ({ mode: usageMode, setMode: jest.fn() }),
 }))
 
+// useTeamLiveStatus derives status from the durable workflowRuns row. Mock it as
+// a pass-through of the store status by default (so existing assertions hold),
+// with an override to exercise the "run row wins over stale store status" path.
+let liveStatusOverride: AgentTeam["status"] | undefined
+jest.mock("@/hooks/agent-runs/use-team-live-status", () => ({
+  useTeamLiveStatus: (team: { status: AgentTeam["status"] }) => liveStatusOverride ?? team.status,
+}))
+
 beforeEach(() => {
   usageMode = "standard"
+  liveStatusOverride = undefined
 })
 
 const baseTeam: AgentTeam = {
@@ -69,6 +78,17 @@ describe("AgentTeamOverview", () => {
     expect(screen.getByText("Squad Alpha")).toBeInTheDocument()
     expect(screen.getByText("Primary research team")).toBeInTheDocument()
     expect(screen.getByTestId("team-status").textContent).toContain("idle")
+  })
+
+  it("derives the badge + actions from the live run status, not a stale store status", () => {
+    // Store still says "executing" (optimistic), but the durable run finished.
+    liveStatusOverride = "completed"
+    const staleTeam = { ...baseTeam, status: "executing" as const }
+    render(<AgentTeamOverview team={staleTeam} teammates={[lead, teammate]} onAbort={jest.fn()} />)
+    expect(screen.getByTestId("team-status").textContent).toContain("completed")
+    // Completed → Start is offered, Abort is not.
+    expect(screen.getByTestId("start-team")).toBeInTheDocument()
+    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
   })
 
   it("shows the lead name and teammate count", () => {

@@ -279,6 +279,45 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
         </div>
       </div>
 
+      {/* Autonomous progress ledger (stall detection + escalation) */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium">{t("progressLedger.heading")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("progressLedger.description")}</p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("progressLedger.enabled")}</Label>
+          <Switch
+            checked={team.config.progressLedger?.enabled === true}
+            onCheckedChange={(v) =>
+              patchConfig({ progressLedger: { ...team.config.progressLedger, enabled: v } })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("progressLedger.allowAutonomousConsensus")}</Label>
+          <Switch
+            checked={team.config.progressLedger?.allowAutonomousConsensus === true}
+            disabled={team.config.progressLedger?.enabled !== true}
+            onCheckedChange={(v) =>
+              patchConfig({
+                progressLedger: { ...team.config.progressLedger, allowAutonomousConsensus: v },
+              })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("progressLedger.allowAutonomousDelegation")}</Label>
+          <Switch
+            checked={team.config.progressLedger?.allowAutonomousDelegation === true}
+            disabled={team.config.progressLedger?.enabled !== true}
+            onCheckedChange={(v) =>
+              patchConfig({
+                progressLedger: { ...team.config.progressLedger, allowAutonomousDelegation: v },
+              })
+            }
+          />
+        </div>
+      </div>
+
       {/* Refusal detection (config-level, not policy-level) */}
       <div className="space-y-2">
         <p className="text-xs font-medium">{t("refusal.heading")}</p>

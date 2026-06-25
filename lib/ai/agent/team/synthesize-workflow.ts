@@ -13,9 +13,31 @@
  */
 
 import { nanoid } from "nanoid"
-import type { AgentTeam, AgentTeamTask } from "@/types/agent/agent-team"
+import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
 import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
-import type { VisualWorkflow, WorkflowEdge, WorkflowNode } from "@/types/workflow/visual"
+import type {
+  VisualWorkflow,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowRetryPolicy,
+} from "@/types/workflow/visual"
+
+/**
+ * Derive the per-node retry policy from a team's config. The orchestrator
+ * honors `settings.retryDefaults` for `retryable` nodes (the team dispatch node
+ * is retryable), so this is the single point that makes the UI-editable
+ * `maxRetries` / `enableTaskRetry` knobs actually affect a run.
+ *
+ * - `enableTaskRetry === false` → one attempt, no retry (overrides maxRetries).
+ * - otherwise `attempts = (maxRetries ?? 2) + 1` — i.e. initial try + retries.
+ *   The `?? 2` default preserves the prior hardcoded behavior (attempts: 3).
+ *
+ * Backoff shape (mode / baseMs / maxMs) is inherited from DEFAULT_RETRY_POLICY.
+ */
+export function resolveRetryPolicy(config: AgentTeamConfig | undefined): WorkflowRetryPolicy {
+  const retries = config?.enableTaskRetry === false ? 0 : (config?.maxRetries ?? 2)
+  return { ...DEFAULT_RETRY_POLICY, attempts: retries + 1 }
+}
 
 export interface SynthesizeInput {
   team: AgentTeam
@@ -170,7 +192,7 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
       timeoutMs: wallClock,
       concurrency: 1,
       maxConcurrency: input.initialConcurrency,
-      retryDefaults: DEFAULT_RETRY_POLICY,
+      retryDefaults: resolveRetryPolicy(input.team.config),
     },
   }
 

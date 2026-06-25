@@ -131,6 +131,18 @@ Path F was selected because: it eliminates the duplicate orchestrator, fixes the
                                        └─────────────────────────────┘
 ```
 
+> **Implementation note (correction):** the registry is a plain
+> `Map<string, TeamRunContext>`, **not** a `WeakMap`. The diagram above shows the
+> original aspiration, but a WeakMap is not applicable here: the key is a string
+> `runId`, and the dispatch executor looks the context up by that string
+> (`getTeamRunContext(ctx.runId)`) — there is no shared object token between the
+> synthesizer that registers and the executor that reads, so weak keying is
+> impossible. Leak-safety instead rests on the lifecycle's `finally`-block
+> `unregisterTeamRunContext`, hardened with two non-throwing diagnostics
+> (`team-run-context.ts`): a warning on re-registering a still-live `runId`
+> (missing unregister) and a warning when the registry grows past a soft limit
+> (unbalanced register/unregister). See `team-run-context.test.ts`.
+
 ### File inventory
 
 | Path                                                  | Action                                                                                            | Lines (impl + test) |

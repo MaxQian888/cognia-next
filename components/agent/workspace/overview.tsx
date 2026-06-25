@@ -11,6 +11,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MotionReveal, useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
 import { useCountUp } from "@/hooks/usage/use-count-up"
+import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 export interface AgentTeamOverviewProps {
@@ -60,7 +61,10 @@ export function AgentTeamOverview({
     ? `${Math.floor(team.totalDuration / 60000)}m ${Math.floor((team.totalDuration % 60000) / 1000)}s`
     : null
 
-  const isLive = team.status === "executing" || team.status === "planning"
+  // Derive the displayed status from the durable workflowRuns row (with the
+  // optimistic store status winning only while in-flight). See ADR-0022 "PR 5".
+  const liveStatus = useTeamLiveStatus(team)
+  const isLive = liveStatus === "executing" || liveStatus === "planning"
 
   return (
     <div className="space-y-4" data-testid="workspace-overview">
@@ -87,7 +91,7 @@ export function AgentTeamOverview({
             />
           </div>
           <StatusBadge
-            value={team.status}
+            value={liveStatus}
             labelNamespace="agentTeam.status"
             pulse={isLive}
             pulseClassName={isLive ? "bg-emerald-400 size-2" : undefined}
@@ -192,7 +196,7 @@ export function AgentTeamOverview({
 
       {/* Actions */}
       <div className="flex items-center justify-end gap-2">
-        {team.status === "executing" || team.status === "planning" ? (
+        {liveStatus === "executing" || liveStatus === "planning" ? (
           <Button variant="outline" size="sm" onClick={onAbort} data-testid="abort-team">
             {t("abortTeam")}
           </Button>
@@ -219,7 +223,7 @@ export function AgentTeamOverview({
       <PluginExtensionSlot
         point="agent.team.panel"
         className="space-y-4"
-        context={{ teamId: team.id, status: team.status }}
+        context={{ teamId: team.id, status: liveStatus }}
       />
     </div>
   )

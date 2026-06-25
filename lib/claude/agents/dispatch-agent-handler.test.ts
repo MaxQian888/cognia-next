@@ -75,6 +75,8 @@ describe("runDispatchAgentTool — call modes", () => {
     expect(target).toBe("coder") // no inline def → raw id
     expect(prompt).toBe("build")
     expect(opts).toMatchObject({ _depth: 0, _maxDepth: 2, _parentChain: [] })
+    // Live-progress sink is wired so the subagent card updates mid-run.
+    expect(typeof (opts as { _onEvent?: unknown })._onEvent).toBe("function")
     expect(out).toContain("done")
   })
 

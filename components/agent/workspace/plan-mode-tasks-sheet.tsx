@@ -1,15 +1,13 @@
 "use client"
 
-// Chat-header trigger that surfaces plan-mode tasks for a non-team chat
-// session. Reuses `<AgentTeamTasks>` from the workspace UI so the rendering
-// stays single-source: every place we show tasks goes through the same
-// component. The synthetic team id (`solo:<sessionId>`) is created on
-// first emit by `lib/agent/plan-mode-bridge.ts`.
+// Chat-header trigger that surfaces plan-mode todos for a non-team chat
+// session. Reads the durable run-record's todo snapshot (the single source
+// shared with the Run Panel's Plan section) so the list survives reload — the
+// older in-memory `solo:<sessionId>` synthetic team was wiped on refresh.
 
-import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { ListTodoIcon } from "lucide-react"
-import { useShallow } from "zustand/react/shallow"
+import { useLiveQuery } from "dexie-react-hooks"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -20,33 +18,26 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { soloTeamId } from "@/lib/agent/plan-mode-bridge"
-import { AgentTeamTasks } from "./tasks"
+import { TodoList } from "@/components/chat/todo-list"
+import { getLatestRunRecord } from "@/lib/db/run-records"
+import type { TodoEntry } from "@/lib/chat/todos"
 
 export interface PlanModeTasksSheetProps {
-  /** Active chat session id. The synthetic team id derives from this. */
+  /** Active chat session id. */
   sessionId: string
   className?: string
 }
 
+const NO_TODOS: TodoEntry[] = []
+
 export function PlanModeTasksSheet({ sessionId, className }: PlanModeTasksSheetProps) {
   const t = useTranslations("planModeTasks")
-  const teamId = soloTeamId(sessionId)
-  // Subscribe to the raw tasks map under shallow equality, then derive the
-  // filtered list inside `useMemo`. Computing `Object.values(...).filter(...)`
-  // directly in the selector returns a fresh array on every store tick and
-  // sends Zustand's getSnapshot into an infinite loop.
-  const allTasks = useAgentTeamStore(useShallow((s) => s.tasks))
-  const tasks = useMemo(
-    () => Object.values(allTasks).filter((task) => task.teamId === teamId),
-    [allTasks, teamId]
-  )
-  // The synthetic team has no teammates; pass an empty array so the
-  // assignee dropdown in the form renders "Unassigned" only.
-  const teammates = useMemo(() => [], [])
+  // Live-read the latest persisted run record's todo snapshot; updates as the
+  // run-record persistence hook writes new snapshots.
+  const record = useLiveQuery(() => getLatestRunRecord(sessionId), [sessionId])
+  const todos = record?.todos ?? NO_TODOS
 
-  if (tasks.length === 0) return null
+  if (todos.length === 0) return null
 
   return (
     <Sheet>
@@ -56,10 +47,10 @@ export function PlanModeTasksSheet({ sessionId, className }: PlanModeTasksSheetP
           size="sm"
           className={className}
           data-testid="plan-mode-tasks-trigger"
-          aria-label={t("triggerLabel", { count: tasks.length })}
+          aria-label={t("triggerLabel", { count: todos.length })}
         >
           <ListTodoIcon className="mr-1.5 size-4" />
-          <span className="text-xs">{t("triggerText", { count: tasks.length })}</span>
+          <span className="text-xs">{t("triggerText", { count: todos.length })}</span>
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="sm:max-w-md">
@@ -68,7 +59,7 @@ export function PlanModeTasksSheet({ sessionId, className }: PlanModeTasksSheetP
           <SheetDescription>{t("headerDescription")}</SheetDescription>
         </SheetHeader>
         <div className="mt-4 px-4 pb-4">
-          <AgentTeamTasks teamId={teamId} tasks={tasks} teammates={teammates} />
+          <TodoList todos={todos} defaultOpen />
         </div>
       </SheetContent>
     </Sheet>

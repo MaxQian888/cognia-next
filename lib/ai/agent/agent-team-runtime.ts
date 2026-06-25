@@ -35,7 +35,9 @@ import {
   type TeamStoreWriter,
 } from "./team/team-run-context"
 import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
+import { createDeadlockHandler } from "./team/deadlock-gate"
 import { runTeamWaves } from "./team/team-wave-runner"
+import { createLedgerCheckpoint } from "./team/progress-ledger-checkpoint"
 import { isUltracodeActive, type UltracodeOverride } from "./team/ultracode-trigger"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 
@@ -265,41 +267,22 @@ export async function runTeamLifecycle(
 
     // ── Wire HITL gate subscriptions ──
     const subs: Array<() => void> = []
-    let deadlockResolverActive = false
 
+    // Deadlock gate: open the HITL recovery modal, or — when the team disabled
+    // `enableDeadlockRecovery` — fast-fail instead of hanging. See deadlock-gate.ts.
     subs.push(
-      pool.onAllUnavailable(() => {
-        if (ac.signal.aborted || deadlockResolverActive) return
-        deadlockResolverActive = true
-        notifier.notify({
-          level: "critical",
-          title: "All teammates unavailable",
-          body: "Run paused awaiting operator decision.",
+      pool.onAllUnavailable(
+        createDeadlockHandler({
+          recovery: team.config.enableDeadlockRecovery !== false,
           runId,
           teamId,
-          openApproval: { scope: "agent-team-deadlock", id: runId },
-          dedupeKey: `deadlock:${runId}`,
+          notifier,
+          concurrency,
+          pool,
+          signal: ac.signal,
+          abort: (err) => ac.abort(err),
         })
-        concurrency.reduceTo(0)
-        void waitForDecision({ scope: "agent-team-deadlock", id: runId }, ac.signal)
-          .then((decision) => {
-            if (decision.outcome === "approve") {
-              pool.forceUnquarantine(
-                (decision.plan as { teammateIds?: string[]; resetAll?: boolean }) ?? {
-                  resetAll: true,
-                }
-              )
-            } else {
-              ac.abort(new Error("Operator aborted on deadlock"))
-            }
-          })
-          .catch(() => {
-            // signal aborted while waiting — no-op
-          })
-          .finally(() => {
-            deadlockResolverActive = false
-          })
-      })
+      )
     )
 
     // Per ADR-0022 §2.2 / §4.6. Non-blocking teammate-fix gate: the run
@@ -415,9 +398,14 @@ export async function runTeamLifecycle(
     })
 
     // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──
-    // Adaptive re-planning (opt-in, flat path only) synthesizes per-wave inside
-    // `runTeamWaves`, so we skip the upfront single-pass synthesis for it.
-    const adaptiveFlat = !ultracodeActive && team.config.adaptiveReplan?.enabled === true
+    // The per-wave path (synthesized inside `runTeamWaves`) is engaged by EITHER
+    // adaptive re-planning OR the progress ledger — both need the between-wave
+    // checkpoint hook, which the single-pass `runWorkflow` does not expose. So
+    // enabling the progress ledger alone is sufficient (it does not silently
+    // require `adaptiveReplan.enabled`).
+    const adaptiveFlat =
+      !ultracodeActive &&
+      (team.config.adaptiveReplan?.enabled === true || team.config.progressLedger?.enabled === true)
     let workflow: VisualWorkflow | undefined
     if (ultracodeActive) {
       // Side-effect import registers the pattern.* node executors.
@@ -485,13 +473,23 @@ export async function runTeamLifecycle(
     try {
       let result: Awaited<ReturnType<typeof runWorkflow>>
       if (adaptiveFlat) {
+        const waveCtx = getTeamRunContext(runId)!
+        // When the progress ledger is enabled, swap the lead-only re-plan
+        // checkpoint for the ledger checkpoint (stall detection + autonomous
+        // escalation). The ledger instance is created once so its cross-wave
+        // stall state persists across waves.
+        const ledgerCheckpoint =
+          team.config.progressLedger?.enabled === true
+            ? createLedgerCheckpoint({ ctx: waveCtx, signal: ac.signal })
+            : undefined
         const waveRes = await runTeamWaves({
-          teamCtx: getTeamRunContext(runId)!,
+          teamCtx: waveCtx,
           tasks,
           initialConcurrency: concurrency.get(),
           ...(team.config.defaultTimeout ? { wallClockTimeoutMs: team.config.defaultTimeout } : {}),
           signal: ac.signal,
           runWave: runOneWorkflow,
+          ...(ledgerCheckpoint ? { checkpoint: ledgerCheckpoint } : {}),
         })
         // A no-task run (or one with no executed wave) has no lastResult; the
         // wave status is authoritative.

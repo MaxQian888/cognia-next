@@ -362,6 +362,13 @@
         "heading": "Adaptive re-planning",
         "requireApproval": "Require approval before applying a re-plan"
       },
+      "progressLedger": {
+        "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
+        "allowAutonomousDelegation": "Allow autonomously delegating work on stall",
+        "description": "After a wave stalls (no new completed tasks or output), a judge diagnoses the run and can re-plan, open a consensus, or delegate to break the stall.",
+        "enabled": "Enable progress ledger",
+        "heading": "Autonomous progress ledger"
+      },
       "approval": {
         "heading": "Approvals",
         "requireDelegationApproval": "Require approval before delegating to an external agent",

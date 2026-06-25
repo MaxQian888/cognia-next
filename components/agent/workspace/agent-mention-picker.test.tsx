@@ -1,7 +1,13 @@
 import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { AgentMentionRow, filterMentionables } from "./agent-mention-picker"
+import {
+  AgentMentionRow,
+  SubagentMentionRow,
+  filterMentionables,
+  filterSubagents,
+} from "./agent-mention-picker"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
 const i18n = {
   agentTeamsWorkspace: {
@@ -106,5 +112,78 @@ describe("filterMentionables", () => {
     // substring matcher would have missed it; the shared fuzzy scorer hits it.
     const out = filterMentionables(all, "cdx")
     expect(out.some((t) => t.id === virtualCodex.id)).toBe(true)
+  })
+})
+
+describe("SubagentMentionRow", () => {
+  const reviewer: SubagentMentionTarget = {
+    id: "template:my-reviewer",
+    name: "My Reviewer",
+    description: "Reviews code",
+    model: "opus",
+    handle: "my-reviewer",
+  }
+  const noModel: SubagentMentionTarget = {
+    id: "workflow-designer",
+    name: "Workflow Designer",
+    description: "",
+    handle: "workflow-designer",
+  }
+
+  it("renders @handle, the model badge, and the description", () => {
+    render(<SubagentMentionRow target={reviewer} />)
+    expect(screen.getByTestId("subagent-mention-row-template:my-reviewer")).toBeInTheDocument()
+    expect(screen.getByText("@my-reviewer")).toBeInTheDocument()
+    expect(screen.getByText("opus")).toBeInTheDocument()
+    expect(screen.getByText("Reviews code")).toBeInTheDocument()
+  })
+
+  it("omits the model badge and description when absent", () => {
+    render(<SubagentMentionRow target={noModel} />)
+    expect(screen.getByText("@workflow-designer")).toBeInTheDocument()
+    expect(screen.queryByText("opus")).toBeNull()
+  })
+
+  it("applies the highlight class when highlighted", () => {
+    render(<SubagentMentionRow target={reviewer} highlighted />)
+    expect(screen.getByTestId("subagent-mention-row-template:my-reviewer").className).toMatch(
+      /bg-accent/
+    )
+  })
+})
+
+describe("filterSubagents", () => {
+  const all: SubagentMentionTarget[] = [
+    {
+      id: "workflow-designer",
+      name: "Workflow Designer",
+      description: "Designs flows",
+      handle: "workflow-designer",
+    },
+    {
+      id: "template:my-reviewer",
+      name: "My Reviewer",
+      description: "Reviews code",
+      handle: "my-reviewer",
+    },
+  ]
+
+  it("returns all entries on empty query", () => {
+    expect(filterSubagents(all, "")).toEqual(all)
+  })
+
+  it("matches by the @handle (primary)", () => {
+    const out = filterSubagents(all, "rev")
+    expect(out).toHaveLength(1)
+    expect(out[0].id).toBe("template:my-reviewer")
+  })
+
+  it("falls through to the description (secondary)", () => {
+    const out = filterSubagents(all, "designs")
+    expect(out.some((t) => t.id === "workflow-designer")).toBe(true)
+  })
+
+  it("returns empty when nothing matches", () => {
+    expect(filterSubagents(all, "zzzz")).toEqual([])
   })
 })
