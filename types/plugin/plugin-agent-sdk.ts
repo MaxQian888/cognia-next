@@ -204,6 +204,13 @@ export interface PluginDispatchSubagentOptions {
   _permissionCeiling?: import("@/lib/ai/agent/external/permission-cascade").ExternalSessionPermissionSpec
   /** Explicit run id (defaults to a generated one) — also the background key. */
   _runId?: string
+  /**
+   * Live capture-stream sink for the child run, populated by the host's
+   * `dispatch_agent` tool. Forwarded into `executeAgent` so tool-call /
+   * tool-result events stream into the subagent runtime store as the run
+   * progresses (lights up `SubagentPart`'s live progress + logs).
+   */
+  _onEvent?: (event: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => void
 }
 
 /** Why a nested dispatch was refused. */

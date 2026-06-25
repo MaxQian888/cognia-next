@@ -147,6 +147,9 @@ export async function dispatchSubagent(
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+    // Live progress: stream the child's tool-call/result events into the
+    // subagent runtime store so its card updates while the run is in flight.
+    ...(options._onEvent ? { onEvent: options._onEvent } : {}),
     // Only thread a dispatch context when this child is allowed to nest — that
     // is what re-exposes `dispatch_agent` to it (gated by depth in build-options).
     ...(def.allowNesting && typeof effectiveMaxDepth === "number"

@@ -152,6 +152,36 @@ pub async fn plugin_unload(state: State<'_, PluginRuntimeState>, plugin_id: Stri
     Ok(())
 }
 
+/// Validate the install manifest before any disk write. Mirrors the always-on
+/// gates the TS `registerBackendInstall` tail enforces (manifest present, valid
+/// JSON, declared id matches the install id, non-empty version) so that callers
+/// reaching this command directly — notably the Companion API remote install
+/// path, which bypasses the renderer's `PluginManager` entirely — cannot
+/// install a phantom, malformed, or id-mismatched plugin. Signature
+/// verification stays TS-side (it is config-gated and off by default); this
+/// covers the integrity gates that always run. Returns the validated version.
+fn validate_install_manifest(plugin_id: &str, payload: &InstallPayload) -> Result<String> {
+    let raw = payload.manifest_json.as_deref().ok_or_else(|| {
+        PluginError::InvalidManifest(
+            "manifest_json is required to install a plugin (refusing to create a manifest-less plugin)".into(),
+        )
+    })?;
+    let manifest: PluginManifestPayload = serde_json::from_str(raw)
+        .map_err(|e| PluginError::InvalidManifest(format!("manifest is not valid JSON: {e}")))?;
+    if manifest.id != plugin_id {
+        return Err(PluginError::InvalidManifest(format!(
+            "manifest.id={} does not match plugin_id={}",
+            manifest.id, plugin_id
+        )));
+    }
+    if manifest.version.trim().is_empty() {
+        return Err(PluginError::InvalidManifest(
+            "manifest.version is empty".into(),
+        ));
+    }
+    Ok(manifest.version)
+}
+
 #[tauri::command]
 pub async fn plugin_install(
     state: State<'_, PluginRuntimeState>,
@@ -162,21 +192,15 @@ pub async fn plugin_install(
     if plugin_id.trim().is_empty() {
         return Err(PluginError::InvalidArgument("plugin_id is empty".into()));
     }
+    // Gate: validate the manifest BEFORE touching disk so a rejected install
+    // leaves no partial plugin directory behind.
+    let version = validate_install_manifest(&plugin_id, &payload)?;
     let install_path = state.plugin_dir(&plugin_id);
     fs::create_dir_all(&install_path)?;
     if let Some(manifest_json) = payload.manifest_json.as_ref() {
         let manifest_path = install_path.join("manifest.json");
         fs::write(&manifest_path, manifest_json.as_bytes())?;
     }
-    let version = payload
-        .manifest_json
-        .as_deref()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .and_then(|v| {
-            v.get("version")
-                .and_then(|s| s.as_str().map(|s| s.to_string()))
-        })
-        .unwrap_or_else(|| "0.0.0".into());
 
     let snapshot = PluginRuntimeSnapshot {
         plugin_id: plugin_id.clone(),
@@ -468,6 +492,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn install_without_manifest_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        // A manifest-less install would create a phantom plugin dir; reject it
+        // and leave no directory behind.
+        let err = plugin_install_inner(
+            &state,
+            "demo".into(),
+            "local".into(),
+            InstallPayload { manifest_json: None },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, PluginError::InvalidManifest(_)));
+        assert!(!tmp.path().join("demo").exists());
+        assert!(state.plugins.read().is_empty());
+    }
+
+    #[tokio::test]
+    async fn install_manifest_id_mismatch_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let err = plugin_install_inner(
+            &state,
+            "expected".into(),
+            "local".into(),
+            InstallPayload {
+                manifest_json: Some(r#"{"id":"other","version":"1.0.0"}"#.into()),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, PluginError::InvalidManifest(_)));
+        assert!(!tmp.path().join("expected").exists());
+    }
+
+    #[tokio::test]
+    async fn install_malformed_manifest_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let err = plugin_install_inner(
+            &state,
+            "demo".into(),
+            "local".into(),
+            InstallPayload {
+                manifest_json: Some("{not json".into()),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, PluginError::InvalidManifest(_)));
+    }
+
+    #[tokio::test]
+    async fn install_empty_version_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let err = plugin_install_inner(
+            &state,
+            "demo".into(),
+            "local".into(),
+            InstallPayload {
+                manifest_json: Some(r#"{"id":"demo","version":"  "}"#.into()),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, PluginError::InvalidManifest(_)));
+    }
+
+    #[tokio::test]
     async fn set_state_persists_and_get_state_reads_back() {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
@@ -541,20 +636,16 @@ mod tests {
         _source: String,
         payload: InstallPayload,
     ) -> Result<PluginRuntimeSnapshot> {
+        if plugin_id.trim().is_empty() {
+            return Err(PluginError::InvalidArgument("plugin_id is empty".into()));
+        }
+        // Mirror production: validate the manifest before any disk write.
+        let version = validate_install_manifest(&plugin_id, &payload)?;
         let install_path = state.plugin_dir(&plugin_id);
         fs::create_dir_all(&install_path)?;
         if let Some(manifest_json) = payload.manifest_json.as_ref() {
             fs::write(install_path.join("manifest.json"), manifest_json.as_bytes())?;
         }
-        let version = payload
-            .manifest_json
-            .as_deref()
-            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-            .and_then(|v| {
-                v.get("version")
-                    .and_then(|s| s.as_str().map(|s| s.to_string()))
-            })
-            .unwrap_or_else(|| "0.0.0".into());
         let snapshot = PluginRuntimeSnapshot {
             plugin_id: plugin_id.clone(),
             version,

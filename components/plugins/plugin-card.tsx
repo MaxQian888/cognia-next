@@ -108,7 +108,10 @@ export function PluginCard({
         >
           <button type="button" onClick={() => onOpen(plugin.id)}>
             <div className="block w-full min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
+              {/* flex-wrap lets the version / "update available" badges drop to
+               *  a second line in narrow grid columns instead of overflowing
+               *  the card; the name still truncates on its own line. */}
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 <span className="font-medium truncate">{plugin.name}</span>
                 <PluginVersionBadge version={plugin.version} className="shrink-0" />
                 {updateAvailable && (
@@ -154,18 +157,21 @@ export function PluginCard({
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <div className="flex items-center gap-2">
+      {/* flex-wrap + min-w-0 keep the source / signature / permission group and
+       *  the status pill from overflowing the card in narrow grid columns —
+       *  the pill drops below the metadata instead of spilling past the edge. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge variant="outline" className="text-xs">
             {plugin.source}
           </Badge>
           <PluginSignatureBadge state={signatureState} compact />
           {permissionCount > 0 && (
-            <span className="flex items-center gap-1">
-              <ShieldCheckIcon className="size-3" />
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              <ShieldCheckIcon className="size-3 shrink-0" />
               {t("permissionCount", { count: permissionCount })}
               {dangerousPermissions.length > 0 && (
-                <AlertTriangleIcon className="size-3 text-destructive" />
+                <AlertTriangleIcon className="size-3 shrink-0 text-destructive" />
               )}
             </span>
           )}

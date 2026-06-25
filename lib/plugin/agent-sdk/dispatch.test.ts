@@ -124,6 +124,17 @@ describe("dispatchSubagent", () => {
     await dispatchSubagent(subagent, "go")
     expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("permissionCeiling")
   })
+
+  it("forwards the live-progress _onEvent sink to executeAgent as onEvent", async () => {
+    const sink = jest.fn()
+    await dispatchSubagent(subagent, "go", { _onEvent: sink })
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({ onEvent: sink })
+  })
+
+  it("omits onEvent when no sink was provided", async () => {
+    await dispatchSubagent(subagent, "go")
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("onEvent")
+  })
 })
 
 describe("dispatchSubagent — nesting guards", () => {
