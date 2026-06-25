@@ -45,6 +45,16 @@ describe("mermaid render-cache", () => {
     )
   })
 
+  it("enables suppressErrorRendering so a failed render cleans up its temp DOM", async () => {
+    // Without this flag, mermaid.render() leaves the "Syntax error in text"
+    // graphic appended to document.body and throws before cleanup runs, so the
+    // orphaned error stays on the page forever (and accumulates one per error).
+    await renderMermaidCached("dark", "graph TD; A-->B")
+    expect(initializeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ suppressErrorRendering: true })
+    )
+  })
+
   it("keys on theme so light vs dark are cached separately", async () => {
     const dark = await renderMermaidCached("dark", "graph LR; X-->Y")
     const light = await renderMermaidCached("default", "graph LR; X-->Y")

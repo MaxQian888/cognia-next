@@ -35,6 +35,12 @@ async function renderChart(chart: string, renderId: string, dark: boolean): Prom
     themeVariables: {
       fontFamily: "var(--font-geist-sans, system-ui, sans-serif)",
     },
+    // No container is passed to mermaid.render below, so mermaid appends a temp
+    // <div> to document.body. On a parse error it draws the "Syntax error in
+    // text" graphic into that div and throws before cleanup runs, orphaning the
+    // error graphic in the DOM permanently. suppressErrorRendering makes it
+    // clean up first and throw, so our catch shows renderError() instead.
+    suppressErrorRendering: true,
   })
   const { svg } = await mermaid.render(renderId, chart)
   return svg
