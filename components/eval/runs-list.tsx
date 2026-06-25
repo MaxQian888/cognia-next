@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { useEvalRuns } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
+import type { EvalRunRow } from "@/lib/db/eval-runs"
 import type { GateThresholds } from "@/types/eval/gate"
 
 export interface RunsListProps {
@@ -18,9 +19,21 @@ export interface RunsListProps {
   onOpenRun: (runId: string) => void
 }
 
+/** Container: reads the dataset's runs and delegates to the presentational view. */
 export function RunsList({ datasetId, gate, onOpenRun }: RunsListProps) {
-  const t = useTranslations("eval.runsList")
   const runs = useEvalRuns(datasetId)
+  return <RunsListView runs={runs} gate={gate} onOpenRun={onOpenRun} />
+}
+
+export interface RunsListViewProps {
+  runs: EvalRunRow[]
+  gate?: GateThresholds
+  onOpenRun: (runId: string) => void
+}
+
+/** Presentational run history — data-free, so it's previewable in isolation. */
+export function RunsListView({ runs, gate, onOpenRun }: RunsListViewProps) {
+  const t = useTranslations("eval.runsList")
 
   if (runs.length === 0) {
     return <p className="text-muted-foreground text-sm">{t("empty")}</p>

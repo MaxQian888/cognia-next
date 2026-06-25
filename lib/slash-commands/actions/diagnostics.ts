@@ -51,10 +51,10 @@ async function resolveActiveModelInfo(
 }
 
 /**
- * Per-model context window for `/cost` + `/context`: a custom- or
- * discovered-model's declared length overrides the curated pattern table, which
- * otherwise forces every non-built-in model to the 200k default. Mirrors the
- * composer's `ContextUsageIndicator`.
+ * Per-model context window for `/cost` + `/context`: a model's declared length
+ * from the custom, discovered, or built-in catalog overrides the curated
+ * pattern table, which otherwise forces unrecognised models to the 200k
+ * default. Mirrors the composer's `ContextUsageIndicator` and the model picker.
  */
 function resolveWindowOverride(
   model: string | undefined,

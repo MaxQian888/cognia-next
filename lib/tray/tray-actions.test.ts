@@ -25,7 +25,7 @@ import {
   toggleAutostartAction,
   type DiagnosticsFacts,
 } from "./tray-actions"
-import { DOCS_URL, ISSUES_URL, RELEASES_URL } from "@/lib/constants/external-urls"
+import { DOCS_URL, ISSUES_URL } from "@/lib/constants/external-urls"
 import { APP_VERSION } from "@/lib/app-version"
 
 beforeEach(() => {
@@ -100,10 +100,24 @@ describe("outbound links", () => {
     expect(openExternal).toHaveBeenCalledWith(ISSUES_URL)
   })
 
-  it("checkUpdates → RELEASES_URL (no in-app updater)", async () => {
-    const openExternal = jest.fn().mockResolvedValue(undefined)
-    await checkUpdates({ openExternal })
-    expect(openExternal).toHaveBeenCalledWith(RELEASES_URL)
+  it("checkUpdates → 'available' when the injected check finds a newer release", async () => {
+    const check = jest.fn().mockResolvedValue({ version: "9.9.9" })
+    await expect(checkUpdates({ check })).resolves.toEqual({ kind: "available", version: "9.9.9" })
+  })
+
+  it("checkUpdates → 'upToDate' when the injected check finds nothing", async () => {
+    const check = jest.fn().mockResolvedValue(null)
+    await expect(checkUpdates({ check })).resolves.toEqual({ kind: "upToDate" })
+  })
+
+  it("checkUpdates → 'error' (never throws) when the check rejects", async () => {
+    const check = jest.fn().mockRejectedValue(new Error("offline"))
+    await expect(checkUpdates({ check })).resolves.toEqual({ kind: "error", message: "offline" })
+  })
+
+  it("checkUpdates stringifies a non-Error rejection", async () => {
+    const check = jest.fn().mockRejectedValue("boom")
+    await expect(checkUpdates({ check })).resolves.toEqual({ kind: "error", message: "boom" })
   })
 })
 
@@ -151,8 +165,9 @@ describe("default IO paths", () => {
     expect(openExternalMock).toHaveBeenCalledWith(DOCS_URL)
     await reportIssue()
     expect(openExternalMock).toHaveBeenCalledWith(ISSUES_URL)
-    await checkUpdates()
-    expect(openExternalMock).toHaveBeenCalledWith(RELEASES_URL)
+    // No deps → real checkForUpdate, which no-ops to `null` off the desktop
+    // shell (jsdom is not Tauri), so the tray reports "up to date".
+    await expect(checkUpdates()).resolves.toEqual({ kind: "upToDate" })
     await expect(toggleAutostartAction()).resolves.toBe(true)
     expect(toggleTrayAutostartMock).toHaveBeenCalledTimes(1)
   })

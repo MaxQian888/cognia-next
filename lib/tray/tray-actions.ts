@@ -16,9 +16,10 @@ import {
   getReleaseChannel,
   getRuntimeVersions,
 } from "@/lib/app-metadata"
-import { DOCS_URL, ISSUES_URL, RELEASES_URL } from "@/lib/constants/external-urls"
+import { DOCS_URL, ISSUES_URL } from "@/lib/constants/external-urls"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { openExternal, revealInExplorer } from "@/lib/tauri/opener"
+import { checkForUpdate, type AvailableUpdate } from "@/lib/tauri/updater"
 
 import { toggleTrayAutostart } from "./autostart-control"
 
@@ -88,7 +89,18 @@ export interface TrayActionDeps {
   writeClipboard?: (text: string) => Promise<void>
   gather?: () => Promise<DiagnosticsFacts>
   toggleAutostart?: () => Promise<boolean>
+  check?: () => Promise<AvailableUpdate | null>
 }
+
+/**
+ * Result of the tray "Check for updates" action, rendered by the
+ * `use-tauri-events` listener (which owns the toast + Settings navigation). The
+ * lib stays i18n-free so it remains a pure unit.
+ */
+export type TrayUpdateOutcome =
+  | { kind: "available"; version: string }
+  | { kind: "upToDate" }
+  | { kind: "error"; message: string }
 
 /** Reveal the app-data folder in the OS file explorer. */
 export async function openDataFolder(deps: TrayActionDeps = {}): Promise<void> {
@@ -115,12 +127,18 @@ export async function reportIssue(deps: TrayActionDeps = {}): Promise<void> {
 }
 
 /**
- * "Check for updates". The app ships no in-process updater, so this opens the
- * Releases page — the canonical "what's new / download" surface — rather than
- * pretending to self-update.
+ * "Check for updates". Runs the same in-app updater check as the About card and
+ * command palette (no longer just opening the Releases page) so every surface
+ * behaves identically. Returns the outcome for the caller to surface — the
+ * download + relaunch still happens in Settings → About.
  */
-export async function checkUpdates(deps: TrayActionDeps = {}): Promise<void> {
-  await (deps.openExternal ?? openExternal)(RELEASES_URL)
+export async function checkUpdates(deps: TrayActionDeps = {}): Promise<TrayUpdateOutcome> {
+  try {
+    const update = await (deps.check ?? checkForUpdate)()
+    return update ? { kind: "available", version: update.version } : { kind: "upToDate" }
+  } catch (err) {
+    return { kind: "error", message: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 /** Flip the OS launch-at-login entry; returns the new on/off state. */

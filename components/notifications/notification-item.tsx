@@ -120,7 +120,7 @@ export function NotificationItem({
           </span>
           {record.count > 1 && (
             <span className="shrink-0 text-xs text-muted-foreground">
-              {t("groupCount", { count: record.count - 1 })}
+              {t("center.groupCount", { count: record.count - 1 })}
             </span>
           )}
         </div>
