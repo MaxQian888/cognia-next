@@ -1,4 +1,17 @@
-import { STEER_PREFIX, frameSteer, frameSteerQueue } from "./steer"
+import {
+  STEER_PREFIX,
+  buildSteerPayload,
+  frameSteer,
+  frameSteerQueue,
+  steerBlocksOf,
+  steerTextOf,
+} from "./steer"
+import type { SendContentBlock } from "@/lib/claude/types"
+
+const img = (data: string): SendContentBlock => ({
+  type: "image",
+  source: { type: "base64", media_type: "image/png", data },
+})
 
 describe("frameSteer", () => {
   it("prefixes and trims a single message", () => {
@@ -25,5 +38,47 @@ describe("frameSteerQueue", () => {
 
   it("handles a single entry", () => {
     expect(frameSteerQueue(["only"])).toBe(`${STEER_PREFIX}only`)
+  })
+})
+
+describe("steerTextOf", () => {
+  it("trims a plain string send", () => {
+    expect(steerTextOf("  hello  ")).toBe("hello")
+  })
+
+  it("reads the first text block of a block array", () => {
+    expect(steerTextOf([img("AAAA"), { type: "text", text: " do it " }])).toBe("do it")
+  })
+
+  it("is empty when there is no text block", () => {
+    expect(steerTextOf([img("AAAA")])).toBe("")
+  })
+})
+
+describe("steerBlocksOf", () => {
+  it("is empty for a plain string", () => {
+    expect(steerBlocksOf("hi")).toEqual([])
+  })
+
+  it("returns only the non-text blocks", () => {
+    const image = img("AAAA")
+    expect(steerBlocksOf([image, { type: "text", text: "x" }])).toEqual([image])
+  })
+})
+
+describe("buildSteerPayload", () => {
+  it("returns a plain framed string when no entry carries blocks", () => {
+    expect(buildSteerPayload([{ text: "a" }, { text: "b" }])).toBe(`${STEER_PREFIX}a\n\nb`)
+  })
+
+  it("aggregates every entry's blocks ahead of one framed text block", () => {
+    const a = img("AAAA")
+    const b = img("BBBB")
+    expect(
+      buildSteerPayload([
+        { text: "first", blocks: [a] },
+        { text: "second", blocks: [b] },
+      ])
+    ).toEqual([a, b, { type: "text", text: `${STEER_PREFIX}first\n\nsecond` }])
   })
 })

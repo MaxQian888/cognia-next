@@ -134,8 +134,35 @@ describe("resolveModelContextLength", () => {
     expect(resolveModelContextLength("x-1", "openai", settings)).toBe(128_000)
   })
 
-  it("returns undefined for built-in models so the pattern table wins", () => {
-    expect(resolveModelContextLength("claude-sonnet-4-6", "anthropic")).toBeUndefined()
+  it("reads a built-in catalog model's declared context length", () => {
+    // The picker shows `builtin.contextLength`; the indicator must size the
+    // window from the SAME source, not the curated regex table, or the two
+    // read-outs disagree.
+    const builtin = PROVIDERS.anthropic?.models?.find((m) => m.id === "claude-sonnet-4-6")
+    expect(builtin?.contextLength).toBeDefined()
+    expect(resolveModelContextLength("claude-sonnet-4-6", "anthropic")).toBe(builtin?.contextLength)
+  })
+
+  it("uses the catalog window even when the regex table would mis-size it", () => {
+    // `gpt-5.4` is 1M in the catalog but has no pattern in usage.ts's table,
+    // so the regex fallback would force it to the 200k default — the exact
+    // model-picker / context-indicator mismatch this resolver closes.
+    const builtin = PROVIDERS.openai?.models?.find((m) => m.id === "gpt-5.4")
+    expect(builtin?.contextLength).toBe(1_000_000)
+    expect(resolveModelContextLength("gpt-5.4", "openai")).toBe(1_000_000)
+  })
+
+  it("returns undefined for a model absent from every catalog so the pattern table wins", () => {
+    expect(resolveModelContextLength("unlisted-model-xyz", "anthropic")).toBeUndefined()
+  })
+
+  it("prefers custom / discovered metadata over the built-in catalog", () => {
+    const settings: Record<string, UserProviderSettings> = {
+      anthropic: {
+        discoveredModels: [{ id: "claude-sonnet-4-6", contextLength: 64_000 }],
+      } as never,
+    }
+    expect(resolveModelContextLength("claude-sonnet-4-6", "anthropic", settings)).toBe(64_000)
   })
 
   it("returns undefined without a provider id or for non-positive lengths", () => {

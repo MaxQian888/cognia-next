@@ -8,10 +8,14 @@ import { ComposerPopover, type ComposerPopoverHandle } from "./composer-popover"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import type { ComposerTrigger } from "./composer-trigger"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, params?: Record<string, unknown>) =>
-    params ? `${key}:${JSON.stringify(params)}` : key,
-}))
+// Stable `t` per the real next-intl contract (its `t` identity is memoized).
+// A fresh function each render would churn effect deps (the file-search effect
+// lists `t`) and loop — that's a mock artifact, not component behaviour.
+jest.mock("next-intl", () => {
+  const t = (key: string, params?: Record<string, unknown>) =>
+    params ? `${key}:${JSON.stringify(params)}` : key
+  return { useTranslations: () => t }
+})
 
 // Descriptions are blank (except /review) so the secondary description match
 // can't pull extra commands into a short-query result — keeps name-ranking
@@ -139,5 +143,91 @@ describe("ComposerPopover — keyboard navigation handle", () => {
     })
     expect(picked).toBe(false)
     expect(onPick).not.toHaveBeenCalled()
+  })
+})
+
+describe("ComposerPopover — combined @ panel (subagents + files)", () => {
+  const chatAgents = [
+    {
+      id: "workflow-designer",
+      name: "Workflow Designer",
+      description: "Designs flows",
+      handle: "workflow-designer",
+    },
+    {
+      id: "template:my-reviewer",
+      name: "My Reviewer",
+      description: "Reviews code",
+      model: "opus",
+      handle: "my-reviewer",
+    },
+  ]
+
+  function fileTrigger(query: string): ComposerTrigger {
+    return { kind: "file", tokenStart: 0, tokenEnd: query.length + 1, query }
+  }
+
+  function setupCombined(query: string, onPick = jest.fn()) {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const ref = createRef<ComposerPopoverHandle>()
+    render(
+      <ComposerPopover
+        ref={ref}
+        trigger={fileTrigger(query)}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        chatAgents={chatAgents}
+        onPick={onPick}
+        onDismiss={jest.fn()}
+      />
+    )
+    return { ref, onPick }
+  }
+
+  it("lists matching subagents under an Agents section header", () => {
+    setupCombined("")
+    // Both agents render as @handle rows.
+    expect(screen.getByTestId("subagent-mention-row-workflow-designer")).toBeInTheDocument()
+    expect(screen.getByTestId("subagent-mention-row-template:my-reviewer")).toBeInTheDocument()
+    // Agents section header is rendered (mocked t returns the key). The Files
+    // header only appears once file results exist (needs a live workspace).
+    expect(screen.getByText("agentsSection")).toBeInTheDocument()
+  })
+
+  it("fuzzy-filters the agent section by the @handle query", () => {
+    setupCombined("rev")
+    expect(screen.queryByTestId("subagent-mention-row-workflow-designer")).not.toBeInTheDocument()
+    expect(screen.getByTestId("subagent-mention-row-template:my-reviewer")).toBeInTheDocument()
+  })
+
+  it("confirm() picks the highlighted subagent (flat keyboard nav across the panel)", () => {
+    const { ref, onPick } = setupCombined("")
+    act(() => {
+      ref.current!.confirm()
+    })
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "subagent",
+      target: expect.objectContaining({ id: "workflow-designer", handle: "workflow-designer" }),
+    })
+  })
+
+  it("does not show section headers when there are no subagents", () => {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    render(
+      <ComposerPopover
+        ref={createRef<ComposerPopoverHandle>()}
+        trigger={fileTrigger("")}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        chatAgents={[]}
+        onPick={jest.fn()}
+        onDismiss={jest.fn()}
+      />
+    )
+    expect(screen.queryByText("agentsSection")).not.toBeInTheDocument()
   })
 })

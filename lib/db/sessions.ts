@@ -176,6 +176,84 @@ export async function clearBranchSeed(id: string): Promise<void> {
 }
 
 /**
+ * Archive a session (conversation-list overhaul). Sets `archivedAt` so the
+ * conversation-list model drops it from the active list; it remains visible in
+ * the Archived view. `updatedAt` is intentionally left untouched so the row
+ * keeps its real recency for the archived-view sort and on restore.
+ */
+export async function archiveSession(id: string): Promise<void> {
+  await getDb().sessions.update(id, { archivedAt: Date.now() })
+}
+
+/**
+ * Un-archive a session — clears `archivedAt` so it returns to the active list
+ * in its original date bucket (and to Pinned if still pinned). Uses `modify`
+ * to `delete` the field outright (passing `undefined` through `update()` would
+ * leave it intact — see {@link clearSessionSdkLink}).
+ */
+export async function unarchiveSession(id: string): Promise<void> {
+  await getDb()
+    .sessions.where("id")
+    .equals(id)
+    .modify((s) => {
+      delete s.archivedAt
+    })
+}
+
+/** Archive many sessions in a single transaction. Missing ids are skipped. */
+export async function bulkArchiveSessions(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return
+  const now = Date.now()
+  const db = getDb()
+  await db.transaction("rw", db.sessions, async () => {
+    for (const id of ids) await db.sessions.update(id, { archivedAt: now })
+  })
+}
+
+/**
+ * Un-archive many sessions atomically — the symmetric counterpart to
+ * {@link bulkArchiveSessions}. Like {@link unarchiveSession} it uses `modify`
+ * to `delete` the non-indexed `archivedAt` field (an `update()` with
+ * `undefined` would leave it intact). A single `anyOf` `modify` runs in one
+ * implicit transaction, so a mid-batch failure can't leave the selection
+ * half-restored. Missing ids are skipped.
+ */
+export async function bulkUnarchiveSessions(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return
+  await getDb()
+    .sessions.where("id")
+    .anyOf(ids as string[])
+    .modify((s) => {
+      delete s.archivedAt
+    })
+}
+
+/**
+ * Move a session into a folder, or back to loose (`folderId = null`). Folder
+ * membership is organizational, so `updatedAt` is intentionally left untouched
+ * — the session keeps its real recency for the date-bucket fallback on removal.
+ * `folderId` is non-indexed; clearing it requires `modify` + `delete` (passing
+ * `undefined` through `update()` would leave it intact — see
+ * {@link clearSessionSdkLink}).
+ */
+export async function assignSessionToFolder(
+  sessionId: string,
+  folderId: string | null
+): Promise<void> {
+  const db = getDb()
+  if (folderId === null) {
+    await db.sessions
+      .where("id")
+      .equals(sessionId)
+      .modify((s) => {
+        delete s.folderId
+      })
+  } else {
+    await db.sessions.update(sessionId, { folderId })
+  }
+}
+
+/**
  * Fork an existing chat session: creates a new ChatSession that inherits the
  * parent's character / team / per-session overrides, with `forkedFromSdkSessionId`
  * set to the parent's `sdkSessionId`. The next send on the new session will

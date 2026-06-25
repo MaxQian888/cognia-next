@@ -27,6 +27,8 @@ export interface ChatPaneGroupProps {
   stop: (sessionId: string) => Promise<void> | void
   /** Interrupt the running turn and immediately replay the queued steer. */
   steerNow: (sessionId: string) => Promise<void> | void
+  /** Replay the queued steer now without a turn boundary (errored/idle queue). */
+  steerFlush: (sessionId: string) => Promise<void> | void
   regenerate: (sessionId: string) => Promise<void> | void
   editResend: (messageId: string, content: SendContent, sessionId: string) => Promise<void> | void
   respondToApproval: (
@@ -70,6 +72,7 @@ export function ChatPaneGroup({
   send,
   stop,
   steerNow,
+  steerFlush,
   regenerate,
   editResend,
   respondToApproval,
@@ -129,6 +132,7 @@ export function ChatPaneGroup({
         onSend={(content) => Promise.resolve(sessionId ? send(content, sessionId) : undefined)}
         onStop={() => Promise.resolve(sessionId ? stop(sessionId) : undefined)}
         onSteerNow={() => Promise.resolve(sessionId ? steerNow(sessionId) : undefined)}
+        onSteerFlush={() => Promise.resolve(sessionId ? steerFlush(sessionId) : undefined)}
         onRegenerate={() => Promise.resolve(sessionId ? regenerate(sessionId) : undefined)}
         onEditResend={(id, content) =>
           Promise.resolve(sessionId ? editResend(id, content, sessionId) : undefined)

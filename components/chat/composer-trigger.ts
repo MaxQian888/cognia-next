@@ -15,7 +15,7 @@
 
 export type TriggerKind = "slash" | "file" | "bash" | "memory" | "agent"
 
-export type MentionMode = "files" | "agents"
+export type MentionMode = "files" | "agents" | "combined"
 
 export interface ComposerTrigger {
   kind: TriggerKind
@@ -30,9 +30,12 @@ export interface ComposerTrigger {
 export interface DetectTriggerOptions {
   /**
    * What `@` should mean in this composer:
-   *   - `"files"` (default) → file picker (workspace search), as in the
-   *     general chat.
-   *   - `"agents"` → agent picker (used by the agent-team workspace chat).
+   *   - `"files"` (default) → file picker (workspace search).
+   *   - `"agents"` → agent picker only (the agent-team workspace chat).
+   *   - `"combined"` → general chat: ONE `@` panel listing subagents + files.
+   *     The trigger kind stays `"file"` (so the async file search still runs);
+   *     the popover prepends the subagent section. So both `"files"` and
+   *     `"combined"` produce a `"file"` trigger — only `"agents"` differs.
    *
    * The token-boundary rules are identical; only the `kind` of the returned
    * trigger differs.

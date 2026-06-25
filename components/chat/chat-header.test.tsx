@@ -147,18 +147,9 @@ describe("ChatHeader", () => {
     expect(screen.queryByText(/no api key/i)).not.toBeInTheDocument()
   })
 
-  it("shows the subscription tier badge (capitalized) when on a subscription", () => {
-    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: "max" })
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <ChatHeader session={mkSession()} />
-      </Wrapper>
-    )
-    // Tier label is the capitalized plan; "no api key" must not show.
-    expect(screen.getByText(/Max/)).toBeInTheDocument()
-    expect(screen.queryByText(/no api key/i)).not.toBeInTheDocument()
-  })
+  // The subscription tier badge and the skills badge moved into
+  // SessionSettingsSheet (control-surface consolidation); their coverage now
+  // lives in session-settings-sheet.test.tsx.
 
   it("renders the session title (no character)", () => {
     const Wrapper = withAdapter(makeAdapter())
@@ -204,28 +195,6 @@ describe("ChatHeader", () => {
       throw new Error("updateSession was not called")
     }
     expect(firstCall[0]).toBe("ses_42")
-  })
-
-  it("renders the skills badge when character has skills + adapter returns them", () => {
-    const c = mkCharacter({ id: "c1", skillIds: ["s1"] })
-    const skill: Skill = {
-      id: "s1",
-      name: "skill-x",
-      content: "...",
-      createdAt: 0,
-      updatedAt: 0,
-    }
-    const adapter = makeAdapter({
-      useCharacter: () => c,
-      useSkillsByIds: () => [skill],
-    })
-    render(
-      <DataAdapterProvider adapter={adapter}>
-        <ChatHeader session={mkSession({ characterId: "c1" })} />
-      </DataAdapterProvider>
-    )
-    // The badge label has the form "Skills 1/1" via i18n; just confirm a 1 is shown.
-    expect(screen.getByLabelText(/skills/i)).toBeInTheDocument()
   })
 
   it("typed working dir survives a background session refresh (touchSession bumping updatedAt while popover open)", async () => {

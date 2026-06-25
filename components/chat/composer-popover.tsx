@@ -10,7 +10,16 @@
 // Mouse interactions (click) work through the regular onMouseDown/onClick
 // handlers.
 
-import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import {
+  forwardRef,
+  Fragment,
+  memo,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useTranslations } from "next-intl"
 import {
   AtSignIcon,
@@ -29,9 +38,12 @@ import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import {
   AgentMentionRow,
+  SubagentMentionRow,
   filterMentionables,
+  filterSubagents,
 } from "@/components/agent/workspace/agent-mention-picker"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
 import type { ComposerTrigger, TriggerKind } from "./composer-trigger"
 
@@ -40,6 +52,7 @@ export type PopoverItem =
   | { kind: "file"; entry: WorkspaceEntry }
   | { kind: "memory"; scope: "project" | "user"; preview: string }
   | { kind: "agent"; target: MentionTarget }
+  | { kind: "subagent"; target: SubagentMentionTarget }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -62,6 +75,13 @@ interface Props {
    * `mentionMode` is `"agents"`. Empty in file mode.
    */
   mentionables?: readonly MentionTarget[]
+  /**
+   * Subagents mentionable in the GENERAL chat composer (combined `@` mode).
+   * When non-empty, the `@file` panel prepends an "Agents" section with these,
+   * above the workspace file results. Empty / undefined in file-only or
+   * team (`mentionMode="agents"`) composers.
+   */
+  chatAgents?: readonly SubagentMentionTarget[]
   /** Called when the user picks an item. */
   onPick: (item: PopoverItem) => void
   /** Called when the user dismisses the popover (Escape / outside click). */
@@ -76,7 +96,7 @@ interface ItemList {
 }
 
 export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function ComposerPopover(
-  { trigger, cwd, slashCommands, anchor, mentionables, onPick, onDismiss },
+  { trigger, cwd, slashCommands, anchor, mentionables, chatAgents, onPick, onDismiss },
   ref
 ) {
   const t = useTranslations("chat.composer.popover")
@@ -205,16 +225,31 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
               }),
       }
     }
-    // file
-    return (
-      fileList ?? {
-        items: [],
-        loading: true,
-        error: null,
-        emptyMessage: "",
-      }
-    )
-  }, [trigger, slashCommands, fileList, t, tMemory, tAgent, mentionables])
+    // file (and combined @ mode: subagents on top, then workspace files)
+    const base = fileList ?? {
+      items: [] as PopoverItem[],
+      loading: true,
+      error: null as string | null,
+      emptyMessage: "",
+    }
+    const agentItems: PopoverItem[] =
+      chatAgents && chatAgents.length > 0
+        ? filterSubagents(chatAgents, trigger.query).map((target) => ({
+            kind: "subagent" as const,
+            target,
+          }))
+        : []
+    if (agentItems.length === 0) return base
+    return {
+      items: [...agentItems, ...base.items],
+      loading: base.loading,
+      // Agents are showing — never surface a file-search error (e.g. no
+      // workspace in web mode) that would replace the whole list. Files just
+      // don't appear in that case; the agent section still works.
+      error: null,
+      emptyMessage: base.emptyMessage,
+    }
+  }, [trigger, slashCommands, fileList, t, tMemory, tAgent, mentionables, chatAgents])
 
   // Clamp the highlight whenever the visible list shrinks below it. The
   // updater form means the clamp is idempotent if it fires multiple times.
@@ -288,24 +323,50 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           </div>
         ) : (
           <ul ref={listRef} className="max-h-72 overflow-auto py-1">
-            {displayList.items.map((item, idx) => (
-              <li
-                key={itemKey(item, idx)}
-                data-index={idx}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm",
-                  idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/40"
-                )}
-                onMouseEnter={() => setHighlight(idx)}
-                onMouseDown={(e) => {
-                  // Prevent the textarea blur that would otherwise fire.
-                  e.preventDefault()
-                  onPick(item)
-                }}
-              >
-                <ItemRow item={item} />
-              </li>
-            ))}
+            {displayList.items.map((item, idx) => {
+              // Combined `@` mode mixes subagents + files. Render a (non-
+              // selectable, no `data-index`) section header at each kind change
+              // so keyboard navigation still walks the flat item array. Only
+              // active when subagents are present — pure file/slash lists stay
+              // header-free.
+              const showSections = displayList.items.some((i) => i.kind === "subagent")
+              const prevKind = idx === 0 ? undefined : displayList.items[idx - 1].kind
+              const header =
+                showSections &&
+                item.kind !== prevKind &&
+                (item.kind === "subagent" || item.kind === "file")
+                  ? item.kind === "subagent"
+                    ? t("agentsSection")
+                    : t("filesSection")
+                  : null
+              return (
+                <Fragment key={itemKey(item, idx)}>
+                  {header ? (
+                    <li
+                      aria-hidden
+                      className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                    >
+                      {header}
+                    </li>
+                  ) : null}
+                  <li
+                    data-index={idx}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm",
+                      idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/40"
+                    )}
+                    onMouseEnter={() => setHighlight(idx)}
+                    onMouseDown={(e) => {
+                      // Prevent the textarea blur that would otherwise fire.
+                      e.preventDefault()
+                      onPick(item)
+                    }}
+                  >
+                    <ItemRow item={item} />
+                  </li>
+                </Fragment>
+              )
+            })}
           </ul>
         )}
       </PopoverContent>
@@ -363,6 +424,7 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "file") return `file-${item.entry.absolutePath}`
   if (item.kind === "memory") return `memory-${item.scope}`
   if (item.kind === "agent") return `agent-${item.target.id}`
+  if (item.kind === "subagent") return `subagent-${item.target.id}`
   return `idx-${idx}`
 }
 
@@ -418,6 +480,9 @@ const ItemRow = memo(function ItemRow({ item }: { item: PopoverItem }) {
   }
   if (item.kind === "agent") {
     return <AgentMentionRow target={item.target} />
+  }
+  if (item.kind === "subagent") {
+    return <SubagentMentionRow target={item.target} />
   }
   return null
 })

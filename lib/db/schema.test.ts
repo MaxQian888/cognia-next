@@ -2191,6 +2191,82 @@ describe("v81 conversation-branching lineage (parentSessionId index)", () => {
   })
 })
 
+describe("v89 runRecords (Run Panel second clock)", () => {
+  it("registers runRecords with a [sessionId+runId] key and startedAt ordering", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(89)
+    await db.runRecords.put({
+      sessionId: "ses_r",
+      runId: 1,
+      startedAt: 100,
+      status: "done",
+      tools: [],
+      subagents: [],
+      todos: [],
+      todoCounts: { done: 0, total: 0 },
+      counts: { tools: 0, subagents: 0 },
+    })
+    await db.runRecords.put({
+      sessionId: "ses_r",
+      runId: 2,
+      startedAt: 300,
+      status: "running",
+      tools: [{ id: "t1", toolName: "Bash", status: "output-available" }],
+      subagents: [],
+      todos: [],
+      todoCounts: { done: 0, total: 0 },
+      counts: { tools: 1, subagents: 0 },
+    })
+    const rows = await db.runRecords
+      .where("[sessionId+startedAt]")
+      .between(["ses_r", -Infinity], ["ses_r", Infinity])
+      .toArray()
+    expect(rows.map((r) => r.runId)).toEqual([1, 2])
+    // The compound key uniquely identifies a run.
+    const r1 = await db.runRecords.get(["ses_r", 1])
+    expect(r1?.status).toBe("done")
+  })
+})
+
+describe("v90 sessionFolders (conversation folders)", () => {
+  it("registers sessionFolders with a [projectId+order] ordering index", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(90)
+    await db.sessionFolders.put({
+      id: "f1",
+      projectId: "proj_a",
+      name: "Work",
+      order: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.sessionFolders.put({
+      id: "f2",
+      projectId: "proj_a",
+      name: "Personal",
+      order: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.sessionFolders.put({
+      id: "f3",
+      projectId: "proj_b",
+      name: "Other workspace",
+      order: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const scoped = await db.sessionFolders
+      .where("[projectId+order]")
+      .between(["proj_a", -Infinity], ["proj_a", Infinity])
+      .toArray()
+    // Ordered by `order`, scoped to the workspace.
+    expect(scoped.map((f) => f.id)).toEqual(["f2", "f1"])
+  })
+})
+
 describe("schema seed error handling isolation", () => {
   it("logs non-Error rejection values", async () => {
     jest.resetModules()

@@ -2,11 +2,27 @@
 
 import type { UIMessage } from "ai"
 import { create } from "zustand"
-import type { PendingApproval, SendContent, SendOptions } from "@/lib/claude/types"
+import type {
+  PendingApproval,
+  SendContent,
+  SendContentBlock,
+  SendOptions,
+} from "@/lib/claude/types"
+import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
+import { nextToolTimestamps } from "@/lib/claude/run-record"
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
+
+/**
+ * A queued steer message — a follow-up the user sent while the turn was still
+ * running. Holds the framing `text` (for display + replay) plus the original
+ * non-text content blocks (`blocks`, e.g. pasted/attached images) so a queued
+ * steer keeps its attachments when it is finally replayed. `id` is a stable key
+ * for per-entry edit/remove in the Run Panel.
+ */
+export type SteerEntry = { id: string; text: string; blocks?: SendContentBlock[] }
 
 export type PermissionMode = NonNullable<SendOptions["permissionMode"]>
 
@@ -40,6 +56,17 @@ export interface FileReference {
   /** Path relative to the workspace root, with forward slashes. */
   relative: string
   isDir: boolean
+}
+
+/**
+ * Records that the in-flight turn for a session is an edit request aimed at a
+ * specific artifact (set when an artifact-selection chip is sent). Consumed at
+ * turn-complete to route the AI revision into a pending review proposal instead
+ * of auto-creating a new artifact. See `lib/artifacts/route-ai-revision.ts`.
+ */
+export interface ArtifactEditTarget {
+  artifactId: string
+  requestId: string
 }
 
 /**
@@ -84,9 +111,21 @@ export interface SessionChatSlice {
    * available; see `lib/claude/steer.ts`) and replayed as a fresh turn when the
    * running turn settles. The run-status bar shows the depth + a preview.
    */
-  steerQueue: string[]
+  steerQueue: SteerEntry[]
   /** Active-work clock for the run-status bar's elapsed timer. */
   runTiming: RunTiming
+  /**
+   * Monotonic per-session run counter. Bumped on each fresh idle/error→streaming
+   * edge (NOT on an approval resume), and used as the join key for the persisted
+   * `RunRecord`. Starts at 0; the first turn is run 1.
+   */
+  runId: number
+  /**
+   * Transient per-tool timing keyed by `toolCallId` — `startedAt` on first
+   * sighting, `endedAt` on terminal state. Drives the Run Panel's per-tool
+   * elapsed. Slice-only (not projected); cleared when a fresh turn starts.
+   */
+  toolTimestamps: Record<string, { startedAt: number; endedAt?: number }>
 }
 
 /** Default-initialised slice. `loading` seeds the hydration spinner for a
@@ -103,6 +142,8 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     messagesReloadNonce: 0,
     steerQueue: [],
     runTiming: IDLE_TIMING,
+    runId: 0,
+    toolTimestamps: {},
   }
 }
 
@@ -153,11 +194,13 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       messagesLoading: state.messagesLoading,
       messagesLoadError: state.messagesLoadError,
       messagesReloadNonce: state.messagesReloadNonce,
-      // steerQueue / runTiming are slice-only (not projected onto the top-level
-      // active mirror), so seed them from defaults when materialising a slice
-      // for the active session before its first explicit write.
+      // steerQueue / runTiming / runId / toolTimestamps are slice-only (not
+      // projected onto the top-level active mirror), so seed them from defaults
+      // when materialising a slice for the active session before its first write.
       steerQueue: [],
       runTiming: IDLE_TIMING,
+      runId: 0,
+      toolTimestamps: {},
     }
   }
   return makeSessionSlice()
@@ -169,13 +212,20 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
  * routes through this so the elapsed timer starts, pauses on approval, and
  * clears on settle in one place.
  */
-function statusPatch(
-  state: ChatState,
-  id: string,
-  next: ChatStatus
-): Pick<SessionChatSlice, "status" | "runTiming"> {
+function statusPatch(state: ChatState, id: string, next: ChatStatus): Partial<SessionChatSlice> {
   const prev = sliceForId(state, id)
-  return { status: next, runTiming: nextRunTiming(prev.runTiming, next, Date.now()) }
+  const patch: Partial<SessionChatSlice> = {
+    status: next,
+    runTiming: nextRunTiming(prev.runTiming, next, Date.now()),
+  }
+  // Fresh-turn edge: idle/error → streaming (a non-null prior startedAt means a
+  // resume from an approval pause, which must NOT mint a new run). Bump the run
+  // counter and reset the per-tool timing for the new turn.
+  if (next === "streaming" && prev.runTiming.startedAt == null) {
+    patch.runId = prev.runId + 1
+    patch.toolTimestamps = {}
+  }
+  return patch
 }
 
 /** Write `patch` into session `id`'s slice; re-project onto the top-level
@@ -229,6 +279,11 @@ interface ChatState {
   permissionMode: PermissionMode | null
   /** Files / folders the user has @-mentioned in the current draft. */
   referencedPaths: FileReference[]
+  /**
+   * Artifact snippets the user selected + commented on, staged as context chips
+   * for the next send. Cleared on send (like attachments) and on focus change.
+   */
+  artifactSelections: ArtifactSelectionRef[]
   /** Frontmatter overrides from a recently-picked custom command; cleared on send. */
   pendingCommandOverrides: PendingCommandOverrides | null
   /**
@@ -256,6 +311,13 @@ interface ChatState {
    * session_ended and on session change. See `lib/claude/routing-fallback.ts`.
    */
   lastSendBySession: Record<string, LastSendCacheEntry>
+  /**
+   * Per-session edit target for the in-flight turn. Set when an artifact
+   * selection chip is sent; consumed (and cleared) at turn-complete to stage
+   * the AI revision as a review proposal. Not reset on focus change so a
+   * background session's targeted edit survives a tab switch.
+   */
+  pendingArtifactEditTarget: Record<string, ArtifactEditTarget | null>
   /**
    * Map from `branchGroupId` → active `messageId` for the assistant-branches
    * subsystem. When the user regenerates a reply, the previous assistant
@@ -312,9 +374,15 @@ interface ChatState {
   setSessionStatus: (id: string, s: ChatStatus) => void
   setSessionError: (id: string, msg: string | null) => void
   /** Append a steer message to a session's queue (typed while it was busy). */
-  enqueueSteer: (id: string, text: string) => void
+  enqueueSteer: (id: string, entry: SteerEntry) => void
+  /** Remove a single queued steer entry by its id (no-op if absent). */
+  removeSteerEntry: (id: string, entryId: string) => void
+  /** Replace the text of a single queued steer entry (keeps its blocks). */
+  updateSteerEntry: (id: string, entryId: string, text: string) => void
   /** Drop all queued steer messages for a session. */
   clearSteerQueue: (id: string) => void
+  /** Fold a session's latest messages into its per-tool timing map (Run Panel). */
+  syncToolTimestamps: (id: string, messages: readonly UIMessage[]) => void
   setSessionActiveBranch: (id: string, branchGroupId: string, messageId: string) => void
   hydrateSessionActiveBranches: (id: string, map: Record<string, string>) => void
   /** Append an approval, routed by `approval.sessionId` (per-session queue). */
@@ -326,6 +394,11 @@ interface ChatState {
   addReferencedPath: (ref: FileReference) => void
   removeReferencedPath: (absolute: string) => void
   clearReferencedPaths: () => void
+  /** Stage an artifact selection as a context chip for the next send. */
+  addArtifactSelection: (selection: ArtifactSelectionRef) => void
+  /** Remove a staged artifact selection (by index, since snapshots can repeat). */
+  removeArtifactSelection: (index: number) => void
+  clearArtifactSelections: () => void
   setPendingCommandOverrides: (overrides: PendingCommandOverrides | null) => void
   toggleBookmark: (messageId: string) => void
   setWebSearchOnForNextSend: (v: boolean) => void
@@ -335,6 +408,8 @@ interface ChatState {
   setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
   bumpLastSendAttempt: (sessionId: string) => void
   clearLastSend: (sessionId: string) => void
+  /** Set (or clear with `null`) the artifact edit target for a session's turn. */
+  setPendingArtifactEditTarget: (sessionId: string, target: ArtifactEditTarget | null) => void
   /** Mark `messageId` as the visible branch within `branchGroupId`. */
   setActiveBranch: (branchGroupId: string, messageId: string) => void
   /** Replace the full active-branch map (used on Dexie hydration). */
@@ -354,11 +429,13 @@ export const useChatStore = create<ChatState>((set) => ({
   pendingApprovals: [],
   permissionMode: null,
   referencedPaths: [],
+  artifactSelections: [],
   pendingCommandOverrides: null,
   bookmarkedIds: [],
   webSearchOnForNextSend: false,
   ephemeralSkillIds: [],
   lastSendBySession: {},
+  pendingArtifactEditTarget: {},
   activeBranchByGroup: {},
   messagesLoading: false,
   messagesLoadError: null,
@@ -373,6 +450,7 @@ export const useChatStore = create<ChatState>((set) => ({
       const uiReset: Partial<ChatState> = {
         permissionMode: null,
         referencedPaths: [],
+        artifactSelections: [],
         pendingCommandOverrides: null,
         bookmarkedIds: [],
         webSearchOnForNextSend: false,
@@ -486,12 +564,31 @@ export const useChatStore = create<ChatState>((set) => ({
         ...statusPatch(s, id, msg ? "error" : "idle"),
       })
     ),
-  enqueueSteer: (id, text) =>
-    set((s) => patchSliceState(s, id, { steerQueue: [...sliceForId(s, id).steerQueue, text] })),
+  enqueueSteer: (id, entry) =>
+    set((s) => patchSliceState(s, id, { steerQueue: [...sliceForId(s, id).steerQueue, entry] })),
+  removeSteerEntry: (id, entryId) =>
+    set((s) => {
+      const queue = sliceForId(s, id).steerQueue
+      const next = queue.filter((e) => e.id !== entryId)
+      return next.length === queue.length ? s : patchSliceState(s, id, { steerQueue: next })
+    }),
+  updateSteerEntry: (id, entryId, text) =>
+    set((s) => {
+      const queue = sliceForId(s, id).steerQueue
+      if (!queue.some((e) => e.id === entryId)) return s
+      const next = queue.map((e) => (e.id === entryId ? { ...e, text } : e))
+      return patchSliceState(s, id, { steerQueue: next })
+    }),
   clearSteerQueue: (id) =>
     set((s) =>
       sliceForId(s, id).steerQueue.length === 0 ? s : patchSliceState(s, id, { steerQueue: [] })
     ),
+  syncToolTimestamps: (id, messages) =>
+    set((s) => {
+      const prev = sliceForId(s, id).toolTimestamps
+      const next = nextToolTimestamps(prev, messages, Date.now())
+      return next === prev ? s : patchSliceState(s, id, { toolTimestamps: next })
+    }),
   setSessionActiveBranch: (id, branchGroupId, messageId) =>
     set((s) => {
       const slice = sliceForId(s, id)
@@ -538,6 +635,16 @@ export const useChatStore = create<ChatState>((set) => ({
         ? s
         : { referencedPaths: [...s.referencedPaths, ref] }
     ),
+  addArtifactSelection: (selection) =>
+    set((s) => ({ artifactSelections: [...s.artifactSelections, selection] })),
+  removeArtifactSelection: (index) =>
+    set((s) =>
+      index < 0 || index >= s.artifactSelections.length
+        ? s
+        : { artifactSelections: s.artifactSelections.filter((_, i) => i !== index) }
+    ),
+  clearArtifactSelections: () =>
+    set((s) => (s.artifactSelections.length === 0 ? s : { artifactSelections: [] })),
   removeReferencedPath: (absolute) =>
     set((s) => ({
       referencedPaths: s.referencedPaths.filter((r) => r.absolute !== absolute),
@@ -584,6 +691,17 @@ export const useChatStore = create<ChatState>((set) => ({
       delete next[sessionId]
       return { lastSendBySession: next }
     }),
+  setPendingArtifactEditTarget: (sessionId, target) =>
+    set((s) => {
+      if (target === null && !s.pendingArtifactEditTarget[sessionId]) return s
+      const next = { ...s.pendingArtifactEditTarget }
+      if (target === null) {
+        delete next[sessionId]
+      } else {
+        next[sessionId] = target
+      }
+      return { pendingArtifactEditTarget: next }
+    }),
   setActiveBranch: (branchGroupId, messageId) =>
     set((s) =>
       s.activeBranchByGroup[branchGroupId] === messageId
@@ -606,11 +724,13 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingApprovals: [],
       permissionMode: null,
       referencedPaths: [],
+      artifactSelections: [],
       pendingCommandOverrides: null,
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
       ephemeralSkillIds: [],
       lastSendBySession: {},
+      pendingArtifactEditTarget: {},
       activeBranchByGroup: {},
       messagesLoading: false,
       messagesLoadError: null,
@@ -687,10 +807,10 @@ export function useIsAtStreamCap(sessionId: string | null): boolean {
   return useChatStore((s) => (sessionId ? selectIsAtStreamCap(s, sessionId) : false))
 }
 
-const EMPTY_STEER: string[] = []
+const EMPTY_STEER: SteerEntry[] = []
 
 /** A session's pending steer messages (drives the run-status `btw` chip). */
-export function useSessionSteerQueue(sessionId: string | null): string[] {
+export function useSessionSteerQueue(sessionId: string | null): SteerEntry[] {
   return useChatStore((s) =>
     sessionId ? (s.sessions[sessionId]?.steerQueue ?? EMPTY_STEER) : EMPTY_STEER
   )
@@ -700,6 +820,24 @@ export function useSessionSteerQueue(sessionId: string | null): string[] {
 export function useSessionRunTiming(sessionId: string | null): RunTiming {
   return useChatStore((s) =>
     sessionId ? (s.sessions[sessionId]?.runTiming ?? IDLE_TIMING) : IDLE_TIMING
+  )
+}
+
+/** A session's monotonic run counter (the persisted RunRecord join key). */
+export function useSessionRunId(sessionId: string | null): number {
+  return useChatStore((s) => (sessionId ? (s.sessions[sessionId]?.runId ?? 0) : 0))
+}
+
+const EMPTY_TOOL_TIMESTAMPS: Record<string, { startedAt: number; endedAt?: number }> = {}
+
+/** A session's per-tool timing map (drives the Run Panel's per-tool elapsed). */
+export function useSessionToolTimestamps(
+  sessionId: string | null
+): Record<string, { startedAt: number; endedAt?: number }> {
+  return useChatStore((s) =>
+    sessionId
+      ? (s.sessions[sessionId]?.toolTimestamps ?? EMPTY_TOOL_TIMESTAMPS)
+      : EMPTY_TOOL_TIMESTAMPS
   )
 }
 

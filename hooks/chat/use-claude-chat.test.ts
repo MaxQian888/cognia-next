@@ -1167,6 +1167,34 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(goalRuntimeMock.pauseGoal).not.toHaveBeenCalled()
   })
 
+  it("send while streaming enqueues a steer entry preserving attachments", async () => {
+    chatState.status = "streaming"
+    const image = {
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: "image/png", data: "AAAA" },
+    }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send([image, { type: "text", text: "and this" }])
+    })
+    expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ text: "and this", blocks: [image] })
+    )
+    // Busy-gate returns before dispatch — nothing reaches the sidecar.
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("flushSteer is a no-op when the queue is empty", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      result.current.flushSteer("sess-1")
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
   it("turnComplete + continue dispatches a silent continuation", async () => {
     goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal())
     buildGoalJudgeClientMock.mockReturnValue({ complete: jest.fn() })

@@ -614,6 +614,47 @@ describe("resolveSendOptions — direct-chat subagents (opts.agents)", () => {
     }
   })
 
+  it("includes the host built-in subagents so they are @-mentionable in direct chat", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.agents).toHaveProperty("workflow-designer")
+    expect(opts.agents).toHaveProperty("workflow-doc-writer")
+  })
+
+  it("routes the turn to a @-mentioned subagent that is registered (opts.agent)", async () => {
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-route-1",
+      name: "Route Helper",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        targetAgentId: "template:route-helper",
+      })
+      expect(opts.agent).toBe("template:route-helper")
+      // A built-in id resolves too (it is registered in direct chat now).
+      const builtin = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        targetAgentId: "workflow-designer",
+      })
+      expect(builtin.agent).toBe("workflow-designer")
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-route-1")
+    }
+  })
+
+  it("drops an unknown / stale targetAgentId (leaves opts.agent unset)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      targetAgentId: "template:does-not-exist",
+    })
+    expect(opts.agent).toBeUndefined()
+  })
+
   it("suppresses SDK-native opts.agents for a nested dispatch run", async () => {
     useSubagentRuntimeStore.getState().addTemplate({
       id: "bo-nest-1",

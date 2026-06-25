@@ -57,6 +57,7 @@ function makeProps(over: Partial<Parameters<typeof ChatPaneGroup>[0]> = {}) {
     send: jest.fn(),
     stop: jest.fn(),
     steerNow: jest.fn(),
+    steerFlush: jest.fn(),
     regenerate: jest.fn(),
     editResend: jest.fn(),
     respondToApproval: jest.fn(),

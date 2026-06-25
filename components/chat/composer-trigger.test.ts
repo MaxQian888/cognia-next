@@ -84,6 +84,17 @@ describe("detectTrigger — @agent mode", () => {
     expect(tg?.kind).toBe("agent")
     expect(tg?.query).toBe("")
   })
+
+  it("combined mode yields a file-kind trigger (popover merges agents on top)", () => {
+    const tg = detectTrigger("@rev", 4, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.query).toBe("rev")
+    expect(tg?.tokenStart).toBe(0)
+  })
+
+  it("combined mode still excludes email-like @ (whitespace boundary)", () => {
+    expect(detectTrigger("foo@bar", 7, { mentionMode: "combined" })).toBeNull()
+  })
 })
 
 describe("spliceToken", () => {

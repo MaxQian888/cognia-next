@@ -15,6 +15,7 @@ import {
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
 import { RunStatusBar } from "./run-status-bar"
+import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
 import { Button } from "@/components/ui/button"
@@ -61,6 +62,8 @@ interface ChatPaneProps {
   onStop: () => Promise<void>
   /** Interrupt the running turn and immediately replay the queued steer. */
   onSteerNow?: () => Promise<void> | void
+  /** Replay the queued steer now without a turn boundary (errored/idle queue). */
+  onSteerFlush?: () => Promise<void> | void
   onRegenerate: () => Promise<void>
   onEditResend: (messageId: string, newContent: SendContent) => Promise<void>
   onCreate: () => void
@@ -118,6 +121,7 @@ export function ChatPane({
   onSend,
   onStop,
   onSteerNow,
+  onSteerFlush,
   onRegenerate,
   onEditResend,
   onCreate,
@@ -143,6 +147,9 @@ export function ChatPane({
   // chrome (header, composer, footer) no longer re-renders per token — only
   // the inner `ChatMessages` subtree does.
   const hasMessages = useSessionHasMessages(boundId)
+  // Snapshot each turn into the durable run-records table (Run Panel "second
+  // clock") — runs regardless of whether the panel is expanded or rendered.
+  useRunRecordPersistence(boundId)
   const status = useSessionStatus(boundId)
   const errorMessage = useSessionErrorMessage(boundId)
   const messagesLoading = useSessionMessagesLoading(boundId)
@@ -261,6 +268,7 @@ export function ChatPane({
       sessionId={boundId}
       onStop={() => void onStop()}
       onSteerNow={onSteerNow ? () => void onSteerNow() : undefined}
+      onSteerFlush={onSteerFlush ? () => void onSteerFlush() : undefined}
     />
   )
 

@@ -1,0 +1,54 @@
+import { useMemo } from "react"
+
+import {
+  buildConversationSections,
+  type ConversationListModel,
+} from "@/lib/chat/conversation-list-model"
+import type { ChatSession, SessionFolder } from "@/lib/claude/types"
+
+const EMPTY_FOLDERS: readonly SessionFolder[] = []
+const EMPTY_COLLAPSED: ReadonlySet<string> = new Set<string>()
+
+// Reading the wall clock is impure, so it lives in a plain module function
+// (not the hook body) to keep the hook render-pure per react-hooks/purity.
+// The pure model still receives `now` explicitly, so tests stay deterministic.
+function resolveNow(now: number | undefined): number {
+  return now ?? Date.now()
+}
+
+export interface UseConversationListModelParams {
+  sessions: readonly ChatSession[]
+  folders?: readonly SessionFolder[]
+  /** Search text; empty/whitespace = grouped, non-empty = flat results. */
+  query: string
+  view?: "active" | "archived"
+  collapsedFolderIds?: ReadonlySet<string>
+  /** Override the injected clock (tests only); defaults to `Date.now()`. */
+  now?: number
+}
+
+/**
+ * Headless wrapper around {@link buildConversationSections}. Memoizes on the
+ * real inputs and injects `now` at compute time, so the pure model stays
+ * deterministic while the hook avoids recomputing on every render. Consumed by
+ * both the desktop and mobile conversation lists.
+ */
+export function useConversationListModel({
+  sessions,
+  folders = EMPTY_FOLDERS,
+  query,
+  view = "active",
+  collapsedFolderIds = EMPTY_COLLAPSED,
+  now,
+}: UseConversationListModelParams): ConversationListModel {
+  return useMemo(
+    () =>
+      buildConversationSections(sessions as readonly ChatSession[], folders, {
+        query,
+        view,
+        now: resolveNow(now),
+        collapsedFolderIds,
+      }),
+    [sessions, folders, query, view, collapsedFolderIds, now]
+  )
+}

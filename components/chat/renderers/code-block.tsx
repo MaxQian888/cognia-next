@@ -114,14 +114,19 @@ export const CodeBlock = memo(function CodeBlock({
 
   const renderCode = useCallback(
     (inFullscreen = false) => {
-      // Shiki HTML path (no manual line numbers).
-      if (hasHighlighting && !localShowLineNumbers) {
+      // Shiki HTML path. Line numbers are layered on via the `.code-line-numbers`
+      // CSS counter (globals.css) targeting Shiki's per-line `.line` spans, so
+      // colour and line numbers co-exist — the default `showLineNumbers` view no
+      // longer drops syntax colour. `highlightLines` (explicit per-line emphasis)
+      // is the one case that still needs the manual table below, so it opts out.
+      if (hasHighlighting && highlightLines.length === 0) {
         return (
           <div
             className={cn(
-              "overflow-x-auto text-sm",
+              "code-scroll-x overflow-x-auto text-sm",
               "[&>pre]:m-0 [&>pre]:p-4 [&>pre]:bg-muted/50!",
               "[&_code]:font-mono [&_code]:text-sm",
+              localShowLineNumbers && "code-line-numbers",
               wordWrap && "[&>pre]:whitespace-pre-wrap",
               inFullscreen && "max-h-[70vh]"
             )}
@@ -142,7 +147,7 @@ export const CodeBlock = memo(function CodeBlock({
         <pre
           ref={inFullscreen ? undefined : codeRef}
           className={cn(
-            "overflow-x-auto p-4 bg-muted/50 text-sm font-mono",
+            "code-scroll-x overflow-x-auto p-4 bg-muted/50 text-sm font-mono",
             wordWrap && "whitespace-pre-wrap wrap-break-word",
             inFullscreen && "max-h-[70vh]"
           )}
@@ -190,6 +195,7 @@ export const CodeBlock = memo(function CodeBlock({
       localShowLineNumbers,
       wordWrap,
       isLineHighlighted,
+      highlightLines,
       hasHighlighting,
       highlightedHtml,
       darkHighlightedHtml,

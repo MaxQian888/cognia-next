@@ -34,6 +34,13 @@ describe("CodeBlock", () => {
     expect(container.querySelector("pre")).toBeTruthy()
   })
 
+  it("marks the horizontal scroll container with the touch scroll affordance class", () => {
+    const { container } = renderInProvider(<CodeBlock code="a very long line of code" />)
+    // `.code-scroll-x` adds momentum scrolling + a coarse-pointer scrollbar so
+    // the horizontal scroll is discoverable on touch.
+    expect(container.querySelector(".code-scroll-x")).toBeTruthy()
+  })
+
   describe("isStreaming short-circuit (Stage 4)", () => {
     it("renders without crashing when isStreaming is true", () => {
       const { container } = renderInProvider(
@@ -103,6 +110,63 @@ describe("CodeBlock", () => {
       // crash and keeps showing the code via the plain-pre fallback.
       await findByText(/const broken = 3/)
       expect(container.querySelector("pre")).toBeTruthy()
+    })
+  })
+
+  // Regression: finalized code blocks default to `showLineNumbers`, and the
+  // Shiki-coloured path used to render *only* when line numbers were OFF — so
+  // the default view dropped all syntax colour, rendering through a plain
+  // <table>. Colour + line numbers must now co-exist (line numbers come from a
+  // CSS counter on Shiki's per-line `.line` spans, keyed off `.code-line-numbers`).
+  describe("syntax highlighting with line numbers", () => {
+    beforeEach(() => {
+      clearHighlightCache()
+    })
+
+    it("renders Shiki-highlighted HTML even with line numbers on (the default)", async () => {
+      await highlightCached("const lit = 1", "ts")
+      const { container } = renderInProvider(
+        <CodeBlock code="const lit = 1" language="ts" showLineNumbers />
+      )
+      // Shiki path: one <pre> per theme (light + dark) from the mock, and NOT
+      // the manual line-number <table> that renders code without any colour.
+      expect(container.querySelectorAll("pre").length).toBeGreaterThanOrEqual(2)
+      expect(container.querySelector("table")).toBeNull()
+    })
+
+    it("marks the highlighted container with the line-number affordance class when line numbers are on", async () => {
+      await highlightCached("const n = 1", "ts")
+      const { container } = renderInProvider(
+        <CodeBlock code="const n = 1" language="ts" showLineNumbers />
+      )
+      expect(container.querySelector(".code-line-numbers")).toBeTruthy()
+    })
+
+    it("omits the line-number affordance class when line numbers are off", async () => {
+      await highlightCached("const f = 1", "ts")
+      const { container } = renderInProvider(
+        <CodeBlock code="const f = 1" language="ts" showLineNumbers={false} />
+      )
+      expect(container.querySelector(".code-line-numbers")).toBeNull()
+      expect(container.querySelectorAll("pre").length).toBeGreaterThanOrEqual(2)
+    })
+
+    it("falls back to the manual line-numbered table when highlighting is unavailable (streaming)", () => {
+      const { container } = renderInProvider(
+        <CodeBlock code={"a\nb"} language="ts" showLineNumbers isStreaming />
+      )
+      // Streaming skips Shiki, so the line-numbered table fallback still renders.
+      expect(container.querySelector("table")).toBeTruthy()
+    })
+
+    it("keeps the manual line-highlight table path when highlightLines is set", async () => {
+      await highlightCached("a\nb\nc", "ts")
+      const { container } = renderInProvider(
+        <CodeBlock code={"a\nb\nc"} language="ts" showLineNumbers highlightLines={[2]} />
+      )
+      // Explicit per-line emphasis still uses the table (bg on chosen lines);
+      // this opt-in path intentionally renders without Shiki colour.
+      expect(container.querySelector("table")).toBeTruthy()
     })
   })
 })

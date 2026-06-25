@@ -1,16 +1,17 @@
 "use client"
 
-import { memo, useCallback, useState } from "react"
+import { memo, useCallback, useMemo, useState } from "react"
 import type { UIMessage } from "ai"
 import type { Virtualizer } from "@tanstack/react-virtual"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, ListTreeIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, ListTreeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings"
 import { useTimelineTurns, type TimelineTurn } from "./use-timeline-turns"
 import { useTimelineScrollSync } from "./use-timeline-scroll-sync"
+import { formatTurnTime } from "./format-turn-time"
 
 interface Props {
   messages: UIMessage[]
@@ -19,22 +20,49 @@ interface Props {
   virtualize: boolean
 }
 
-function formatTime(ms: number | undefined): string {
-  if (!ms || !Number.isFinite(ms)) return ""
-  try {
-    return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-  } catch {
-    return ""
+/** Half the scrub card's height, in px — used to clamp it inside the rail. */
+const SCRUB_CARD_HALF = 22
+
+/**
+ * Pick the turn whose rail position is nearest the pointer fraction `frac`
+ * (both in `[0,1]`). Uses the measured `positions` when they cover every turn;
+ * before the scroll-sync hook has measured (or in a DOM-less test) it falls
+ * back to an even distribution by turn index so scrubbing still resolves a turn.
+ */
+export function nearestTurnIndex(frac: number, positions: number[], count: number): number {
+  if (count <= 0) return -1
+  const f = !Number.isFinite(frac) ? 0 : frac < 0 ? 0 : frac > 1 ? 1 : frac
+  if (positions.length === count) {
+    let best = 0
+    let bestDist = Infinity
+    for (let i = 0; i < count; i++) {
+      const d = Math.abs((positions[i] ?? 0) - f)
+      if (d < bestDist) {
+        bestDist = d
+        best = i
+      }
+    }
+    return best
   }
+  return count === 1 ? 0 : Math.round(f * (count - 1))
+}
+
+interface ScrubState {
+  index: number
+  /** Clamped pointer offset from the rail top, in px. */
+  y: number
 }
 
 /**
  * Right-edge, timeline-style conversation minimap. Collapsed it's a thin rail
- * with proportional turn markers and a viewport slider; expanded it's a
- * vertical timeline of user turns with hover previews and click-to-jump.
- * Desktop / wide-screen only (`lg`); mounting + threshold gating live in the
- * parent. Memoised + self-contained scroll sync so it doesn't re-render the
- * message list.
+ * with proportional turn markers and a viewport slider; hovering the rail body
+ * shows a lightweight scrub card (time + summary of the nearest user input) and
+ * clicking jumps to it — so users can locate their own inputs in a long
+ * conversation by time without opening the full panel. A top grip button opens
+ * the expanded sidebar (vertical timeline of user turns with previews and
+ * click-to-jump). Desktop / wide-screen only (`lg`); mounting + threshold
+ * gating live in the parent. Memoised + self-contained scroll sync so it
+ * doesn't re-render the message list.
  */
 export const ConversationTimeline = memo(function ConversationTimeline({
   messages,
@@ -48,9 +76,10 @@ export const ConversationTimeline = memo(function ConversationTimeline({
 
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
-  const pinned = settings?.conversationTimeline?.expanded ?? false
-  const [hovered, setHovered] = useState(false)
-  const expanded = pinned || hovered
+  const expanded = settings?.conversationTimeline?.expanded ?? false
+  const [scrub, setScrub] = useState<ScrubState | null>(null)
+
+  const yesterdayLabel = t("yesterday")
 
   const setPinned = useCallback(
     (next: boolean) => {
@@ -76,12 +105,39 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [virtualize, virtualizer, scrollRef]
   )
 
+  const onRailMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect()
+      if (rect.height <= 0) return
+      const frac = (e.clientY - rect.top) / rect.height
+      const index = nearestTurnIndex(frac, geom.positions, turns.length)
+      if (index < 0) return
+      const raw = e.clientY - rect.top
+      const y = Math.max(SCRUB_CARD_HALF, Math.min(raw, rect.height - SCRUB_CARD_HALF))
+      setScrub({ index, y })
+    },
+    [geom.positions, turns.length]
+  )
+
+  const onRailClick = useCallback(() => {
+    if (scrub && turns[scrub.index]) jumpTo(turns[scrub.index])
+  }, [scrub, turns, jumpTo])
+
+  const scrubTurn = scrub ? turns[scrub.index] : null
+  // The scrub card re-renders on every mousemove (setScrub). Memoize the
+  // locale time-format keyed on the hovered turn so it only recomputes when the
+  // pointer crosses into a different turn, not on each pixel of vertical drag.
+  const scrubTime = useMemo(
+    () => (scrubTurn ? formatTurnTime(scrubTurn.time, { yesterdayLabel }) : null),
+    [scrubTurn, yesterdayLabel]
+  )
+
   if (turns.length === 0) return null
 
   return (
     <div
       className="absolute right-0 top-0 bottom-0 z-20 hidden lg:flex"
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => setScrub(null)}
       data-testid="conversation-timeline"
     >
       {expanded ? (
@@ -96,10 +152,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               size="icon"
               className="size-6"
               aria-label={t("collapse")}
-              onClick={() => {
-                setHovered(false)
-                setPinned(false)
-              }}
+              onClick={() => setPinned(false)}
             >
               <ChevronRightIcon className="size-4" />
             </Button>
@@ -113,7 +166,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
             <ul className="flex flex-col">
               {turns.map((turn, i) => {
                 const active = i === geom.activeIndex
-                const time = formatTime(turn.time)
+                const time = formatTurnTime(turn.time, { yesterdayLabel })
                 return (
                   <li key={turn.id}>
                     <Tooltip>
@@ -165,35 +218,76 @@ export const ConversationTimeline = memo(function ConversationTimeline({
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          aria-label={t("expand")}
-          onClick={() => setPinned(true)}
-          onMouseEnter={() => setHovered(true)}
-          onFocus={() => setHovered(true)}
-          className="group relative h-full w-3 cursor-pointer bg-transparent transition-colors hover:bg-accent/30"
-        >
-          {/* viewport slider */}
-          <span
-            aria-hidden
-            className="absolute inset-x-0.5 rounded-full bg-primary/15 group-hover:bg-primary/25"
-            style={{
-              top: `${geom.viewportTop * 100}%`,
-              height: `${Math.max(geom.viewportHeight * 100, 4)}%`,
-            }}
-          />
-          {turns.map((turn, i) => (
-            <span
-              key={turn.id}
+        <div className="group relative h-full w-4">
+          {/* Grip — the accessible, keyboard-focusable way to open the full panel. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("expand")}
+            onClick={() => setPinned(true)}
+            className="absolute left-1/2 top-1 z-20 size-5 -translate-x-1/2 rounded opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <ChevronLeftIcon className="size-3.5" />
+          </Button>
+
+          {/* Scrub preview card — pointer-only, mirrored by the accessible panel. */}
+          {scrubTurn && (
+            <div
               aria-hidden
-              className={cn(
-                "absolute right-1 size-1.5 -translate-y-1/2 rounded-full",
-                i === geom.activeIndex ? "bg-primary" : "bg-muted-foreground/40"
+              data-testid="timeline-scrub-card"
+              className="pointer-events-none absolute right-full z-30 mr-1 w-44 -translate-y-1/2 rounded-md border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md"
+              style={{ top: scrub?.y }}
+            >
+              {scrubTime && (
+                <div className="text-[10px] font-medium tabular-nums text-muted-foreground">
+                  {scrubTime}
+                </div>
               )}
-              style={{ top: `${(geom.positions[i] ?? 0) * 100}%` }}
+              <div className="truncate text-xs text-foreground">{scrubTurn.label}</div>
+            </div>
+          )}
+
+          {/* Rail body — pointer-driven scrub + click-to-jump. */}
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden
+            data-testid="timeline-rail"
+            onMouseMove={onRailMouseMove}
+            onMouseLeave={() => setScrub(null)}
+            onClick={onRailClick}
+            className="absolute inset-0 cursor-pointer bg-transparent transition-colors hover:bg-accent/30"
+          >
+            {/* viewport slider */}
+            <span
+              aria-hidden
+              className="absolute inset-x-0.5 rounded-full bg-primary/15 group-hover:bg-primary/25"
+              style={{
+                top: `${geom.viewportTop * 100}%`,
+                height: `${Math.max(geom.viewportHeight * 100, 4)}%`,
+              }}
             />
-          ))}
-        </button>
+            {turns.map((turn, i) => {
+              const isScrub = scrub?.index === i
+              const isActive = i === geom.activeIndex
+              return (
+                <span
+                  key={turn.id}
+                  aria-hidden
+                  className={cn(
+                    "absolute right-1 -translate-y-1/2 rounded-full transition-all",
+                    isScrub
+                      ? "size-2 bg-primary"
+                      : isActive
+                        ? "size-1.5 bg-primary"
+                        : "size-1.5 bg-muted-foreground/40"
+                  )}
+                  style={{ top: `${(geom.positions[i] ?? 0) * 100}%` }}
+                />
+              )
+            })}
+          </button>
+        </div>
       )}
     </div>
   )

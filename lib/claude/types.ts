@@ -163,6 +163,14 @@ export interface SendOptions {
   /** Dynamic subagent definitions keyed by name. */
   agents?: Record<string, Record<string, unknown>>
   /**
+   * Run THIS turn's main thread AS the named subagent (its system prompt, tool
+   * restrictions, and model). Must be a key present in {@link agents}. Equivalent
+   * to Claude Code's `@agent` / `--agent`. Set by `resolveSendOptions` from the
+   * composer's `@`-mention. Anthropic path forwards it to the SDK's `agent`
+   * option; the ai-sdk path applies a synthetic system/tools overlay instead.
+   */
+  agent?: string
+  /**
    * Forward subagent text + thinking blocks as assistant/user messages with
    * `parent_tool_use_id` set (default off in the SDK). Enabled for team /
    * workflow-editor so the SDK-subagent bridge can render rich nested logs.

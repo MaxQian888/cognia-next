@@ -16,6 +16,8 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
 import { usePlatform } from "@/hooks/use-platform"
+import { useTranslations } from "next-intl"
+import { InfoIcon } from "lucide-react"
 import { useCharacters } from "@/lib/data-hooks/context"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
@@ -59,6 +61,12 @@ export function MessageList({
   const sessionId = useChatStore((s) => s.activeSessionId)
   const platform = usePlatform()
   const isMobile = platform === "mobile"
+  const tActions = useTranslations("mobile.messageActions")
+  // Long-press opens the action sheet on mobile, but there's no hover hint to
+  // advertise it. Surface a one-line nudge early in the conversation; it
+  // self-retires once the thread grows past a couple of messages, so it never
+  // becomes persistent chrome and needs no dismissal state.
+  const showLongPressHint = isMobile && messages.length > 0 && messages.length <= 2
   const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const scrollParentRef = useRef<HTMLDivElement>(null)
@@ -215,10 +223,19 @@ export function MessageList({
   return (
     <PerfBoundary id="chat:list">
       <div className="relative flex flex-1 flex-col overflow-hidden">
+        {showLongPressHint ? (
+          <div
+            className="flex items-center justify-center gap-1.5 px-4 py-1.5 text-[11px] text-muted-foreground"
+            data-testid="long-press-hint"
+          >
+            <InfoIcon className="size-3 shrink-0" aria-hidden />
+            <span>{tActions("longPressHint")}</span>
+          </div>
+        ) : null}
         <div className="relative flex flex-1 overflow-hidden">
           <div
             ref={scrollParentRef}
-            className="relative flex-1 overflow-y-auto"
+            className="relative flex-1 overflow-y-auto overscroll-contain"
             role="log"
             onScroll={handleScroll}
           >

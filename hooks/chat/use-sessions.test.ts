@@ -21,6 +21,11 @@ const bulkDeleteSessionsMock = jest.fn()
 const listSessionsMock = jest.fn()
 const updateSessionMock = jest.fn()
 const getSessionMock = jest.fn()
+const archiveSessionMock = jest.fn()
+const unarchiveSessionMock = jest.fn()
+const bulkArchiveSessionsMock = jest.fn()
+const bulkUnarchiveSessionsMock = jest.fn()
+const assignSessionToFolderMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
   deleteSession: (id: string) => deleteSessionMock(id),
@@ -28,6 +33,22 @@ jest.mock("@/lib/db/sessions", () => ({
   listScopedSessions: (projectId?: string) => listSessionsMock(projectId),
   updateSession: (id: string, p: unknown) => updateSessionMock(id, p),
   getSession: (id: string) => getSessionMock(id),
+  archiveSession: (id: string) => archiveSessionMock(id),
+  unarchiveSession: (id: string) => unarchiveSessionMock(id),
+  bulkArchiveSessions: (ids: readonly string[]) => bulkArchiveSessionsMock(ids),
+  bulkUnarchiveSessions: (ids: readonly string[]) => bulkUnarchiveSessionsMock(ids),
+  assignSessionToFolder: (sid: string, fid: string | null) => assignSessionToFolderMock(sid, fid),
+}))
+
+const listFoldersMock = jest.fn()
+const createFolderDbMock = jest.fn()
+const renameFolderDbMock = jest.fn()
+const deleteFolderDbMock = jest.fn()
+jest.mock("@/lib/db/session-folders", () => ({
+  listFolders: (projectId?: string) => listFoldersMock(projectId),
+  createFolder: (name: string) => createFolderDbMock(name),
+  renameFolder: (id: string, name: string) => renameFolderDbMock(id, name),
+  deleteFolder: (id: string) => deleteFolderDbMock(id),
 }))
 
 const resolveCharacterByIdMock = jest.fn()
@@ -96,6 +117,15 @@ beforeEach(() => {
   listSessionsMock.mockReset().mockResolvedValue([])
   updateSessionMock.mockReset().mockResolvedValue(undefined)
   getSessionMock.mockReset().mockResolvedValue({ id: "s1" })
+  archiveSessionMock.mockReset().mockResolvedValue(undefined)
+  unarchiveSessionMock.mockReset().mockResolvedValue(undefined)
+  bulkArchiveSessionsMock.mockReset().mockResolvedValue(undefined)
+  bulkUnarchiveSessionsMock.mockReset().mockResolvedValue(undefined)
+  assignSessionToFolderMock.mockReset().mockResolvedValue(undefined)
+  listFoldersMock.mockReset().mockResolvedValue([])
+  createFolderDbMock.mockReset().mockResolvedValue({ id: "f-new" })
+  renameFolderDbMock.mockReset().mockResolvedValue(undefined)
+  deleteFolderDbMock.mockReset().mockResolvedValue(undefined)
   resolveCharacterByIdMock.mockReset().mockResolvedValue(undefined)
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   chatStoreState.setActiveSession.mockClear()
@@ -364,5 +394,75 @@ describe("useSessions", () => {
       await result.current.bulkSetPinned([], false)
     })
     expect(updateSessionMock).not.toHaveBeenCalled()
+  })
+
+  it("archive stamps the row and deselects it when it is the active session", async () => {
+    chatStoreState.activeSessionId = "s1"
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.archive("s1")
+    })
+    expect(archiveSessionMock).toHaveBeenCalledWith("s1")
+    expect(chatStoreState.setActiveSession).toHaveBeenCalledWith(null)
+  })
+
+  it("archive leaves the active pointer alone for a non-active session", async () => {
+    chatStoreState.activeSessionId = "other"
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.archive("s1")
+    })
+    expect(archiveSessionMock).toHaveBeenCalledWith("s1")
+    expect(chatStoreState.setActiveSession).not.toHaveBeenCalled()
+  })
+
+  it("unarchive clears the archive marker", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.unarchive("s1")
+    })
+    expect(unarchiveSessionMock).toHaveBeenCalledWith("s1")
+  })
+
+  it("bulkUnarchive delegates to the transactional db helper", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkUnarchive(["s1", "s2"])
+    })
+    expect(bulkUnarchiveSessionsMock).toHaveBeenCalledWith(["s1", "s2"])
+  })
+
+  it("bulkArchive archives every id and deselects the active one", async () => {
+    chatStoreState.activeSessionId = "s2"
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkArchive(["s1", "s2"])
+    })
+    expect(bulkArchiveSessionsMock).toHaveBeenCalledWith(["s1", "s2"])
+    expect(chatStoreState.setActiveSession).toHaveBeenCalledWith(null)
+  })
+
+  it("bulkArchive on an empty array is a no-op", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkArchive([])
+    })
+    expect(bulkArchiveSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it("exposes folder CRUD that delegates to the folders data layer", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.createFolder("Work")
+      await result.current.renameFolder("f1", "Renamed")
+      await result.current.deleteFolder("f1")
+      await result.current.assignToFolder("s1", "f1")
+      await result.current.assignToFolder("s1", null)
+    })
+    expect(createFolderDbMock).toHaveBeenCalledWith("Work")
+    expect(renameFolderDbMock).toHaveBeenCalledWith("f1", "Renamed")
+    expect(deleteFolderDbMock).toHaveBeenCalledWith("f1")
+    expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", "f1")
+    expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", null)
   })
 })

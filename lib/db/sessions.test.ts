@@ -13,6 +13,10 @@ import {
   deleteSession,
   bulkDeleteSessions,
   clearBranchSeed,
+  archiveSession,
+  unarchiveSession,
+  bulkArchiveSessions,
+  bulkUnarchiveSessions,
 } from "./sessions"
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
@@ -316,5 +320,49 @@ describe("workspace (project) scoping", () => {
     expect((await listScopedSessions()).map((s) => s.id)).toEqual([a2.id, a1.id])
     // The unscoped escape hatch still sees every workspace.
     expect((await listSessions()).map((s) => s.id).sort()).toEqual([a1.id, a2.id, b1.id].sort())
+  })
+})
+
+describe("archive / unarchive", () => {
+  it("archiveSession stamps archivedAt without touching updatedAt", async () => {
+    const s = await createSession({ title: "to archive" })
+    const before = (await getSession(s.id))!.updatedAt
+    await archiveSession(s.id)
+    const after = await getSession(s.id)
+    expect(typeof after?.archivedAt).toBe("number")
+    expect(after?.updatedAt).toBe(before)
+  })
+
+  it("unarchiveSession deletes the archivedAt field outright", async () => {
+    const s = await createSession({ title: "round trip" })
+    await archiveSession(s.id)
+    expect((await getSession(s.id))?.archivedAt).toEqual(expect.any(Number))
+    await unarchiveSession(s.id)
+    const after = await getSession(s.id)
+    expect(after).toBeDefined()
+    expect("archivedAt" in (after as object)).toBe(false)
+  })
+
+  it("bulkArchiveSessions archives every id in one pass and no-ops on empty", async () => {
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await bulkArchiveSessions([])
+    expect((await getSession(a.id))?.archivedAt).toBeUndefined()
+    await bulkArchiveSessions([a.id, b.id, "missing-id"])
+    expect((await getSession(a.id))?.archivedAt).toEqual(expect.any(Number))
+    expect((await getSession(b.id))?.archivedAt).toEqual(expect.any(Number))
+  })
+
+  it("bulkUnarchiveSessions deletes archivedAt for every id in one pass and no-ops on empty", async () => {
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await bulkArchiveSessions([a.id, b.id])
+    await bulkUnarchiveSessions([])
+    expect((await getSession(a.id))?.archivedAt).toEqual(expect.any(Number))
+    await bulkUnarchiveSessions([a.id, b.id, "missing-id"])
+    const afterA = await getSession(a.id)
+    const afterB = await getSession(b.id)
+    expect("archivedAt" in (afterA as object)).toBe(false)
+    expect("archivedAt" in (afterB as object)).toBe(false)
   })
 })

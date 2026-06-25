@@ -20,7 +20,15 @@ import {
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input"
 import type { ChatStatus as PromptStatus, UIMessage } from "ai"
-import { ArrowUpIcon, FolderIcon, Loader2Icon, PaperclipIcon, SquareIcon } from "lucide-react"
+import {
+  ArrowUpIcon,
+  FileTextIcon,
+  FolderIcon,
+  Loader2Icon,
+  PaperclipIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react"
 import {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -38,6 +46,7 @@ import { useTranslations } from "next-intl"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
+import { formatArtifactSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
 import type { SendContent, ChatSession, Character } from "@/lib/claude/types"
 import {
   buildSendContent,
@@ -60,7 +69,9 @@ import {
 } from "@cognia/document/support-matrix"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { collapsePaste, expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
 import { usePlatform } from "@/hooks/use-platform"
+import { useElementHeight } from "@/hooks/use-element-height"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -71,6 +82,7 @@ import {
   type MentionMode,
 } from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
+import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
 import { FolderPickerButton } from "./composer/folder-picker-button"
@@ -312,6 +324,10 @@ function ComposerInner(props: InnerProps) {
   const ghostOverlayRef = useRef<HTMLDivElement>(null)
   const ghost = useComposerGhostText(props.session)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
+  // Measured composer height — feeds the mobile @-mention popover so it floats
+  // exactly above the composer instead of a hardcoded guess (which broke once
+  // the composer grew with attachments / goal·loop pills / multi-line drafts).
+  const composerHeight = useElementHeight(containerEl)
   const popoverRef = useRef<ComposerPopoverHandle | null>(null)
 
   const [caret, setCaret] = useState(0)
@@ -334,6 +350,12 @@ function ComposerInner(props: InnerProps) {
   // "re-attach" reminder chips above the input.
   const [restoredAttachments, setRestoredAttachments] = useState<DraftAttachmentMeta[]>([])
   const [dragDepth, setDragDepth] = useState(0)
+  // Oversized text pastes are folded into a `[Pasted N lines #id]` placeholder
+  // (mirrors the CLI's paste-collapse): the full body is held aside, keyed by
+  // its placeholder, and re-expanded at send time. Removable chips above the
+  // textarea show what was folded. `pasteSeq` keeps ids stable + unique.
+  const [pastedBlocks, setPastedBlocks] = useState<Record<string, string>>({})
+  const pasteSeq = useRef(0)
   const isDragging = dragDepth > 0
 
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
@@ -342,6 +364,16 @@ function ComposerInner(props: InnerProps) {
   const updateSession = useUpdateSession()
   const cwd = props.session?.workingDir ?? null
   const sessionId = props.session?.id ?? null
+
+  // `@` mode resolution. Callers may set `mentionMode` explicitly (team chat →
+  // "agents", etc.). Otherwise a DIRECT chat defaults to the combined panel
+  // (subagents + files), so every general-chat composer gets `@agent` without
+  // each call site opting in; non-direct composers keep the file picker.
+  const resolvedMentionMode: MentionMode =
+    props.mentionMode ?? (props.session?.kind === "direct" ? "combined" : "files")
+  // Reactive subagent list for the combined panel (no-op cost otherwise).
+  const mentionableSubagents = useMentionableSubagents()
+  const chatAgents = resolvedMentionMode === "combined" ? mentionableSubagents : undefined
 
   // --- Per-cwd custom slash commands ------------------------------------
   useEffect(() => {
@@ -428,7 +460,7 @@ function ComposerInner(props: InnerProps) {
 
   const trigger = useMemo<ComposerTrigger | null>(() => {
     const tg = detectTrigger(controller.textInput.value, caret, {
-      mentionMode: props.mentionMode,
+      mentionMode: resolvedMentionMode,
     })
     if (!tg) return null
     if (
@@ -439,18 +471,18 @@ function ComposerInner(props: InnerProps) {
       return null
     }
     return tg
-  }, [controller.textInput.value, caret, popoverDismissed, props.mentionMode])
+  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode])
 
   useEffect(() => {
     if (!popoverDismissed) return
     const tg = detectTrigger(controller.textInput.value, caret, {
-      mentionMode: props.mentionMode,
+      mentionMode: resolvedMentionMode,
     })
     if (!tg || tg.kind !== popoverDismissed.kind || tg.tokenStart !== popoverDismissed.tokenStart) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPopoverDismissed(null)
     }
-  }, [controller.textInput.value, caret, popoverDismissed, props.mentionMode])
+  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode])
 
   const dismissPopover = useCallback(() => {
     if (trigger) {
@@ -525,6 +557,10 @@ function ComposerInner(props: InnerProps) {
       } else if (item.kind === "agent") {
         const replacement = `@${item.target.name}`
         insertReplacement(replacement)
+      } else if (item.kind === "subagent") {
+        // Insert the unique, no-whitespace handle so the send-time resolver can
+        // match it back to the agent id 1:1.
+        insertReplacement(`@${item.target.handle}`)
       }
     },
     [
@@ -590,6 +626,9 @@ function ComposerInner(props: InnerProps) {
     // still has them (and so a failed send can restore the composer).
     const snapshotFiles = [...attachments.files]
     const snapshotAttachmentInputs = snapshotFiles.map(({ id: _id, ...item }) => item)
+    // Snapshot the folded-paste bodies too: the optimistic clear wipes them, so
+    // the send (and a restore-on-failure) reads from this stable map.
+    const pasteMap = pastedBlocks
 
     // ── Optimistic clear ───────────────────────────────────────────────────
     // Natural chat UX: the box empties the instant you hit send — not after the
@@ -603,12 +642,14 @@ function ComposerInner(props: InnerProps) {
       controller.textInput.clear()
       attachments.clear()
       setRestoredAttachments([])
+      setPastedBlocks({})
       if (sessionId) void clearChatDraft(sessionId)
       cleared = true
     }
     const restoreInputAfterFailure = () => {
       if (!cleared) return
       controller.textInput.setInput(text)
+      setPastedBlocks(pasteMap)
       cleared = false
     }
     clearInputOptimistically()
@@ -649,7 +690,7 @@ function ComposerInner(props: InnerProps) {
         // today's "action command clears the input, no turn" behavior.
         let sent = true
         if (outgoingText.length > 0 || filesToSend.length > 0) {
-          sent = await props.onSubmit(outgoingText, filesToSend)
+          sent = await props.onSubmit(expandPastes(outgoingText, pasteMap), filesToSend)
         } else if (!ranAction) {
           // Defensive: no prose, no files, no action — nothing was dispatched,
           // so restore the optimistically-cleared input rather than lose it.
@@ -661,7 +702,7 @@ function ComposerInner(props: InnerProps) {
         return
       }
 
-      const sent = await props.onSubmit(text, filesToSend)
+      const sent = await props.onSubmit(expandPastes(text, pasteMap), filesToSend)
       if (sent) textareaRef.current?.focus()
       else restoreInputAfterFailure()
     } catch (err) {
@@ -687,6 +728,7 @@ function ComposerInner(props: InnerProps) {
     segments,
     history,
     clearAfterSendEnabled,
+    pastedBlocks,
   ])
 
   // --- Textarea key handling --------------------------------------------
@@ -709,7 +751,7 @@ function ComposerInner(props: InnerProps) {
           dismissPopover()
           return
         }
-        if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey && trigger.kind !== "bash")) {
+        if (e.key === "ArrowDown") {
           e.preventDefault()
           popoverRef.current?.navigate(1)
           return
@@ -717,6 +759,13 @@ function ComposerInner(props: InnerProps) {
         if (e.key === "ArrowUp") {
           e.preventDefault()
           popoverRef.current?.navigate(-1)
+          return
+        }
+        // Tab selects the highlighted item. Bash mode has no list to confirm,
+        // so Tab falls through there to default textarea behavior.
+        if (e.key === "Tab" && !e.shiftKey && trigger.kind !== "bash") {
+          e.preventDefault()
+          popoverRef.current?.confirm()
           return
         }
         if (e.key === "Enter" && !e.shiftKey) {
@@ -869,9 +918,52 @@ function ComposerInner(props: InnerProps) {
       if (files.length > 0) {
         e.preventDefault()
         acceptFiles(files)
+        return
+      }
+      // Fold an oversized text paste into a `[Pasted N lines #id]` placeholder
+      // rather than flooding the textarea. Small pastes fall through to the
+      // browser's native insert. The full body is held in `pastedBlocks` and
+      // re-expanded on send.
+      const text = e.clipboardData?.getData("text") ?? ""
+      if (!text) return
+      const folded = collapsePaste(text, pasteSeq.current)
+      if (!folded.isLarge) return
+      e.preventDefault()
+      pasteSeq.current += 1
+      const ta = textareaRef.current
+      const cur = controller.textInput.value
+      const start = ta?.selectionStart ?? cur.length
+      const end = ta?.selectionEnd ?? cur.length
+      const result = spliceToken(cur, start, end, folded.display)
+      controller.textInput.setInput(result.value)
+      setPastedBlocks((prev) => ({ ...prev, [folded.display]: folded.stored }))
+      requestAnimationFrame(() => {
+        const ta2 = textareaRef.current
+        if (ta2) {
+          ta2.setSelectionRange(result.caret, result.caret)
+          ta2.focus()
+        }
+      })
+    },
+    [acceptFiles, controller.textInput]
+  )
+
+  // Drop a folded paste: remove its placeholder from the text and forget the
+  // stored body (chip "×" or editing the placeholder out by hand).
+  const removePastedBlock = useCallback(
+    (placeholder: string) => {
+      setPastedBlocks((prev) => {
+        if (!(placeholder in prev)) return prev
+        const next = { ...prev }
+        delete next[placeholder]
+        return next
+      })
+      const cur = controller.textInput.value
+      if (cur.includes(placeholder)) {
+        controller.textInput.setInput(cur.split(placeholder).join(""))
       }
     },
-    [acceptFiles]
+    [controller.textInput]
   )
 
   const onDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -951,6 +1043,10 @@ function ComposerInner(props: InnerProps) {
         if (row?.text) {
           controller.textInput.setInput(row.text)
         }
+        // Folded-paste bodies are in-memory only (not persisted). Switching
+        // sessions drops them; any `[Pasted …]` placeholder in the restored
+        // draft becomes "orphaned" and surfaces a re-paste reminder.
+        setPastedBlocks({})
         // Reset (or populate) the reminder chips for the session we just
         // switched to — a session with no staged attachments clears them.
         const restored = row?.attachments ?? []
@@ -1069,6 +1165,52 @@ function ComposerInner(props: InnerProps) {
       />
       <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
       <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
+      {/* Folded large-paste chips — only those whose placeholder is still in the
+          text (manual deletion drops the chip too). */}
+      {(() => {
+        const chips = Object.entries(pastedBlocks).filter(([ph]) =>
+          controller.textInput.value.includes(ph)
+        )
+        if (chips.length === 0) return null
+        return (
+          <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
+            {chips.map(([ph, body]) => (
+              <span
+                key={ph}
+                className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              >
+                <FileTextIcon className="size-3 shrink-0" aria-hidden />
+                {t("pastedChip", { count: body.split("\n").length })}
+                <button
+                  type="button"
+                  onClick={() => removePastedBlock(ph)}
+                  aria-label={t("removePastedChip")}
+                  className="text-muted-foreground/60 hover:text-foreground"
+                >
+                  <XIcon className="size-3" aria-hidden />
+                </button>
+              </span>
+            ))}
+          </div>
+        )
+      })()}
+      {/* Re-paste reminder: a restored draft can carry `[Pasted …]` placeholders
+          whose bodies weren't persisted. Nudge the user to re-paste (the
+          placeholder text stays visible so they see exactly where). */}
+      {(() => {
+        const orphans = findPastePlaceholders(controller.textInput.value).filter(
+          (ph) => !(ph in pastedBlocks)
+        )
+        if (orphans.length === 0) return null
+        return (
+          <div
+            className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
+            data-testid="composer-paste-reminder"
+          >
+            {t("pasteReminder", { count: orphans.length })}
+          </div>
+        )
+      })()}
       {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
       <GoalStatusPill sessionId={sessionId} />
       {/* /loop status + controls; self-hides when no open loop. */}
@@ -1119,7 +1261,12 @@ function ComposerInner(props: InnerProps) {
             <TooltipTrigger asChild>
               <Button
                 aria-label={t("ariaAttachImage")}
-                className="size-9 text-muted-foreground hover:text-foreground"
+                className={cn(
+                  "size-9 text-muted-foreground hover:text-foreground",
+                  // Mobile: expand the tap target to the 44px minimum without
+                  // changing the icon. Desktop keeps the compact 36px button.
+                  isMobile && "touch-target"
+                )}
                 disabled={props.disabled}
                 onClick={openFileDialog}
                 size="icon"
@@ -1216,7 +1363,11 @@ function ComposerInner(props: InnerProps) {
                   aria-label={
                     isStreaming ? t("ariaStop") : isSending ? t("ariaSending") : t("ariaSend")
                   }
-                  className="size-9 rounded-full transition-transform duration-200 ease-out will-change-transform active:scale-90 disabled:scale-100"
+                  className={cn(
+                    "size-9 rounded-full transition-transform duration-200 ease-out will-change-transform active:scale-90 disabled:scale-100",
+                    // Mobile: 44px minimum tap target (primary send/stop action).
+                    isMobile && "touch-target"
+                  )}
                   disabled={
                     // In web mode, platform-bound sessions cannot send outbound messages.
                     (!isDesktop && !!props.session?.platformBinding) ||
@@ -1307,6 +1458,7 @@ function ComposerInner(props: InnerProps) {
         slashCommands={slashCommands}
         anchor={containerEl}
         mentionables={props.mentionables}
+        chatAgents={chatAgents}
         onPick={onPickPopoverItem}
         onDismiss={dismissPopover}
       />
@@ -1316,6 +1468,7 @@ function ComposerInner(props: InnerProps) {
           open={mobileMentionOpen}
           query={mobileMentionQuery}
           members={props.mobileMentionMembers ?? []}
+          composerHeight={composerHeight}
           onPick={onPickMobileMember}
           onDismiss={dismissPopover}
         />
@@ -1371,6 +1524,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
+  const clearArtifactSelections = useChatStore((s) => s.clearArtifactSelections)
 
   const cwd = session?.workingDir ?? null
 
@@ -1597,6 +1751,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         useChatStore.getState().setWebSearchOnForNextSend(false)
       }
 
+      // ── Artifact selections ─────────────────────────────────────────
+      // Prepend the selected snippet(s) + comment as context, and record the
+      // edit target so the assistant reply routes into a per-hunk review
+      // proposal against the targeted artifact (the first selection wins; the
+      // rest contribute context only).
+      const artifactSelections = useChatStore.getState().artifactSelections
+      if (artifactSelections.length > 0 && session?.id) {
+        const selectionCtx = formatArtifactSelectionsForLLM(artifactSelections)
+        augmented = augmented.trim() ? `${selectionCtx}\n\n---\n\n${augmented}` : selectionCtx
+        const primary = artifactSelections[0]
+        useChatStore.getState().setPendingArtifactEditTarget(session.id, {
+          artifactId: primary.artifactId,
+          requestId: crypto.randomUUID(),
+        })
+        if (artifactSelections.length > 1) {
+          loggers.chat.debug("artifact.selections.multi-target-dropped", {
+            dropped: artifactSelections.length - 1,
+          })
+        }
+      }
+
       const { content, rejected, tokens } = await buildSendContent(augmented, files)
       const isEmpty =
         (typeof content === "string" && !content.trim()) ||
@@ -1617,12 +1792,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
       await onSend(content)
       clearReferencedPaths()
+      clearArtifactSelections()
       return true
     },
     [
       onSend,
       handleBashSubmit,
       clearReferencedPaths,
+      clearArtifactSelections,
       pushSystemMessage,
       tAttach,
       tMemory,

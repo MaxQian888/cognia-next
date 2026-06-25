@@ -194,6 +194,15 @@ export interface BuildOptionsContext {
    */
   referencedPaths?: { absolute: string; isDir: boolean }[]
   /**
+   * Projected dispatcher id of the subagent the user `@`-mentioned for THIS
+   * turn (resolved by `resolveTargetAgentId` from the composer text). When it
+   * names an agent actually registered in `opts.agents`, the turn runs AS that
+   * subagent (SDK-native `agent` field on the Anthropic path; synthetic overlay
+   * on ai-sdk). An unknown / stale id is silently dropped — the SDK requires the
+   * agent to be defined. Direct chat only; team/connector paths leave it unset.
+   */
+  targetAgentId?: string
+  /**
    * Optional explicit Agent Mode override. When omitted, `resolveSendOptions`
    * reads the active mode id from `useAgentRuntimeStore` and looks it up in
    * the built-in or custom mode registries. Pass `null` to opt OUT of mode
@@ -2304,8 +2313,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // team sessions. Empty-guarded: an empty map would otherwise advertise a
     // no-op agent surface on every turn.
     try {
-      const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
-      const direct = resolveAllSubagents({ context: "direct" })
+      const { resolveAllSubagents, workflowEditorSubagents } =
+        await import("@/lib/claude/agents/subagents")
+      // Include the 4 host built-ins so they are `@`-mentionable in general
+      // chat (they back the picker via `resolveDispatchableSubagents`); union
+      // with the user's own plugin + template subagents. Keys align across the
+      // picker, the send-time resolver, and this map, so a picked `@handle`
+      // routes to a registered agent.
+      const direct = { ...workflowEditorSubagents(), ...resolveAllSubagents({ context: "direct" }) }
       if (Object.keys(direct).length > 0) {
         opts.agents = { ...(opts.agents ?? {}), ...direct }
       }
@@ -2331,6 +2346,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     } catch (err) {
       console.warn("project markdown subagent registration failed:", err)
     }
+  }
+
+  // --- @agent single-turn routing ------------------------------------------
+  // The user `@`-mentioned a subagent for this turn. Run the turn AS that agent
+  // (SDK-native `agent` field; ai-sdk applies a synthetic overlay) — but ONLY
+  // when the id is actually registered in `opts.agents` above. An unknown /
+  // stale id is silently dropped (the SDK errors on an undefined agent). This is
+  // the single membership gate that keeps the picked handle, the parsed id, and
+  // the registered agent map in agreement.
+  if (ctx.targetAgentId && opts.agents?.[ctx.targetAgentId]) {
+    opts.agent = ctx.targetAgentId
   }
 
   // --- Cache-friendly dynamic tail (experimental) ---------------------------

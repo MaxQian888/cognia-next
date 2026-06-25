@@ -136,7 +136,7 @@ export interface ActiveToolLine {
 }
 
 /** AI-SDK tool-part states that mean "still running" (no output yet). */
-const RUNNING_TOOL_STATES = new Set(["input-streaming", "input-available"])
+export const RUNNING_TOOL_STATES = new Set(["input-streaming", "input-available"])
 
 /**
  * The still-running tool calls of the latest assistant message, most-recent

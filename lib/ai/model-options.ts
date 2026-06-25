@@ -96,12 +96,17 @@ export function resolveModelDisplayName(
 
 /**
  * Resolve the per-model context-window length (in tokens) from explicitly
- * declared metadata only: the user's custom-provider model metadata first,
- * then their live-discovered models. Returns `undefined` for built-in catalog
- * models so the caller falls back to the curated pattern table in
- * `lib/claude/usage.ts` (the single source of truth for built-ins). This closes
- * the gap where a custom or account-discovered model with a non-200k window was
- * sized at the 200k default.
+ * declared metadata, in the same authoritative order the model picker uses
+ * ({@link resolveModelMeta}): the user's custom-provider model metadata first,
+ * then live-discovered models, then the built-in `PROVIDERS` catalog. Returns
+ * `undefined` only when no catalog knows the model, so the caller falls back to
+ * the curated pattern table in `lib/claude/usage.ts`.
+ *
+ * Consulting the built-in catalog here is what keeps the context indicator (and
+ * the `/cost` / `/context` diagnostics) in lock-step with the picker: both now
+ * read a built-in model's window from the catalog, so a model like `gpt-5.4`
+ * (1M in the catalog, but unmatched by the regex table → 200k default) is sized
+ * identically in both places instead of disagreeing.
  */
 export function resolveModelContextLength(
   modelId: string | undefined,
@@ -116,7 +121,10 @@ export function resolveModelContextLength(
   const cpLen = positive(cp?.customModelMetadata?.[modelId]?.contextLength)
   if (cpLen) return cpLen
   const discovered = providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
-  return positive(discovered?.contextLength)
+  const discoveredLen = positive(discovered?.contextLength)
+  if (discoveredLen) return discoveredLen
+  const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)
+  return positive(builtin?.contextLength)
 }
 
 /**

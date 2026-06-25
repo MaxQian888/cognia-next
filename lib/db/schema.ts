@@ -15,6 +15,7 @@ import type {
   Character,
   ChatSession,
   McpServer,
+  SessionFolder,
   Skill,
   SkillResource,
   StoredMessage,
@@ -117,6 +118,7 @@ import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
 import type { BackgroundTaskJournalRow } from "./background-tasks"
 import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
+import type { RunRecordRow } from "./run-records"
 import type { Memory } from "@/types/memory/memory"
 import type {
   PetProfile,
@@ -374,6 +376,10 @@ export class CogniaDB extends Dexie {
   backgroundTasks!: Table<BackgroundTaskJournalRow, string>
   // v88 — Durable WASM preopen grant ledger. See `lib/db/wasm-grant-ledger.ts`.
   wasmGrantLedger!: Table<WasmGrantLedgerRow, string>
+  // v89 — Per-turn Run Records (Run Panel). See `lib/db/run-records.ts`.
+  runRecords!: Table<RunRecordRow, [string, number]>
+  // v90 — Conversation folders. See `lib/db/session-folders.ts`.
+  sessionFolders!: Table<SessionFolder, string>
 
   constructor(name = LEGACY_COGNIA_DB_NAME) {
     super(name)
@@ -2102,6 +2108,21 @@ export class CogniaDB extends Dexie {
     this.version(88).stores({
       wasmGrantLedger: "&id, pluginId, preopen, source, grantedAt",
     })
+
+    // v89 — Per-turn Run Records (Run Panel "second clock"). Pure additive;
+    // a row with no `settledAt` on reload is shown as "interrupted". See
+    // `lib/db/run-records.ts`.
+    this.version(89).stores({
+      runRecords: "[sessionId+runId], sessionId, [sessionId+startedAt], startedAt, status",
+    })
+
+    // v90 — Conversation folders (conversation-list overhaul). A lightweight,
+    // workspace-scoped folder dimension orthogonal to the workspace itself;
+    // sessions reference a folder via the non-indexed `ChatSession.folderId`.
+    // Pure additive — no upgrade hook. See `lib/db/session-folders.ts`.
+    this.version(90).stores({
+      sessionFolders: "id, projectId, [projectId+order], name, createdAt, updatedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2165,6 +2186,7 @@ export type { CalibrationItemRow } from "./calibration-items"
 export type { CalibrationRunRow, CalibrationVerdict } from "./calibration-runs"
 export type { BackgroundTaskJournalRow } from "./background-tasks"
 export type { WasmGrantLedgerRow, WasmGrantSource } from "./wasm-grant-ledger"
+export type { RunRecordRow } from "./run-records"
 export type { PetModelRow, PetModelFileRow } from "./pet-models"
 export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"

@@ -7,7 +7,6 @@ import {
   MessageContent,
 } from "@/components/ai-elements/message"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
-import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
 import { Tool, ToolBody, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
 import { ErrorParsedView } from "@/components/chat/error-parsed-view"
@@ -40,6 +39,7 @@ import {
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
 import { useAgentFlowMode } from "@/hooks/chat/use-agent-flow-mode"
 import { groupAgentParts, isToolPartType } from "@/lib/chat/agent-flow-grouping"
+import { parseTodoInput } from "@/lib/chat/todos"
 import type { AgentFlowMode } from "@/types/appearance"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
 import { TriggerBadge } from "@/components/chat/trigger-badge"
@@ -56,10 +56,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   BookmarkIcon,
-  CheckCircle2Icon,
   CheckIcon,
-  CircleIcon,
-  ClockIcon,
   CopyIcon,
   GitBranchIcon,
   PencilIcon,
@@ -76,6 +73,7 @@ import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ReadAloudButton } from "./read-aloud-button"
+import { TodoList } from "./todo-list"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -616,43 +614,6 @@ function extractText(message: UIMessage): string {
     .join("\n\n")
 }
 
-interface TodoEntry {
-  content: string
-  status: "pending" | "in_progress" | "completed"
-  activeForm?: string
-}
-
-function parseTodoInput(input: unknown): TodoEntry[] | null {
-  if (!input || typeof input !== "object") return null
-  const todos = (input as { todos?: unknown }).todos
-  if (!Array.isArray(todos) || todos.length === 0) return null
-  const out: TodoEntry[] = []
-  for (const t of todos) {
-    if (!t || typeof t !== "object") return null
-    const content = (t as { content?: unknown }).content
-    const status = (t as { status?: unknown }).status
-    const activeForm = (t as { activeForm?: unknown }).activeForm
-    if (typeof content !== "string") return null
-    if (status !== "pending" && status !== "in_progress" && status !== "completed") return null
-    out.push({
-      content,
-      status,
-      activeForm: typeof activeForm === "string" ? activeForm : undefined,
-    })
-  }
-  return out
-}
-
-function TodoStatusGlyph({ status }: { status: TodoEntry["status"] }) {
-  if (status === "completed") {
-    return <CheckCircle2Icon className="size-3.5 shrink-0 text-green-600" />
-  }
-  if (status === "in_progress") {
-    return <ClockIcon className="size-3.5 shrink-0 animate-pulse text-yellow-600" />
-  }
-  return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
-}
-
 /**
  * Memoized boundary around a single message part. Parts inside a finalized
  * message keep stable references (the adapter only replaces the changed
@@ -961,31 +922,7 @@ function renderPart(
     const tp = part as ToolUIPart
     const todos = parseTodoInput(tp.input)
     if (todos) {
-      const completed = todos.filter((todo) => todo.status === "completed").length
-      return (
-        <Task key={key} defaultOpen className="not-prose mb-2 w-full">
-          <TaskTrigger title={t("todoPlanTitle", { done: completed, total: todos.length })} />
-          <TaskContent>
-            {todos.map((todo, i) => (
-              <TaskItem
-                key={i}
-                className={cn(
-                  "flex items-start gap-2",
-                  todo.status === "completed" && "text-muted-foreground line-through",
-                  todo.status === "in_progress" && "text-foreground"
-                )}
-              >
-                <TodoStatusGlyph status={todo.status} />
-                <span className="min-w-0 flex-1 break-words">
-                  {todo.status === "in_progress" && todo.activeForm
-                    ? todo.activeForm
-                    : todo.content}
-                </span>
-              </TaskItem>
-            ))}
-          </TaskContent>
-        </Task>
-      )
+      return <TodoList key={key} todos={todos} />
     }
     // Falls through to generic Tool rendering below.
   }

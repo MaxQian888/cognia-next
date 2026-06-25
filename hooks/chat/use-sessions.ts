@@ -4,20 +4,31 @@ import { useCallback, useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import {
+  archiveSession,
+  assignSessionToFolder,
+  bulkArchiveSessions,
   bulkDeleteSessions,
+  bulkUnarchiveSessions,
   createSession,
   deleteSession,
   getSession,
   listScopedSessions,
+  unarchiveSession,
   updateSession,
 } from "@/lib/db/sessions"
+import {
+  createFolder as createFolderDb,
+  deleteFolder as deleteFolderDb,
+  listFolders,
+  renameFolder as renameFolderDb,
+} from "@/lib/db/session-folders"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { buildOpeningMessage } from "@/lib/chat/opening-message"
 import { getDb } from "@/lib/db/schema"
 import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@/lib/claude/types"
 import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 
@@ -37,6 +48,13 @@ export function useSessions() {
     if (typeof window === "undefined") return Promise.resolve([])
     if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
     return listScopedSessions(activeProjectId)
+  }, [activeProjectId, projectStoreLoaded])
+
+  // Live-bind the workspace's conversation folders (conversation-list overhaul).
+  const folders = useLiveQuery<SessionFolder[]>(() => {
+    if (typeof window === "undefined") return Promise.resolve([])
+    if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
+    return listFolders(activeProjectId)
   }, [activeProjectId, projectStoreLoaded])
 
   // When the active session changes, hydrate its messages from Dexie. For an
@@ -166,6 +184,42 @@ export function useSessions() {
     await Promise.all(ids.map((id) => updateSession(id, { pinned })))
   }, [])
 
+  const archive = useCallback(
+    async (id: string) => {
+      await archiveSession(id)
+      // An archived session leaves the active list; deselect it if active so
+      // the chat panel doesn't keep showing a now-hidden conversation.
+      if (useChatStore.getState().activeSessionId === id) setActiveSession(null)
+    },
+    [setActiveSession]
+  )
+
+  const unarchive = useCallback(async (id: string) => {
+    await unarchiveSession(id)
+  }, [])
+
+  const bulkArchive = useCallback(
+    async (ids: readonly string[]) => {
+      if (ids.length === 0) return
+      await bulkArchiveSessions(ids)
+      const current = useChatStore.getState().activeSessionId
+      if (current && ids.includes(current)) setActiveSession(null)
+    },
+    [setActiveSession]
+  )
+
+  const bulkUnarchive = useCallback(async (ids: readonly string[]) => {
+    await bulkUnarchiveSessions(ids)
+  }, [])
+
+  const createFolder = useCallback((name: string) => createFolderDb(name), [])
+  const renameFolder = useCallback((id: string, name: string) => renameFolderDb(id, name), [])
+  const deleteFolder = useCallback((id: string) => deleteFolderDb(id), [])
+  const assignToFolder = useCallback(
+    (sessionId: string, folderId: string | null) => assignSessionToFolder(sessionId, folderId),
+    []
+  )
+
   return {
     sessions: sessions ?? [],
     // `useLiveQuery` returns `undefined` until the first Dexie read resolves;
@@ -179,6 +233,15 @@ export function useSessions() {
     rename,
     bulkRemove,
     bulkSetPinned,
+    archive,
+    unarchive,
+    bulkArchive,
+    bulkUnarchive,
+    folders: folders ?? [],
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    assignToFolder,
     db: typeof window === "undefined" ? null : getDb(),
   }
 }

@@ -830,13 +830,54 @@ describe("steer queue + run timing", () => {
   it("enqueues then clears steer messages per session", () => {
     act(() => {
       useChatStore.getState().setActiveSession("s1")
-      useChatStore.getState().enqueueSteer("s1", "first")
-      useChatStore.getState().enqueueSteer("s1", "second")
+      useChatStore.getState().enqueueSteer("s1", { id: "a", text: "first" })
+      useChatStore.getState().enqueueSteer("s1", { id: "b", text: "second" })
     })
     const { result } = renderHook(() => useSessionSteerQueue("s1"))
-    expect(result.current).toEqual(["first", "second"])
+    expect(result.current.map((e) => e.text)).toEqual(["first", "second"])
     act(() => useChatStore.getState().clearSteerQueue("s1"))
     expect(result.current).toEqual([])
+  })
+
+  it("preserves non-text blocks on a queued steer entry", () => {
+    const blocks = [
+      {
+        type: "image" as const,
+        source: { type: "base64" as const, media_type: "image/png", data: "AAAA" },
+      },
+    ]
+    act(() => useChatStore.getState().enqueueSteer("s1", { id: "img", text: "look", blocks }))
+    const { result } = renderHook(() => useSessionSteerQueue("s1"))
+    expect(result.current[0]?.blocks).toEqual(blocks)
+  })
+
+  it("removeSteerEntry drops one entry by id and is a no-op for unknown ids", () => {
+    act(() => {
+      useChatStore.getState().enqueueSteer("s1", { id: "a", text: "first" })
+      useChatStore.getState().enqueueSteer("s1", { id: "b", text: "second" })
+    })
+    const { result } = renderHook(() => useSessionSteerQueue("s1"))
+    act(() => useChatStore.getState().removeSteerEntry("s1", "a"))
+    expect(result.current.map((e) => e.id)).toEqual(["b"])
+    const before = result.current
+    act(() => useChatStore.getState().removeSteerEntry("s1", "ghost"))
+    expect(result.current).toBe(before) // identity preserved → no re-render
+  })
+
+  it("updateSteerEntry replaces the text but keeps the entry's blocks", () => {
+    const blocks = [
+      {
+        type: "image" as const,
+        source: { type: "base64" as const, media_type: "image/png", data: "AAAA" },
+      },
+    ]
+    act(() => useChatStore.getState().enqueueSteer("s1", { id: "a", text: "old", blocks }))
+    const { result } = renderHook(() => useSessionSteerQueue("s1"))
+    act(() => useChatStore.getState().updateSteerEntry("s1", "a", "new"))
+    expect(result.current[0]).toMatchObject({ id: "a", text: "new", blocks })
+    const before = result.current
+    act(() => useChatStore.getState().updateSteerEntry("s1", "ghost", "x"))
+    expect(result.current).toBe(before) // unknown id → no-op
   })
 
   it("clearSteerQueue on an empty queue is a no-op", () => {
@@ -897,5 +938,170 @@ describe("steer queue + run timing", () => {
     const timing = renderHook(() => useSessionRunTiming(null))
     expect(q.result.current).toEqual([])
     expect(timing.result.current.startedAt).toBeNull()
+  })
+})
+
+describe("runId + tool timestamps", () => {
+  const { useSessionRunId, makeSessionSlice } =
+    require("./chat-store") as typeof import("./chat-store")
+
+  const toolMsg = (id: string, toolCallId: string, state: string): UIMessage =>
+    ({
+      id,
+      role: "assistant",
+      parts: [{ type: "tool-Bash", state, input: { command: "ls" }, toolCallId }],
+    }) as unknown as UIMessage
+
+  beforeEach(() => {
+    act(() => useChatStore.getState().clear())
+  })
+
+  it("mints a new runId on each fresh streaming turn and keeps it on settle", () => {
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    expect(useChatStore.getState().sessions["s1"]?.runId).toBe(1)
+    act(() => useChatStore.getState().setSessionStatus("s1", "idle"))
+    expect(useChatStore.getState().sessions["s1"]?.runId).toBe(1)
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    expect(useChatStore.getState().sessions["s1"]?.runId).toBe(2)
+  })
+
+  it("does not mint a new runId when resuming from an approval pause", () => {
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    act(() => useChatStore.getState().pushApproval(approval("r1")))
+    act(() => useChatStore.getState().clearApproval("r1", "s1"))
+    expect(useChatStore.getState().sessions["s1"]?.runId).toBe(1)
+  })
+
+  it("clears toolTimestamps when a fresh turn starts", () => {
+    act(() =>
+      useChatStore.setState({
+        activeSessionId: null,
+        sessions: {
+          s1: {
+            ...makeSessionSlice(),
+            status: "idle",
+            runId: 1,
+            toolTimestamps: { t1: { startedAt: 1 } },
+          },
+        },
+      })
+    )
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    expect(useChatStore.getState().sessions["s1"]?.toolTimestamps).toEqual({})
+    expect(useChatStore.getState().sessions["s1"]?.runId).toBe(2)
+  })
+
+  it("syncToolTimestamps stamps running then terminal tools", () => {
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    act(() =>
+      useChatStore.getState().syncToolTimestamps("s1", [toolMsg("a1", "t1", "input-available")])
+    )
+    expect(typeof useChatStore.getState().sessions["s1"]?.toolTimestamps.t1?.startedAt).toBe(
+      "number"
+    )
+    expect(useChatStore.getState().sessions["s1"]?.toolTimestamps.t1?.endedAt).toBeUndefined()
+    act(() =>
+      useChatStore.getState().syncToolTimestamps("s1", [toolMsg("a1", "t1", "output-available")])
+    )
+    expect(typeof useChatStore.getState().sessions["s1"]?.toolTimestamps.t1?.endedAt).toBe("number")
+  })
+
+  it("useSessionRunId returns the runId (0 for unknown / null)", () => {
+    const nul = renderHook(() => useSessionRunId(null))
+    expect(nul.result.current).toBe(0)
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    const live = renderHook(() => useSessionRunId("s1"))
+    expect(live.result.current).toBe(1)
+  })
+})
+
+describe("pendingArtifactEditTarget", () => {
+  beforeEach(() => {
+    act(() => useChatStore.getState().clear())
+  })
+
+  it("sets and clears a per-session edit target", () => {
+    act(() =>
+      useChatStore.getState().setPendingArtifactEditTarget("s1", {
+        artifactId: "art1",
+        requestId: "req1",
+      })
+    )
+    expect(useChatStore.getState().pendingArtifactEditTarget.s1).toEqual({
+      artifactId: "art1",
+      requestId: "req1",
+    })
+
+    act(() => useChatStore.getState().setPendingArtifactEditTarget("s1", null))
+    expect(useChatStore.getState().pendingArtifactEditTarget.s1).toBeUndefined()
+  })
+
+  it("clearing an absent target is a no-op (stable reference)", () => {
+    const before = useChatStore.getState().pendingArtifactEditTarget
+    act(() => useChatStore.getState().setPendingArtifactEditTarget("nope", null))
+    expect(useChatStore.getState().pendingArtifactEditTarget).toBe(before)
+  })
+
+  it("clear() resets all edit targets", () => {
+    act(() =>
+      useChatStore.getState().setPendingArtifactEditTarget("s1", {
+        artifactId: "a",
+        requestId: "r",
+      })
+    )
+    act(() => useChatStore.getState().clear())
+    expect(useChatStore.getState().pendingArtifactEditTarget).toEqual({})
+  })
+})
+
+describe("artifactSelections", () => {
+  beforeEach(() => {
+    act(() => useChatStore.getState().clear())
+  })
+
+  const sel = (over = {}) => ({
+    artifactId: "a1",
+    title: "Snippet",
+    snapshot: "const x = 1",
+    comment: "rename",
+    range: { startLine: 1, endLine: 1 },
+    ...over,
+  })
+
+  it("adds, removes by index, and clears selections", () => {
+    act(() => {
+      useChatStore.getState().addArtifactSelection(sel({ title: "one" }))
+      useChatStore.getState().addArtifactSelection(sel({ title: "two" }))
+    })
+    expect(useChatStore.getState().artifactSelections).toHaveLength(2)
+
+    act(() => useChatStore.getState().removeArtifactSelection(0))
+    expect(useChatStore.getState().artifactSelections).toHaveLength(1)
+    expect(useChatStore.getState().artifactSelections[0].title).toBe("two")
+
+    act(() => useChatStore.getState().clearArtifactSelections())
+    expect(useChatStore.getState().artifactSelections).toHaveLength(0)
+  })
+
+  it("removeArtifactSelection ignores out-of-range indices (stable reference)", () => {
+    act(() => useChatStore.getState().addArtifactSelection(sel()))
+    const before = useChatStore.getState().artifactSelections
+    act(() => useChatStore.getState().removeArtifactSelection(5))
+    expect(useChatStore.getState().artifactSelections).toBe(before)
+  })
+
+  it("clearArtifactSelections is a no-op when already empty (stable reference)", () => {
+    const before = useChatStore.getState().artifactSelections
+    act(() => useChatStore.getState().clearArtifactSelections())
+    expect(useChatStore.getState().artifactSelections).toBe(before)
+  })
+
+  it("focus change and clear() reset selections", () => {
+    act(() => {
+      useChatStore.getState().setActiveSession("s1")
+      useChatStore.getState().addArtifactSelection(sel())
+    })
+    act(() => useChatStore.getState().setActiveSession("s2"))
+    expect(useChatStore.getState().artifactSelections).toHaveLength(0)
   })
 })

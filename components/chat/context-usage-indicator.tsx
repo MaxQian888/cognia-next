@@ -104,9 +104,10 @@ export function ContextUsageIndicator({
 
   const usage = useMemo<UsageInfo | null>(() => getLatestUsage(messages as UIMessage[]), [messages])
   // Window sizing: an explicit `maxTokens` prop wins (tests / pinned
-  // deployments); otherwise a custom- or discovered-model's declared context
-  // length overrides the curated pattern table so non-built-in models aren't
-  // forced to the 200k default.
+  // deployments); otherwise the model's declared context length — from the
+  // custom, discovered, or built-in catalog, the same source the model picker
+  // shows — overrides the curated pattern table, so the indicator and the
+  // picker can never disagree about a known model's window.
   const catalogWindow = useMemo(
     () => resolveModelContextLength(modelId, providerId, providerSettings, customProviders),
     [modelId, providerId, providerSettings, customProviders]

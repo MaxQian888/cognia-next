@@ -199,6 +199,44 @@ describe("MessageList", () => {
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
   })
 
+  it("shows the long-press discoverability hint early in a mobile conversation", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    expect(screen.getByTestId("long-press-hint")).toBeInTheDocument()
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("retires the long-press hint once the conversation grows past two messages", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "a"), userMsg("m2", "b"), userMsg("m3", "c")]}
+          status="idle"
+        />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("long-press-hint")).not.toBeInTheDocument()
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("never shows the long-press hint on desktop", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("long-press-hint")).not.toBeInTheDocument()
+  })
+
   describe("streaming-row measure-skip (Stage 2)", () => {
     const assistantStreaming = (id: string, text: string): UIMessage => ({
       id,
@@ -334,6 +372,17 @@ describe("MessageList", () => {
     expect(btn).toBeTruthy()
     fireEvent.click(btn!)
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" })
+  })
+
+  it("contains overscroll on the scroll container so iOS rubber-band does not chain to the shell", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    expect(scrollEl).toHaveClass("overscroll-contain")
   })
 })
 

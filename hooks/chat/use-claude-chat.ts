@@ -98,6 +98,10 @@ import {
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import {
+  buildChatMentionTargets,
+  resolveTargetAgentId,
+} from "@/lib/claude/agents/chat-mention-targets"
 import { useProjectStore } from "@/stores/project/project-store"
 import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
 import {
@@ -1456,6 +1460,14 @@ async function buildSendOptions(
     .getState()
     .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir }))
 
+  // `@agent` single-turn routing: resolve the first @-mentioned subagent in the
+  // message to its dispatcher id. `resolveSendOptions` only honours it when the
+  // id is actually registered in this turn's agent map (membership guard), so a
+  // stale / unknown mention is harmless here.
+  const targetAgentId = userMessage
+    ? (resolveTargetAgentId(userMessage, buildChatMentionTargets()) ?? undefined)
+    : undefined
+
   // Active workspace (project). Its `rootDir` joins the cwd resolution chain
   // and its `additionalDirs` are unioned into `additionalDirectories` for this
   // turn. `null` when no workspace is active (resolver falls back as before).
@@ -1517,6 +1529,7 @@ async function buildSendOptions(
     activeProject,
     workspaceRestricted,
     referencedPaths,
+    targetAgentId,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,
     memoryDeps: memoryHandshake,

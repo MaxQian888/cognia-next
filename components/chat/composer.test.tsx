@@ -48,7 +48,7 @@ jest.mock("./composer/voice-controls", () => ({
 // to "web" so the existing tests keep the desktop/web responsive layout.
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { act } from "react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -338,6 +338,72 @@ describe("Composer — wallpaper-aware tonality", () => {
     renderComposer()
     const bar = document.querySelector("[class*='@container/composer']")
     expect(bar).toHaveAttribute("data-tonality", "glass")
+  })
+})
+
+describe("Composer — large-paste folding", () => {
+  const BIG = "L1\nL2\nL3\nL4\nL5\nL6" // 6 lines → crosses the line threshold
+
+  function renderComposer(onSend: (c: unknown) => Promise<void> = async () => undefined) {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    return document.querySelector("textarea") as HTMLTextAreaElement
+  }
+
+  function pasteText(ta: HTMLTextAreaElement, text: string) {
+    fireEvent.paste(ta, {
+      clipboardData: { items: [], getData: () => text },
+    })
+  }
+
+  it("folds an oversized paste into a placeholder + chip instead of raw text", () => {
+    const ta = renderComposer()
+    pasteText(ta, BIG)
+    expect(ta.value).toContain("[Pasted 6 lines #0]")
+    expect(ta.value).not.toContain("L6")
+    expect(screen.getByTestId("composer-pasted-chips")).toBeInTheDocument()
+  })
+
+  it("leaves a small paste inline (no chip, no placeholder)", () => {
+    const ta = renderComposer()
+    pasteText(ta, "just a line")
+    expect(ta.value).not.toContain("[Pasted")
+    expect(screen.queryByTestId("composer-pasted-chips")).not.toBeInTheDocument()
+  })
+
+  it("expands the placeholder back to full text on send", async () => {
+    const onSend = jest.fn(async (_text: unknown) => undefined)
+    const ta = renderComposer(onSend)
+    pasteText(ta, BIG)
+    expect(ta.value).toContain("[Pasted 6 lines #0]")
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    // The placeholder is expanded back to the full body before dispatch.
+    const sent = onSend.mock.calls[0][0] as string
+    expect(sent).toContain(BIG)
+    expect(sent).not.toContain("[Pasted")
+  })
+
+  it("removing a chip strips its placeholder from the text", () => {
+    const ta = renderComposer()
+    pasteText(ta, BIG)
+    expect(ta.value).toContain("[Pasted 6 lines #0]")
+    fireEvent.click(screen.getByLabelText("Remove pasted text"))
+    expect(ta.value).not.toContain("[Pasted")
+    expect(screen.queryByTestId("composer-pasted-chips")).not.toBeInTheDocument()
   })
 })
 
