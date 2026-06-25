@@ -1,21 +1,36 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { PinIcon, PinOffIcon, PlusIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FolderIcon,
+  PinIcon,
+  PinOffIcon,
+  PlusIcon,
+  SearchIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
+import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { updateSession } from "@/lib/db/sessions"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
-import type { Character, ChatSession } from "@/lib/claude/types"
+import type { DateBucket } from "@/lib/chat/conversation-list-model"
+import type { Character, ChatSession, SessionFolder } from "@/lib/claude/types"
 
 import { SwipeRow } from "@/components/interactions/swipe-row"
 import { LongPress } from "@/components/interactions/long-press"
@@ -26,6 +41,11 @@ export interface MobileChannelListProps {
   onSelect: (id: string) => void
   onNewDirect: () => void
   onDelete: (id: string) => void | Promise<void>
+  onRename: (id: string, title: string) => void | Promise<void>
+  onArchive: (id: string) => void | Promise<void>
+  onUnarchive: (id: string) => void | Promise<void>
+  /** Conversation folders (display + collapse only on mobile). */
+  folders?: SessionFolder[]
 }
 
 interface ResolvedSession {
@@ -33,6 +53,15 @@ interface ResolvedSession {
   unread: number
   glyph: string
   color: string
+}
+
+/** Maps a date bucket to its `mobile.home` label key. */
+const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
+  today: "bucketToday",
+  yesterday: "bucketYesterday",
+  prev7: "bucketPrev7",
+  prev30: "bucketPrev30",
+  older: "bucketOlder",
 }
 
 function relativeTime(ms: number): string {
@@ -49,10 +78,47 @@ export function MobileChannelList({
   onSelect,
   onNewDirect,
   onDelete,
+  onRename,
+  onArchive,
+  onUnarchive,
+  folders,
 }: MobileChannelListProps) {
   const t = useTranslations("mobile.home")
   const tShell = useTranslations("mobile.shell")
+  // Search box: keep the field value immediate but debounce the value fed to
+  // the grouping model so typing doesn't re-bucket on every keystroke (mirrors
+  // the desktop sidebar). buildConversationSections is O(n log n) over all
+  // sessions, so on a phone that work must not run per keystroke.
+  const [searchInput, setSearchInput] = useState("")
   const [query, setQuery] = useState("")
+  const { call: debouncedSetQuery, cancel: cancelDebouncedQuery } = useDebouncedCallback(
+    (next: string) => setQuery(next),
+    150
+  )
+  const handleSearchChange = useCallback(
+    (next: string) => {
+      setSearchInput(next)
+      debouncedSetQuery(next)
+    },
+    [debouncedSetQuery]
+  )
+  const clearSearch = useCallback(() => {
+    setSearchInput("")
+    cancelDebouncedQuery()
+    setQuery("")
+  }, [cancelDebouncedQuery])
+  const [view, setView] = useState<"active" | "archived">("active")
+  const [collapsedFolderIds, setCollapsedFolderIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>()
+  )
+  const toggleFolder = useCallback((id: string) => {
+    setCollapsedFolderIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   // Wave 4 / ADR-0026 — Dexie-first read so the chip list survives a
   // server drop; `table: "characters"` kicks the sync orchestrator on
@@ -78,36 +144,59 @@ export function MobileChannelList({
     return map
   }, [sessionStates])
 
-  const resolved: ResolvedSession[] = useMemo(() => {
-    const trimmed = query.trim().toLowerCase()
-    return sessions
-      .map((s): ResolvedSession => {
-        const ch = s.characterId ? characterById.get(s.characterId) : undefined
-        const subject = ch ?? { name: s.title }
-        return {
-          session: s,
-          unread: unreadById.get(s.id) ?? 0,
-          glyph: avatarGlyph(subject),
-          color: avatarColor(subject),
-        }
-      })
-      .filter((r) =>
-        trimmed.length === 0 ? true : r.session.title.toLowerCase().includes(trimmed)
-      )
-  }, [sessions, characterById, unreadById, query])
+  // Shared grouping model: pinned → date buckets, or a flat result list while
+  // searching (mirrors the desktop sidebar via the same headless hook).
+  const { sections, filteredCount } = useConversationListModel({
+    sessions,
+    folders: view === "archived" ? undefined : folders,
+    query,
+    view,
+    collapsedFolderIds,
+  })
+  const archived = view === "archived"
 
-  const pinned = useMemo(() => resolved.filter((r) => r.session.pinned), [resolved])
-  const recent = useMemo(
-    () =>
-      resolved
-        .filter((r) => !r.session.pinned)
-        .sort((a, b) => b.session.updatedAt - a.session.updatedAt),
-    [resolved]
+  // Decorate a session with its avatar glyph/color + unread count for rendering.
+  const resolve = useCallback(
+    (s: ChatSession): ResolvedSession => {
+      const ch = s.characterId ? characterById.get(s.characterId) : undefined
+      const subject = ch ?? { name: s.title }
+      return {
+        session: s,
+        unread: unreadById.get(s.id) ?? 0,
+        glyph: avatarGlyph(subject),
+        color: avatarColor(subject),
+      }
+    },
+    [characterById, unreadById]
   )
 
   const togglePin = async (session: ChatSession) => {
     await updateSession(session.id, { pinned: !session.pinned }).catch(() => undefined)
   }
+
+  const renderRows = (list: ChatSession[]) =>
+    list.map((s) => {
+      const r = resolve(s)
+      return (
+        <ChannelRow
+          key={s.id}
+          resolved={r}
+          active={s.id === activeSessionId}
+          archived={archived}
+          onSelect={() => onSelect(s.id)}
+          onTogglePin={() => void togglePin(s)}
+          onDelete={() => void onDelete(s.id)}
+          onRename={(title) => void onRename(s.id, title)}
+          onArchive={() => void onArchive(s.id)}
+          onUnarchive={() => void onUnarchive(s.id)}
+          pinLabel={s.pinned ? t("swipeUnpin") : t("swipePin")}
+          deleteLabel={t("swipeDelete")}
+          renameLabel={t("renameAria")}
+          archiveLabel={archived ? t("swipeUnarchive") : t("swipeArchive")}
+          unreadLabel={t("unreadCount", { count: r.unread })}
+        />
+      )
+    })
 
   return (
     <div className="flex h-full flex-col" data-testid="mobile-channel-list">
@@ -118,27 +207,39 @@ export function MobileChannelList({
             className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
           />
           <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder={t("search")}
             aria-label={t("searchAria")}
             data-testid="mobile-channel-search"
             className="h-9 pl-7 pr-8 text-sm"
           />
-          {query.length > 0 ? (
+          {searchInput.length > 0 ? (
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               aria-label={tShell("clearSearch")}
               data-testid="mobile-channel-search-clear"
-              onClick={() => setQuery("")}
+              onClick={clearSearch}
               className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
             >
               <XIcon />
             </Button>
           ) : null}
         </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          onClick={() => setView((v) => (v === "active" ? "archived" : "active"))}
+          aria-label={archived ? t("viewActive") : t("viewArchived")}
+          aria-pressed={archived}
+          data-testid="mobile-channel-view-toggle"
+          className={cn(archived && "text-primary")}
+        >
+          <ArchiveIcon />
+        </Button>
         <Button
           type="button"
           size="icon"
@@ -152,50 +253,73 @@ export function MobileChannelList({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {resolved.length === 0 ? (
+        {filteredCount === 0 ? (
           <p
             className="px-4 py-8 text-center text-xs text-muted-foreground"
             data-testid="mobile-channel-empty"
           >
-            {query.trim().length > 0 ? t("emptyFiltered", { query }) : t("emptyChats")}
+            {query.trim().length > 0
+              ? t("emptyFiltered", { query })
+              : archived
+                ? t("emptyArchived")
+                : t("emptyChats")}
           </p>
         ) : null}
 
-        {pinned.length > 0 ? (
-          <Section title={t("pinned")} testId="mobile-channel-pinned">
-            {pinned.map((r) => (
-              <ChannelRow
-                key={r.session.id}
-                resolved={r}
-                active={r.session.id === activeSessionId}
-                onSelect={() => onSelect(r.session.id)}
-                onTogglePin={() => void togglePin(r.session)}
-                onDelete={() => void onDelete(r.session.id)}
-                pinLabel={t("swipeUnpin")}
-                deleteLabel={t("swipeDelete")}
-                unreadLabel={t("unreadCount", { count: r.unread })}
-              />
-            ))}
-          </Section>
-        ) : null}
-
-        {recent.length > 0 ? (
-          <Section title={t("recent")} testId="mobile-channel-recent">
-            {recent.map((r) => (
-              <ChannelRow
-                key={r.session.id}
-                resolved={r}
-                active={r.session.id === activeSessionId}
-                onSelect={() => onSelect(r.session.id)}
-                onTogglePin={() => void togglePin(r.session)}
-                onDelete={() => void onDelete(r.session.id)}
-                pinLabel={t("swipePin")}
-                deleteLabel={t("swipeDelete")}
-                unreadLabel={t("unreadCount", { count: r.unread })}
-              />
-            ))}
-          </Section>
-        ) : null}
+        {sections.map((section) => {
+          switch (section.kind) {
+            case "pinned":
+              return (
+                <Section key="pinned" title={t("pinned")} testId="mobile-channel-pinned">
+                  {renderRows(section.sessions)}
+                </Section>
+              )
+            case "date":
+              return (
+                <Section
+                  key={`date:${section.bucket}`}
+                  title={t(BUCKET_LABEL_KEY[section.bucket])}
+                  testId={`mobile-channel-bucket-${section.bucket}`}
+                >
+                  {renderRows(section.sessions)}
+                </Section>
+              )
+            case "folder":
+              return (
+                <section
+                  key={`folder:${section.folder.id}`}
+                  data-testid={`mobile-channel-folder-${section.folder.id}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleFolder(section.folder.id)}
+                    aria-expanded={!section.collapsed}
+                    aria-label={section.folder.name}
+                    className="flex w-full items-center gap-1.5 px-3 pb-1 pt-3 text-left"
+                  >
+                    {section.collapsed ? (
+                      <ChevronRightIcon className="size-3 text-muted-foreground" />
+                    ) : (
+                      <ChevronDownIcon className="size-3 text-muted-foreground" />
+                    )}
+                    <FolderIcon className="size-3 text-muted-foreground" aria-hidden="true" />
+                    <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {section.folder.name}
+                    </span>
+                  </button>
+                  {section.collapsed ? null : (
+                    <ul className="flex flex-col">{renderRows(section.sessions)}</ul>
+                  )}
+                </section>
+              )
+            case "search":
+              return (
+                <Section key="search" testId="mobile-channel-results">
+                  {renderRows(section.sessions)}
+                </Section>
+              )
+          }
+        })}
       </div>
     </div>
   )
@@ -206,16 +330,18 @@ function Section({
   testId,
   children,
 }: {
-  title: string
+  title?: string
   testId: string
   children: React.ReactNode
 }) {
   const reduce = useReducedMotion()
   return (
     <section data-testid={testId}>
-      <h2 className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h2>
+      {title ? (
+        <h2 className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h2>
+      ) : null}
       <motion.ul
         className="flex flex-col"
         initial={reduce ? false : "initial"}
@@ -231,23 +357,74 @@ function Section({
 function ChannelRow({
   resolved,
   active,
+  archived,
   onSelect,
   onTogglePin,
   onDelete,
+  onRename,
+  onArchive,
+  onUnarchive,
   pinLabel,
   deleteLabel,
+  renameLabel,
+  archiveLabel,
   unreadLabel,
 }: {
   resolved: ResolvedSession
   active: boolean
+  archived: boolean
   onSelect: () => void
   onTogglePin: () => void
   onDelete: () => void
+  onRename: (title: string) => void
+  onArchive: () => void
+  onUnarchive: () => void
   pinLabel: string
   deleteLabel: string
+  renameLabel: string
+  archiveLabel: string
   unreadLabel: string
 }) {
   const { session, unread, glyph, color } = resolved
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(session.title)
+
+  const commitRename = () => {
+    const next = draft.trim()
+    if (next && next !== session.title) onRename(next)
+    setEditing(false)
+  }
+  const cancelRename = () => {
+    setDraft(session.title)
+    setEditing(false)
+  }
+
+  // Long-press opens inline rename (pin/delete stay on the swipe actions).
+  if (editing) {
+    return (
+      <motion.li variants={STAGGER_CHILD}>
+        <Input
+          autoFocus
+          value={draft}
+          aria-label={renameLabel}
+          data-testid={`mobile-channel-rename-${session.id}`}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              commitRename()
+            } else if (e.key === "Escape") {
+              e.preventDefault()
+              cancelRename()
+            }
+          }}
+          className="mx-3 my-1 h-9 w-[calc(100%-1.5rem)] text-sm"
+        />
+      </motion.li>
+    )
+  }
+
   return (
     <motion.li variants={STAGGER_CHILD}>
       <SwipeRow
@@ -263,6 +440,16 @@ function ChannelRow({
             onSelect: onTogglePin,
           },
           {
+            id: "archive",
+            label: archiveLabel,
+            icon: archived ? (
+              <ArchiveRestoreIcon className="size-3.5" />
+            ) : (
+              <ArchiveIcon className="size-3.5" />
+            ),
+            onSelect: archived ? onUnarchive : onArchive,
+          },
+          {
             id: "delete",
             label: deleteLabel,
             icon: <Trash2Icon className="size-3.5" />,
@@ -271,7 +458,12 @@ function ChannelRow({
           },
         ]}
       >
-        <LongPress onLongPress={onTogglePin}>
+        <LongPress
+          onLongPress={() => {
+            setDraft(session.title)
+            setEditing(true)
+          }}
+        >
           <Button
             type="button"
             variant="ghost"

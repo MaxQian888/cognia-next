@@ -20,10 +20,20 @@ interface Props {
   open: boolean
   query: string
   members: readonly Character[]
+  /**
+   * Measured composer height (px). The panel floats this far above the bottom
+   * edge so it clears the composer regardless of how tall it has grown
+   * (attachments, goal/loop pills, multi-line draft). Falls back to ~5rem
+   * (80px) until the composer has been measured.
+   */
+  composerHeight?: number
   onPick: (character: Character) => void
   onDismiss: () => void
   className?: string
 }
+
+/** Fallback composer clearance (~5rem) used until a real measurement lands. */
+const FALLBACK_COMPOSER_PX = 80
 
 /**
  * Mobile @-mention picker.
@@ -35,9 +45,18 @@ interface Props {
  * above the composer + virtual keyboard rather than sitting flush with the
  * bottom edge.
  */
-export function MentionPopover({ open, query, members, onPick, onDismiss, className }: Props) {
+export function MentionPopover({
+  open,
+  query,
+  members,
+  composerHeight,
+  onPick,
+  onDismiss,
+  className,
+}: Props) {
   const t = useTranslations("mobile.mentionPopover")
   const keyboard = useKeyboardInsets()
+  const clearance = composerHeight && composerHeight > 0 ? composerHeight : FALLBACK_COMPOSER_PX
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -64,10 +83,12 @@ export function MentionPopover({ open, query, members, onPick, onDismiss, classN
           className
         )}
         style={{
-          // Push above composer + keyboard. The 5rem mirrors the
-          // composer's reserved height; safe-area covers the iOS home
-          // indicator. Inline style overrides Sheet's `bottom-0`.
-          bottom: `calc(env(safe-area-inset-bottom, 0px) + 5rem + ${keyboard.keyboardHeight}px)`,
+          // Push above composer + keyboard. `clearance` is the *measured*
+          // composer height (falls back to ~5rem until measured); safe-area
+          // covers the iOS home indicator; keyboardHeight is ~0 under the
+          // native-resize strategy but kept for the visualViewport overlay
+          // case. Inline style overrides Sheet's `bottom-0`.
+          bottom: `calc(env(safe-area-inset-bottom, 0px) + ${clearance}px + ${keyboard.keyboardHeight}px)`,
         }}
       >
         <div data-testid="mobile-mention-popover" className="contents">

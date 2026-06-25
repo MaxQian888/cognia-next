@@ -30,10 +30,12 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   InboxIcon,
+  KeyRoundIcon,
   MenuIcon,
   MoreVerticalIcon,
   SearchIcon,
   SettingsIcon,
+  Settings2Icon,
   Share2Icon,
   UserPlusIcon,
   UsersIcon,
@@ -52,11 +54,13 @@ import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
+import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
 import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
 import { useMobileHomeLayout } from "@/components/mobile/home/use-mobile-home-layout"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   DropdownMenu,
@@ -67,6 +71,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { ComposerHandle } from "@/components/chat/composer"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
+import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { useTeamMembers } from "@/hooks/use-team-members"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useChatStore } from "@/stores/chat"
@@ -86,7 +91,8 @@ export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
   const router = useRouter()
-  const { sessions, activeSessionId, select, create, remove } = useSessions()
+  const { sessions, activeSessionId, select, create, remove, rename, archive, unarchive, folders } =
+    useSessions()
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -102,8 +108,11 @@ export function AppShellMobile() {
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
   const { isSectionHidden } = useMobileHomeLayout()
 
+  const { keyOk } = useCredentialStatus()
+
   const [navOpen, setNavOpen] = useState(false)
   const [memberSheetOpen, setMemberSheetOpen] = useState(false)
+  const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
@@ -266,7 +275,7 @@ export function AppShellMobile() {
 
   return (
     <div
-      className="relative flex h-[100dvh] w-full flex-col bg-background text-foreground safe-area-pt"
+      className="relative flex h-[100dvh] w-full flex-col bg-background text-foreground safe-area-pt safe-area-px"
       data-testid="app-shell-mobile"
     >
       {/* ── Top bar ────────────────────────────────────────────────────── */}
@@ -314,6 +323,10 @@ export function AppShellMobile() {
                     handleNewDirect()
                   }}
                   onDelete={(id) => void remove(id)}
+                  onRename={(id, title) => void rename(id, title)}
+                  onArchive={(id) => void archive(id)}
+                  onUnarchive={(id) => void unarchive(id)}
+                  folders={folders}
                 />
               </div>
             </div>
@@ -327,6 +340,21 @@ export function AppShellMobile() {
         />
 
         <MobileWorkspaceChip className="ml-2 shrink-0" />
+
+        {/* Missing-credential warning stays visible (blocking issue): a tap
+            opens the session sheet whose Account section resolves it. Never
+            buried in the overflow menu. */}
+        {keyOk === false && activeSession ? (
+          <Badge
+            variant="destructive"
+            className="ml-2 shrink-0 cursor-pointer gap-1"
+            onClick={() => setSessionSettingsOpen(true)}
+            data-testid="mobile-no-api-key"
+          >
+            <KeyRoundIcon className="size-3" />
+            {tShell("noApiKey")}
+          </Badge>
+        ) : null}
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <Button
@@ -403,6 +431,18 @@ export function AppShellMobile() {
               {activeSession ? (
                 <DropdownMenuItem
                   onSelect={() => {
+                    // Defer so the menu can close before the sheet grabs focus.
+                    setTimeout(() => setSessionSettingsOpen(true), 0)
+                  }}
+                  data-testid="mobile-action-session-settings"
+                >
+                  <Settings2Icon className="size-4" />
+                  <span>{tShell("sessionSettings")}</span>
+                </DropdownMenuItem>
+              ) : null}
+              {activeSession ? (
+                <DropdownMenuItem
+                  onSelect={() => {
                     // Defer so the menu can close before the dialog grabs focus.
                     setTimeout(() => setExportOpen(true), 0)
                   }}
@@ -442,6 +482,19 @@ export function AppShellMobile() {
         />
       ) : null}
 
+      {/* Per-session settings (mobile relocates the inner ChatHeader here via
+          `showHeader={false}` below). `showAmbientStatus` surfaces the live
+          cost badge, plan-mode tasks, and the `chat.header` plugin slot at the
+          top of the sheet — the affordances the dropped header used to host. */}
+      {activeSession ? (
+        <SessionSettingsSheet
+          session={activeSession}
+          open={sessionSettingsOpen}
+          onOpenChange={setSessionSettingsOpen}
+          showAmbientStatus
+        />
+      ) : null}
+
       {/* ── Chat pane (single column) ─────────────────────────────────── */}
       <main
         className="relative flex min-w-0 flex-1 flex-col overflow-hidden safe-area-pb"
@@ -450,6 +503,10 @@ export function AppShellMobile() {
         {!mounted ? null : (
           <ChatPane
             activeSession={activeSession}
+            // The mobile shell renders its own top bar (CharacterHeader) +
+            // relocates the inner ChatHeader's affordances into the session
+            // settings sheet, so suppress the duplicate inner header.
+            showHeader={false}
             onSend={send}
             onStop={stop}
             onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}

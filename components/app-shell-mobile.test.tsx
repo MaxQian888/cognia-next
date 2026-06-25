@@ -21,25 +21,33 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/",
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: {
-    shell: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: (...args: unknown[]) => logWarn(...args),
-      error: jest.fn(),
-    },
-    ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-  },
-  createLogger: () => ({
+jest.mock("@/lib/logging", () => {
+  const makeStub = () => ({
     debug: jest.fn(),
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
     trace: jest.fn(),
     fatal: jest.fn(),
-    child: jest.fn(),
-  }),
-}))
+    child: () => makeStub(),
+  })
+  return {
+    loggers: {
+      shell: {
+        info: (...args: unknown[]) => logInfo(...args),
+        warn: (...args: unknown[]) => logWarn(...args),
+        error: jest.fn(),
+        child: () => makeStub(),
+      },
+      ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), child: () => makeStub() },
+      // `agent` is reached transitively via the agent-team store import chain
+      // (actions.slice.ts calls `loggers.agent.child("team-store")` at module
+      // load); without it the whole suite fails to load.
+      agent: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), child: () => makeStub() },
+    },
+    createLogger: () => makeStub(),
+  }
+})
 
 const toastError = jest.fn()
 jest.mock("sonner", () => ({
@@ -148,7 +156,9 @@ jest.mock("@/hooks/data", () => ({
 // Stub heavy children — the shell test verifies structural wiring, not
 // child internals.
 jest.mock("@/components/chat/chat-view", () => ({
-  ChatPane: () => <div data-testid="chat-pane" />,
+  ChatPane: ({ showHeader }: { showHeader?: boolean }) => (
+    <div data-testid="chat-pane" data-show-header={showHeader === false ? "false" : "true"} />
+  ),
 }))
 jest.mock("@/components/chat/character-picker", () => ({
   CharacterPicker: ({ open }: { open: boolean }) =>
@@ -178,6 +188,30 @@ jest.mock("@/components/shell/guild-rail", () => ({
 jest.mock("@/components/data/export/single-export-dialog", () => ({
   SingleExportDialog: ({ open, session }: { open?: boolean; session?: { id: string } }) =>
     open ? <div data-testid="single-export-dialog">{session?.id}</div> : null,
+}))
+
+jest.mock("@/components/chat/session-settings-sheet", () => ({
+  SessionSettingsSheet: ({
+    open,
+    session,
+    showAmbientStatus,
+  }: {
+    open?: boolean
+    session?: { id: string }
+    showAmbientStatus?: boolean
+  }) =>
+    open ? (
+      <div data-testid="session-settings-sheet" data-ambient={showAmbientStatus ? "1" : "0"}>
+        {session?.id}
+      </div>
+    ) : null,
+}))
+
+const credentialStatusRef: { current: { keyOk: boolean | null; plan: string | null } } = {
+  current: { keyOk: true, plan: null },
+}
+jest.mock("@/hooks/chat/use-credential-status", () => ({
+  useCredentialStatus: () => credentialStatusRef.current,
 }))
 
 jest.mock("@/components/mobile/shell/mobile-channel-list", () => ({
@@ -229,6 +263,7 @@ beforeEach(() => {
   selectedGuild = { kind: "dm" }
   errorMessageRef.current = null
   pendingSettingsRequestRef.current = null
+  credentialStatusRef.current = { keyOk: true, plan: null }
 })
 
 describe("<AppShellMobile />", () => {
@@ -238,6 +273,13 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("mobile-nav-trigger")).toBeInTheDocument()
     expect(screen.getByTestId("chat-pane")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-actions-trigger")).toBeInTheDocument()
+  })
+
+  it("applies left/right safe-area insets so a landscape notch never covers content", () => {
+    render(<AppShellMobile />)
+    // safe-area-px = env(safe-area-inset-left/right); pairs with safe-area-pt
+    // on the shell root so notches are cleared on all edges incl. landscape.
+    expect(screen.getByTestId("app-shell-mobile")).toHaveClass("safe-area-px")
   })
 
   it("opens the navigation drawer when hamburger is pressed", async () => {
@@ -392,6 +434,75 @@ describe("<AppShellMobile />", () => {
 
     const dialog = await screen.findByTestId("single-export-dialog")
     expect(dialog).toHaveTextContent("s-1")
+  })
+
+  it("suppresses the inner ChatHeader (showHeader=false) to avoid a duplicate mobile header", () => {
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-show-header", "false")
+  })
+
+  it("opens the per-session settings sheet (with ambient status) via the actions menu", async () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "x",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    expect(screen.queryByTestId("session-settings-sheet")).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await user.click(await screen.findByTestId("mobile-action-session-settings"))
+
+    const sheet = await screen.findByTestId("session-settings-sheet")
+    expect(sheet).toHaveTextContent("s-1")
+    // Ambient cluster (cost / plan-tasks / plugin slot) is relocated here.
+    expect(sheet).toHaveAttribute("data-ambient", "1")
+  })
+
+  it("shows the No-API-key warning and opens session settings when credentials are missing", async () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "x",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    credentialStatusRef.current = { keyOk: false, plan: null }
+
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    const warning = screen.getByTestId("mobile-no-api-key")
+    expect(warning).toBeInTheDocument()
+
+    await user.click(warning)
+    await waitFor(() => expect(screen.getByTestId("session-settings-sheet")).toBeInTheDocument())
+  })
+
+  it("hides the No-API-key warning when credentials are present", () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "x",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    credentialStatusRef.current = { keyOk: true, plan: null }
+
+    render(<AppShellMobile />)
+    expect(screen.queryByTestId("mobile-no-api-key")).not.toBeInTheDocument()
   })
 
   it("hides the export action when there is no active session", async () => {

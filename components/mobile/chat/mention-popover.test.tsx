@@ -117,6 +117,36 @@ describe("MentionPopover", () => {
     expect(onDismiss).toHaveBeenCalled()
   })
 
+  it("floats above the measured composer height when provided", () => {
+    render(
+      <MentionPopover
+        open={true}
+        query=""
+        members={[mkCharacter({ id: "a", name: "Alice" })]}
+        composerHeight={150}
+        onPick={() => undefined}
+        onDismiss={() => undefined}
+      />
+    )
+    const panel = screen.getByTestId("mobile-mention-popover-panel")
+    expect(panel.style.bottom).toContain("150px")
+  })
+
+  it("falls back to ~5rem (80px) clearance when the composer is not yet measured", () => {
+    render(
+      <MentionPopover
+        open={true}
+        query=""
+        members={[mkCharacter({ id: "a", name: "Alice" })]}
+        composerHeight={0}
+        onPick={() => undefined}
+        onDismiss={() => undefined}
+      />
+    )
+    const panel = screen.getByTestId("mobile-mention-popover-panel")
+    expect(panel.style.bottom).toContain("80px")
+  })
+
   it("ignores clicks inside the panel (no dismiss bubble-up)", () => {
     const onDismiss = jest.fn()
     render(

@@ -28,20 +28,31 @@
     "title": "自定义首页"
   },
   "edit": "编辑",
+  "bucketOlder": "更早",
+  "bucketPrev30": "过去 30 天",
+  "bucketPrev7": "过去 7 天",
+  "bucketToday": "今天",
+  "bucketYesterday": "昨天",
+  "emptyArchived": "没有已归档的聊天。",
   "emptyChats": "还没有聊天，点击 + 新建一个。",
   "emptyFiltered": "没有与「{query}」匹配的聊天。",
   "pinned": "置顶",
   "presenceStreaming": "回复中",
   "quickActions": "快捷操作",
   "recent": "最近",
+  "renameAria": "重命名会话",
   "search": "搜索聊天…",
   "searchAria": "搜索聊天",
   "sections": {
     "activeRuns": "运行中",
     "recents": "最近会话"
   },
+  "swipeArchive": "归档",
   "swipeDelete": "删除",
   "swipePin": "置顶",
+  "swipeUnarchive": "取消归档",
   "swipeUnpin": "取消置顶",
-  "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}"
+  "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}",
+  "viewActive": "显示活跃聊天",
+  "viewArchived": "显示已归档聊天"
 }

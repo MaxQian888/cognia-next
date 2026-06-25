@@ -4,6 +4,7 @@
   "copyFailed": "Copy failed: {message}",
   "copySuccess": "Copied to clipboard.",
   "description": "Pick an action.",
+  "longPressHint": "Long-press a message for actions",
   "share": "Share…",
   "shareDialogTitle": "Share via",
   "shareFailed": "Share failed: {message}",
