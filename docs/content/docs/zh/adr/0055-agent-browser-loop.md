@@ -1,6 +1,6 @@
 ---
 title: ADR-0055 — 智能体浏览器闭环
-description: "为产品智能体提供基于内置 /browser 嵌入式 webview 的 snapshot→按 ref 操作→重新 snapshot 闭环（导航、带稳定 ref 的可访问性树快照、点击/输入/填充/选择/悬停、console 与 network 检查、截图），以受门控的插件工具暴露。第一阶段通过注入 JS 驱动应用内嵌入式 webview，保留人机共享面板；第二阶段在统一的 URL 信任等级路由与同一套规范化快照结构之下接入外部 playwright-mcp 引擎，用于稳健的公开站点自动化。"
+description: "为产品智能体提供基于内置 /browser 嵌入式 webview 的 snapshot→按 ref 操作→重新 snapshot 闭环（导航、带稳定 ref 的可访问性树快照、点击/输入/填充/选择/悬停、console 与 network 检查、截图），以受门控的插件工具暴露。第一阶段通过注入 JS 驱动应用内嵌入式 webview，保留人机共享面板；第二阶段为引导式——URL 信任等级路由把公开源标记为 untrusted，并将模型引导到另行接入的 Playwright MCP 工具（mcp__playwright__*）以进行稳健的公开站点自动化，因为渲染进程插件无法透明地调用外部 MCP 工具。"
 ---
 
 # ADR-0055 — 智能体浏览器闭环
@@ -28,13 +28,17 @@ description: "为产品智能体提供基于内置 /browser 嵌入式 webview �
 - **第一阶段（本 ADR）——嵌入式引擎。** 通过注入 JS 驱动现有嵌入式 webview。保留人机
   共享、可见、可协同操作的面板（差异化卖点），零额外体积，且在三大桌面系统上均可工作。
   公开站点自动化仅为尽力而为。
-- **第二阶段——MCP 引擎。** 在同一路由与同一套规范化快照结构之下，通过产品既有的 stdio-MCP
-  拉起通道接入外部 `playwright-mcp`（`plugins/playwright-mcp` 预设已存在），用于稳健的
-  任意公开站点自动化。
+- **第二阶段——引导至 Playwright MCP。** 复用既有的 `playwright-mcp` 预设
+  （`plugins/playwright-mcp` 已存在）进行稳健的任意公开站点自动化。这是**引导式，而非
+  第二个引擎**：渲染进程插件只能调用自己注册的工具（`invokePluginTool` 强制
+  `tool.pluginId === pluginId`）；外部 MCP 的 `mcp__playwright__*` 工具位于 sidecar，
+  只能由模型自身的工具调用循环触达，因此进程内透明委派不可行。取而代之，信任等级路由把公开源
+  标记为 `untrusted`，并由 `browser_navigate` 结果的 `hint` 与 `browser-tools:availability`
+  上下文共同引导模型在该服务器接入时直接调用 `mcp__playwright__*`。相对预设零额外体积。
 
 在 macOS/Linux 上，共享视图保真度与完整 CDP 能力互斥：驱动自家嵌入式 webview 受限于
 注入 JS 能力但能让人留在闭环中；独立无头 Chromium 拥有完整 CDP 但不可见。第一阶段取
-嵌入式路径，第二阶段在收益更高处再加无头引擎。
+嵌入式路径，第二阶段把公开站点工作交给收益更高的 Playwright MCP。
 
 ## 关键通道
 
@@ -67,13 +71,13 @@ WebKitGTK）上均可用。`eval_embed_with_result` 通过 oneshot + 10 秒超�
 3. 网络**响应体**不可得（仅状态/时延）。
 4. 闭合 shadow DOM 不可达；开放 shadow DOM 需显式穿透。
 
-这些对主要的 localhost 场景已足够，且正是第二阶段 MCP 引擎所修复的；它们以明确的限制形式
-告知模型，而非静默缺口。
+这些对主要的 localhost 场景已足够，且正是 Playwright MCP 所修复的——这也是公开源引导至该处的
+原因；它们以明确的限制形式告知模型，而非静默缺口。
 
 ## 后果
 
 - 智能体现在可以在用户观看的同一面板中自检并驱动本地开发预览，补齐了原浏览器功能最大的缺口。
-- 单一规范化快照结构使第二阶段的引擎切换对模型透明；唯一真正的未知是 playwright `ref` →
-  规范化结构的适配器。
+- 公开站点自动化以零额外体积复用既有 Playwright MCP 预设；模型按信任等级在两套工具族之间切换，
+  而非由宿主透明地切换引擎（渲染进程插件无法做到这一点）。
 - 实时 webview eval 桥（`eval_with_callback`）无法被 jest 或 cargo 单测覆盖；以
   `pnpm tauri dev` 跑一次 snapshot→点击→snapshot 闭环作为人工冒烟门。

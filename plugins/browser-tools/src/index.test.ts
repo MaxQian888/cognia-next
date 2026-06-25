@@ -20,7 +20,16 @@ jest.mock("@/lib/browser/agent-engine", () => {
   }
   return {
     __engine: engine,
-    routeEngine: () => ({ engine, tier: "trusted", untrusted: false }),
+    // URL-aware so the public-URL (untrusted) branch is exercisable: anything
+    // off localhost is treated as a public origin, mirroring resolveTrustTier.
+    routeEngine: (url: string) => {
+      const trusted = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(url ?? "")
+      return {
+        engine,
+        tier: trusted ? "trusted" : "public",
+        untrusted: !trusted,
+      }
+    },
   }
 })
 jest.mock("@cognia/plugin-sdk", () => ({
@@ -82,6 +91,17 @@ describe("browser-tools plugin", () => {
     expect(res.navigated).toBe("http://localhost:3000/")
     expect(res.snapshot.generation).toBe(3)
     expect(res.untrusted).toBe(false)
+    expect("hint" in res).toBe(false)
+  })
+
+  it("browser_navigate to a PUBLIC url flags untrusted and steers to the Playwright MCP tools", async () => {
+    const tools = await collectTools()
+    const res = (await tools.browser_navigate({ url: "https://example.com/" })) as {
+      untrusted: boolean
+      hint?: string
+    }
+    expect(res.untrusted).toBe(true)
+    expect(res.hint).toMatch(/mcp__playwright__/)
   })
 
   it("browser_click acts by ref and returns a refreshed snapshot", async () => {
@@ -193,7 +213,10 @@ describe("browser-tools plugin", () => {
     }
     await definition.activate!(ctx as never)
     expect(providers).toHaveLength(1)
-    expect(providers[0].provide()).toMatch(/browser_snapshot/)
+    const text = providers[0].provide()
+    expect(text).toMatch(/browser_snapshot/)
+    // Steers public-site automation to the separately-attached Playwright MCP.
+    expect(text).toMatch(/mcp__playwright__/)
     await expect(definition.deactivate!({} as never)).resolves.toBeUndefined()
   })
 

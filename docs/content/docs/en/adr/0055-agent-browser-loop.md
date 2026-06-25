@@ -1,6 +1,6 @@
 ---
 title: ADR-0055 — Agent browser loop
-description: "Give the product agent a snapshot→act-by-ref→re-snapshot browser loop over the existing embedded /browser webview (navigate, accessibility-tree snapshot with stable refs, click/type/fill/select/hover, console + network inspection, screenshot), exposed as gated plugin tools. Phase 1 drives the in-app embedded webview via injected JS for a shared human+agent pane; Phase 2 adds an external playwright-mcp engine for robust public-site automation behind a URL trust-tier router with one canonical snapshot schema."
+description: "Give the product agent a snapshot→act-by-ref→re-snapshot browser loop over the existing embedded /browser webview (navigate, accessibility-tree snapshot with stable refs, click/type/fill/select/hover, console + network inspection, screenshot), exposed as gated plugin tools. Phase 1 drives the in-app embedded webview via injected JS for a shared human+agent pane; Phase 2 is guidance-based — a URL trust-tier router flags public origins untrusted and steers the model to the separately-attached Playwright MCP tools (mcp__playwright__*) for robust public-site automation, since a renderer plugin cannot transparently invoke external MCP tools."
 ---
 
 # ADR-0055 — Agent browser loop
@@ -34,15 +34,23 @@ and phased**:
   via injected JS. This preserves the shared, human-visible co-driven pane (the
   differentiator), ships at 0 MB, and works on all three desktop OSes. Public-site
   automation is best-effort only.
-- **Phase 2 — MCP engine.** Wire an external `playwright-mcp` (the
-  `plugins/playwright-mcp` preset already exists) as a second engine for robust
-  arbitrary-public-site automation, behind the same router and one canonical
-  snapshot schema, via the product's existing stdio-MCP spawn path.
+- **Phase 2 — guidance to the Playwright MCP.** Reuse the existing
+  `playwright-mcp` preset (the `plugins/playwright-mcp` preset already exists) for
+  robust arbitrary-public-site automation. This is **guidance-based, not a second
+  engine**: a renderer plugin can only invoke its _own_ registered tools
+  (`invokePluginTool` enforces `tool.pluginId === pluginId`); the external MCP's
+  `mcp__playwright__*` tools live in the sidecar and are reachable only by the
+  model's own tool-call loop, so transparent in-process delegation is infeasible.
+  Instead the trust-tier router flags public origins `untrusted`, and both the
+  `browser_navigate` result `hint` and the `browser-tools:availability` context
+  steer the model to call `mcp__playwright__*` directly when that server is
+  attached. Zero extra footprint over the preset.
 
 Shared-view fidelity and full CDP power are mutually exclusive on macOS/Linux:
 driving our own embedded webview caps us at injected-JS capability but keeps the
 human in the loop; a separate headless Chromium gives full CDP but is invisible.
-Phase 1 takes the embedded path; Phase 2 adds the headless engine where it pays.
+Phase 1 takes the embedded path; Phase 2 hands public-site work to the Playwright
+MCP where it pays.
 
 ## Architecture
 
@@ -51,18 +59,21 @@ agent tool call ──► plugins/browser-tools (registerTool ×N)
                         │  validates args, builds the call
                         ▼
                  lib/browser/agent-engine.ts ── routeEngine(urlTrustTier)
-                    ├─ EmbeddedEngine  (Phase 1) → browserClient → src-tauri/src/browser  [injected JS]
-                    └─ McpEngine       (Phase 2) → external playwright-mcp
+                    └─ EmbeddedEngine → browserClient → src-tauri/src/browser  [injected JS]
+                         │
+       (public origin) ──┴─► untrusted flag + hint ──► model calls mcp__playwright__*
+                                                       (sidecar MCP, Phase 2 guidance)
 ```
 
 - **Trust tier** (`resolveTrustTier`): `localhost` / `127.0.0.1` / `::1` =
-  **trusted → embedded pane**; any other `http(s)` = **public**. Phase 2 routes
-  public to the MCP engine; Phase 1 falls back to the embedded pane best-effort
-  with an explicit `untrusted` flag.
+  **trusted → embedded pane**; any other `http(s)` = **public**. The embedded
+  engine is the only in-process backend; for public origins it runs best-effort
+  with an explicit `untrusted` flag and the model is steered (via the navigate
+  `hint` + availability context) to the `mcp__playwright__*` tools instead.
 - **Canonical snapshot schema** (`lib/browser/protocol.ts`: `BrowserSnapshot`,
   `SnapshotNode`, `BrowserActionResult`, `ConsoleEntry`, `NetworkEntry`) is emitted
-  by both engines, so the model's tool surface is identical regardless of which
-  engine ran.
+  by the embedded engine; the Playwright MCP keeps its own native snapshot shape,
+  so the two surfaces are distinct tool families the model picks between by tier.
 
 ### Page → Rust channel
 
@@ -123,15 +134,16 @@ error-as-value.
 4. Closed shadow DOM is unreachable; open shadow DOM needs explicit piercing.
 
 These are strong enough for the primary localhost use case and are exactly what the
-Phase-2 MCP engine fixes. They are surfaced to the model as explicit limitations,
-not silent gaps.
+Playwright MCP fixes — which is why public origins steer there. They are surfaced to
+the model as explicit limitations, not silent gaps.
 
 ## Consequences
 
 - The agent can now self-verify and drive local dev previews in the same pane the
   human watches — closing the biggest gap in the prior browser feature.
-- One canonical snapshot schema keeps the Phase-2 engine swap invisible to the
-  model; the only real Phase-2 unknown is the playwright-`ref` → canonical adapter.
+- Public-site automation reuses the existing Playwright MCP preset at zero extra
+  footprint; the model switches tool families by trust tier rather than the host
+  transparently swapping an engine (which a renderer plugin cannot do).
 - The live webview eval bridge (`eval_with_callback`) cannot be covered by jest or
   cargo unit tests; a `pnpm tauri dev` smoke of one snapshot→click→snapshot loop is
   the manual gate.

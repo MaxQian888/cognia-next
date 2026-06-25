@@ -50,7 +50,7 @@ const definition: PluginDefinition = {
         id: "browser-tools:availability",
         name: "Browser tools availability",
         provide: () =>
-          "Browser tools are available for the in-app preview: browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs), browser_click/type/fill_form/select/hover (target by ref), browser_wait_for (wait for text to appear/disappear), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot.",
+          "Browser tools drive the in-app preview webview (best for localhost / your own dev server): browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs), browser_click/type/fill_form/select/hover (target by ref), browser_wait_for (wait for text to appear/disappear), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot. For arbitrary PUBLIC websites the embedded preview is best-effort only (cross-origin iframes are invisible, synthetic events are untrusted, response bodies are unavailable) — prefer the Playwright MCP tools (mcp__playwright__*) for those if the Playwright MCP server is attached.",
       })
     )
 
@@ -75,7 +75,15 @@ const definition: PluginDefinition = {
         lastUrl = url
         const { engine, untrusted } = engineFor()
         await engine.navigate(url)
-        return { ...(await withSnapshot({ navigated: url })), untrusted }
+        const base = { ...(await withSnapshot({ navigated: url })), untrusted }
+        // Steer public-site automation to the Playwright MCP tools — the embedded
+        // engine is best-effort off-localhost (see the availability context).
+        return untrusted
+          ? {
+              ...base,
+              hint: "Public URL: the embedded preview is best-effort here (no cross-origin iframes, untrusted events, no response bodies). For reliable automation prefer the Playwright MCP tools (mcp__playwright__*) if the Playwright MCP server is attached.",
+            }
+          : base
       },
     })
 

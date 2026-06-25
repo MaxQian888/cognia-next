@@ -122,9 +122,13 @@ export interface EngineRoute {
 }
 
 /**
- * Resolve the engine for a target URL. Phase 1 always returns the embedded
- * engine; the `public` tier is flagged `untrusted` (Phase 2 routes it to the
- * external-MCP engine instead).
+ * Resolve the engine for a target URL. The embedded engine is the only in-app
+ * engine; the `public` tier is flagged `untrusted`. Transparent delegation to an
+ * external Playwright-MCP "engine" is NOT possible (a renderer plugin can only
+ * invoke its own tools; external MCP tools live in the sidecar, callable only by
+ * the model), so public-site automation is GUIDANCE-BASED: the `untrusted` flag
+ * + the browser-tools availability context steer the model to the separately
+ * attached `mcp__playwright__*` tools. See ADR-0055 §Phase 2.
  */
 export function routeEngine(url: string): EngineRoute {
   const tier = resolveTrustTier(url)
