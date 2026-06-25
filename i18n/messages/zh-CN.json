@@ -973,6 +973,13 @@
           "pause_for_review": "暂停以待审核",
           "reduce_concurrency": "并发降到 1"
         },
+        "progressLedger": {
+          "allowAutonomousConsensus": "停滞时允许自主发起共识",
+          "allowAutonomousDelegation": "停滞时允许自主委派任务",
+          "description": "当某一波停滞（无新完成任务或新产出）时，由判断器诊断运行状态，并可重新规划、发起共识或委派以打破停滞。",
+          "enabled": "启用进度账本",
+          "heading": "自主进度账本"
+        },
         "refusal": {
           "detect": "在队员输出中检测拒答模式",
           "heading": "拒答检测",
@@ -1263,6 +1270,30 @@
     "recentArtifacts": "最近作品",
     "restoreVersion": "恢复",
     "revealInExplorer": "在文件资源管理器中显示",
+    "review": {
+      "accept": "接受",
+      "acceptedCount": "已接受 {accepted}/{total}",
+      "addToChat": "添加到对话",
+      "applyAccepted": "应用已接受",
+      "commentOnSelection": "对选区添加注释",
+      "discard": "丢弃",
+      "empty": "没有可审阅的改动",
+      "hunkDelete": "删除",
+      "hunkInsert": "新增",
+      "hunkReplace": "替换",
+      "lines": "行",
+      "original": "当前",
+      "proposed": "提案",
+      "reDiff": "与当前重新比对",
+      "reject": "拒绝",
+      "rejectAll": "全部拒绝",
+      "removeSelectionAria": "移除选区 {title}",
+      "selectionChipLabel": "{title} · 第 {start}-{end} 行",
+      "selectionCommentPlaceholder": "这里希望怎么改？",
+      "staleBanner": "此提案生成后 Artifact 已变化，请重新比对或丢弃。",
+      "title": "审阅改动",
+      "viewChanges": "查看改动"
+    },
     "runnable": "可运行",
     "runtimeStates": {
       "error": "错误",
@@ -1569,6 +1600,37 @@
       "windowPlaceholder": "如 *Chrome*",
       "windowTitles": "窗口标题模式",
       "windowTitlesHint": "使用 * 作为通配符的 Glob 模式（例如 *Excel* 或 *记事本*）。"
+    }
+  },
+  "browser": {
+    "actions": {
+      "cancelSelect": "取消选择",
+      "reload": "刷新",
+      "selectElement": "选择元素"
+    },
+    "comment": {
+      "cancel": "取消",
+      "failed": "评论发送失败",
+      "noSession": "请先打开一个对话会话",
+      "placeholder": "描述你想要的修改…",
+      "send": "发送到对话",
+      "sent": "已发送到对话",
+      "title": "对该元素评论"
+    },
+    "empty": {
+      "hint": "输入 localhost 地址即可在此渲染，然后选择元素进行评论。",
+      "title": "预览本地开发服务器"
+    },
+    "errors": {
+      "navigate": "无法导航到该地址"
+    },
+    "selection": {
+      "selector": "选择器"
+    },
+    "title": "浏览器",
+    "url": {
+      "go": "前往",
+      "placeholder": "http://localhost:3000"
     }
   },
   "canvas": {
@@ -2030,6 +2092,10 @@
       "summaryError": "生成摘要失败",
       "title": "分支对话"
     },
+    "branchNavigator": {
+      "nextBranch": "下一个回复",
+      "prevBranch": "上一个回复"
+    },
     "canvasInline": {
       "collapsePreview": "折叠预览",
       "expandPreview": "展开预览",
@@ -2105,6 +2171,10 @@
       "dragOverlay": {
         "dropToAttach": "松开以添加图片"
       },
+      "effort": {
+        "aria": "思考等级",
+        "auto": "默认"
+      },
       "enhance": {
         "modes": {
           "concise": "更精简",
@@ -2179,6 +2249,8 @@
         "selectPlaceholder": "请选择…",
         "title": "配置 /{name}"
       },
+      "pasteReminder": "草稿未保存大段粘贴内容——发送前请重新粘贴（{count}）。",
+      "pastedChip": "已粘贴 {count} 行",
       "placeholder": "输入消息 — 试试 /、@、!、#",
       "placeholderDisabled": "请选择一个会话开始聊天…",
       "popover": {
@@ -2201,6 +2273,7 @@
       "references": {
         "removeAria": "移除引用 {path}"
       },
+      "removePastedChip": "移除粘贴的文本",
       "sandboxShield": {
         "label": {
           "microvm": "沙盒已开启 — microVM 层",
@@ -2374,16 +2447,6 @@
         "favorites": "收藏",
         "other": "其他"
       },
-      "modelCustomPlaceholder": "claude-...",
-      "modelLabel": "模型",
-      "modelPresets": {
-        "custom": "自定义",
-        "default": "默认（使用全局）",
-        "haiku45": "Claude Haiku 4.5",
-        "opus45": "Claude Opus 4.5",
-        "opus47": "Claude Opus 4.7",
-        "sonnet45": "Claude Sonnet 4.5"
-      },
       "noApiKey": "未配置 API Key",
       "permissionModeAppDefault": "使用应用默认",
       "permissionModeLabel": "权限模式",
@@ -2415,6 +2478,16 @@
         "searchPlaceholder": "搜索预设…"
       },
       "save": "保存",
+      "sheet": {
+        "sections": {
+          "account": "模型与账号",
+          "actions": "会话操作",
+          "behavior": "行为",
+          "display": "显示",
+          "role": "角色与能力",
+          "status": "状态"
+        }
+      },
       "skills": {
         "aria": "本会话已激活的技能",
         "counter": "{active}/{total} 个技能",
@@ -2713,6 +2786,38 @@
         "youtubeTitle": "YouTube 视频"
       }
     },
+    "runPanel": {
+      "ariaDiscardQueue": "丢弃排队的消息",
+      "ariaEditSteer": "编辑排队的消息",
+      "ariaInterrupt": "中断当前回合",
+      "ariaRemoveSteer": "移除排队的消息",
+      "ariaSteerAttachments": "{count} 个附件",
+      "ariaSteerQueue": "待发送消息",
+      "ariaSubagent": "子智能体",
+      "collapse": "收起运行详情",
+      "discardQueue": "丢弃",
+      "emptySteer": "（空）",
+      "expand": "展开运行详情",
+      "lastRun": "上一轮",
+      "lastRunSummary": "{count} 个工具 · {elapsed}",
+      "runFailedQueued": "运行失败 · {count} 条排队中",
+      "sectionPlan": "计划",
+      "sectionSubagents": "子智能体",
+      "sectionSummary": "概要",
+      "sectionTools": "工具",
+      "summarySubagents": "{count} 个子智能体",
+      "summaryTodos": "{done}/{total} 项待办",
+      "summaryTools": "{count} 个工具"
+    },
+    "runStatus": {
+      "ariaSteerNow": "中断当前回合并立即发送队列中的消息",
+      "interruptHint": "按 Esc 中断",
+      "interruptHintTouch": "点按中断",
+      "queued": "{count} 条待发送",
+      "steerNow": "立即发送",
+      "waitingApproval": "等待审批",
+      "working": "运行中"
+    },
     "sessionCost": {
       "byModelTitle": "按模型拆分",
       "cache": "缓存",
@@ -2791,7 +2896,8 @@
       "expand": "展开对话时间线",
       "jumpTo": "跳转到：{label}",
       "replyCount": "{count} 条回复",
-      "title": "时间线"
+      "title": "时间线",
+      "yesterday": "昨天"
     },
     "toolApproval": {
       "allowAlways": "始终允许",
@@ -3081,7 +3187,14 @@
   },
   "desktop": {
     "channelList": {
+      "bucketOlder": "更早",
+      "bucketPrev30": "过去 30 天",
+      "bucketPrev7": "过去 7 天",
+      "bucketToday": "今天",
+      "bucketYesterday": "昨天",
       "bulk": {
+        "archive": "归档",
+        "archiveSuccess": "已归档 {count} 个会话",
         "cancel": "取消",
         "delete": "删除",
         "deleteConfirmBody": "将永久删除这些会话及其所有消息，不可撤销。",
@@ -3090,18 +3203,37 @@
         "pin": "置顶",
         "pinSuccess": "已置顶 {count} 个会话",
         "selectedCount": "已选 {count} 项",
+        "unarchive": "取消归档",
+        "unarchiveSuccess": "已恢复 {count} 个会话",
         "unpin": "取消置顶",
         "unpinSuccess": "已取消置顶 {count} 个会话"
       },
+      "cancel": "取消",
+      "clearSearch": "清空搜索",
       "conversationsTitle": "会话",
+      "deleteFolder": "删除文件夹",
+      "deleteFolderConfirmBody": "仅删除文件夹；其中的会话会保留并回到日期列表。此操作不可撤销。",
+      "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
       "directMessages": "私信",
+      "emptyArchived": "没有已归档的会话。",
       "emptyDm": "还没有聊天，挑选一个角色开始。",
+      "emptyFolder": "空文件夹——把会话移动到这里。",
+      "emptySearch": "没有与「{query}」匹配的会话。",
       "emptyTeam": "还没有会话，从上方开启一个吧。",
+      "folderActions": "文件夹操作",
       "groupOther": "其它",
       "newChat": "新建聊天",
       "newConversation": "新建会话",
+      "newFolder": "新建文件夹",
+      "newFolderName": "新建文件夹",
       "openSessions": "打开会话列表",
-      "teamFallback": "团队"
+      "renameFolder": "重命名文件夹",
+      "searchAria": "搜索会话",
+      "searchPlaceholder": "搜索会话…",
+      "sectionPinned": "置顶",
+      "teamFallback": "团队",
+      "viewActive": "显示活跃会话",
+      "viewArchived": "显示已归档会话"
     },
     "commandPalette": {
       "actions": {
@@ -3149,6 +3281,7 @@
       "agentRuns": "智能体运行",
       "agentTeams": "智能体团队",
       "auxiliaryGroup": "个人与日志",
+      "browser": "浏览器",
       "canvas": "画布",
       "createTeam": "创建团队",
       "customize": {
@@ -3471,14 +3604,18 @@
     },
     "sessionRow": {
       "actionsMenu": "会话操作",
+      "archive": "归档",
       "branchedFrom": "分支会话——打开父会话",
       "delete": "删除",
+      "moveToFolder": "移动到文件夹",
       "openInTerminal": "在终端打开",
       "openInTerminalFailed": "无法导出此会话到终端",
       "openedInTerminal": "在终端运行：{command}",
       "pin": "置顶",
       "pinned": "已置顶",
+      "removeFromFolder": "移出文件夹",
       "rename": "重命名",
+      "unarchive": "取消归档",
       "unpin": "取消置顶",
       "untitled": "（无标题）"
     },
@@ -4170,7 +4307,7 @@
     "manage": "管理",
     "manageAgents": "管理代理",
     "manager": {
-      "a2aComingSoon": "A2A（即将支持）",
+      "a2aProtocol": "A2A",
       "addAgentFailed": "添加外部代理失败。",
       "addExternalAgent": "添加外部代理",
       "addingAgent": "添加中…",
@@ -6621,6 +6758,11 @@
         "title": "{count, plural, =1 {1 个工作流运行中} other {# 个工作流运行中}}",
         "viewRuns": "查看运行"
       },
+      "bucketOlder": "更早",
+      "bucketPrev30": "过去 30 天",
+      "bucketPrev7": "过去 7 天",
+      "bucketToday": "今天",
+      "bucketYesterday": "昨天",
       "customize": {
         "active": "已在首页",
         "activeEmpty": "暂无快捷操作——从下方添加。",
@@ -6635,22 +6777,28 @@
         "title": "自定义首页"
       },
       "edit": "编辑",
+      "emptyArchived": "没有已归档的聊天。",
       "emptyChats": "还没有聊天，点击 + 新建一个。",
       "emptyFiltered": "没有与「{query}」匹配的聊天。",
       "pinned": "置顶",
       "presenceStreaming": "回复中",
       "quickActions": "快捷操作",
       "recent": "最近",
+      "renameAria": "重命名会话",
       "search": "搜索聊天…",
       "searchAria": "搜索聊天",
       "sections": {
         "activeRuns": "运行中",
         "recents": "最近会话"
       },
+      "swipeArchive": "归档",
       "swipeDelete": "删除",
       "swipePin": "置顶",
+      "swipeUnarchive": "取消归档",
       "swipeUnpin": "取消置顶",
-      "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}"
+      "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}",
+      "viewActive": "显示活跃聊天",
+      "viewArchived": "显示已归档聊天"
     },
     "inbox": {
       "tabs": {
@@ -6857,6 +7005,7 @@
       "copyFailed": "复制失败：{message}",
       "copySuccess": "已复制到剪贴板。",
       "description": "选择一项操作。",
+      "longPressHint": "长按消息查看操作",
       "share": "分享…",
       "shareDialogTitle": "分享至",
       "shareFailed": "分享失败：{message}",
@@ -7156,10 +7305,12 @@
       "memberSheetTitle": "团队成员",
       "navSheetTitle": "导航",
       "newChat": "新建聊天",
+      "noApiKey": "未配置密钥",
       "openMembers": "打开成员列表",
       "openNav": "打开导航",
       "search": "搜索",
       "sessionMenu": "会话菜单",
+      "sessionSettings": "会话设置",
       "settings": "设置",
       "tabBarAria": "主导航"
     },
@@ -12257,12 +12408,14 @@
         "checkUpdates": "检查更新",
         "checking": "检查中…",
         "desktopOnly": "更新通过桌面版应用推送。",
+        "downloadingPercent": "正在下载… {percent}%",
         "goInstallAction": "去安装",
         "install": "安装 {version}",
+        "installing": "正在安装…",
         "lastChecked": "上次检查",
         "title": "更新",
         "updateAvailable": "{version} 版本可用",
-        "updateAvailableBackground": "{version} 版本可用 —— 打开「关于」即可安装。",
+        "updateAvailableBackground": "{version} 版本可用。",
         "updateAvailableToast": "可用更新：{version}",
         "updateCheckFailed": "检查更新失败：{error}",
         "updateInstallFailed": "安装更新失败：{error}",
@@ -13140,6 +13293,8 @@
       "persistAcrossSessionsHint": "开启后 Artifact 通过 localStorage 持久化；关闭则随会话清理。",
       "persistAcrossSessionsLabel": "跨会话保留",
       "resetDefaults": "恢复默认",
+      "reviewBeforeApplyHint": "开启后，助手对已有 Artifact 的修改会先暂存为差异提案，由你逐块（hunk）审阅后再应用；关闭则直接覆盖 Artifact。",
+      "reviewBeforeApplyLabel": "应用前审阅 AI 修改",
       "showNotificationHint": "新 Artifact 创建时显示简短的 sonner 提示。",
       "showNotificationLabel": "自动创建时弹出提示",
       "title": "作品"

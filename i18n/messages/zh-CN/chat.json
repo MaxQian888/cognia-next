@@ -75,6 +75,10 @@
     "summaryError": "生成摘要失败",
     "title": "分支对话"
   },
+  "branchNavigator": {
+    "nextBranch": "下一个回复",
+    "prevBranch": "上一个回复"
+  },
   "canvasInline": {
     "collapsePreview": "折叠预览",
     "expandPreview": "展开预览",
@@ -149,6 +153,10 @@
     },
     "dragOverlay": {
       "dropToAttach": "松开以添加图片"
+    },
+    "effort": {
+      "aria": "思考等级",
+      "auto": "默认"
     },
     "enhance": {
       "modes": {
@@ -309,7 +317,10 @@
       "selectMicAria": "选择麦克风",
       "voiceSettings": "语音设置"
     },
-    "webLabel": "Web"
+    "webLabel": "Web",
+    "pastedChip": "已粘贴 {count} 行",
+    "removePastedChip": "移除粘贴的文本",
+    "pasteReminder": "草稿未保存大段粘贴内容——发送前请重新粘贴（{count}）。"
   },
   "concurrent": {
     "awaitingApproval": "等待审批",
@@ -391,16 +402,6 @@
       "favorites": "收藏",
       "other": "其他"
     },
-    "modelCustomPlaceholder": "claude-...",
-    "modelLabel": "模型",
-    "modelPresets": {
-      "custom": "自定义",
-      "default": "默认（使用全局）",
-      "haiku45": "Claude Haiku 4.5",
-      "opus45": "Claude Opus 4.5",
-      "opus47": "Claude Opus 4.7",
-      "sonnet45": "Claude Sonnet 4.5"
-    },
     "noApiKey": "未配置 API Key",
     "permissionModeAppDefault": "使用应用默认",
     "permissionModeLabel": "权限模式",
@@ -432,6 +433,16 @@
       "searchPlaceholder": "搜索预设…"
     },
     "save": "保存",
+    "sheet": {
+      "sections": {
+        "account": "模型与账号",
+        "actions": "会话操作",
+        "behavior": "行为",
+        "display": "显示",
+        "role": "角色与能力",
+        "status": "状态"
+      }
+    },
     "skills": {
       "aria": "本会话已激活的技能",
       "counter": "{active}/{total} 个技能",
@@ -730,6 +741,38 @@
       "youtubeTitle": "YouTube 视频"
     }
   },
+  "runStatus": {
+    "working": "运行中",
+    "waitingApproval": "等待审批",
+    "interruptHint": "按 Esc 中断",
+    "interruptHintTouch": "点按中断",
+    "queued": "{count} 条待发送",
+    "steerNow": "立即发送",
+    "ariaSteerNow": "中断当前回合并立即发送队列中的消息"
+  },
+  "runPanel": {
+    "expand": "展开运行详情",
+    "collapse": "收起运行详情",
+    "ariaInterrupt": "中断当前回合",
+    "ariaSubagent": "子智能体",
+    "ariaSteerQueue": "待发送消息",
+    "sectionPlan": "计划",
+    "sectionTools": "工具",
+    "sectionSubagents": "子智能体",
+    "sectionSummary": "概要",
+    "summaryTools": "{count} 个工具",
+    "summarySubagents": "{count} 个子智能体",
+    "summaryTodos": "{done}/{total} 项待办",
+    "lastRun": "上一轮",
+    "lastRunSummary": "{count} 个工具 · {elapsed}",
+    "runFailedQueued": "运行失败 · {count} 条排队中",
+    "discardQueue": "丢弃",
+    "ariaDiscardQueue": "丢弃排队的消息",
+    "ariaEditSteer": "编辑排队的消息",
+    "ariaRemoveSteer": "移除排队的消息",
+    "ariaSteerAttachments": "{count} 个附件",
+    "emptySteer": "（空）"
+  },
   "sessionCost": {
     "byModelTitle": "按模型拆分",
     "cache": "缓存",
@@ -808,7 +851,8 @@
     "expand": "展开对话时间线",
     "jumpTo": "跳转到：{label}",
     "replyCount": "{count} 条回复",
-    "title": "时间线"
+    "title": "时间线",
+    "yesterday": "昨天"
   },
   "toolApproval": {
     "allowAlways": "始终允许",

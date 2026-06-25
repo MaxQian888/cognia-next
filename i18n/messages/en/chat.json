@@ -75,6 +75,10 @@
     "summaryError": "Failed to generate summary",
     "title": "Branch conversation"
   },
+  "branchNavigator": {
+    "nextBranch": "Next response",
+    "prevBranch": "Previous response"
+  },
   "canvasInline": {
     "collapsePreview": "Collapse preview",
     "expandPreview": "Expand preview",
@@ -149,6 +153,10 @@
     },
     "dragOverlay": {
       "dropToAttach": "Drop image to attach"
+    },
+    "effort": {
+      "aria": "Thinking level",
+      "auto": "Auto"
     },
     "enhance": {
       "modes": {
@@ -309,7 +317,10 @@
       "selectMicAria": "Select microphone",
       "voiceSettings": "Voice settings"
     },
-    "webLabel": "Web"
+    "webLabel": "Web",
+    "pastedChip": "Pasted {count} lines",
+    "removePastedChip": "Remove pasted text",
+    "pasteReminder": "A large paste wasn't saved with the draft — re-paste it before sending ({count})."
   },
   "concurrent": {
     "awaitingApproval": "Awaiting approval",
@@ -391,16 +402,6 @@
       "favorites": "Favorites",
       "other": "Other"
     },
-    "modelCustomPlaceholder": "claude-...",
-    "modelLabel": "Model",
-    "modelPresets": {
-      "custom": "Custom",
-      "default": "Default (use global)",
-      "haiku45": "Claude Haiku 4.5",
-      "opus45": "Claude Opus 4.5",
-      "opus47": "Claude Opus 4.7",
-      "sonnet45": "Claude Sonnet 4.5"
-    },
     "noApiKey": "No API key",
     "permissionModeAppDefault": "Use app default",
     "permissionModeLabel": "Permission mode",
@@ -432,6 +433,16 @@
       "searchPlaceholder": "Search presets…"
     },
     "save": "Save",
+    "sheet": {
+      "sections": {
+        "account": "Model & account",
+        "actions": "Session actions",
+        "behavior": "Behavior",
+        "display": "Display",
+        "role": "Role & abilities",
+        "status": "Status"
+      }
+    },
     "skills": {
       "aria": "Skills active in this session",
       "counter": "{active}/{total} skills",
@@ -730,6 +741,38 @@
       "youtubeTitle": "YouTube video"
     }
   },
+  "runStatus": {
+    "working": "Working",
+    "waitingApproval": "Waiting for approval",
+    "interruptHint": "Esc to interrupt",
+    "interruptHintTouch": "Tap to interrupt",
+    "queued": "{count} queued",
+    "steerNow": "Send now",
+    "ariaSteerNow": "Interrupt the current turn and send queued messages now"
+  },
+  "runPanel": {
+    "expand": "Show run details",
+    "collapse": "Hide run details",
+    "ariaInterrupt": "Interrupt the current turn",
+    "ariaSubagent": "Sub-agent",
+    "ariaSteerQueue": "Queued messages",
+    "sectionPlan": "Plan",
+    "sectionTools": "Tools",
+    "sectionSubagents": "Sub-agents",
+    "sectionSummary": "Summary",
+    "summaryTools": "{count, plural, one {# tool} other {# tools}}",
+    "summarySubagents": "{count, plural, one {# sub-agent} other {# sub-agents}}",
+    "summaryTodos": "{done}/{total} todos",
+    "lastRun": "Last run",
+    "lastRunSummary": "{count, plural, one {# tool} other {# tools}} · {elapsed}",
+    "runFailedQueued": "Run failed · {count} queued",
+    "discardQueue": "Discard",
+    "ariaDiscardQueue": "Discard queued messages",
+    "ariaEditSteer": "Edit queued message",
+    "ariaRemoveSteer": "Remove queued message",
+    "ariaSteerAttachments": "{count} attachments",
+    "emptySteer": "(empty)"
+  },
   "sessionCost": {
     "byModelTitle": "By model",
     "cache": "Cache",
@@ -808,7 +851,8 @@
     "expand": "Expand conversation timeline",
     "jumpTo": "Jump to: {label}",
     "replyCount": "{count} replies",
-    "title": "Timeline"
+    "title": "Timeline",
+    "yesterday": "Yesterday"
   },
   "toolApproval": {
     "allowAlways": "Allow always",

@@ -973,6 +973,13 @@
           "pause_for_review": "Pause for review",
           "reduce_concurrency": "Reduce concurrency to 1"
         },
+        "progressLedger": {
+          "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
+          "allowAutonomousDelegation": "Allow autonomously delegating work on stall",
+          "description": "After a wave stalls (no new completed tasks or output), a judge diagnoses the run and can re-plan, open a consensus, or delegate to break the stall.",
+          "enabled": "Enable progress ledger",
+          "heading": "Autonomous progress ledger"
+        },
         "refusal": {
           "detect": "Detect refusal patterns in teammate output",
           "heading": "Refusal detection",
@@ -1263,6 +1270,30 @@
     "recentArtifacts": "Recent Artifacts",
     "restoreVersion": "Restore",
     "revealInExplorer": "Reveal in File Explorer",
+    "review": {
+      "accept": "Accept",
+      "acceptedCount": "{accepted}/{total} accepted",
+      "addToChat": "Add to chat",
+      "applyAccepted": "Apply accepted",
+      "commentOnSelection": "Comment on selection",
+      "discard": "Discard",
+      "empty": "No changes to review",
+      "hunkDelete": "Deletion",
+      "hunkInsert": "Insertion",
+      "hunkReplace": "Replacement",
+      "lines": "Lines",
+      "original": "Current",
+      "proposed": "Proposed",
+      "reDiff": "Re-diff against current",
+      "reject": "Reject",
+      "rejectAll": "Reject all",
+      "removeSelectionAria": "Remove selection {title}",
+      "selectionChipLabel": "{title} · lines {start}-{end}",
+      "selectionCommentPlaceholder": "What should change here?",
+      "staleBanner": "The artifact changed since this proposal was generated. Re-diff or discard.",
+      "title": "Review changes",
+      "viewChanges": "View changes"
+    },
     "runnable": "Runnable",
     "runtimeStates": {
       "error": "Error",
@@ -1569,6 +1600,37 @@
       "windowPlaceholder": "e.g. *Chrome*",
       "windowTitles": "Window Title Patterns",
       "windowTitlesHint": "Glob patterns using * as wildcard (e.g. *Excel* or Untitled - Notepad)."
+    }
+  },
+  "browser": {
+    "actions": {
+      "cancelSelect": "Cancel selection",
+      "reload": "Reload",
+      "selectElement": "Select element"
+    },
+    "comment": {
+      "cancel": "Cancel",
+      "failed": "Could not send the comment",
+      "noSession": "Open a chat session first",
+      "placeholder": "Describe the change you want…",
+      "send": "Send to chat",
+      "sent": "Sent to chat",
+      "title": "Comment on this element"
+    },
+    "empty": {
+      "hint": "Enter a localhost URL to render it here, then select an element to comment on it.",
+      "title": "Preview a local dev server"
+    },
+    "errors": {
+      "navigate": "Could not navigate to that URL"
+    },
+    "selection": {
+      "selector": "Selector"
+    },
+    "title": "Browser",
+    "url": {
+      "go": "Go",
+      "placeholder": "http://localhost:3000"
     }
   },
   "canvas": {
@@ -2030,6 +2092,10 @@
       "summaryError": "Failed to generate summary",
       "title": "Branch conversation"
     },
+    "branchNavigator": {
+      "nextBranch": "Next response",
+      "prevBranch": "Previous response"
+    },
     "canvasInline": {
       "collapsePreview": "Collapse preview",
       "expandPreview": "Expand preview",
@@ -2105,6 +2171,10 @@
       "dragOverlay": {
         "dropToAttach": "Drop image to attach"
       },
+      "effort": {
+        "aria": "Thinking level",
+        "auto": "Auto"
+      },
       "enhance": {
         "modes": {
           "concise": "Make concise",
@@ -2179,6 +2249,8 @@
         "selectPlaceholder": "Select…",
         "title": "Configure /{name}"
       },
+      "pasteReminder": "A large paste wasn't saved with the draft — re-paste it before sending ({count}).",
+      "pastedChip": "Pasted {count} lines",
       "placeholder": "Send a message — try /, @, !, or #",
       "placeholderDisabled": "Select a session to start chatting…",
       "popover": {
@@ -2201,6 +2273,7 @@
       "references": {
         "removeAria": "Remove reference to {path}"
       },
+      "removePastedChip": "Remove pasted text",
       "sandboxShield": {
         "label": {
           "microvm": "Sandbox active — microVM tier",
@@ -2374,16 +2447,6 @@
         "favorites": "Favorites",
         "other": "Other"
       },
-      "modelCustomPlaceholder": "claude-...",
-      "modelLabel": "Model",
-      "modelPresets": {
-        "custom": "Custom",
-        "default": "Default (use global)",
-        "haiku45": "Claude Haiku 4.5",
-        "opus45": "Claude Opus 4.5",
-        "opus47": "Claude Opus 4.7",
-        "sonnet45": "Claude Sonnet 4.5"
-      },
       "noApiKey": "No API key",
       "permissionModeAppDefault": "Use app default",
       "permissionModeLabel": "Permission mode",
@@ -2415,6 +2478,16 @@
         "searchPlaceholder": "Search presets…"
       },
       "save": "Save",
+      "sheet": {
+        "sections": {
+          "account": "Model & account",
+          "actions": "Session actions",
+          "behavior": "Behavior",
+          "display": "Display",
+          "role": "Role & abilities",
+          "status": "Status"
+        }
+      },
       "skills": {
         "aria": "Skills active in this session",
         "counter": "{active}/{total} skills",
@@ -2713,6 +2786,38 @@
         "youtubeTitle": "YouTube video"
       }
     },
+    "runPanel": {
+      "ariaDiscardQueue": "Discard queued messages",
+      "ariaEditSteer": "Edit queued message",
+      "ariaInterrupt": "Interrupt the current turn",
+      "ariaRemoveSteer": "Remove queued message",
+      "ariaSteerAttachments": "{count} attachments",
+      "ariaSteerQueue": "Queued messages",
+      "ariaSubagent": "Sub-agent",
+      "collapse": "Hide run details",
+      "discardQueue": "Discard",
+      "emptySteer": "(empty)",
+      "expand": "Show run details",
+      "lastRun": "Last run",
+      "lastRunSummary": "{count, plural, one {# tool} other {# tools}} · {elapsed}",
+      "runFailedQueued": "Run failed · {count} queued",
+      "sectionPlan": "Plan",
+      "sectionSubagents": "Sub-agents",
+      "sectionSummary": "Summary",
+      "sectionTools": "Tools",
+      "summarySubagents": "{count, plural, one {# sub-agent} other {# sub-agents}}",
+      "summaryTodos": "{done}/{total} todos",
+      "summaryTools": "{count, plural, one {# tool} other {# tools}}"
+    },
+    "runStatus": {
+      "ariaSteerNow": "Interrupt the current turn and send queued messages now",
+      "interruptHint": "Esc to interrupt",
+      "interruptHintTouch": "Tap to interrupt",
+      "queued": "{count} queued",
+      "steerNow": "Send now",
+      "waitingApproval": "Waiting for approval",
+      "working": "Working"
+    },
     "sessionCost": {
       "byModelTitle": "By model",
       "cache": "Cache",
@@ -2791,7 +2896,8 @@
       "expand": "Expand conversation timeline",
       "jumpTo": "Jump to: {label}",
       "replyCount": "{count} replies",
-      "title": "Timeline"
+      "title": "Timeline",
+      "yesterday": "Yesterday"
     },
     "toolApproval": {
       "allowAlways": "Allow always",
@@ -3081,7 +3187,14 @@
   },
   "desktop": {
     "channelList": {
+      "bucketOlder": "Older",
+      "bucketPrev30": "Previous 30 Days",
+      "bucketPrev7": "Previous 7 Days",
+      "bucketToday": "Today",
+      "bucketYesterday": "Yesterday",
       "bulk": {
+        "archive": "Archive",
+        "archiveSuccess": "{count, plural, one {Archived # conversation} other {Archived # conversations}}",
         "cancel": "Cancel",
         "delete": "Delete",
         "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
@@ -3090,18 +3203,37 @@
         "pin": "Pin",
         "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
         "selectedCount": "{count, plural, one {# selected} other {# selected}}",
+        "unarchive": "Unarchive",
+        "unarchiveSuccess": "{count, plural, one {Restored # conversation} other {Restored # conversations}}",
         "unpin": "Unpin",
         "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
       },
+      "cancel": "Cancel",
+      "clearSearch": "Clear search",
       "conversationsTitle": "Conversations",
+      "deleteFolder": "Delete folder",
+      "deleteFolderConfirmBody": "The folder is removed; its conversations stay and return to the date list. This cannot be undone.",
+      "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
       "directMessages": "Direct Messages",
+      "emptyArchived": "No archived conversations.",
       "emptyDm": "No chats yet. Pick a character to begin.",
+      "emptyFolder": "Empty — move conversations here.",
+      "emptySearch": "No conversations match “{query}”.",
       "emptyTeam": "No conversations yet. Start one above.",
+      "folderActions": "Folder actions",
       "groupOther": "Other",
       "newChat": "New chat",
       "newConversation": "New conversation",
+      "newFolder": "New folder",
+      "newFolderName": "New folder",
       "openSessions": "Open sessions",
-      "teamFallback": "Team"
+      "renameFolder": "Rename folder",
+      "searchAria": "Search conversations",
+      "searchPlaceholder": "Search conversations…",
+      "sectionPinned": "Pinned",
+      "teamFallback": "Team",
+      "viewActive": "Show active conversations",
+      "viewArchived": "Show archived conversations"
     },
     "commandPalette": {
       "actions": {
@@ -3149,6 +3281,7 @@
       "agentRuns": "Agent runs",
       "agentTeams": "Agent teams",
       "auxiliaryGroup": "Profile and logs",
+      "browser": "Browser",
       "canvas": "Canvas",
       "createTeam": "Create team",
       "customize": {
@@ -3471,14 +3604,18 @@
     },
     "sessionRow": {
       "actionsMenu": "Session actions",
+      "archive": "Archive",
       "branchedFrom": "Branched conversation — open parent",
       "delete": "Delete",
+      "moveToFolder": "Move to folder",
       "openInTerminal": "Open in terminal",
       "openInTerminalFailed": "Could not export this session for the terminal",
       "openedInTerminal": "Run in your terminal: {command}",
       "pin": "Pin",
       "pinned": "Pinned",
+      "removeFromFolder": "Remove from folder",
       "rename": "Rename",
+      "unarchive": "Unarchive",
       "unpin": "Unpin",
       "untitled": "(untitled)"
     },
@@ -4170,7 +4307,7 @@
     "manage": "Manage",
     "manageAgents": "Manage Agents",
     "manager": {
-      "a2aComingSoon": "A2A (coming soon)",
+      "a2aProtocol": "A2A",
       "addAgentFailed": "Failed to add external agent.",
       "addExternalAgent": "Add External Agent",
       "addingAgent": "Adding…",
@@ -6621,6 +6758,11 @@
         "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
         "viewRuns": "View runs"
       },
+      "bucketOlder": "Older",
+      "bucketPrev30": "Previous 30 Days",
+      "bucketPrev7": "Previous 7 Days",
+      "bucketToday": "Today",
+      "bucketYesterday": "Yesterday",
       "customize": {
         "active": "On your home",
         "activeEmpty": "No quick actions — add some below.",
@@ -6635,22 +6777,28 @@
         "title": "Customize home"
       },
       "edit": "Edit",
+      "emptyArchived": "No archived chats.",
       "emptyChats": "No chats yet. Tap + to start one.",
       "emptyFiltered": "No chats match “{query}”.",
       "pinned": "Pinned",
       "presenceStreaming": "Streaming",
       "quickActions": "Quick actions",
       "recent": "Recent",
+      "renameAria": "Rename conversation",
       "search": "Search chats…",
       "searchAria": "Search chats",
       "sections": {
         "activeRuns": "Active runs",
         "recents": "Recent chats"
       },
+      "swipeArchive": "Archive",
       "swipeDelete": "Delete",
       "swipePin": "Pin",
+      "swipeUnarchive": "Unarchive",
       "swipeUnpin": "Unpin",
-      "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}"
+      "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}",
+      "viewActive": "Show active chats",
+      "viewArchived": "Show archived chats"
     },
     "inbox": {
       "tabs": {
@@ -6857,6 +7005,7 @@
       "copyFailed": "Copy failed: {message}",
       "copySuccess": "Copied to clipboard.",
       "description": "Pick an action.",
+      "longPressHint": "Long-press a message for actions",
       "share": "Share…",
       "shareDialogTitle": "Share via",
       "shareFailed": "Share failed: {message}",
@@ -7156,10 +7305,12 @@
       "memberSheetTitle": "Team members",
       "navSheetTitle": "Navigation",
       "newChat": "New chat",
+      "noApiKey": "No API key",
       "openMembers": "Open team members",
       "openNav": "Open navigation",
       "search": "Search",
       "sessionMenu": "Session menu",
+      "sessionSettings": "Session settings",
       "settings": "Settings",
       "tabBarAria": "Main navigation"
     },
@@ -12257,12 +12408,14 @@
         "checkUpdates": "Check for updates",
         "checking": "Checking…",
         "desktopOnly": "Updates are delivered through the desktop app.",
+        "downloadingPercent": "Downloading… {percent}%",
         "goInstallAction": "Install",
         "install": "Install {version}",
+        "installing": "Installing…",
         "lastChecked": "Last checked",
         "title": "Updates",
         "updateAvailable": "Update {version} available",
-        "updateAvailableBackground": "Version {version} is available — open About to install.",
+        "updateAvailableBackground": "Version {version} is available.",
         "updateAvailableToast": "Update available: {version}",
         "updateCheckFailed": "Update check failed: {error}",
         "updateInstallFailed": "Update install failed: {error}",
@@ -13140,6 +13293,8 @@
       "persistAcrossSessionsHint": "When on, artifacts survive restarts via localStorage. When off, they’re cleared with the session.",
       "persistAcrossSessionsLabel": "Persist across sessions",
       "resetDefaults": "Reset to defaults",
+      "reviewBeforeApplyHint": "When on, the assistant's edits to an existing artifact are staged as a diff proposal you review hunk-by-hunk before they apply. When off, edits overwrite the artifact directly.",
+      "reviewBeforeApplyLabel": "Review AI edits before applying",
       "showNotificationHint": "Show a brief sonner toast when a new artifact is auto-created.",
       "showNotificationLabel": "Toast on auto-create",
       "title": "Artifacts"
