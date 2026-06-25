@@ -32,6 +32,7 @@
     "0047-project-instruction-files",
     "0050-cli-tui-operation-experience",
     "0052-cli-tui-fixed-region-layout",
-    "0053-cli-tui-rendering-and-tool-invocation"
+    "0053-cli-tui-rendering-and-tool-invocation",
+    "0055-agent-browser-loop"
   ]
 }

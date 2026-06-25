@@ -1,6 +1,6 @@
 /**
  * Browser Tools — built-in plugin exposing the agent browser loop over the
- * embedded preview webview (ADR-0038). Tools target elements by `ref` from the
+ * embedded preview webview (ADR-0055). Tools target elements by `ref` from the
  * latest `browser_snapshot`; every mutating action returns a refreshed snapshot
  * so the model always acts on the current tree.
  *

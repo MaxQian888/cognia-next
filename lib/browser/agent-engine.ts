@@ -2,7 +2,7 @@
  * Agent-facing browser engine abstraction. Phase 1 ships only the embedded
  * webview engine; Phase 2 adds an external-MCP engine behind the same router.
  * The trust tier (`resolveTrustTier`) decides routing and whether the page
- * content must be treated as untrusted. See ADR-0038.
+ * content must be treated as untrusted. See ADR-0055.
  */
 import { emitAgentActivity } from "@/lib/browser/agent-activity"
 import { browserClient } from "@/lib/browser/client"

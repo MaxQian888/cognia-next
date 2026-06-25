@@ -1529,7 +1529,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const computerUseAllowedForChat =
     character?.enableComputerUse === true && (!imSession || allowImComputerUse)
 
-  // Agent browser tools (ADR-0038) drive the embedded preview webview, which
+  // Agent browser tools (ADR-0055) drive the embedded preview webview, which
   // only exists in the desktop shell. Opt-in per character; never surfaced on
   // IM-bound sessions (no embedded webview there).
   const browserAllowedForChat = character?.enableBrowserTools === true && !imSession

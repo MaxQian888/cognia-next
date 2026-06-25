@@ -3100,7 +3100,7 @@ export interface Character {
    */
   enableComputerUse?: boolean
   /**
-   * Gate for the agent browser tools (`cognia-browser-tools`, ADR-0038) that
+   * Gate for the agent browser tools (`cognia-browser-tools`, ADR-0055) that
    * drive the embedded preview webview (navigate / snapshot / click / type /
    * console / network). Opt-in: only `true` surfaces the `browser_*` tools.
    * Mirrors the `enableComputerUse` soft-binding convention.

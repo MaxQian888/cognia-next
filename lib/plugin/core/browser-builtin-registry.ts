@@ -306,7 +306,7 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     load: async () => resolvePluginModule(skillRecorderModule),
   },
   {
-    // ADR-0038 — agent browser loop over the embedded preview webview
+    // ADR-0055 — agent browser loop over the embedded preview webview
     // (browser_navigate / browser_snapshot / browser_click|type|fill_form|
     // select|hover / browser_read_console|network / browser_get_page). It is
     // `browser: blocked` (drives the Tauri browser_embed_* commands), but must

@@ -90,7 +90,7 @@ export function screenshotToFile(base64Png: string, filename = "preview.png"): S
 
 // ---------------------------------------------------------------------------
 // Agent browser loop (Phase 1) — canonical types shared by both engines so the
-// model's tool surface stays engine-agnostic. See ADR-0038.
+// model's tool surface stays engine-agnostic. See ADR-0055.
 // ---------------------------------------------------------------------------
 
 export type TrustTier = "trusted" | "public"

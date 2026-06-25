@@ -1,0 +1,70 @@
+---
+title: ADR-0055 — 智能体浏览器闭环
+description: "为产品智能体提供基于内置 /browser 嵌入式 webview 的 snapshot→按 ref 操作→重新 snapshot 闭环（导航、带稳定 ref 的可访问性树快照、点击/输入/填充/选择/悬停、console 与 network 检查、截图），以受门控的插件工具暴露。第一阶段通过注入 JS 驱动应用内嵌入式 webview，保留人机共享面板；第二阶段在统一的 URL 信任等级路由与同一套规范化快照结构之下接入外部 playwright-mcp 引擎，用于稳健的公开站点自动化。"
+---
+
+# ADR-0055 — 智能体浏览器闭环
+
+**状态**：已采纳（2026-06-25）
+**作者**：Max Qian + Claude
+
+## 背景
+
+内置浏览器（`/browser`）此前是一个被动的、面向人的设计反馈工具：预览本地开发服务器，
+让用户点选单个元素获取 CSS 选择器 / `outerHTML` / 文本并写评论发送到对话。所有浏览器
+操作都仅限 UI——智能体无法导航、读取或操作页面。模型唯一的 Web 能力是独立的纯 HTTP
+通道（`web_fetch` / `web_search`，无 JS 渲染）以及基于坐标的系统级 `computer-use`，
+后者看不到嵌入式 webview 的 DOM。
+
+业界智能体浏览器（Playwright-MCP、chrome-devtools-MCP，以及 Codex 自家的应用内浏览器）
+在面向模型的设计上收敛到同一范式：模型的主要“视图”是**结构化的可访问性树快照而非像素**；
+元素通过**快照中铸造的不透明句柄**（`ref` / `uid`）定位，默认不用原始坐标；闭环是
+**snapshot → 按 ref 操作 → 重新 snapshot**；console 与 network 是一等的只读工具。
+
+## 决策
+
+为智能体增加 `snapshot → 按 ref 操作 → 重新 snapshot` 浏览器闭环，采用**混合、分阶段**：
+
+- **第一阶段（本 ADR）——嵌入式引擎。** 通过注入 JS 驱动现有嵌入式 webview。保留人机
+  共享、可见、可协同操作的面板（差异化卖点），零额外体积，且在三大桌面系统上均可工作。
+  公开站点自动化仅为尽力而为。
+- **第二阶段——MCP 引擎。** 在同一路由与同一套规范化快照结构之下，通过产品既有的 stdio-MCP
+  拉起通道接入外部 `playwright-mcp`（`plugins/playwright-mcp` 预设已存在），用于稳健的
+  任意公开站点自动化。
+
+在 macOS/Linux 上，共享视图保真度与完整 CDP 能力互斥：驱动自家嵌入式 webview 受限于
+注入 JS 能力但能让人留在闭环中；独立无头 Chromium 拥有完整 CDP 但不可见。第一阶段取
+嵌入式路径，第二阶段在收益更高处再加无头引擎。
+
+## 关键通道
+
+预览页面是远程上下文，无 IPC 桥。关键支撑是 Tauri 2.11.1 的 **`Webview::eval_with_callback`**，
+它把 JS 执行结果序列化为 JSON 交给 Rust 回调，在三种引擎（WKWebView / WebView2 /
+WebKitGTK）上均可用。`eval_embed_with_result` 通过 oneshot + 10 秒超时把该回调桥接为异步
+命令——因此旧的 `cognia.invalid/__cognia_select` 哨兵导航技巧不再是唯一的页面→Rust 通道
+（仅保留用于人工点选）。在 Windows 上 `eval_with_callback` 会吞掉异常，故每个注入函数都用
+`try/catch` 包裹并以错误值返回。
+
+## 纪律与安全
+
+- `snapshot → 操作 → 重新 snapshot`：每个变更类工具内联返回新快照；ref 携带 `generation`。
+- 协议白名单仍为 http(s)；`public` 等级标记为 `untrusted`（防提示注入），智能体绝不自动填入密钥。
+- `browser_evaluate`（裸 JS，RCE 级）在第一阶段**不注册**，后续作为独立门控、默认关闭的工具。
+
+## 第一阶段诚实的能力边界（注入 JS 上限）
+
+1. 跨源 iframe 对快照 / console / network / 操作均不可见。
+2. 合成事件 `isTrusted:false`，剪贴板 / 文件选择器 / 部分反爬流程会拒绝。
+3. 网络**响应体**不可得（仅状态/时延）。
+4. 闭合 shadow DOM 不可达；开放 shadow DOM 需显式穿透。
+
+这些对主要的 localhost 场景已足够，且正是第二阶段 MCP 引擎所修复的；它们以明确的限制形式
+告知模型，而非静默缺口。
+
+## 后果
+
+- 智能体现在可以在用户观看的同一面板中自检并驱动本地开发预览，补齐了原浏览器功能最大的缺口。
+- 单一规范化快照结构使第二阶段的引擎切换对模型透明；唯一真正的未知是 playwright `ref` →
+  规范化结构的适配器。
+- 实时 webview eval 桥（`eval_with_callback`）无法被 jest 或 cargo 单测覆盖；以
+  `pnpm tauri dev` 跑一次 snapshot→点击→snapshot 闭环作为人工冒烟门。
