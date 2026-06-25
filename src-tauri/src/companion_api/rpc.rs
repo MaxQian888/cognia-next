@@ -314,6 +314,20 @@ const KNOWN_COMMANDS: &[&str] = &[
     "twin_job_pause",
     "twin_job_resume",
     "twin_job_retry",
+    // Twin create + profile edit (coarse remote surface — closes the
+    // "remote can delete a twin/source but never create one" asymmetry and the
+    // missing profile-mutation surface). All round-trip through
+    // desktop_writes_bridge. `twin_profile_update` is a unified discriminated
+    // patch (gated as a CONTROL command — it can reset/rewrite the persona).
+    "twin_create",
+    "twin_source_create",
+    "twin_profile_update",
+    // Goal create / update / status (coarse remote surface). create + update
+    // are CONTROL commands (they start / re-aim an autonomous agent loop);
+    // status is a pure read.
+    "goal_create",
+    "goal_update",
+    "goal_status",
     // ── Settings / conversation overrides ───────────────────────────────────
     "conversation_overrides_update",
     // ── App-data backup ─────────────────────────────────────────────────────
@@ -386,6 +400,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Twin reads.
     "twin_source_list",
     "twin_job_status",
+    // Goal status is a pure read (same goalId/sessionId returns current state).
+    "goal_status",
     // App-data backup export is a pure read (snapshots current state).
     "backup_export",
 ];
@@ -467,6 +483,13 @@ const CONTROL_COMMANDS: &[&str] = &[
     "twin_delete",
     "twin_source_delete",
     "twin_job_cancel",
+    // Twin persona rewrite — `twin_profile_update` can reset/overwrite the
+    // digital-twin profile, so it's gated like the other powerful surfaces.
+    "twin_profile_update",
+    // Goal create/update start or re-aim an autonomous agent loop — same
+    // elevation as goal_pause/resume/stop above.
+    "goal_create",
+    "goal_update",
     // App-data restore overwrites local state.
     "backup_import",
 ];
@@ -1182,6 +1205,12 @@ pub(super) async fn dispatch(
         | "twin_job_pause"
         | "twin_job_resume"
         | "twin_job_retry"
+        | "twin_create"
+        | "twin_source_create"
+        | "twin_profile_update"
+        | "goal_create"
+        | "goal_update"
+        | "goal_status"
         | "conversation_overrides_update"
         | "backup_export"
         | "backup_import" => {

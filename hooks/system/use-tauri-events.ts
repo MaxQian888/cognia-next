@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { listen } from "@tauri-apps/api/event"
 import { TAURI_EVENTS, onTauriEvent } from "@/lib/tauri"
@@ -69,6 +70,14 @@ function parseDeepLink(raw: string): ParsedDeepLink {
  */
 export function useTauriEvents(): void {
   const router = useRouter()
+  // Tray toasts fire from inside the long-lived setup effect (deps: [router]).
+  // Hold the translator in a ref so locale changes don't tear down and rebuild
+  // every Tauri listener, while still resolving against the current locale.
+  const t = useTranslations("settings.about")
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -216,7 +225,25 @@ export function useTauriEvents(): void {
         void reportIssue().catch((err) => console.warn("tray report-issue failed", err))
       })
       const trayCheckUpdates = await listen<null>("tray://check-updates", () => {
-        void checkUpdates().catch((err) => console.warn("tray check-updates failed", err))
+        void checkUpdates()
+          .then((outcome) => {
+            switch (outcome.kind) {
+              case "available":
+                toast.success(
+                  tRef.current("updates.updateAvailableToast", { version: outcome.version })
+                )
+                // Hand off to Settings → About, where the download + relaunch lives.
+                useUIStore.getState().requestOpenSettings("about")
+                break
+              case "upToDate":
+                toast.success(tRef.current("updates.alreadyLatest"))
+                break
+              case "error":
+                console.warn("tray check-updates failed", outcome.message)
+                break
+            }
+          })
+          .catch((err) => console.warn("tray check-updates failed", err))
       })
       const trayToggleAutostart = await listen<null>("tray://toggle-autostart", () => {
         void toggleAutostartAction()

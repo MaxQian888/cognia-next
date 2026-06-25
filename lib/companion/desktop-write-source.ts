@@ -37,9 +37,33 @@ import {
 } from "@/lib/db/workflows"
 import { createWorkflowSource } from "@/lib/scheduler/sources/workflow-source"
 import { requestCancelRun } from "@/lib/workflow/runtime/run-cancel-registry"
-import { deleteTwin } from "@/lib/db/twins"
-import { deleteTwinSource, listTwinSourcesByTwin, updateTwinSource } from "@/lib/db/twin-sources"
-import type { TwinSource } from "@/types/twin"
+import { createTwin, deleteTwin, type TwinInput } from "@/lib/db/twins"
+import {
+  createTwinSource,
+  deleteTwinSource,
+  listTwinSourcesByTwin,
+  updateTwinSource,
+  type TwinSourceDraft,
+} from "@/lib/db/twin-sources"
+import {
+  addEntity,
+  addPlaybook,
+  addStyleSample,
+  removeEntity,
+  removePlaybook,
+  removeStyleSample,
+  resetTwinProfile,
+  setEntityPinned,
+  setPlaybookPinned,
+  setStyleSamplePinned,
+  setVoiceSummary,
+  updateEntity,
+  updatePlaybook,
+  updateStyleSample,
+} from "@/lib/db/twin-profile"
+import { getActiveGoalForSession, getGoal, listGoalsBySession } from "@/lib/db/goals"
+import type { GoalConfig } from "@/types/goal"
+import type { Playbook, ProfileEntity, StyleSample, TwinSource } from "@/types/twin"
 import {
   cancelJob,
   getTwinJob,
@@ -219,6 +243,19 @@ export async function dispatchCommand(
       return twinJobAction(payload, "resume")
     case "twin_job_retry":
       return twinJobAction(payload, "retry")
+    case "twin_create":
+      return twinCreate(payload)
+    case "twin_source_create":
+      return twinSourceCreate(payload)
+    case "twin_profile_update":
+      return twinProfileUpdate(payload)
+    // Goal create / update / status (coarse remote surface).
+    case "goal_create":
+      return goalCreate(payload)
+    case "goal_update":
+      return goalUpdate(payload)
+    case "goal_status":
+      return goalStatus(payload)
     // Settings — per-conversation overrides (pin/archive/title).
     case "conversation_overrides_update":
       return conversationOverridesUpdate(payload)
@@ -266,6 +303,113 @@ async function goalTransition(
   return { goal }
 }
 
+/** Read string[] nameHints from the payload, tolerating an absent field. */
+function readNameHints(payload: Record<string, unknown>): string[] {
+  const raw = payload.nameHints
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw) || raw.some((s) => typeof s !== "string")) {
+    throw new Error("nameHints must be an array of strings")
+  }
+  return raw as string[]
+}
+
+/**
+ * Start a new self-driving goal for a session. Delegates to the canonical
+ * `GoalRuntime.createGoal`, so every guardrail the desktop /goal command runs
+ * (PII redaction of the objective, the IM opt-in gate, /loop exclusivity,
+ * superseding an existing open goal) applies identically to the remote path.
+ * App settings are loaded locally to feed the redaction allowlist.
+ */
+async function goalCreate(payload: Record<string, unknown>): Promise<{ goal: unknown }> {
+  const sessionId = payload.sessionId as string | undefined
+  const rawObjective = payload.rawObjective as string | undefined
+  if (!sessionId) throw new Error("goal_create.sessionId is required")
+  if (typeof rawObjective !== "string" || rawObjective.trim().length === 0) {
+    throw new Error("goal_create.rawObjective is required")
+  }
+  const appSettings = await getSettings().catch(() => null)
+  const goal = await getGoalRuntime().createGoal({
+    sessionId,
+    rawObjective,
+    characterId: payload.characterId as string | undefined,
+    config: payload.config as Partial<GoalConfig> | undefined,
+    nameHints: readNameHints(payload),
+    startPaused: payload.startPaused === true,
+    appSettings,
+  })
+  return { goal }
+}
+
+/**
+ * Re-aim or reconfigure an open goal. `rawObjective` re-runs the redaction +
+ * objective-update flow (returning the model-facing update prompt); `config`
+ * patches the goal config. At least one must be present.
+ */
+async function goalUpdate(
+  payload: Record<string, unknown>
+): Promise<{ goal: unknown; updatePrompt?: string }> {
+  const goalId = payload.goalId as string | undefined
+  if (!goalId) throw new Error("goal_update.goalId is required")
+  const rawObjective = payload.rawObjective as string | undefined
+  const config = payload.config as Partial<GoalConfig> | undefined
+  if (rawObjective === undefined && config === undefined) {
+    throw new Error("goal_update requires rawObjective and/or config")
+  }
+
+  let goal: unknown = null
+  let updatePrompt: string | undefined
+  if (rawObjective !== undefined) {
+    if (typeof rawObjective !== "string" || rawObjective.trim().length === 0) {
+      throw new Error("goal_update.rawObjective must be a non-empty string")
+    }
+    const result = await getGoalRuntime().updateObjective(
+      goalId,
+      rawObjective,
+      readNameHints(payload)
+    )
+    // `null` means the goal is missing/terminal or the objective is unchanged.
+    if (result) {
+      goal = result.goal
+      updatePrompt = result.updatePrompt
+    }
+  }
+  if (config !== undefined) {
+    if (!config || typeof config !== "object") {
+      throw new Error("goal_update.config must be an object")
+    }
+    goal = await getGoalRuntime().updateConfig(goalId, config)
+  }
+  // Fall back to the current persisted state when nothing changed, so the
+  // caller always gets the goal it referenced rather than a bare null.
+  if (goal === null) {
+    goal = (await getGoal(goalId)) ?? null
+  }
+  return { goal, updatePrompt }
+}
+
+/**
+ * Read goal status. With `goalId`, returns that goal; with `sessionId`,
+ * returns the session's active goal plus the full goal list. Pure read.
+ */
+async function goalStatus(
+  payload: Record<string, unknown>
+): Promise<{ goal?: unknown; activeGoal?: unknown; goals?: unknown[] }> {
+  const goalId = payload.goalId as string | undefined
+  if (goalId) {
+    const goal = await getGoal(goalId)
+    return { goal: goal ?? null }
+  }
+  const sessionId = payload.sessionId as string | undefined
+  if (!sessionId) {
+    throw new Error("goal_status requires goalId or sessionId")
+  }
+  const [activeGoal, goals] = await Promise.all([
+    getActiveGoalForSession(sessionId),
+    listGoalsBySession(sessionId),
+  ])
+  return { activeGoal: activeGoal ?? null, goals }
+}
+
 async function characterUpsert(payload: Record<string, unknown>): Promise<{ character: unknown }> {
   const id = payload.id as string | undefined
   const draft = payload.draft as CharacterDraft
@@ -311,13 +455,48 @@ async function skillSetEnabled(payload: Record<string, unknown>): Promise<null> 
   return null
 }
 
+/** A plugin enable/disable failure that is NOT a genuine runtime error
+ *  (dependency / activation failure) but rather "there is no live manager to
+ *  drive here" — an uninitialized PluginManager (headless cognia-server, or a
+ *  test context) or a plugin the running store has never discovered. In those
+ *  cases we safely fall back to persisting the flag. Genuine enable failures
+ *  must surface to the caller, not be masked by a silent flag flip. */
+function isPluginManagerUnavailable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /initialized PluginManager|Plugin not found/i.test(message)
+}
+
 async function pluginSetEnabled(payload: Record<string, unknown>): Promise<null> {
   const id = payload.id as string | undefined
   const enabled = payload.enabled as boolean | undefined
   if (!id) throw new Error("plugin_set_enabled.id is required")
   if (typeof enabled !== "boolean") throw new Error("plugin_set_enabled.enabled must be boolean")
-  await getDb().plugins.update(id, { enabled, updatedAt: Date.now() })
-  return null
+
+  // Mirror the desktop toggle: drive the live PluginManager through the plugin
+  // runtime store so the plugin actually loads/unloads, its required
+  // dependencies are resolved, contributions register/unregister, and the
+  // enabled flag is persisted to Dexie + the Rust backend by the manager's
+  // `syncBackendStatus`. A bare Dexie flag write (the previous behavior) only
+  // took effect on the next renderer reload and skipped dependency resolution.
+  try {
+    const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
+    const store = usePluginStore.getState()
+    if (enabled) {
+      await store.enablePlugin(id)
+    } else {
+      await store.disablePlugin(id)
+    }
+    return null
+  } catch (error) {
+    // No live manager (headless / uninitialized) or unknown-to-store plugin:
+    // persist the flag so it applies on the next load. Re-throw genuine enable
+    // failures (dependency / activation errors) so the remote caller sees them.
+    if (isPluginManagerUnavailable(error)) {
+      await getDb().plugins.update(id, { enabled, updatedAt: Date.now() })
+      return null
+    }
+    throw error
+  }
 }
 
 type ConnectorMode = "auto" | "manual" | "draft"
@@ -392,7 +571,14 @@ type ConnectorSegment = { type?: string; text?: string }
 
 /** Insert a user-authored message into the named session. Production caller
  *  is the share-target page, which receives a piece of shared text/url from
- *  the OS and routes it to a selected chat session. */
+ *  the OS and routes it to a selected chat session.
+ *
+ *  NOTE: the `connector_send` name is historical (it shares the mobile
+ *  outbound-queue command set) — this does NOT transmit to any external
+ *  connector platform and does NOT trigger an AI reply. It only appends a
+ *  local `role: "user"` message row. Real connector outbound goes through
+ *  `connector_approve_draft` → the desktop outbound runner; an AI turn goes
+ *  through `claude_send`. */
 async function connectorSend(payload: Record<string, unknown>): Promise<{ messageId: string }> {
   const sessionId = payload.sessionId as string | undefined
   const segmentsRaw = payload.segments as unknown
@@ -457,9 +643,21 @@ async function workflowTriggerManual(payload: Record<string, unknown>): Promise<
 async function twinIngestSource(payload: Record<string, unknown>): Promise<{ jobId: string }> {
   const twinId = payload.twinId as string | undefined
   if (!twinId) throw new Error("twin_ingest_source.twinId is required")
+  // Scope the ingest to the caller-supplied source ids when present; an
+  // omitted or empty list means "ingest every source attached to the twin"
+  // (the desktop scheduler's default). Reject a malformed `sourceIds` rather
+  // than silently widening the scope.
+  const rawSourceIds = payload.sourceIds
+  let sourceIds: string[] = []
+  if (rawSourceIds !== undefined && rawSourceIds !== null) {
+    if (!Array.isArray(rawSourceIds) || rawSourceIds.some((s) => typeof s !== "string")) {
+      throw new Error("twin_ingest_source.sourceIds must be an array of strings")
+    }
+    sourceIds = rawSourceIds as string[]
+  }
   const job = await enqueueIngestJob({
     twinId,
-    sourceIds: [],
+    sourceIds,
   })
   return { jobId: job.id }
 }
@@ -580,6 +778,135 @@ async function twinSourceDelete(payload: Record<string, unknown>): Promise<null>
   if (!id) throw new Error("twin_source_delete.id is required")
   await deleteTwinSource(id)
   return null
+}
+
+/** Create a new twin. Closes the "remote can delete but not create" gap. */
+async function twinCreate(payload: Record<string, unknown>): Promise<{ twin: unknown }> {
+  const input = payload.twin as TwinInput | undefined
+  if (!input || typeof input !== "object") {
+    throw new Error("twin_create.twin is required")
+  }
+  if (typeof input.name !== "string" || input.name.trim().length === 0) {
+    throw new Error("twin_create.twin.name is required")
+  }
+  const twin = await createTwin(input)
+  return { twin }
+}
+
+/** Create a new twin source row (the remote add-path that `twin_ingest_source`
+ *  never provided — ingest scopes existing sources but does not create them). */
+async function twinSourceCreate(payload: Record<string, unknown>): Promise<{ source: unknown }> {
+  const draft = payload.source as TwinSourceDraft | undefined
+  if (!draft || typeof draft !== "object") {
+    throw new Error("twin_source_create.source is required")
+  }
+  if (typeof draft.twinId !== "string" || draft.twinId.length === 0) {
+    throw new Error("twin_source_create.source.twinId is required")
+  }
+  const source = await createTwinSource(draft)
+  return { source }
+}
+
+/**
+ * Unified twin-profile mutation. A single coarse RPC arm covers the whole
+ * persona-edit surface (voice summary, entities, playbooks, style samples,
+ * reset) via a discriminated `op`, so the remote device has parity with the
+ * desktop profile editor without exploding the wire surface into ~15 arms.
+ * Returns the updated profile.
+ */
+async function twinProfileUpdate(payload: Record<string, unknown>): Promise<{ profile: unknown }> {
+  const twinId = payload.twinId as string | undefined
+  const op = payload.op as string | undefined
+  if (!twinId) throw new Error("twin_profile_update.twinId is required")
+  if (!op) throw new Error("twin_profile_update.op is required")
+
+  const requireString = (field: string): string => {
+    const v = payload[field]
+    if (typeof v !== "string" || v.length === 0) {
+      throw new Error(`twin_profile_update.${field} is required for op=${op}`)
+    }
+    return v
+  }
+  const requireObject = <T>(field: string): T => {
+    const v = payload[field]
+    if (!v || typeof v !== "object") {
+      throw new Error(`twin_profile_update.${field} is required for op=${op}`)
+    }
+    return v as T
+  }
+  const requireBool = (field: string): boolean => {
+    const v = payload[field]
+    if (typeof v !== "boolean") {
+      throw new Error(`twin_profile_update.${field} must be boolean for op=${op}`)
+    }
+    return v
+  }
+
+  let profile: unknown
+  switch (op) {
+    case "setVoiceSummary":
+      profile = await setVoiceSummary(twinId, requireString("voiceSummary"))
+      // setVoiceSummary returns void — re-read for a consistent envelope below.
+      break
+    case "reset":
+      profile = await resetTwinProfile(twinId)
+      break
+    case "addEntity":
+      profile = await addEntity(twinId, requireObject<ProfileEntity>("entity"))
+      break
+    case "updateEntity":
+      profile = await updateEntity(
+        twinId,
+        requireString("name"),
+        requireObject<ProfileEntity>("entity")
+      )
+      break
+    case "removeEntity":
+      profile = await removeEntity(twinId, requireString("name"))
+      break
+    case "setEntityPinned":
+      profile = await setEntityPinned(twinId, requireString("name"), requireBool("pinned"))
+      break
+    case "addPlaybook":
+      profile = await addPlaybook(twinId, requireObject<Playbook>("playbook"))
+      break
+    case "updatePlaybook":
+      profile = await updatePlaybook(
+        twinId,
+        requireString("playbookId"),
+        requireObject<Playbook>("playbook")
+      )
+      break
+    case "removePlaybook":
+      profile = await removePlaybook(twinId, requireString("playbookId"))
+      break
+    case "setPlaybookPinned":
+      profile = await setPlaybookPinned(twinId, requireString("playbookId"), requireBool("pinned"))
+      break
+    case "addStyleSample":
+      profile = await addStyleSample(twinId, requireObject<StyleSample>("sample"))
+      break
+    case "updateStyleSample":
+      profile = await updateStyleSample(
+        twinId,
+        requireString("sampleId"),
+        requireObject<StyleSample>("sample")
+      )
+      break
+    case "removeStyleSample":
+      profile = await removeStyleSample(twinId, requireString("sampleId"))
+      break
+    case "setStyleSamplePinned":
+      profile = await setStyleSamplePinned(twinId, requireString("sampleId"), requireBool("pinned"))
+      break
+    default:
+      throw new Error(`twin_profile_update.op is not supported: ${op}`)
+  }
+  // `setVoiceSummary` resolves to void; re-read so every op returns the profile.
+  if (op === "setVoiceSummary") {
+    profile = (await getDb().twinProfile.get(twinId)) ?? null
+  }
+  return { profile: profile ?? null }
 }
 
 async function twinJobStatus(payload: Record<string, unknown>): Promise<unknown> {

@@ -65,6 +65,18 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// The hook resolves tray update toasts via next-intl (reusing settings.about
+// keys). Resolve just the keys the tray path touches to their en.json copy.
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
+    const messages: Record<string, string> = {
+      "updates.updateAvailableToast": `Update available: ${vars?.version}`,
+      "updates.alreadyLatest": "You're on the latest version.",
+    }
+    return messages[key] ?? key
+  },
+}))
+
 const setActiveSession = jest.fn()
 const clearChatStore = jest.fn()
 const requestOpenSettings = jest.fn()
@@ -109,6 +121,16 @@ jest.mock("@/lib/tray/dispatcher", () => ({
   dispatchShortcut: (...a: unknown[]) => dispatchShortcutMock(...a),
 }))
 
+const checkUpdatesMock = jest.fn()
+jest.mock("@/lib/tray/tray-actions", () => ({
+  checkUpdates: (...a: unknown[]) => checkUpdatesMock(...a),
+  copyDiagnostics: jest.fn().mockResolvedValue(undefined),
+  openDataFolder: jest.fn().mockResolvedValue(undefined),
+  openDocs: jest.fn().mockResolvedValue(undefined),
+  reportIssue: jest.fn().mockResolvedValue(undefined),
+  toggleAutostartAction: jest.fn().mockResolvedValue(true),
+}))
+
 import { useTauriEvents } from "./use-tauri-events"
 
 beforeEach(() => {
@@ -130,6 +152,7 @@ beforeEach(() => {
   openExternalMock.mockClear()
   dispatchTrayClickMock.mockClear()
   dispatchShortcutMock.mockClear()
+  checkUpdatesMock.mockReset()
 })
 
 async function flushPromises() {
@@ -175,6 +198,36 @@ describe("useTauriEvents", () => {
     await flushPromises()
     tauriHandlers[TAURI_EVENTS.traySettings]?.(null)
     expect(requestOpenSettings).toHaveBeenCalledWith()
+  })
+
+  it("tray Check for updates opens Settings → About when an update is available", async () => {
+    checkUpdatesMock.mockResolvedValue({ kind: "available", version: "3.1.4" })
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    listenHandlers["tray://check-updates"]?.({ payload: null })
+    await flushPromises()
+    expect(toastSuccess).toHaveBeenCalledWith("Update available: 3.1.4")
+    expect(requestOpenSettings).toHaveBeenCalledWith("about")
+  })
+
+  it("tray Check for updates toasts and stays put when already current", async () => {
+    checkUpdatesMock.mockResolvedValue({ kind: "upToDate" })
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    listenHandlers["tray://check-updates"]?.({ payload: null })
+    await flushPromises()
+    expect(toastSuccess).toHaveBeenCalledWith("You're on the latest version.")
+    expect(requestOpenSettings).not.toHaveBeenCalled()
+  })
+
+  it("tray Check for updates swallows an error outcome without navigating", async () => {
+    checkUpdatesMock.mockResolvedValue({ kind: "error", message: "offline" })
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    listenHandlers["tray://check-updates"]?.({ payload: null })
+    await flushPromises()
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(requestOpenSettings).not.toHaveBeenCalled()
   })
 
   it("tray Open Logs and menu Open Logs both navigate to /logs", async () => {

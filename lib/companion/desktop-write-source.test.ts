@@ -40,6 +40,16 @@ jest.mock("@/lib/goal/runtime", () => {
   return { getGoalRuntime: () => ({ pauseGoal, resumeGoal, stopGoal }) }
 })
 
+// Stub the plugin runtime store so plugin_set_enabled exercises the live
+// enable/disable wiring without spinning up a real PluginManager.
+const mockEnablePlugin = jest.fn().mockResolvedValue(undefined)
+const mockDisablePlugin = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
+  usePluginStore: {
+    getState: () => ({ enablePlugin: mockEnablePlugin, disablePlugin: mockDisablePlugin }),
+  },
+}))
+
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -49,6 +59,7 @@ beforeEach(async () => {
   const db = getDb()
   await db.messages.clear().catch(() => undefined)
   await db.connectorDrafts.clear().catch(() => undefined)
+  await db.plugins.clear().catch(() => undefined)
 })
 
 describe("dispatchCommand: connector_send", () => {
@@ -208,6 +219,77 @@ describe("dispatchCommand: twin_ingest_source", () => {
 
   it("rejects without a twinId", async () => {
     await expect(dispatchCommand("twin_ingest_source", {})).rejects.toThrow(/twinId is required/)
+  })
+
+  it("scopes the ingest to the supplied sourceIds", async () => {
+    await dispatchCommand("twin_ingest_source", {
+      twinId: "default",
+      sourceIds: ["src_a", "src_b"],
+    })
+    expect(enqueueIngestJob).toHaveBeenCalledWith(
+      expect.objectContaining({ twinId: "default", sourceIds: ["src_a", "src_b"] })
+    )
+  })
+
+  it("treats an omitted sourceIds as ingest-all (empty array)", async () => {
+    await dispatchCommand("twin_ingest_source", { twinId: "default" })
+    expect(enqueueIngestJob).toHaveBeenCalledWith(
+      expect.objectContaining({ twinId: "default", sourceIds: [] })
+    )
+  })
+
+  it("rejects a malformed sourceIds", async () => {
+    await expect(
+      dispatchCommand("twin_ingest_source", { twinId: "default", sourceIds: "src_a" })
+    ).rejects.toThrow(/sourceIds must be an array/)
+    await expect(
+      dispatchCommand("twin_ingest_source", { twinId: "default", sourceIds: [1, 2] })
+    ).rejects.toThrow(/sourceIds must be an array/)
+  })
+})
+
+describe("dispatchCommand: plugin_set_enabled", () => {
+  it("drives the live PluginManager enablePlugin when enabling", async () => {
+    await dispatchCommand("plugin_set_enabled", { id: "p1", enabled: true })
+    expect(mockEnablePlugin).toHaveBeenCalledWith("p1")
+    expect(mockDisablePlugin).not.toHaveBeenCalled()
+  })
+
+  it("drives the live PluginManager disablePlugin when disabling", async () => {
+    await dispatchCommand("plugin_set_enabled", { id: "p1", enabled: false })
+    expect(mockDisablePlugin).toHaveBeenCalledWith("p1")
+    expect(mockEnablePlugin).not.toHaveBeenCalled()
+  })
+
+  it("falls back to a flag write when no manager is initialized", async () => {
+    mockEnablePlugin.mockRejectedValueOnce(
+      new Error("Verified plugin lifecycle action requires an initialized PluginManager for enable")
+    )
+    await getDb().plugins.add({
+      id: "p2",
+      manifest: { id: "p2" },
+      enabled: false,
+      updatedAt: 1,
+    } as never)
+    await dispatchCommand("plugin_set_enabled", { id: "p2", enabled: true })
+    const row = await getDb().plugins.get("p2")
+    expect(row?.enabled).toBe(true)
+  })
+
+  it("re-throws a genuine enable failure (dependency error)", async () => {
+    mockEnablePlugin.mockRejectedValueOnce(new Error("Required dependency dep-x is disabled"))
+    await expect(
+      dispatchCommand("plugin_set_enabled", { id: "p3", enabled: true })
+    ).rejects.toThrow(/Required dependency/)
+  })
+
+  it("rejects without an id or non-boolean enabled", async () => {
+    await expect(dispatchCommand("plugin_set_enabled", { enabled: true })).rejects.toThrow(
+      /id is required/
+    )
+    await expect(dispatchCommand("plugin_set_enabled", { id: "p1" })).rejects.toThrow(
+      /must be boolean/
+    )
   })
 })
 
