@@ -103,6 +103,7 @@ function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
     twinId: undefined,
     twinSettings: undefined,
     enableComputerUse: false,
+    enableBrowserTools: false,
     computerUseSettings: undefined,
     sandboxEnabled: false,
     sandboxTier: "inherit",

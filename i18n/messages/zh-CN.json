@@ -13687,6 +13687,11 @@
           "large": "头像图片偏大——使用更小的图片可让角色数据更轻量。",
           "upload": "上传图片"
         },
+        "browserToolsToggle": {
+          "aria": "切换智能体浏览器工具",
+          "description": "允许该角色操作应用内预览浏览器（导航、快照、点击、输入、读取控制台/网络）。仅桌面端可用。",
+          "label": "智能体浏览器工具"
+        },
         "computerUseSubSettings": {
           "allowedToolIds": {
             "description": "限制该角色可使用的已注册原生 Anthropic 工具。全部取消勾选 = 不限制。",

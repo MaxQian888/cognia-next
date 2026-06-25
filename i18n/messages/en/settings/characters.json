@@ -73,6 +73,11 @@
       "large": "Avatar image is large — a smaller image keeps the character data lean.",
       "upload": "Upload image"
     },
+    "browserToolsToggle": {
+      "label": "Agent browser tools",
+      "description": "Let this character drive the in-app preview browser (navigate, snapshot, click, type, read console/network). Desktop only.",
+      "aria": "Toggle agent browser tools"
+    },
     "computerUseSubSettings": {
       "allowedToolIds": {
         "description": "Restrict which registered native Anthropic tools this character can use. Uncheck all to let every registered tool through.",

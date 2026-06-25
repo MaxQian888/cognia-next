@@ -596,6 +596,7 @@ export function CharactersSection() {
             twinId: undefined,
             twinSettings: undefined,
             enableComputerUse: false,
+            enableBrowserTools: false,
             computerUseSettings: undefined,
             computerUseTarget: "local",
             sandboxEnabled: false,
@@ -712,6 +713,7 @@ function CharacterRow({
           twinId: character.twinId,
           twinSettings: character.twinSettings,
           enableComputerUse: Boolean(character.enableComputerUse),
+          enableBrowserTools: Boolean(character.enableBrowserTools),
           computerUseSettings: character.computerUseSettings,
           computerUseTarget:
             character.computerUseTarget && typeof character.computerUseTarget === "object"
@@ -1322,6 +1324,7 @@ export type EditorState = {
   twinId?: string
   twinSettings?: Character["twinSettings"]
   enableComputerUse: boolean
+  enableBrowserTools: boolean
   computerUseSettings?: Character["computerUseSettings"]
   /** ADR-0020 remote-target — `"local"` or a sandbox connection id. */
   computerUseTarget: "local" | string
@@ -1370,6 +1373,7 @@ type EditorOutput = {
   twinId?: string
   twinSettings?: Character["twinSettings"]
   enableComputerUse?: boolean
+  enableBrowserTools?: boolean
   computerUseSettings?: Character["computerUseSettings"]
   computerUseTarget?: Character["computerUseTarget"]
   sandboxEnabled?: boolean
@@ -1514,6 +1518,7 @@ export function CharacterEditor({
         twinId: s.twinId,
         twinSettings: s.twinSettings,
         enableComputerUse: s.enableComputerUse || undefined,
+        enableBrowserTools: s.enableBrowserTools || undefined,
         computerUseSettings: s.computerUseSettings,
         computerUseTarget:
           s.enableComputerUse && s.computerUseTarget && s.computerUseTarget !== "local"
@@ -1815,6 +1820,19 @@ export function CharacterEditor({
             />
           </>
         )}
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <Label className="cursor-pointer text-xs">{t("browserToolsToggle.label")}</Label>
+            <p className="text-[10px] text-muted-foreground">
+              {t("browserToolsToggle.description")}
+            </p>
+          </div>
+          <Switch
+            checked={s.enableBrowserTools}
+            onCheckedChange={(v) => setS({ ...s, enableBrowserTools: v })}
+            aria-label={t("browserToolsToggle.aria")}
+          />
+        </div>
         <div className="flex items-center justify-between gap-3">
           <div className="space-y-0.5">
             <Label className="cursor-pointer text-xs">{tSandbox("enable.label")}</Label>
