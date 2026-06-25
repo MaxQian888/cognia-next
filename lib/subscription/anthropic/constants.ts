@@ -37,7 +37,10 @@ export const OAUTH_ENDPOINTS: Record<AnthropicAuthMode, OAuthEndpointConfig> = {
   subscription: {
     authorizeUrl: "https://claude.ai/oauth/authorize",
     redirectUri: "https://platform.claude.com/oauth/code/callback",
-    scopes: "user:profile user:inference user:sessions:claude_code",
+    // Mirrors the current Claude Code CLI scope set. `user:mcp_servers` was
+    // added upstream for OAuth-backed MCP access; included for parity so the
+    // consent screen matches the official client.
+    scopes: "user:profile user:inference user:sessions:claude_code user:mcp_servers",
   },
   console: {
     authorizeUrl: "https://console.anthropic.com/oauth/authorize",

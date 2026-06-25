@@ -299,10 +299,14 @@ export async function codexOauthRequestDeviceCode(): Promise<DeviceCodeResponse>
   return await transport.call<DeviceCodeResponse>("codex_oauth_request_device_code")
 }
 
-export async function codexOauthPollDeviceCode(deviceCode: string): Promise<PollOutcome> {
+export async function codexOauthPollDeviceCode(
+  deviceCode: string,
+  userCode: string
+): Promise<PollOutcome> {
   const outcome = await transport.call<PollOutcome>("codex_oauth_poll_device_code", {
     ...subscriptionScope(),
     deviceCode,
+    userCode,
   })
   // A granted poll persists the new account Rust-side — that's a mutation.
   if (outcome && "Granted" in outcome) vaultMutated()

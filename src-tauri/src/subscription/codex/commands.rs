@@ -32,9 +32,12 @@ pub async fn codex_oauth_request_device_code() -> Result<DeviceCodeResponse, Str
 pub async fn codex_oauth_poll_device_code(
     local_account_id: String,
     device_code: String,
+    user_code: String,
 ) -> Result<PollOutcome, String> {
     vault::service_name_for_account(&local_account_id)?;
-    oauth::poll_device_code(&device_code).await
+    // codex's deviceauth/token poll keys on BOTH the opaque device_auth_id
+    // (carried as `device_code`) and the displayed `user_code`.
+    oauth::poll_device_code(&device_code, &user_code).await
 }
 
 #[tauri::command]

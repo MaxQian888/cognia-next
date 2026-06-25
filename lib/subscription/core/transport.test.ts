@@ -263,7 +263,7 @@ describe("subscription core transport", () => {
     [
       "codexOauthPollDeviceCode",
       "codex_oauth_poll_device_code",
-      () => codexOauthPollDeviceCode("dc-1"),
+      () => codexOauthPollDeviceCode("dc-1", "CODE-1"),
     ],
     ["codexOauthRefresh", "codex_oauth_refresh", () => codexOauthRefresh("rt-1")],
     ["codexOauthRevoke", "codex_oauth_revoke", () => codexOauthRevoke("tok")],
@@ -275,12 +275,13 @@ describe("subscription core transport", () => {
     expect(mockedCall.mock.calls[0][0]).toBe(command)
   })
 
-  it("codexOauthPollDeviceCode forwards camelCase deviceCode", async () => {
+  it("codexOauthPollDeviceCode forwards device_auth_id + user_code", async () => {
     mockedCall.mockResolvedValueOnce({ Pending: { error: "authorization_pending" } })
-    await codexOauthPollDeviceCode("device-code-x")
+    await codexOauthPollDeviceCode("device-code-x", "CODE-9")
     expect(mockedCall).toHaveBeenCalledWith("codex_oauth_poll_device_code", {
       localAccountId: "local_acct_a",
       deviceCode: "device-code-x",
+      userCode: "CODE-9",
     })
   })
 

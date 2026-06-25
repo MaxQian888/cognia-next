@@ -60,13 +60,14 @@ describe("oauth IPC wrappers", () => {
     expect(got).toEqual(deviceCode)
   })
 
-  it("pollCodexDeviceCode forwards camelCase deviceCode", async () => {
+  it("pollCodexDeviceCode forwards device_auth_id + user_code", async () => {
     const outcome: PollOutcome = { Granted: tokenResponse }
     ;(transport.call as jest.Mock).mockResolvedValueOnce(outcome)
-    const got = await pollCodexDeviceCode("dc-test")
+    const got = await pollCodexDeviceCode("dc-test", "CODE-1234")
     expect(transport.call).toHaveBeenCalledWith("codex_oauth_poll_device_code", {
       localAccountId: "local_acct_a",
       deviceCode: "dc-test",
+      userCode: "CODE-1234",
     })
     expect(got).toEqual(outcome)
   })

@@ -30,11 +30,21 @@ describe("moonshotBalanceAdapter", () => {
     expect(req.headers.Authorization).toBe("Bearer sk-moon-test")
   })
 
-  it("parses available_balance as remaining", () => {
+  it("parses available_balance as remaining (CNY for the .cn console)", () => {
     const snap = a.parse(200, FIXTURE, Q)
     expect(snap.kind).toBe("credit")
     expect(snap.remaining).toBeCloseTo(49.58894)
     expect(snap.currency).toBe("CNY")
+    expect(snap.unit).toBe("CNY")
+  })
+
+  it("tags USD for the international .ai / kimi.ai host", () => {
+    const aiQ: BalanceQuery = { ...Q, baseUrl: "https://api.moonshot.ai/v1" }
+    const snap = a.parse(200, FIXTURE, aiQ)
+    expect(snap.currency).toBe("USD")
+    expect(snap.unit).toBe("USD")
+    const kimiQ: BalanceQuery = { ...Q, baseUrl: "https://platform.kimi.ai/v1" }
+    expect(a.parse(200, FIXTURE, kimiQ).currency).toBe("USD")
   })
 
   it("errors on non-2xx and missing data", () => {

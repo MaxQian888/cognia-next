@@ -1,13 +1,19 @@
 // OpenRouter balance adapter.
 //
-// Verified endpoint (2026-06): GET https://openrouter.ai/api/v1/credits with
+// Verified endpoint (2026-06): GET https://openrouter.ai/api/v1/key with
 // `Authorization: Bearer <token>` →
-//   { data: { total_credits, total_usage } }   (both in USD)
-// Remaining = total_credits - total_usage.
-// Docs: https://openrouter.ai/docs/api/api-reference/credits/get-credits
+//   { data: { usage, limit, limit_remaining, is_free_tier, ... } }  (USD credits)
+// Docs: https://openrouter.ai/docs/api/reference/limits
+//
+// We deliberately use `/key`, NOT `/credits`: the `/credits` endpoint requires a
+// *management/provisioning* key, so it 401s for the ordinary inference key our
+// presets store. `/key` is the per-key endpoint that works with the inference
+// key and reports that key's `usage` (spent) + `limit` / `limit_remaining`.
+// `limit` and `limit_remaining` are `null` when the key has no cap (then we can
+// only surface `used`).
 //
 // The configured preset baseUrl is already "https://openrouter.ai/api/v1", so
-// `${baseUrl}/credits` is the documented path.
+// `${baseUrl}/key` is the path.
 
 import type {
   BalanceAdapter,
@@ -27,7 +33,7 @@ export const openrouterBalanceAdapter: BalanceAdapter = {
   },
 
   request(q: BalanceQuery): BalanceRequestDescriptor {
-    return { url: `${trimBase(q.baseUrl)}/credits`, headers: bearer(q.token) }
+    return { url: `${trimBase(q.baseUrl)}/key`, headers: bearer(q.token) }
   },
 
   parse(status: number, body: string, q: BalanceQuery): BalanceSnapshot {
@@ -40,9 +46,11 @@ export const openrouterBalanceAdapter: BalanceAdapter = {
       return errorSnapshot(q, "credit", "no data", obj)
     }
     const d = data as Record<string, unknown>
-    const total = toNum(d.total_credits)
-    const used = toNum(d.total_usage)
-    const remaining = total != null && used != null ? total - used : undefined
+    // `usage` = credits spent; `limit` = cap (null/absent = uncapped);
+    // `limit_remaining` = remaining under the cap (null/absent = uncapped).
+    const used = toNum(d.usage)
+    const total = toNum(d.limit)
+    const remaining = toNum(d.limit_remaining)
     return {
       fetchedAt: Date.now(),
       providerKey: q.providerKey,

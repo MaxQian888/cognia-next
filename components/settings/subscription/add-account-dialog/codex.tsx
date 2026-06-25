@@ -345,7 +345,7 @@ function OAuthPanel({ onCompleted }: { onCompleted: (response: TokenResponse) =>
         return
       }
       try {
-        const outcome = await pollCodexDeviceCode(res.device_code)
+        const outcome = await pollCodexDeviceCode(res.device_code, res.user_code)
         if (cancelledRef.current) return
         if (pollOutcomeKind(outcome) === "granted") {
           setStep("exchanging")
