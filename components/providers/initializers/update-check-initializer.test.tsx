@@ -8,14 +8,23 @@ const isTauriMock = jest.fn<boolean, []>(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
 const checkForUpdateMock = jest.fn()
-jest.mock("@/lib/tauri/updater", () => ({ checkForUpdate: () => checkForUpdateMock() }))
+const downloadAndInstallMock = jest.fn()
+jest.mock("@/lib/tauri/updater", () => ({
+  checkForUpdate: () => checkForUpdateMock(),
+  downloadAndInstallUpdate: (...a: unknown[]) => downloadAndInstallMock(...a),
+}))
 
 jest.mock("@/lib/logging", () => ({
-  loggers: { app: { info: jest.fn(), warn: jest.fn(), debug: jest.fn() } },
+  loggers: { app: { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() } },
 }))
 
 jest.mock("sonner", () => ({
-  toast: { success: jest.fn(), error: jest.fn() },
+  toast: {
+    success: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+    loading: jest.fn(() => "toast-id"),
+  },
 }))
 
 jest.mock("next-intl", () => ({
@@ -28,18 +37,19 @@ jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (s: typeof settingsState) => unknown) => selector(settingsState),
 }))
 
-const requestOpenSettingsMock = jest.fn()
-jest.mock("@/stores/ui/ui-store", () => ({
-  useUIStore: { getState: () => ({ requestOpenSettings: requestOpenSettingsMock }) },
-}))
-
 import { toast } from "sonner"
 import { loggers } from "@/lib/logging"
 import { UpdateCheckInitializer } from "./update-check-initializer"
 
-const toastMock = toast as unknown as { success: jest.Mock; error: jest.Mock }
+const toastMock = toast as unknown as {
+  success: jest.Mock
+  error: jest.Mock
+  info: jest.Mock
+  loading: jest.Mock
+}
 const warnMock = (loggers.app as unknown as { warn: jest.Mock }).warn
 const debugMock = (loggers.app as unknown as { debug: jest.Mock }).debug
+const errorMock = (loggers.app as unknown as { error: jest.Mock }).error
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -75,8 +85,9 @@ describe("UpdateCheckInitializer", () => {
     await waitFor(() => expect(checkForUpdateMock).toHaveBeenCalled())
   })
 
-  it("toasts an available update with a go-install action", async () => {
+  it("toasts an available update whose action installs in one click", async () => {
     checkForUpdateMock.mockResolvedValue({ version: "9.9.9", body: "Notes" })
+    downloadAndInstallMock.mockResolvedValue("installed")
     render(<UpdateCheckInitializer />)
     await waitFor(() =>
       expect(toastMock.success).toHaveBeenCalledWith(
@@ -87,8 +98,45 @@ describe("UpdateCheckInitializer", () => {
     const opts = toastMock.success.mock.calls[0][1] as {
       action: { onClick: () => void }
     }
-    opts.action.onClick()
-    expect(requestOpenSettingsMock).toHaveBeenCalledWith("about")
+    await act(async () => {
+      opts.action.onClick()
+      await Promise.resolve()
+    })
+    expect(toastMock.loading).toHaveBeenCalledWith("installing")
+    expect(downloadAndInstallMock).toHaveBeenCalled()
+  })
+
+  it("surfaces a background install failure via an error toast + log", async () => {
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    downloadAndInstallMock.mockRejectedValue(new Error("disk full"))
+    render(<UpdateCheckInitializer />)
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled())
+    const opts = toastMock.success.mock.calls[0][1] as { action: { onClick: () => void } }
+    await act(async () => {
+      opts.action.onClick()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith('updateInstallFailed:{"error":"disk full"}', {
+        id: "toast-id",
+      })
+    )
+    expect(errorMock).toHaveBeenCalledWith("about.autoUpdateInstallFailed", expect.any(Error))
+  })
+
+  it("reports when the update vanished before the background install", async () => {
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    downloadAndInstallMock.mockResolvedValue("noLongerAvailable")
+    render(<UpdateCheckInitializer />)
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled())
+    const opts = toastMock.success.mock.calls[0][1] as { action: { onClick: () => void } }
+    await act(async () => {
+      opts.action.onClick()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(toastMock.info).toHaveBeenCalledWith("updateNoLongerAvailable", { id: "toast-id" })
+    )
   })
 
   it("stays silent when already current", async () => {

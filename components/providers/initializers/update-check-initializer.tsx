@@ -2,20 +2,20 @@
 
 // Boot-time (and periodic) background self-update check for the desktop shell.
 // Gated on `settings.updates.autoCheck` (default on). Surfaces a single Sonner
-// toast with a "go install" action that opens Settings → About, where
-// `UpdateCard` owns the actual download + relaunch — this initializer never
-// auto-installs. No-op off the Tauri desktop shell or when the toggle is off.
-// Mirrors the other boot initializers in this directory.
+// toast whose "Install" action downloads + relaunches in place (reusing the
+// handle the check just cached) — one click, no detour through Settings. The
+// check never auto-installs; the install is always user-initiated. No-op off
+// the Tauri desktop shell or when the toggle is off. Mirrors the other boot
+// initializers in this directory.
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { isTauri } from "@/lib/tauri"
-import { checkForUpdate } from "@/lib/tauri/updater"
+import { checkForUpdate, downloadAndInstallUpdate } from "@/lib/tauri/updater"
 import { loggers } from "@/lib/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { useUIStore } from "@/stores/ui/ui-store"
 
 /** Re-check every 6 hours so long-running desktop sessions still notice. */
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
@@ -47,6 +47,25 @@ export function UpdateCheckInitializer() {
     if (!isTauri() || !autoCheck) return
 
     let cancelled = false
+
+    // One-click install from the toast action: download + relaunch in place.
+    // The handle was cached by the preceding `checkForUpdate`, so this does not
+    // re-hit the network on the happy path.
+    const install = async () => {
+      const toastId = toast.loading(t("installing"))
+      try {
+        const result = await downloadAndInstallUpdate()
+        if (result === "noLongerAvailable") {
+          toast.info(t("updateNoLongerAvailable"), { id: toastId })
+        }
+        // "installed" relaunches the app; "web" can't happen on the desktop path.
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err)
+        loggers.app.error("about.autoUpdateInstallFailed", err)
+        toast.error(t("updateInstallFailed", { error }), { id: toastId })
+      }
+    }
+
     const run = async () => {
       try {
         const update = await checkForUpdate()
@@ -60,7 +79,7 @@ export function UpdateCheckInitializer() {
         toast.success(t("updateAvailableBackground", { version: update.version }), {
           action: {
             label: t("goInstallAction"),
-            onClick: () => useUIStore.getState().requestOpenSettings("about"),
+            onClick: () => void install(),
           },
         })
       } catch (err) {

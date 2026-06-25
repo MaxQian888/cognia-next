@@ -9,10 +9,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Progress } from "@/components/ui/progress"
 import { Switch } from "@/components/ui/switch"
 import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
-import { checkForUpdate, downloadAndInstallUpdate, type AvailableUpdate } from "@/lib/tauri/updater"
+import {
+  checkForUpdate,
+  downloadAndInstallUpdate,
+  type AvailableUpdate,
+  type UpdateProgress,
+} from "@/lib/tauri/updater"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { InfoRow } from "./info-row"
@@ -28,6 +34,8 @@ export function UpdateCard() {
   const [checking, setChecking] = useState(false)
   const [available, setAvailable] = useState<AvailableUpdate | null>(null)
   const [lastChecked, setLastChecked] = useState<string | null>(null)
+  const [installing, setInstalling] = useState(false)
+  const [progress, setProgress] = useState<UpdateProgress | null>(null)
 
   const autoCheck = useSettingsStore((s) => s.settings?.updates?.autoCheck ?? true)
   const save = useSettingsStore((s) => s.save)
@@ -62,22 +70,35 @@ export function UpdateCard() {
   }
 
   const handleInstall = async () => {
-    if (!desktop || !available) return
+    if (!desktop || !available || installing) return
+    setInstalling(true)
+    setProgress(null)
     try {
       loggers.app.info("about.updateInstall", { status: "starting", version: available.version })
-      const result = await downloadAndInstallUpdate()
+      const result = await downloadAndInstallUpdate(setProgress)
       if (result === "noLongerAvailable") {
         loggers.app.info("about.updateInstall", { status: "noLongerAvailable" })
         toast.info(t("updates.updateNoLongerAvailable"))
+        setAvailable(null)
         return
       }
+      // "installed" relaunches the app, so the UI is torn down — leave the
+      // installing state in place rather than flashing the button back.
       loggers.app.info("about.updateInstall", { status: "installed", version: available.version })
     } catch (err) {
       const errorText = err instanceof Error ? err.message : String(err)
       loggers.app.error("about.updateInstallFailed", err)
       toast.error(t("updates.updateInstallFailed", { error: errorText }))
+      setInstalling(false)
+      setProgress(null)
     }
   }
+
+  // Determinate percent when the server sent a Content-Length, else null.
+  const percent =
+    progress && progress.total
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : null
 
   return (
     <Card data-testid="about-update-card">
@@ -98,17 +119,39 @@ export function UpdateCard() {
         )}
 
         <div className="mt-2 flex flex-wrap gap-2">
-          <Button onClick={handleCheck} disabled={checking || !desktop} data-testid="check-updates">
+          <Button
+            onClick={handleCheck}
+            disabled={checking || installing || !desktop}
+            data-testid="check-updates"
+          >
             <RefreshCwIcon className={`mr-2 size-4 ${checking ? "animate-spin" : ""}`} />
             {checking ? t("updates.checking") : t("updates.checkUpdates")}
           </Button>
           {available && (
-            <Button variant="default" onClick={handleInstall} data-testid="install-update">
-              <DownloadIcon className="mr-2 size-4" />
-              {t("updates.install", { version: available.version })}
+            <Button
+              variant="default"
+              onClick={handleInstall}
+              disabled={installing}
+              data-testid="install-update"
+            >
+              <DownloadIcon className={`mr-2 size-4 ${installing ? "animate-pulse" : ""}`} />
+              {installing
+                ? t("updates.installing")
+                : t("updates.install", { version: available.version })}
             </Button>
           )}
         </div>
+
+        {installing && (
+          <div className="mt-3 space-y-1.5" data-testid="install-progress">
+            <Progress value={percent ?? 0} aria-label={t("updates.installing")} />
+            <p className="text-xs text-muted-foreground">
+              {percent !== null
+                ? t("updates.downloadingPercent", { percent })
+                : t("updates.installing")}
+            </p>
+          </div>
+        )}
 
         {available && (
           <Alert className="mt-3" data-testid="update-alert">
