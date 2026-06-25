@@ -18,6 +18,7 @@ describe("browser-builtin-registry", () => {
       "cognia-anthropic-skills",
       "cognia-appearance-demo",
       "cognia-backend-refactor",
+      "cognia-browser-tools",
       "cognia-builtin-characters",
       "cognia-clipboard-history",
       "cognia-clipboard-tools",

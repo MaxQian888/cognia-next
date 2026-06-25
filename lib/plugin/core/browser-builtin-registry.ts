@@ -32,6 +32,7 @@ import playwrightMcpManifest from "@/plugins/playwright-mcp/plugin.json"
 import stagehandMcpManifest from "@/plugins/stagehand-mcp/plugin.json"
 import ripgrepToolsManifest from "@/plugins/ripgrep-tools/plugin.json"
 import skillRecorderManifest from "@/plugins/skill-recorder/plugin.json"
+import browserToolsManifest from "@/plugins/browser-tools/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -62,6 +63,7 @@ import playwrightMcpModule from "@/plugins/playwright-mcp/src/index"
 import stagehandMcpModule from "@/plugins/stagehand-mcp/src/index"
 import ripgrepToolsModule from "@/plugins/ripgrep-tools/src/index"
 import skillRecorderModule from "@/plugins/skill-recorder/src/index"
+import browserToolsModule from "@/plugins/browser-tools/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -302,6 +304,19 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-skill-recorder",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(skillRecorderModule),
+  },
+  {
+    // ADR-0038 — agent browser loop over the embedded preview webview
+    // (browser_navigate / browser_snapshot / browser_click|type|fill_form|
+    // select|hover / browser_read_console|network / browser_get_page). It is
+    // `browser: blocked` (drives the Tauri browser_embed_* commands), but must
+    // still be DISCOVERED here like computer-use / skill-recorder, or the whole
+    // agent browser surface stays dormant; the compatibility policy gates it at
+    // enable time, not discovery.
+    manifest: builtinManifest(browserToolsManifest, browserToolsModule),
+    path: "builtin://cognia-browser-tools",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(browserToolsModule),
   },
 ]
 
