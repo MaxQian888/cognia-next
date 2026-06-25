@@ -69,7 +69,9 @@ export function EffortSelector({ session, disabled, className }: EffortSelectorP
 
   const handleSelect = (next: EffortValue | undefined) => {
     setOptimistic({ value: next })
-    void updateSession(session.id, { effort: next })
+    // Revert the optimistic label if the write doesn't land, so the trigger
+    // never shows an effort level the session didn't actually persist.
+    void updateSession(session.id, { effort: next }).catch(() => setOptimistic(null))
   }
 
   return (

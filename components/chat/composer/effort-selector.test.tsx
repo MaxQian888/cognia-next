@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { EffortSelector } from "./effort-selector"
 import type { ChatSession } from "@/lib/claude/types"
@@ -136,6 +136,17 @@ describe("EffortSelector", () => {
   it("disables the trigger while streaming", () => {
     renderSelector(capableSession, true)
     expect(screen.getByRole("button")).toBeDisabled()
+  })
+
+  it("reverts the optimistic label when the persist fails", async () => {
+    mockedUpdateSession.mockRejectedValueOnce(new Error("write failed"))
+    renderSelector(capableSession) // persisted effort: "high"
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "max" }))
+    // Optimistic label flips to "max" synchronously…
+    expect(screen.getByRole("button").textContent).toContain("max")
+    // …then reverts to the persisted "high" once the rejection settles, so the
+    // trigger never misrepresents an effort the DB didn't store.
+    await waitFor(() => expect(screen.getByRole("button").textContent).toContain("high"))
   })
 
   it("clears the optimistic overlay when the session changes", () => {
