@@ -863,6 +863,7 @@ pub fn run() {
             browser::embedded::browser_embed_stop,
             browser::embedded::browser_embed_get_url,
             browser::embedded::browser_embed_get_title,
+            browser::embedded::browser_embed_has_text,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,

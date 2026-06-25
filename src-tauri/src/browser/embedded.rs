@@ -307,6 +307,24 @@ pub async fn browser_embed_stop(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// Whether the embedded page's visible text currently contains `text`.
+/// (`__cogniaHasText` returns a boolean; `eval_with_callback` serializes it to
+/// the JSON literal `true`/`false`.)
+#[tauri::command]
+pub async fn browser_embed_has_text(app: AppHandle, text: String) -> Result<bool, String> {
+    #[cfg(desktop)]
+    {
+        let call = format!("window.__cogniaHasText({})", js_string(&text)?);
+        let raw = eval_embed_with_result(&app, &call).await?;
+        Ok(raw.trim() == "true")
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, text);
+        Err("desktop only".to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn browser_embed_get_url(app: AppHandle) -> Result<String, String> {
     #[cfg(desktop)]

@@ -64,6 +64,8 @@ export const browserClient = {
   embedStop: () => transport.call<void>("browser_embed_stop", {}),
   embedGetUrl: () => transport.call<string>("browser_embed_get_url", {}),
   embedGetTitle: () => transport.call<string>("browser_embed_get_title", {}),
+  /** Whether the embedded page's visible text currently contains `text`. */
+  embedHasText: (text: string) => transport.call<boolean>("browser_embed_has_text", { text }),
 }
 
 export type BrowserClient = typeof browserClient

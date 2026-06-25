@@ -30,6 +30,19 @@ export interface BrowserEngine {
   reload(): Promise<void>
   stop(): Promise<void>
   getPage(): Promise<{ url: string; title: string }>
+  waitForText(text: string, opts?: WaitForOptions): Promise<WaitForResult>
+}
+
+export interface WaitForOptions {
+  /** Wait for the text to appear (default) or disappear. */
+  mode?: "appear" | "disappear"
+  timeoutMs?: number
+  intervalMs?: number
+}
+
+export interface WaitForResult {
+  ok: boolean
+  timedOut: boolean
 }
 
 /** Drives the in-app embedded webview via the Tauri `browser_embed_*` commands. */
@@ -73,6 +86,20 @@ export class EmbeddedEngine implements BrowserEngine {
       browserClient.embedGetTitle(),
     ])
     return { url, title }
+  }
+  async waitForText(text: string, opts: WaitForOptions = {}): Promise<WaitForResult> {
+    const mode = opts.mode ?? "appear"
+    const timeoutMs = opts.timeoutMs ?? 5000
+    const intervalMs = opts.intervalMs ?? 200
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const has = await browserClient.embedHasText(text)
+      if ((mode === "appear" && has) || (mode === "disappear" && !has)) {
+        return { ok: true, timedOut: false }
+      }
+      if (Date.now() >= deadline) return { ok: false, timedOut: true }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
   }
 }
 

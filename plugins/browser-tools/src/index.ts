@@ -50,7 +50,7 @@ const definition: PluginDefinition = {
         id: "browser-tools:availability",
         name: "Browser tools availability",
         provide: () =>
-          "Browser tools are available for the in-app preview: browser_navigate, browser_snapshot (a11y tree with refs), browser_click/type/fill_form/select/hover (target by ref), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot.",
+          "Browser tools are available for the in-app preview: browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs), browser_click/type/fill_form/select/hover (target by ref), browser_wait_for (wait for text to appear/disappear), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot.",
       })
     )
 
@@ -171,6 +171,37 @@ const definition: PluginDefinition = {
     )
     navTool("browser_reload", "Reload the preview; returns a fresh snapshot.", (e) => e.reload())
     navTool("browser_stop", "Stop the preview's current load.", (e) => e.stop())
+
+    reg({
+      name: "browser_wait_for",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "browser_wait_for",
+        description:
+          "Wait until the preview's visible text contains `text` (mode 'appear', default) or no longer contains it ('disappear'), up to `timeoutMs`. Returns the wait result plus a fresh snapshot.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            mode: { type: "string", enum: ["appear", "disappear"] },
+            timeoutMs: { type: "number" },
+          },
+          required: ["text"],
+        },
+      },
+      execute: async (args) => {
+        const a = (args ?? {}) as {
+          text?: string
+          mode?: "appear" | "disappear"
+          timeoutMs?: number
+        }
+        const result = await engineFor().engine.waitForText(String(a.text ?? ""), {
+          mode: a.mode,
+          timeoutMs: a.timeoutMs,
+        })
+        return withSnapshot({ result })
+      },
+    })
 
     reg({
       name: "browser_read_console",

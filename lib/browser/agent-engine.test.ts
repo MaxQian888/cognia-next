@@ -11,6 +11,7 @@ jest.mock("@/lib/browser/client", () => ({
     embedStop: jest.fn(async () => {}),
     embedGetUrl: jest.fn(async () => "http://localhost/"),
     embedGetTitle: jest.fn(async () => "Home"),
+    embedHasText: jest.fn(async () => true),
   },
 }))
 
@@ -70,5 +71,39 @@ describe("EmbeddedEngine", () => {
     expect(mockClient.embedForward).toHaveBeenCalled()
     expect(mockClient.embedReload).toHaveBeenCalled()
     expect(mockClient.embedStop).toHaveBeenCalled()
+  })
+})
+
+describe("EmbeddedEngine.waitForText", () => {
+  it("resolves immediately when the text is already present (appear)", async () => {
+    mockClient.embedHasText.mockResolvedValueOnce(true)
+    const res = await new EmbeddedEngine().waitForText("done", { timeoutMs: 1000 })
+    expect(res).toEqual({ ok: true, timedOut: false })
+    expect(mockClient.embedHasText).toHaveBeenCalledWith("done")
+  })
+
+  it("resolves when the text is absent (disappear)", async () => {
+    mockClient.embedHasText.mockResolvedValueOnce(false)
+    const res = await new EmbeddedEngine().waitForText("spinner", {
+      mode: "disappear",
+      timeoutMs: 1000,
+    })
+    expect(res.ok).toBe(true)
+  })
+
+  it("times out when the condition is never met", async () => {
+    mockClient.embedHasText.mockResolvedValue(false)
+    const res = await new EmbeddedEngine().waitForText("never", { timeoutMs: 0 })
+    expect(res).toEqual({ ok: false, timedOut: true })
+  })
+
+  it("polls until the text appears", async () => {
+    jest.useFakeTimers()
+    mockClient.embedHasText.mockResolvedValueOnce(false).mockResolvedValue(true)
+    const p = new EmbeddedEngine().waitForText("ready", { intervalMs: 100, timeoutMs: 1000 })
+    await jest.advanceTimersByTimeAsync(100)
+    const res = await p
+    expect(res.ok).toBe(true)
+    jest.useRealTimers()
   })
 })

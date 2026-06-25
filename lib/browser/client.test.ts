@@ -113,4 +113,10 @@ describe("browserClient agent methods", () => {
     expect(await browserClient.embedGetUrl()).toBe("http://localhost/")
     expect(await browserClient.embedGetTitle()).toBe("Home")
   })
+
+  it("embedHasText forwards the text and returns the boolean", async () => {
+    call.mockResolvedValueOnce(true)
+    expect(await browserClient.embedHasText("Loaded")).toBe(true)
+    expect(call).toHaveBeenCalledWith("browser_embed_has_text", { text: "Loaded" })
+  })
 })

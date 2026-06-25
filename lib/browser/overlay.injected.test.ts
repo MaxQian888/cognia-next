@@ -130,7 +130,12 @@ type Win = Record<string, unknown> & {
   __cogniaAct: (ref: string, action: string, argsJson: string) => string
   __cogniaDrainConsole: () => string
   __cogniaDrainNetwork: () => string
-  __cogniaOverlay: { resolveRef: (ref: string) => unknown; installNetworkHook: () => void }
+  __cogniaHasText: (text: string) => boolean
+  __cogniaOverlay: {
+    resolveRef: (ref: string) => unknown
+    installNetworkHook: () => void
+    hasText: (text: string) => boolean
+  }
 }
 
 function win(): Win {
@@ -213,6 +218,13 @@ describe("console + network capture", () => {
     expect(last.text).toContain("boom")
     expect(JSON.parse(win().__cogniaDrainConsole())).toHaveLength(0)
   })
+  it("detects visible page text via __cogniaHasText", () => {
+    document.body.innerHTML = `<p>Loading complete</p>`
+    install()
+    expect(win().__cogniaHasText("Loading complete")).toBe(true)
+    expect(win().__cogniaHasText("nope")).toBe(false)
+  })
+
   it("records a fetch call", async () => {
     ;(window as unknown as { fetch: unknown }).fetch = () =>
       Promise.resolve({ status: 200, ok: true })

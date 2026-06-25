@@ -15,6 +15,7 @@ jest.mock("@/lib/browser/agent-engine", () => {
     forward: jest.fn(async () => {}),
     reload: jest.fn(async () => {}),
     stop: jest.fn(async () => {}),
+    waitForText: jest.fn(async () => ({ ok: true, timedOut: false })),
   }
   return {
     __engine: engine,
@@ -134,6 +135,21 @@ describe("browser-tools plugin", () => {
     expect(engine.forward).toHaveBeenCalled()
     expect(engine.reload).toHaveBeenCalled()
     expect(engine.stop).toHaveBeenCalled()
+  })
+
+  it("browser_wait_for forwards text/mode/timeout and returns result + snapshot", async () => {
+    const tools = await collectTools()
+    const res = (await tools.browser_wait_for({
+      text: "Done",
+      mode: "appear",
+      timeoutMs: 1000,
+    })) as {
+      result: { ok: boolean }
+      snapshot: { generation: number }
+    }
+    expect(engine.waitForText).toHaveBeenCalledWith("Done", { mode: "appear", timeoutMs: 1000 })
+    expect(res.result.ok).toBe(true)
+    expect(res.snapshot.generation).toBe(3)
   })
 
   it("browser_read_network and browser_get_page delegate", async () => {
