@@ -58,4 +58,14 @@ describe("EmbeddedEngine", () => {
     expect(mockClient.embedReadConsole).toHaveBeenCalled()
     expect(mockClient.embedReadNetwork).toHaveBeenCalled()
   })
+
+  it("back/forward/stop/reload delegate to browserClient", async () => {
+    const e = new EmbeddedEngine()
+    await e.back()
+    await e.forward()
+    await e.reload()
+    expect(mockClient.embedBack).toHaveBeenCalled()
+    expect(mockClient.embedForward).toHaveBeenCalled()
+    expect(mockClient.embedReload).toHaveBeenCalled()
+  })
 })

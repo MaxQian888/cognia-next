@@ -20,4 +20,12 @@ describe("agent-activity bus", () => {
     emitAgentActivity("click e2")
     expect(seen).toEqual([])
   })
+
+  it("ignores events without a detail payload", () => {
+    const seen: string[] = []
+    const off = onAgentActivity((a) => seen.push(a.action))
+    window.dispatchEvent(new Event("cognia:browser-agent-activity"))
+    expect(seen).toEqual([])
+    off()
+  })
 })

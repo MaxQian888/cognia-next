@@ -100,4 +100,58 @@ describe("browser-tools plugin", () => {
     const res = (await tools.browser_read_console({})) as { entries: unknown[] }
     expect(res.entries).toHaveLength(1)
   })
+
+  it("browser_snapshot returns the raw snapshot", async () => {
+    const tools = await collectTools()
+    const snap = (await tools.browser_snapshot({})) as { generation: number }
+    expect(snap.generation).toBe(3)
+    expect(engine.snapshot).toHaveBeenCalled()
+  })
+
+  it("browser_type / browser_select / browser_hover forward their args", async () => {
+    const tools = await collectTools()
+    await tools.browser_type({ ref: "e1", text: "hi" })
+    await tools.browser_select({ ref: "e2", value: "v" })
+    await tools.browser_hover({ ref: "e3" })
+    expect(engine.act).toHaveBeenNthCalledWith(1, "e1", "type", { text: "hi" })
+    expect(engine.act).toHaveBeenNthCalledWith(2, "e2", "select", { value: "v" })
+    expect(engine.act).toHaveBeenNthCalledWith(3, "e3", "hover", {})
+  })
+
+  it("browser_read_network and browser_get_page delegate", async () => {
+    const tools = await collectTools()
+    const net = (await tools.browser_read_network({})) as { entries: unknown[] }
+    expect(net.entries).toEqual([])
+    const page = (await tools.browser_get_page({})) as { url: string; title: string }
+    expect(page).toEqual({ url: "http://localhost/", title: "t" })
+  })
+
+  it("ignores activation when the host exposes no registerTool", async () => {
+    const ctx = { pluginId: "cognia-browser-tools", logger: { info: jest.fn() }, agent: {} }
+    await expect(definition.activate!(ctx as never)).resolves.toBeUndefined()
+  })
+
+  it("registers an availability context provider and deactivates cleanly", async () => {
+    const providers: Array<{ provide: () => string }> = []
+    const ctx = {
+      pluginId: "cognia-browser-tools",
+      logger: { info: jest.fn() },
+      agent: {
+        registerTool: jest.fn(),
+        context: { registerProvider: (p: { provide: () => string }) => providers.push(p) },
+      },
+    }
+    await definition.activate!(ctx as never)
+    expect(providers).toHaveLength(1)
+    expect(providers[0].provide()).toMatch(/browser_snapshot/)
+    await expect(definition.deactivate!({} as never)).resolves.toBeUndefined()
+  })
+
+  it("defaults missing args (no url, no ref) to empty values", async () => {
+    const tools = await collectTools()
+    await tools.browser_navigate({})
+    expect(engine.navigate).toHaveBeenCalledWith("")
+    await tools.browser_click(undefined)
+    expect(engine.act).toHaveBeenCalledWith("", "click", {})
+  })
 })
