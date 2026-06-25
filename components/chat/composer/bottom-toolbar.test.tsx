@@ -56,6 +56,12 @@ jest.mock("./web-search-toggle", () => ({
     return <div data-testid="web-search-toggle" />
   },
 }))
+jest.mock("./effort-selector", () => ({
+  EffortSelector: (props: Record<string, unknown>) => {
+    Object.assign(lastSelectorProps, props)
+    return <div data-testid="effort-selector" />
+  },
+}))
 // EnhanceButton needs the composer controller context; stub it (and the
 // controller hook) so these prop-branching tests don't require a provider.
 jest.mock("./enhance-button", () => ({
@@ -174,8 +180,15 @@ describe("BottomToolbar — session-kind branching", () => {
   it("renders the generic toolbar for a direct session", () => {
     render(<BottomToolbar session={session} />)
     expect(screen.queryByTestId("workflow-bottom-toolbar")).toBeNull()
-    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    // Mode + web-search stay on the primary row; Runtime is overflow-by-default.
+    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
     expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+  })
+
+  it("renders the effort selector inline in Tier 1 for a direct session", () => {
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("effort-selector")).toBeInTheDocument()
   })
 
   // Regression: the row must wrap instead of pinning both ends with
@@ -190,12 +203,16 @@ describe("BottomToolbar — session-kind branching", () => {
 })
 
 describe("BottomToolbar — narrow-width More menu", () => {
-  it("keeps Tier 2/3 inline when the toolbar is wide", () => {
+  it("keeps Tier 2/3 inline when the toolbar is wide, with Runtime in the More menu", () => {
     mockToolbarWidth = 600
     render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
+    // Runtime is overflow-by-default even when wide — not inline until More opens.
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    const more = screen.getByTestId("composer-toolbar-more")
+    fireEvent.click(more)
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
-    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
   })
 
   it("collapses Tier 2/3 into a More menu below the compact threshold", () => {
@@ -211,6 +228,12 @@ describe("BottomToolbar — narrow-width More menu", () => {
     fireEvent.click(more)
     expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+  })
+
+  it("keeps the effort selector inline (Tier 1) below the compact threshold", () => {
+    mockToolbarWidth = 300
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("effort-selector")).toBeInTheDocument()
   })
 })
 

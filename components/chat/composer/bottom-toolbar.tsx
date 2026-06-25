@@ -12,6 +12,8 @@ import { MoreHorizontalIcon, SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useElementWidth } from "@/hooks/use-element-width"
+import { usePlatform } from "@/hooks/use-platform"
+import { cn } from "@/lib/utils"
 import { SkillPicker } from "@/components/chat/skill-picker"
 import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
 import { useSdkContextUsage } from "@/hooks/chat/use-sdk-context-usage"
@@ -21,6 +23,7 @@ import type { ChatSession } from "@/lib/claude/types"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { WebSearchToggle } from "./web-search-toggle"
 import { ModelPicker } from "./model-picker"
+import { EffortSelector } from "./effort-selector"
 import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { AgentModeSelector } from "@/components/agent/mode/mode-selector"
@@ -60,6 +63,8 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const toolbarWidth = useElementWidth(rootRef)
+  // Capacitor native shell only — desktop keeps the compact 28px controls.
+  const isMobile = usePlatform() === "mobile"
   const tSkill = useTranslations("skills.composer.skillPicker")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
@@ -129,16 +134,19 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
         onClick={() => setPickerOpen(true)}
         aria-label={tSkill("trigger")}
         disabled={isStreaming}
-        className="size-7"
+        className={cn("size-7", isMobile && "touch-target")}
       >
         <SparklesIcon className="size-3.5" />
       </Button>
     </>
   )
 
+  // Runtime is overflow-by-default: most sessions stay on `claude-sdk`, so the
+  // runtime switch lives in the "⋯ More" menu rather than the primary row.
+  const runtimeControl = <AgentRuntimeSelector disabled={isStreaming} />
+
   const tier3 = (
     <>
-      <AgentRuntimeSelector disabled={isStreaming} />
       {runtime === "claude-sdk" && (
         <AgentModeSelector
           selectedModeId={modeId}
@@ -186,6 +194,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <ModelPicker session={session} disabled={isStreaming} />
+        <EffortSelector session={session} disabled={isStreaming} />
         <PermissionModeIndicator
           onCycle={(next) => setPermissionMode(next)}
           disabled={isStreaming}
@@ -195,6 +204,14 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
           <>
             <div className="flex items-center gap-2">{tier2}</div>
             <div className="flex items-center gap-2">{tier3}</div>
+            {/* Runtime overflow even on a wide toolbar — keeps the primary row short. */}
+            <ToolbarMoreMenu
+              label={t("moreControls")}
+              active={runtime !== "claude-sdk"}
+              disabled={isStreaming}
+            >
+              <div className="flex flex-col gap-2">{runtimeControl}</div>
+            </ToolbarMoreMenu>
           </>
         )}
         {compact && (
@@ -202,6 +219,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">{tier2}</div>
               <div className="flex flex-wrap items-center gap-2">{tier3}</div>
+              <div className="flex flex-wrap items-center gap-2">{runtimeControl}</div>
             </div>
           </ToolbarMoreMenu>
         )}
@@ -245,6 +263,7 @@ function ToolbarMoreMenu({
   disabled: boolean
   children: ReactNode
 }) {
+  const isMobile = usePlatform() === "mobile"
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -255,7 +274,7 @@ function ToolbarMoreMenu({
           aria-label={label}
           disabled={disabled}
           data-testid="composer-toolbar-more"
-          className="relative size-7"
+          className={cn("relative size-7", isMobile && "touch-target")}
         >
           <MoreHorizontalIcon className="size-3.5" />
           {active && (
