@@ -2374,6 +2374,15 @@ export interface AppSettings {
    */
   sandboxDefaultEnabled?: boolean
   /**
+   * Confine code executed from the Canvas panel (Python especially) through
+   * the OS sandbox. Independent of `sandboxDefaultEnabled` (which gates chat
+   * Bash/Edit/Write): defaults to **true** so model-authored Canvas code is
+   * confined out of the box, while leaving a deliberate per-user opt-out for
+   * trusted machines or platforms without a sandbox backend. Read by
+   * `hooks/canvas/use-code-execution.ts`.
+   */
+  canvasCodeSandboxEnabled?: boolean
+  /**
    * App-wide default for the ADR-0028 / T4 sandbox tier. `"os"` (default)
    * routes Bash / Edit / Write through the per-platform OS sandbox
    * (sandbox-exec / bwrap / windows-codex). `"microvm"` routes them
@@ -3091,6 +3100,13 @@ export interface Character {
    */
   enableComputerUse?: boolean
   /**
+   * Gate for the agent browser tools (`cognia-browser-tools`, ADR-0038) that
+   * drive the embedded preview webview (navigate / snapshot / click / type /
+   * console / network). Opt-in: only `true` surfaces the `browser_*` tools.
+   * Mirrors the `enableComputerUse` soft-binding convention.
+   */
+  enableBrowserTools?: boolean
+  /**
    * Gate for the OCR agent tool (`ocr.extract`, ADR-0024). Unlike Computer
    * Use, OCR is low-risk and defaults to **enabled** — only an explicit
    * `false` removes the `cognia-ocr` tool from the send (and the IM safeguard
@@ -3248,6 +3264,7 @@ export interface PackPristineSnapshot {
   skillIds?: string[]
   pluginSkillIds?: string[]
   enableComputerUse?: boolean
+  enableBrowserTools?: boolean
   enableOcr?: boolean
   computerUseSettings?: Character["computerUseSettings"]
   sandboxTier?: Character["sandboxTier"]

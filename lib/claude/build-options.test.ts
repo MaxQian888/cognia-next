@@ -1969,6 +1969,35 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     expect(names).toEqual(["github_pr"])
   })
 
+  const browserTool = {
+    name: "browser_snapshot",
+    description: "snapshot the preview",
+    jsonSchema: {},
+    pluginId: "cognia-browser-tools",
+  }
+
+  it("includes browser tools when character.enableBrowserTools=true", async () => {
+    mBuildManifest.mockReturnValueOnce([browserTool, otherTool])
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableBrowserTools: true }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
+    expect(names).toContain("browser_snapshot")
+    expect(names).toContain("github_pr")
+  })
+
+  it("filters browser tools when character.enableBrowserTools !== true", async () => {
+    mBuildManifest.mockReturnValueOnce([browserTool, otherTool])
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableBrowserTools: false }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
+    expect(names).not.toContain("browser_snapshot")
+    expect(names).toContain("github_pr")
+  })
+
   it("IM-session default-denies computer-use plugin tools even when character allows", async () => {
     mReadOverride.mockResolvedValueOnce(undefined)
     const opts = await resolveSendOptions({

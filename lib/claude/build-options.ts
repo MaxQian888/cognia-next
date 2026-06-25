@@ -1529,6 +1529,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const computerUseAllowedForChat =
     character?.enableComputerUse === true && (!imSession || allowImComputerUse)
 
+  // Agent browser tools (ADR-0038) drive the embedded preview webview, which
+  // only exists in the desktop shell. Opt-in per character; never surfaced on
+  // IM-bound sessions (no embedded webview there).
+  const browserAllowedForChat = character?.enableBrowserTools === true && !imSession
+
   // First-class web tools (web_search + web_fetch). Default ON; ungated by the
   // pluginTools toggle. When on, the web-tools plugin's duplicate entries are
   // filtered out (below) and the promoted built-ins are appended unconditionally.
@@ -1581,6 +1586,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
       if (!ocrAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-ocr")
+      }
+      if (!browserAllowedForChat) {
+        manifest = manifest.filter((entry) => entry.pluginId !== "cognia-browser-tools")
       }
       // When the first-class web tools are on, drop the web-tools plugin's
       // duplicate web_search/web_fetch so the model sees exactly one of each.
