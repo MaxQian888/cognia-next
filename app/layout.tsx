@@ -103,6 +103,12 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Keyboard avoidance (pure-CSS dvh strategy): on Android Chromium WebViews
+  // this makes the on-screen keyboard *resize* the layout viewport (so
+  // `100dvh` shrinks and the composer rides above the keyboard) instead of
+  // overlaying it. iOS Safari/WebView ignores it and relies on dvh +
+  // Capacitor's native keyboard resize. No JS visualViewport observer.
+  interactiveWidget: "resizes-content",
 }
 
 export default async function RootLayout({

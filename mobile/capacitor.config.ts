@@ -61,7 +61,15 @@ const config: CapacitorConfig = {
       overlaysWebView: false,
     },
     Keyboard: {
-      resize: "body",
+      // `native` (not `body`): let the OS resize the WebView frame itself so the
+      // layout viewport / `100dvh` shrinks cleanly when the keyboard opens. The
+      // coarser `body` mode mutates document.body height and is known to cause
+      // layout jump / double-resize artifacts, especially combined with
+      // `100dvh`. Pairs with the `interactiveWidget: "resizes-content"` viewport
+      // hint (Android) for a single, consistent keyboard-avoidance path.
+      // NOTE: requires `cap sync` + on-device verification; revert to `body`
+      // for any device that regresses while keeping the rest of this wave.
+      resize: "native",
       resizeOnFullScreen: true,
     },
     LocalNotifications: {

@@ -116,6 +116,9 @@ const config: Config = {
     // would just duplicate those — it's a routing surface with very low
     // branch density.
     "!lib/search/search-type-router.ts",
+    // Storybook stories are dev-preview artifacts, not production source — they
+    // would otherwise count as uncovered code and sink the ≥90% gate.
+    "!**/*.stories.{js,jsx,ts,tsx}",
     "!**/*.d.ts",
     "!**/node_modules/**",
     "!**/.next/**",

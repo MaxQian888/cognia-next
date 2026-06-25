@@ -43,9 +43,19 @@ pnpm sidecar:test       # node --test on sidecar/builtin-tools/
 # shadcn/ui
 pnpm dlx shadcn@latest add <component>
 
+# Storybook (isolated component preview — additive, never replaces Jest)
+pnpm storybook        # dev server on :6006
+pnpm build-storybook  # static build (catches Vite alias gaps)
+
 # Run a single Jest file
 pnpm test -- path/to/file.test.ts
 ```
+
+**Storybook** (`@storybook/nextjs-vite`, config in `.storybook/`): co-located `*.stories.tsx` for
+isolated component dev/preview. Stories are **not tests** — they do not satisfy the co-located-test
+rule and are excluded from Jest coverage + `lint:i18n`. The Storybook AI MCP server (`storybook`
+entry in `.mcp.json`, `@storybook/addon-mcp`) is only reachable **while `pnpm storybook` is
+running** — use its MCP tools to author/preview stories, not as an always-on server.
 
 `predev` / `prebuild` run `scripts/copy-monaco-assets.mjs` automatically — don't import Monaco assets manually.
 

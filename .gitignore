@@ -144,3 +144,6 @@ cli/dist/
 
 # Superpowers brainstorming visual companion
 .superpowers/
+
+# Storybook static build output
+storybook-static/

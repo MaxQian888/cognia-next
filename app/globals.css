@@ -1352,6 +1352,48 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
     min-height: 44px;
     min-width: 44px;
   }
+  /* Horizontally-scrollable code blocks: on touch devices a bare
+     `overflow-x-auto` gives no hint that the block scrolls (the scroll happens
+     inside a vertically-scrolling list, an awkward gesture). Add momentum
+     scrolling everywhere and, on coarse pointers, a thin always-visible
+     scrollbar as the affordance. (iOS WebKit still hides overflow scrollbars,
+     but momentum scrolling remains a real improvement there.) Desktop mouse
+     users are untouched — the scrollbar styling is gated behind pointer:coarse. */
+  .code-scroll-x {
+    -webkit-overflow-scrolling: touch;
+  }
+  @media (pointer: coarse) {
+    .code-scroll-x {
+      scrollbar-width: thin;
+    }
+    .code-scroll-x::-webkit-scrollbar {
+      height: 4px;
+    }
+    .code-scroll-x::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 9999px;
+    }
+  }
+  /* Line numbers for Shiki-highlighted code blocks. Shiki wraps every source
+     line in `<span class="line">`, so a CSS counter lets syntax colour and
+     line numbers co-exist — the finalized `CodeBlock` (which defaults to
+     showing line numbers) keeps full highlighting instead of falling back to a
+     colourless table. Gated behind `.code-line-numbers` so the number gutter
+     only appears when the user wants it. Both the light and dark `<pre>` carry
+     their own `<code>`, so the counter resets per element. */
+  .code-line-numbers .shiki code {
+    counter-reset: shiki-line;
+  }
+  .code-line-numbers .shiki .line::before {
+    counter-increment: shiki-line;
+    content: counter(shiki-line);
+    display: inline-block;
+    min-width: 2ch;
+    margin-right: 1.25rem;
+    text-align: right;
+    color: var(--muted-foreground);
+    user-select: none;
+  }
 }
 
 /* Mobile pair-page radar — `<ScanRadar>` renders three concentric rings that
