@@ -86,8 +86,11 @@ error-as-value.
   drain_network,back,forward,stop,get_url,get_title}`.
 - `lib/browser/client.ts` + `protocol.ts` — pass-throughs + canonical types.
 - `lib/browser/agent-engine.ts` — `BrowserEngine`, `EmbeddedEngine`, `routeEngine`.
-- `plugins/browser-tools` — `browser_navigate / snapshot / click / type / fill_form /
-  select / hover / read_console / read_network / get_page`, discovered via
+- `plugins/browser-tools` — `browser_navigate` (+ `browser_back / forward / reload /
+  stop`), `browser_snapshot`, `browser_click / type / fill_form / select / hover`,
+  `browser_wait_for` (text appear/disappear, backed by the injected `__cogniaHasText`
+  + `browser_embed_has_text` command and the engine's poll loop), `browser_read_console
+  / read_network`, `browser_get_page`, discovered via
   `lib/plugin/core/browser-builtin-registry.ts`.
 - `lib/claude/build-options.ts` — `browserAllowedForChat` gate, opt-in per character
   (`Character.enableBrowserTools`), never on IM-bound sessions.
@@ -102,6 +105,11 @@ error-as-value.
   (prompt-injection caution); the agent never auto-fills secrets.
 - `browser_evaluate` (raw JS, RCE-class) is intentionally **not registered** in
   Phase 1 — it will be a separately gated, off-by-default tool in a follow-up.
+- `browser_screenshot` (agent-facing capture) is **deferred**: capturing the embed at
+  its own bounds needs physical/logical coordinate math that cannot be verified
+  without the live desktop shell, and the model works off the structured snapshot by
+  design (screenshot is only a vision fallback). The human still gets screenshots via
+  the existing selection→chat flow. Tracked as a follow-up.
 
 ## Honest Phase-1 limits (injected-JS ceiling)
 
