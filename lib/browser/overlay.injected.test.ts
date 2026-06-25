@@ -124,3 +124,109 @@ describe("overlay.injected select mode", () => {
     expect(api.isActive()).toBe(false)
   })
 })
+
+type Win = Record<string, unknown> & {
+  __cogniaSnapshot: () => string
+  __cogniaAct: (ref: string, action: string, argsJson: string) => string
+  __cogniaDrainConsole: () => string
+  __cogniaDrainNetwork: () => string
+  __cogniaOverlay: { resolveRef: (ref: string) => unknown; installNetworkHook: () => void }
+}
+
+function win(): Win {
+  return window as unknown as Win
+}
+
+describe("__cogniaSnapshot", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <button id="go">Go</button>
+      <input type="text" value="hi" />
+      <a href="#">link</a>
+    `
+    install()
+  })
+
+  it("emits a generation + ref'd interactive nodes", () => {
+    const parsed = JSON.parse(win().__cogniaSnapshot())
+    expect(parsed.ok).toBe(true)
+    expect(parsed.snapshot.generation).toBeGreaterThan(0)
+    const roles = parsed.snapshot.nodes.map((n: { role: string }) => n.role)
+    expect(roles).toEqual(expect.arrayContaining(["button", "textbox", "link"]))
+    const button = parsed.snapshot.nodes.find((n: { role: string }) => n.role === "button")
+    expect(button.name).toBe("Go")
+    expect(typeof button.ref).toBe("string")
+  })
+
+  it("resolves a ref back to its element", () => {
+    const parsed = JSON.parse(win().__cogniaSnapshot())
+    const ref = parsed.snapshot.nodes[0].ref
+    expect(win().__cogniaOverlay.resolveRef(ref)).toBeInstanceOf(HTMLElement)
+  })
+})
+
+describe("__cogniaAct", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<input id="n" type="text" /><button id="b">B</button>`
+    install()
+  })
+  function refFor(role: string) {
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    return snap.nodes.find((n: { role: string }) => n.role === role).ref
+  }
+  it("fills an input via the native setter and fires input/change", () => {
+    const fired: string[] = []
+    const input = document.getElementById("n") as HTMLInputElement
+    input.addEventListener("input", () => fired.push("input"))
+    input.addEventListener("change", () => fired.push("change"))
+    const res = JSON.parse(
+      win().__cogniaAct(refFor("textbox"), "fill", JSON.stringify({ text: "abc" }))
+    )
+    expect(res.ok).toBe(true)
+    expect(input.value).toBe("abc")
+    expect(fired).toEqual(["input", "change"])
+  })
+  it("clicks a button", () => {
+    let clicked = false
+    document.getElementById("b")!.addEventListener("click", () => (clicked = true))
+    const res = JSON.parse(win().__cogniaAct(refFor("button"), "click", "{}"))
+    expect(res.ok).toBe(true)
+    expect(clicked).toBe(true)
+  })
+  it("returns an error for an unknown ref", () => {
+    const res = JSON.parse(win().__cogniaAct("e999", "click", "{}"))
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/ref/i)
+  })
+})
+
+describe("console + network capture", () => {
+  beforeEach(() => {
+    document.body.innerHTML = ""
+    install()
+  })
+  it("buffers console.error and drains it", () => {
+    console.error("boom", 42)
+    const entries = JSON.parse(win().__cogniaDrainConsole())
+    const last = entries[entries.length - 1]
+    expect(last.level).toBe("error")
+    expect(last.text).toContain("boom")
+    expect(JSON.parse(win().__cogniaDrainConsole())).toHaveLength(0)
+  })
+  it("records a fetch call", async () => {
+    ;(window as unknown as { fetch: unknown }).fetch = () =>
+      Promise.resolve({ status: 200, ok: true })
+    win().__cogniaOverlay.installNetworkHook()
+    await (window as unknown as { fetch: (u: string, i: unknown) => Promise<unknown> }).fetch(
+      "https://x.test/api",
+      { method: "POST" }
+    )
+    const net = JSON.parse(win().__cogniaDrainNetwork())
+    expect(net[net.length - 1]).toMatchObject({
+      url: "https://x.test/api",
+      method: "POST",
+      status: 200,
+      ok: true,
+    })
+  })
+})
