@@ -1,0 +1,68 @@
+<!--
+  Browser-global shims for the Storybook preview iframe.
+
+  Some deps pulled transitively into stories crash at module-eval because the
+  bundled (rolldown) output references identifiers that aren't in scope:
+
+    • Node globals `__dirname` / `__filename` (e.g. @opentelemetry/api via the
+      loop/goal runtime logger).
+    • esbuild/rolldown CJS-interop helpers (`__reExport`, `__copyProps`, …) that
+      a shared chunk references but whose preamble rolldown fails to emit into
+      that chunk — a known interop gap. Declaring canonical implementations as
+      globals lets the bare references resolve.
+
+  Config-level `define` does not reach pre-bundled deps, so this iframe-head
+  shim is the reliable place. Works in both `storybook dev` and
+  `build-storybook`. The app bundle is unaffected (this file is Storybook-only).
+-->
+<script>
+  var __dirname = "/"
+  var __filename = "/index.js"
+
+  // Canonical esbuild runtime helpers (stable, well-known implementations).
+  var __defProp = Object.defineProperty
+  var __getOwnPropNames = Object.getOwnPropertyNames
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor
+  var __hasOwnProp = Object.prototype.hasOwnProperty
+  var __copyProps = function (to, from, except, desc) {
+    if ((from && typeof from === "object") || typeof from === "function") {
+      var names = __getOwnPropNames(from)
+      for (var i = 0; i < names.length; i++) {
+        var key = names[i]
+        if (!__hasOwnProp.call(to, key) && key !== except) {
+          ;(function (key) {
+            __defProp(to, key, {
+              get: function () {
+                return from[key]
+              },
+              enumerable:
+                !(desc = __getOwnPropDesc(from, key)) || desc.enumerable,
+            })
+          })(key)
+        }
+      }
+    }
+    return to
+  }
+  var __reExport = function (target, mod, secondTarget) {
+    __copyProps(target, mod, "default")
+    return secondTarget ? __copyProps(secondTarget, mod, "default") : target
+  }
+  // rolldown helper: installs a getter object as a namespace. Returning the
+  // object as-is is enough for module eval to succeed (the lazy members are
+  // only invoked when actually used, which Storybook stories don't do).
+  var __exportAll = function (obj) {
+    return obj
+  }
+  var __toESM = function (mod, isNodeMode, target) {
+    target = mod != null ? Object.create(Object.getPrototypeOf(mod)) : {}
+    var to =
+      isNodeMode || !mod || !mod.__esModule
+        ? __defProp(target, "default", { value: mod, enumerable: true })
+        : target
+    return __copyProps(to, mod, undefined)
+  }
+  var __toCommonJS = function (mod) {
+    return __copyProps(__defProp({}, "__esModule", { value: true }), mod)
+  }
+</script>
