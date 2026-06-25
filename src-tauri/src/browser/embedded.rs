@@ -165,6 +165,174 @@ fn eval_embed(app: &AppHandle, js: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Build the `window.__cogniaAct(ref, action, args)` call string. `args` is a
+/// JSON object string that we pass *as a JS string literal* (double-encoded) so
+/// the page can `JSON.parse` it back without quoting hazards.
+#[cfg(desktop)]
+fn build_act_call(reference: &str, action: &str, args_json: &str) -> Result<String, String> {
+    Ok(format!(
+        "window.__cogniaAct({}, {}, {})",
+        js_string(reference)?,
+        js_string(action)?,
+        js_string(args_json)?
+    ))
+}
+
+/// Evaluate JS in the embedded webview and return the JSON-serialized result.
+/// Bridges Tauri's callback-style `eval_with_callback` (the only result-bearing
+/// eval available on WKWebView/WebView2/WebKitGTK) to an async command via a
+/// oneshot channel with a timeout.
+#[cfg(desktop)]
+async fn eval_embed_with_result(app: &AppHandle, js: &str) -> Result<String, String> {
+    use std::sync::{Arc, Mutex};
+    use tauri::Manager;
+    let wv = app
+        .get_webview(EMBED_LABEL)
+        .ok_or_else(|| "embedded preview is not open".to_string())?;
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let slot = Arc::new(Mutex::new(Some(tx)));
+    let cb = slot.clone();
+    wv.eval_with_callback(js, move |result| {
+        if let Ok(mut guard) = cb.lock() {
+            if let Some(sender) = guard.take() {
+                let _ = sender.send(result);
+            }
+        }
+    })
+    .map_err(|e| e.to_string())?;
+    match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(_)) => Err("embedded eval channel closed".to_string()),
+        Err(_) => Err("embedded eval timed out".to_string()),
+    }
+}
+
+/// Snapshot the embedded page's accessibility tree (JSON envelope from
+/// `__cogniaSnapshot`).
+#[tauri::command]
+pub async fn browser_embed_snapshot(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        eval_embed_with_result(&app, "window.__cogniaSnapshot()").await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+/// Perform an act-by-ref (`click`/`type`/`fill`/`select`/`hover`/`focus`).
+#[tauri::command]
+pub async fn browser_embed_act(
+    app: AppHandle,
+    reference: String,
+    action: String,
+    args: String,
+) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        let call = build_act_call(&reference, &action, &args)?;
+        eval_embed_with_result(&app, &call).await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, reference, action, args);
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_drain_console(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        eval_embed_with_result(&app, "window.__cogniaDrainConsole()").await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_drain_network(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        eval_embed_with_result(&app, "window.__cogniaDrainNetwork()").await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_back(app: AppHandle) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        eval_embed(&app, "window.history.back()")
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_forward(app: AppHandle) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        eval_embed(&app, "window.history.forward()")
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_stop(app: AppHandle) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        eval_embed(&app, "window.stop()")
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_get_url(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        eval_embed_with_result(&app, "String(window.location.href)").await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_get_title(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        eval_embed_with_result(&app, "String(document.title)").await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn browser_embed_navigate(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = validate_external_url(&url)?;
@@ -303,5 +471,26 @@ mod tests {
     fn embed_capture_region_subtracts_monitor_origin() {
         let r = compute_embed_capture_region((1920, 0), (0.0, 0.0, 50.0, 50.0), 1.0, (1920, 0));
         assert_eq!((r.x, r.y, r.width, r.height), (0, 0, 50, 50));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn act_call_is_json_safe() {
+        let call = build_act_call("e1", "fill", r#"{"text":"a\"b"}"#).unwrap();
+        assert!(call.starts_with("window.__cogniaAct("));
+        assert!(call.contains(r#""e1""#));
+        assert!(call.contains(r#""fill""#));
+        // The args JSON is itself passed as a JS string literal (double-encoded),
+        // so the inner quote is escaped twice.
+        assert!(call.contains("a\\\\\\\""));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn act_call_escapes_injection_in_ref() {
+        let call = build_act_call(r#"e"); alert(1)//"#, "click", "{}").unwrap();
+        // The malicious ref is contained inside a JSON string literal.
+        assert!(call.contains(r#"alert(1)"#));
+        assert!(!call.contains(r#"e"); alert"#));
     }
 }

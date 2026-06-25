@@ -403,6 +403,7 @@ pub fn run() {
             // plugin consumes sandbox_exec via plugin_tool_exec → renderer
             // → Tauri.
             sandbox::sandbox_health_probe,
+            sandbox::sandbox_health_check,
             sandbox::sandbox_exec,
             subscription::anthropic::commands::anthropic_oauth_save_pkce_result,
             subscription::codex::commands::codex_oauth_discover,
@@ -852,6 +853,16 @@ pub fn run() {
             browser::embedded::browser_embed_set_select_mode,
             browser::embedded::browser_embed_capture,
             browser::embedded::browser_embed_destroy,
+            // Agent browser loop (Phase 1) — snapshot/act/console/network + nav.
+            browser::embedded::browser_embed_snapshot,
+            browser::embedded::browser_embed_act,
+            browser::embedded::browser_embed_drain_console,
+            browser::embedded::browser_embed_drain_network,
+            browser::embedded::browser_embed_back,
+            browser::embedded::browser_embed_forward,
+            browser::embedded::browser_embed_stop,
+            browser::embedded::browser_embed_get_url,
+            browser::embedded::browser_embed_get_title,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
