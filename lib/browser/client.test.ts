@@ -54,3 +54,63 @@ describe("browserClient (embedded pane)", () => {
     expect(call).toHaveBeenCalledWith("browser_embed_destroy", {})
   })
 })
+
+describe("browserClient agent methods", () => {
+  it("embedSnapshot unwraps the ok envelope", async () => {
+    call.mockResolvedValueOnce(
+      JSON.stringify({
+        ok: true,
+        error: null,
+        snapshot: { generation: 1, url: "u", title: "t", nodes: [] },
+      })
+    )
+    const snap = await browserClient.embedSnapshot()
+    expect(call).toHaveBeenCalledWith("browser_embed_snapshot", {})
+    expect(snap.generation).toBe(1)
+  })
+
+  it("embedSnapshot throws on ok:false", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: false, error: "kaboom", snapshot: null }))
+    await expect(browserClient.embedSnapshot()).rejects.toThrow("kaboom")
+  })
+
+  it("embedAct passes reference/action/serialized args", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: true, error: null, generation: 2 }))
+    const res = await browserClient.embedAct("e1", "click", {})
+    expect(call).toHaveBeenCalledWith("browser_embed_act", {
+      reference: "e1",
+      action: "click",
+      args: "{}",
+    })
+    expect(res.generation).toBe(2)
+  })
+
+  it("embedReadConsole parses the array", async () => {
+    call.mockResolvedValueOnce(JSON.stringify([{ level: "warn", text: "x", ts: 1 }]))
+    const out = await browserClient.embedReadConsole()
+    expect(call).toHaveBeenCalledWith("browser_embed_drain_console", {})
+    expect(out).toHaveLength(1)
+  })
+
+  it("embedReadNetwork parses the array", async () => {
+    call.mockResolvedValueOnce(
+      JSON.stringify([{ url: "u", method: "GET", status: 200, ok: true, durationMs: 3 }])
+    )
+    expect(await browserClient.embedReadNetwork()).toHaveLength(1)
+  })
+
+  it("nav primitives dispatch by name", async () => {
+    await browserClient.embedBack()
+    await browserClient.embedForward()
+    await browserClient.embedStop()
+    expect(call).toHaveBeenNthCalledWith(1, "browser_embed_back", {})
+    expect(call).toHaveBeenNthCalledWith(2, "browser_embed_forward", {})
+    expect(call).toHaveBeenNthCalledWith(3, "browser_embed_stop", {})
+  })
+
+  it("getUrl/getTitle return strings", async () => {
+    call.mockResolvedValueOnce("http://localhost/").mockResolvedValueOnce("Home")
+    expect(await browserClient.embedGetUrl()).toBe("http://localhost/")
+    expect(await browserClient.embedGetTitle()).toBe("Home")
+  })
+})
