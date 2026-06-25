@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Character, ChatSession, Team } from "@/lib/claude/types"
 import type { SelectedGuild } from "@/stores/ui"
@@ -13,15 +13,21 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: {
-    ui: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: jest.fn(),
-      error: jest.fn(),
-    },
-  },
-}))
+// Complete logger mock: the import chain (plugin-view-container-panel →
+// plugin-sdk → lsp-registry) reads `loggers.plugin.child(...)`, so the mock
+// must answer any namespace with a logger that has a `.child` method. A Proxy
+// keeps it exhaustive without enumerating every namespace.
+jest.mock("@/lib/logging", () => {
+  const makeLogger = (): Record<string, unknown> => ({
+    info: (...args: unknown[]) => logInfo(...args),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    child: () => makeLogger(),
+  })
+  return { loggers: new Proxy({}, { get: () => makeLogger() }) }
+})
 
 const callQueue: Array<unknown> = []
 jest.mock("@/hooks/data", () => ({
@@ -75,6 +81,17 @@ const teamSession: ChatSession = {
   updatedAt: 0,
 } as unknown as ChatSession
 
+function baseSession(id: string, overrides: Partial<ChatSession> = {}): ChatSession {
+  return {
+    id,
+    title: id,
+    kind: "direct",
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  } as unknown as ChatSession
+}
+
 beforeEach(() => {
   logInfo.mockReset()
   callQueue.length = 0
@@ -82,7 +99,7 @@ beforeEach(() => {
   isNarrow = false
 })
 
-test("DM guild renders only direct sessions grouped by character", () => {
+test("DM guild renders only direct sessions, grouped into date buckets", () => {
   // queries: characters, sessionStates (none), team (none)
   callQueue.push(characters, [], undefined)
   render(
@@ -99,6 +116,80 @@ test("DM guild renders only direct sessions grouped by character", () => {
   expect(screen.getByText("directMessages")).toBeInTheDocument()
   expect(screen.getByText("Hi Alice")).toBeInTheDocument()
   expect(screen.queryByText("Squad meeting")).toBeNull()
+  // updatedAt: 0 (epoch) → "Older" date-bucket header (no character grouping).
+  expect(screen.getByText("bucketOlder")).toBeInTheDocument()
+})
+
+test("typing in the search box filters to a flat result list", async () => {
+  const dmMatch = {
+    ...dmSession,
+    id: "s-match",
+    title: "Trip budget",
+  } as ChatSession
+  const dmMiss = {
+    ...dmSession,
+    id: "s-miss",
+    title: "Grocery list",
+  } as ChatSession
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmMatch, dmMiss]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.type(screen.getByLabelText("searchAria"), "trip")
+  // Matching row stays, non-matching row drops (after the 150ms debounce), and
+  // the date-bucket header is replaced by the flat search list.
+  await waitFor(() => expect(screen.queryByText("Grocery list")).toBeNull())
+  expect(screen.getByText("Trip budget")).toBeInTheDocument()
+  expect(screen.queryByText("bucketOlder")).toBeNull()
+})
+
+test("a search that matches nothing shows the empty-search state", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.type(screen.getByLabelText("searchAria"), "zzz")
+  // The mocked translator echoes `key:{vars}` for parameterized messages.
+  expect(await screen.findByText(/emptySearch/)).toBeInTheDocument()
+  expect(screen.queryByText("Hi Alice")).toBeNull()
+})
+
+test("the clear button resets the search and restores the list", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.type(screen.getByLabelText("searchAria"), "zzz")
+  expect(await screen.findByText(/emptySearch/)).toBeInTheDocument()
+  await user.click(screen.getByLabelText("clearSearch"))
+  expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
 })
 
 test("Team guild renders only that team's sessions", () => {
@@ -397,6 +488,159 @@ describe("multi-select gestures", () => {
     expect(buttons[1].textContent).toMatch(/Alpha/)
     expect(buttons[2].textContent).toMatch(/Charlie/)
   })
+})
+
+test("archive view toggle switches between active and archived sessions", async () => {
+  const activeS = baseSession("act", { title: "Active one", updatedAt: 100 })
+  const archivedS = baseSession("arc", { title: "Archived one", archivedAt: 50, updatedAt: 90 })
+  // characters, sessionStates, team — consumed twice (toggle re-renders reuse memo).
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[activeS, archivedS]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onArchive={jest.fn()}
+      onUnarchive={jest.fn()}
+    />
+  )
+  // Active view: only the non-archived session shows.
+  expect(screen.getByText("Active one")).toBeInTheDocument()
+  expect(screen.queryByText("Archived one")).toBeNull()
+  // Toggle into the archived view.
+  await user.click(screen.getByRole("button", { name: "viewArchived" }))
+  expect(await screen.findByText("Archived one")).toBeInTheDocument()
+  expect(screen.queryByText("Active one")).toBeNull()
+})
+
+test("an empty archived view shows the archived empty state", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("act", { title: "Active one" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onArchive={jest.fn()}
+      onUnarchive={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "viewArchived" }))
+  expect(await screen.findByText("emptyArchived")).toBeInTheDocument()
+})
+
+test("per-row Archive action fires onArchive", async () => {
+  callQueue.push(characters, [], undefined)
+  const onArchive = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("act", { title: "Active one" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onArchive={onArchive}
+      onUnarchive={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("archive"))
+  expect(onArchive).toHaveBeenCalledWith("act")
+})
+
+const workFolder = {
+  id: "f1",
+  name: "Work",
+  projectId: "p",
+  order: 0,
+  createdAt: 0,
+  updatedAt: 0,
+} as never
+
+test("renders a collapsible folder section for foldered sessions", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("in-folder", { title: "Inside work", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[workFolder]}
+      onAssignToFolder={jest.fn()}
+    />
+  )
+  // The folder header renders and its member shows under it.
+  expect(screen.getAllByText("Work").length).toBeGreaterThan(0)
+  expect(screen.getByText("Inside work")).toBeInTheDocument()
+  // Collapsing the folder hides its rows.
+  await user.click(screen.getByRole("button", { name: "Work" }))
+  expect(screen.queryByText("Inside work")).toBeNull()
+})
+
+test("New folder button invokes onCreateFolder", async () => {
+  callQueue.push(characters, [], undefined)
+  const onCreateFolder = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("a", { title: "A" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[]}
+      onCreateFolder={onCreateFolder}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "newFolder" }))
+  expect(onCreateFolder).toHaveBeenCalledWith("newFolderName")
+})
+
+test("folder header menu deletes the folder after confirmation", async () => {
+  callQueue.push(characters, [], undefined)
+  const onDeleteFolder = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("in-folder", { title: "Inside", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[workFolder]}
+      onAssignToFolder={jest.fn()}
+      onDeleteFolder={onDeleteFolder}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "folderActions" }))
+  await user.click(await screen.findByText("deleteFolder"))
+  const dialog = await screen.findByRole("alertdialog")
+  const confirm = Array.from(dialog.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === "deleteFolder"
+  )
+  if (!confirm) throw new Error("expected destructive confirm button")
+  await user.click(confirm)
+  expect(onDeleteFolder).toHaveBeenCalledWith("f1")
 })
 
 test("Canvas guild renders nothing (canvas has its own rail)", () => {

@@ -1,22 +1,59 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { buttonVariants } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { SessionListLoading } from "@/components/ui/loading-states"
 import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useIsNarrow, useRangeSelection } from "@/hooks/ui"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
+import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { getTeam } from "@/lib/db/teams"
 import { loggers } from "@/lib/logging"
 import { avatarColor } from "@/lib/ui/avatar"
+import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
 import { PerfBoundary } from "@/lib/perf"
-import type { Character, ChatSession, Team } from "@/lib/claude/types"
-import { MailIcon, MenuIcon, PlusIcon, UsersIcon } from "lucide-react"
+import type { DateBucket } from "@/lib/chat/conversation-list-model"
+import type { Character, ChatSession, SessionFolder, Team } from "@/lib/claude/types"
+import {
+  ArchiveIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  MailIcon,
+  MenuIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PlusIcon,
+  SearchIcon,
+  Trash2Icon,
+  UsersIcon,
+  XIcon,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import {
   useCallback,
@@ -27,11 +64,27 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react"
-import { AvatarBadge } from "./avatar-badge"
 import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
 import { SessionRow } from "./session-row"
 
 const log = loggers.ui
+
+/**
+ * Stable empty-folders identity. Passing an inline `folders ?? []` would mint a
+ * fresh array every render and, since it's forwarded to every memoized
+ * <SessionRow>, bust their memo on any sidebar re-render (cf. the `onSelect`
+ * note below). Hoisting the fallback keeps the reference constant.
+ */
+const EMPTY_FOLDERS: SessionFolder[] = []
+
+/** Maps a date bucket to its `desktop.channelList` label key. */
+const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
+  today: "bucketToday",
+  yesterday: "bucketYesterday",
+  prev7: "bucketPrev7",
+  prev30: "bucketPrev30",
+  older: "bucketOlder",
+}
 
 interface Props {
   sessions: ChatSession[]
@@ -48,8 +101,18 @@ interface Props {
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
   onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
+  onArchive?: (id: string) => void | Promise<void>
+  onUnarchive?: (id: string) => void | Promise<void>
   onBulkDelete?: (ids: string[]) => void | Promise<void>
   onBulkSetPinned?: (ids: string[], pinned: boolean) => void | Promise<void>
+  onBulkArchive?: (ids: string[]) => void | Promise<void>
+  onBulkUnarchive?: (ids: string[]) => void | Promise<void>
+  /** Conversation folders for this workspace (conversation-list overhaul). */
+  folders?: SessionFolder[]
+  onCreateFolder?: (name: string) => void | Promise<unknown>
+  onRenameFolder?: (id: string, name: string) => void | Promise<void>
+  onDeleteFolder?: (id: string) => void | Promise<void>
+  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
 }
 
 /**
@@ -115,17 +178,6 @@ export function ChannelList(props: Props) {
   )
 }
 
-function sortByPinThenRecent(list: ChatSession[]): ChatSession[] {
-  // Stable: Array.prototype.sort is stable since ES2019. Pinned bubbles up,
-  // ties broken by `updatedAt` newest-first (matching the Dexie ordering).
-  return [...list].sort((a, b) => {
-    const pa = a.pinned ? 1 : 0
-    const pb = b.pinned ? 1 : 0
-    if (pa !== pb) return pb - pa
-    return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
-  })
-}
-
 function ChannelListBody({
   sessions,
   loading,
@@ -136,8 +188,17 @@ function ChannelListBody({
   onDelete,
   onRename,
   onTogglePinned,
+  onArchive,
+  onUnarchive,
   onBulkDelete,
   onBulkSetPinned,
+  onBulkArchive,
+  onBulkUnarchive,
+  folders,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onAssignToFolder,
 }: Props) {
   const t = useTranslations("desktop.channelList")
   const selectedGuild = useUIStore((s) => s.selectedGuild)
@@ -186,45 +247,70 @@ function ChannelListBody({
     return visible.filter((s) => s.kind !== "team")
   }, [sessions, chatGuild])
 
-  // For DMs, group by character; legacy sessions land under "Other".
-  // Apply pinned-on-top sort inside each character group so the pinned
-  // marker is observable to the user immediately after a bulk action.
-  const dmGroups = useMemo(() => {
-    if (chatGuild.kind !== "dm") return null
-    const groups = new Map<string | null, ChatSession[]>()
-    for (const s of filtered) {
-      const key = s.characterId ?? null
-      const arr = groups.get(key) ?? []
-      arr.push(s)
-      groups.set(key, arr)
-    }
-    for (const [k, list] of groups) groups.set(k, sortByPinThenRecent(list))
-    return groups
-  }, [filtered, chatGuild])
-
-  // Team branch lays sessions out in pin-then-recent order too.
-  const sortedTeamSessions = useMemo(
-    () => (chatGuild.kind === "team" ? sortByPinThenRecent(filtered) : []),
-    [filtered, chatGuild]
+  // Search box: keep the field value immediate but debounce the value fed
+  // to the grouping model so typing doesn't re-bucket on every keystroke.
+  const [searchInput, setSearchInput] = useState("")
+  const [query, setQuery] = useState("")
+  // Destructure the stable `call`/`cancel` identities — the handle object
+  // itself is a fresh literal each render, so depending on it would re-run the
+  // guild-change effect (and wipe the multi-selection) on every render.
+  const { call: debouncedSetQuery, cancel: cancelDebouncedQuery } = useDebouncedCallback(
+    (next: string) => setQuery(next),
+    150
   )
+  const handleSearchChange = useCallback(
+    (next: string) => {
+      setSearchInput(next)
+      debouncedSetQuery(next)
+    },
+    [debouncedSetQuery]
+  )
+  const clearSearch = useCallback(() => {
+    setSearchInput("")
+    cancelDebouncedQuery()
+    setQuery("")
+  }, [cancelDebouncedQuery])
 
-  // Ordered list of visible ids — required for Shift-range to walk the
-  // same order as the rendered rows. DM groups are concatenated in the
-  // same order `DmGroupedList` iterates (character name asc, then "Other").
-  const orderedIds = useMemo<string[]>(() => {
-    if (chatGuild.kind === "team") return sortedTeamSessions.map((s) => s.id)
-    if (!dmGroups) return []
-    const entries = [...dmGroups.entries()].sort((a, b) => {
-      if (a[0] === null) return 1
-      if (b[0] === null) return -1
-      const ca = characterById.get(a[0])?.name ?? ""
-      const cb = characterById.get(b[0])?.name ?? ""
-      return ca.localeCompare(cb)
+  // Active ⇄ Archived view (local, ephemeral — resets on remount).
+  const [view, setView] = useState<"active" | "archived">("active")
+
+  // Folder collapse is local/ephemeral — resets on reload (UX-acceptable and
+  // keeps the persisted UI store untouched).
+  const [collapsedFolderIds, setCollapsedFolderIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>()
+  )
+  const toggleFolderCollapsed = useCallback((id: string) => {
+    setCollapsedFolderIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
     })
-    const ids: string[] = []
-    for (const [, list] of entries) for (const s of list) ids.push(s.id)
-    return ids
-  }, [chatGuild, dmGroups, characterById, sortedTeamSessions])
+  }, [])
+
+  // Folders only group the active view (archived chats stay in date buckets).
+  const modelFolders = view === "archived" ? undefined : folders
+
+  // Grouping/filtering/search now live in the shared headless model
+  // (pinned → folders → date buckets, or a flat result list while searching).
+  const { sections, total, filteredCount, orderedIds } = useConversationListModel({
+    sessions: filtered,
+    folders: modelFolders,
+    query,
+    view,
+    collapsedFolderIds,
+  })
+
+  // Per-row accent: team sessions inherit the team color, DM sessions inherit
+  // their character color. Replaces the old per-character group accent.
+  const accentFor = useCallback(
+    (s: ChatSession): string | undefined => {
+      if (s.kind === "team") return team ? avatarColor(team) : undefined
+      const character = s.characterId ? characterById.get(s.characterId) : null
+      return character ? avatarColor(character) : undefined
+    },
+    [team, characterById]
+  )
 
   const selection = useRangeSelection(orderedIds)
   const { selected, handleClick, selectAll, clear, isSelected, lastInteractionWasModified } =
@@ -237,7 +323,7 @@ function ChannelListBody({
   // this effect.
   useEffect(() => {
     clear()
-  }, [chatGuild, clear])
+  }, [chatGuild, view, clear])
 
   const handleNewDirect = () => {
     log.info("channel-list new-direct")
@@ -308,6 +394,20 @@ function ChannelListBody({
     [onBulkSetPinned, selected, clear]
   )
 
+  const handleBulkArchiveClick = useCallback(async () => {
+    if (!onBulkArchive || selected.size === 0) return
+    const ids = [...selected]
+    await onBulkArchive(ids)
+    clear()
+  }, [onBulkArchive, selected, clear])
+
+  const handleBulkUnarchiveClick = useCallback(async () => {
+    if (!onBulkUnarchive || selected.size === 0) return
+    const ids = [...selected]
+    await onBulkUnarchive(ids)
+    clear()
+  }, [onBulkUnarchive, selected, clear])
+
   // Canvas guild has its own dedicated rail; do not render the chat
   // session list when the user is in canvas mode.
   if (selectedGuild.kind === "canvas") {
@@ -332,55 +432,87 @@ function ChannelListBody({
         <Header
           selectedGuild={chatGuild}
           team={team ?? null}
+          view={view}
+          onToggleView={() => setView((v) => (v === "active" ? "archived" : "active"))}
+          onNewFolder={
+            view === "active" && onCreateFolder
+              ? () => void onCreateFolder(t("newFolderName"))
+              : undefined
+          }
           onNewDirect={handleNewDirect}
           onNewTeamConversation={handleNewTeamConversation}
         />
+        <div className="px-3 pb-2">
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              value={searchInput}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder={t("searchPlaceholder")}
+              aria-label={t("searchAria")}
+              className="h-8 pr-7 pl-7 text-sm"
+            />
+            {searchInput ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute top-1/2 right-1 size-6 -translate-y-1/2"
+                aria-label={t("clearSearch")}
+                onClick={clearSearch}
+              >
+                <XIcon className="size-3.5" />
+              </Button>
+            ) : null}
+          </div>
+        </div>
         {toolbarVisible ? (
           <ChannelListBulkToolbar
             count={selected.size}
+            archived={view === "archived"}
             onDelete={handleBulkDeleteClick}
             onPin={() => handleBulkSetPinnedClick(true)}
             onUnpin={() => handleBulkSetPinnedClick(false)}
+            onArchive={handleBulkArchiveClick}
+            onUnarchive={handleBulkUnarchiveClick}
             onClear={clear}
           />
         ) : null}
         <Separator />
         <ScrollArea className="flex-1">
-          {loading && filtered.length === 0 ? (
+          {loading && total === 0 ? (
             <SessionListLoading />
-          ) : filtered.length === 0 ? (
+          ) : total === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-              {chatGuild.kind === "team" ? t("emptyTeam") : t("emptyDm")}
+              {view === "archived"
+                ? t("emptyArchived")
+                : chatGuild.kind === "team"
+                  ? t("emptyTeam")
+                  : t("emptyDm")}
             </p>
-          ) : chatGuild.kind === "team" ? (
-            <ul className="flex flex-col gap-0.5 p-2">
-              {sortedTeamSessions.map((s) => (
-                <SessionRow
-                  key={s.id}
-                  session={s}
-                  active={s.id === activeSessionId}
-                  selected={isSelected(s.id)}
-                  accentColor={team ? avatarColor(team) : undefined}
-                  unread={unreadById.get(s.id)}
-                  onSelect={handleSessionSelect}
-                  onDelete={onDelete}
-                  onRename={onRename}
-                  onTogglePinned={onTogglePinned}
-                  onJumpToParent={handleJumpToParent}
-                />
-              ))}
-            </ul>
+          ) : filteredCount === 0 ? (
+            <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+              {t("emptySearch", { query: searchInput.trim() })}
+            </p>
           ) : (
-            <DmGroupedList
-              groups={dmGroups!}
-              characterById={characterById}
+            <ConversationSections
+              sections={sections}
               activeSessionId={activeSessionId}
               unreadById={unreadById}
               isSelected={isSelected}
+              accentFor={accentFor}
+              folders={folders ?? EMPTY_FOLDERS}
               onSelect={handleSessionSelect}
               onDelete={onDelete}
               onRename={onRename}
               onTogglePinned={onTogglePinned}
+              onArchive={onArchive}
+              onUnarchive={onUnarchive}
+              onAssignToFolder={onAssignToFolder}
+              onToggleFolder={toggleFolderCollapsed}
+              onRenameFolder={onRenameFolder}
+              onDeleteFolder={onDeleteFolder}
               onJumpToParent={handleJumpToParent}
             />
           )}
@@ -393,17 +525,25 @@ function ChannelListBody({
 function Header({
   selectedGuild,
   team,
+  view,
+  onToggleView,
+  onNewFolder,
   onNewDirect,
   onNewTeamConversation,
 }: {
   selectedGuild: { kind: "dm" } | { kind: "team"; teamId: string }
   team: Team | null
+  view: "active" | "archived"
+  onToggleView: () => void
+  onNewFolder?: () => void
   onNewDirect: () => void
   onNewTeamConversation: (teamId: string) => void
 }) {
   const t = useTranslations("desktop.channelList")
   const isTeam = selectedGuild.kind === "team"
   const ctaLabel = isTeam ? t("newConversation") : t("newChat")
+  const isArchived = view === "archived"
+  const viewLabel = isArchived ? t("viewActive") : t("viewArchived")
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-3">
       <div className="flex min-w-0 items-center gap-2">
@@ -421,96 +561,286 @@ function Header({
           {isTeam ? (team?.name ?? t("teamFallback")) : t("directMessages")}
         </span>
       </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-7"
-        onClick={() => {
-          if (selectedGuild.kind === "team") {
-            onNewTeamConversation(selectedGuild.teamId)
-          } else {
-            onNewDirect()
-          }
-        }}
-        aria-label={ctaLabel}
-        title={ctaLabel}
-      >
-        <PlusIcon className="size-4" />
-      </Button>
+      <div className="flex shrink-0 items-center gap-0.5">
+        {onNewFolder ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            onClick={onNewFolder}
+            aria-label={t("newFolder")}
+            title={t("newFolder")}
+          >
+            <FolderPlusIcon className="size-4" />
+          </Button>
+        ) : null}
+        <Button
+          size="icon"
+          variant="ghost"
+          className={cn("size-7", isArchived && "text-primary")}
+          onClick={onToggleView}
+          aria-label={viewLabel}
+          aria-pressed={isArchived}
+          title={viewLabel}
+        >
+          <ArchiveIcon className="size-4" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7"
+          onClick={() => {
+            if (selectedGuild.kind === "team") {
+              onNewTeamConversation(selectedGuild.teamId)
+            } else {
+              onNewDirect()
+            }
+          }}
+          aria-label={ctaLabel}
+          title={ctaLabel}
+        >
+          <PlusIcon className="size-4" />
+        </Button>
+      </div>
     </div>
   )
 }
 
-function DmGroupedList({
-  groups,
-  characterById,
+function ConversationSections({
+  sections,
   activeSessionId,
   unreadById,
   isSelected,
+  accentFor,
+  folders,
   onSelect,
   onDelete,
   onRename,
   onTogglePinned,
+  onArchive,
+  onUnarchive,
+  onAssignToFolder,
+  onToggleFolder,
+  onRenameFolder,
+  onDeleteFolder,
   onJumpToParent,
 }: {
-  groups: Map<string | null, ChatSession[]>
-  characterById: Map<string, Character>
+  sections: import("@/lib/chat/conversation-list-model").ConversationSection[]
   activeSessionId: string | null
   unreadById: Map<string, number>
   isSelected: (id: string) => boolean
+  accentFor: (session: ChatSession) => string | undefined
+  folders: SessionFolder[]
   onSelect: (id: string, e: ReactMouseEvent) => void
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
   onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
+  onArchive?: (id: string) => void | Promise<void>
+  onUnarchive?: (id: string) => void | Promise<void>
+  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
+  onToggleFolder: (id: string) => void
+  onRenameFolder?: (id: string, name: string) => void | Promise<void>
+  onDeleteFolder?: (id: string) => void | Promise<void>
   onJumpToParent?: (parentSessionId: string) => void
 }) {
   const t = useTranslations("desktop.channelList")
-  // Sort: characters with sessions first (alphabetical by name), then "Other".
-  const entries = [...groups.entries()].sort((a, b) => {
-    if (a[0] === null) return 1
-    if (b[0] === null) return -1
-    const ca = characterById.get(a[0])?.name ?? ""
-    const cb = characterById.get(b[0])?.name ?? ""
-    return ca.localeCompare(cb)
-  })
+
+  const renderRow = (s: ChatSession) => (
+    <SessionRow
+      key={s.id}
+      session={s}
+      active={s.id === activeSessionId}
+      selected={isSelected(s.id)}
+      accentColor={accentFor(s)}
+      unread={unreadById.get(s.id)}
+      folders={folders}
+      onSelect={onSelect}
+      onDelete={onDelete}
+      onRename={onRename}
+      onTogglePinned={onTogglePinned}
+      onArchive={onArchive}
+      onUnarchive={onUnarchive}
+      onAssignToFolder={onAssignToFolder}
+      onJumpToParent={onJumpToParent}
+    />
+  )
 
   return (
     <div className="flex flex-col gap-3 p-2">
-      {entries.map(([characterId, list]) => {
-        const character = characterId ? characterById.get(characterId) : null
-        const groupName = character?.name ?? t("groupOther")
-        return (
-          <section key={characterId ?? "other"} aria-label={groupName}>
-            <div className="flex items-center gap-2 px-2 pb-1">
-              {character ? (
-                <AvatarBadge subject={character} size={16} />
-              ) : (
-                <span className="size-2 rounded-full bg-muted-foreground/40" aria-hidden />
+      {sections.map((section) => {
+        if (section.kind === "folder") {
+          const { folder, collapsed } = section
+          return (
+            <section key={`folder:${folder.id}`} aria-label={folder.name}>
+              <FolderSectionHeader
+                folder={folder}
+                collapsed={collapsed}
+                count={section.sessions.length}
+                onToggle={() => onToggleFolder(folder.id)}
+                onRename={onRenameFolder}
+                onDelete={onDeleteFolder}
+              />
+              {collapsed ? null : (
+                <ul className="flex flex-col gap-0.5">
+                  {section.sessions.length === 0 ? (
+                    <li className="px-3 py-1 text-[11px] text-muted-foreground">
+                      {t("emptyFolder")}
+                    </li>
+                  ) : (
+                    section.sessions.map(renderRow)
+                  )}
+                </ul>
               )}
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {groupName}
-              </span>
-            </div>
-            <ul className="flex flex-col gap-0.5">
-              {list.map((s) => (
-                <SessionRow
-                  key={s.id}
-                  session={s}
-                  active={s.id === activeSessionId}
-                  selected={isSelected(s.id)}
-                  accentColor={character ? avatarColor(character) : undefined}
-                  unread={unreadById.get(s.id)}
-                  onSelect={onSelect}
-                  onDelete={onDelete}
-                  onRename={onRename}
-                  onTogglePinned={onTogglePinned}
-                  onJumpToParent={onJumpToParent}
-                />
-              ))}
-            </ul>
+            </section>
+          )
+        }
+
+        const label =
+          section.kind === "pinned"
+            ? t("sectionPinned")
+            : section.kind === "date"
+              ? t(BUCKET_LABEL_KEY[section.bucket])
+              : null
+        const key = section.kind === "date" ? `date:${section.bucket}` : section.kind
+        return (
+          <section key={key} aria-label={label ?? t("searchAria")}>
+            {label ? (
+              <div className="flex items-center gap-2 px-2 pb-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {label}
+                </span>
+              </div>
+            ) : null}
+            <ul className="flex flex-col gap-0.5">{section.sessions.map(renderRow)}</ul>
           </section>
         )
       })}
+    </div>
+  )
+}
+
+function FolderSectionHeader({
+  folder,
+  collapsed,
+  count,
+  onToggle,
+  onRename,
+  onDelete,
+}: {
+  folder: SessionFolder
+  collapsed: boolean
+  count: number
+  onToggle: () => void
+  onRename?: (id: string, name: string) => void | Promise<void>
+  onDelete?: (id: string) => void | Promise<void>
+}) {
+  const t = useTranslations("desktop.channelList")
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(folder.name)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const commit = () => {
+    const next = draft.trim()
+    if (next && next !== folder.name) void onRename?.(folder.id, next)
+    setEditing(false)
+  }
+
+  return (
+    <div className="group/folder flex items-center gap-1 px-2 pb-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        aria-expanded={!collapsed}
+        aria-label={folder.name}
+      >
+        {collapsed ? (
+          <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <FolderIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+        {editing ? (
+          <Input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                commit()
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                setDraft(folder.name)
+                setEditing(false)
+              }
+            }}
+            onBlur={commit}
+            className="h-5 px-1 py-0 text-[11px]"
+            aria-label={t("renameFolder")}
+          />
+        ) : (
+          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {folder.name}
+            {count > 0 ? <span className="ml-1 normal-case opacity-60">{count}</span> : null}
+          </span>
+        )}
+      </button>
+      {(onRename || onDelete) && !editing ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-5 opacity-0 group-hover/folder:opacity-100 data-[state=open]:opacity-100"
+              aria-label={t("folderActions")}
+            >
+              <MoreHorizontalIcon className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {onRename ? (
+              <DropdownMenuItem onSelect={() => setEditing(true)}>
+                <PencilIcon className="mr-2 size-4" />
+                {t("renameFolder")}
+              </DropdownMenuItem>
+            ) : null}
+            {onDelete ? (
+              <DropdownMenuItem
+                onSelect={() => setConfirmOpen(true)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2Icon className="mr-2 size-4" />
+                {t("deleteFolder")}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("deleteFolderConfirmTitle", { name: folder.name })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteFolderConfirmBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
+            <AlertDialogCancel className="w-full sm:w-auto">{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive", className: "w-full sm:w-auto" })}
+              onClick={() => {
+                setConfirmOpen(false)
+                void onDelete?.(folder.id)
+              }}
+            >
+              {t("deleteFolder")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

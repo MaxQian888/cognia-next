@@ -68,6 +68,14 @@ const remove = jest.fn()
 const rename = jest.fn()
 const bulkRemove = jest.fn().mockResolvedValue(undefined)
 const bulkSetPinned = jest.fn().mockResolvedValue(undefined)
+const archive = jest.fn().mockResolvedValue(undefined)
+const unarchive = jest.fn().mockResolvedValue(undefined)
+const bulkArchive = jest.fn().mockResolvedValue(undefined)
+const bulkUnarchive = jest.fn().mockResolvedValue(undefined)
+const createFolder = jest.fn().mockResolvedValue({ id: "f-new" })
+const renameFolder = jest.fn().mockResolvedValue(undefined)
+const deleteFolder = jest.fn().mockResolvedValue(undefined)
+const assignToFolder = jest.fn().mockResolvedValue(undefined)
 let activeSessionId: string | null = null
 // Navigation epochs — mirror the real stores so the workspace can decide
 // whether the guild or the active session was chosen more recently.
@@ -84,6 +92,15 @@ jest.mock("@/hooks/chat", () => ({
     rename,
     bulkRemove,
     bulkSetPinned,
+    archive,
+    unarchive,
+    bulkArchive,
+    bulkUnarchive,
+    folders: [],
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    assignToFolder,
   }),
   useClaudeChat: () => ({
     send: jest.fn(),
@@ -210,6 +227,10 @@ beforeEach(() => {
   rename.mockReset()
   bulkRemove.mockReset().mockResolvedValue(undefined)
   bulkSetPinned.mockReset().mockResolvedValue(undefined)
+  archive.mockReset().mockResolvedValue(undefined)
+  unarchive.mockReset().mockResolvedValue(undefined)
+  bulkArchive.mockReset().mockResolvedValue(undefined)
+  bulkUnarchive.mockReset().mockResolvedValue(undefined)
   setSelectedGuild.mockReset().mockImplementation((g: SelectedGuild) => {
     selectedGuild = g
     selectedGuildEpoch = ++navCounter
@@ -505,6 +526,30 @@ test("onBulkSetPinned(false) routes to unpinSuccess toast", async () => {
   expect(bulkSetPinned).toHaveBeenCalledWith(["s-1", "s-2", "s-3"], false)
   const { toast } = await import("sonner")
   expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("unpinSuccess")
+})
+
+test("onBulkArchive delegates to bulkArchive and toasts archiveSuccess", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onBulkArchive = props.onBulkArchive as (ids: string[]) => Promise<void>
+  await act(async () => {
+    await onBulkArchive(["s-1", "s-2"])
+  })
+  expect(bulkArchive).toHaveBeenCalledWith(["s-1", "s-2"])
+  const { toast } = await import("sonner")
+  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("archiveSuccess")
+})
+
+test("onBulkUnarchive delegates to the transactional bulkUnarchive and toasts unarchiveSuccess", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onBulkUnarchive = props.onBulkUnarchive as (ids: string[]) => Promise<void>
+  await act(async () => {
+    await onBulkUnarchive(["s-1", "s-2"])
+  })
+  expect(bulkUnarchive).toHaveBeenCalledWith(["s-1", "s-2"])
+  const { toast } = await import("sonner")
+  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("unarchiveSuccess")
 })
 
 test("per-row onTogglePinned routes through bulkSetPinned with a single-id list", async () => {

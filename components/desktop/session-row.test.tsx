@@ -203,6 +203,69 @@ test("Pin menu item is hidden when no onTogglePinned callback is provided", asyn
   expect(screen.queryByText("unpin")).toBeNull()
 })
 
+test("Archive menu item fires onArchive for an active session", async () => {
+  const user = userEvent.setup()
+  const onArchive = jest.fn()
+  setup({ onArchive })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("archive"))
+  expect(onArchive).toHaveBeenCalledWith("s-1")
+  // An active session offers Archive, not Unarchive.
+  expect(screen.queryByText("unarchive")).toBeNull()
+})
+
+test("Unarchive menu item fires onUnarchive for an archived session", async () => {
+  const user = userEvent.setup()
+  const onUnarchive = jest.fn()
+  setup({ session: { ...baseSession, archivedAt: 123 }, onArchive: jest.fn(), onUnarchive })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("unarchive"))
+  expect(onUnarchive).toHaveBeenCalledWith("s-1")
+  expect(screen.queryByText("archive")).toBeNull()
+})
+
+test("Archive menu item is hidden when no onArchive callback is provided", async () => {
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  expect(screen.queryByText("archive")).toBeNull()
+})
+
+// The Move-to-folder submenu is a Radix sub-menu whose items don't reliably
+// fire `onSelect` through the nested portal under jsdom (a documented gotcha);
+// the assignment itself is covered in the useSessions + db layers. Here we
+// verify the submenu and its items RENDER for each branch.
+test("Move to folder submenu lists the workspace folders", async () => {
+  const user = userEvent.setup()
+  const folders = [
+    { id: "f1", name: "Work", projectId: "p", order: 0, createdAt: 0, updatedAt: 0 },
+  ] as never
+  setup({ folders, onAssignToFolder: jest.fn() })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.hover(await screen.findByText("moveToFolder"))
+  expect(await screen.findByText("Work")).toBeInTheDocument()
+  // A loose session has no "remove" affordance.
+  expect(screen.queryByText("removeFromFolder")).toBeNull()
+})
+
+test("Move to folder offers Remove from folder when the session is foldered", async () => {
+  const user = userEvent.setup()
+  const folders = [
+    { id: "f1", name: "Work", projectId: "p", order: 0, createdAt: 0, updatedAt: 0 },
+  ] as never
+  setup({ session: { ...baseSession, folderId: "f1" }, folders, onAssignToFolder: jest.fn() })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.hover(await screen.findByText("moveToFolder"))
+  expect(await screen.findByText("removeFromFolder")).toBeInTheDocument()
+})
+
+test("Move to folder submenu is hidden without folders or a current folder", async () => {
+  const user = userEvent.setup()
+  setup({ folders: [], onAssignToFolder: jest.fn() })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  expect(screen.queryByText("moveToFolder")).toBeNull()
+})
+
 test("branched session shows a lineage chip that jumps to the parent", async () => {
   const user = userEvent.setup()
   const onJumpToParent = jest.fn()

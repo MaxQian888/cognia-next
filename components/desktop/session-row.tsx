@@ -7,13 +7,21 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@/lib/claude/types"
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  CheckIcon,
+  FolderIcon,
+  FolderInputIcon,
   GitBranchIcon,
   HashIcon,
   MessageSquareIcon,
@@ -62,6 +70,14 @@ export interface SessionRowProps {
   onRename: (id: string, title: string) => void | Promise<void>
   /** Toggle the pinned state for this row. */
   onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
+  /** Archive this session (hides it from the active list). */
+  onArchive?: (id: string) => void | Promise<void>
+  /** Restore this session from the Archived view back to the active list. */
+  onUnarchive?: (id: string) => void | Promise<void>
+  /** Folders available for the "Move to folder" submenu. */
+  folders?: SessionFolder[]
+  /** Move this session into a folder, or to loose (`null`). */
+  onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
   /**
    * When this session was created by branching another (it has a
    * `parentSessionId`), a small branch indicator is shown; clicking it calls
@@ -91,6 +107,10 @@ function SessionRowImpl({
   onDelete,
   onRename,
   onTogglePinned,
+  onArchive,
+  onUnarchive,
+  folders,
+  onAssignToFolder,
   onJumpToParent,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
@@ -156,6 +176,16 @@ function SessionRowImpl({
     const next = !session.pinned
     log.info("session toggle-pinned", { sessionId: session.id, pinned: next })
     void onTogglePinned?.(session.id, next)
+  }
+
+  const isArchived = session.archivedAt != null
+  const handleArchive = () => {
+    log.info("session archive", { sessionId: session.id })
+    void onArchive?.(session.id)
+  }
+  const handleUnarchive = () => {
+    log.info("session unarchive", { sessionId: session.id })
+    void onUnarchive?.(session.id)
   }
 
   /**
@@ -271,6 +301,49 @@ function SessionRowImpl({
                 )}
                 {session.pinned ? t("unpin") : t("pin")}
               </DropdownMenuItem>
+            ) : null}
+            {isArchived && onUnarchive ? (
+              <DropdownMenuItem onSelect={handleUnarchive}>
+                <ArchiveRestoreIcon className="mr-2 size-4" />
+                {t("unarchive")}
+              </DropdownMenuItem>
+            ) : null}
+            {!isArchived && onArchive ? (
+              <DropdownMenuItem onSelect={handleArchive}>
+                <ArchiveIcon className="mr-2 size-4" />
+                {t("archive")}
+              </DropdownMenuItem>
+            ) : null}
+            {onAssignToFolder && (folders?.length || session.folderId) ? (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <FolderInputIcon className="mr-2 size-4" />
+                  {t("moveToFolder")}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {(folders ?? []).map((f) => (
+                    <DropdownMenuItem
+                      key={f.id}
+                      onSelect={() => void onAssignToFolder(session.id, f.id)}
+                    >
+                      {session.folderId === f.id ? (
+                        <CheckIcon className="mr-2 size-4" />
+                      ) : (
+                        <FolderIcon className="mr-2 size-4" />
+                      )}
+                      <span className="truncate">{f.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                  {session.folderId ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => void onAssignToFolder(session.id, null)}>
+                        {t("removeFromFolder")}
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
             ) : null}
             {isTauri() ? (
               <DropdownMenuItem onSelect={handleOpenInTerminal}>

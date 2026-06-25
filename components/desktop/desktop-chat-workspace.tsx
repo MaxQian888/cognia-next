@@ -59,6 +59,15 @@ export function DesktopChatWorkspace() {
     rename,
     bulkRemove,
     bulkSetPinned,
+    archive,
+    unarchive,
+    bulkArchive,
+    bulkUnarchive,
+    folders,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    assignToFolder,
   } = useSessions()
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
@@ -281,6 +290,7 @@ export function DesktopChatWorkspace() {
   )
   const paneStop = useCallback((sid: string) => directChat.stop(sid), [directChat])
   const paneSteer = useCallback((sid: string) => directChat.interruptAndSteer(sid), [directChat])
+  const paneFlush = useCallback((sid: string) => directChat.flushSteer(sid), [directChat])
   const paneRegenerate = useCallback((sid: string) => directChat.regenerate(sid), [directChat])
   const paneEditResend = useCallback(
     (messageId: string, content: SendContent, sid: string) =>
@@ -350,6 +360,26 @@ export function DesktopChatWorkspace() {
       toast.success(bulkTRef.current(pinned ? "pinSuccess" : "unpinSuccess", { count }))
     },
     [bulkSetPinned]
+  )
+
+  const handleChannelBulkArchive = useCallback(
+    async (ids: string[]) => {
+      const count = ids.length
+      log.info("channel bulk-archive", { count })
+      await bulkArchive(ids)
+      toast.success(bulkTRef.current("archiveSuccess", { count }))
+    },
+    [bulkArchive]
+  )
+
+  const handleChannelBulkUnarchive = useCallback(
+    async (ids: string[]) => {
+      const count = ids.length
+      log.info("channel bulk-unarchive", { count })
+      await bulkUnarchive(ids)
+      toast.success(bulkTRef.current("unarchiveSuccess", { count }))
+    },
+    [bulkUnarchive]
   )
 
   const handleUseSample = useCallback(
@@ -427,8 +457,17 @@ export function DesktopChatWorkspace() {
               onDelete={handleChannelDelete}
               onRename={handleChannelRename}
               onTogglePinned={handleChannelTogglePinned}
+              onArchive={archive}
+              onUnarchive={unarchive}
               onBulkDelete={handleChannelBulkDelete}
               onBulkSetPinned={handleChannelBulkSetPinned}
+              onBulkArchive={handleChannelBulkArchive}
+              onBulkUnarchive={handleChannelBulkUnarchive}
+              folders={folders}
+              onCreateFolder={createFolder}
+              onRenameFolder={renameFolder}
+              onDeleteFolder={deleteFolder}
+              onAssignToFolder={assignToFolder}
             />
           )}
 
@@ -467,6 +506,7 @@ export function DesktopChatWorkspace() {
                   send={paneSend}
                   stop={paneStop}
                   steerNow={paneSteer}
+                  steerFlush={paneFlush}
                   regenerate={paneRegenerate}
                   editResend={paneEditResend}
                   respondToApproval={directChat.respondToApproval}
