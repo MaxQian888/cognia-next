@@ -23,6 +23,7 @@ import {
   scrollByLines,
   scrollPage,
   scrollToBottom,
+  scrollToRow,
   scrollToTop,
   type ScrollIntent,
 } from "../components/scroll-view-state"
@@ -42,6 +43,8 @@ export interface ScrollController {
   lineDown: () => void
   toTop: () => void
   toBottom: () => void
+  /** Jump so content-row `targetRow` sits ~1/3 down the viewport (find jump). */
+  toRow: (targetRow: number) => void
   /** Re-pin to the bottom (e.g. after `/clear` or a session swap). */
   reset: () => void
 }
@@ -72,6 +75,10 @@ export function useScroll(): ScrollController {
   const lineDown = useCallback(() => apply((i, c, v) => scrollByLines(i, 1, c, v)), [apply])
   const toTop = useCallback(() => setIntent(scrollToTop()), [])
   const toBottom = useCallback(() => setIntent(scrollToBottom()), [])
+  const toRow = useCallback(
+    (targetRow: number) => setIntent((_i) => scrollToRow(targetRow, sizes.content, sizes.viewport)),
+    [sizes]
+  )
 
   return {
     offset: effectiveTop(intent, sizes.content, sizes.viewport),
@@ -84,6 +91,7 @@ export function useScroll(): ScrollController {
     lineDown,
     toTop,
     toBottom,
+    toRow,
     reset: toBottom,
   }
 }

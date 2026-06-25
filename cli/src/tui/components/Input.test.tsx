@@ -489,7 +489,7 @@ describe("Input (rich composer)", () => {
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)
     type("/copy ")
-    expect(container.textContent).toContain("/copy [n]")
+    expect(container.textContent).toContain("/copy [n|code|tool]")
   })
 
   it("Tab completes a slash command in place without submitting", () => {
@@ -501,6 +501,52 @@ describe("Input (rich composer)", () => {
     expect(onSubmit).not.toHaveBeenCalled()
     // The buffer now holds the completed command ready for args.
     expect(container.textContent).toContain("/settings")
+  })
+})
+
+// Seeds composer history so ghost-text autosuggest has something to complete.
+function GhostHarness({ history }: { history: string[] }) {
+  const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
+  const seeded = React.useRef(false)
+  React.useEffect(() => {
+    if (seeded.current) return
+    seeded.current = true
+    for (const h of history) dispatch({ type: "INPUT_PUSH_HISTORY", entry: h })
+  }, [history])
+  return (
+    <Input
+      input={state.input}
+      dispatch={dispatch}
+      onSubmit={jest.fn()}
+      cwd="/work"
+      listDir={listDir}
+      mentionProviders={stubProviders(listDir)}
+    />
+  )
+}
+
+describe("Input ghost-text autosuggest", () => {
+  beforeEach(() => __resetInk())
+
+  it("shows the dim completion of a prior history entry", () => {
+    const { container } = render(<GhostHarness history={["deploy to staging"]} />)
+    type("deploy ")
+    // The buffer shows what was typed plus the ghost remainder.
+    expect(container.textContent).toContain("deploy ")
+    expect(container.textContent).toContain("to staging")
+  })
+
+  it("accepts the suggestion with → at the end of the draft", () => {
+    const { container } = render(<GhostHarness history={["deploy to staging"]} />)
+    type("deploy ")
+    key("", { rightArrow: true })
+    expect(container.textContent).toContain("deploy to staging")
+  })
+
+  it("shows no ghost when nothing matches", () => {
+    const { container } = render(<GhostHarness history={["deploy to staging"]} />)
+    type("xyz")
+    expect(container.textContent).not.toContain("staging")
   })
 })
 

@@ -20,6 +20,7 @@ describe("Footer", () => {
         config={config}
         usage={{ inputTokens: 1000, outputTokens: 500, totalCostUsd: 0.02 }}
         turnStatus="idle"
+        columns={200}
       />
     )
     const text = container.textContent ?? ""
@@ -30,24 +31,20 @@ describe("Footer", () => {
     expect(text).toContain("⚙ /settings")
   })
 
-  it("shows a rotating working verb and the interrupt hint while streaming", () => {
-    const { container } = render(<Footer config={config} turnStatus="streaming" />)
+  it("hides the discoverability hint while busy (it lives in BottomStatus now)", () => {
+    const { container } = render(<Footer config={config} turnStatus="streaming" columns={200} />)
     const text = container.textContent ?? ""
-    // The first frame reads "Working"; the verb rotates on a timer thereafter.
-    expect(text).toContain("Working")
-    expect(text).toContain("esc to interrupt")
-    // The settings hint yields to the spinner while busy.
+    // The persistent identity line stays; the idle hint yields.
+    expect(text).toContain("claude-x")
     expect(text).not.toContain("⚙ /settings")
-  })
-
-  it("shows the stopping hint while aborting", () => {
-    const { container } = render(<Footer config={config} turnStatus="aborting" />)
-    expect(container.textContent).toContain("stopping")
+    // Transient working indicator no longer lives in the Footer.
+    expect(text).not.toContain("esc to interrupt")
+    expect(text).not.toContain("Working")
   })
 
   it("honors a custom segment list + order and drops the rest", () => {
     const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["mode", "model"] } }
-    const { container } = render(<Footer config={cfg} turnStatus="idle" />)
+    const { container } = render(<Footer config={cfg} turnStatus="idle" columns={200} />)
     const text = container.textContent ?? ""
     expect(text).toContain("claude-x")
     expect(text).toContain("default") // permission mode
@@ -57,114 +54,52 @@ describe("Footer", () => {
 
   it("renders the git segment from the injected branch", () => {
     const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["git"] } }
-    const { container } = render(<Footer config={cfg} turnStatus="idle" gitBranch="feat/x" />)
+    const { container } = render(
+      <Footer config={cfg} turnStatus="idle" gitBranch="feat/x" columns={200} />
+    )
     expect(container.textContent).toContain("feat/x")
   })
 
   it("does not reread git branch when rerendered with stable props", () => {
     const readFile = jest.spyOn(fs, "readFileSync").mockReturnValue("ref: refs/heads/main")
     const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["git"] } }
-    const { rerender } = render(<Footer config={cfg} turnStatus="idle" />)
+    const { rerender } = render(<Footer config={cfg} turnStatus="idle" columns={200} />)
     expect(readFile).toHaveBeenCalledTimes(1)
-    rerender(<Footer config={cfg} turnStatus="idle" />)
+    rerender(<Footer config={cfg} turnStatus="idle" columns={200} />)
     expect(readFile).toHaveBeenCalledTimes(1)
     readFile.mockRestore()
   })
 
   it("shows a 📋 chip with the plan title when a plan is on file", () => {
     const { container } = render(
-      <Footer config={config} turnStatus="idle" planTitle="Refactor the parser" />
+      <Footer config={config} turnStatus="idle" planTitle="Refactor the parser" columns={200} />
     )
     const text = container.textContent ?? ""
     expect(text).toContain("📋")
     expect(text).toContain("Refactor the parser")
   })
 
-  it("shows a ⚙ copilot chip with the draft name + exit hint when in copilot mode", () => {
-    const { container } = render(
-      <Footer config={config} turnStatus="idle" copilot={{ name: "Nightly report" }} />
-    )
-    const text = container.textContent ?? ""
-    expect(text).toContain("copilot: Nightly report")
-    expect(text).toContain("/workflow exit")
-  })
-
   it("omits the plan chip when no plan is set", () => {
-    const { container } = render(<Footer config={config} turnStatus="idle" />)
+    const { container } = render(<Footer config={config} turnStatus="idle" columns={200} />)
     expect(container.textContent ?? "").not.toContain("📋")
   })
 
-  it("shows a btw chip with the queued steer count", () => {
-    const { container } = render(<Footer config={config} turnStatus="idle" steerCount={2} />)
-    expect(container.textContent ?? "").toContain("btw×2")
-  })
-
-  it("omits the btw chip when nothing is queued", () => {
-    const { container } = render(<Footer config={config} turnStatus="idle" steerCount={0} />)
-    expect(container.textContent ?? "").not.toContain("btw")
-  })
-
-  it("shows a ◆ sub-agent chip while a dispatch is running", () => {
+  it("drops low-priority segments with a … marker on a narrow terminal", () => {
+    const cfg: ResolvedConfig = {
+      ...config,
+      statusBar: { segments: ["model", "mode", "ctx", "tokens", "git", "cost"] },
+    }
     const { container } = render(
       <Footer
-        config={config}
-        turnStatus="streaming"
-        subagentRunning={{ name: "reviewer", count: 1 }}
-      />
-    )
-    const text = container.textContent ?? ""
-    expect(text).toContain("◆")
-    expect(text).toContain("reviewer")
-  })
-
-  it("shows the running count when more than one sub-agent is in flight", () => {
-    const { container } = render(
-      <Footer
-        config={config}
-        turnStatus="streaming"
-        subagentRunning={{ name: "planner", count: 3 }}
-      />
-    )
-    expect(container.textContent ?? "").toContain("×3")
-  })
-
-  it("omits the sub-agent chip when none is running", () => {
-    const { container } = render(<Footer config={config} turnStatus="idle" />)
-    expect(container.textContent ?? "").not.toContain("◆")
-  })
-
-  it("shows a ⧗ background chip with the count of detached subagent runs", () => {
-    const { container } = render(
-      <Footer config={config} turnStatus="idle" backgroundSubagents={2} />
-    )
-    const text = container.textContent ?? ""
-    expect(text).toContain("⧗")
-    expect(text).toContain("2 bg")
-  })
-
-  it("omits the background chip when no detached runs are in flight", () => {
-    const { container } = render(
-      <Footer config={config} turnStatus="idle" backgroundSubagents={0} />
-    )
-    expect(container.textContent ?? "").not.toContain("⧗")
-  })
-
-  it("shows interrupted detached background runs separately", () => {
-    const { container } = render(
-      <Footer config={config} turnStatus="idle" interruptedBackgroundSubagents={2} />
-    )
-    const text = container.textContent ?? ""
-    expect(text).toContain("! 2 bg interrupted")
-  })
-
-  it("shows a determinate progress pill when activity has a max", () => {
-    const { container } = render(
-      <Footer
-        config={config}
+        config={cfg}
+        usage={{ inputTokens: 1000, outputTokens: 500, totalCostUsd: 0.02 }}
         turnStatus="idle"
-        activity={{ kind: "goal", label: "ship it", turns: 2, max: 5, status: "running" }}
+        gitBranch="feature/some-long-branch-name"
+        columns={28}
       />
     )
-    expect(container.textContent).toContain("2/5")
+    const text = container.textContent ?? ""
+    expect(text).toContain("claude-x") // highest priority survives
+    expect(text).toContain("…") // truncation marker
   })
 })

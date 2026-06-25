@@ -540,6 +540,13 @@ export interface TuiState {
   exit: boolean
   /** Monotonic counter feeding unique cell ids without Date.now/Math.random. */
   seq: number
+  /** Active backtrack-to-edit selection: the index in `cells` of the user
+   * message currently highlighted for editing. Absent when not selecting. */
+  backtrack?: { index: number }
+  /** Committed edit target: the index in `cells` of the user message whose text
+   * is loaded in the composer. Submitting forks the conversation here, discarding
+   * every later turn. Absent when not editing. */
+  editTarget?: { index: number }
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -612,6 +619,13 @@ export type TuiAction =
   | { type: "NOTICE"; message: string }
   | { type: "LOAD_CELLS"; cells: Cell[] }
   | { type: "RESET"; sessionId: string }
+  // Backtrack-to-edit: select a prior user message (Esc/↑↓), then commit it as
+  // the edit target — submitting forks the conversation there (destructive).
+  | { type: "BACKTRACK_ENTER" }
+  | { type: "BACKTRACK_MOVE"; dir: -1 | 1 }
+  | { type: "BACKTRACK_CANCEL" }
+  | { type: "BACKTRACK_COMMIT"; index: number }
+  | { type: "EDIT_CLEAR" }
   // `/init` staged-draft lifecycle: stage a generated/rewritten instruction file
   // pending confirmation, then clear it once applied or cancelled.
   | { type: "SET_INIT_DRAFT"; target: string; content: string }

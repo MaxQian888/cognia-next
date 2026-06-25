@@ -125,6 +125,156 @@ describe("App", () => {
     expect(container.textContent).toContain("hi")
   })
 
+  it("backtracks to edit the last user message on double-Esc then Enter", async () => {
+    const { create } = fakeSession("ok")
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("backtrack me please")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("ok"))
+    const occurrences = () => (container.textContent ?? "").split("backtrack me please").length - 1
+    // After submit the message lives only in the transcript (composer cleared).
+    const before = occurrences()
+    // First Esc arms; second Esc enters backtrack selection (highlight only).
+    act(() => __fireInput("", { escape: true }))
+    act(() => __fireInput("", { escape: true }))
+    // Enter loads the highlighted message into the composer for editing.
+    act(() => __fireInput("", { return: true }))
+    expect(occurrences()).toBe(before + 1)
+  })
+
+  it("forks the conversation when an edited earlier message is submitted", async () => {
+    const { create, prompts } = fakeSession("answer")
+    const { container } = render(<App config={config} sessionId="ses1" createSession={create} />)
+    // Two turns.
+    type("first question")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("first question"))
+    type("second question")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("second question"))
+    // Backtrack: enter selection, walk up to the FIRST user message, edit it.
+    act(() => __fireInput("", { escape: true }))
+    act(() => __fireInput("", { escape: true }))
+    act(() => __fireInput("", { upArrow: true }))
+    act(() => __fireInput("", { return: true }))
+    // Edit the loaded text and resubmit → forks at the first user message,
+    // discarding the second turn, then sends the edited prompt.
+    type(" edited")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(prompts[prompts.length - 1]).toContain("edited"))
+    // The discarded turn is gone from the transcript after the fork.
+    await waitFor(() => expect(container.textContent).not.toContain("second question"))
+  })
+
+  it("shows the selection position and discard count, and Esc cancels the edit", async () => {
+    const { create } = fakeSession("ok")
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("only question")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("only question"))
+    // Enter backtrack selection — the status line shows #1/1.
+    act(() => __fireInput("", { escape: true }))
+    act(() => __fireInput("", { escape: true }))
+    await waitFor(() => expect(container.textContent).toContain("Editing message #1/1"))
+    // Commit → editing status shows 0 later turns discarded.
+    act(() => __fireInput("", { return: true }))
+    await waitFor(() =>
+      expect(container.textContent).toContain("0 later turn(s) will be discarded")
+    )
+    // Esc cancels the edit: status line and loaded text both clear.
+    act(() => __fireInput("", { escape: true }))
+    await waitFor(() => expect(container.textContent).not.toContain("will be discarded"))
+  })
+
+  it("abandons a pending edit when a slash command is submitted instead", async () => {
+    const { create } = fakeSession("ok")
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("a question")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("a question"))
+    // Backtrack + commit loads the message for editing.
+    act(() => __fireInput("", { escape: true }))
+    act(() => __fireInput("", { escape: true }))
+    act(() => __fireInput("", { return: true }))
+    await waitFor(() => expect(container.textContent).toContain("will be discarded"))
+    // Clear the loaded text (Ctrl+U) and submit a command instead → edit abandoned.
+    act(() => __fireInput("u", { ctrl: true }))
+    type("/help")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).not.toContain("will be discarded"))
+  })
+
+  it("copies the last assistant reply to the clipboard on Ctrl+P", async () => {
+    const { create } = fakeSession("the reply text")
+    const copyClipboard = jest.fn(() => Promise.resolve({ ok: true } as const))
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} copyClipboard={copyClipboard} />
+    )
+    type("hi")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("the reply text"))
+    await act(async () => {
+      __fireInput("p", { ctrl: true })
+      await Promise.resolve()
+    })
+    expect(copyClipboard).toHaveBeenCalledWith("the reply text")
+  })
+
+  it("notes when there is no reply to copy on Ctrl+P", async () => {
+    const { create } = fakeSession("ok")
+    const copyClipboard = jest.fn(() => Promise.resolve({ ok: true } as const))
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} copyClipboard={copyClipboard} />
+    )
+    act(() => __fireInput("p", { ctrl: true }))
+    await waitFor(() => expect(container.textContent).toContain("No reply to copy yet."))
+    expect(copyClipboard).not.toHaveBeenCalled()
+  })
+
+  it("clears the screen on Ctrl+L without wiping the conversation", async () => {
+    const { create } = fakeSession("kept answer")
+    const clearScreen = jest.fn()
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} clearScreen={clearScreen} />
+    )
+    type("kept prompt")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("kept answer"))
+    clearScreen.mockClear()
+    act(() => __fireInput("l", { ctrl: true }))
+    expect(clearScreen).toHaveBeenCalled()
+    // The transcript survives — Ctrl+L only repaints, unlike `/clear`.
+    expect(container.textContent).toContain("kept answer")
+  })
+
   it("surfaces interrupted background subagent history in the footer", async () => {
     const backgroundTasks = jest.requireMock("../../agent/subagent-background-tasks") as {
       countInterruptedCliBackgroundRuns: jest.Mock
@@ -650,7 +800,7 @@ describe("App", () => {
 
   it("copies the last reply on /copy", async () => {
     const { create } = fakeSession("the reply text")
-    const copyClipboard = jest.fn().mockResolvedValue(true)
+    const copyClipboard = jest.fn().mockResolvedValue({ ok: true })
     const { container } = render(
       <App config={config} sessionId="s1" createSession={create} copyClipboard={copyClipboard} />
     )
@@ -666,6 +816,49 @@ describe("App", () => {
     })
     expect(copyClipboard).toHaveBeenCalledWith("the reply text")
     await waitFor(() => expect(container.textContent).toContain("Copied the last reply"))
+  })
+
+  it("shows the too-large notice when /copy is refused by the OSC 52 cap", async () => {
+    const { create } = fakeSession("the reply text")
+    const copyClipboard = jest.fn().mockResolvedValue({ ok: false, reason: "too-large" })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} copyClipboard={copyClipboard} />
+    )
+    type("hi")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    type("/copy")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("too large to copy over OSC 52"))
+  })
+
+  it("honors a config-overridden clipboard notice", async () => {
+    const { create } = fakeSession("the reply text")
+    const copyClipboard = jest.fn().mockResolvedValue({ ok: false, reason: "unavailable" })
+    const { container } = render(
+      <App
+        config={{ ...config, notices: { clipboardUnavailable: "CLIP-OVERRIDE" } }}
+        sessionId="s1"
+        createSession={create}
+        copyClipboard={copyClipboard}
+      />
+    )
+    type("hi")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    type("/copy")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("CLIP-OVERRIDE"))
   })
 
   it("shows the working directory on /cwd", () => {

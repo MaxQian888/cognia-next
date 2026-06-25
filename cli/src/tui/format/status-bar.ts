@@ -18,6 +18,7 @@ import {
   type StatusTheme,
 } from "../../config/schema"
 import { getBuiltinTheme } from "../theme/builtins"
+import { stringWidth } from "../markdown/width"
 import type { ThemePalette } from "../theme/palette"
 import {
   cacheHitRatio,
@@ -193,6 +194,77 @@ export function buildStatusBar(ctx: {
     out.push({ id, text, ...style })
   }
   return out
+}
+
+/**
+ * Drop-priority for each segment when the persistent status line can't fit the
+ * terminal width: HIGHER survives longer. The identity segments the user reads
+ * most (model / mode / context / tokens) are kept; cost and git are sacrificed
+ * first; everything else sits in a middle band and keeps its declared order on a
+ * tie. Mirrors the plan's `model > mode > ctx > tokens > … > git > cost`.
+ */
+const SEGMENT_KEEP_PRIORITY: Record<StatusSegment, number> = {
+  model: 100,
+  mode: 90,
+  ctx: 80,
+  tokens: 70,
+  provider: 50,
+  cwd: 50,
+  cache: 50,
+  thinking: 50,
+  ratelimit: 50,
+  git: 40,
+  cost: 30,
+}
+
+/** The ` · ` separator the Footer renders between segments. */
+const SEGMENT_SEP = " · "
+const SEP_WIDTH = stringWidth(SEGMENT_SEP)
+/** Display width reserved for the trailing ` …` truncation marker. */
+const ELLIPSIS_WIDTH = 2
+
+/** Total display width of segments joined by ` · ` (CJK-aware). */
+function joinedWidth(segments: StatusSegmentView[]): number {
+  if (segments.length === 0) return 0
+  let w = 0
+  for (const s of segments) w += stringWidth(s.text)
+  return w + SEP_WIDTH * (segments.length - 1)
+}
+
+/** Result of fitting the status line to a terminal width. */
+export interface FittedStatusBar {
+  /** The segments that survived, in their original order. */
+  segments: StatusSegmentView[]
+  /** Whether any segment was dropped (the Footer shows a trailing ` …`). */
+  truncated: boolean
+}
+
+/**
+ * Fit the persistent status segments into `columns` display columns by dropping
+ * the lowest-{@link SEGMENT_KEEP_PRIORITY} segments (rightmost first on a tie)
+ * until the rest fit with room for a ` …` marker. Pure — the {@link Footer}
+ * renders the survivors plus a trailing ellipsis when `truncated`. Never drops
+ * the single most-important segment; `columns <= 0` yields nothing.
+ */
+export function fitStatusSegments(segments: StatusSegmentView[], columns: number): FittedStatusBar {
+  if (columns <= 0) return { segments: [], truncated: false }
+  if (segments.length === 0 || joinedWidth(segments) <= columns) {
+    return { segments, truncated: false }
+  }
+  const kept = segments.map((s, i) => ({ s, i }))
+  let truncated = false
+  while (kept.length > 1 && joinedWidth(kept.map((k) => k.s)) + ELLIPSIS_WIDTH > columns) {
+    let dropAt = 0
+    for (let j = 1; j < kept.length; j++) {
+      const pj = SEGMENT_KEEP_PRIORITY[kept[j].s.id] ?? 50
+      const pd = SEGMENT_KEEP_PRIORITY[kept[dropAt].s.id] ?? 50
+      // Lowest priority drops first; on a tie the rightmost (greater index).
+      if (pj < pd || (pj === pd && kept[j].i > kept[dropAt].i)) dropAt = j
+    }
+    kept.splice(dropAt, 1)
+    truncated = true
+  }
+  return { segments: kept.map((k) => k.s), truncated }
 }
 
 /** A determinate progress bar: `progressBar(3, 5)` → "▰▰▰▱▱". */

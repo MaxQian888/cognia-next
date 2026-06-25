@@ -3,6 +3,10 @@
  * placeholder, keeping the full text aside so it can be re-expanded on submit.
  * Pure: the caller supplies the placeholder id (a counter) so there is no
  * reliance on Math.random / Date.now.
+ *
+ * Shared by the web composer (`components/chat/composer.tsx`) and the CLI TUI
+ * input (`cli/src/tui/components/Input.tsx`) so both fold oversized pastes the
+ * same way.
  */
 export interface PasteResult {
   isLarge: boolean
@@ -15,6 +19,18 @@ export interface PasteResult {
 
 export function placeholderFor(lineCount: number, id: number): string {
   return `[Pasted ${lineCount} lines #${id}]`
+}
+
+/**
+ * Returns all `[Pasted N lines #k]` placeholders present in `text`, in order.
+ * Owns the placeholder shape alongside {@link placeholderFor} so callers (e.g.
+ * the composer's orphaned-placeholder reminder) don't re-encode the format with
+ * their own regex and silently break if the placeholder wording ever changes.
+ * A fresh RegExp is built per call because the global flag carries mutable
+ * `lastIndex` state that a shared instance would corrupt across call sites.
+ */
+export function findPastePlaceholders(text: string): string[] {
+  return text.match(/\[Pasted \d+ lines #\d+\]/g) ?? []
 }
 
 /**

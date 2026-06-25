@@ -1,7 +1,12 @@
 import {
   cliConfigFileSchema,
+  clipboardSchema,
+  DEFAULT_OSC52_MAX_BYTES,
   DEFAULT_RESOLVED_CONFIG,
+  NOTICE_DEFAULTS,
+  noticesSchema,
   RENDER_DEFAULTS,
+  resolveNotices,
   resolveRenderConfig,
   renderConfigSchema,
 } from "./schema"
@@ -27,6 +32,14 @@ describe("renderConfigSchema + resolveRenderConfig", () => {
   it("rejects a fractional / out-of-range line count", () => {
     expect(renderConfigSchema.safeParse({ toolResultMaxLines: 1.5 }).success).toBe(false)
     expect(renderConfigSchema.safeParse({ pagerThresholdLines: 0 }).success).toBe(false)
+  })
+
+  it("accepts notices + clipboard on the config file", () => {
+    const parsed = cliConfigFileSchema.safeParse({
+      notices: { clipboardUnavailable: "no clip" },
+      clipboard: { osc52: "always", osc52MaxBytes: 1000 },
+    })
+    expect(parsed.success).toBe(true)
   })
 
   it("accepts render + keybindings on the config file", () => {
@@ -240,5 +253,44 @@ describe("cliConfigFileSchema.customLimitsSources", () => {
         select: { arrayPath: "a.b", by: "tag", equals: "x" },
       })
     }
+  })
+})
+
+describe("noticesSchema + resolveNotices", () => {
+  it("returns the defaults when notices are absent", () => {
+    expect(resolveNotices(undefined)).toEqual(NOTICE_DEFAULTS)
+  })
+
+  it("overlays a sparse patch onto the defaults", () => {
+    const n = resolveNotices({ clipboardUnavailable: "剪贴板不可用" })
+    expect(n.clipboardUnavailable).toBe("剪贴板不可用")
+    // Untouched keys keep their default wording.
+    expect(n.copiedReply).toBe(NOTICE_DEFAULTS.copiedReply)
+    expect(n.clipboardTooLarge).toBe(NOTICE_DEFAULTS.clipboardTooLarge)
+  })
+
+  it("ignores undefined-valued keys rather than clobbering a default", () => {
+    const n = resolveNotices({ copiedCell: undefined })
+    expect(n.copiedCell).toBe(NOTICE_DEFAULTS.copiedCell)
+  })
+
+  it("rejects an unknown notice key (strict)", () => {
+    expect(noticesSchema.safeParse({ nope: "x" }).success).toBe(false)
+  })
+})
+
+describe("clipboardSchema (osc52MaxBytes)", () => {
+  it("defaults the OSC 52 byte cap to a terminal-safe value", () => {
+    expect(DEFAULT_OSC52_MAX_BYTES).toBeGreaterThan(0)
+  })
+
+  it("accepts a non-negative integer cap (0 disables)", () => {
+    expect(clipboardSchema.safeParse({ osc52MaxBytes: 0 }).success).toBe(true)
+    expect(clipboardSchema.safeParse({ osc52MaxBytes: 100000 }).success).toBe(true)
+  })
+
+  it("rejects a negative or fractional cap", () => {
+    expect(clipboardSchema.safeParse({ osc52MaxBytes: -1 }).success).toBe(false)
+    expect(clipboardSchema.safeParse({ osc52MaxBytes: 1.5 }).success).toBe(false)
   })
 })

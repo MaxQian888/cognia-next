@@ -96,6 +96,30 @@ export function scrollToTop(): ScrollIntent {
   return { top: 0, stick: false }
 }
 
+/**
+ * Fraction of the viewport kept ABOVE a jumped-to row, so a find match lands
+ * with a little context above it rather than flush against the top edge.
+ */
+export const SCROLL_TO_ROW_BIAS = 1 / 3
+
+/**
+ * Scroll so `targetRow` (a content-row index, 0 = first row) sits roughly
+ * {@link SCROLL_TO_ROW_BIAS} of the way down the viewport, clamped into range.
+ * Stops following the bottom (a jump is an explicit position). Degrades to the
+ * top when sizes aren't measured yet (viewport 0 ⇒ no meaningful window), so a
+ * jump never throws on the first commit or under the jsdom test mock.
+ */
+export function scrollToRow(
+  targetRow: number,
+  contentHeight: number,
+  viewportHeight: number
+): ScrollIntent {
+  const row = Number.isFinite(targetRow) ? Math.max(0, Math.floor(targetRow)) : 0
+  const lead = Math.floor(Math.max(0, Math.floor(viewportHeight)) * SCROLL_TO_ROW_BIAS)
+  const top = clampTop(row - lead, contentHeight, viewportHeight)
+  return { top, stick: false }
+}
+
 /** Jump to the bottom and re-engage follow mode. */
 export function scrollToBottom(): ScrollIntent {
   return { top: 0, stick: true }

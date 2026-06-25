@@ -172,6 +172,10 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     keybindings: layer.keybindings ? { ...acc.keybindings, ...layer.keybindings } : acc.keybindings,
     layout: layer.layout ?? acc.layout,
     mouse: layer.mouse ?? acc.mouse,
+    clipboard: layer.clipboard
+      ? { ...acc.clipboard, ...stripUndefined(layer.clipboard) }
+      : acc.clipboard,
+    notices: layer.notices ? { ...acc.notices, ...stripUndefined(layer.notices) } : acc.notices,
     streamIdleTimeoutMs: layer.streamIdleTimeoutMs ?? acc.streamIdleTimeoutMs,
     aiSdkMaxSteps: layer.aiSdkMaxSteps ?? acc.aiSdkMaxSteps,
     toolExecutionTimeoutMs: layer.toolExecutionTimeoutMs ?? acc.toolExecutionTimeoutMs,

@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { stringWidth } from "./width"
+import { stringWidth, truncateToWidth } from "./width"
 
 describe("stringWidth", () => {
   it("counts ASCII as one column each", () => {
@@ -37,5 +37,25 @@ describe("stringWidth", () => {
   it("counts astral-plane ideographs and emoji as wide", () => {
     expect(stringWidth("\u{20000}")).toBe(2) // CJK Ext B
     expect(stringWidth("🚀")).toBe(2)
+  })
+})
+
+describe("truncateToWidth", () => {
+  it("returns the text unchanged when it fits", () => {
+    expect(truncateToWidth("hello", 10)).toBe("hello")
+    expect(truncateToWidth("hello", 5)).toBe("hello")
+  })
+
+  it("cuts to width with an ellipsis", () => {
+    expect(truncateToWidth("hello world", 6)).toBe("hello…")
+  })
+
+  it("is display-width aware (CJK counts as two columns)", () => {
+    expect(truncateToWidth("模型名称", 3)).toBe("模…")
+  })
+
+  it("collapses to a bare ellipsis when max <= 1", () => {
+    expect(truncateToWidth("hello", 1)).toBe("…")
+    expect(truncateToWidth("hello", 0)).toBe("…")
   })
 })

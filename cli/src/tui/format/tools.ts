@@ -4,7 +4,8 @@
  * diff stats, and result-size hints for the tool card. No Ink, no I/O.
  */
 import { formatEditDiff, bareToolName } from "../markdown/diff"
-import type { Todo } from "../state/types"
+import { truncateToWidth } from "../markdown/width"
+import type { Todo, ToolCell } from "../state/types"
 
 /** Tools whose input describes a file edit we render as a diff. */
 const DIFF_TOOLS = new Set(["edit", "write", "multi_edit", "multiedit", "str_replace", "create"])
@@ -126,6 +127,31 @@ export function summarizeToolCall(toolName: string, input: Record<string, unknow
     return files > 0 ? `${files} file${files === 1 ? "" : "s"}` : ""
   }
   return firstString(input, ["file_path", "filePath", "path", "url", "query", "command"]) ?? ""
+}
+
+/**
+ * The live "what's running" detail line for the working indicator, Codex-style:
+ * `└ <tool>: <summary>` (e.g. `└ bash: npm test`). Reuses {@link toolDisplayName}
+ * and {@link summarizeToolCall} so the label and summary match the tool card.
+ * Truncated to `columns` display columns; the `: <summary>` tail is dropped when
+ * the tool has no natural summary.
+ */
+export function toolDetailLine(tool: ToolCell, columns = 80): string {
+  const name = toolDisplayName(tool.toolName)
+  const summary = summarizeToolCall(tool.toolName, tool.input)
+  const body = summary ? `${name}: ${summary}` : name
+  return truncateToWidth(`└ ${body}`, columns)
+}
+
+/**
+ * Detail lines for the tools still running in the current turn (`status` ===
+ * "running"), most-recent last, capped at `max` lines. Drives the live detail
+ * block under the working indicator. Empty when nothing is running.
+ */
+export function runningToolLines(tools: ToolCell[], columns = 80, max = 3): string[] {
+  const running = tools.filter((t) => t.status === "running")
+  const tail = running.slice(Math.max(0, running.length - max))
+  return tail.map((t) => toolDetailLine(t, columns))
 }
 
 /** Added / removed line counts for a diff tool. */

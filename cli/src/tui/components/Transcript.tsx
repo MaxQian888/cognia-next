@@ -8,12 +8,35 @@
  * Ink prints `<Static>` content above the live frame, in insertion order.
  */
 import React from "react"
-import { Box, Static, Text } from "ink"
+import { Box, Static, Text, measureElement, type DOMElement } from "ink"
 
 import { CellView } from "./CellView"
 import { useTheme } from "../theme/context"
 import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
 import type { Cell, ToolCell } from "../state/types"
+
+/** Reports its measured row-height for the find cursor's row map. Wraps a cell
+ * only while find is active (measurement is gated), so the static-history path
+ * pays nothing. */
+function MeasuredCell({
+  id,
+  onHeight,
+  children,
+}: {
+  id: string
+  onHeight: (id: string, height: number) => void
+  children: React.ReactNode
+}) {
+  const ref = React.useRef<DOMElement | null>(null)
+  React.useEffect(() => {
+    if (ref.current) onHeight(id, measureElement(ref.current).height)
+  })
+  return (
+    <Box ref={ref} flexDirection="column">
+      {children}
+    </Box>
+  )
+}
 
 /** A folded run of completed context-gathering tools, shown as one dim summary
  * line ("⚙ 3 reads, 2 searches") so a burst doesn't bury the actual work. */
@@ -45,6 +68,9 @@ function TranscriptImpl({
   verbose = false,
   epoch = 0,
   mode = "static",
+  measuring = false,
+  focusedCellId = null,
+  onCellHeight,
 }: {
   cells: Cell[]
   header?: React.ReactNode
@@ -60,17 +86,50 @@ function TranscriptImpl({
    * rendered separately, so no header row is emitted here.
    */
   mode?: "static" | "live"
+  /** Find active: render every cell individually (no context folding) and
+   * report each cell's measured height so the cursor can jump to it. */
+  measuring?: boolean
+  /** The cell the find cursor points at — highlighted with a left accent bar. */
+  focusedCellId?: string | null
+  /** Receives `(cellId, height)` for every cell while {@link measuring}. */
+  onCellHeight?: (id: string, height: number) => void
 }) {
-  const renderCell = (cell: Cell) => (
-    <Box key={cell.id} marginBottom={1}>
-      <CellView cell={applyVerbose(cell, verbose)} />
-    </Box>
-  )
+  const theme = useTheme()
+  const renderCell = (cell: Cell) => {
+    const focused = cell.id === focusedCellId
+    const body = <CellView cell={applyVerbose(cell, verbose)} />
+    const inner = focused ? (
+      <Box
+        borderStyle="single"
+        borderTop={false}
+        borderRight={false}
+        borderBottom={false}
+        borderColor={theme.accent}
+        paddingLeft={1}
+      >
+        {body}
+      </Box>
+    ) : (
+      body
+    )
+    return (
+      <Box key={cell.id} marginBottom={1}>
+        {onCellHeight && measuring ? (
+          <MeasuredCell id={cell.id} onHeight={onCellHeight}>
+            {inner}
+          </MeasuredCell>
+        ) : (
+          inner
+        )}
+      </Box>
+    )
+  }
 
   if (mode === "live") {
     // The fullscreen viewport re-renders in place (unlike `<Static>` below), so
-    // it can safely fold completed context-tool bursts into one summary row.
-    const runs = groupContextRuns(cells, verbose)
+    // it can fold completed context-tool bursts into one summary row — EXCEPT
+    // while find is active, when every cell must stay individually addressable.
+    const runs = groupContextRuns(cells, verbose || measuring)
     return (
       <Box flexDirection="column">
         {runs.map((run) =>

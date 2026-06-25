@@ -430,4 +430,32 @@ describe("useAgentSession", () => {
     })
     expect(h.actions).toContainEqual({ type: "NOTICE", message: "Checkpoint #99 not found." })
   })
+
+  it("forkConversationAt truncates to the kept cells and re-mints the session", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi") // create the session so a sessionId exists
+    })
+    const cells = [
+      { id: "1", kind: "user", text: "a" },
+      { id: "2", kind: "assistant", raw: "b" },
+      { id: "3", kind: "user", text: "c" },
+    ] as never
+    await act(async () => {
+      await h.api().forkConversationAt(2, cells)
+    })
+    // Keeps the first two cells, drops the rest, and resets onto the same id.
+    expect(h.actions).toContainEqual({ type: "LOAD_CELLS", cells: [cells[0], cells[1]] })
+    expect(h.actions.some((a) => a.type === "RESET")).toBe(true)
+    // The session is re-minted (initial create + the fork's create).
+    expect((h.create as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("forkConversationAt is a no-op without an active session", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().forkConversationAt(0, [])
+    })
+    expect(h.actions.some((a) => a.type === "LOAD_CELLS")).toBe(false)
+  })
 })

@@ -58,6 +58,23 @@ describe("resolveConfig defaults", () => {
     expect(cfg.streamIdleTimeoutMs).toBe(60_000)
   })
 
+  it("field-merges notices and clipboard across user + project layers", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        notices: { clipboardUnavailable: "user-clip", copiedReply: "user-reply" },
+        clipboard: { osc52: "always", osc52MaxBytes: 1000 },
+      }),
+      [projectConfigPath(CWD)]: JSON.stringify({
+        // Project overrides one notice key + the byte cap; the rest survive.
+        notices: { clipboardUnavailable: "project-clip" },
+        clipboard: { osc52MaxBytes: 2000 },
+      }),
+    })
+    expect(cfg.notices).toEqual({ clipboardUnavailable: "project-clip", copiedReply: "user-reply" })
+    // osc52 mode from the user layer is preserved; the cap is overridden by project.
+    expect(cfg.clipboard).toEqual({ osc52: "always", osc52MaxBytes: 2000 })
+  })
+
   it("lets a config file override streamIdleTimeoutMs (0 disables)", () => {
     const cfg = run({
       [userConfigPath(HOME)]: JSON.stringify({ streamIdleTimeoutMs: 0 }),

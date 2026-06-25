@@ -14,7 +14,10 @@ import { Box, Text, useApp, useInput, useStdout } from "ink"
 
 import { Banner } from "./Banner"
 import { ScrollView } from "./ScrollView"
+import { FindBar } from "./FindBar"
 import { useScroll } from "../hooks/useScroll"
+import { useTranscriptCursor } from "../hooks/useTranscriptCursor"
+import { cellToText } from "../format/scrollback-search"
 import { resolveLayoutMode, readLayoutCapability, type LayoutCapability } from "../layout-mode"
 import {
   enterAltScreen,
@@ -28,6 +31,7 @@ import { ThemeProvider } from "../theme/context"
 import { RenderPrefsProvider } from "../render/context"
 import { resolveTheme } from "../theme/resolve"
 import { Footer } from "./Footer"
+import { BottomStatus } from "./BottomStatus"
 import { Inflight } from "./Inflight"
 import { WorkflowRunPanel } from "./WorkflowRunPanel"
 import { Mascot } from "./Mascot"
@@ -116,7 +120,7 @@ import { ensureCliDb } from "../../db/bootstrap"
 import { createForm, formSubmit } from "../state/form"
 import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
-import { isBusy } from "../state/selectors"
+import { isBusy, lastAssistantText } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
 import { runningSubagents } from "../format/subagent"
 import {
@@ -124,7 +128,7 @@ import {
   countRunningCliBackgroundRuns,
 } from "../../agent/subagent-background-tasks"
 import { contextPercent } from "../format/usage"
-import { copyToClipboard } from "../clipboard"
+import { copyToClipboard, clipboardFailureMessage, type CopyResult } from "../clipboard"
 import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
 import { searchHistory } from "../input/history-search"
 import { bufferFromText, bufferText, insertText } from "../input/buffer"
@@ -160,6 +164,7 @@ import {
   PERMISSION_MODES,
   DEFAULT_MOUSE_MODE,
   resolveRenderConfig,
+  resolveNotices,
   type ThinkingLevel,
 } from "../../config/schema"
 import { deriveEffortSliderState, modelSupportsEffort } from "../../config/thinking"
@@ -207,6 +212,24 @@ function clearTerminal(): void {
   if (process.stdout.isTTY) process.stdout.write(CLEAR_SCREEN)
 }
 
+/** Position of the user message at `index` among all user messages: its 1-based
+ * `pos`, the `total` user-message count, and how many `later` ones follow it.
+ * Drives the backtrack/edit status line. */
+function userMessageStats(
+  cells: { kind: string }[],
+  index: number
+): { pos: number; total: number; later: number } {
+  let total = 0
+  let pos = 0
+  cells.forEach((c, i) => {
+    if (c.kind === "user") {
+      total++
+      if (i === index) pos = total
+    }
+  })
+  return { pos, total, later: total - pos }
+}
+
 /** Read a theme config file, or null when it doesn't exist / can't be read. */
 function readThemeFile(p: string): string | null {
   try {
@@ -242,7 +265,7 @@ export interface AppProps {
   /** Transcript reader for `/sessions` + resume; defaults to the real filesystem. */
   transcriptFs?: TranscriptFs
   /** Clipboard writer for `/copy`; defaults to the OS clipboard helper. */
-  copyClipboard?: (text: string) => Promise<boolean>
+  copyClipboard?: (text: string) => Promise<CopyResult>
   /** Terminal wiper for `/clear`; defaults to the ANSI clear-screen sequence. */
   clearScreen?: () => void
   /**
@@ -347,7 +370,12 @@ export function App({
   osHome = os.homedir(),
   readdir,
   transcriptFs,
-  copyClipboard = copyToClipboard,
+  copyClipboard = (text: string) =>
+    copyToClipboard(text, {
+      osc52: config.clipboard?.osc52,
+      osc52MaxBytes: config.clipboard?.osc52MaxBytes,
+      env: process.env,
+    }),
   persistConfig,
   persistProviderModel,
   clearScreen = clearTerminal,
@@ -481,6 +509,8 @@ export function App({
   // Resolved transcript render preferences (highlight/line-numbers/truncation),
   // re-derived only when the `render` config object changes.
   const renderPrefs = useMemo(() => resolveRenderConfig(state.config.render), [state.config.render])
+  // Resolved copy/clipboard notice strings (defaults ⊕ user overrides).
+  const notices = useMemo(() => resolveNotices(state.config.notices), [state.config.notices])
   // Resolved keyboard bindings (defaults ⊕ user overrides), for both the global
   // chord handler below and the composer's editor chords.
   const keybindings = useMemo(
@@ -492,6 +522,33 @@ export function App({
   // Timer that clears the Ctrl+C double-press window after the hint expires, so a
   // single press doesn't linger waiting for a second press forever.
   const ctrlCTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Double-Esc backtrack (Codex's "Esc twice to edit the last message"): the first
+  // idle Esc arms a short window, the second pulls the last user message back into
+  // the composer for editing — without touching the transcript (rewinding history
+  // stays with /rewind, /retry). `armed` is mirrored to state so BottomStatus can
+  // show the confirm hint; the ref is the source of truth for the key handler.
+  const [backtrackArmed, setBacktrackArmed] = useState(false)
+  const backtrackArmedRef = useRef(false)
+  const backtrackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const disarmBacktrack = useCallback(() => {
+    backtrackArmedRef.current = false
+    setBacktrackArmed(false)
+    if (backtrackTimer.current) {
+      clearTimeout(backtrackTimer.current)
+      backtrackTimer.current = null
+    }
+  }, [])
+  const armBacktrack = useCallback(() => {
+    backtrackArmedRef.current = true
+    setBacktrackArmed(true)
+    if (backtrackTimer.current) clearTimeout(backtrackTimer.current)
+    backtrackTimer.current = setTimeout(() => {
+      backtrackArmedRef.current = false
+      setBacktrackArmed(false)
+      backtrackTimer.current = null
+    }, 1500)
+  }, [])
 
   // `btw` steer mirror. The async goal/loop driver and the plain-turn drain read
   // the latest queued steer through a ref (component `state` is only the snapshot
@@ -581,6 +638,18 @@ export function App({
   // Stable reference for the submit/clear re-pin (the rest of `scroll` is read
   // during render, but this one is closed over by callbacks).
   const scrollReset = scroll.reset
+  // Find-in-viewport cursor (fullscreen only). Drives the FindBar, the focused
+  // cell's highlight, per-cell copy, and the jump-to-match scroll below.
+  const cursor = useTranscriptCursor(state.cells)
+  // Jump the viewport so the focused match lands ~1/3 down, re-running as the
+  // gated per-cell measurements settle (cursor.targetRow folds in their version).
+  const cursorTargetRow = cursor.targetRow
+  useEffect(() => {
+    if (cursorTargetRow !== null) scroll.toRow(cursorTargetRow)
+    // `scroll.toRow` is rebuilt every render; depend only on the target so a jump
+    // fires when the focus/measurement changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursorTargetRow])
 
   // Terminal resize recovery (scrollback mode only). `<Static>` wrote the
   // transcript into the scrollback at the OLD width; on resize Ink reflows its
@@ -919,13 +988,15 @@ export function App({
           // reset state so Ink repaints the empty transcript onto a blank screen.
           clearScreen()
           scrollReset()
+          // Drop any find cursor — its focused cell id is about to be wiped.
+          cursor.clear()
           void agent.clear(mintId())
           break
         case "copy":
-          void Promise.resolve(copyClipboard(effect.text)).then((ok) =>
+          void Promise.resolve(copyClipboard(effect.text)).then((res) =>
             dispatch({
               type: "NOTICE",
-              message: ok ? "Copied the last reply to the clipboard." : "Clipboard is unavailable.",
+              message: res.ok ? notices.copiedReply : clipboardFailureMessage(res.reason, notices),
             })
           )
           break
@@ -1284,8 +1355,10 @@ export function App({
       startLoopRun,
       takeSteer,
       scrollReset,
+      cursor,
       fullscreen,
       screen,
+      notices,
       state.config,
       state.sessionId,
       state.usage,
@@ -1409,6 +1482,27 @@ export function App({
       // message always snaps back to the live turn even if the user had scrolled
       // up to read history. No-op in scrollback mode.
       scrollReset()
+      // Editing a prior message: fork the conversation at the target (drop it and
+      // every later turn), then send the edited text as a fresh turn. Only a plain
+      // message edits — submitting a `/command` or `!bash` instead abandons the
+      // pending edit (clear the target so its stale index can't fork a later send).
+      const editTarget = state.editTarget
+      if (editTarget) {
+        if (!text.startsWith("/") && parseBang(text) === null) {
+          const cells = state.cells
+          void (async () => {
+            await agent.forkConversationAt(editTarget.index, cells)
+            dispatch({
+              type: "NOTICE",
+              message:
+                "Edited and re-ran from here. Earlier file changes were not reverted — use /rewind both to restore.",
+            })
+            await sendThenDrainSteer(text)
+          })()
+          return
+        }
+        dispatch({ type: "EDIT_CLEAR" })
+      }
       const bang = parseBang(text)
       if (bang !== null) {
         runBash(bang)
@@ -1444,6 +1538,9 @@ export function App({
       sendThenDrainSteer,
       sendCopilot,
       state.copilot?.workflowId,
+      state.editTarget,
+      state.cells,
+      agent,
       scrollReset,
     ]
   )
@@ -1704,6 +1801,95 @@ export function App({
     // During the startup gate, only Ctrl+C (above) is honored — the gate owns
     // its own keys.
     if (state.phase === "startup") return
+    // Find-in-viewport (Ctrl+F): while the find bar is open it owns all input —
+    // printable keys extend the query (live incremental search), arrows / Enter
+    // step matches, Ctrl+Y copies the focused match, Esc closes. The composer is
+    // unmounted during find (see the render below), so this is the only consumer.
+    if (cursor.state.find) {
+      const find = cursor.state.find
+      if (key.escape) {
+        cursor.clear()
+        clearScreen()
+        return
+      }
+      if (key.return || key.downArrow) {
+        cursor.next()
+        return
+      }
+      if (key.upArrow) {
+        cursor.prev()
+        return
+      }
+      if (key.ctrl && input === "y") {
+        const cell = cursor.focused
+        if (cell) {
+          void Promise.resolve(copyClipboard(cellToText(cell))).then((res) =>
+            dispatch({
+              type: "NOTICE",
+              message: res.ok ? notices.copiedCell : clipboardFailureMessage(res.reason, notices),
+            })
+          )
+        }
+        return
+      }
+      if (key.backspace || key.delete) {
+        cursor.setQuery(find.query.slice(0, -1))
+        return
+      }
+      // A printable character extends the query; control/meta chords are ignored.
+      if (input && !key.ctrl && !key.meta && !key.tab) {
+        cursor.setQuery(find.query + input)
+        return
+      }
+      return
+    }
+    // Backtrack-to-edit selection: the composer is inert (`disabled` below) while
+    // a prior user message is highlighted. ↑/↓ walk between user messages, Esc
+    // cancels, Enter (or typing) loads the message into the composer as the edit
+    // target — submitting then forks the conversation there.
+    if (state.backtrack) {
+      const idx = state.backtrack.index
+      const targetText = () => {
+        const cell = state.cells[idx]
+        return cell && cell.kind === "user" ? cell.text : ""
+      }
+      // Scrollback highlights via `<Static>`, which only repaints after a clear +
+      // epoch bump. Wipe the screen here so the reducer's epoch bump re-prints the
+      // transcript with the highlight at its new position. Fullscreen re-renders
+      // live, so it needs no clear.
+      const repaintHighlight = () => {
+        if (!fullscreen) clearScreen()
+      }
+      if (key.upArrow) {
+        repaintHighlight()
+        dispatch({ type: "BACKTRACK_MOVE", dir: -1 })
+        return
+      }
+      if (key.downArrow) {
+        repaintHighlight()
+        dispatch({ type: "BACKTRACK_MOVE", dir: 1 })
+        return
+      }
+      if (key.escape) {
+        repaintHighlight()
+        dispatch({ type: "BACKTRACK_CANCEL" })
+        return
+      }
+      if (key.return) {
+        repaintHighlight()
+        dispatch({ type: "INPUT_SET", buffer: bufferFromText(targetText()) })
+        dispatch({ type: "BACKTRACK_COMMIT", index: idx })
+        return
+      }
+      // Start typing to edit: load the message and append the typed character.
+      if (input && !key.ctrl && !key.meta && !key.tab) {
+        repaintHighlight()
+        dispatch({ type: "INPUT_SET", buffer: bufferFromText(targetText() + input) })
+        dispatch({ type: "BACKTRACK_COMMIT", index: idx })
+        return
+      }
+      return
+    }
     // Fullscreen scroll: PgUp/PgDn page the transcript viewport (conflict-free —
     // the composer ignores PageUp/PageDown, and overlays own input while open).
     // Reaching the bottom re-engages follow mode, so PgDn doubles as "jump to
@@ -1755,6 +1941,13 @@ export function App({
       dispatch({ type: "TOGGLE_COLLAPSE_ALL" })
       return
     }
+    // Open incremental find-in-viewport. Fullscreen only: the jump-to-match needs
+    // the app-managed scroll viewport (scrollback mode has `/search` instead).
+    if (chord === "find") {
+      if (fullscreen) cursor.open()
+      else dispatch({ type: "NOTICE", message: "Find is available in the fullscreen layout." })
+      return
+    }
     // Reverse-history-search over the composer history (readline parity). The
     // overlay owns input once open; here we seed it empty with no match yet.
     if (chord === "historySearch") {
@@ -1786,6 +1979,31 @@ export function App({
       } else {
         dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "inspect", items, index: 0 } })
       }
+      return
+    }
+    // Copy the latest assistant reply to the clipboard without entering find
+    // mode (Codex Ctrl+O parity). The injected writer handles OSC 52 over SSH.
+    if (chord === "copyLast") {
+      const reply = lastAssistantText(state)
+      if (reply) {
+        void Promise.resolve(copyClipboard(reply)).then((res) =>
+          dispatch({
+            type: "NOTICE",
+            message: res.ok ? notices.copiedReply : clipboardFailureMessage(res.reason, notices),
+          })
+        )
+      } else {
+        dispatch({ type: "NOTICE", message: notices.noReplyToCopy })
+      }
+      return
+    }
+    // Clear the visible scrollback + repaint WITHOUT resetting the conversation
+    // (distinct from `/clear`, which wipes the session). Cells are untouched.
+    if (chord === "clearScreen") {
+      clearScreen()
+      scrollReset()
+      cursor.clear()
+      dispatch({ type: "REPAINT" })
       return
     }
     // Paste an image from the OS clipboard as an `@<path>` mention so it flows
@@ -1827,8 +2045,39 @@ export function App({
     }
     // Esc only acts here when no overlay is open (overlays own their Esc).
     if (key.escape && !overlayOpen) {
-      if (busy) agent.abort()
-      abortRuntime()
+      // A live turn / background run: Esc interrupts (existing behaviour) and
+      // cancels any half-armed backtrack.
+      if (busy || state.activity) {
+        if (busy) agent.abort()
+        abortRuntime()
+        disarmBacktrack()
+        return
+      }
+      // Idle: double-Esc enters backtrack-to-edit selection. Skip while the
+      // completion popup is open (its Esc closes the popup) or while the composer
+      // holds a draft (don't clobber unsent text). The selection highlights the
+      // last user message; ↑/↓ walk earlier/later, Enter loads it for editing.
+      if (composerPopupOpen.current) return
+      // Esc while editing a backtracked message cancels: drop the edit target and
+      // clear the composer (the loaded text is discarded).
+      if (state.editTarget) {
+        dispatch({ type: "EDIT_CLEAR" })
+        dispatch({ type: "INPUT_SET", buffer: bufferFromText("") })
+        disarmBacktrack()
+        return
+      }
+      if (bufferText(state.input.buffer).length > 0) {
+        disarmBacktrack()
+        return
+      }
+      if (backtrackArmedRef.current) {
+        disarmBacktrack()
+        // Scrollback: clear so the epoch bump re-prints with the new highlight.
+        if (!fullscreen) clearScreen()
+        dispatch({ type: "BACKTRACK_ENTER" })
+      } else {
+        armBacktrack()
+      }
     }
   })
 
@@ -1860,6 +2109,17 @@ export function App({
     () => (hasCopilot ? { name: copilotName ?? "" } : undefined),
     [copilotName, hasCopilot]
   )
+  // Timestamp the current turn entered "streaming", for the BottomStatus elapsed
+  // timer. Captured in an effect — Date.now() is impure and refs/state must not
+  // be touched during render. The deferred set keeps it out of the synchronous
+  // effect body; one tick of lag before `since` lands is invisible to the
+  // 1s-resolution elapsed timer (BottomStatus renders no elapsed while null).
+  const isStreaming = state.turnStatus === "streaming"
+  const [streamStartedAt, setStreamStartedAt] = useState<number | null>(null)
+  useEffect(() => {
+    const t = setTimeout(() => setStreamStartedAt(isStreaming ? Date.now() : null), 0)
+    return () => clearTimeout(t)
+  }, [isStreaming])
 
   // Startup phase: welcome banner + the "do you trust this folder?" gate only —
   // no transcript/composer/footer until the user proceeds.
@@ -1911,7 +2171,17 @@ export function App({
               {/* Scrollable middle: history + the live turn, clipped to the
                   space between the banner and the composer. */}
               <ScrollView offset={scroll.offset} onMeasure={scroll.measure}>
-                <Transcript cells={state.cells} verbose={state.verbose} mode="live" />
+                <Transcript
+                  cells={state.cells}
+                  verbose={state.verbose}
+                  mode="live"
+                  measuring={cursor.measuring}
+                  focusedCellId={
+                    (state.backtrack ? state.cells[state.backtrack.index]?.id : undefined) ??
+                    cursor.state.focusedCellId
+                  }
+                  onCellHeight={cursor.reportCellHeight}
+                />
                 <Inflight inflight={state.inflight} verbose={state.verbose} />
                 <WorkflowRunPanel run={state.workflowRun} />
               </ScrollView>
@@ -1932,6 +2202,9 @@ export function App({
                 header={banner}
                 verbose={state.verbose}
                 epoch={state.renderEpoch}
+                focusedCellId={
+                  state.backtrack ? (state.cells[state.backtrack.index]?.id ?? null) : null
+                }
               />
               <Inflight inflight={state.inflight} verbose={state.verbose} />
               <WorkflowRunPanel run={state.workflowRun} />
@@ -2477,15 +2750,63 @@ export function App({
               }}
             />
           )}
-          {!overlayOpen && (
+          <BottomStatus
+            turnStatus={state.turnStatus}
+            activity={state.activity}
+            tools={inflightTools}
+            steerQueue={state.steerQueue}
+            since={streamStartedAt}
+            subagentRunning={footerSubagentRunning}
+            backgroundSubagents={footerBackgroundSubagents}
+            interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+            copilot={footerCopilot}
+            verbose={state.verbose}
+            backtrackArmed={backtrackArmed}
+            columns={columns}
+          />
+          {cursor.state.find && (
+            <FindBar
+              query={cursor.state.find.query}
+              matchCount={cursor.matchCount}
+              matchIndex={cursor.matchIndex}
+            />
+          )}
+          {/* Backtrack-to-edit status: while selecting, the composer is inert and
+              ↑/↓ choose a message (shown as #position/total so it reads even in
+              scrollback mode, where the transcript can't highlight the cell); once
+              a target is committed, warn how many later turns the edit discards. */}
+          {state.backtrack &&
+            (() => {
+              const { pos, total } = userMessageStats(state.cells, state.backtrack.index)
+              return (
+                <Box flexShrink={0}>
+                  <Text color={themePalette.warning}>
+                    {`✎ Editing message #${pos}/${total} — ↑/↓ choose · Enter to edit · Esc to cancel`}
+                  </Text>
+                </Box>
+              )
+            })()}
+          {state.editTarget &&
+            (() => {
+              const { pos, total, later } = userMessageStats(state.cells, state.editTarget.index)
+              return (
+                <Box flexShrink={0}>
+                  <Text color={themePalette.warning}>
+                    {`✎ Editing message #${pos}/${total} · ${later} later turn(s) will be discarded on send · Esc to cancel`}
+                  </Text>
+                </Box>
+              )
+            })()}
+          {!overlayOpen && !cursor.state.find && (
             <Input
               input={state.input}
               dispatch={dispatch}
               onSubmit={handleSubmit}
               onHistoryPush={persistHistory}
-              // Stay active during a turn / goal / loop run so a `btw` steer can be
-              // typed mid-stream — `handleSubmit` queues it instead of sending.
-              disabled={false}
+              // Inert while a backtrack-to-edit selection is active (App owns ↑/↓/
+              // Enter then); otherwise stays active even during a turn so a `btw`
+              // steer can be typed mid-stream (`handleSubmit` queues it).
+              disabled={!!state.backtrack}
               cwd={state.config.cwd}
               listDir={listDir}
               mentionProviders={mentionProviders}
@@ -2516,14 +2837,8 @@ export function App({
             contextWindow={state.modelMeta?.contextWindow}
             rateLimits={state.rateLimits}
             turnStatus={state.turnStatus}
-            activity={state.activity}
-            verbose={state.verbose}
             planTitle={footerPlanTitle}
-            steerCount={state.steerQueue.length}
-            subagentRunning={footerSubagentRunning}
-            backgroundSubagents={footerBackgroundSubagents}
-            interruptedBackgroundSubagents={interruptedBackgroundSubagents}
-            copilot={footerCopilot}
+            columns={columns}
           />
         </Box>
       </RenderPrefsProvider>

@@ -8,11 +8,25 @@ import {
   parseTodos,
   resultCountLabel,
   resultPreview,
+  runningToolLines,
   summarizeResult,
   summarizeToolCall,
+  toolDetailLine,
   toolDisplayName,
   toolKind,
 } from "./tools"
+import type { ToolCell } from "../state/types"
+
+const toolCell = (over: Partial<ToolCell> = {}): ToolCell => ({
+  id: "t1",
+  kind: "tool",
+  callKey: "k1",
+  toolName: "bash",
+  input: { command: "npm test" },
+  status: "running",
+  collapsed: true,
+  ...over,
+})
 
 describe("isDiffTool", () => {
   it("recognizes file-editing tools case-insensitively", () => {
@@ -119,6 +133,68 @@ describe("summarizeToolCall", () => {
 
   it("returns '' when no known field is present", () => {
     expect(summarizeToolCall("unknown", {})).toBe("")
+  })
+})
+
+describe("toolDetailLine", () => {
+  it("builds '└ <tool>: <summary>' for a bash tool", () => {
+    expect(toolDetailLine(toolCell({ toolName: "bash", input: { command: "npm test" } }))).toBe(
+      "└ bash: npm test"
+    )
+  })
+
+  it("uses the file path for a read tool", () => {
+    expect(toolDetailLine(toolCell({ toolName: "read", input: { file_path: "/a/b.ts" } }))).toBe(
+      "└ read: /a/b.ts"
+    )
+  })
+
+  it("collapses an MCP tool name to <server>:<tool>", () => {
+    const line = toolDetailLine(toolCell({ toolName: "mcp__github__create_issue", input: {} }))
+    expect(line).toBe("└ github:create_issue")
+  })
+
+  it("drops the summary tail when there is no natural summary", () => {
+    expect(toolDetailLine(toolCell({ toolName: "noop", input: {} }))).toBe("└ noop")
+  })
+
+  it("truncates to the column budget with an ellipsis", () => {
+    const line = toolDetailLine(
+      toolCell({ toolName: "bash", input: { command: "a".repeat(100) } }),
+      20
+    )
+    expect(line.endsWith("…")).toBe(true)
+    // "└ " + content fits within 20 display columns.
+    expect(line.length).toBeLessThanOrEqual(20)
+  })
+
+  it("counts CJK summaries as double-width when truncating", () => {
+    const line = toolDetailLine(
+      toolCell({ toolName: "bash", input: { command: "中".repeat(20) } }),
+      12
+    )
+    // Each 中 is 2 columns; the line must not exceed the 12-column budget.
+    let w = 0
+    for (const ch of line) w += /\p{Script=Han}/u.test(ch) ? 2 : 1
+    expect(w).toBeLessThanOrEqual(12)
+  })
+})
+
+describe("runningToolLines", () => {
+  it("returns only running tools, most-recent last, capped at max", () => {
+    const tools: ToolCell[] = [
+      toolCell({ id: "1", toolName: "read", input: { file_path: "/a" }, status: "done" }),
+      toolCell({ id: "2", toolName: "bash", input: { command: "one" }, status: "running" }),
+      toolCell({ id: "3", toolName: "bash", input: { command: "two" }, status: "running" }),
+      toolCell({ id: "4", toolName: "bash", input: { command: "three" }, status: "running" }),
+      toolCell({ id: "5", toolName: "bash", input: { command: "four" }, status: "running" }),
+    ]
+    const lines = runningToolLines(tools, 80, 3)
+    expect(lines).toEqual(["└ bash: two", "└ bash: three", "└ bash: four"])
+  })
+
+  it("is empty when nothing is running", () => {
+    expect(runningToolLines([toolCell({ status: "done" })])).toEqual([])
   })
 })
 

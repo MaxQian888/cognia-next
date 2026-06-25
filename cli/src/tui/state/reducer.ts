@@ -39,6 +39,21 @@ function makeId(seq: number): string {
   return `c${seq}`
 }
 
+/** Index of the last user-message cell, or null when there are none. */
+function lastUserCellIndex(cells: Cell[]): number | null {
+  for (let i = cells.length - 1; i >= 0; i--) if (cells[i].kind === "user") return i
+  return null
+}
+
+/** Index of the nearest user cell from `from` in direction `dir` (-1 earlier,
+ * +1 later), or null when there's no further user cell that way. */
+function adjacentUserCellIndex(cells: Cell[], from: number, dir: -1 | 1): number | null {
+  for (let i = from + dir; i >= 0 && i < cells.length; i += dir) {
+    if (cells[i].kind === "user") return i
+  }
+  return null
+}
+
 /** Max per-turn token samples kept for the usage-panel sparkline. */
 const USAGE_HISTORY_LIMIT = 60
 
@@ -693,6 +708,38 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, verbose: !state.verbose, renderEpoch: state.renderEpoch + 1 }
     case "REPAINT":
       return { ...state, renderEpoch: state.renderEpoch + 1 }
+    // Backtrack selection drives a highlight on the chosen user cell. In the
+    // scrollback layout that highlight lives in `<Static>`, which never repaints
+    // in place — so every selection change bumps `renderEpoch` to force a
+    // re-print (paired with a `clearScreen()` at the dispatch site). The
+    // fullscreen layout re-renders live and ignores the epoch, so the bump is a
+    // harmless no-op there.
+    case "BACKTRACK_ENTER": {
+      const index = lastUserCellIndex(state.cells)
+      return index === null
+        ? state
+        : { ...state, backtrack: { index }, renderEpoch: state.renderEpoch + 1 }
+    }
+    case "BACKTRACK_MOVE": {
+      if (!state.backtrack) return state
+      const next = adjacentUserCellIndex(state.cells, state.backtrack.index, action.dir)
+      return next === null
+        ? state
+        : { ...state, backtrack: { index: next }, renderEpoch: state.renderEpoch + 1 }
+    }
+    case "BACKTRACK_CANCEL":
+      return state.backtrack
+        ? { ...state, backtrack: undefined, renderEpoch: state.renderEpoch + 1 }
+        : state
+    case "BACKTRACK_COMMIT":
+      return {
+        ...state,
+        backtrack: undefined,
+        editTarget: { index: action.index },
+        renderEpoch: state.renderEpoch + 1,
+      }
+    case "EDIT_CLEAR":
+      return state.editTarget ? { ...state, editTarget: undefined } : state
     case "NOTICE":
       return {
         ...state,
@@ -735,6 +782,8 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         lastPlan: undefined,
         planCapturedThisTurn: false,
         initDraft: undefined,
+        backtrack: undefined,
+        editTarget: undefined,
       }
 
     // ── Config switches ──────────────────────────────────────────────────────────

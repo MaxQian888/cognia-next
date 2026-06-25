@@ -137,6 +137,86 @@ export type MouseMode = (typeof MOUSE_MODES)[number]
  * for a fullscreen TUI); `/mouse select` trades it back for native selection. */
 export const DEFAULT_MOUSE_MODE: MouseMode = "scroll"
 
+/**
+ * Clipboard OSC 52 strategy for `/copy` & the copy keybinding. `"auto"` (the
+ * default) uses the native helper locally but switches to the OSC 52 terminal
+ * escape over SSH (or where no helper exists); `"always"` forces OSC 52;
+ * `"never"` keeps only the native helper. Mirrors `tui/clipboard.Osc52Mode`.
+ */
+export const CLIPBOARD_OSC52_MODES = ["auto", "always", "never"] as const
+export type ClipboardOsc52Mode = (typeof CLIPBOARD_OSC52_MODES)[number]
+
+/**
+ * Default ceiling (raw UTF-8 bytes) for the OSC 52 clipboard escape. Many
+ * terminals silently DROP an OSC 52 sequence whose payload exceeds an internal
+ * limit (xterm's default caps the control string near 100 000 bytes; once the
+ * text is base64-encoded that lands around ~74 994 raw bytes), so a too-large
+ * copy looks like it worked but never reaches the system clipboard. We treat
+ * anything above this as a copy failure and surface a notice instead of emitting
+ * a doomed escape. Tunable via `clipboard.osc52MaxBytes`; `0` disables the cap.
+ */
+export const DEFAULT_OSC52_MAX_BYTES = 74_994
+
+export const clipboardSchema = z
+  .object({
+    osc52: z.enum(CLIPBOARD_OSC52_MODES).optional(),
+    /** Max raw UTF-8 bytes allowed through the OSC 52 escape; larger copies are
+     * skipped (the terminal would drop them anyway). Absent ⇒
+     * {@link DEFAULT_OSC52_MAX_BYTES}; `0` disables the cap. */
+    osc52MaxBytes: z.number().int().min(0).optional(),
+  })
+  .strict()
+export type ClipboardConfig = z.infer<typeof clipboardSchema>
+
+/**
+ * Overridable user-facing notice strings for the clipboard / copy commands.
+ * The CLI's Ink TUI has no next-intl wiring, so these live in config: every key
+ * is optional and falls back to {@link NOTICE_DEFAULTS}, letting a user retheme
+ * (or localize) the copy notices from `config.json` without touching code. Only
+ * STATIC strings live here — templated notices (e.g. "No reply #3 to copy.")
+ * stay inline at their call sites.
+ */
+export const noticesSchema = z
+  .object({
+    /** Shown after copying the latest assistant reply. */
+    copiedReply: z.string().optional(),
+    /** Shown after copying a single transcript cell. */
+    copiedCell: z.string().optional(),
+    /** Shown when no clipboard mechanism is available / the copy failed. */
+    clipboardUnavailable: z.string().optional(),
+    /** Shown when the text is too large for the OSC 52 escape (see
+     * {@link DEFAULT_OSC52_MAX_BYTES}). */
+    clipboardTooLarge: z.string().optional(),
+    /** Shown by `/copy` (and Ctrl+P) when there is no reply to copy yet. */
+    noReplyToCopy: z.string().optional(),
+    /** Shown by `/copy code` when no code block exists yet. */
+    noCodeBlockToCopy: z.string().optional(),
+    /** Shown by `/copy tool` when no tool result exists yet. */
+    noToolResultToCopy: z.string().optional(),
+  })
+  .strict()
+
+export type NoticesConfig = z.infer<typeof noticesSchema>
+
+/** Resolved notices with every key present. */
+export type ResolvedNotices = Required<NoticesConfig>
+
+/** Baseline notice strings — preserve the historic wording exactly. */
+export const NOTICE_DEFAULTS: ResolvedNotices = {
+  copiedReply: "Copied the last reply to the clipboard.",
+  copiedCell: "Copied cell to the clipboard.",
+  clipboardUnavailable: "Clipboard is unavailable.",
+  clipboardTooLarge: "Content is too large to copy over OSC 52.",
+  noReplyToCopy: "No reply to copy yet.",
+  noCodeBlockToCopy: "No code block to copy yet.",
+  noToolResultToCopy: "No tool result to copy yet.",
+}
+
+/** Fill missing notice keys with {@link NOTICE_DEFAULTS}. */
+export function resolveNotices(notices: NoticesConfig | undefined): ResolvedNotices {
+  return { ...NOTICE_DEFAULTS, ...(notices ? stripUndefinedShallow(notices) : {}) }
+}
+
 /** Default footer layout — preserves the pre-customization footer exactly. */
 export const DEFAULT_STATUS_SEGMENTS: StatusSegment[] = [
   "model",
@@ -449,6 +529,12 @@ export const cliConfigFileSchema = z
      * the transcript; `"select"` keeps native click-drag text selection (losing
      * wheel-scroll). Only meaningful in the fullscreen layout on a TTY. */
     mouse: z.enum(MOUSE_MODES).optional(),
+    /** Clipboard OSC 52 strategy for `/copy` & the copy keybinding. Absent ⇒
+     * `"auto"` (native helper locally, OSC 52 over SSH). */
+    clipboard: clipboardSchema.optional(),
+    /** Overridable copy/clipboard notice strings. Absent keys ⇒
+     * {@link NOTICE_DEFAULTS}. */
+    notices: noticesSchema.optional(),
     /**
      * Idle (read) timeout for a streaming turn, in milliseconds. If the model
      * stream produces no new output for this long mid-turn — the classic
@@ -586,6 +672,12 @@ export interface ResolvedConfig {
   /** Fullscreen mouse model (`select` / `scroll`). Absent ⇒ `scroll` (wheel
    * scrolls the transcript). Only meaningful in the fullscreen layout on a TTY. */
   mouse?: MouseMode
+  /** Clipboard OSC 52 strategy (`auto` / `always` / `never`). Absent ⇒ `auto`
+   * (native helper locally, OSC 52 escape over SSH). */
+  clipboard?: ClipboardConfig
+  /** Overridable copy/clipboard notice strings. Absent ⇒ {@link NOTICE_DEFAULTS};
+   * resolved per-use via {@link resolveNotices}. */
+  notices?: NoticesConfig
   /** Idle (read) timeout for a streaming turn, in ms. Absent ⇒ 60000; `0`
    * disables. Guards against a provider stream that stalls mid-turn. */
   streamIdleTimeoutMs?: number

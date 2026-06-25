@@ -11,10 +11,15 @@
  * returning a {@link CommandEffect}; the App interprets the effect. See
  * `dispatch.ts`.
  */
-import { PERMISSION_MODES } from "../../config/schema"
+import { PERMISSION_MODES, resolveNotices } from "../../config/schema"
 import { deriveEffortSliderState } from "../../config/thinking"
 import { collectModelOptions } from "../components/model-options"
-import { lastUserText, nthAssistantText } from "../state/selectors"
+import {
+  lastCodeBlock,
+  lastToolResultText,
+  lastUserText,
+  nthAssistantText,
+} from "../state/selectors"
 import { aboutLine, buildToolsCatalogDocument } from "./builtins"
 import { buildCommandHelpDocument } from "./command-help"
 import { settingsSections } from "../runtime/settings-sections"
@@ -138,22 +143,35 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "copy",
-    description: "copy a reply to the clipboard (last, or the Nth-latest)",
+    description: "copy a reply, code block, or tool result to the clipboard",
     category: "chat",
-    argumentHint: "[n]",
+    argumentHint: "[n|code|tool]",
     handler: (ctx) => {
-      const arg = ctx.args.trim()
+      const notices = resolveNotices(ctx.config.notices)
+      const arg = ctx.args.trim().toLowerCase()
+      if (arg === "code") {
+        const code = lastCodeBlock(ctx.state)
+        return code
+          ? { kind: "copy", text: code }
+          : { kind: "notice", message: notices.noCodeBlockToCopy }
+      }
+      if (arg === "tool") {
+        const out = lastToolResultText(ctx.state)
+        return out
+          ? { kind: "copy", text: out }
+          : { kind: "notice", message: notices.noToolResultToCopy }
+      }
       const n = arg ? Number(arg) : 1
       if (!Number.isInteger(n) || n < 1) {
         return {
           kind: "notice",
-          message: "Usage: /copy [n] — n is a positive reply index (1 = latest).",
+          message: "Usage: /copy [n|code|tool] — n is a positive reply index (1 = latest).",
         }
       }
       const reply = nthAssistantText(ctx.state, n)
       return reply
         ? { kind: "copy", text: reply }
-        : { kind: "notice", message: n === 1 ? "No reply to copy yet." : `No reply #${n} to copy.` }
+        : { kind: "notice", message: n === 1 ? notices.noReplyToCopy : `No reply #${n} to copy.` }
     },
   },
   {

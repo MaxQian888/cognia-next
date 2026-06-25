@@ -57,6 +57,15 @@ describe("useScroll", () => {
     expect(result.current.atBottom).toBe(true)
   })
 
+  it("jumps to a target row ~1/3 down the viewport", () => {
+    const { result } = renderHook(() => useScroll())
+    act(() => result.current.measure(100, 30))
+    act(() => result.current.toRow(50))
+    // lead = floor(30/3) = 10 ⇒ offset 40, not sticking.
+    expect(result.current.offset).toBe(40)
+    expect(result.current.atBottom).toBe(false)
+  })
+
   it("reset re-pins to the bottom", () => {
     const { result } = renderHook(() => useScroll())
     act(() => result.current.measure(50, 20))

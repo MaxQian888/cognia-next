@@ -10,7 +10,14 @@
  * layout + theme color.
  */
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text, useInput, useStdout } from "ink"
+
+import {
+  PANEL_CHROME_ROWS,
+  PanelViewport,
+  panelFooterHint,
+  usePanelScroll,
+} from "../../hooks/usePanelScroll"
 
 import {
   meterColor,
@@ -168,6 +175,7 @@ export function LimitsPanel({
   now,
   rateLimits,
   activeProvider,
+  viewportRows,
   onClose,
 }: {
   snapshots: ProviderLimits[]
@@ -178,40 +186,49 @@ export function LimitsPanel({
   rateLimits?: RateLimitSnapshot
   /** Active provider id — its block is badged `● active`. */
   activeProvider?: string
+  /** Test seam: viewport height in rows (defaults to the terminal height). */
+  viewportRows?: number
   onClose: () => void
 }) {
   const theme = useTheme()
-  useInput((_input, key) => {
-    if (key.escape || key.return) onClose()
+  const { stdout } = useStdout()
+  const viewport =
+    viewportRows ?? Math.max(4, ((stdout?.rows as number | undefined) ?? 24) - PANEL_CHROME_ROWS)
+  const scroll = usePanelScroll(viewport)
+  useInput((input, key) => {
+    if (key.escape || key.return) return onClose()
+    scroll.onKey(input, key)
   })
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text bold color={theme.accent}>
         Subscription limits
       </Text>
-      {rateLimits && rateLimits.meters.length > 0 && (
-        <RateLimitBlock snapshot={rateLimits} now={now} />
-      )}
-      {snapshots.map((s) => (
-        <ProviderBlock
-          key={`${s.provider}:${s.accountId ?? ""}`}
-          snapshot={s}
-          now={now}
-          active={activeProvider != null && s.accountId === activeProvider}
-        />
-      ))}
-      {/* Onboarding hint whenever NO account carries usable data — shown both
-          when the list is empty and when the only block is a no-data active
-          provider, so the "add a token" pointer is never lost. */}
-      {!snapshots.some((s) => s.meters.length > 0 || s.error) && (
-        <Text color={theme.muted}>
-          No subscription limit data — add a Claude/Codex subscription token or a credit-provider
-          key, then run /limits again.
-        </Text>
-      )}
-      <SessionSummary analysis={analysis} />
+      <PanelViewport viewportRows={viewport} scroll={scroll}>
+        {rateLimits && rateLimits.meters.length > 0 && (
+          <RateLimitBlock snapshot={rateLimits} now={now} />
+        )}
+        {snapshots.map((s) => (
+          <ProviderBlock
+            key={`${s.provider}:${s.accountId ?? ""}`}
+            snapshot={s}
+            now={now}
+            active={activeProvider != null && s.accountId === activeProvider}
+          />
+        ))}
+        {/* Onboarding hint whenever NO account carries usable data — shown both
+            when the list is empty and when the only block is a no-data active
+            provider, so the "add a token" pointer is never lost. */}
+        {!snapshots.some((s) => s.meters.length > 0 || s.error) && (
+          <Text color={theme.muted}>
+            No subscription limit data — add a Claude/Codex subscription token or a credit-provider
+            key, then run /limits again.
+          </Text>
+        )}
+        <SessionSummary analysis={analysis} />
+      </PanelViewport>
       <Text color={theme.muted} dimColor>
-        esc to close
+        {panelFooterHint(scroll.hidden)}
       </Text>
     </Box>
   )

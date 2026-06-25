@@ -77,6 +77,10 @@ export interface AgentSessionApi {
   }[]
   /** Restore a checkpoint by seq: files and/or conversation (`cells` = current). */
   rewind(seq: number, scope: RewindScope, cells: Cell[]): Promise<void>
+  /** Truncate the conversation to the first `cellCount` cells (drop the rest),
+   * re-minting the session under the same id. Drives edit-and-fork. Files are
+   * not reverted. No-op without an active session. */
+  forkConversationAt(cellCount: number, cells: Cell[]): Promise<void>
   /** Enter Workflow Copilot mode: subsequent `send`s route to a dedicated
    * `workflow-editor`-kind session for `workflowId` (and its `wf_*` tools are
    * auto-approved). Idempotent. */
@@ -506,6 +510,27 @@ export function useAgentSession({
     [checkpoint]
   )
 
+  /**
+   * Truncate the conversation to its first `cellCount` cells: rebuild the
+   * on-disk transcript, re-mint a fresh session under the same id (so the model
+   * forgets the dropped turns), and reload the kept cells into the view. Shared
+   * by `/rewind` (conversation scope) and the edit-and-fork flow. Files are NOT
+   * reverted — that's the caller's `scope` decision. No-op without a session id.
+   */
+  const forkConversationAt = useCallback(
+    async (cellCount: number, cells: Cell[]) => {
+      const sid = sessionRef.current?.sessionId
+      if (!sid) return
+      const kept = cells.slice(0, cellCount)
+      writeTranscript(resolveHome(process.env, os.homedir()), sid, cellsToEntries(kept))
+      await dropSession()
+      sessionRef.current = createSession({ config: configRef.current, sessionId: sid })
+      dispatch({ type: "RESET", sessionId: sid })
+      dispatch({ type: "LOAD_CELLS", cells: kept })
+    },
+    [createSession, dispatch, dropSession]
+  )
+
   const rewind = useCallback(
     async (seq: number, scope: RewindScope, cells: Cell[]) => {
       const cp = checkpoint.list().find((c) => c.seq === seq)
@@ -517,25 +542,14 @@ export function useAgentSession({
         checkpoint.store.restore(cp, { files: true, conversation: false })
       }
       if (scope === "conversation" || scope === "both") {
-        const kept = cells.slice(0, cp.cellCount)
-        const sid = sessionRef.current?.sessionId
-        if (sid) {
-          // Rebuild the on-disk transcript to match the restored view, then
-          // re-mint a fresh session adopting the same id (the model forgets the
-          // rewound turns; further turns append to the truncated transcript).
-          writeTranscript(resolveHome(process.env, os.homedir()), sid, cellsToEntries(kept))
-          await dropSession()
-          sessionRef.current = createSession({ config: configRef.current, sessionId: sid })
-          dispatch({ type: "RESET", sessionId: sid })
-          dispatch({ type: "LOAD_CELLS", cells: kept })
-        }
+        await forkConversationAt(cp.cellCount, cells)
       }
       dispatch({
         type: "NOTICE",
         message: `Rewound to checkpoint #${seq} (${scope}) — ${cp.label}.`,
       })
     },
-    [checkpoint, createSession, dispatch, dropSession]
+    [checkpoint, dispatch, forkConversationAt]
   )
 
   const close = useCallback(async () => {
@@ -559,6 +573,7 @@ export function useAgentSession({
     compact,
     listCheckpoints,
     rewind,
+    forkConversationAt,
     enterCopilot,
     exitCopilot,
     close,

@@ -7,9 +7,11 @@ import type { UsageInfo } from "../state/types"
 import {
   buildStatusBar,
   contextGauge,
+  fitStatusSegments,
   progressBar,
   readGitBranch,
   resolveSegments,
+  type StatusSegmentView,
 } from "./status-bar"
 
 const base: ResolvedConfig = {
@@ -211,6 +213,59 @@ describe("buildStatusBar", () => {
     const byId = Object.fromEntries(segs.map((s) => [s.id, s]))
     expect(byId.tokens.text).toBe("6.0k tok")
     expect(byId.cost.text).toBe("$2.00")
+  })
+})
+
+describe("fitStatusSegments", () => {
+  const seg = (id: StatusSegmentView["id"], text: string): StatusSegmentView => ({ id, text })
+  // model(7) mode(4) ctx(6) tokens(7) git(5) cost(5) → joined with " · " (3 each).
+  const segs: StatusSegmentView[] = [
+    seg("model", "sonnet4"),
+    seg("mode", "auto"),
+    seg("ctx", "23%ctx"),
+    seg("tokens", "12k tok"),
+    seg("git", "⎇ dev"),
+    seg("cost", "$0.02"),
+  ]
+
+  it("keeps everything and is not truncated when it fits (wide terminal)", () => {
+    const out = fitStatusSegments(segs, 200)
+    expect(out.truncated).toBe(false)
+    expect(out.segments).toEqual(segs)
+  })
+
+  it("drops cost then git first on a narrow terminal", () => {
+    const out = fitStatusSegments(segs, 40)
+    expect(out.truncated).toBe(true)
+    const ids = out.segments.map((s) => s.id)
+    expect(ids).not.toContain("cost")
+    expect(ids).not.toContain("git")
+    // The identity segments survive.
+    expect(ids).toContain("model")
+    expect(ids).toContain("mode")
+    // Survivors keep their original order.
+    expect(ids).toEqual(
+      [...ids].sort((a, b) => segs.findIndex((s) => s.id === a) - segs.findIndex((s) => s.id === b))
+    )
+  })
+
+  it("keeps the single highest-priority segment when extremely narrow", () => {
+    const out = fitStatusSegments(segs, 6)
+    expect(out.truncated).toBe(true)
+    expect(out.segments.map((s) => s.id)).toEqual(["model"])
+  })
+
+  it("returns nothing for non-positive columns", () => {
+    expect(fitStatusSegments(segs, 0)).toEqual({ segments: [], truncated: false })
+  })
+
+  it("never exceeds the column budget with the ellipsis marker", () => {
+    const out = fitStatusSegments(segs, 30)
+    let w = 0
+    out.segments.forEach((s, i) => {
+      w += s.text.length + (i > 0 ? 3 : 0)
+    })
+    expect(w + (out.truncated ? 2 : 0)).toBeLessThanOrEqual(30)
   })
 })
 

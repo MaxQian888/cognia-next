@@ -17,6 +17,7 @@ export const KEYBINDABLE_ACTIONS = [
   "inspect",
   "verboseToggle",
   "collapseAll",
+  "find",
   "historySearch",
   "pasteImage",
   "workflowInspect",
@@ -27,6 +28,8 @@ export const KEYBINDABLE_ACTIONS = [
   "lineKillToEnd",
   "undo",
   "redo",
+  "copyLast",
+  "clearScreen",
 ] as const
 
 export type KeybindableAction = (typeof KEYBINDABLE_ACTIONS)[number]
@@ -36,6 +39,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
   inspect: "ctrl+g",
   verboseToggle: "ctrl+o",
   collapseAll: "ctrl+t",
+  find: "ctrl+f",
   historySearch: "ctrl+r",
   pasteImage: "ctrl+v",
   workflowInspect: "ctrl+i",
@@ -46,6 +50,8 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
   lineKillToEnd: "ctrl+k",
   undo: "ctrl+z",
   redo: "ctrl+y",
+  copyLast: "ctrl+p",
+  clearScreen: "ctrl+l",
 }
 
 /** Human-readable labels for the settings-panel rows. */
@@ -53,6 +59,7 @@ export const KEYBINDING_LABELS: Record<KeybindableAction, string> = {
   inspect: "Inspect tool output",
   verboseToggle: "Toggle detail mode",
   collapseAll: "Expand / collapse all",
+  find: "Find in transcript",
   historySearch: "Search composer history",
   pasteImage: "Paste image from clipboard",
   workflowInspect: "Inspect workflow step",
@@ -63,6 +70,8 @@ export const KEYBINDING_LABELS: Record<KeybindableAction, string> = {
   lineKillToEnd: "Delete to line end",
   undo: "Undo edit",
   redo: "Redo edit",
+  copyLast: "Copy last reply",
+  clearScreen: "Clear screen",
 }
 
 export interface ParsedKeySpec {

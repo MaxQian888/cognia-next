@@ -123,6 +123,40 @@ describe("Transcript", () => {
     expect(verbose.container.textContent ?? "").not.toContain("⚙")
   })
 
+  it("reports every cell height and unfolds context runs while measuring (find active)", () => {
+    const ctx = (id: string, toolName: string): Cell => ({
+      id,
+      kind: "tool",
+      callKey: id,
+      toolName,
+      input: {},
+      status: "done",
+      result: "x",
+      collapsed: true,
+    })
+    const cells: Cell[] = [ctx("1", "read"), ctx("2", "grep"), ctx("3", "read")]
+    const onCellHeight = jest.fn()
+    const { container } = render(
+      <Transcript cells={cells} mode="live" measuring onCellHeight={onCellHeight} />
+    )
+    // Measuring disables the context fold so each cell stays addressable.
+    expect(container.textContent ?? "").not.toContain("⚙")
+    // Every cell reports a height for the cursor's row map.
+    expect(onCellHeight.mock.calls.map((c) => c[0]).sort()).toEqual(["1", "2", "3"])
+  })
+
+  it("renders the focused cell (accent-border branch) without dropping content", () => {
+    const cells: Cell[] = [
+      { id: "u1", kind: "user", text: "alpha" },
+      { id: "u2", kind: "user", text: "beta" },
+    ]
+    // Exercises the focused-cell wrapper branch; both cells still render.
+    const { container } = render(<Transcript cells={cells} mode="live" focusedCellId="u2" />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("alpha")
+    expect(text).toContain("beta")
+  })
+
   it("hides a collapsed tool result by default but reveals it in verbose mode", () => {
     const cells: Cell[] = [
       {

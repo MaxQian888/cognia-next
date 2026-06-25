@@ -1,7 +1,13 @@
 /**
  * @jest-environment node
  */
-import { collapsePaste, expandPastes, placeholderFor, PASTE_CHAR_THRESHOLD } from "./paste-collapse"
+import {
+  collapsePaste,
+  expandPastes,
+  findPastePlaceholders,
+  placeholderFor,
+  PASTE_CHAR_THRESHOLD,
+} from "./index"
 
 describe("collapsePaste", () => {
   it("leaves a small paste inline", () => {
@@ -45,6 +51,22 @@ describe("collapsePaste", () => {
 describe("placeholderFor", () => {
   it("formats the placeholder", () => {
     expect(placeholderFor(12, 3)).toBe("[Pasted 12 lines #3]")
+  })
+})
+
+describe("findPastePlaceholders", () => {
+  it("matches the exact placeholders produced by placeholderFor", () => {
+    const a = placeholderFor(3, 1)
+    const b = placeholderFor(12, 8)
+    expect(findPastePlaceholders(`see ${a} and ${b} end`)).toEqual([a, b])
+  })
+  it("returns an empty array when there are no placeholders", () => {
+    expect(findPastePlaceholders("plain text")).toEqual([])
+  })
+  it("does not retain lastIndex state across calls (fresh global regex)", () => {
+    const ph = placeholderFor(2, 5)
+    expect(findPastePlaceholders(ph)).toEqual([ph])
+    expect(findPastePlaceholders(ph)).toEqual([ph])
   })
 })
 

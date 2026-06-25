@@ -8,6 +8,7 @@ import {
   scrollByLines,
   scrollPage,
   scrollToBottom,
+  scrollToRow,
   scrollToTop,
 } from "./scroll-view-state"
 
@@ -95,6 +96,28 @@ describe("scroll-view-state", () => {
     })
     it("scrollToBottom re-pins to the bottom", () => {
       expect(scrollToBottom()).toEqual({ top: 0, stick: true })
+    })
+  })
+
+  describe("scrollToRow", () => {
+    it("places the target ~1/3 down the viewport and stops sticking", () => {
+      // viewport 30 → lead 10; target row 25 → top 15.
+      expect(scrollToRow(25, 100, 30)).toEqual({ top: 15, stick: false })
+    })
+    it("clamps a near-top target to the top", () => {
+      // lead 10 exceeds the row, so the clamped offset floors at 0.
+      expect(scrollToRow(3, 100, 30)).toEqual({ top: 0, stick: false })
+    })
+    it("clamps a near-bottom target to maxScroll", () => {
+      // maxScroll(100,30)=70; row 99 - lead 10 = 89 → clamped 70.
+      expect(scrollToRow(99, 100, 30)).toEqual({ top: 70, stick: false })
+    })
+    it("degrades to the top when sizes are not measured yet", () => {
+      expect(scrollToRow(40, 0, 0)).toEqual({ top: 0, stick: false })
+    })
+    it("treats a non-finite / negative target as the first row", () => {
+      expect(scrollToRow(Number.NaN, 100, 30)).toEqual({ top: 0, stick: false })
+      expect(scrollToRow(-5, 100, 30)).toEqual({ top: 0, stick: false })
     })
   })
 

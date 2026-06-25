@@ -197,6 +197,38 @@ describe("App — fullscreen layout", () => {
     expect(container.textContent ?? "").not.toContain("[<65")
   })
 
+  it("Ctrl+F opens find-in-viewport, matches the transcript, and Esc closes", async () => {
+    const { screen } = fakeScreen()
+    const { create } = fakeSession("hello fullscreen")
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        layoutCapability={FULLSCREEN_CAP}
+        screenOut={screen}
+      />
+    )
+    // Produce a transcript: a committed user cell ("hi") + the assistant reply.
+    act(() => __fireInput("h"))
+    act(() => __fireInput("i"))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("hello fullscreen"))
+    // Ctrl+F opens the find bar with an empty query.
+    act(() => __fireInput("f", { ctrl: true }))
+    expect(container.textContent).toContain("type to search")
+    // Typing narrows to the single user cell that contains "hi".
+    act(() => __fireInput("h"))
+    act(() => __fireInput("i"))
+    expect(container.textContent).toContain("1/1")
+    // Esc closes the bar.
+    act(() => __fireInput("", { escape: true }))
+    expect(container.textContent).not.toContain("type to search")
+  })
+
   it("handles PgUp / PgDn without error in fullscreen", () => {
     const { screen } = fakeScreen()
     const { create } = fakeSession()

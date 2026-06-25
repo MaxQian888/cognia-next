@@ -11,10 +11,12 @@ import {
   hasOverlay,
   isBusy,
   lastAssistantText,
+  lastCodeBlock,
+  lastToolResultText,
   lastUserText,
   nthAssistantText,
 } from "./selectors"
-import type { Cell } from "./types"
+import type { Cell, ToolCell } from "./types"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 const base = () => createInitialState(config, "ses1")
@@ -78,5 +80,87 @@ describe("selectors", () => {
     expect(nthAssistantText(s, 0)).toBeNull()
     expect(nthAssistantText(s, -1)).toBeNull()
     expect(nthAssistantText(s, 1.5)).toBeNull()
+  })
+
+  it("lastCodeBlock returns the last fenced block of the most recent reply with one", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "assistant", raw: "older\n```js\nold()\n```" },
+      { id: "2", kind: "assistant", raw: "see\n```ts\nfirst()\n```\nand\n```ts\nsecond()\n```" },
+      { id: "3", kind: "assistant", raw: "no code here" },
+    ]
+    expect(lastCodeBlock({ ...base(), cells })).toBe("second()")
+  })
+
+  it("lastCodeBlock returns null when no assistant reply has a fenced block", () => {
+    const cells: Cell[] = [{ id: "1", kind: "assistant", raw: "plain prose only" }]
+    expect(lastCodeBlock({ ...base(), cells })).toBeNull()
+    expect(lastCodeBlock(base())).toBeNull()
+  })
+
+  it("lastToolResultText returns strings verbatim and other shapes as JSON", () => {
+    const strTool: ToolCell = {
+      id: "t1",
+      kind: "tool",
+      callKey: "k1",
+      toolName: "bash",
+      input: {},
+      status: "done",
+      result: "plain output",
+      collapsed: false,
+    }
+    expect(lastToolResultText({ ...base(), cells: [strTool] })).toBe("plain output")
+
+    const objTool: ToolCell = { ...strTool, id: "t2", result: { ok: true } }
+    expect(lastToolResultText({ ...base(), cells: [objTool] })).toBe(
+      JSON.stringify({ ok: true }, null, 2)
+    )
+  })
+
+  it("lastToolResultText joins text from a content-block array result", () => {
+    const tool: ToolCell = {
+      id: "t1",
+      kind: "tool",
+      callKey: "k1",
+      toolName: "read",
+      input: {},
+      status: "done",
+      result: [
+        { type: "text", text: "line one" },
+        { type: "image", source: "..." },
+        { type: "text", text: "line two" },
+      ],
+      collapsed: false,
+    }
+    expect(lastToolResultText({ ...base(), cells: [tool] })).toBe("line one\nline two")
+  })
+
+  it("lastToolResultText falls back to JSON for a block array with no text", () => {
+    const tool: ToolCell = {
+      id: "t1",
+      kind: "tool",
+      callKey: "k1",
+      toolName: "x",
+      input: {},
+      status: "done",
+      result: [{ type: "image", source: "z" }],
+      collapsed: false,
+    }
+    expect(lastToolResultText({ ...base(), cells: [tool] })).toBe(
+      JSON.stringify([{ type: "image", source: "z" }], null, 2)
+    )
+  })
+
+  it("lastToolResultText skips tools without a result and returns null when none", () => {
+    const pending: ToolCell = {
+      id: "t1",
+      kind: "tool",
+      callKey: "k1",
+      toolName: "read",
+      input: {},
+      status: "running",
+      collapsed: false,
+    }
+    expect(lastToolResultText({ ...base(), cells: [pending] })).toBeNull()
+    expect(lastToolResultText(base())).toBeNull()
   })
 })

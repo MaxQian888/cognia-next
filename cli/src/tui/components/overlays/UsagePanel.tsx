@@ -7,8 +7,14 @@
  * breakdown of the session's tool usage (`format/tool-stats`).
  */
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text, useInput, useStdout } from "ink"
 
+import {
+  PANEL_CHROME_ROWS,
+  PanelViewport,
+  panelFooterHint,
+  usePanelScroll,
+} from "../../hooks/usePanelScroll"
 import { contextComposition, formatCost, formatTokens, usagePanelRows } from "../../format/usage"
 import { sparkline, stackedBar } from "../../format/charts"
 import { progressBar } from "../../format/status-bar"
@@ -135,6 +141,7 @@ export function UsagePanel({
   usageHistory = [],
   costHistory = [],
   toolStats = {},
+  viewportRows,
   onClose,
 }: {
   usage?: UsageInfo
@@ -150,11 +157,18 @@ export function UsagePanel({
   costHistory?: number[]
   /** Per-tool call/error tallies for the "top tools" breakdown. */
   toolStats?: Record<string, ToolStat>
+  /** Test seam: viewport height in rows (defaults to the terminal height). */
+  viewportRows?: number
   onClose: () => void
 }) {
   const theme = useTheme()
-  useInput((_input, key) => {
-    if (key.escape || key.return) onClose()
+  const { stdout } = useStdout()
+  const viewport =
+    viewportRows ?? Math.max(4, ((stdout?.rows as number | undefined) ?? 24) - PANEL_CHROME_ROWS)
+  const scroll = usePanelScroll(viewport)
+  useInput((input, key) => {
+    if (key.escape || key.return) return onClose()
+    scroll.onKey(input, key)
   })
   const rows = usagePanelRows(usage, model, totals, contextWindow, pricing)
   return (
@@ -162,18 +176,20 @@ export function UsagePanel({
       <Text bold color={theme.accent}>
         Usage
       </Text>
-      {rows.map((row) => (
-        <Text key={row.label}>
-          <Text color={theme.muted}>{row.label.padEnd(12)}</Text>
-          {row.value}
-        </Text>
-      ))}
-      <TokenTrend history={usageHistory} />
-      <CostTrend history={costHistory} />
-      <Composition usage={usage} />
-      <TopTools toolStats={toolStats} />
+      <PanelViewport viewportRows={viewport} scroll={scroll}>
+        {rows.map((row) => (
+          <Text key={row.label}>
+            <Text color={theme.muted}>{row.label.padEnd(12)}</Text>
+            {row.value}
+          </Text>
+        ))}
+        <TokenTrend history={usageHistory} />
+        <CostTrend history={costHistory} />
+        <Composition usage={usage} />
+        <TopTools toolStats={toolStats} />
+      </PanelViewport>
       <Text color={theme.muted} dimColor>
-        esc to close
+        {panelFooterHint(scroll.hidden)}
       </Text>
     </Box>
   )

@@ -10,6 +10,7 @@ import {
   costFromUsage,
   emptySessionTotals,
   formatCost,
+  formatElapsed,
   formatFooter,
   formatTokens,
   shortenCwd,
@@ -351,5 +352,27 @@ describe("formatFooter with totals", () => {
     })
     expect(f.tokens).toBe("5.0k")
     expect(f.cost).toBe("$1.50")
+  })
+})
+
+describe("formatElapsed", () => {
+  it.each([
+    [0, "0s"],
+    [999, "0s"],
+    [47_000, "47s"],
+    [59_000, "59s"],
+    [60_000, "1m 00s"],
+    [247_000, "4m 07s"],
+    [3_599_000, "59m 59s"],
+    [3_600_000, "1h 00m 00s"],
+    [3_729_000, "1h 02m 09s"],
+    [3_661_000, "1h 01m 01s"],
+  ])("formats %ims as %s", (ms, expected) => {
+    expect(formatElapsed(ms)).toBe(expected)
+  })
+
+  it("clamps negative and undefined to 0s", () => {
+    expect(formatElapsed(-5000)).toBe("0s")
+    expect(formatElapsed(undefined)).toBe("0s")
   })
 })

@@ -54,3 +54,55 @@ export function nthAssistantText(state: TuiState, n: number): string | null {
   }
   return null
 }
+
+/** Matches fenced code blocks; group 1 is the inner body. */
+const FENCED_CODE = /```[^\n]*\n([\s\S]*?)```/g
+
+/**
+ * The last fenced code block of the most recent assistant reply that contains
+ * one (inner body, trailing newline trimmed), or null. Powers `/copy code`.
+ */
+export function lastCodeBlock(state: TuiState): string | null {
+  for (let i = state.cells.length - 1; i >= 0; i--) {
+    const c = state.cells[i]
+    if (c.kind !== "assistant") continue
+    let last: string | null = null
+    for (const m of c.raw.matchAll(FENCED_CODE)) last = m[1]
+    if (last !== null) return last.replace(/\n$/, "")
+  }
+  return null
+}
+
+/**
+ * The most recent tool result rendered as plain text (strings verbatim, other
+ * shapes pretty-printed JSON), or null when no tool has produced a result.
+ * Powers `/copy tool`.
+ */
+export function lastToolResultText(state: TuiState): string | null {
+  for (let i = state.cells.length - 1; i >= 0; i--) {
+    const c = state.cells[i]
+    if (c.kind !== "tool") continue
+    if (c.result === undefined || c.result === null) continue
+    return toolResultToText(c.result)
+  }
+  return null
+}
+
+/** Render a tool result as plain text: strings verbatim, content-block arrays
+ * (`[{type:"text",text}]`, as Claude tools emit) joined, else pretty JSON. */
+function toolResultToText(result: unknown): string {
+  if (typeof result === "string") return result
+  if (Array.isArray(result)) {
+    const texts = result
+      .filter(
+        (b): b is { type: "text"; text: string } =>
+          !!b &&
+          typeof b === "object" &&
+          (b as { type?: unknown }).type === "text" &&
+          typeof (b as { text?: unknown }).text === "string"
+      )
+      .map((b) => b.text)
+    if (texts.length > 0) return texts.join("\n")
+  }
+  return JSON.stringify(result, null, 2)
+}

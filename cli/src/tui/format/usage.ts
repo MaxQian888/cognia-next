@@ -145,6 +145,24 @@ export function formatTokens(n: number | undefined): string {
   return `${(n / 1_000_000).toFixed(1)}M`
 }
 
+/**
+ * Compact elapsed-time label for the live "working" indicator (Codex-style):
+ * `< 1m → "47s"`, `< 1h → "4m 07s"`, `≥ 1h → "1h 02m 09s"`. Sub-minute shows bare
+ * seconds; minutes/hours zero-pad the trailing fields so the width stays steady
+ * as the timer ticks. Negative / NaN inputs clamp to "0s".
+ */
+export function formatElapsed(ms: number | undefined): string {
+  const totalSec = Math.max(0, Math.floor((ms ?? 0) / 1000))
+  if (!Number.isFinite(totalSec)) return "0s"
+  if (totalSec < 60) return `${totalSec}s`
+  const s = totalSec % 60
+  const totalMin = Math.floor(totalSec / 60)
+  if (totalMin < 60) return `${totalMin}m ${String(s).padStart(2, "0")}s`
+  const m = totalMin % 60
+  const h = Math.floor(totalMin / 60)
+  return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`
+}
+
 /** Humanize a USD cost. Sub-cent costs keep 4 decimals; otherwise 2–3. */
 export function formatCost(usd: number | undefined): string {
   if (!usd || usd <= 0) return "$0.00"

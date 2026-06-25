@@ -46,9 +46,11 @@ import {
   expandPastes,
   PASTE_CHAR_THRESHOLD,
   type PasteResult,
-} from "../input/paste-collapse"
+} from "@/lib/paste-collapse"
 import { createPasteParser } from "../input/bracketed-paste"
+import { suggest } from "../input/autosuggest"
 import { matchSlash, slashQuery } from "../commands/matcher"
+import { listVisibleCommands } from "../commands/registry"
 import { buildCommandHint } from "../commands/command-hint"
 import { type ListDir } from "../commands/file-completer"
 import { detectMention } from "../mention/detector"
@@ -347,6 +349,21 @@ export function Input({
   const popupLen = popupKind === "slash" ? slashMatches.length : mentionCandidates.length
   const safeIndex = popupLen > 0 ? popupIndex % popupLen : 0
 
+  // Inline ghost-text autosuggest: a dim completion shown after the cursor when
+  // the single-line draft is a prefix of a prior history entry (or slash name).
+  // Suppressed while a popup owns input (the palette handles `/` and `@`) or the
+  // composer is disabled. `→` at the end of the draft accepts it.
+  const cursorAtEnd =
+    buffer.cursorRow === buffer.lines.length - 1 &&
+    buffer.cursorCol === buffer.lines[buffer.cursorRow].length
+  const suggestion =
+    disabled || popupOpen
+      ? null
+      : suggest(text, cursorAtEnd, {
+          history: [...input.history.entries].reverse(),
+          commands: listVisibleCommands().map((c) => `/${c.name}`),
+        })
+
   const setBuffer = (next: InputBuffer) => {
     setDismissed(null)
     dispatch({ type: "INPUT_SET", buffer: next })
@@ -468,6 +485,12 @@ export function Input({
             if (target) setBuffer(moveTo(buffer, target.row, target.col))
           }
         }
+        return
+      }
+      // Accept an inline ghost suggestion: → at the very end of the draft fills
+      // it in (a no-op move otherwise), before normal key interpretation.
+      if (suggestion && key.rightArrow && cursorAtEnd) {
+        setBuffer(bufferFromText(text + suggestion))
         return
       }
       const intent = interpretKey(
@@ -637,6 +660,11 @@ export function Input({
               {row === 0 && showPlaceholder && (
                 <Text color={theme.muted} dimColor>
                   {placeholder}
+                </Text>
+              )}
+              {row === buffer.cursorRow && cursorAtEnd && suggestion && (
+                <Text color={theme.muted} dimColor>
+                  {suggestion}
                 </Text>
               )}
             </Box>

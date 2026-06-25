@@ -57,3 +57,24 @@ export function stringWidth(text: string): number {
   }
   return width
 }
+
+/**
+ * Truncate `text` to at most `max` display columns, appending `…` when cut.
+ * Display-width aware (a wide glyph counts as two columns) via
+ * {@link stringWidth}. Lives here next to `stringWidth` so the Markdown table
+ * renderer and the tool-detail formatter share one implementation instead of
+ * each carrying its own copy.
+ */
+export function truncateToWidth(text: string, max: number): string {
+  if (stringWidth(text) <= max) return text
+  if (max <= 1) return "…"
+  let out = ""
+  let w = 0
+  for (const ch of text) {
+    const cw = stringWidth(ch)
+    if (w + cw > max - 1) break
+    out += ch
+    w += cw
+  }
+  return out + "…"
+}

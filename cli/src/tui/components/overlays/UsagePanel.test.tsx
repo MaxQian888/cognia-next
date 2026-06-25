@@ -1,5 +1,5 @@
 import React from "react"
-import { render } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { UsagePanel } from "./UsagePanel"
@@ -75,5 +75,13 @@ describe("UsagePanel", () => {
     render(<UsagePanel onClose={onClose} />)
     __fireInput("", { escape: true })
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("routes a scroll key to the viewport instead of closing", () => {
+    const onClose = jest.fn()
+    render(<UsagePanel onClose={onClose} viewportRows={4} />)
+    act(() => __fireInput("", { pageDown: true }))
+    act(() => __fireInput("", { downArrow: true }))
+    expect(onClose).not.toHaveBeenCalled()
   })
 })

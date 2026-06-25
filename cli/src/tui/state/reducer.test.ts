@@ -725,6 +725,83 @@ describe("tuiReducer", () => {
     expect(s1.cells).toBe(s0.cells)
   })
 
+  it("BACKTRACK_ENTER selects the last user cell; no-op without one", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "user", text: "q1" },
+      { id: "2", kind: "assistant", raw: "a1" },
+      { id: "3", kind: "user", text: "q2" },
+    ]
+    const s = reduce({ ...base(), cells }, { type: "BACKTRACK_ENTER" })
+    expect(s.backtrack).toEqual({ index: 2 })
+    // No user cells → unchanged (no backtrack state).
+    const empty = reduce(base(), { type: "BACKTRACK_ENTER" })
+    expect(empty.backtrack).toBeUndefined()
+  })
+
+  it("BACKTRACK_MOVE walks between user cells and clamps at the ends", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "user", text: "q1" },
+      { id: "2", kind: "assistant", raw: "a1" },
+      { id: "3", kind: "user", text: "q2" },
+    ]
+    const start = { ...base(), cells, backtrack: { index: 2 } }
+    const up = reduce(start, { type: "BACKTRACK_MOVE", dir: -1 })
+    expect(up.backtrack).toEqual({ index: 0 })
+    // Already at the earliest → clamp (no further user cell).
+    const clampUp = reduce(up, { type: "BACKTRACK_MOVE", dir: -1 })
+    expect(clampUp.backtrack).toEqual({ index: 0 })
+    const down = reduce(up, { type: "BACKTRACK_MOVE", dir: 1 })
+    expect(down.backtrack).toEqual({ index: 2 })
+    // Move without an active selection is a no-op.
+    expect(
+      reduce({ ...base(), cells }, { type: "BACKTRACK_MOVE", dir: -1 }).backtrack
+    ).toBeUndefined()
+  })
+
+  it("BACKTRACK_COMMIT sets the edit target and clears the selection", () => {
+    const s0 = { ...base(), backtrack: { index: 1 } }
+    const s1 = reduce(s0, { type: "BACKTRACK_COMMIT", index: 1 })
+    expect(s1.backtrack).toBeUndefined()
+    expect(s1.editTarget).toEqual({ index: 1 })
+  })
+
+  it("BACKTRACK_CANCEL and EDIT_CLEAR drop their respective state", () => {
+    const cancelled = reduce({ ...base(), backtrack: { index: 0 } }, { type: "BACKTRACK_CANCEL" })
+    expect(cancelled.backtrack).toBeUndefined()
+    const cleared = reduce({ ...base(), editTarget: { index: 0 } }, { type: "EDIT_CLEAR" })
+    expect(cleared.editTarget).toBeUndefined()
+  })
+
+  it("bumps renderEpoch on every backtrack selection change (scrollback repaint)", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "user", text: "q1" },
+      { id: "2", kind: "assistant", raw: "a1" },
+      { id: "3", kind: "user", text: "q2" },
+    ]
+    // ENTER bumps (a highlight appears).
+    const entered = reduce({ ...base(), cells }, { type: "BACKTRACK_ENTER" })
+    expect(entered.renderEpoch).toBe(base().renderEpoch + 1)
+    // MOVE bumps (the highlight relocates).
+    const moved = reduce(entered, { type: "BACKTRACK_MOVE", dir: -1 })
+    expect(moved.renderEpoch).toBe(entered.renderEpoch + 1)
+    // CANCEL bumps (the highlight disappears).
+    const cancelled = reduce(moved, { type: "BACKTRACK_CANCEL" })
+    expect(cancelled.renderEpoch).toBe(moved.renderEpoch + 1)
+    // COMMIT bumps (highlight gone, message loaded for edit).
+    const committed = reduce(entered, { type: "BACKTRACK_COMMIT", index: 2 })
+    expect(committed.renderEpoch).toBe(entered.renderEpoch + 1)
+  })
+
+  it("does NOT bump renderEpoch on a no-op backtrack action", () => {
+    // ENTER with no user cell, MOVE/CANCEL with no active selection — all no-ops.
+    const noEnter = reduce(base(), { type: "BACKTRACK_ENTER" })
+    expect(noEnter.renderEpoch).toBe(base().renderEpoch)
+    const noMove = reduce(base(), { type: "BACKTRACK_MOVE", dir: -1 })
+    expect(noMove.renderEpoch).toBe(base().renderEpoch)
+    const noCancel = reduce(base(), { type: "BACKTRACK_CANCEL" })
+    expect(noCancel.renderEpoch).toBe(base().renderEpoch)
+  })
+
   it("OVERLAY_MOVE navigates a files completion list", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",

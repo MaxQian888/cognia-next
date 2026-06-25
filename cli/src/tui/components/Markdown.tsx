@@ -9,7 +9,7 @@ import { Box, Text, useStdout } from "ink"
 
 import { paletteCodeTheme } from "../markdown/highlight"
 import { highlightCached, themeCodeKey, tokenizeCached } from "../markdown/render-cache"
-import { stringWidth } from "../markdown/width"
+import { stringWidth, truncateToWidth } from "../markdown/width"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import { useTheme } from "../theme/context"
 import type { MdLine, MdSpan, TableAlign } from "../markdown/types"
@@ -137,21 +137,9 @@ export function cellRefText(spans: MdSpan[], footnotes: string[]): string {
     .join("")
 }
 
-/** Truncate `text` to at most `max` display columns, appending `…` when cut.
- * CJK-aware (a wide glyph counts as two columns). */
-export function truncateToWidth(text: string, max: number): string {
-  if (stringWidth(text) <= max) return text
-  if (max <= 1) return "…"
-  let out = ""
-  let w = 0
-  for (const ch of text) {
-    const cw = stringWidth(ch)
-    if (w + cw > max - 1) break
-    out += ch
-    w += cw
-  }
-  return out + "…"
-}
+// `truncateToWidth` now lives in ../markdown/width (next to `stringWidth`) so the
+// tool-detail formatter can share it; re-exported here for existing importers.
+export { truncateToWidth }
 
 /** Render a table cell's spans, turning footnoted links into `label[n]` so the
  * URL lives below the table instead of widening (and misaligning) the column. */

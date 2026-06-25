@@ -85,12 +85,17 @@ describe("matchAction", () => {
     expect(matchAction(b, ...ctrl("k"))).toBe("lineKillToEnd")
   })
   it("returns undefined for an unbound key", () => {
-    expect(matchAction(resolveKeybindings(undefined), ...ctrl("p"))).toBeUndefined()
+    expect(matchAction(resolveKeybindings(undefined), ...ctrl("x"))).toBeUndefined()
   })
   it("maps the undo/redo chords back to their actions", () => {
     const b = resolveKeybindings(undefined)
     expect(matchAction(b, ...ctrl("z"))).toBe("undo")
     expect(matchAction(b, ...ctrl("y"))).toBe("redo")
+  })
+  it("maps the copy/clear chords back to their actions", () => {
+    const b = resolveKeybindings(undefined)
+    expect(matchAction(b, ...ctrl("p"))).toBe("copyLast")
+    expect(matchAction(b, ...ctrl("l"))).toBe("clearScreen")
   })
   it("honours a user override", () => {
     const b = resolveKeybindings({ inspect: "ctrl+j" })
