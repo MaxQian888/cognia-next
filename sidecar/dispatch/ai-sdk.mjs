@@ -297,6 +297,23 @@ export function dispatchAiSdk({
   // pendingPluginToolCalls).
   const pendingProtocolExecs = new Map()
   const protocol = resolveProtocol(provider, sendOptions.providerCredentials)
+
+  // `@agent` single-turn routing on the ai-sdk path. The SDK-native `agent`
+  // field (Anthropic path) has no equivalent here, so we synthesize the
+  // subagent's IDENTITY: prepend its system prompt and narrow the tool allowlist
+  // to its `tools`. We deliberately do NOT override the model — a subagent's
+  // model usually names a Claude id that the active non-Anthropic provider can't
+  // serve; the user's chosen provider model stays in force. Mirrors the
+  // `synthesizeCharacter` overlay used by the team/dispatch executor.
+  const agentOverlay =
+    sendOptions.agent && sendOptions.agents ? sendOptions.agents[sendOptions.agent] : null
+  const agentSystemPrompt =
+    agentOverlay && typeof agentOverlay.prompt === "string" && agentOverlay.prompt.trim().length > 0
+      ? agentOverlay.prompt
+      : null
+  const agentAllowedTools =
+    agentOverlay && Array.isArray(agentOverlay.tools) ? agentOverlay.tools : null
+
   // The Anthropic protocol carries images inside tool-result messages natively;
   // every other protocol we drive (openai / google / mistral / cohere) either
   // can't, or only can on specific endpoints/model versions — so for them we end
@@ -493,9 +510,13 @@ export function dispatchAiSdk({
   // losing A2UI/goal/plan/brief instructions on the non-Anthropic path.
   /** @type {Array<{ role: "user"|"assistant"|"system", content: any }>} */
   const conversation = []
-  const systemParts = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt].filter(
-    (s) => typeof s === "string" && s.trim().length > 0
-  )
+  const systemParts = [
+    // `@agent` overlay (if any) leads so the subagent's identity frames the turn,
+    // with the app's base + appended sections kept beneath it.
+    agentSystemPrompt,
+    sendOptions.systemPrompt,
+    sendOptions.appendSystemPrompt,
+  ].filter((s) => typeof s === "string" && s.trim().length > 0)
   if (
     systemParts.length > 0 &&
     protocol === "anthropic" &&
@@ -678,7 +699,13 @@ export function dispatchAiSdk({
       if (toolsCache === undefined) {
         const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
         toolsCache = buildAiSdkTools({
-          sendOptions,
+          // A routed `@agent` narrows the built-in tool allowlist to its own
+          // tools (same allowlist mechanism characters / skills / modes use).
+          // `disallowedTools` (deny / restricted mode) is checked separately and
+          // still wins.
+          sendOptions: agentAllowedTools
+            ? { ...sendOptions, allowedTools: agentAllowedTools }
+            : sendOptions,
           emit,
           sessionId,
           pendingApprovals,
@@ -710,7 +737,8 @@ export function dispatchAiSdk({
             const mcp = await buildAiSdkMcpTools({
               mcpServers: sendOptions.mcpServers,
               gate: mcpGate,
-              allowedTools: sendOptions.allowedTools,
+              // A routed `@agent` narrows the allowlist to its own tools.
+              allowedTools: agentAllowedTools ?? sendOptions.allowedTools,
               disallowedTools: sendOptions.disallowedTools,
               log,
             })

@@ -279,6 +279,12 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     includePartialMessages: sendOptions.includePartialMessages,
     settingSources: sendOptions.settingSources,
     agents: sendOptions.agents,
+    // Run THIS turn's main thread AS the named subagent (its system prompt, tool
+    // restrictions, and model) — Claude Code's `@agent` / `--agent`. Set by
+    // `resolveSendOptions` from the composer's `@`-mention, and only ever an id
+    // already present in `agents` above (membership-guarded there). Undefined is
+    // stripped by the pass below, so a normal turn is unaffected.
+    agent: sendOptions.agent,
     // Forward subagent text/thinking as parent_tool_use_id-tagged frames so the
     // renderer's SDK-subagent bridge can render rich nested logs (team /
     // workflow-editor). The query options are an explicit whitelist, so this

@@ -52,7 +52,12 @@ test("nearestRoot finds the directory containing a marker", () => {
   fs.writeFileSync(file, "")
 
   const find = nearestRoot(["package.json"])
-  assert.equal(find(file, { cwd: root }), fs.realpathSync(root))
+  // nearestRoot walks up lexically from the input file, so it returns the root in
+  // the SAME path space it was given — not a realpath'd one. Realpath'ing here
+  // would diverge on macOS, where os.tmpdir() is the `/var`→`/private/var`
+  // symlink (realpathSync(root) !== root); on Linux CI the two coincide so this
+  // masquerades as passing. Compare against the path actually handed in.
+  assert.equal(find(file, { cwd: root }), path.resolve(root))
 })
 
 test("nearestRoot stops at cwd boundary and returns undefined when no marker", () => {

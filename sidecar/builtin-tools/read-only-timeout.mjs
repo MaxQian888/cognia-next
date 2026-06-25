@@ -66,8 +66,14 @@ export function wrapHandlerWithReadOnlyTimeout(def, timeoutMs, readOnly) {
     const work = Promise.resolve().then(() => handler(args, extra))
     let timer = null
     const deadline = new Promise((resolve) => {
+      // Keep the timer REF'd: while a read-only handler is in flight we owe the
+      // model a response, so the deadline must hold the event loop open until it
+      // fires (or `work` settles and we clearTimeout). An unref'd timer let the
+      // loop drain mid-wait — the process could exit before the budget error was
+      // ever delivered, defeating the whole backstop. The timer is always cleared
+      // or fired the moment the race settles, so it never lingers; graceful
+      // shutdown is driven by stdin-close → process.exit(), not timer GC.
       timer = setTimeout(() => resolve(TIMEOUT), timeoutMs)
-      if (timer && typeof timer.unref === "function") timer.unref()
     })
     return Promise.race([work, deadline]).then(
       (winner) => {

@@ -65,10 +65,16 @@ function runBuiltinHandler(def, effective, timeoutMs) {
   if (!Number.isFinite(net) || net <= 0) return call()
   let timer = null
   const deadline = new Promise((_, reject) => {
+    // Keep the timer REF'd: while a read-only handler is in flight we owe the AI
+    // SDK a result, so the deadline must hold the event loop open until it fires
+    // (or `call()` settles and we clearTimeout). An unref'd timer let the loop
+    // drain mid-wait — the process could exit before the budget rejection was
+    // ever surfaced, defeating the backstop. The timer is always cleared on
+    // settle (the .finally below), so it never lingers; graceful shutdown is
+    // driven by stdin-close → process.exit(), not timer GC.
     timer = setTimeout(() => {
       reject(new Error(toolBudgetMessage(def.name, net)))
     }, net)
-    if (timer && typeof timer.unref === "function") timer.unref()
   })
   return Promise.race([call(), deadline]).finally(() => {
     if (timer) clearTimeout(timer)

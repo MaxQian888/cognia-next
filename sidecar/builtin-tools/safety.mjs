@@ -36,8 +36,8 @@ export function assertPathInside(rootCwd, target) {
   // Use realpath where possible so symlink escapes are caught. Fall back to
   // the lexically resolved path when the target doesn't exist yet (e.g.
   // before file_write).
-  const canonicalRoot = safeRealpath(absRoot)
-  const canonicalTarget = safeRealpath(absTarget) ?? absTarget
+  const canonicalRoot = safeRealpath(absRoot) ?? absRoot
+  const canonicalTarget = canonicalisePartial(absTarget)
   // Normalise trailing separators so a root of "/a" doesn't accept "/aa".
   const rootWithSep = canonicalRoot.endsWith(path.sep) ? canonicalRoot : canonicalRoot + path.sep
   if (canonicalTarget !== canonicalRoot && !canonicalTarget.startsWith(rootWithSep)) {
@@ -52,6 +52,33 @@ function safeRealpath(p) {
   } catch {
     return null
   }
+}
+
+/**
+ * Canonicalise a path that may not exist yet (write targets). Resolves the
+ * longest existing ancestor via realpath — so platform symlinks like macOS's
+ * `/var` -> `/private/var` are collapsed the same way the root is — then
+ * re-appends the not-yet-created trailing segments. Without this, a write
+ * target under a symlinked temp dir is compared lexically against a realpath'd
+ * root and falsely reported as escaping it.
+ *
+ * @param {string} absTarget  An absolute path.
+ * @returns {string}
+ */
+function canonicalisePartial(absTarget) {
+  let current = absTarget
+  const missing = [] // segments collected deepest-first
+  for (;;) {
+    const real = safeRealpath(current)
+    if (real !== null) {
+      return missing.length ? path.join(real, ...missing.reverse()) : real
+    }
+    const parent = path.dirname(current)
+    if (parent === current) break // reached the filesystem root; nothing exists
+    missing.push(path.basename(current))
+    current = parent
+  }
+  return absTarget
 }
 
 /**

@@ -56,14 +56,16 @@ function stripEnvKeys(env, patterns) {
   return changed ? out : env
 }
 
-const SH_DESCRIPTOR = {
-  kind: "sh",
-  bin: "/bin/sh",
-  isWin: false,
-  label: "POSIX sh",
-  syntaxHint: "",
-  buildArgs: (command) => ["-c", command],
-  sanitizeEnv: (env) => env,
+function makeSh() {
+  return {
+    kind: "sh",
+    bin: "/bin/sh",
+    isWin: false,
+    label: "POSIX sh",
+    syntaxHint: "",
+    buildArgs: (command) => ["-c", command],
+    sanitizeEnv: (env) => env,
+  }
 }
 
 function makePwsh(bin) {
@@ -152,7 +154,7 @@ export function findOnPathSync(name, opts = {}) {
  */
 export function resolveShellDescriptor(opts = {}) {
   const platform = opts.platform ?? process.platform
-  if (platform !== "win32") return SH_DESCRIPTOR
+  if (platform !== "win32") return makeSh()
   const lookup = opts.lookup ?? ((name) => findOnPathSync(name, { platform }))
   if (lookup("pwsh.exe") || lookup("pwsh")) return makePwsh("pwsh.exe")
   if (lookup("powershell.exe") || lookup("powershell")) return makePowershell("powershell.exe")

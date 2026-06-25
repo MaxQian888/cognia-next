@@ -402,6 +402,74 @@ test("systemPrompt and appendSystemPrompt concatenate into a single system messa
   assert.equal(captured.messages[0].content, "BASE_SYSTEM\n\nAPPENDED_DYNAMIC_TAIL")
 })
 
+test("@agent overlay: prepends the routed subagent's system prompt (ai-sdk fallback)", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      systemPrompt: "BASE_SYSTEM",
+      agent: "template:reviewer",
+      agents: { "template:reviewer": { prompt: "YOU ARE A REVIEWER" } },
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  assert.ok(captured, "streamText invoked")
+  assert.equal(captured.messages[0].role, "system")
+  // Agent identity leads; the app base prompt is kept beneath it.
+  assert.equal(captured.messages[0].content, "YOU ARE A REVIEWER\n\nBASE_SYSTEM")
+})
+
+test("@agent overlay: no-op when the agent id is not in the agents map", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      systemPrompt: "BASE_SYSTEM",
+      agent: "template:missing",
+      agents: { "template:reviewer": { prompt: "YOU ARE A REVIEWER" } },
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  assert.ok(captured, "streamText invoked")
+  assert.equal(captured.messages[0].content, "BASE_SYSTEM")
+})
+
 test("anthropic protocol + cacheOptimizationEnabled splits system at the stable boundary with a cacheControl breakpoint", async () => {
   const { events, emit } = captureEmit()
   let captured = null
