@@ -21,6 +21,11 @@
   "selection": {
     "selector": "选择器"
   },
+  "agent": {
+    "driving": "智能体操作中",
+    "human": "你在操作",
+    "lastAction": "最近操作：{action}"
+  },
   "empty": {
     "title": "预览本地开发服务器",
     "hint": "输入 localhost 地址即可在此渲染，然后选择元素进行评论。"

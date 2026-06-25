@@ -21,6 +21,11 @@
   "selection": {
     "selector": "Selector"
   },
+  "agent": {
+    "driving": "Agent driving",
+    "human": "You're driving",
+    "lastAction": "Last action: {action}"
+  },
   "empty": {
     "title": "Preview a local dev server",
     "hint": "Enter a localhost URL to render it here, then select an element to comment on it."

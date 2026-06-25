@@ -1608,6 +1608,11 @@
       "reload": "刷新",
       "selectElement": "选择元素"
     },
+    "agent": {
+      "driving": "智能体操作中",
+      "human": "你在操作",
+      "lastAction": "最近操作：{action}"
+    },
     "comment": {
       "cancel": "取消",
       "failed": "评论发送失败",
@@ -2259,6 +2264,15 @@
         "bashHintPrefix": "按",
         "bashHintSuffix": "以 shell 命令运行。",
         "bashTitle": "执行 shell 命令",
+        "categories": {
+          "chat": "对话",
+          "diagnostics": "诊断",
+          "goal": "目标",
+          "help": "帮助",
+          "other": "其他",
+          "system": "系统",
+          "template": "提示词"
+        },
         "comingSoon": "即将上线",
         "fileTitle": "引用文件或文件夹",
         "filesSection": "文件",
@@ -2266,9 +2280,13 @@
         "noCommandMatches": "没有匹配「/{query}」的命令。",
         "noCommands": "暂无可用命令。",
         "noFiles": "没有匹配「{query}」的文件。",
+        "pinAction": "置顶 /{name}",
+        "pinnedSection": "置顶",
+        "recentSection": "最近使用",
         "searching": "搜索中…",
         "searchingShort": "搜索中…",
         "slashTitle": "斜杠命令",
+        "unpinAction": "取消置顶 /{name}",
         "workspaceEmpty": "工作区为空。",
         "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
       },
@@ -2511,6 +2529,33 @@
       "loadError": "无法加载此对话。",
       "loading": "正在加载对话…",
       "retry": "重试"
+    },
+    "hookNotice": {
+      "event": {
+        "Notification": "通知",
+        "PermissionDenied": "权限被拒绝",
+        "PermissionRequest": "权限请求",
+        "PostCompact": "压缩后",
+        "PostToolUse": "工具调用后",
+        "PostToolUseFailure": "工具失败后",
+        "PreToolUse": "工具调用前",
+        "SessionEnd": "会话结束",
+        "SessionStart": "会话开始",
+        "Stop": "停止",
+        "StopFailure": "停止（失败）",
+        "SubagentStop": "子代理停止",
+        "UserPromptSubmit": "提交提示词"
+      },
+      "outcome": {
+        "blocked": "已拦截",
+        "context": "已注入上下文",
+        "warning": "警告"
+      },
+      "section": {
+        "context": "注入的上下文",
+        "reason": "原因"
+      },
+      "toggle": "展开/折叠 Hook 详情"
     },
     "inlineError": {
       "dismiss": "忽略",
@@ -2879,7 +2924,8 @@
       },
       "rowAria": "{name} 子代理 — {status}",
       "title": "子代理",
-      "tokens": "{n} tokens"
+      "tokens": "{n} tokens",
+      "toolsRunCount": "{n} 次工具调用"
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -16994,6 +17040,12 @@
       "backend": {
         "label": "后端"
       },
+      "canvasSandbox": {
+        "description": "让 Canvas 面板中执行的代码（尤其是 Python）经由 OS 沙盒运行。关闭后，Canvas 代码将不受约束地以完整主机权限运行。",
+        "label": "沙盒化 Canvas 代码执行",
+        "note": "默认开启。关闭后 Canvas Python 可访问你的文件系统与网络——请仅在你信任的机器上关闭。",
+        "title": "Canvas 代码沙盒"
+      },
       "description": "为高风险工具 (Bash / Edit / Write / text_editor) 提供按平台的 OS 沙盒。沙盒不可用时严格模式拒绝这些工具调用,不会绕过隔离。",
       "enable": {
         "description": "在每个会话中默认让高风险工具经由 OS 沙盒执行。单个会话与角色仍可覆盖此默认值。",
@@ -17037,6 +17089,12 @@
           "placeholder": "/home/me/projects\n/tmp/cognia-work"
         }
       },
+      "probe": {
+        "failed": "隔离校验失败",
+        "label": "探测",
+        "ok": "隔离已验证",
+        "running": "正在验证…"
+      },
       "retryButton": "运行健康探测",
       "status": {
         "down": "不可用",
@@ -17057,6 +17115,7 @@
         "title": "默认沙盒层级"
       },
       "title": "沙盒",
+      "verifyButton": "验证沙盒隔离",
       "version": {
         "label": "版本"
       }

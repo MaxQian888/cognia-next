@@ -1608,6 +1608,11 @@
       "reload": "Reload",
       "selectElement": "Select element"
     },
+    "agent": {
+      "driving": "Agent driving",
+      "human": "You're driving",
+      "lastAction": "Last action: {action}"
+    },
     "comment": {
       "cancel": "Cancel",
       "failed": "Could not send the comment",
@@ -2259,6 +2264,15 @@
         "bashHintPrefix": "Press",
         "bashHintSuffix": "to run as a shell command.",
         "bashTitle": "Run shell command",
+        "categories": {
+          "chat": "Chat",
+          "diagnostics": "Diagnostics",
+          "goal": "Goal",
+          "help": "Help",
+          "other": "Other",
+          "system": "System",
+          "template": "Prompts"
+        },
         "comingSoon": "Coming soon",
         "fileTitle": "Reference a file or folder",
         "filesSection": "Files",
@@ -2266,9 +2280,13 @@
         "noCommandMatches": "No commands match \"/{query}\".",
         "noCommands": "No commands available.",
         "noFiles": "No files match \"{query}\".",
+        "pinAction": "Pin /{name}",
+        "pinnedSection": "Pinned",
+        "recentSection": "Recent",
         "searching": "Searching…",
         "searchingShort": "searching…",
         "slashTitle": "Slash command",
+        "unpinAction": "Unpin /{name}",
         "workspaceEmpty": "Workspace is empty.",
         "workspaceMissing": "Set a working directory in session settings to use @-references."
       },
@@ -2511,6 +2529,33 @@
       "loadError": "Couldn't load this conversation.",
       "loading": "Loading conversation…",
       "retry": "Retry"
+    },
+    "hookNotice": {
+      "event": {
+        "Notification": "Notification",
+        "PermissionDenied": "Permission denied",
+        "PermissionRequest": "Permission request",
+        "PostCompact": "After compaction",
+        "PostToolUse": "After tool",
+        "PostToolUseFailure": "After tool failure",
+        "PreToolUse": "Before tool",
+        "SessionEnd": "Session end",
+        "SessionStart": "Session start",
+        "Stop": "Stop",
+        "StopFailure": "Stop (failed)",
+        "SubagentStop": "Subagent stop",
+        "UserPromptSubmit": "Prompt submitted"
+      },
+      "outcome": {
+        "blocked": "blocked",
+        "context": "context injected",
+        "warning": "warning"
+      },
+      "section": {
+        "context": "Injected context",
+        "reason": "Reason"
+      },
+      "toggle": "Toggle hook details"
     },
     "inlineError": {
       "dismiss": "Dismiss",
@@ -2879,7 +2924,8 @@
       },
       "rowAria": "{name} sub-agent — {status}",
       "title": "Sub-agent",
-      "tokens": "{n} tokens"
+      "tokens": "{n} tokens",
+      "toolsRunCount": "{n, plural, one {# tool} other {# tools}}"
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -16994,6 +17040,12 @@
       "backend": {
         "label": "Backend"
       },
+      "canvasSandbox": {
+        "description": "Run code from the Canvas panel (Python especially) through the OS sandbox. When off, Canvas code runs unconfined with full host access.",
+        "label": "Sandbox Canvas code execution",
+        "note": "On by default. Disabling lets Canvas Python reach your filesystem and network — only turn it off on a machine you trust.",
+        "title": "Canvas code sandbox"
+      },
       "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
       "enable": {
         "description": "Run high-risk tools through the OS sandbox by default in every session. Individual sessions and characters can still override this.",
@@ -17037,6 +17089,12 @@
           "placeholder": "/home/me/projects\n/tmp/cognia-work"
         }
       },
+      "probe": {
+        "failed": "Confinement check failed",
+        "label": "Probe",
+        "ok": "Confinement verified",
+        "running": "Verifying…"
+      },
       "retryButton": "Run health probe",
       "status": {
         "down": "Unavailable",
@@ -17057,6 +17115,7 @@
         "title": "Default sandbox tier"
       },
       "title": "Sandbox",
+      "verifyButton": "Verify confinement",
       "version": {
         "label": "Version"
       }

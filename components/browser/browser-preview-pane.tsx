@@ -5,6 +5,10 @@ import { useTranslations } from "next-intl"
 import { type FormEvent, useCallback, useRef, useState } from "react"
 import { toast } from "sonner"
 
+import {
+  BrowserAgentIndicator,
+  useBrowserAgentActivity,
+} from "@/components/browser/browser-agent-indicator"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,6 +39,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     driver: browserClient.embedSetSelectMode,
   })
   const { sendComment } = useSelectionToChat()
+  const { driver, lastAction } = useBrowserAgentActivity()
 
   const commitUrl = useCallback(
     (e: FormEvent) => {
@@ -113,6 +118,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
         >
           <MousePointerSquareDashedIcon />
         </TooltipIconButton>
+        <BrowserAgentIndicator driver={driver} lastAction={lastAction} />
       </div>
 
       <div ref={reservedRef} className="relative min-h-0 flex-1">

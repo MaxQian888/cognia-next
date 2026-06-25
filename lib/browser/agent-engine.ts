@@ -4,6 +4,7 @@
  * The trust tier (`resolveTrustTier`) decides routing and whether the page
  * content must be treated as untrusted. See ADR-0038.
  */
+import { emitAgentActivity } from "@/lib/browser/agent-activity"
 import { browserClient } from "@/lib/browser/client"
 import {
   resolveTrustTier,
@@ -33,12 +34,14 @@ export interface BrowserEngine {
 /** Drives the in-app embedded webview via the Tauri `browser_embed_*` commands. */
 export class EmbeddedEngine implements BrowserEngine {
   navigate(url: string) {
+    emitAgentActivity(`navigate ${url}`)
     return browserClient.embedNavigate(url)
   }
   snapshot() {
     return browserClient.embedSnapshot()
   }
   act(reference: string, action: string, args: Record<string, unknown>) {
+    emitAgentActivity(`${action} ${reference}`)
     return browserClient.embedAct(reference, action, args)
   }
   readConsole() {
