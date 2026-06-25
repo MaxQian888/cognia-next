@@ -110,6 +110,7 @@ export interface PluginCharacterDef {
   debugMode?: boolean
   briefMode?: boolean
   enableComputerUse?: boolean
+  enableBrowserTools?: boolean
   computerUseSettings?: Character["computerUseSettings"]
   sandboxEnabled?: boolean
   sandboxTier?: Character["sandboxTier"]

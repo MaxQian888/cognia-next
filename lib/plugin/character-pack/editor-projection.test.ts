@@ -146,6 +146,7 @@ describe("characterToPackDef", () => {
       voiceProfile: { provider: "openai", voiceId: "alloy" },
       avatarImage: { webDataUrl: "data:image/png;base64,AAA" },
       availableOnPlatforms: ["tauri"],
+      enableBrowserTools: true,
     } as Character)
     expect(def.avatarEmoji).toBe("🐙")
     expect(def.model).toBe("claude-sonnet-4-6")
@@ -153,5 +154,6 @@ describe("characterToPackDef", () => {
     expect(def.voiceProfile).toEqual({ provider: "openai", voiceId: "alloy" })
     expect(def.avatarImage).toEqual({ webDataUrl: "data:image/png;base64,AAA" })
     expect(def.availableOnPlatforms).toEqual(["tauri"])
+    expect(def.enableBrowserTools).toBe(true)
   })
 })

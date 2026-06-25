@@ -122,6 +122,7 @@ export function characterToPackDef(character: Character): PluginCharacterDef {
     debugMode: character.debugMode,
     briefMode: character.briefMode,
     enableComputerUse: character.enableComputerUse,
+    enableBrowserTools: character.enableBrowserTools,
     computerUseSettings: character.computerUseSettings,
     sandboxEnabled: character.sandboxEnabled,
     sandboxTier: character.sandboxTier,
