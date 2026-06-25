@@ -17,7 +17,7 @@
   "manage": "管理",
   "manageAgents": "管理代理",
   "manager": {
-    "a2aComingSoon": "A2A（即将支持）",
+    "a2aProtocol": "A2A",
     "addAgentFailed": "添加外部代理失败。",
     "addExternalAgent": "添加外部代理",
     "addingAgent": "添加中…",

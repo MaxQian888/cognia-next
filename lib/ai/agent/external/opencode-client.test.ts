@@ -178,12 +178,22 @@ describe("OpenCodeClientAdapter — basic state", () => {
     expect(a.capabilities).toBeUndefined()
   })
 
-  it("reports list/fork/resume extensions as supported", () => {
+  it("reports extensions as unknown before connect and supported once connected", () => {
     const a = new OpenCodeClientAdapter()
-    const ext = a.getSessionExtensionSupport()
-    expect(ext["session/list"].state).toBe("supported")
-    expect(ext["session/fork"].state).toBe("supported")
-    expect(ext["session/resume"].state).toBe("supported")
+    // Before connect there is no server to exercise — report unknown, not a
+    // hardcoded supported.
+    const before = a.getSessionExtensionSupport()
+    expect(before["session/list"].state).toBe("unknown")
+    expect(before["session/fork"].state).toBe("unknown")
+    expect(before["session/resume"].state).toBe("unknown")
+    expect(before["session/resume"].reason).toMatch(/not connected/i)
+
+    // Once connected, the typed SDK contract guarantees these operations.
+    ;(a as unknown as { _connectionStatus: string })._connectionStatus = "connected"
+    const after = a.getSessionExtensionSupport()
+    expect(after["session/list"].state).toBe("supported")
+    expect(after["session/fork"].state).toBe("supported")
+    expect(after["session/resume"].state).toBe("supported")
     expect(() => a.clearSessionExtensionSupportCache()).not.toThrow()
   })
 

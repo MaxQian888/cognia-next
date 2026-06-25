@@ -81,6 +81,7 @@ import type {
 import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
+  isSupportedExternalAgentProtocol,
 } from "@/lib/ai/agent/external/config-normalizer"
 import { getExternalAgentEcosystemAdapter } from "@/lib/ai/agent/external/ecosystem-adapters"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
@@ -299,13 +300,14 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Accept the two built-in protocols OR any plugin-contributed adapter
-    // currently registered in the runtime registry (mirrors the registry-aware
-    // gate in getExternalAgentExecutionBlock). A disabled-plugin protocol is no
-    // longer in the registry, so it stays correctly blocked.
+    // Accept any built-in protocol (acp / codex-app-server / opencode / a2a) OR
+    // any plugin-contributed adapter currently registered in the runtime registry
+    // (mirrors the registry-aware gate in getExternalAgentExecutionBlock). Using
+    // the canonical built-in list keeps every shipping protocol — including A2A —
+    // selectable without depending on registry bootstrap order. A disabled-plugin
+    // protocol is no longer in the registry, so it stays correctly blocked.
     if (
-      formData.protocol !== "acp" &&
-      formData.protocol !== "opencode" &&
+      !isSupportedExternalAgentProtocol(formData.protocol) &&
       !protocolAdapterRegistry.has(formData.protocol)
     ) {
       toast.error(tManager("unsupportedProtocol"))
@@ -471,8 +473,15 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     setFormData({
                       ...formData,
                       protocol: value,
-                      // OpenCode always runs over HTTP + SSE.
-                      transport: value === "opencode" ? "sse" : formData.transport,
+                      // OpenCode runs over HTTP + SSE; A2A is a remote HTTP
+                      // (JSON-RPC + optional SSE) protocol — both need a network
+                      // endpoint rather than a stdio command.
+                      transport:
+                        value === "opencode"
+                          ? "sse"
+                          : value === "a2a"
+                            ? "http"
+                            : formData.transport,
                     })
                   }}
                 >
@@ -488,9 +497,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     )}
                     <SelectItem value="acp">ACP</SelectItem>
                     <SelectItem value="opencode">OpenCode</SelectItem>
-                    <SelectItem value="a2a" disabled>
-                      {tManager("a2aComingSoon")}
-                    </SelectItem>
+                    <SelectItem value="a2a">{tManager("a2aProtocol")}</SelectItem>
                     <SelectItem value="http" disabled>
                       {tManager("httpProtocolComingSoon")}
                     </SelectItem>

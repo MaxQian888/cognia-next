@@ -664,6 +664,36 @@ describe("ExternalAgentManager", () => {
     )
   })
 
+  it("exposes A2A as a selectable (no longer 'coming soon') protocol and adds it", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+
+    // The protocol dropdown is the second combobox (after the preset quick-start).
+    fireEvent.click(screen.getAllByRole("combobox")[1])
+    const a2aOption = await screen.findByRole("option", { name: "A2A" })
+    expect(a2aOption).not.toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(a2aOption)
+
+    // A2A is a remote HTTP protocol → an endpoint field is required.
+    fireEvent.change(screen.getByLabelText(en.externalAgent.manager.name), {
+      target: { value: "My A2A Agent" },
+    })
+    const endpoint = screen.getByLabelText(en.externalAgent.settings.endpoint) as HTMLInputElement
+    endpoint.removeAttribute("required")
+    fireEvent.change(endpoint, { target: { value: "https://agent.example/a2a" } })
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: "a2a", transport: "http" })
+    )
+  })
+
   it("requires an endpoint for a remote OpenCode agent (no auto-spawn)", async () => {
     ;(toast.error as jest.Mock).mockClear()
     const hook = baseHookValue()

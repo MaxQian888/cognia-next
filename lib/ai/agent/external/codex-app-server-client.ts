@@ -50,6 +50,7 @@ import type {
   AcpPlanEntry,
   AcpStopReason,
   ExternalAgentTokenUsage,
+  ExternalAgentSessionExtensionSupport,
 } from "@/types/agent/external-agent"
 
 const log = loggers.agent
@@ -363,6 +364,26 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this._sessions.delete(sessionId)
   }
 
+  /**
+   * The Codex app-server protocol exposes only `thread/start` + `thread/unsubscribe`
+   * — there is no `session/list`, `session/fork`, or `session/resume` equivalent.
+   * Report these as deterministically `unsupported` (rather than leaving the
+   * manager at `unknown`) so session-extension gating short-circuits with a clear
+   * reason instead of attempting an optimistic dispatch that would always fail.
+   */
+  getSessionExtensionSupport(): ExternalAgentSessionExtensionSupport {
+    const unsupported = {
+      state: "unsupported" as const,
+      lastCheckedAt: new Date(),
+      reason: "Codex app-server does not implement session list/fork/resume.",
+    }
+    return {
+      "session/list": unsupported,
+      "session/fork": unsupported,
+      "session/resume": unsupported,
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Prompt / turn lifecycle
   // --------------------------------------------------------------------------
@@ -381,6 +402,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const queue: ExternalAgentEvent[] = []
     let resolveNext: (() => void) | null = null
     let isDone = false
+    let sawDone = false
     let error: Error | null = null
 
     const listener = (event: ExternalAgentEvent) => {
@@ -388,9 +410,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       queue.push(event)
       resolveNext?.()
       resolveNext = null
-      if (event.type === "done" || event.type === "error") {
+      if (event.type === "done") {
         isDone = true
-        if (event.type === "error") error = new Error(event.error)
+        sawDone = true
+      } else if (event.type === "error") {
+        isDone = true
+        error = new Error(event.error)
       }
     }
     this.addSessionListener(sessionId, listener)
@@ -427,7 +452,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }
 
       while (queue.length > 0) yield queue.shift()!
-      if (error) throw error
+      // A turn-failure emits an `error` event for consumer parity AND a terminal
+      // `done{success:false}`; that is a graceful end, so we do not rethrow. We
+      // only throw for a hard error with no `done` (e.g. turn/start rejected or a
+      // transport break), preserving the original failure-propagation contract.
+      if (error && !sawDone) throw error
     } finally {
       this.removeSessionListener(sessionId, listener)
       this.updateSession(sessionId, { status: "idle" })
@@ -581,6 +610,23 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       case "turn/completed": {
         const turn = readObject(p.turn)
         const status = readString(turn?.status) ?? "completed"
+        // Align failure signaling with the OpenCode/A2A adapters: a failed turn
+        // emits a dedicated `error` event (not only `done{success:false}`), so
+        // downstream consumers that branch on `error` surface Codex failures the
+        // same way. The terminal `done` still follows for turn bookkeeping.
+        if (status === "failed") {
+          const failureMessage =
+            readString(readObject(turn?.error)?.message) ??
+            readString(turn?.error) ??
+            "Codex turn failed"
+          this.emit(sessionId, {
+            type: "error",
+            sessionId,
+            timestamp: new Date(),
+            error: failureMessage,
+            recoverable: false,
+          })
+        }
         this.emit(sessionId, {
           type: "done",
           sessionId,
@@ -649,15 +695,22 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         return
       }
       case "item/commandExecution/outputDelta": {
+        // Per the protocol `CommandExecutionOutputDeltaNotification.delta` is a
+        // plain (UTF-8) string — there is no base64 field. We read `delta`
+        // directly and only fall back to decoding a legacy `deltaBase64` if a
+        // forked build still sends it. The previous `deltaBase64`-only read
+        // dropped every live command-output chunk.
         const itemId = readString(p.itemId)
+        const deltaPlain = readString(p.delta)
         const deltaB64 = readString(p.deltaBase64)
-        if (itemId && deltaB64) {
+        const delta = deltaPlain ?? (deltaB64 ? decodeBase64(deltaB64) : undefined)
+        if (itemId && delta) {
           this.emit(sessionId, {
             type: "tool_use_delta",
             sessionId,
             timestamp: new Date(),
             toolUseId: itemId,
-            delta: decodeBase64(deltaB64),
+            delta,
           })
         }
         return
@@ -1022,13 +1075,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async listModels(): Promise<Array<{ id: string; name?: string }>> {
     if (!this.peer) return []
     try {
-      const result = await this.peer.sendRequest<{ models?: Array<Record<string, unknown>> }>(
-        "model/list",
-        { includeHidden: false }
-      )
-      return (result?.models ?? []).map((m) => ({
+      // Per the Codex app-server v2 protocol the result is
+      // `ModelListResponse { data: Model[], nextCursor }`, and each `Model` is
+      // `{ id, model, displayName, ... }`. We read `data` (with a `models`
+      // fallback for any legacy/forked build) so the model picker is populated;
+      // the previous `result.models` read always yielded an empty list.
+      const result = await this.peer.sendRequest<{
+        data?: Array<Record<string, unknown>>
+        models?: Array<Record<string, unknown>>
+      }>("model/list", { includeHidden: false })
+      return (result?.data ?? result?.models ?? []).map((m) => ({
         id: readString(m.id) ?? readString(m.model) ?? "",
-        name: readString(m.name) ?? readString(m.displayName),
+        name: readString(m.displayName) ?? readString(m.name),
       }))
     } catch (error) {
       log.warn("model/list failed", { error })

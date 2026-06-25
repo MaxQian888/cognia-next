@@ -947,19 +947,26 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   // ============================================================================
 
   getSessionExtensionSupport(): ExternalAgentSessionExtensionSupport {
-    const supported: ExternalAgentExtensionSupportStatus = {
-      state: "supported",
-      lastCheckedAt: new Date(),
-    }
+    // The OpenCode SDK statically guarantees session list/fork/continuation
+    // (`session.children`/`session.fork`/`session.prompt` exist in the typed v1
+    // client), so support is a compile-time contract rather than a runtime probe.
+    // We still gate on the live connection: before connect there is no server to
+    // talk to, so report `unknown` instead of asserting a capability we cannot
+    // yet exercise. This keeps the manager's gating honest about readiness.
+    const connected = this.isConnected()
+    const status: ExternalAgentExtensionSupportStatus = connected
+      ? { state: "supported", lastCheckedAt: new Date() }
+      : { state: "unknown", reason: "OpenCode server not connected yet." }
     return {
-      "session/list": supported,
-      "session/fork": supported,
-      "session/resume": supported,
+      "session/list": status,
+      "session/fork": status,
+      "session/resume": status,
     }
   }
 
   clearSessionExtensionSupportCache(): void {
-    // OpenCode always supports these - no cache needed
+    // Support is derived from the SDK contract + live connection state, so there
+    // is no probe result to cache or clear.
   }
 
   getAcpInitializationMetadata() {

@@ -381,5 +381,180 @@ export function createExternalAgentBenchmarkBaseline(
       },
       updatedAt: now,
     },
+    {
+      id: "codex-failure-error-event-parity",
+      title: "Codex turn-failure error-event parity",
+      referenceBehavior:
+        "OpenCode/A2A adapters emit a dedicated `error` event when a turn fails so consumers branch uniformly.",
+      cogniaBehavior:
+        "Codex now emits an `error` event on a failed turn before the terminal `done`, matching the other adapters.",
+      adaptationTarget:
+        "Surface Codex turn failures through the canonical `error` event, not only `done{success:false}`.",
+      gapGrade: "major",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "codex-failed-turn-error-event-test",
+          kind: "test",
+          summary: "Codex app-server failed turn emits a canonical error event",
+          reference: "lib/ai/agent/external/codex-app-server-client.test.ts",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "codex-session-extension-deterministic-gating",
+      title: "Codex session-extension deterministic gating",
+      referenceBehavior:
+        "Mature clients report session list/fork/resume support deterministically instead of leaving it unknown.",
+      cogniaBehavior:
+        "Codex adapter reports session/list|fork|resume as deterministically `unsupported` (the protocol exposes only thread/start), so gating short-circuits with a clear reason.",
+      adaptationTarget:
+        "Expose getSessionExtensionSupport from the Codex adapter with deterministic unsupported state.",
+      gapGrade: "minor",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "codex-extension-support-test",
+          kind: "test",
+          summary: "Codex app-server reports deterministic unsupported session extensions",
+          reference: "lib/ai/agent/external/codex-app-server-client.test.ts",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "opencode-session-extension-connection-gated",
+      title: "OpenCode session-extension support is connection-gated",
+      referenceBehavior:
+        "Support state should reflect real readiness, not assert a capability before the server is reachable.",
+      cogniaBehavior:
+        "OpenCode adapter reports list/fork/resume as `supported` only while connected (a static SDK contract) and `unknown` before connect, instead of a hardcoded `supported`.",
+      adaptationTarget:
+        "Derive OpenCode session-extension support from the live connection plus the typed SDK contract.",
+      gapGrade: "minor",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "opencode-extension-support-test",
+          kind: "test",
+          summary: "OpenCode reports unknown before connect and supported once connected",
+          reference: "lib/ai/agent/external/opencode-client.test.ts",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "a2a-surface-reachability",
+      title: "A2A surface reachable from the UI",
+      referenceBehavior:
+        "A registered protocol adapter should be selectable by users, not only constructable in code.",
+      cogniaBehavior:
+        "The A2A protocol is now selectable in the add-agent protocol dropdown (HTTP transport, endpoint-based), no longer disabled as 'coming soon'.",
+      adaptationTarget:
+        "Wire the registered A2A adapter into the add-agent UI so it is not dormant.",
+      gapGrade: "major",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "a2a-selectable-test",
+          kind: "test",
+          summary: "Add-agent dropdown exposes A2A as a selectable protocol",
+          reference: "components/agent/external-agent/manager.test.tsx",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "a2a-task-protocol-projection-scope",
+      title: "A2A projects the task-protocol slice only",
+      referenceBehavior:
+        "Rich coding agents stream reasoning, tool calls, plans, and permission requests.",
+      cogniaBehavior:
+        "A2A projects message text, progress, error, and done. A2A is a remote task-exchange protocol with no canonical tool-call/plan/permission streaming, so those internal events are not synthesizable.",
+      adaptationTarget:
+        "Map the A2A Task/Message/Artifact surface to internal streaming/progress/done events.",
+      gapGrade: "minor",
+      status: "intentional-deviation",
+      owner: "external-agent",
+      evidence: [],
+      deviation: {
+        rationale:
+          "The A2A spec models opaque remote tasks (Task/Message/Artifact), not granular tool/plan/permission streams, so those internal events have no source to project from.",
+        tradeOff: "A2A turns surface less granular live detail than ACP/Codex/OpenCode turns.",
+        userImpact:
+          "A2A shows streamed text, progress, completion, and errors but not per-tool or plan timelines.",
+        review: {
+          reviewedBy: "external-agent-maintainers",
+          reviewedAt: now,
+          reviewLink:
+            "openspec/changes/improve-existing-external-agent-support-completeness/design.md",
+        },
+      },
+      updatedAt: now,
+    },
+    {
+      id: "acp-usage-context-window-only",
+      title: "ACP usage is context-window occupancy only",
+      referenceBehavior: "Native usage reporting splits prompt vs completion tokens.",
+      cogniaBehavior:
+        "ACP `usage_update` carries only context-window `used`/`size`/`cost`; the adapter maps `used` to totalTokens and leaves prompt/completion at 0 because the protocol provides no split.",
+      adaptationTarget: "Surface per-turn prompt/completion token usage for ACP agents.",
+      gapGrade: "minor",
+      status: "intentional-deviation",
+      owner: "external-agent",
+      evidence: [],
+      deviation: {
+        rationale:
+          "The canonical ACP usage_update notification reports context-window occupancy (used/size) and cumulative cost, not a prompt/completion breakdown.",
+        tradeOff:
+          "Per-turn ACP token accounting reports a total rather than an input/output split.",
+        userImpact:
+          "Usage panels show total context tokens for ACP agents instead of separate prompt/completion counts.",
+        review: {
+          reviewedBy: "external-agent-maintainers",
+          reviewedAt: now,
+          reviewLink:
+            "openspec/changes/improve-existing-external-agent-support-completeness/design.md",
+        },
+      },
+      updatedAt: now,
+    },
+    {
+      id: "codex-agent-auth-env-based",
+      title: "Codex agent auth is environment-based",
+      referenceBehavior:
+        "Some clients drive interactive account login/logout through the protocol.",
+      cogniaBehavior:
+        "Codex auth flows through CODEX_ACCESS_TOKEN (ChatGPT) or OPENAI_API_KEY/CODEX_API_KEY env injection — matching the codex-cli contract and the ACP path — rather than the protocol's account/login methods.",
+      adaptationTarget: "Authenticate Codex through the protocol account/login surface.",
+      gapGrade: "minor",
+      status: "intentional-deviation",
+      owner: "external-agent",
+      evidence: [],
+      deviation: {
+        rationale:
+          "Codex CLI's real contract is env-based credentials; reusing them keeps auth consistent with the ACP shim and the rest of the subsystem.",
+        tradeOff:
+          "The adapter cannot surface an unauthenticated/expired state at the protocol level; failures appear as turn errors.",
+        userImpact:
+          "Auth issues show up when a turn fails rather than as a distinct pre-flight auth prompt.",
+        review: {
+          reviewedBy: "external-agent-maintainers",
+          reviewedAt: now,
+          reviewLink:
+            "openspec/changes/improve-existing-external-agent-support-completeness/design.md",
+        },
+      },
+      updatedAt: now,
+    },
   ]
 }

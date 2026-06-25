@@ -93,7 +93,10 @@ function resetHarness() {
     "turn/start": () => ({ turn: { id: "turn_1" } }),
     "turn/interrupt": () => ({}),
     "thread/unsubscribe": () => ({}),
-    "model/list": () => ({ models: [{ id: "gpt-5.2-codex", name: "Codex" }] }),
+    // Spec shape: `ModelListResponse { data: Model[] }`, `Model { id, model, displayName }`.
+    "model/list": () => ({
+      data: [{ id: "gpt-5.2-codex", model: "gpt-5.2-codex", displayName: "Codex" }],
+    }),
     "mcpServerStatus/list": () => ({ servers: [{ name: "fs", status: "running" }] }),
     "config/mcpServer/reload": () => ({}),
     "mcpServer/oauth/login": () => ({ authUrl: "https://auth.example" }),
@@ -232,6 +235,40 @@ describe("CodexAppServerAdapter", () => {
         r = await it.next()
       }
       expect(done?.success).toBe(false)
+    })
+
+    it("emits a canonical error event on a failed turn (parity with OpenCode/A2A)", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("hi"))
+      const first = it.next()
+      feed("turn/completed", {
+        threadId: "thr_1",
+        turn: { id: "turn_1", status: "failed", error: { message: "model overloaded" } },
+      })
+      const types: string[] = []
+      let errorMsg: string | undefined
+      let r = await first
+      while (!r.done) {
+        types.push(r.value.type)
+        if (r.value.type === "error") errorMsg = r.value.error
+        r = await it.next()
+      }
+      // The error event precedes the terminal done event.
+      expect(types).toContain("error")
+      expect(types.indexOf("error")).toBeLessThan(types.lastIndexOf("done"))
+      expect(errorMsg).toBe("model overloaded")
+    })
+  })
+
+  describe("session extension support", () => {
+    it("reports session list/fork/resume as deterministically unsupported", async () => {
+      const adapter = await connectedAdapter()
+      const support = adapter.getSessionExtensionSupport()
+      expect(support["session/list"].state).toBe("unsupported")
+      expect(support["session/fork"].state).toBe("unsupported")
+      expect(support["session/resume"].state).toBe("unsupported")
+      expect(support["session/resume"].reason).toMatch(/does not implement/i)
     })
   })
 
@@ -449,7 +486,8 @@ describe("CodexAppServerAdapter", () => {
         threadId: "thr_1",
         itemId: "c1",
         stream: "stdout",
-        deltaBase64: btoa("hello"),
+        // Spec: `delta` is a plain UTF-8 string, not a base64 field.
+        delta: "hello",
       })
       feed("item/completed", {
         threadId: "thr_1",

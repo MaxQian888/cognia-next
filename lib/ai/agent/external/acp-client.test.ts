@@ -103,7 +103,13 @@ function stdioConfig(): ExternalAgentConfig {
 // ---- helpers for exercising the private agent-facing handlers --------------
 
 type PermissionOption = { optionId: string; name: string; kind: string; isDefault?: boolean }
-type PermissionParams = { sessionId?: string; kind?: string; options?: PermissionOption[] }
+type PermissionParams = {
+  sessionId?: string
+  kind?: string
+  options?: PermissionOption[]
+  // Spec shape nests the tool-call fields under `toolCall`.
+  toolCall?: { toolCallId?: string; title?: string; kind?: string }
+}
 type PermissionOutcome = { outcome: { outcome: string; optionId?: string } }
 
 const ALLOW: PermissionOption = { optionId: "allow", name: "Allow", kind: "allow_once" }
@@ -365,6 +371,21 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
       expect(res.outcome).toEqual({ outcome: "selected", optionId: "allow" })
     }
   )
+
+  it("reads the spec-nested toolCall shape (kind under params.toolCall)", async () => {
+    // Per ACP, RequestPermissionRequest nests tool-call fields under `toolCall`.
+    // acceptEdits only auto-approves non-destructive kinds, so reading the
+    // nested `kind: "write"` proves the handler unwraps `toolCall` (a flat call
+    // with no top-level kind would have an undefined kind and stay pending).
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "acceptEdits")
+    const res = await callPermission(a, {
+      sessionId: "s",
+      toolCall: { toolCallId: "tc1", title: "Edit file", kind: "write" },
+      options: [ALLOW, REJECT],
+    })
+    expect(res.outcome).toEqual({ outcome: "selected", optionId: "allow" })
+  })
 
   it("acceptEdits does NOT auto-approve execute — it stays pending for the UI", async () => {
     const a = new AcpClientAdapter()

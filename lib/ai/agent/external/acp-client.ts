@@ -869,8 +869,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       )
     }
 
+    // Per the ACP spec the request body is `AuthenticateRequest = { methodId }`
+    // (https://agentclientprotocol.com/protocol/initialization#authentication).
+    // The legacy `method` key was non-conformant — spec-strict agents (Claude
+    // Code / Gemini / the Codex ACP shim) reject it and auth never completes.
+    // Any extra `credentials` are spread after for the (non-spec) custom-agent
+    // path; Rust serde ignores unknown fields so this stays safe.
     await this.sendRequest("authenticate", {
-      method: methodId,
+      methodId,
       ...credentials,
     })
 
@@ -1950,6 +1956,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    */
   private async handlePermissionRequest(params: {
     sessionId?: string
+    toolCall?: {
+      toolCallId?: string
+      title?: string
+      kind?: string
+      rawInput?: Record<string, unknown>
+      locations?: AcpToolCallLocation[]
+    }
     toolCallId?: string
     title?: string
     kind?: string
@@ -1971,10 +1984,23 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       return { outcome: { outcome: "cancelled" } }
     }
 
+    // Per the ACP spec `RequestPermissionRequest = { sessionId, toolCall, options }`
+    // where the tool-call fields (toolCallId/title/kind/rawInput/locations) are
+    // nested under `toolCall` (a flattened ToolCallUpdate). Real agents send the
+    // nested form; we fall back to the flat shape for the legacy/custom-agent
+    // dialect so both work. Without this, every spec-conformant permission prompt
+    // rendered with no title/kind/rawInput.
+    const tc = params.toolCall ?? params
+    const tcToolCallId = tc.toolCallId ?? params.toolCallId
+    const tcTitle = tc.title ?? params.title
+    const tcKind = tc.kind ?? params.kind
+    const tcRawInput = tc.rawInput ?? params.rawInput
+    const tcLocations = tc.locations ?? params.locations
+
     const toolInfo: AcpToolInfo = params.toolInfo || {
-      id: params.toolCallId || "tool_call",
-      name: params.title || "Tool request",
-      category: params.kind,
+      id: tcToolCallId || "tool_call",
+      name: tcTitle || "Tool request",
+      category: tcKind,
     }
     const requestId =
       params.requestId ||
@@ -1984,15 +2010,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       id: requestId,
       requestId,
       sessionId: sessionId || undefined,
-      toolCallId: params.toolCallId || toolInfo.id,
-      title: params.title || toolInfo.name,
-      kind: (params.kind || toolInfo.category || "other") as AcpToolCallKind,
+      toolCallId: tcToolCallId || toolInfo.id,
+      title: tcTitle || toolInfo.name,
+      kind: (tcKind || toolInfo.category || "other") as AcpToolCallKind,
       toolInfo,
       options: params.options,
-      rawInput: params.rawInput,
-      locations: params.locations,
+      rawInput: tcRawInput,
+      locations: tcLocations,
       _meta: params._meta,
-      reason: params.reason || `Tool "${params.title || toolInfo.name}" requires permission`,
+      reason: params.reason || `Tool "${tcTitle || toolInfo.name}" requires permission`,
       riskLevel: params.riskLevel,
       autoApproveTimeout: params.autoApproveTimeout,
       metadata: params.metadata,

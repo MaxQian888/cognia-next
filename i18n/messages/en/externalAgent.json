@@ -17,7 +17,7 @@
   "manage": "Manage",
   "manageAgents": "Manage Agents",
   "manager": {
-    "a2aComingSoon": "A2A (coming soon)",
+    "a2aProtocol": "A2A",
     "addAgentFailed": "Failed to add external agent.",
     "addExternalAgent": "Add External Agent",
     "addingAgent": "Adding…",

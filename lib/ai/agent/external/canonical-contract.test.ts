@@ -398,15 +398,38 @@ describe("validateExternalAgentBenchmarkCapabilityMap", () => {
 })
 
 describe("createExternalAgentBenchmarkBaseline", () => {
-  it("returns the four canonical baseline entries", () => {
+  it("returns the canonical baseline entries", () => {
     const baseline = createExternalAgentBenchmarkBaseline()
-    expect(baseline.length).toBe(4)
+    expect(baseline.length).toBe(11)
     expect(baseline.map((e) => e.id)).toEqual([
       "acp-validity-canonical-projection",
       "session-extension-operation-gating",
       "routing-fallback-diagnostics-consistency",
       "session-resume-fallback-policy-deviation",
+      "codex-failure-error-event-parity",
+      "codex-session-extension-deterministic-gating",
+      "opencode-session-extension-connection-gated",
+      "a2a-surface-reachability",
+      "a2a-task-protocol-projection-scope",
+      "acp-usage-context-window-only",
+      "codex-agent-auth-env-based",
     ])
+  })
+
+  it("keeps every baseline entry valid (each gap resolved or reviewed)", () => {
+    const baseline = createExternalAgentBenchmarkBaseline()
+    const result = validateExternalAgentBenchmarkCapabilityMap(baseline)
+    expect(result.valid).toBe(true)
+    // Every entry is either a validated capability or a fully-reviewed deviation.
+    for (const entry of baseline) {
+      if (entry.status === "validated") {
+        expect(entry.evidence.length).toBeGreaterThan(0)
+      }
+      if (entry.status === "intentional-deviation") {
+        expect(entry.deviation?.rationale).toBeTruthy()
+        expect(entry.deviation?.review.reviewedBy).toBeTruthy()
+      }
+    }
   })
 
   it("uses the supplied 'now' for timestamps", () => {
