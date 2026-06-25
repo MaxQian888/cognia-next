@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "node scripts/dev/free-port.mjs 3000 && pnpm dev",
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
@@ -23,6 +23,8 @@
         "fullscreen": false,
         "decorations": false,
         "transparent": false,
+        "visible": false,
+        "backgroundColor": "#0a0a0a",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "trafficLightPosition": { "x": 16, "y": 10 },

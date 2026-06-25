@@ -47,6 +47,10 @@ function useIsClient(): boolean {
  * `null`), so the shared static-export bundle hydrates without divergence
  * whether it boots in the browser, Tauri, or the Capacitor WebView.
  */
+const WindowShowInitializer = dynamic(
+  () => import("./window-show-initializer").then((m) => m.WindowShowInitializer),
+  { ssr: false }
+)
 const CodexUsageSchedulerInitializer = dynamic(
   () => import("./codex-usage-scheduler-initializer").then((m) => m.CodexUsageSchedulerInitializer),
   { ssr: false }
@@ -106,6 +110,7 @@ export function DesktopOnlyInitializers() {
 
   return (
     <>
+      <WindowShowInitializer />
       <CodexUsageSchedulerInitializer />
       <CliSyncInitializer />
       <ComputerUseKillSwitchInitializer />
