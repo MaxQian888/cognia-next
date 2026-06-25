@@ -1,7 +1,9 @@
 import {
+  BROWSER_EVENTS,
   type BrowserSelection,
   formatSelectionComment,
   normalizePreviewUrl,
+  resolveTrustTier,
   screenshotToFile,
 } from "./protocol"
 
@@ -63,5 +65,29 @@ describe("screenshotToFile", () => {
   })
   it("accepts a custom filename", () => {
     expect(screenshotToFile("AAAA", "shot.png").filename).toBe("shot.png")
+  })
+})
+
+describe("resolveTrustTier", () => {
+  it.each([
+    ["http://localhost:3000/", "trusted"],
+    ["http://127.0.0.1:8080/x", "trusted"],
+    ["http://[::1]:5173/", "trusted"],
+    ["https://app.example.com/", "public"],
+    ["http://192.168.1.10/", "public"],
+  ])("classifies %s as %s", (url, tier) => {
+    expect(resolveTrustTier(url)).toBe(tier)
+  })
+
+  it("treats unparseable input as public (fail-closed)", () => {
+    expect(resolveTrustTier("not a url")).toBe("public")
+  })
+})
+
+describe("BROWSER_EVENTS", () => {
+  it("exposes agent event names", () => {
+    expect(BROWSER_EVENTS.snapshot).toBe("browser://snapshot")
+    expect(BROWSER_EVENTS.console).toBe("browser://console")
+    expect(BROWSER_EVENTS.network).toBe("browser://network")
   })
 })

@@ -12,6 +12,12 @@ export const BROWSER_EVENTS = {
   elementSelected: "browser://element-selected",
   /** Emitted on each top-level navigation of the preview. */
   navigated: "browser://navigated",
+  /** Emitted when a fresh agent snapshot is available. */
+  snapshot: "browser://snapshot",
+  /** Emitted when console output is captured. */
+  console: "browser://console",
+  /** Emitted when a network request is captured. */
+  network: "browser://network",
 } as const
 
 export interface ElementRect {
@@ -80,4 +86,68 @@ export function screenshotToFile(base64Png: string, filename = "preview.png"): S
     mediaType: "image/png",
     filename,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Agent browser loop (Phase 1) — canonical types shared by both engines so the
+// model's tool surface stays engine-agnostic. See ADR-0038.
+// ---------------------------------------------------------------------------
+
+export type TrustTier = "trusted" | "public"
+
+/**
+ * Classify a target URL. Loopback hosts (localhost/127.0.0.1/::1) are the
+ * trusted dev-preview tier and route to the embedded webview; everything else
+ * is public. Fail-closed: unparseable input is treated as public.
+ */
+export function resolveTrustTier(url: string): TrustTier {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "")
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return "trusted"
+    return "public"
+  } catch {
+    return "public"
+  }
+}
+
+/** One ref'd node in an agent snapshot of the page's accessibility tree. */
+export interface SnapshotNode {
+  ref: string
+  role: string
+  name: string
+  tag: string
+  rect: ElementRect
+  value: string | null
+  state: { disabled: boolean; checked: boolean | null; expanded: boolean | null }
+}
+
+/** A full accessibility-tree snapshot the model acts against by `ref`. */
+export interface BrowserSnapshot {
+  generation: number
+  url: string
+  title: string
+  nodes: SnapshotNode[]
+}
+
+/** Result of a `browser_*` mutating action. `generation` is the live tree id. */
+export interface BrowserActionResult {
+  ok: boolean
+  error: string | null
+  generation: number
+}
+
+/** A captured console line from the previewed page. */
+export interface ConsoleEntry {
+  level: "log" | "info" | "warn" | "error" | "debug"
+  text: string
+  ts: number
+}
+
+/** A captured network request (status/timing only — not the response body). */
+export interface NetworkEntry {
+  url: string
+  method: string
+  status: number
+  ok: boolean
+  durationMs: number | null
 }
