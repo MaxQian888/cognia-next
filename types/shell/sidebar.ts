@@ -42,6 +42,7 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "scheduler", route: "/scheduler", i18nKey: "scheduler", group: "feature" },
   { id: "goals", route: "/goals", i18nKey: "goals", group: "feature" },
   { id: "pet", route: "/pet", i18nKey: "pet", group: "feature" },
+  { id: "browser", route: "/browser", i18nKey: "browser", group: "feature", desktopOnly: true },
   // === Auxiliary (overflow → "More" by default) ===
   {
     id: "source-control",

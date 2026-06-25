@@ -65,7 +65,11 @@ serde = { version = "1.0", features = ["derive"] }
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
 cognia-signaling-core = { path = "../services/signaling-server/core" }
 log = "0.4"
-tauri = { version = "2.11.1", features = ["macos-private-api", "tray-icon", "image-png"] }
+# `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
+# `Manager::get_webview`) that powers the embedded in-app browser pane
+# (`src-tauri/src/browser/embedded.rs`). Pinned exactly because unstable APIs
+# may shift across minor versions.
+tauri = { version = "=2.11.1", features = ["macos-private-api", "tray-icon", "image-png", "unstable"] }
 tauri-plugin-log = "2"
 
 # Native logging — fern dispatch chain mirrors records into the OS-native

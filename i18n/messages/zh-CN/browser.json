@@ -1,0 +1,31 @@
+{
+  "title": "浏览器",
+  "url": {
+    "placeholder": "http://localhost:3000",
+    "go": "前往"
+  },
+  "actions": {
+    "reload": "刷新",
+    "selectElement": "选择元素",
+    "cancelSelect": "取消选择"
+  },
+  "comment": {
+    "title": "对该元素评论",
+    "placeholder": "描述你想要的修改…",
+    "send": "发送到对话",
+    "cancel": "取消",
+    "sent": "已发送到对话",
+    "noSession": "请先打开一个对话会话",
+    "failed": "评论发送失败"
+  },
+  "selection": {
+    "selector": "选择器"
+  },
+  "empty": {
+    "title": "预览本地开发服务器",
+    "hint": "输入 localhost 地址即可在此渲染，然后选择元素进行评论。"
+  },
+  "errors": {
+    "navigate": "无法导航到该地址"
+  }
+}

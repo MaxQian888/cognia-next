@@ -3,6 +3,7 @@ mod account_auth;
 mod agents;
 mod api_key;
 mod automation;
+mod browser;
 mod canvas;
 mod ccswitch;
 mod claude;
@@ -47,6 +48,7 @@ mod wallpaper;
 mod workflow;
 
 mod window_behavior;
+mod window_recovery;
 mod window_utils;
 
 #[cfg(desktop)]
@@ -163,8 +165,26 @@ pub fn run() {
             .plugin(
                 // The pet overlay owns its own position via PetSettings, so
                 // exclude it from the window-state plugin's save/restore.
+                //
+                // Restore SIZE/POSITION/MAXIMIZED/DECORATIONS but NOT FULLSCREEN
+                // or VISIBLE:
+                //   - FULLSCREEN: a window saved fullscreen on a display that is
+                //     later disconnected/rearranged restores into a macOS Space
+                //     on an absent monitor — the app boots alive but invisible
+                //     (see window_recovery + ADR notes). Re-centering can't undo
+                //     a fullscreen Space, so we never restore it.
+                //   - VISIBLE: visibility is owned by the boot path — the window
+                //     is created hidden (`visible:false`) and revealed only after
+                //     the renderer signals first paint (white-flash fix). Letting
+                //     the plugin restore a stale hidden/visible bit would fight
+                //     that handshake.
                 tauri_plugin_window_state::Builder::default()
                     .with_denylist(&["pet", "pet-popup"])
+                    .with_state_flags(
+                        tauri_plugin_window_state::StateFlags::all()
+                            & !tauri_plugin_window_state::StateFlags::FULLSCREEN
+                            & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                    )
                     .build(),
             )
             .plugin(
@@ -823,6 +843,15 @@ pub fn run() {
             automation::commands::virtual_display_probe,
             automation::commands::virtual_display_release,
             automation::commands::virtual_display_arm,
+            // In-app browser (v0/Lovable-style visual editing) — embedded pane.
+            browser::embedded::browser_embed_create,
+            browser::embedded::browser_embed_set_bounds,
+            browser::embedded::browser_embed_set_visible,
+            browser::embedded::browser_embed_navigate,
+            browser::embedded::browser_embed_reload,
+            browser::embedded::browser_embed_set_select_mode,
+            browser::embedded::browser_embed_capture,
+            browser::embedded::browser_embed_destroy,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
@@ -1152,6 +1181,35 @@ pub fn run() {
             #[cfg(desktop)]
             if let Some(window) = app.get_webview_window("main") {
                 use window_behavior::CloseBehavior;
+
+                // Recover a window the window-state plugin restored off-screen
+                // (a monitor was disconnected/rearranged since last exit). Runs
+                // while the window is still hidden, so the user only ever sees
+                // it centered on a live display. FULLSCREEN restore is already
+                // disabled at the plugin level above.
+                window_recovery::recenter_if_offscreen(&window);
+
+                // White-flash safety net. The window is created hidden
+                // (`visible:false`); the renderer reveals it via
+                // `getCurrentWindow().show()` after first paint. If the
+                // renderer never gets there (JS crash, hung hydrate), force the
+                // window visible after a grace period so a boot failure can
+                // never leave an alive-but-invisible process.
+                {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                        if let Some(window) = handle.get_webview_window("main") {
+                            if !window.is_visible().unwrap_or(true) {
+                                log::warn!(
+                                    "main window still hidden 8s after boot; force-showing (renderer never signaled first paint)"
+                                );
+                                window_utils::bring_window_to_front(&window);
+                            }
+                        }
+                    });
+                }
+
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
