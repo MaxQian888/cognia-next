@@ -9,7 +9,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { makeWrappedEmit, restartReason } from "./claude-host.mjs"
+import { makeWrappedEmit, restartReason, routeRestore } from "./claude-host.mjs"
 
 function setup(sessionId, session) {
   const forwarded = []
@@ -70,6 +70,32 @@ test("non-lifecycle events are forwarded untouched", () => {
   wrapped(evt)
   assert.deepEqual(forwarded.at(-1), evt)
   assert.ok(sessions.has("s1"))
+})
+
+// ── Restore (undo compaction) routing ────────────────────────────────────────
+test("routeRestore forwards the snapshot to the session's restoreConversation", () => {
+  let received = null
+  const sessions = new Map([["s1", { restoreConversation: (m) => ((received = m), true) }]])
+  const snapshot = [{ role: "user", content: "m0" }]
+  const ok = routeRestore(sessions, { sessionId: "s1", messages: snapshot })
+  assert.equal(ok, true)
+  assert.deepEqual(received, snapshot)
+})
+
+test("routeRestore is a safe no-op for unknown / non-restorable sessions", () => {
+  const logs = []
+  const log = (lvl, m) => logs.push([lvl, m])
+  // Unknown session.
+  assert.equal(routeRestore(new Map(), { sessionId: "x", messages: [] }, log), false)
+  assert.ok(logs.some(([lvl]) => lvl === "warn"))
+  // Anthropic-style session without restoreConversation.
+  const sessions = new Map([["a1", { multiTurn: false }]])
+  assert.equal(routeRestore(sessions, { sessionId: "a1", messages: [] }, log), false)
+})
+
+test("routeRestore reports false when the session declines the restore", () => {
+  const sessions = new Map([["s1", { restoreConversation: () => false }]])
+  assert.equal(routeRestore(sessions, { sessionId: "s1", messages: [] }), false)
 })
 
 // ── Identity guard: a superseded old loop must not evict its replacement ──────
@@ -216,6 +242,18 @@ test("buildPermissionResult: allow_always also falls back to the original input"
 test("buildPermissionResult: an explicit updatedInput is preserved over the original input", () => {
   const res = buildPermissionResult("allow", { updatedInput: { a: 2 }, input: { a: 1 } })
   assert.deepEqual(res.updatedInput, { a: 2 })
+})
+
+test("buildPermissionResult: allow with neither updatedInput nor input defaults to an empty record (never undefined → no ZodError)", () => {
+  const res = buildPermissionResult("allow", {})
+  assert.equal(res.behavior, "allow")
+  assert.deepEqual(res.updatedInput, {})
+  assert.notEqual(res.updatedInput, undefined)
+})
+
+test("buildPermissionResult: allow called with no opts at all still yields an empty record", () => {
+  const res = buildPermissionResult("allow")
+  assert.deepEqual(res, { behavior: "allow", updatedInput: {} })
 })
 
 test("buildPermissionResult: deny carries the message (default when absent)", () => {

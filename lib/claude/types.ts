@@ -25,7 +25,12 @@ import type {
 } from "@cognia/provider-types/model-mapping"
 import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
 import type { LspServerConfig, LspSettings, LspSendOptions } from "@/types/lsp/config"
-import type { CompressionSettings, SessionCompressionOverrides } from "@/types/system/compression"
+import type {
+  CompressionSettings,
+  CompressionStrategy,
+  CompressionTrigger,
+  SessionCompressionOverrides,
+} from "@/types/system/compression"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -47,6 +52,50 @@ export interface ResolvedCompaction {
   focus?: string
   /** Full summarization system prompt (canonical prompt + strategy + focus). */
   summaryPrompt?: string
+  /**
+   * Hard cap on the summary call's output tokens (generic path). Mirrors
+   * `CompressionModelConfig.maxSummaryTokens` (default 500). Without it the
+   * summary inherits the full turn's (potentially large) output budget.
+   */
+  maxSummaryTokens?: number
+  /**
+   * Alternate cheap/fast model for the summary call ONLY (generic path). Absent
+   * ⇒ the sidecar reuses the turn's model + credentials. `model` alone (no
+   * `protocol`/`credentials`) means "same provider, cheaper model". Credentials
+   * are resolved in `resolveSendOptions` (async/registry), never in the pure
+   * `resolveCompaction`. Treated like `providerCredentials` for log redaction.
+   */
+  summary?: {
+    model?: string
+    protocol?: string
+    credentials?: { apiKey?: string; baseURL?: string; headers?: Record<string, string> }
+    protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
+  }
+  /**
+   * Compaction strategy (generic path): summary | sliding-window | selective |
+   * hybrid | recursive. Drives `planStrategy` in the sidecar.
+   */
+  strategy?: CompressionStrategy
+  /** Trigger mode (generic path): token-threshold | message-count | manual. */
+  trigger?: CompressionTrigger
+  /** Message-count trigger threshold (generic path, when trigger = message-count). */
+  messageCountThreshold?: number
+  /** Keep ALL system messages verbatim (not just the leading block). */
+  preserveSystemMessages?: boolean
+  /** When false, summarize deterministically (extractive) instead of an LLM call. */
+  useAISummarization?: boolean
+  /** Importance score (0..1) above which a message is kept by the selective strategy. */
+  importanceThreshold?: number
+  /** Per-tool-result token cap applied during compaction (default 500). */
+  maxToolResultTokens?: number
+  /** Keep tool name/args/status metadata when capping a tool result. */
+  preserveToolCallMetadata?: boolean
+  /** Messages per chunk for the recursive strategy (default 20). */
+  recursiveChunkSize?: number
+  /** Drain line (0..1): compact down to at most this window fraction. */
+  retainedFraction?: number
+  /** Attach the pre-compaction message snapshot to the boundary event (enables undo). */
+  captureUndoSnapshot?: boolean
 }
 
 /**

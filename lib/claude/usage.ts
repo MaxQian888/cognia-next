@@ -11,18 +11,26 @@
  * importing `types/provider/built-in-provider-catalog` so the provider data
  * set isn't pulled into the chat composer bundle; the table below is correct
  * for every model the Claude Agent SDK actually drives and falls back to a
- * safe 200k for anything unknown.
+ * conservative 128k for anything unknown.
+ *
+ * IMPORTANT: this table + {@link DEFAULT_CONTEXT_WINDOW} + {@link AUTO_COMPACT_FRACTION}
+ * are MIRRORED in `sidecar/dispatch/compaction.mjs` (the sidecar cannot import
+ * `lib/`). The two are kept in lock-step by `lib/claude/usage.compaction-parity.test.ts`
+ * — update both sides together or that test goes red.
  */
 
 import type { UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 /**
- * Default context-window size for an unknown / unrecognised model id. 200k is
- * the standard window for current Anthropic frontier tiers (Sonnet 4.5, Haiku
- * 4.5, Opus 4 / 4.1, all Claude 3.x), so it is the safe floor.
+ * Default context-window size for an unknown / unrecognised model id. 128k is a
+ * conservative floor: many local / OpenAI-compatible engines expose only 128k,
+ * and under-reporting the window is the safe direction (the auto-compact trigger
+ * fires early rather than overflowing a genuinely-128k model — `0.835 × 200k`
+ * would exceed a real 128k window before compaction ever ran). Mirrored in
+ * `sidecar/dispatch/compaction.mjs`.
  */
-export const DEFAULT_CONTEXT_WINDOW = 200_000
+export const DEFAULT_CONTEXT_WINDOW = 128_000
 
 /**
  * Fraction of the window at which Claude Code auto-compacts the conversation
@@ -50,16 +58,18 @@ const MODEL_CONTEXT_WINDOWS: Array<{ pattern: RegExp; window: number }> = [
   { pattern: /claude-opus-4-(6|7|8)/i, window: 1_000_000 },
   { pattern: /claude-sonnet-4-(6|7|8)/i, window: 1_000_000 },
   // Every other Claude (Opus 4 / 4.1, Sonnet 4.5, Haiku 4.x, and all Claude
-  // 3.x — `claude-3-5-sonnet` etc. still contain opus/sonnet/haiku) — 200k.
-  { pattern: /claude-(opus|sonnet|haiku)/i, window: 200_000 },
+  // 3.x) — 200k. The optional `(-[\d.]+)*` segment matches BOTH the family-first
+  // ids (`claude-sonnet-4-5`) and the version-first 3.x ids (`claude-3-5-sonnet`,
+  // `claude-3-opus`). The 1M-tier patterns above win first, so 4.6+ is unaffected.
+  { pattern: /claude(-[\d.]+)*-(opus|sonnet|haiku)/i, window: 200_000 },
   // OpenAI.
   { pattern: /gpt-4o/i, window: 128_000 },
   { pattern: /gpt-4\.1/i, window: 1_000_000 },
   { pattern: /(^|[^a-z])o[134]([^a-z]|$)/i, window: 200_000 },
   // Google Gemini long-context tiers.
   { pattern: /gemini-(1\.5|2\.5|3)/i, window: 1_000_000 },
-  // DeepSeek — all tiers are 1M context.
-  { pattern: /deepseek/i, window: 1_000_000 },
+  // DeepSeek V3 / V3.1 (deepseek-chat, deepseek-reasoner) — 128k context.
+  { pattern: /deepseek/i, window: 128_000 },
 ]
 
 export function getModelContextWindow(modelId: string | undefined): number {

@@ -165,6 +165,35 @@ describe("applySdkEvent — compact boundary", () => {
     expect(part.postTokens).toBe(200)
   })
 
+  it("registers an undo snapshot and tags the part when pre_messages are present", async () => {
+    const { hasUndoSnapshot, getUndoSnapshot, __resetUndoRegistryForTesting } =
+      await import("./compaction-undo")
+    __resetUndoRegistryForTesting()
+    const { messages } = applySdkEvent(
+      [],
+      boundary({
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 1000,
+          post_tokens: 200,
+          strategy: "selective",
+          pre_messages: [{ role: "user", content: "m0" }],
+        },
+      })
+    )
+    const part = messages[0].parts[0] as { strategy?: string; undoToken?: string }
+    expect(part.strategy).toBe("selective")
+    expect(part.undoToken).toBe("compact-cb-1")
+    expect(hasUndoSnapshot("compact-cb-1")).toBe(true)
+    expect(getUndoSnapshot("compact-cb-1")?.snapshot).toHaveLength(1)
+  })
+
+  it("does not tag an undo token when no snapshot was captured", () => {
+    const { messages } = applySdkEvent([], boundary())
+    const part = messages[0].parts[0] as { undoToken?: string }
+    expect(part.undoToken).toBeUndefined()
+  })
+
   it("leaves other system messages (init) untouched", () => {
     const existing = [{ id: "u1", role: "user", parts: [] }] as unknown as UIMessage[]
     const evt = { type: "system", subtype: "init", session_id: "s" } as unknown as SDKResultMessage
@@ -176,6 +205,107 @@ describe("applySdkEvent — compact boundary", () => {
     const { messages } = applySdkEvent([], boundary({ uuid: undefined }))
     expect(messages[0].id).toMatch(/^compact-/)
     expect(messages[0].id.length).toBeGreaterThan("compact-".length)
+  })
+})
+
+describe("applySdkEvent — hook fire", () => {
+  const hookFire = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: "system",
+      subtype: "hook_fire",
+      hook_event: "PreToolUse",
+      tool_name: "Bash",
+      outcome: "blocked",
+      block: "command matches denylist",
+      additional_context: null,
+      warnings: ["hook timed out after 5000ms"],
+      ...extra,
+    }) as unknown as SDKResultMessage
+
+  it("projects a consequential fire into a system hook-notice marker", () => {
+    const { messages, turnComplete } = applySdkEvent([], hookFire())
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe("system")
+    expect(messages[0].id).toMatch(/^hook-PreToolUse-/)
+    const part = messages[0].parts[0] as {
+      type: string
+      event: string
+      toolName?: string
+      outcome: string
+      block?: string
+      additionalContext?: string
+      warnings: string[]
+    }
+    expect(part.type).toBe("hook-notice")
+    expect(part.event).toBe("PreToolUse")
+    expect(part.toolName).toBe("Bash")
+    expect(part.outcome).toBe("blocked")
+    expect(part.block).toBe("command matches denylist")
+    expect(part.additionalContext).toBeFalsy()
+    expect(part.warnings).toEqual(["hook timed out after 5000ms"])
+  })
+
+  it("maps a context fire with no tool name", () => {
+    const { messages } = applySdkEvent(
+      [],
+      hookFire({
+        hook_event: "UserPromptSubmit",
+        tool_name: undefined,
+        outcome: "context",
+        block: undefined,
+        additional_context: "loaded 1.2KB of context",
+        warnings: [],
+      })
+    )
+    const part = messages[0].parts[0] as unknown as {
+      outcome: string
+      toolName?: string
+      warnings: string[]
+    }
+    expect(part.outcome).toBe("context")
+    expect(part.toolName).toBeUndefined()
+    expect(part.warnings).toEqual([])
+  })
+
+  it("defaults a missing outcome to warning and missing warnings to []", () => {
+    const { messages } = applySdkEvent(
+      [],
+      hookFire({ outcome: undefined, block: undefined, warnings: undefined })
+    )
+    const part = messages[0].parts[0] as unknown as { outcome: string; warnings: string[] }
+    expect(part.outcome).toBe("warning")
+    expect(part.warnings).toEqual([])
+  })
+})
+
+describe("applySdkEvent — permission denied dedup", () => {
+  const permDenied = (reason: string) =>
+    ({
+      type: "system",
+      subtype: "permission_denied",
+      uuid: "pd-1",
+      tool_name: "Bash",
+      decision_reason: reason,
+    }) as unknown as SDKResultMessage
+
+  it("suppresses the notice when the denial came from a hook", () => {
+    const existing = [{ id: "u1", role: "user", parts: [] }] as unknown as UIMessage[]
+    const { messages } = applySdkEvent(
+      existing,
+      permDenied("hook denied: command matches denylist")
+    )
+    // The hook_fire row already covers it — no extra session notice appended.
+    expect(messages).toBe(existing)
+  })
+
+  it("still appends a session notice for a non-hook denial", () => {
+    const { messages } = applySdkEvent([], permDenied("classifier auto-denied"))
+    expect(messages).toHaveLength(1)
+    const part = messages[0].parts[0] as { type: string; variant: string; reason?: string }
+    expect(part.type).toBe("session-notice")
+    expect(part.variant).toBe("permission-denied")
+    expect(part.reason).toBe("classifier auto-denied")
   })
 })
 

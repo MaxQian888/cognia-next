@@ -376,10 +376,15 @@ export function buildAiSdkTools({
   lspResolver,
   readTracker,
   bgShells,
+  doomGuard: providedDoomGuard,
 }) {
   /** @type {Record<string, ReturnType<typeof tool>>} */
   const tools = {}
-  const doomGuard = createDoomLoopGuard()
+  // Accept a caller-owned guard so the session can `reset()` it per turn (the
+  // guard counts identical-call repetition WITHIN a turn — matching the
+  // Anthropic path, which gets a fresh guard per `query()`). Falls back to an
+  // owned guard for callers/tests that don't pass one.
+  const doomGuard = providedDoomGuard ?? createDoomLoopGuard()
   const gate = createToolPermissionGate({
     emit,
     sessionId,

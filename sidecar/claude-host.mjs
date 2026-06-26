@@ -258,6 +258,14 @@ async function handleInterrupt(msg) {
   } catch (err) {
     log("error", `interrupt failed: ${err?.message ?? err}`)
   }
+  // Anthropic path: settle tool/approval round-trips the SDK interrupt doesn't
+  // drain (`pendingPluginToolCalls` has no signal wiring). The ai-sdk path
+  // already drains inside `q.interrupt()`, so this is a no-op there.
+  try {
+    s.drainPending?.("interrupted")
+  } catch (err) {
+    log("error", `drainPending (interrupt) failed: ${err?.message ?? err}`)
+  }
 }
 
 // Manual context compaction. The generic (AI-SDK) session exposes
@@ -277,6 +285,31 @@ async function handleCompact(msg) {
   } catch (err) {
     log("error", `compact failed: ${err?.message ?? err}`)
   }
+}
+
+// Undo a compaction: restore the pre-compaction message snapshot into the live
+// AI-SDK session. Only the generic path exposes `restoreConversation`; the
+// Anthropic session self-manages context and has no such hook (no-op there).
+// Unknown / already-closed sessions are a no-op — restore must never fault.
+// Pure routing extracted for testability; `handleRestore` binds the module map.
+export function routeRestore(sessionsMap, msg, logFn = () => {}) {
+  const { sessionId, messages } = msg
+  const s = sessionsMap.get(sessionId)
+  if (!s) {
+    logFn("warn", `restore: no session ${sessionId}`)
+    return false
+  }
+  if (typeof s.restoreConversation !== "function") return false
+  try {
+    return s.restoreConversation(messages) !== false
+  } catch (err) {
+    logFn("error", `restore failed: ${err?.message ?? err}`)
+    return false
+  }
+}
+
+function handleRestore(msg) {
+  routeRestore(sessions, msg, log)
 }
 
 // Change a live session's permission mode in place — WITHOUT respawning the
@@ -363,9 +396,11 @@ async function handleControl(msg) {
  * the user approves a call unmodified, so we fall back to the ORIGINAL tool
  * input. Resolving with `updatedInput: undefined` fails the Agent-SDK
  * subprocess's zod schema (which requires a record), surfacing to the user as
- * `Tool permission request failed: ZodError`. `allow_always` is enforced
- * parent-side (it stops re-asking); for this individual call it is a plain
- * allow.
+ * `Tool permission request failed: ZodError`. When neither an edited input nor
+ * a captured original is present, fall back to an empty record `{}` (which the
+ * zod schema accepts) so the guarantee lives in THIS function, not solely in
+ * the caller. `allow_always` is enforced parent-side (it stops re-asking); for
+ * this individual call it is a plain allow.
  *
  * @param {"allow"|"allow_always"|"deny"} decision
  * @param {{ updatedInput?: Record<string, unknown>, message?: string, input?: Record<string, unknown> }} opts
@@ -375,7 +410,7 @@ export function buildPermissionResult(decision, { updatedInput, message, input }
   if (decision === "deny") {
     return { behavior: "deny", message: message ?? "denied by user" }
   }
-  return { behavior: "allow", updatedInput: updatedInput ?? input }
+  return { behavior: "allow", updatedInput: updatedInput ?? input ?? {} }
 }
 
 function handlePermissionResponse(msg) {
@@ -468,6 +503,15 @@ function handleClose(msg) {
   } catch (err) {
     log("error", `close failed: ${err?.message ?? err}`)
   }
+  // Settle any pending tool/approval round-trips so a renderer that never
+  // answers can't keep promises (and the agent loop) alive past teardown. The
+  // ai-sdk session has no `drainPending` (its `closeInput` aborts the in-flight
+  // request); the Anthropic session drains here.
+  try {
+    s.drainPending?.("session closed")
+  } catch (err) {
+    log("error", `drainPending (close) failed: ${err?.message ?? err}`)
+  }
   sessions.delete(sessionId)
 }
 
@@ -508,6 +552,9 @@ function startReadLoop() {
         break
       case "compact":
         void handleCompact(msg)
+        break
+      case "restore":
+        handleRestore(msg)
         break
       case "set_mode":
         void handleSetMode(msg)

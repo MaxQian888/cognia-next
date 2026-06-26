@@ -9,6 +9,14 @@
 
 export const DEFAULT_DOOM_THRESHOLD = 3
 
+// Cap the per-guard signature map so a long agentic session making thousands of
+// DISTINCT tool calls (each a unique grep/read with different args) can't grow
+// it unbounded — each signature is a full stringified tool input, so the memory
+// is non-trivial. The guard only cares about RECENT repetition, so an LRU
+// eviction (oldest distinct signature first) never drops a signature that is
+// actively repeating toward the threshold.
+export const DEFAULT_DOOM_MAX_ENTRIES = 512
+
 /**
  * JSON.stringify with sorted object keys at every level so two semantically
  * identical inputs always produce the same signature.
@@ -21,10 +29,13 @@ export function stableStringify(value) {
 }
 
 /**
- * @param {{ threshold?: number }} [opts]
+ * @param {{ threshold?: number, maxEntries?: number }} [opts]
  * @returns {{ check: (toolName: string, input: unknown) => "ask" | null, reset: () => void }}
  */
-export function createDoomLoopGuard({ threshold = DEFAULT_DOOM_THRESHOLD } = {}) {
+export function createDoomLoopGuard({
+  threshold = DEFAULT_DOOM_THRESHOLD,
+  maxEntries = DEFAULT_DOOM_MAX_ENTRIES,
+} = {}) {
   /** @type {Map<string, number>} */
   const counts = new Map()
 
@@ -41,7 +52,18 @@ export function createDoomLoopGuard({ threshold = DEFAULT_DOOM_THRESHOLD } = {})
         return null // unserializable input — don't guess
       }
       const n = (counts.get(sig) ?? 0) + 1
+      // Re-insert so this signature becomes the most-recently-used entry: a Map
+      // preserves insertion order, so delete+set moves it to the tail.
+      counts.delete(sig)
       counts.set(sig, n)
+      // Evict the oldest DISTINCT signatures once over the cap. The signature we
+      // just touched is the newest, so it is never the eviction target — a call
+      // repeating toward the threshold can't be evicted out from under itself.
+      while (counts.size > maxEntries) {
+        const oldest = counts.keys().next().value
+        if (oldest === undefined) break
+        counts.delete(oldest)
+      }
       return n >= threshold ? "ask" : null
     },
 

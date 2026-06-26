@@ -15,6 +15,9 @@ jest.mock("@/lib/db/skills", () => ({
   renderSkillsSection: jest.fn(),
   renderSkillsCatalog: jest.fn(),
   seedBuiltInSkills: jest.fn().mockResolvedValue(undefined),
+  // Pure resolver — keep the real implementation so the effective-skill
+  // precedence the send path depends on is exercised, not stubbed.
+  activeEffectiveSkillIds: jest.requireActual("@/lib/db/skills").activeEffectiveSkillIds,
 }))
 
 jest.mock("@/lib/db/mcp-servers", () => ({
@@ -84,6 +87,14 @@ jest.mock("@/lib/claude/skills-bridge", () => ({
   renderResolvedSkillsSection: (...a: unknown[]) => mRenderResolvedSkillsSection(...a),
 }))
 
+// Surface-activation: keep the real selection/rendering by default (so the
+// existing surface tests use the real catalog), but make selectSurfaceSkills
+// overridable so a test can inject a skill that declares allowedTools.
+jest.mock("@/lib/skills/surface-activation", () => {
+  const actual = jest.requireActual("@/lib/skills/surface-activation")
+  return { ...actual, selectSurfaceSkills: jest.fn(actual.selectSurfaceSkills) }
+})
+
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import {
@@ -99,6 +110,8 @@ import {
   renderSkillsSection,
 } from "@/lib/db/skills"
 import { getTeam } from "@/lib/db/teams"
+import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
+import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@/lib/logging"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
@@ -431,6 +444,65 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
     } finally {
       __resetProtocolAdaptersForTesting()
     }
+  })
+})
+
+describe("resolveSendOptions — compaction config", () => {
+  it("threads the resolved compaction config and strips draft fields", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: true } } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.enabled).toBe(true)
+    expect(opts.compaction?.maxSummaryTokens).toBe(500)
+    expect(opts.compaction?.strategy).toBeDefined()
+    // No alternate summary provider/model configured → no summary block.
+    expect(opts.compaction?.summary).toBeUndefined()
+    // Draft-only keys never reach the wire object.
+    expect((opts.compaction as Record<string, unknown>).summaryProvider).toBeUndefined()
+    expect((opts.compaction as Record<string, unknown>).summaryModel).toBeUndefined()
+  })
+
+  it("resolves an alternate cheap summary provider's credentials", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { openai: { apiKey: "sk-summary" } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "openai", model: "gpt-4o-mini", maxSummaryTokens: 256 },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.maxSummaryTokens).toBe(256)
+    expect(opts.compaction?.summary?.model).toBe("gpt-4o-mini")
+    expect(opts.compaction?.summary?.protocol).toBe("openai")
+    expect(opts.compaction?.summary?.credentials?.apiKey).toBe("sk-summary")
+  })
+
+  it("reuses the turn provider when only a summary model is configured", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: { openai: { apiKey: "sk-test" } },
+        compaction: { enabled: true, compressionModel: { model: "gpt-4o-mini" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary).toEqual({ model: "gpt-4o-mini" })
+  })
+
+  it("omits the summary block when the alternate provider is unconfigured", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: { enabled: true, compressionModel: { provider: "openai" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary).toBeUndefined()
   })
 })
 
@@ -1489,6 +1561,15 @@ describe("resolveSendOptions — surface-aware built-in skills", () => {
       activeLoop: true,
     })
     expect(opts.appendSystemPrompt).toContain("## Goal-driven execution")
+  })
+
+  it("unions an activated surface skill's allowedTools into the allowlist", async () => {
+    const base = BUILT_IN_SKILL_CATALOG.find((e) => e.id === "im-auto-reply")!
+    ;(selectSurfaceSkills as jest.Mock).mockReturnValueOnce([
+      { ...base, allowedTools: ["surface_tool_x"] },
+    ])
+    const opts = await resolveSendOptions({ session: imSession() })
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["surface_tool_x"]))
   })
 })
 

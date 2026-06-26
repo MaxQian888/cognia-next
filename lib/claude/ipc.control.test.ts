@@ -118,6 +118,18 @@ describe("sessionControl round-trip", () => {
     await expect(sessionControl("s5", "getContextUsage")).rejects.toThrow("sidecar not ready")
   })
 
+  it("rejects all pending control requests immediately on sidecar_exited (no 8s wait)", async () => {
+    jest.spyOn(transport, "call").mockResolvedValue(undefined)
+    const p1 = getSessionContextUsage("s7")
+    const p2 = setSessionModel("s7", "claude-opus-4-8")
+    await flush()
+    // The sidecar PROCESS died — both in-flight controls can never be answered,
+    // so they must reject now rather than each waiting out the 8s timeout.
+    captured!({ type: "sidecar_exited" })
+    await expect(p1).rejects.toThrow("sidecar exited")
+    await expect(p2).rejects.toThrow("sidecar exited")
+  })
+
   it("rejects after the control timeout elapses", async () => {
     jest.useFakeTimers()
     try {

@@ -31,8 +31,14 @@ describe("getModelContextWindow", () => {
     expect(getModelContextWindow("")).toBe(DEFAULT_CONTEXT_WINDOW)
   })
 
-  it("falls back to the default for an unknown model id", () => {
-    expect(getModelContextWindow("gpt-5-turbo")).toBe(200_000)
+  it("falls back to the conservative 128k default for an unknown model id", () => {
+    expect(getModelContextWindow("gpt-5-turbo")).toBe(128_000)
+    expect(getModelContextWindow("gpt-5-turbo")).toBe(DEFAULT_CONTEXT_WINDOW)
+  })
+
+  it("uses the reconciled 128k window for DeepSeek tiers", () => {
+    expect(getModelContextWindow("deepseek-chat")).toBe(128_000)
+    expect(getModelContextWindow("deepseek-reasoner")).toBe(128_000)
   })
 
   it("returns 1M for any model carrying the .1m / -1m build suffix", () => {

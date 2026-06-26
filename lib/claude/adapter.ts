@@ -16,6 +16,7 @@ import type {
   SendContentBlock,
 } from "./types"
 import type { A2UIPart, ArtifactPart, SourcesPart, SourcesPartItem } from "./parts-extensions"
+import { registerUndoSnapshot } from "./compaction-undo"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
 import {
   extractAnthropicCitations,
@@ -280,18 +281,46 @@ export function applySdkEvent(
         tool_name?: string
         decision_reason?: string
         message?: string
+        // hook_fire fields (synthetic event emitted by the Rust hook runtime —
+        // see src-tauri/src/claude/sidecar.rs:emit_hook_fire)
+        hook_event?: string
+        outcome?: "blocked" | "context" | "warning"
+        block?: string
+        additional_context?: string
+        warnings?: string[]
       }
       if (sys.subtype === "compact_boundary") {
         return { messages: appendCompactBoundary(messages, sys), turnComplete: false }
       }
+      if (sys.subtype === "hook_fire") {
+        return {
+          messages: appendHookNotice(messages, {
+            type: "hook-notice",
+            event: sys.hook_event ?? "",
+            toolName: sys.tool_name,
+            outcome: sys.outcome ?? "warning",
+            block: sys.block,
+            additionalContext: sys.additional_context,
+            warnings: sys.warnings ?? [],
+          }),
+          turnComplete: false,
+        }
+      }
       if (sys.subtype === "permission_denied") {
+        // A hook-caused denial already renders as a `hook_fire` row; the deny
+        // payload Rust writes is prefixed `"hook denied:"`. Suppress the generic
+        // permission-denied notice so the same block isn't shown twice.
+        const reason = sys.decision_reason || sys.message
+        if (reason?.startsWith("hook denied:")) {
+          return { messages, turnComplete: false }
+        }
         return {
           messages: appendSessionNotice(messages, {
             type: "session-notice",
             variant: "permission-denied",
             uuid: sys.uuid,
             toolName: sys.tool_name,
-            reason: sys.decision_reason || sys.message,
+            reason,
           }),
           turnComplete: false,
         }
@@ -383,6 +412,38 @@ function appendSessionNotice(
   return [...messages, marker]
 }
 
+/** Structured payload for the synthetic `hook-notice` system message. */
+export interface HookNoticePartData {
+  type: "hook-notice"
+  /** Lifecycle event name, e.g. "PreToolUse" / "UserPromptSubmit". */
+  event: string
+  /** Tool the hook gated, when the event is tool-scoped. */
+  toolName?: string
+  /** Derived status, by precedence block > context > warning. */
+  outcome: "blocked" | "context" | "warning"
+  /** Reason a hook blocked the action. */
+  block?: string
+  /** Context a hook injected into the turn. */
+  additionalContext?: string
+  /** Non-blocking diagnostics (timeouts, crashes). */
+  warnings: string[]
+}
+
+/**
+ * Append a non-conversational "hook notice" marker projecting a consequential
+ * hook fire into the transcript, mirroring `appendSessionNotice`. Only fired by
+ * the adapter's `system`/`hook_fire` branch, which the Rust runtime emits solely
+ * when a hook blocked, injected context, or warned.
+ */
+function appendHookNotice(messages: UIMessage[], data: HookNoticePartData): UIMessage[] {
+  const marker: UIMessage = {
+    id: `hook-${data.event}-${crypto.randomUUID()}`,
+    role: "system",
+    parts: [data as unknown as UIMessage["parts"][number]],
+  }
+  return [...messages, marker]
+}
+
 /**
  * Append a non-conversational divider marking where the SDK compacted the
  * context. Rendered by `MessageRenderer` as a centered "context compacted"
@@ -392,11 +453,36 @@ function appendCompactBoundary(
   messages: UIMessage[],
   sys: {
     uuid?: string
-    compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number }
+    compact_metadata?: {
+      trigger?: string
+      pre_tokens?: number
+      post_tokens?: number
+      strategy?: string
+      frozenSummaryDecision?: string
+      // Generic-path undo snapshot (sidecar-format), present only when the
+      // `captureUndoSnapshot` setting is on. Kept OUT of the persisted part —
+      // it is moved into the in-memory undo registry instead.
+      pre_messages?: unknown[]
+    }
   }
 ): UIMessage[] {
   const meta = sys.compact_metadata
   const id = `compact-${sys.uuid ?? crypto.randomUUID()}`
+
+  // Record the pre-compaction snapshot for undo (live-session-only, in-memory).
+  let undoToken: string | undefined
+  if (Array.isArray(meta?.pre_messages) && meta.pre_messages.length > 0) {
+    undoToken = id
+    registerUndoSnapshot({
+      token: id,
+      strategy: meta.strategy,
+      tokensBefore: meta.pre_tokens,
+      tokensAfter: meta.post_tokens,
+      createdAt: Date.now(),
+      snapshot: meta.pre_messages,
+    })
+  }
+
   const marker: UIMessage = {
     id,
     role: "system",
@@ -406,6 +492,8 @@ function appendCompactBoundary(
         trigger: meta?.trigger,
         preTokens: meta?.pre_tokens,
         postTokens: meta?.post_tokens,
+        strategy: meta?.strategy,
+        ...(undoToken ? { undoToken } : {}),
       } as unknown as UIMessage["parts"][number],
     ],
   }

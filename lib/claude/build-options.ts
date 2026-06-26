@@ -28,6 +28,7 @@ import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "@/lib/claude/agents/di
 import { ASK_USER_TOOL_NAME } from "@/lib/claude/ask-user-tool"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import {
+  activeEffectiveSkillIds,
   listEnabledSkillsByIds,
   recordSkillUsage,
   renderSkillsCatalog,
@@ -591,15 +592,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const characterSkillIds = character?.skillIds ?? []
   const ephemeralIds = ctx.ephemeralSkillIds ?? []
   if (characterSkillIds.length || ephemeralIds.length) {
-    const disabled = new Set(session?.disabledSkillIds ?? [])
-    const seen = new Set<string>()
-    const wantedIds: string[] = []
-    for (const id of [...characterSkillIds, ...ephemeralIds]) {
-      if (disabled.has(id)) continue
-      if (seen.has(id)) continue
-      seen.add(id)
-      wantedIds.push(id)
-    }
+    // Shared resolution (character ∪ ephemeral − session-disabled, deduped)
+    // so the send path and the chat UI never drift on the effective set.
+    const wantedIds = activeEffectiveSkillIds({
+      characterSkillIds,
+      ephemeralSkillIds: ephemeralIds,
+      disabledIds: session?.disabledSkillIds ?? [],
+    })
     if (wantedIds.length) {
       skills = await listEnabledSkillsByIds(wantedIds)
     }
@@ -1321,6 +1320,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // before the manifest builder walks the registry.
       await import("@/lib/skills/built-in")
       const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
+      // Resolve the bound channel's declared capabilities so the manifest's
+      // `requires` filter can hide skills the channel can't serve (e.g. a
+      // skill needing `rich-card.lark` for its HITL confirm card). Static
+      // per-platform — no live adapter build needed. Desktop (no binding)
+      // leaves this undefined; the filter no-ops there.
+      let channelCapabilities:
+        | readonly import("@/types/connectors/capability").Capability[]
+        | undefined
+      if (session?.platformBinding?.adapterId) {
+        const { getPlatformCapabilities } = await import("@/lib/connectors/platform-capabilities")
+        channelCapabilities = getPlatformCapabilities(session.platformBinding.platform)
+      }
       builtInSkillsManifest = buildBuiltInSkillManifest({
         imBinding: session?.platformBinding?.adapterId
           ? {
@@ -1330,6 +1341,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             }
           : undefined,
         imOverrideRow: imOverrideRow ?? undefined,
+        channelCapabilities,
       })
       for (const entry of builtInSkillsManifest) {
         allowed.add(entry.name)
@@ -2040,12 +2052,75 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   {
     const appComp = appSettings?.compaction
     const strategy = appComp?.strategyId ? getCompactionStrategy(appComp.strategyId) : undefined
-    const resolved = resolveCompaction({
+    const draft = resolveCompaction({
       appComp,
       charOv: character?.compactionOverride,
       sessOv: session?.compactionOverride,
       strategy,
     })
+    // `summaryProvider`/`summaryModel` are draft-only — strip them before the
+    // wire type and resolve the cheap-model credentials here (async/registry).
+    const { summaryProvider, summaryModel, ...resolved } = draft
+
+    // Cheap-model summary (generic path): when a distinct, configured provider is
+    // requested, resolve its credentials with the same machinery as the main
+    // turn; when only a model is requested, reuse the turn's provider with the
+    // model overridden. Never fail the turn — on any miss, omit `summary` and the
+    // sidecar reuses the main model.
+    if (resolved.enabled && appSettings) {
+      try {
+        if (summaryProvider && summaryProvider !== providerId) {
+          const snapshot = createProviderSettingsSnapshot({
+            defaultProvider: appSettings.defaultProvider,
+            providerSettings: appSettings.providerSettings as
+              | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
+              | undefined,
+            customProviders: appSettings.customProviders as
+              | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
+              | undefined,
+          })
+          const r = resolveFeatureProvider(
+            {
+              featureId: "chat-compaction-summary",
+              routeProfile: "general-text",
+              selectionMode: "explicit-provider",
+              providerId: summaryProvider,
+              fallbackMode: "none",
+            },
+            snapshot
+          )
+          if (r.kind === "resolved" && r.apiKey) {
+            let protocolAdapterSpec: SendOptions["protocolAdapterSpec"] | undefined
+            const { getProtocolAdapter } =
+              await import("@cognia/provider-core/providers/protocol-adapter-registry")
+            const adapterDef = getProtocolAdapter(r.protocol)
+            if (adapterDef) {
+              if (adapterDef.spec.kind === "code") {
+                const sep = r.protocol.indexOf(":")
+                protocolAdapterSpec = {
+                  kind: "code",
+                  pluginId: sep > 0 ? r.protocol.slice(0, sep) : r.protocol,
+                  adapterId: r.protocol,
+                }
+              } else {
+                protocolAdapterSpec = adapterDef.spec
+              }
+            }
+            resolved.summary = {
+              model: summaryModel ?? r.model,
+              protocol: r.protocol,
+              credentials: { apiKey: r.apiKey, baseURL: r.baseURL },
+              ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
+            }
+          }
+        } else if (summaryModel) {
+          resolved.summary = { model: summaryModel }
+        }
+      } catch (err) {
+        console.warn("compaction summary provider resolution failed:", err)
+      }
+    }
+
     opts.compaction = resolved
 
     if (resolved.enabled) {
@@ -2077,6 +2152,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (section) {
       const existing = opts.appendSystemPrompt?.trim() ?? ""
       opts.appendSystemPrompt = existing ? `${existing}\n\n${section}` : section
+      // Union any tools the activated surface skills declare into the
+      // allowlist (already finalized above) — mirrors how chat & plugin
+      // skills widen it. Skills can only widen, never narrow.
+      const surfaceTools = fresh.flatMap((e) => e.allowedTools ?? [])
+      if (surfaceTools.length > 0) {
+        opts.allowedTools = [...new Set([...(opts.allowedTools ?? []), ...surfaceTools])]
+      }
       void recordSkillUsage(fresh.map((e) => builtinSkillId(e))).catch(() => undefined)
     }
   }
@@ -2328,6 +2410,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // with the user's own plugin + template subagents. Keys align across the
       // picker, the send-time resolver, and this map, so a picked `@handle`
       // routes to a registered agent.
+      //
+      // NOTE: this re-walks the same registry + template sources the
+      // `dispatch_agent` gate already walked (`resolveDispatchableSubagents`,
+      // ~750 lines up). The two produce DIFFERENT shapes (SDK `AgentDefinition`
+      // map here vs dispatchable `PluginSubagentDef[]` there), and both sources
+      // are small in-memory collections, so the duplicate walk is negligible and
+      // deliberately not deduped — threading a shared snapshot across the gate↔
+      // branch distance in this function would cost more in fragility than it saves.
       const direct = { ...workflowEditorSubagents(), ...resolveAllSubagents({ context: "direct" }) }
       if (Object.keys(direct).length > 0) {
         opts.agents = { ...(opts.agents ?? {}), ...direct }

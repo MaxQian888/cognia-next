@@ -20,13 +20,19 @@ import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
-import { shouldCompact, planCompaction, applyCompaction, estimateTokens } from "./compaction.mjs"
+import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
+import { planStrategy } from "./compaction-strategies.mjs"
+import { capToolResults } from "./tool-result-cap.mjs"
 import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
 
 // Recent user/assistant messages kept verbatim when compacting; everything
 // older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
 // Used only as the fallback when `sendOptions.compaction.keepRecent` is absent.
 const COMPACT_KEEP_RECENT_MESSAGES = 6
+
+// After this many accumulated frozen summaries, collapse them all into one
+// (a bounded, one-time prefix-cache break) instead of appending another.
+const MAX_FROZEN_SUMMARIES = 4
 
 // Fallback summarization system prompt. The renderer normally supplies
 // `sendOptions.compaction.summaryPrompt` (composed from the canonical prompt in
@@ -271,6 +277,27 @@ function projectToolResultImages(messages) {
 }
 
 /**
+ * How many agentic steps to charge a finished leg against the turn's step
+ * budget. `result.steps` is an AI-SDK getter that REJECTS on a partial-error
+ * leg, so the real count isn't always available:
+ *  - read OK, count > 0 → the real count (clamped to the per-leg cap)
+ *  - read OK, count 0   → the per-leg cap (defensive: don't under-count a leg
+ *    that ran but reported nothing)
+ *  - read FAILED        → a conservative 1 (the leg ran ≥1 step), NOT the full
+ *    cap — over-charging here burns the agentic budget far faster than the work
+ *    actually done and trips the safety-cap notice prematurely.
+ *
+ * Exported via `__testing__`.
+ *
+ * @param {{ legStepsRead: boolean, legStepsRun: number, perLegCap: number }} p
+ * @returns {number}
+ */
+function chargeLegSteps({ legStepsRead, legStepsRun, perLegCap }) {
+  if (!legStepsRead) return 1
+  return legStepsRun > 0 ? Math.min(legStepsRun, perLegCap) : perLegCap
+}
+
+/**
  * @param {{
  *   provider: string,
  *   sessionId: string,
@@ -300,11 +327,14 @@ export function dispatchAiSdk({
 
   // `@agent` single-turn routing on the ai-sdk path. The SDK-native `agent`
   // field (Anthropic path) has no equivalent here, so we synthesize the
-  // subagent's IDENTITY: prepend its system prompt and narrow the tool allowlist
-  // to its `tools`. We deliberately do NOT override the model — a subagent's
-  // model usually names a Claude id that the active non-Anthropic provider can't
-  // serve; the user's chosen provider model stays in force. Mirrors the
-  // `synthesizeCharacter` overlay used by the team/dispatch executor.
+  // subagent's IDENTITY from its `AgentDefinition`: prepend its system prompt,
+  // narrow the tool allowlist to its `tools`, UNION its `disallowedTools` onto
+  // the turn's deny-list, and clamp the agentic loop by its `maxTurns` — parity
+  // with the Anthropic Agent SDK, which honors all of these. We deliberately do
+  // NOT override the model — a subagent's model usually names a Claude id that
+  // the active non-Anthropic provider can't serve; the user's chosen provider
+  // model stays in force. Mirrors the `synthesizeCharacter` overlay used by the
+  // team/dispatch executor.
   const agentOverlay =
     sendOptions.agent && sendOptions.agents ? sendOptions.agents[sendOptions.agent] : null
   const agentSystemPrompt =
@@ -313,6 +343,33 @@ export function dispatchAiSdk({
       : null
   const agentAllowedTools =
     agentOverlay && Array.isArray(agentOverlay.tools) ? agentOverlay.tools : null
+  const agentDisallowedTools =
+    agentOverlay &&
+    Array.isArray(agentOverlay.disallowedTools) &&
+    agentOverlay.disallowedTools.length
+      ? agentOverlay.disallowedTools
+      : null
+  const agentMaxTurns =
+    agentOverlay && typeof agentOverlay.maxTurns === "number" && agentOverlay.maxTurns > 0
+      ? agentOverlay.maxTurns
+      : null
+  // The turn's sendOptions narrowed to the routed agent's tool scope. Reused for
+  // both built-in/plugin tool building and the MCP tool/gate path so the agent's
+  // allow + deny lists apply uniformly. Identity when no agent is routed.
+  const agentScopedSendOptions =
+    agentAllowedTools || agentDisallowedTools
+      ? {
+          ...sendOptions,
+          ...(agentAllowedTools ? { allowedTools: agentAllowedTools } : {}),
+          ...(agentDisallowedTools
+            ? {
+                disallowedTools: [
+                  ...new Set([...(sendOptions.disallowedTools ?? []), ...agentDisallowedTools]),
+                ],
+              }
+            : {}),
+        }
+      : sendOptions
 
   // The Anthropic protocol carries images inside tool-result messages natively;
   // every other protocol we drive (openai / google / mistral / cohere) either
@@ -432,6 +489,14 @@ export function dispatchAiSdk({
   // Tools are stable for the session — build once, reuse across turns.
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache
+  // Doom-loop guards owned by this session (the tool gate's + the MCP gate's).
+  // The tools map is built once, so the guards live for the whole multi-turn
+  // session; reset them per turn so a legitimate identical call repeated ACROSS
+  // turns (e.g. reading the same config at the start of each turn) doesn't trip
+  // the threshold — the Anthropic path resets implicitly via a fresh guard per
+  // `query()`.
+  /** @type {Array<{ reset: () => void }>} */
+  const doomGuards = []
   // Teardown for external MCP-server connections, set when they're opened.
   /** @type {(() => Promise<void>) | null} */
   let mcpClose = null
@@ -453,12 +518,15 @@ export function dispatchAiSdk({
   // any multi-tool task on every non-Anthropic provider — the Anthropic Agent
   // SDK loops unbounded, so the two channels were badly asymmetric.
   const STEP_CHUNK = 16
-  const maxStepsBudget =
+  const baseStepsBudget =
     typeof sendOptions.maxTurns === "number" && sendOptions.maxTurns > 0
       ? sendOptions.maxTurns
       : typeof sendOptions.aiSdkMaxSteps === "number" && sendOptions.aiSdkMaxSteps > 0
         ? sendOptions.aiSdkMaxSteps
         : 256
+  // A routed `@agent` clamps the loop by its own `maxTurns` (parity with the
+  // Anthropic Agent SDK). Clamp DOWN only — never widen the turn's budget.
+  const maxStepsBudget = agentMaxTurns ? Math.min(baseStepsBudget, agentMaxTurns) : baseStepsBudget
 
   function flushAdapter(events) {
     for (const e of events) {
@@ -573,6 +641,10 @@ export function dispatchAiSdk({
   // Real input-token count from the previous turn's usage; drives the
   // compaction trigger (same signal the Anthropic SDK auto-compacts on).
   let lastInputTokens = 0
+  // Highest frozen-summary version spliced into `conversation` this session.
+  // The summaries themselves live in `conversation` (re-detected via
+  // `summaryVersion`); this is a monotonic hint for the next version number.
+  let frozenSummaryVersion = 0
 
   // Render the to-be-summarized slice as plain transcript for the summary call.
   function renderForSummary(messages) {
@@ -596,20 +668,39 @@ export function dispatchAiSdk({
   // event so the renderer marks it exactly like the Anthropic path.
   async function maybeCompact(creds, modelParams, { force = false, focus } = {}) {
     const comp = sendOptions.compaction ?? {}
-    // Auto path: honour the enable toggle + configured fraction. Manual
+    // Auto path: honour the enable toggle + the configured trigger. Manual
     // (`force`) bypasses both — the user asked for it explicitly.
     if (!force) {
       if (comp.enabled === false) return
-      const fraction = typeof comp.fraction === "number" ? comp.fraction : undefined
-      const trigger = fraction
-        ? shouldCompact({ lastInputTokens, modelId: model, fraction })
-        : shouldCompact({ lastInputTokens, modelId: model })
-      if (!trigger) return
+      const args =
+        comp.trigger === "message-count"
+          ? {
+              trigger: "message-count",
+              messageCount: conversation.length,
+              messageCountThreshold: comp.messageCountThreshold,
+            }
+          : {
+              lastInputTokens,
+              modelId: model,
+              ...(typeof comp.fraction === "number" ? { fraction: comp.fraction } : {}),
+            }
+      if (!shouldCompact(args)) return
     }
-    const keepRecentMessages =
+
+    const keepRecent =
       typeof comp.keepRecent === "number" ? comp.keepRecent : COMPACT_KEEP_RECENT_MESSAGES
-    const plan = planCompaction({ conversation, keepRecentMessages })
-    if (!plan) return
+
+    const plan = planStrategy({
+      strategy: comp.strategy,
+      conversation,
+      keepRecent,
+      preserveSystemMessages: comp.preserveSystemMessages,
+      recursiveChunkSize: comp.recursiveChunkSize,
+      importanceThreshold: comp.importanceThreshold,
+      retainedFraction: comp.retainedFraction,
+      modelId: model,
+    })
+    if (plan.kind === "none") return
 
     // The renderer-supplied prompt already folds in the app-level focus; a
     // manual `/compact <focus>` arg layers an extra instruction on top.
@@ -619,32 +710,117 @@ export function dispatchAiSdk({
       ? `${basePrompt}\n\nFocus especially on: ${manualFocus}`
       : basePrompt
 
-    let summary
-    try {
-      const summaryRun = await protocolAdapter.start({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: renderForSummary(plan.middle) },
-        ],
-        modelParams,
-        tools: undefined,
-        maxSteps: 1,
-        credentials: creds,
-        streamTextFn: streamTextOverride,
-      })
-      let text = ""
-      for await (const evt of summaryRun.fullStream) {
-        if (evt?.type === "text-delta") text += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+    // Summary executor: alternate cheap model + credentials + adapter, with the
+    // output token cap. Returns trimmed text, or null on failure/empty. When AI
+    // summarization is disabled, falls back to a deterministic extractive cut.
+    const useAI = comp.useAISummarization !== false
+    const summaryCap =
+      typeof comp.maxSummaryTokens === "number" && comp.maxSummaryTokens > 0
+        ? comp.maxSummaryTokens
+        : 500
+    const summarize = async (messages) => {
+      const transcript = renderForSummary(messages)
+      if (!useAI) {
+        const cap = summaryCap * 4
+        return transcript.length > cap
+          ? `${transcript.slice(0, cap)}\n... (extractive summary truncated)`
+          : transcript
       }
-      summary = text.trim()
-    } catch (err) {
-      log("warn", `compaction summary failed, skipping: ${err?.message ?? err}`)
-      return
+      try {
+        const sum = comp.summary ?? {}
+        const summaryModel = sum.model || model
+        const summaryCreds = sum.credentials || creds
+        let summaryAdapter = protocolAdapter
+        if (sum.protocol) {
+          const alt = resolveAdapter(sum.protocol, sum.protocolAdapterSpec, {
+            emit,
+            sessionId,
+            pendingProtocolExecs,
+          })
+          if (alt) summaryAdapter = alt
+        }
+        const summaryParams = { ...modelParams, maxOutputTokens: summaryCap }
+        const run = await summaryAdapter.start({
+          model: summaryModel,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: transcript },
+          ],
+          modelParams: summaryParams,
+          tools: undefined,
+          maxSteps: 1,
+          credentials: summaryCreds,
+          streamTextFn: streamTextOverride,
+        })
+        let out = ""
+        for await (const evt of run.fullStream) {
+          if (evt?.type === "text-delta") out += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+        }
+        return out.trim() || null
+      } catch (err) {
+        log("warn", `compaction summary failed, skipping: ${err?.message ?? err}`)
+        return null
+      }
     }
-    if (!summary) return
+
+    // Reuse prior frozen summaries verbatim (prefix-cache stable) until too many
+    // accumulate, then collapse once.
+    const frozen = plan.frozen ?? []
+    const regenerate = frozen.length >= MAX_FROZEN_SUMMARIES
+    const nextVersion =
+      (frozen.length > 0
+        ? Math.max(frozenSummaryVersion, ...frozen.map(summaryVersion))
+        : frozenSummaryVersion) + 1
+
+    let next
+    let decision = "reused"
+    let summaryProduced = false
+
+    if (plan.kind === "rebuild") {
+      // Sliding-window (or a no-op fallback) — no LLM call.
+      next = plan.rebuilt
+    } else {
+      let summaryText
+      if (plan.kind === "chunked") {
+        const parts = []
+        for (const chunk of plan.chunks) {
+          const s = await summarize(chunk)
+          if (s) parts.push(s)
+        }
+        if (regenerate && frozen.length) parts.unshift(renderForSummary(frozen))
+        if (parts.length === 0) return
+        summaryText =
+          parts.length > 1 && useAI
+            ? ((await summarize([{ role: "user", content: parts.join("\n\n") }])) ??
+              parts.join("\n\n"))
+            : parts.join("\n\n")
+      } else {
+        const material = plan.kind === "selective" ? plan.summarizeSet : plan.middle
+        const full = regenerate && frozen.length ? [...frozen, ...material] : material
+        summaryText = await summarize(full)
+      }
+      if (!summaryText) return
+      summaryProduced = true
+      decision = regenerate ? "regenerated" : "reused"
+      const summaryMsg = makeSummaryMessage(summaryText, nextVersion)
+      const keep = plan.keep ?? []
+      next = regenerate
+        ? [...plan.systemHead, ...keep, summaryMsg, ...plan.tail]
+        : [...plan.systemHead, ...frozen, ...keep, summaryMsg, ...plan.tail]
+    }
+
+    if (summaryProduced) frozenSummaryVersion = nextVersion
+
+    // Per-tool-result cap (independent of the summary strategy).
+    next = capToolResults(next, {
+      maxToolResultTokens: comp.maxToolResultTokens,
+      preserveToolCallMetadata: comp.preserveToolCallMetadata,
+    })
+
+    // Undo snapshot — copied BEFORE the splice when enabled.
+    const preMessages = comp.captureUndoSnapshot ? conversation.map((m) => ({ ...m })) : undefined
+
     const preTokens = lastInputTokens || estimateTokens(conversation)
-    const next = applyCompaction({ conversation, keepRecentMessages, summary })
     // Replace the conversation contents in place (it is a const binding).
     conversation.splice(0, conversation.length, ...next)
     // Reset the trigger so we don't compact again until the window refills.
@@ -661,6 +837,9 @@ export function dispatchAiSdk({
           trigger: force ? "manual" : "auto",
           pre_tokens: preTokens,
           post_tokens: estimateTokens(next),
+          strategy: comp.strategy ?? "summary",
+          ...(summaryProduced ? { frozenSummaryDecision: decision } : {}),
+          ...(preMessages ? { pre_messages: preMessages } : {}),
         },
       },
     })
@@ -671,6 +850,10 @@ export function dispatchAiSdk({
     // Clear any leftover interrupt from a previous turn so this turn streams.
     cancelled = false
     active = true
+    // Reset per-turn so identical-but-legitimate calls repeated across turns
+    // don't trip the doom-loop threshold (the guards persist with the cached
+    // tools map). Empty on turn 1 — the build below populates them.
+    for (const g of doomGuards) g.reset()
     // NB: the event adapter's turn-scoped buffers are reset at the top of EACH
     // agent-loop leg below (so every leg renders as a fresh content block, and
     // turn N+1 never re-emits turn N's reply — the "duplicate output" bug). The
@@ -698,14 +881,16 @@ export function dispatchAiSdk({
       // the bridge (and its `ai` dependency) doesn't load for tool-less turns.
       if (toolsCache === undefined) {
         const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
+        const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+        // Own the tool gate's guard here so it can be reset per turn (F1).
+        const toolDoomGuard = createDoomLoopGuard()
+        doomGuards.push(toolDoomGuard)
         toolsCache = buildAiSdkTools({
           // A routed `@agent` narrows the built-in tool allowlist to its own
-          // tools (same allowlist mechanism characters / skills / modes use).
-          // `disallowedTools` (deny / restricted mode) is checked separately and
-          // still wins.
-          sendOptions: agentAllowedTools
-            ? { ...sendOptions, allowedTools: agentAllowedTools }
-            : sendOptions,
+          // tools and unions its deny-list on top (same allowlist mechanism
+          // characters / skills / modes use). `disallowedTools` (deny /
+          // restricted mode) is checked separately and still wins.
+          sendOptions: agentScopedSendOptions,
           emit,
           sessionId,
           pendingApprovals,
@@ -713,6 +898,7 @@ export function dispatchAiSdk({
           lspResolver: lsp.lspResolver,
           readTracker,
           bgShells,
+          doomGuard: toolDoomGuard,
         })
 
         // External MCP servers (parity with the Anthropic path, which passes
@@ -726,20 +912,23 @@ export function dispatchAiSdk({
             const buildAiSdkMcpTools =
               buildMcpToolsOverride ?? (await import("./ai-sdk-mcp.mjs")).buildAiSdkMcpTools
             const { createToolPermissionGate } = await import("./ai-sdk-tools.mjs")
-            const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+            // Own the MCP gate's guard here too so it resets per turn (F1).
+            const mcpDoomGuard = createDoomLoopGuard()
+            doomGuards.push(mcpDoomGuard)
             const mcpGate = createToolPermissionGate({
               emit,
               sessionId,
               pendingApprovals,
-              sendOptions,
-              doomGuard: createDoomLoopGuard(),
+              sendOptions: agentScopedSendOptions,
+              doomGuard: mcpDoomGuard,
             })
             const mcp = await buildAiSdkMcpTools({
               mcpServers: sendOptions.mcpServers,
               gate: mcpGate,
-              // A routed `@agent` narrows the allowlist to its own tools.
-              allowedTools: agentAllowedTools ?? sendOptions.allowedTools,
-              disallowedTools: sendOptions.disallowedTools,
+              // A routed `@agent` narrows the allowlist to its own tools and
+              // unions its deny-list (parity with the built-in tool path above).
+              allowedTools: agentScopedSendOptions.allowedTools,
+              disallowedTools: agentScopedSendOptions.disallowedTools,
               log,
             })
             mcpClose = mcp.close
@@ -988,13 +1177,15 @@ export function dispatchAiSdk({
         // (a tool image) may run far fewer than `perLegCap`; charging the whole
         // cap would burn the turn budget on every image. Prefer the real count.
         let legStepsRun = 0
+        let legStepsRead = true
         try {
           const steps = await result.steps
           if (Array.isArray(steps)) legStepsRun = steps.length
         } catch {
-          legStepsRun = 0
+          // The `steps` getter rejects on a partial-error leg. Don't trust 0.
+          legStepsRead = false
         }
-        const legStepsCharged = legStepsRun > 0 ? Math.min(legStepsRun, perLegCap) : perLegCap
+        const legStepsCharged = chargeLegSteps({ legStepsRead, legStepsRun, perLegCap })
 
         // Continue the agent loop when the model stopped because it hit the
         // per-leg step cap with more tool calls pending, OR when we cut the leg
@@ -1036,7 +1227,30 @@ export function dispatchAiSdk({
         : undefined
       const finishEvents = adapter.finish({ usage: finishUsage })
       flushAdapter(finishEvents)
-      emit({ type: "session_ended", sessionId })
+      if (turnError && !cancelled) {
+        // A provider error AFTER partial text already streamed (e.g. a 429 /
+        // overloaded / connection-reset mid-reply). `finish` above closed the
+        // content blocks so the partial is preserved, but we must still report
+        // the error: a clean `session_ended` here would (a) skip the renderer's
+        // routing fallback and breaker recording, and (b) present a truncated
+        // reply as a successful turn. Symmetric with the pre-text error branch
+        // above — forward the real HTTP status + Retry-After so the renderer
+        // classifies off authoritative data.
+        const msg =
+          turnError instanceof Error
+            ? turnError.message
+            : typeof turnError === "string"
+              ? turnError
+              : (turnError?.message ?? JSON.stringify(turnError))
+        emit({
+          type: "session_ended",
+          sessionId,
+          error: msg,
+          ...extractHttpErrorMeta(turnError),
+        })
+      } else {
+        emit({ type: "session_ended", sessionId })
+      }
     } catch (err) {
       // An aborted turn (user interrupt) is a clean stop, not a failure —
       // streamText rejects with an AbortError once the signal fires.
@@ -1163,6 +1377,20 @@ export function dispatchAiSdk({
         log("warn", `manual compaction failed: ${err?.message ?? err}`)
       )
     },
+    // Undo a prior compaction by restoring the pre-compaction message snapshot.
+    // Only valid while the session is live and idle (the renderer gates the UI
+    // on "no intervening user turn"); a no-op while a turn is in flight.
+    restoreConversation: (messages) => {
+      if (closing || active) {
+        log("warn", "restore ignored: session closing or turn in flight")
+        return false
+      }
+      if (!Array.isArray(messages) || messages.length === 0) return false
+      conversation.splice(0, conversation.length, ...messages)
+      lastInputTokens = 0
+      frozenSummaryVersion = 0
+      return true
+    },
     closeInput: () => {
       // End the session: stop the loop (`closing`) and the in-flight turn
       // (`cancelled` + abort the provider request, so a stalled stream doesn't
@@ -1196,4 +1424,5 @@ export const __testing__ = {
   toolOutputHasImage,
   projectToolResultImages,
   sanitizeToolMessagePairs,
+  chargeLegSteps,
 }

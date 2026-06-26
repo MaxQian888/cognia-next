@@ -53,6 +53,52 @@ function isAskUserTool(toolName) {
 }
 
 /**
+ * Settle every pending tool/approval round-trip immediately so a renderer that
+ * never answers (crashed, navigated away, or the host is tearing the session
+ * down) can't wedge the in-flight turn.
+ *
+ * The Anthropic `Query.interrupt()` aborts the SDK's own turn and the per-tool
+ * `ctx.signal` settles `pendingApprovals`, but `pendingPluginToolCalls` have NO
+ * abort/signal wiring — without this they only clear on the plugin-tool per-call
+ * timeout. This is the explicit, immediate drain (symmetric with the ai-sdk
+ * path, whose `q.interrupt()` drains its pending maps inline). Pure + exported
+ * so the drain semantics are unit-testable without spawning the agent SDK.
+ *
+ * @param {{
+ *   pendingApprovals?: Map<string, { resolve: (r: any) => void }>,
+ *   pendingPluginToolCalls?: Map<string, { resolve: (r: any) => void }>,
+ * }} maps
+ * @param {string} [reason]
+ */
+export function drainPendingRoundTrips(
+  { pendingApprovals, pendingPluginToolCalls } = {},
+  reason = "interrupted"
+) {
+  if (pendingApprovals) {
+    for (const [id, p] of pendingApprovals) {
+      pendingApprovals.delete(id)
+      try {
+        // A denied permission result the agent SDK accepts as a record.
+        p.resolve({ behavior: "deny", message: reason })
+      } catch {
+        /* defensive — a resolver shape we don't own */
+      }
+    }
+  }
+  if (pendingPluginToolCalls) {
+    for (const [id, p] of pendingPluginToolCalls) {
+      pendingPluginToolCalls.delete(id)
+      try {
+        // The `{ error }` envelope `plugin-tools.mjs` surfaces as a tool error.
+        p.resolve({ error: reason })
+      } catch {
+        /* defensive — a resolver shape we don't own */
+      }
+    }
+  }
+}
+
+/**
  * @param {{
  *   sessionId: string,
  *   firstPrompt: any,
@@ -427,6 +473,12 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       session.pushUserMessage(trimmed ? `/compact ${trimmed}` : "/compact")
     },
     closeInput: inputStream.close,
+    // Immediate teardown drain for the host's interrupt/close handlers. The SDK
+    // `q.interrupt()` doesn't settle `pendingPluginToolCalls`, so without this a
+    // closed/crashed renderer would keep the turn alive until the per-call
+    // timeout. See `drainPendingRoundTrips`.
+    drainPending: (reason) =>
+      drainPendingRoundTrips({ pendingApprovals, pendingPluginToolCalls }, reason),
     pendingApprovals,
     pendingPluginToolCalls,
     sendOptions,

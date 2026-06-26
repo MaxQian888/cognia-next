@@ -49,6 +49,17 @@ export async function compactSession(sessionId: string, focus?: string): Promise
 }
 
 /**
+ * Undo a prior compaction by restoring the pre-compaction message snapshot.
+ * Mirrors {@link compactSession}: a fire-and-forget control message. `messages`
+ * is the sidecar-format snapshot captured on the `compact_boundary` event
+ * (`compact_metadata.pre_messages`) — NOT renderer UIMessages. Only valid on the
+ * generic (AI-SDK) path while the session is still live and idle.
+ */
+export async function restoreSession(sessionId: string, messages: unknown[]): Promise<void> {
+  await transport.call("claude_restore", { sessionId, messages })
+}
+
+/**
  * Change a running session's permission mode in place — without tearing down
  * and respawning the sidecar (which would lose the in-process conversation).
  * Mirrors {@link compactSession}: a fire-and-forget control message. On the
@@ -87,6 +98,20 @@ let controlListener: Promise<UnlistenFn> | null = null
 function ensureControlListener(): Promise<UnlistenFn> {
   if (!controlListener) {
     controlListener = onClaudeMessage((evt) => {
+      // Fail-fast on a sidecar crash/restart: the PROCESS died, so every
+      // in-flight control request (model picker, MCP settings action,
+      // context-usage poll) can never be answered. Reject them now instead of
+      // each waiting out CONTROL_TIMEOUT_MS — mirrors run-and-capture's
+      // `sidecar_exited` posture so a control issued just before a restart
+      // doesn't hang the UI for 8s.
+      if (evt.type === "sidecar_exited") {
+        for (const [id, pending] of pendingControl) {
+          pendingControl.delete(id)
+          clearTimeout(pending.timer)
+          pending.reject(new Error("sidecar exited"))
+        }
+        return
+      }
       if (!isControlResponseEvent(evt)) return
       const pending = pendingControl.get(evt.requestId)
       if (!pending) return

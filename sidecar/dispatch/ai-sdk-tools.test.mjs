@@ -265,6 +265,41 @@ test("createToolPermissionGate: a denied prompt rejects", async () => {
   await assert.rejects(p, /nope/)
 })
 
+test("buildAiSdkTools threads a caller-provided doomGuard into the gate (so the session can reset it per turn)", async () => {
+  // F1: the ai-sdk tools map is built once and reused across turns, so the
+  // session owns the doom-loop guard and resets it per turn. This verifies the
+  // provided guard is the one the gate actually consults (the reset hook is
+  // pointless if buildAiSdkTools silently makes its own).
+  const checked = []
+  const spyGuard = {
+    check: (name, input) => {
+      checked.push({ name, input })
+      return null // no doom — let the call proceed
+    },
+    reset: () => {},
+  }
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      builtinTools: { git: true },
+      permissionRuleset: { "*": "allow" },
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    doomGuard: spyGuard,
+  })
+  try {
+    await tools.git_status.execute({ cwd: "/tmp" })
+  } catch {
+    // The handler may fail to shell out in CI; the doom guard is consulted
+    // by the gate BEFORE execution, which is all this test asserts.
+  }
+  assert.ok(
+    checked.some((c) => c.name === "mcp__cognia-tools__git_status"),
+    "the caller-provided doomGuard was consulted for the gated call"
+  )
+})
+
 test("buildAiSdkTools gates a built-in tool through the permission gate (deny blocks handler)", async () => {
   const pendingApprovals = new Map()
   const tools = buildAiSdkTools({

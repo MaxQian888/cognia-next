@@ -23,6 +23,22 @@ function captureEmit() {
   }
 }
 
+test("chargeLegSteps: a failed steps read charges 1, not the full per-leg cap (F13)", () => {
+  const { chargeLegSteps } = __testing__
+  // Read failed → conservative 1 (the leg ran at least once), never the cap.
+  assert.equal(chargeLegSteps({ legStepsRead: false, legStepsRun: 0, perLegCap: 16 }), 1)
+  assert.equal(chargeLegSteps({ legStepsRead: false, legStepsRun: 99, perLegCap: 16 }), 1)
+})
+
+test("chargeLegSteps: a successful read uses the real count, clamped to the cap", () => {
+  const { chargeLegSteps } = __testing__
+  assert.equal(chargeLegSteps({ legStepsRead: true, legStepsRun: 3, perLegCap: 16 }), 3)
+  assert.equal(chargeLegSteps({ legStepsRead: true, legStepsRun: 40, perLegCap: 16 }), 16)
+  // Read OK but zero steps → still charge the cap (don't under-count a leg that
+  // ran but reported nothing — the historical defensive behaviour).
+  assert.equal(chargeLegSteps({ legStepsRead: true, legStepsRun: 0, perLegCap: 16 }), 16)
+})
+
 test("resolveProtocol picks openai for openai/openrouter/groq/deepseek", () => {
   const { resolveProtocol } = __testing__
   assert.equal(resolveProtocol("openai", undefined), "openai")
@@ -292,6 +308,225 @@ test("q.setModel ignores an empty model (never blanks the running session)", asy
   session.closeInput()
 })
 
+// ---- Conversation compaction (generic path) ------------------------------
+
+function capturingStream(events, usage) {
+  const calls = []
+  const fn = (args) => {
+    calls.push(args)
+    return {
+      fullStream: (async function* () {
+        for (const e of events) yield e
+      })(),
+      usage: Promise.resolve(usage),
+    }
+  }
+  return { calls, fn }
+}
+
+// Drive the session over several turns and resolve once `n` turns have ended.
+function waitForTurnsFactory(events) {
+  const ended = () => events.filter((e) => e.type === "session_ended").length
+  return (n) =>
+    new Promise((resolve) => {
+      const tick = () => (ended() >= n ? resolve() : setTimeout(tick, 5))
+      tick()
+    })
+}
+
+test("maybeCompact: caps the summary call output, reuses frozen summaries, emits boundaries", async () => {
+  const { events, emit } = captureEmit()
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: "SUM" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    // Real input tokens above the trigger (0.1 × 128k = 12,800).
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "m0",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "summary",
+        maxSummaryTokens: 64,
+        summaryPrompt: "SUMMARIZE",
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+
+  await waitForTurns(1)
+  session.pushUserMessage("m1")
+  await waitForTurns(2)
+  session.pushUserMessage("m2")
+  await waitForTurns(3)
+  session.closeInput()
+
+  const boundaries = events.filter(
+    (e) => e.type === "event" && e.event?.subtype === "compact_boundary"
+  )
+  assert.ok(boundaries.length >= 1, "at least one compaction boundary emitted")
+  // The summary call is capped to maxSummaryTokens and uses the summary prompt.
+  const summaryCall = calls.find(
+    (a) => a.maxOutputTokens === 64 && a.messages?.[0]?.content === "SUMMARIZE"
+  )
+  assert.ok(summaryCall, "summary call carries the maxOutputTokens cap + prompt")
+  // Every boundary that produced a summary reuses the frozen prefix (never
+  // re-summarizes a prior summary).
+  for (const b of boundaries) {
+    if (b.event.compact_metadata.frozenSummaryDecision) {
+      assert.equal(b.event.compact_metadata.frozenSummaryDecision, "reused")
+    }
+    assert.equal(b.event.compact_metadata.strategy, "summary")
+  }
+})
+
+test("maybeCompact: sliding-window strategy compacts WITHOUT an LLM summary call", async () => {
+  const { events, emit } = captureEmit()
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: "resp" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "m0",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: { enabled: true, keepRecent: 2, fraction: 0.1, strategy: "sliding-window" },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  await waitForTurns(1)
+  session.pushUserMessage("m1")
+  await waitForTurns(2)
+  session.pushUserMessage("m2")
+  await waitForTurns(3)
+  session.closeInput()
+
+  const boundaries = events.filter(
+    (e) => e.type === "event" && e.event?.subtype === "compact_boundary"
+  )
+  assert.ok(boundaries.length >= 1, "sliding-window still emits a boundary")
+  // No summary LLM call: sliding-window never invokes the capped summarizer, so
+  // no stream call carries a maxOutputTokens cap.
+  assert.ok(!calls.some((a) => typeof a.maxOutputTokens === "number"))
+  for (const b of boundaries) {
+    assert.equal(b.event.compact_metadata.frozenSummaryDecision, undefined)
+  }
+})
+
+test("maybeCompact: captures a pre-compaction snapshot when undo is enabled", async () => {
+  const { events, emit } = captureEmit()
+  const { fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: "SUM" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "m0",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "summary",
+        captureUndoSnapshot: true,
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  await waitForTurns(1)
+  session.pushUserMessage("m1")
+  await waitForTurns(2)
+  session.closeInput()
+
+  const boundary = events.find((e) => e.type === "event" && e.event?.subtype === "compact_boundary")
+  assert.ok(boundary, "boundary emitted")
+  assert.ok(Array.isArray(boundary.event.compact_metadata.pre_messages))
+  assert.ok(boundary.event.compact_metadata.pre_messages.length > 0)
+})
+
+test("restoreConversation puts the pre-compaction snapshot back for the next turn", async () => {
+  const { events, emit } = captureEmit()
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: "SUM" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "m0",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "summary",
+        captureUndoSnapshot: true,
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  await waitForTurns(1)
+  session.pushUserMessage("m1")
+  await waitForTurns(2) // compaction happened at this turn's head
+
+  const boundary = events.find((e) => e.type === "event" && e.event?.subtype === "compact_boundary")
+  const pre = boundary.event.compact_metadata.pre_messages
+  assert.ok(Array.isArray(pre) && pre.length > 0)
+
+  // Restore is honoured while idle and returns true.
+  assert.equal(session.restoreConversation(pre), true)
+
+  // The next turn now sends the restored (pre-compaction) messages, including
+  // "m0" which compaction had summarized away.
+  calls.length = 0
+  session.pushUserMessage("m2")
+  await waitForTurns(3)
+  const sent = calls.find((a) => JSON.stringify(a.messages ?? []).includes("m0"))
+  assert.ok(sent, "restored conversation (with m0) is sent on the next turn")
+
+  session.closeInput()
+  // After close, restore is a no-op.
+  assert.equal(session.restoreConversation(pre), false)
+})
+
 test("tool_result_review round-trip rewrites the tool output the model sees", async () => {
   const { events, emit } = captureEmit()
   const session = dispatchAiSdk({
@@ -468,6 +703,75 @@ test("@agent overlay: no-op when the agent id is not in the agents map", async (
   })
   assert.ok(captured, "streamText invoked")
   assert.equal(captured.messages[0].content, "BASE_SYSTEM")
+})
+
+test("@agent overlay: unions the routed agent's disallowedTools onto the deny-list", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { git: true },
+      agent: "template:reviewer",
+      // The AgentDefinition forbids git_status; the ai-sdk path must honor it
+      // (parity with the Anthropic SDK), not silently keep the tool.
+      agents: { "template:reviewer": { prompt: "REVIEWER", disallowedTools: ["git_status"] } },
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.ok(captured, "streamText invoked")
+  assert.equal(captured.tools.git_status, undefined, "agent's disallowedTools removes git_status")
+  assert.ok(
+    Object.keys(captured.tools).length > 0,
+    "other built-in tools remain (only the agent's deny-listed tool is dropped)"
+  )
+})
+
+test("@agent overlay: clamps the agentic budget by the routed agent's maxTurns", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  // The model never stops on its own; only the agent's maxTurns can halt it.
+  const streamText = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: String(calls), text: `leg${calls}` }
+        yield { type: "finish", finishReason: "tool-calls" }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 3 }),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      // No turn-level maxTurns (base budget would be 256); the agent caps it to 1.
+      agent: "template:reviewer",
+      agents: { "template:reviewer": { prompt: "REVIEWER", maxTurns: 1 } },
+    },
+    emit,
+    log: () => {},
+    streamText,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(calls, 1, "agent maxTurns=1 caps the loop to a single leg")
+  const snapshots = events.filter((e) => e.type === "event" && e.event.type === "assistant")
+  const finalText = snapshots[snapshots.length - 1].event.message.content[0].text
+  assert.match(finalText, /safety cap/, "surfaces the cap note rather than looping forever")
 })
 
 test("anthropic protocol + cacheOptimizationEnabled splits system at the stable boundary with a cacheControl breakpoint", async () => {
@@ -940,6 +1244,52 @@ test("dispatchAiSdk does not leak an unhandled rejection when result getters rej
   } finally {
     process.removeListener("unhandledRejection", onUnhandled)
   }
+})
+
+test("dispatchAiSdk surfaces a provider error that arrives AFTER partial text (keeps partial + reports error)", async () => {
+  // F3: AI SDK v6 reports a mid-stream provider failure as a `{ type:"error" }`
+  // part. When it lands AFTER some text streamed, the old code finished cleanly
+  // (no `error`), so the renderer's routing fallback + breaker never fired and a
+  // truncated reply looked like a successful turn. The partial must be kept AND
+  // the error surfaced.
+  const { events, emit } = captureEmit()
+  const partialThenError = () => ({
+    fullStream: (async function* () {
+      yield { type: "text-delta", textDelta: "Here is part of " }
+      yield { type: "text-delta", textDelta: "the answer" }
+      yield { type: "error", error: { code: "overloaded_error", message: "529 Overloaded" } }
+    })(),
+    usage: Promise.resolve({ promptTokens: 7, completionTokens: 5 }),
+  })
+  const session = dispatchAiSdk({
+    provider: "anthropic",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "claude-x",
+      providerCredentials: { apiKey: "sk", protocol: "anthropic" },
+    },
+    emit,
+    log: () => {},
+    streamText: partialThenError,
+  })
+  assert.ok(session)
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.ok(ended, "a session_ended is emitted")
+  // The error is surfaced (drives routing-fallback + breaker), not swallowed.
+  assert.match(ended.error, /529 Overloaded/)
+  // The partial text already streamed is preserved (finish closed the blocks).
+  const snaps = events.filter((e) => e.type === "event" && e.event.type === "assistant")
+  assert.ok(snaps.length >= 1, "the partial assistant text was emitted")
+  const lastText = snaps[snaps.length - 1].event.message.content[0].text
+  assert.match(lastText, /Here is part of the answer/)
 })
 
 test("closeInput cancels in-flight turn and ends session", async () => {
