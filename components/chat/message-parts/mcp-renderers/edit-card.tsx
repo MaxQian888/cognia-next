@@ -4,6 +4,7 @@
 // `Edit`/`MultiEdit` payloads, which share the same input shape). Shows the
 // target path and a before/after diff per edit.
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { FilePenLineIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
@@ -26,6 +27,17 @@ export function EditCard({ part }: { part: ToolUIPart }) {
   const t = useTranslations("chat.mcp.edit")
   const input = (part.input ?? {}) as EditInput
   const path = input.file_path ?? input.path
+
+  const resultText = typeof part.output === "string" ? part.output : undefined
+  // Only the first line is shown — slice at the first newline instead of
+  // splitting the whole (potentially large) string. Keep the original
+  // truthiness guard on `resultText` so the rendered DOM is identical.
+  const resultFirstLine = useMemo(() => {
+    if (resultText === undefined) return undefined
+    const nl = resultText.indexOf("\n")
+    return nl === -1 ? resultText : resultText.slice(0, nl)
+  }, [resultText])
+
   if (!path) return null
 
   const edits: EditEntry[] = Array.isArray(input.edits)
@@ -34,8 +46,6 @@ export function EditCard({ part }: { part: ToolUIPart }) {
       ? [input]
       : []
   if (edits.length === 0) return null
-
-  const resultText = typeof part.output === "string" ? part.output : undefined
 
   return (
     <McpCardShell title={t("title")} badge={path} testId="mcp-edit-card">
@@ -51,7 +61,7 @@ export function EditCard({ part }: { part: ToolUIPart }) {
           ))}
           {resultText && (
             <p className="text-[11px] text-muted-foreground" data-testid="mcp-edit-result">
-              {resultText.split("\n")[0]}
+              {resultFirstLine}
             </p>
           )}
         </div>

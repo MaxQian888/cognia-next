@@ -34,6 +34,58 @@ export function useParsedOutput<T>(output: unknown): T | null {
   return useMemo(() => parseOutputJson(output) as T | null, [output])
 }
 
+/**
+ * Extract the hostname from a URL for the compact card badges. Falls back to
+ * the raw string when the value isn't a parseable URL. Shared by the WebFetch
+ * and WebSearch cards (previously duplicated verbatim in both).
+ */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
+
+/**
+ * Canonical file-extension → syntax-highlighting language map. Hoisted to
+ * module scope so it isn't reallocated on every render, and shared by the
+ * Read / Write cards (which previously kept two separately-drifting copies —
+ * this superset is a strict union of both so neither card loses a mapping).
+ */
+const LANGUAGE_BY_EXT: Record<string, string> = {
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  mjs: "javascript",
+  py: "python",
+  rs: "rust",
+  go: "go",
+  java: "java",
+  rb: "ruby",
+  cs: "csharp",
+  c: "c",
+  cpp: "cpp",
+  h: "c",
+  hpp: "cpp",
+  md: "markdown",
+  json: "json",
+  yml: "yaml",
+  yaml: "yaml",
+  toml: "toml",
+  css: "css",
+  html: "html",
+  sh: "bash",
+  sql: "sql",
+}
+
+export function languageFromPath(path: string | undefined): string {
+  if (!path) return "text"
+  const ext = path.toLowerCase().split(".").pop() ?? ""
+  return LANGUAGE_BY_EXT[ext] ?? "text"
+}
+
 export function McpCardShell({
   title,
   badge,

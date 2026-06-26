@@ -6,6 +6,7 @@
 // old_string/new_string payloads these tools carry, without pulling a diff
 // library into the renderer bundle.
 
+import { memo, useMemo } from "react"
 import { cn } from "@/lib/utils"
 
 export interface DiffPreviewProps {
@@ -14,9 +15,17 @@ export interface DiffPreviewProps {
   className?: string
 }
 
-export function DiffPreview({ oldText, newText, className }: DiffPreviewProps) {
-  const oldLines = oldText.length > 0 ? oldText.split("\n") : []
-  const newLines = newText.length > 0 ? newText.split("\n") : []
+export const DiffPreview = memo(function DiffPreview({
+  oldText,
+  newText,
+  className,
+}: DiffPreviewProps) {
+  // Splitting the full before/after payloads is the only real work this
+  // component does; memoize so re-renders driven by sibling streaming updates
+  // (this block is also mounted inside the edit-card `.map` and the
+  // tool-approval dialog) don't re-split unchanged strings.
+  const oldLines = useMemo(() => (oldText.length > 0 ? oldText.split("\n") : []), [oldText])
+  const newLines = useMemo(() => (newText.length > 0 ? newText.split("\n") : []), [newText])
   return (
     <div
       className={cn(
@@ -47,4 +56,4 @@ export function DiffPreview({ oldText, newText, className }: DiffPreviewProps) {
       ))}
     </div>
   )
-}
+})

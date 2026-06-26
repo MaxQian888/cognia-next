@@ -3,6 +3,7 @@
 // Structured card for the core `ls` tool — directory listing, reusing the
 // GlobCard list layout.
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { FolderOpenIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
@@ -15,8 +16,12 @@ interface LsInput {
 export function LsCard({ part }: { part: ToolUIPart }) {
   const t = useTranslations("chat.mcp.ls")
   const input = (part.input ?? {}) as LsInput
-  const output = typeof part.output === "string" ? part.output : ""
-  const lines = output.split(/\r?\n/).filter(Boolean)
+  // Re-split only when the raw output changes; a large directory listing is
+  // otherwise re-split on every streaming token of the surrounding message.
+  const lines = useMemo(() => {
+    const output = typeof part.output === "string" ? part.output : ""
+    return output.split(/\r?\n/).filter(Boolean)
+  }, [part.output])
   // First output line is the resolved directory path; the rest are entries.
   const dir = lines[0] ?? input.path
   const entries = lines.slice(1)

@@ -29,6 +29,7 @@ import net from "node:net"
 import { randomUUID } from "node:crypto"
 
 import { SERVER_NAME, SERVER_VERSION, rawTools, buildDispatch } from "./a2ui-tools/tool-defs.mjs"
+import { negotiateProtocolVersion } from "./a2ui-tools/protocol-version.mjs"
 
 const VERSION = SERVER_VERSION
 
@@ -106,8 +107,11 @@ function handle(req) {
   const { method, id, params } = req
   switch (method) {
     case "initialize": {
+      // Echo the client's requested protocol version when supported, else our
+      // preferred one — instead of always answering `2024-11-05`. See
+      // `a2ui-tools/protocol-version.mjs`.
       sendResponse(id, {
-        protocolVersion: "2024-11-05",
+        protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: SERVER_NAME, version: VERSION },
       })

@@ -1,9 +1,10 @@
 "use client"
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { GlobeIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, useParsedOutput } from "./common"
+import { McpCardShell, hostOf, useParsedOutput } from "./common"
 
 interface WebFetchInput {
   url?: string
@@ -16,14 +17,6 @@ interface WebFetchOutput {
   result?: string
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return url
-  }
-}
-
 /**
  * Renderer for the Claude built-in `WebFetch` tool: the fetched URL (clickable),
  * the optional extraction prompt, and a scrollable preview of the returned
@@ -34,14 +27,18 @@ export function WebFetchCard({ part }: { part: ToolUIPart }) {
   const input = (part.input ?? {}) as WebFetchInput
   const parsed = useParsedOutput<WebFetchOutput>(part.output)
 
-  if (!input.url) return null
+  // Resolve + truncate the fetched body once per output change; a large page
+  // is otherwise re-sliced on every streaming re-render of the message.
+  const preview = useMemo(() => {
+    const content =
+      parsed?.content ??
+      parsed?.text ??
+      parsed?.result ??
+      (typeof part.output === "string" ? part.output : "")
+    return content.length > 2000 ? `${content.slice(0, 2000)}…` : content
+  }, [parsed, part.output])
 
-  const content =
-    parsed?.content ??
-    parsed?.text ??
-    parsed?.result ??
-    (typeof part.output === "string" ? part.output : "")
-  const preview = content.length > 2000 ? `${content.slice(0, 2000)}…` : content
+  if (!input.url) return null
 
   return (
     <McpCardShell title="WebFetch" badge={hostOf(input.url)} testId="mcp-webfetch-card">

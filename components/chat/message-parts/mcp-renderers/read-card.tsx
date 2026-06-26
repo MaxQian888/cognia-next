@@ -1,8 +1,9 @@
 "use client"
 
+import { useMemo } from "react"
 import { FileIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, useParsedOutput } from "./common"
+import { McpCardShell, languageFromPath, useParsedOutput } from "./common"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 
 interface ReadInput {
@@ -18,47 +19,20 @@ interface ReadOutput {
   startLine?: number
 }
 
-function languageFromPath(path: string | undefined): string {
-  if (!path) return "text"
-  const ext = path.toLowerCase().split(".").pop() ?? ""
-  const map: Record<string, string> = {
-    ts: "typescript",
-    tsx: "tsx",
-    js: "javascript",
-    jsx: "jsx",
-    py: "python",
-    rs: "rust",
-    go: "go",
-    java: "java",
-    rb: "ruby",
-    cs: "csharp",
-    c: "c",
-    cpp: "cpp",
-    h: "c",
-    hpp: "cpp",
-    md: "markdown",
-    json: "json",
-    yml: "yaml",
-    yaml: "yaml",
-    toml: "toml",
-    css: "css",
-    html: "html",
-    sh: "bash",
-    sql: "sql",
-  }
-  return map[ext] ?? "text"
-}
-
 export function ReadCard({ part }: { part: ToolUIPart }) {
   const input = (part.input ?? {}) as ReadInput
   const path = input.path ?? input.file_path
   const parsed = useParsedOutput<ReadOutput>(part.output)
+  // Joining a multi-line `lines[]` payload back into a single string can be
+  // expensive for large files; recompute only when the parsed/raw output moves.
+  const code = useMemo(
+    () =>
+      parsed?.content ??
+      (Array.isArray(parsed?.lines) ? parsed!.lines.join("\n") : undefined) ??
+      (typeof part.output === "string" ? part.output : ""),
+    [parsed, part.output]
+  )
   if (!path) return null
-
-  const code =
-    parsed?.content ??
-    (Array.isArray(parsed?.lines) ? parsed!.lines.join("\n") : undefined) ??
-    (typeof part.output === "string" ? part.output : "")
 
   return (
     <McpCardShell title="Read" badge={path} testId="mcp-read-card">

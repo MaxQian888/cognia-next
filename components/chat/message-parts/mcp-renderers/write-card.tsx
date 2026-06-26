@@ -3,40 +3,14 @@
 // Structured card for the core `write` tool (and SDK `Write`): target path +
 // a syntax-highlighted preview of the content being written.
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { FilePlus2Icon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell } from "./common"
+import { McpCardShell, languageFromPath } from "./common"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 
 const PREVIEW_CHAR_CAP = 4_000
-
-function languageFromPath(path: string | undefined): string {
-  if (!path) return "text"
-  const ext = path.toLowerCase().split(".").pop() ?? ""
-  const map: Record<string, string> = {
-    ts: "typescript",
-    tsx: "tsx",
-    js: "javascript",
-    jsx: "jsx",
-    mjs: "javascript",
-    py: "python",
-    rs: "rust",
-    go: "go",
-    java: "java",
-    rb: "ruby",
-    md: "markdown",
-    json: "json",
-    yml: "yaml",
-    yaml: "yaml",
-    toml: "toml",
-    css: "css",
-    html: "html",
-    sh: "bash",
-    sql: "sql",
-  }
-  return map[ext] ?? "text"
-}
 
 interface WriteInput {
   file_path?: string
@@ -48,10 +22,18 @@ export function WriteCard({ part }: { part: ToolUIPart }) {
   const t = useTranslations("chat.mcp.write")
   const input = (part.input ?? {}) as WriteInput
   const path = input.file_path ?? input.path
+  const content = typeof input.content === "string" ? input.content : ""
+  // Slicing the preview and counting lines both scan the full file content;
+  // recompute only when the written content changes, not on every render.
+  const { clipped, preview, lineCount } = useMemo(() => {
+    const isClipped = content.length > PREVIEW_CHAR_CAP
+    return {
+      clipped: isClipped,
+      preview: isClipped ? content.slice(0, PREVIEW_CHAR_CAP) : content,
+      lineCount: content.split("\n").length,
+    }
+  }, [content])
   if (!path || typeof input.content !== "string") return null
-
-  const clipped = input.content.length > PREVIEW_CHAR_CAP
-  const preview = clipped ? input.content.slice(0, PREVIEW_CHAR_CAP) : input.content
 
   return (
     <McpCardShell title={t("title")} badge={path} testId="mcp-write-card">
@@ -59,7 +41,7 @@ export function WriteCard({ part }: { part: ToolUIPart }) {
         <FilePlus2Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[11px] text-muted-foreground" data-testid="mcp-write-path">
-            {path} · {t("lineCount", { count: input.content.split("\n").length })}
+            {path} · {t("lineCount", { count: lineCount })}
           </p>
           <div className="mt-1" data-testid="mcp-write-code">
             <CodeBlock code={preview} language={languageFromPath(path)} showLineNumbers />

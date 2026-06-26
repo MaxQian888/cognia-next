@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl"
 import { SearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, useParsedOutput } from "./common"
+import { McpCardShell, hostOf, useParsedOutput } from "./common"
 
 interface WebSearchInput {
   query?: string
@@ -19,14 +19,6 @@ interface SearchResult {
 interface WebSearchOutput {
   results?: SearchResult[]
   items?: SearchResult[]
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return url
-  }
 }
 
 /**
