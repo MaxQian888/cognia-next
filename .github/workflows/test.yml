@@ -13,6 +13,10 @@ name: Test Suite
 on:
   workflow_call:
   workflow_dispatch:
+  schedule:
+    # Nightly full run — re-enables the desktop Tauri E2E job (`e2e-tauri`),
+    # which is too slow (Windows + cargo build) to run on every PR.
+    - cron: "0 3 * * *"
 
 concurrency:
   group: test-${{ github.ref }}
@@ -284,15 +288,21 @@ jobs:
           path: playwright-report/
           retention-days: 14
 
-  e2e-tauri-driver:
-    name: E2E Tauri (Windows, opt-in)
+  e2e-tauri:
+    name: E2E Tauri (Windows)
     runs-on: windows-latest
-    # Only runs when the workflow_dispatch input asks for it. Avoids paying
-    # the cargo build cost on every PR.
-    if: github.event_name == 'workflow_dispatch'
+    # Runs nightly (schedule) and on manual dispatch. Avoids paying the cargo
+    # build cost on every PR.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
 
     permissions:
       contents: read
+
+    # NEXT_PUBLIC_E2E must be present at BUILD time so `ExposeTestGlobals`
+    # (window.__cognia* seed/reset bridges every tauri spec depends on) is
+    # compiled into the bundle — not just at Playwright run time.
+    env:
+      NEXT_PUBLIC_E2E: "1"
 
     steps:
       - name: Checkout code
@@ -312,24 +322,25 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install tauri-driver
-        run: cargo install tauri-driver --locked
+      # NOTE: tauri-driver is intentionally NOT installed — the launch helper
+      # (tests/e2e/helpers/tauri-cdp-launch.ts) connects to WebView2 directly
+      # over the Chrome DevTools Protocol and never spawns tauri-driver.
       - name: Build Tauri debug binary
         run: pnpm tauri build --debug --no-bundle
       - name: Install Playwright chromium
         run: pnpm exec playwright install --with-deps chromium
-      - name: Run Playwright tauri-driver project
-        run: pnpm exec playwright test --project=tauri-driver tests/e2e/tauri/
+      - name: Run Playwright tauri project
+        run: pnpm exec playwright test --project=tauri tests/e2e/tauri/
         env:
           CI: "true"
           NEXT_PUBLIC_E2E: "1"
-          PLAYWRIGHT_TAURI_DRIVER: "1"
+          PLAYWRIGHT_TAURI: "1"
           PLAYWRIGHT_TAURI_BIN: ${{ github.workspace }}\target\debug\cognia-next.exe
       - name: Upload Playwright HTML report
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: playwright-report-tauri-driver
+          name: playwright-report-tauri
           path: playwright-report/
           retention-days: 14
 
