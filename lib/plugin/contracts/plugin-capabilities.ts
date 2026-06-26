@@ -772,12 +772,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // Diagnostics + provider responses route through the existing
     // `monaco-bridge` + `lsp-protocol-adapter` pipeline.
     id: "lsp-server",
-    // Host runtime is fully wired (lsp-registry + monaco bridge + sidecar
-    // client are all live), but the SDK packages don't yet ship a
-    // `defineLspServer()` helper — plugin authors declare LSP servers
-    // through `manifest.lspServers[]` only. Downgrade to `experimental`
-    // until the SDK gains a typed helper; the host contract is unaffected.
-    support: "experimental",
+    // Promoted experimental→supported: the host runtime was already fully
+    // wired (lsp-registry + monaco bridge + sidecar client), and the prior
+    // "no typed SDK helper" justification is now stale — `defineLspServer()`
+    // ships at `packages/plugin-sdk/src/define/define-lsp-server.ts` and is
+    // re-exported from the root barrel + `api/lsp-server.ts`. Plugin authors
+    // can declare LSP servers via the typed helper or `manifest.lspServers[]`.
+    support: "supported",
     manifestFields: ["lspServers"],
     runtimeBinding: "lib/plugin/lsp/lsp-registry registerPluginLspServers / unregisterByOwner",
     hostBindings: [
@@ -788,13 +789,17 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/vscode-shim/monaco-bridge.ts",
       "sidecar/vscode-ext-host/src/lsp-client.ts",
     ],
-    typescriptSdk: [],
-    pythonSdk: [],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-lsp-server.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: ["plugins/test-lsp-contribution/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/lsp/lsp-registry.test.ts",
       "sidecar/vscode-ext-host/tests/lsp-client.test.mjs",
+      "packages/plugin-sdk/src/define/define-lsp-server.test.ts",
     ],
   },
   {
@@ -1236,12 +1241,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // standard registry so both the in-process and sidecar dispatch paths
     // pick them up unchanged.
     id: "cli-tools",
-    // Host runtime is fully wired (validation + exec pipeline + registry
-    // dispatch), but the capability is manifest-declarative only — the SDK
-    // packages ship no `defineCliTool()` helper yet. Same posture as
-    // `lsp-server`: experimental until a typed SDK helper exists; the host
-    // contract is unaffected.
-    support: "experimental",
+    // Promoted experimental→supported: the host runtime was already fully
+    // wired (validation + exec pipeline + registry dispatch), and the prior
+    // "no `defineCliTool()` helper yet" justification is now stale — the
+    // typed helper ships at `packages/plugin-sdk/src/define/define-cli-tool.ts`
+    // and is re-exported from the root barrel + `api/cli-tool.ts`. Plugin
+    // authors can declare CLI tools via the typed helper or `manifest.cliTools[]`.
+    support: "supported",
     manifestFields: ["cliTools"],
     runtimeBinding:
       "manager.registerPluginContributions cliTools → registry.registerTool(executeCliTool)",
@@ -1251,12 +1257,16 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/cli-tools/binary-status.ts",
       "src-tauri/src/plugin_api/cli_exec.rs",
     ],
-    typescriptSdk: [],
-    pythonSdk: [],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-cli-tool.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/cli-tools/execute-cli-tool.test.ts",
       "lib/plugin/cli-tools/cli-binary-policy.test.ts",
+      "packages/plugin-sdk/src/define/define-cli-tool.test.ts",
     ],
   },
   {
