@@ -4278,6 +4278,32 @@
       "version": "v{version}"
     }
   },
+  "execution": {
+    "cancelAll": "全部取消",
+    "cancelLeg": "取消 {label}",
+    "empty": "当前没有正在运行的任务。",
+    "kind": {
+      "chat": "对话",
+      "connector": "连接器",
+      "goal": "目标",
+      "scheduled": "计划任务",
+      "subagent": "子代理",
+      "team": "团队",
+      "workflow": "工作流",
+      "workflowStep": "工作流步骤"
+    },
+    "runningCount": "{count, plural, =0 {空闲} other {# 个运行中}}",
+    "status": {
+      "cancelled": "已取消",
+      "done": "完成",
+      "error": "错误",
+      "queued": "排队中",
+      "running": "运行中",
+      "waiting": "等待中"
+    },
+    "title": "执行监视器",
+    "watchLeg": "查看 {label}"
+  },
   "exitDialog": {
     "cancel": "取消",
     "description": "你想把 Cognia 最小化到系统托盘，还是直接退出？",
@@ -17027,6 +17053,11 @@
         "rateLimit": "速率上限（次/分钟）",
         "rateLimitHelp": "超过上限的请求会得到 HTTP 429。默认 60。",
         "rotateToken": "重新生成",
+        "sensitiveBadge": "敏感",
+        "sensitiveHeading": "敏感命令目标",
+        "sensitiveHelp": "部分目标会产生模型费用或离开设备的副作用。除非显式允许，否则即使是写权限令牌也会被拒绝（403）。",
+        "sensitiveTargetsList": "敏感目标：{targets}",
+        "sensitiveToggleLabel": "允许敏感目标",
         "startError": "启动监听器失败：{error}",
         "stopError": "停止监听器失败：{error}",
         "testFailed": "入站测试失败：{error}",
