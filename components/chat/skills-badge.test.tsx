@@ -44,4 +44,34 @@ describe("SkillsBadge", () => {
     fireEvent.click(switchEl)
     await waitFor(() => expect(onToggle).toHaveBeenCalledWith("s2", false))
   })
+
+  it("folds ephemeral attachments into the counter (net effective set)", () => {
+    render(
+      <SkillsBadge
+        skills={SKILLS}
+        disabled={new Set()}
+        onToggle={jest.fn()}
+        ephemeralSkills={[{ id: "s3", name: "Skill Three" }]}
+      />
+    )
+    // active = total = 2 character + 1 ephemeral = 3
+    expect(screen.getByText(/counter:\{"active":3,"total":3\}/)).toBeInTheDocument()
+  })
+
+  it("lists attached ephemeral skills and marks a session-disabled one inert", () => {
+    render(
+      <SkillsBadge
+        skills={SKILLS}
+        disabled={new Set(["s3"])}
+        onToggle={jest.fn()}
+        ephemeralSkills={[{ id: "s3", name: "Skill Three" }]}
+      />
+    )
+    // s3 attached but disabled → counted in total, not active.
+    expect(screen.getByText(/counter:\{"active":2,"total":3\}/)).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText("aria"))
+    expect(screen.getByText("attachedTitle")).toBeInTheDocument()
+    expect(screen.getByText("Skill Three")).toBeInTheDocument()
+    expect(screen.getByText("attachedInert")).toBeInTheDocument()
+  })
 })

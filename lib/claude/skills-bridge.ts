@@ -10,10 +10,11 @@
  *   behaviour of `lib/db/skills.ts:renderSkillsSection`.
  *
  * - **Plugin skills** (overlay). The discriminated `source` union has
- *   three shapes — `inline`, `local-folder`, and `anthropic-managed`:
- *   - `inline` and `local-folder` resolve to a markdown body that
- *     appends to the system prompt like a chat skill (handled by
- *     `resolveSkillMarkdown` in `skills-io.ts`).
+ *   five shapes — `inline`, `local-folder`, `local-bundle`, `archive`,
+ *   and `anthropic-managed`:
+ *   - `inline`, `local-folder`, `local-bundle`, and `archive` resolve to a
+ *     markdown body that appends to the system prompt like a chat skill
+ *     (all handled by `resolveSkillMarkdown` in `skills-io.ts`).
  *   - `anthropic-managed` does not produce a body. It carries a
  *     `containerSkillId` that was *intended* to attach the managed skill at
  *     request time. **This is not currently deliverable**: the Claude Agent

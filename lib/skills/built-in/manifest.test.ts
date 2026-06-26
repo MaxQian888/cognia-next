@@ -212,6 +212,58 @@ describe("buildBuiltInSkillManifest — allowedList filter", () => {
   })
 })
 
+describe("buildBuiltInSkillManifest — requires filter", () => {
+  it("drops a skill whose required capability the channel doesn't declare", () => {
+    registerBuiltInSkill(mkSkill({ id: "lark.cal.create", requires: ["rich-card.lark"] }))
+    const m = buildBuiltInSkillManifest({
+      imBinding: { platform: "lark", adapterId: "lark-1", conversationKey: "k" },
+      channelCapabilities: ["send.text"],
+    })
+    expect(m).toEqual([])
+  })
+
+  it("keeps a skill when the channel declares every required capability", () => {
+    registerBuiltInSkill(mkSkill({ id: "lark.cal.create", requires: ["rich-card.lark"] }))
+    const m = buildBuiltInSkillManifest({
+      imBinding: { platform: "lark", adapterId: "lark-1", conversationKey: "k" },
+      channelCapabilities: ["send.text", "rich-card.lark"],
+    })
+    expect(m.map((e) => e.skillId)).toEqual(["lark.cal.create"])
+  })
+
+  it("ignores requires in non-IM (desktop) sessions", () => {
+    registerBuiltInSkill(mkSkill({ id: "lark.cal.create", requires: ["rich-card.lark"] }))
+    const m = buildBuiltInSkillManifest({})
+    expect(m.map((e) => e.skillId)).toEqual(["lark.cal.create"])
+  })
+
+  it("passes skills with no requires regardless of channel capabilities", () => {
+    registerBuiltInSkill(mkSkill({ id: "lark.cal.list" }))
+    const m = buildBuiltInSkillManifest({
+      imBinding: { platform: "lark", adapterId: "lark-1", conversationKey: "k" },
+      channelCapabilities: [],
+    })
+    expect(m.map((e) => e.skillId)).toEqual(["lark.cal.list"])
+  })
+
+  it("passes a skill declaring an empty requires array", () => {
+    registerBuiltInSkill(mkSkill({ id: "lark.cal.list", requires: [] }))
+    const m = buildBuiltInSkillManifest({
+      imBinding: { platform: "lark", adapterId: "lark-1", conversationKey: "k" },
+      channelCapabilities: [],
+    })
+    expect(m.map((e) => e.skillId)).toEqual(["lark.cal.list"])
+  })
+
+  it("drops a requires-bearing skill when channelCapabilities is omitted in IM", () => {
+    registerBuiltInSkill(mkSkill({ id: "lark.cal.create", requires: ["rich-card.lark"] }))
+    const m = buildBuiltInSkillManifest({
+      imBinding: { platform: "lark", adapterId: "lark-1", conversationKey: "k" },
+    })
+    expect(m).toEqual([])
+  })
+})
+
 describe("buildBuiltInSkillManifest — manifest shape", () => {
   it("entries carry name, description, jsonSchema, pluginId, skillId", () => {
     registerBuiltInSkill(mkSkill())

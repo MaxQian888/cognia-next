@@ -2,10 +2,12 @@
 
 import "fake-indexeddb/auto"
 import {
+  activeEffectiveSkillIds,
   bulkImportSkills,
   createSkill,
   deleteSkill,
   duplicateSkill,
+  resolveEffectiveSkills,
   getSkill,
   inferCategory,
   inferSource,
@@ -158,6 +160,54 @@ describe("recordSkillUsage", () => {
 
   it("is a no-op for empty input", async () => {
     await expect(recordSkillUsage([])).resolves.toBeUndefined()
+  })
+
+  it("accumulates across calls and writes one bulkPut per call", async () => {
+    const a = await createSkill({ name: "A", content: "x" })
+    const b = await createSkill({ name: "B", content: "x" })
+    const db = getDb()
+    const putSpy = jest.spyOn(db.skills, "bulkPut")
+    await recordSkillUsage([a.id, b.id, "missing"])
+    await recordSkillUsage([a.id])
+    expect((await getSkill(a.id))?.usageCount).toBe(2)
+    expect((await getSkill(b.id))?.usageCount).toBe(1)
+    expect(putSpy).toHaveBeenCalledTimes(2)
+    putSpy.mockRestore()
+  })
+})
+
+describe("resolveEffectiveSkills / activeEffectiveSkillIds", () => {
+  it("unions character then ephemeral, deduping with first-source-wins", () => {
+    const refs = resolveEffectiveSkills({
+      characterSkillIds: ["a", "b"],
+      ephemeralSkillIds: ["b", "c"],
+    })
+    expect(refs).toEqual([
+      { id: "a", source: "character", inert: false },
+      { id: "b", source: "character", inert: false },
+      { id: "c", source: "ephemeral", inert: false },
+    ])
+  })
+
+  it("tags session-disabled ids as inert but keeps them in the set", () => {
+    const refs = resolveEffectiveSkills({
+      characterSkillIds: ["a"],
+      ephemeralSkillIds: ["c"],
+      disabledIds: ["c"],
+    })
+    expect(refs.find((r) => r.id === "c")?.inert).toBe(true)
+    expect(
+      activeEffectiveSkillIds({
+        characterSkillIds: ["a"],
+        ephemeralSkillIds: ["c"],
+        disabledIds: ["c"],
+      })
+    ).toEqual(["a"])
+  })
+
+  it("returns an empty set for empty inputs", () => {
+    expect(resolveEffectiveSkills({})).toEqual([])
+    expect(activeEffectiveSkillIds({})).toEqual([])
   })
 })
 
@@ -312,6 +362,18 @@ describe("bulkImportSkills", () => {
     expect(refreshed?.name).toBe("Reviewer 2")
   })
 
+  it("loads the table once for a batch of canonicalId drafts (no per-draft rescan)", async () => {
+    const db = getDb()
+    const scanSpy = jest.spyOn(db.skills, "toArray")
+    await bulkImportSkills([
+      { name: "C1", content: "a", canonicalId: "bundle:c1" },
+      { name: "C2", content: "b", canonicalId: "bundle:c2" },
+      { name: "C3", content: "c", canonicalId: "bundle:c3" },
+    ])
+    expect(scanSpy).toHaveBeenCalledTimes(1)
+    scanSpy.mockRestore()
+  })
+
   it("persists resources alongside the row when the draft carries them", async () => {
     const result = await bulkImportSkills([
       {
@@ -450,6 +512,39 @@ describe("upsertSkillByCanonicalId", () => {
     expect(resources).toHaveLength(1)
     expect(resources[0].path).toBe("references/b.md")
   })
+
+  it("uses a provided canonicalId map and skips the table scan", async () => {
+    const existing = await createSkill({
+      name: "Mapped",
+      content: "v1",
+      canonicalId: "bundle:mapped",
+    })
+    const db = getDb()
+    const scanSpy = jest.spyOn(db.skills, "toArray")
+    const res = await upsertSkillByCanonicalId({
+      draft: { name: "Mapped", content: "v2", canonicalId: "bundle:mapped" },
+      canonicalId: "bundle:mapped",
+      existingByCanonicalId: new Map([["bundle:mapped", existing]]),
+    })
+    expect(res.created).toBe(false)
+    expect(res.skill.id).toBe(existing.id)
+    expect(res.skill.content).toBe("v2")
+    expect(scanSpy).not.toHaveBeenCalled()
+    scanSpy.mockRestore()
+  })
+
+  it("treats a missing map key as a new row without a scan fallback", async () => {
+    const db = getDb()
+    const scanSpy = jest.spyOn(db.skills, "toArray")
+    const res = await upsertSkillByCanonicalId({
+      draft: { name: "Brand", content: "x", canonicalId: "bundle:brand" },
+      canonicalId: "bundle:brand",
+      existingByCanonicalId: new Map(),
+    })
+    expect(res.created).toBe(true)
+    expect(scanSpy).not.toHaveBeenCalled()
+    scanSpy.mockRestore()
+  })
 })
 
 describe("seedBuiltInSkills", () => {
@@ -490,5 +585,28 @@ describe("seedBuiltInSkills", () => {
     await seedBuiltInSkills()
     const after = await listResourcesForSkill("skill_builtin_im_auto_reply")
     expect(after.length).toBe(refs.length)
+  })
+
+  it("skips redundant row writes on an unchanged reseed", async () => {
+    await seedBuiltInSkills()
+    const db = getDb()
+    const putSpy = jest.spyOn(db.skills, "put")
+    await seedBuiltInSkills()
+    expect(putSpy).not.toHaveBeenCalled()
+    putSpy.mockRestore()
+  })
+
+  it("rewrites a row whose content drifted from the catalog", async () => {
+    await seedBuiltInSkills()
+    const target = (await listSkills()).find((s) => s.isBuiltIn)!
+    const fresh = target.content
+    await updateSkill(target.id, { content: "stale drifted body" })
+    const db = getDb()
+    const putSpy = jest.spyOn(db.skills, "put")
+    await seedBuiltInSkills()
+    expect(putSpy).toHaveBeenCalled()
+    // Reseed restores the catalog content for the drifted row.
+    expect((await getSkill(target.id))?.content).toBe(fresh)
+    putSpy.mockRestore()
   })
 })

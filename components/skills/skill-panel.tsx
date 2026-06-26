@@ -11,6 +11,7 @@ import { createSkill, deleteSkill, getSkill, updateSkill } from "@/lib/db/skills
 import { useSkills, useSkillShortcuts } from "@/hooks/skills"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useSkillsStore } from "@/stores/skills"
+import { useChatStore } from "@/stores/chat"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { SkillPanelHeader } from "./skill-panel-header"
 import { SkillPanelTabs } from "./skill-panel-tabs"
@@ -299,6 +300,9 @@ function SkillDeleteHost() {
         if (!target) return
         try {
           await deleteSkill(target.skillId)
+          // Drop any stale ad-hoc attachment so a deleted skill can't linger
+          // as a dead id in the composer's ephemeral list.
+          useChatStore.getState().removeEphemeralSkillIds([target.skillId])
           toast.success(tToasts("removedName", { name: target.name }))
           loggers.skills.info("remove ok", { skillId: target.skillId, name: target.name })
         } catch (err) {

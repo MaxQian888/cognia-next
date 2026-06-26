@@ -69,9 +69,11 @@
   },
   "composer": {
     "skillPicker": {
+      "builtinGroupHeading": "Built-in skills",
       "description": "Select skills to include in the next message only.",
       "empty": "No skills found.",
       "groupHeading": "Available skills",
+      "inertChip": "{name} is disabled for this session and won't be sent.",
       "removeChip": "Remove {name}",
       "searchPlaceholder": "Search skills…",
       "title": "Attach a skill",

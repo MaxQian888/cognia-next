@@ -69,9 +69,11 @@
   },
   "composer": {
     "skillPicker": {
+      "builtinGroupHeading": "内置技能",
       "description": "选择仅在下一条消息中生效的技能。",
       "empty": "未找到技能。",
       "groupHeading": "可用技能",
+      "inertChip": "{name} 已在本会话停用，不会发送。",
       "removeChip": "移除 {name}",
       "searchPlaceholder": "搜索技能…",
       "title": "附加技能",

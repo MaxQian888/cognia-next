@@ -231,6 +231,7 @@ jest.mock("./editor/skill-editor-workspace", () => ({
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { useChatStore } from "@/stores/chat"
 import { SkillPanel } from "./skill-panel"
 
 beforeEach(() => {
@@ -345,10 +346,13 @@ describe("SkillPanel", () => {
 
   it("calls deleteSkill and clears the target when the delete dialog confirms", async () => {
     storeState.deleteTarget = { skillId: "s1", name: "Doomed" }
+    useChatStore.getState().setEphemeralSkillIds(["s1", "keep"])
     render(<SkillPanel />)
     fireEvent.click(screen.getByTestId("delete-confirm"))
     await waitFor(() => expect(deleteSkill).toHaveBeenCalledWith("s1"))
     expect(storeState.setDeleteTarget).toHaveBeenCalledWith(null)
+    // The deleted skill is pruned from the composer's ad-hoc attachments.
+    await waitFor(() => expect(useChatStore.getState().ephemeralSkillIds).toEqual(["keep"]))
   })
 
   it("still clears the target when deleteSkill fails", async () => {

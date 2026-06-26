@@ -32,6 +32,7 @@ jest.mock("@/lib/logging", () => ({
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useSkillsStore } from "@/stores/skills"
+import { useChatStore } from "@/stores/chat"
 import { deleteSkill, setSkillStatus } from "@/lib/db/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
 import { SkillBatchActionsBar } from "./skill-batch-actions-bar"
@@ -101,11 +102,13 @@ describe("SkillBatchActionsBar", () => {
     await waitFor(() => expect(exportSkillsToDirWithFeedback).toHaveBeenCalled())
   })
 
-  it("batch-deletes the selection", async () => {
+  it("batch-deletes the selection and prunes those ids from ephemeral attachments", async () => {
     useSkillsStore.setState({ selection: new Set(["s1"]) } as never)
+    useChatStore.getState().setEphemeralSkillIds(["s1", "keep"])
     render(<SkillBatchActionsBar />)
     fireEvent.click(screen.getByText("delete"))
     await waitFor(() => expect(deleteSkill).toHaveBeenCalledWith("s1"))
+    await waitFor(() => expect(useChatStore.getState().ephemeralSkillIds).toEqual(["keep"]))
   })
 
   it("removes an existing tag chip from the selection", async () => {

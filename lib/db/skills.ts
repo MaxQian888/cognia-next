@@ -153,15 +153,59 @@ export async function recordSkillUsage(ids: string[]): Promise<void> {
   const now = Date.now()
   const db = getDb()
   await db.transaction("rw", db.skills, async () => {
-    for (const id of ids) {
-      const row = await db.skills.get(id)
-      if (!row) continue
-      await db.skills.update(id, {
-        usageCount: (row.usageCount ?? 0) + 1,
-        lastUsedAt: now,
-      })
-    }
+    // Single bulkGet + bulkPut instead of a per-id get/update round-trip.
+    const rows = await db.skills.bulkGet(ids)
+    const updated = rows
+      .filter((row): row is Skill => Boolean(row))
+      .map((row) => ({ ...row, usageCount: (row.usageCount ?? 0) + 1, lastUsedAt: now }))
+    if (updated.length > 0) await db.skills.bulkPut(updated)
   })
+}
+
+/** One resolved entry in the effective skill set for a send. */
+export interface EffectiveSkillRef {
+  id: string
+  /** Where this id came from: the active character vs an ad-hoc attachment. */
+  source: "character" | "ephemeral"
+  /** Switched off for this session — present but will NOT be injected. */
+  inert: boolean
+}
+
+/**
+ * Resolve the effective skill set for a send/UI surface: the character's
+ * skills followed by ad-hoc ephemeral attachments, de-duplicated (first
+ * occurrence wins its source), each tagged with whether the session has it
+ * disabled. This is the single source of truth shared by `build-options`
+ * (send path) and the chat UI (composer chips, per-session badge) so the two
+ * never drift.
+ */
+export function resolveEffectiveSkills(input: {
+  characterSkillIds?: readonly string[]
+  ephemeralSkillIds?: readonly string[]
+  disabledIds?: Iterable<string>
+}): EffectiveSkillRef[] {
+  const disabled = new Set(input.disabledIds ?? [])
+  const seen = new Set<string>()
+  const out: EffectiveSkillRef[] = []
+  const push = (id: string, source: EffectiveSkillRef["source"]) => {
+    if (seen.has(id)) return
+    seen.add(id)
+    out.push({ id, source, inert: disabled.has(id) })
+  }
+  for (const id of input.characterSkillIds ?? []) push(id, "character")
+  for (const id of input.ephemeralSkillIds ?? []) push(id, "ephemeral")
+  return out
+}
+
+/** Just the ids that will actually be injected (active, de-duplicated, ordered). */
+export function activeEffectiveSkillIds(input: {
+  characterSkillIds?: readonly string[]
+  ephemeralSkillIds?: readonly string[]
+  disabledIds?: Iterable<string>
+}): string[] {
+  return resolveEffectiveSkills(input)
+    .filter((r) => !r.inert)
+    .map((r) => r.id)
 }
 
 /**
@@ -206,10 +250,19 @@ export function inferSource(skill: Skill): SkillSource {
 export async function upsertSkillByCanonicalId(input: {
   draft: SkillDraft
   canonicalId: string
+  /**
+   * Optional canonicalId→row map pre-loaded by a bulk caller so each draft
+   * skips its own full-table scan. When supplied it is authoritative: a
+   * missing key means "no existing row" (→ create). When omitted, the
+   * function self-scans (single-call callers like marketplace install).
+   */
+  existingByCanonicalId?: Map<string, Skill>
 }): Promise<{ skill: Skill; created: boolean }> {
-  const { draft, canonicalId } = input
+  const { draft, canonicalId, existingByCanonicalId } = input
   const db = getDb()
-  const existing = (await db.skills.toArray()).find((s) => s.canonicalId === canonicalId)
+  const existing = existingByCanonicalId
+    ? existingByCanonicalId.get(canonicalId)
+    : (await db.skills.toArray()).find((s) => s.canonicalId === canonicalId)
   if (existing) {
     await updateSkill(existing.id, {
       name: draft.name,
@@ -272,6 +325,10 @@ export async function bulkImportSkills(
   }
   const existing = await db.skills.toArray()
   const byName = new Map(existing.map((s) => [s.name.toLowerCase(), s]))
+  // Reuse the single full-table load for canonicalId lookups too, so the
+  // upsert path doesn't re-scan the table once per draft.
+  const byCanonicalId = new Map<string, Skill>()
+  for (const s of existing) if (s.canonicalId) byCanonicalId.set(s.canonicalId, s)
 
   for (const draft of drafts) {
     try {
@@ -286,8 +343,12 @@ export async function bulkImportSkills(
         const { skill, created } = await upsertSkillByCanonicalId({
           draft,
           canonicalId: draft.canonicalId,
+          existingByCanonicalId: byCanonicalId,
         })
         byName.set(skill.name.toLowerCase(), skill)
+        // Keep the map current so a repeated canonicalId in the same batch
+        // updates the just-written row instead of creating a duplicate.
+        if (skill.canonicalId) byCanonicalId.set(skill.canonicalId, skill)
         if (created) result.created += 1
         else result.updated += 1
         continue
@@ -370,6 +431,28 @@ export function renderSkillsCatalog(skills: Skill[]): string {
     "",
     ...lines,
   ].join("\n")
+}
+
+/**
+ * Key-order-independent structural equality for two stored rows. Drops
+ * `undefined` fields and sorts object keys recursively so the comparison
+ * matches what Dexie would persist. Used to skip redundant built-in reseed
+ * writes.
+ */
+function sameStoredRow(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(norm)
+    if (v && typeof v === "object") {
+      return Object.fromEntries(
+        Object.entries(v as Record<string, unknown>)
+          .filter(([, val]) => val !== undefined)
+          .sort(([x], [y]) => x.localeCompare(y))
+          .map(([k, val]) => [k, norm(val)])
+      )
+    }
+    return v
+  }
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b))
 }
 
 export async function seedBuiltInSkills(): Promise<void> {
@@ -467,14 +550,18 @@ export async function seedBuiltInSkills(): Promise<void> {
       continue
     }
     // Preserve user-toggled status & usage telemetry; refresh content/category.
-    await db.skills.put({
+    const merged: Skill = {
       ...seed,
       status: existing.status ?? seed.status,
       usageCount: existing.usageCount ?? 0,
       lastUsedAt: existing.lastUsedAt,
       createdAt: existing.createdAt,
       updatedAt: existing.updatedAt,
-    })
+    }
+    // Skip the write when reseeding would store a byte-identical row, so a
+    // settled built-in catalog is a true no-op on every subsequent boot.
+    if (sameStoredRow(merged, existing)) continue
+    await db.skills.put(merged)
   }
 
   // Persist each functional skill's bundled reference resources into the
