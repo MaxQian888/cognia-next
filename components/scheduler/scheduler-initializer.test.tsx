@@ -20,6 +20,14 @@ jest.mock("@/lib/logging", () => ({
   },
 }))
 
+// The execution-event bridge is wired into the scheduler boot; mock it so the
+// initializer test doesn't pull the real broker / logging chain.
+const teardownBridgeMock = jest.fn()
+const installBridgeMock = jest.fn(() => teardownBridgeMock)
+jest.mock("@/lib/execution/event-bridge", () => ({
+  installExecutionEventBridge: () => installBridgeMock(),
+}))
+
 type StoreState = {
   initialize: jest.Mock<Promise<void>, []>
   isInitialized: boolean
@@ -43,6 +51,8 @@ beforeEach(() => {
   stopSchedulerSystem.mockClear()
   logInfo.mockClear()
   logError.mockClear()
+  installBridgeMock.mockClear()
+  teardownBridgeMock.mockClear()
 })
 
 describe("SchedulerInitializer", () => {
@@ -85,6 +95,16 @@ describe("SchedulerInitializer", () => {
     unmount()
     expect(stopSchedulerSystem).toHaveBeenCalled()
     expect(storeState.setSchedulerStatus).toHaveBeenCalledWith("stopped")
+  })
+
+  it("installs the execution-event bridge on mount and tears it down on unmount", async () => {
+    const { unmount } = render(<SchedulerInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(installBridgeMock).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(teardownBridgeMock).toHaveBeenCalledTimes(1)
   })
 
   it("captures beforeunload to stop the scheduler", async () => {

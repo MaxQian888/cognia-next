@@ -1,0 +1,26 @@
+{
+  "title": "Execution Monitor",
+  "runningCount": "{count, plural, =0 {Idle} other {# running}}",
+  "empty": "Nothing is running right now.",
+  "cancelAll": "Cancel all",
+  "cancelLeg": "Cancel {label}",
+  "watchLeg": "Watch {label}",
+  "kind": {
+    "chat": "Chat",
+    "workflowStep": "Workflow step",
+    "scheduled": "Scheduled",
+    "connector": "Connector",
+    "subagent": "Sub-agent",
+    "goal": "Goal",
+    "team": "Team",
+    "workflow": "Workflow"
+  },
+  "status": {
+    "queued": "Queued",
+    "running": "Running",
+    "waiting": "Waiting",
+    "done": "Done",
+    "error": "Error",
+    "cancelled": "Cancelled"
+  }
+}

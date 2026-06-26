@@ -4,6 +4,7 @@ import { useEffect } from "react"
 
 import { stopSchedulerSystem } from "@/lib/scheduler"
 import { useSchedulerStore } from "@/stores/scheduler"
+import { installExecutionEventBridge } from "@/lib/execution/event-bridge"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
@@ -23,6 +24,12 @@ export function SchedulerInitializer() {
   useEffect(() => {
     if (isInitialized) return
 
+    // Bridge the ExecutionBroker's leg-completed events into the scheduler event
+    // system so an event-triggered task can react to "any chat / agent run
+    // finished" (fills the chat:completed + agent:completed gaps; goal/team/plan
+    // already emit their own subsystem-level events). Idempotent.
+    const teardownBridge = installExecutionEventBridge()
+
     initialize()
       .then(() => {
         setSchedulerStatus("running")
@@ -36,6 +43,7 @@ export function SchedulerInitializer() {
     // Cleanup on component unmount
     return () => {
       try {
+        teardownBridge()
         stopSchedulerSystem()
         setSchedulerStatus("stopped")
         log.info("[SchedulerInitializer] Scheduler system stopped")

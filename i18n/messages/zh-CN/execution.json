@@ -1,0 +1,26 @@
+{
+  "title": "执行监视器",
+  "runningCount": "{count, plural, =0 {空闲} other {# 个运行中}}",
+  "empty": "当前没有正在运行的任务。",
+  "cancelAll": "全部取消",
+  "cancelLeg": "取消 {label}",
+  "watchLeg": "查看 {label}",
+  "kind": {
+    "chat": "对话",
+    "workflowStep": "工作流步骤",
+    "scheduled": "计划任务",
+    "connector": "连接器",
+    "subagent": "子代理",
+    "goal": "目标",
+    "team": "团队",
+    "workflow": "工作流"
+  },
+  "status": {
+    "queued": "排队中",
+    "running": "运行中",
+    "waiting": "等待中",
+    "done": "完成",
+    "error": "错误",
+    "cancelled": "已取消"
+  }
+}

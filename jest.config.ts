@@ -100,6 +100,7 @@ const config: Config = {
     "!lib/claude/subagent-importers/types.ts",
     "!lib/perf/backend/types.ts",
     "!lib/memory/external/types.ts",
+    "!lib/execution/types.ts",
     "!lib/pet/live2d/types.ts",
     "!lib/tts/providers/adapter.ts",
     "!components/editor/diagnostics/types.ts",

@@ -24,6 +24,11 @@ export type SchedulerEventType =
   | "backup:completed"
   | "workflow:completed"
   | "agent:completed"
+  // A single chat turn finished. Emitted by the ExecutionBroker event bridge
+  // (`lib/execution/event-bridge.ts`) when a `chat` leg settles, so an
+  // event-triggered task / forward chain can react to "any chat turn finished".
+  // No subsystem emitted a per-turn chat event before the broker existed.
+  | "chat:completed"
   // Built-in multi-agent terminal events (ADR-0019 / 0022 / 0045). Emitted
   // when a Goal / Agent Team / Plan reaches a terminal status — from either a
   // direct (chat-driven) run or a scheduled run — so an event-triggered task
@@ -109,6 +114,7 @@ export function isValidEventType(eventType: string): eventType is SchedulerEvent
     "backup:completed",
     "workflow:completed",
     "agent:completed",
+    "chat:completed",
     "goal:completed",
     "agent-team:completed",
     "plan:completed",

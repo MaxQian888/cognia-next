@@ -21,6 +21,7 @@ import {
   setChatMiddlewareExecutionEnabled,
   __resetChatMiddlewareFlagForTesting,
 } from "./chat-middleware/feature-flag"
+import { getExecutionBroker, __resetExecutionBrokerForTesting } from "@/lib/execution/broker"
 
 // ── Mock the IPC layer the wrapper depends on ─────────────────────────────
 // `onClaudeMessage` returns the unlistener; we capture the handler so the
@@ -71,6 +72,14 @@ async function flushUntilSubscribed(): Promise<void> {
   }
 }
 
+// Drain a handful of microtasks — used after subscription to let the
+// `onClaudeMessage(...).then(...)` continuation dispatch `sendPrompt`.
+async function flushMicrotasks(times = 5): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve()
+  }
+}
+
 // Helper: dispatch a synthetic event to the captured handler.
 const fire = (evt: ClaudeEvent) => {
   if (!captured) throw new Error("no handler captured — onClaudeMessage not called yet")
@@ -115,8 +124,10 @@ const sessionEnded = (opts?: { error?: string; resultText?: string }): ClaudeEve
 describe("runAndCaptureAssistantReply", () => {
   it("resolves with assembled text from the assistant event", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
-    // Wait a microtask for the subscribe to land
-    await Promise.resolve()
+    // Wait for the subscribe to land (broker admission + the IPC `.then` add a
+    // couple of microtask hops before `sendPrompt` is dispatched).
+    await flushUntilSubscribed()
+    await flushMicrotasks()
     fire(assistantEvent("Hello, world!"))
     fire(sessionEnded())
     const result = await promise
@@ -909,7 +920,7 @@ describe("runAndCaptureAssistantReply", () => {
     await promise
     const toolCalls = events.filter((e) => e.type === "tool-call")
     expect(toolCalls).toHaveLength(1)
-    expect(toolCalls[0]).toMatchObject({ type: "tool-call", toolName: "ls" })
+    expect(toolCalls[0]).toMatchObject({ type: "tool-call", toolName: "ls", id: "tu_1" })
   })
 
   it("does not reject a tool-only turn (tool calls, no closing text)", async () => {
@@ -981,6 +992,7 @@ describe("runAndCaptureAssistantReply", () => {
       type: "tool-result",
       toolName: "web_fetch",
       input: { url: "x" },
+      id: "tu_9",
       result: "RAW OUTPUT",
       isError: false,
     })
@@ -1219,5 +1231,75 @@ describe("compactBoundaryFromInner", () => {
     expect(compactBoundaryFromInner(null)).toBeNull()
     expect(compactBoundaryFromInner({ type: "assistant" })).toBeNull()
     expect(compactBoundaryFromInner({ type: "system", subtype: "init" })).toBeNull()
+  })
+})
+
+// ── Execution-broker admission ─────────────────────────────────────────────
+// The wrapper funnels every headless leg through the global ExecutionBroker so
+// the four concurrency subsystems share one ceiling and are observable/
+// cancellable as a unit.
+describe("runAndCaptureAssistantReply — execution broker admission", () => {
+  afterEach(() => {
+    __resetExecutionBrokerForTesting()
+  })
+
+  it("registers a leg with the broker while the turn runs and releases it after", async () => {
+    const broker = getExecutionBroker()
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      execution: { kind: "connector", label: "WeCom reply", projectId: "p1" },
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    expect(broker.countRunning()).toBe(1)
+    const leg = broker.list()[0]
+    expect(leg).toMatchObject({ kind: "connector", label: "WeCom reply", projectId: "p1" })
+    expect(broker.hasActiveSession(SESSION)).toBe(true)
+
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(broker.countRunning()).toBe(0)
+  })
+
+  it("bypasses admission when execution.skip is set", async () => {
+    const broker = getExecutionBroker()
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      execution: { skip: true },
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    expect(broker.countRunning()).toBe(0)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+  })
+
+  it("a broker session cancel aborts the in-flight turn", async () => {
+    const broker = getExecutionBroker()
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 5_000,
+      execution: { kind: "goal", label: "goal turn" },
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    expect(broker.cancelBySession(SESSION)).toBe(1)
+    await expect(promise).rejects.toMatchObject({ code: "aborted" })
+    expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    expect(broker.countRunning()).toBe(0)
+  })
+
+  it("defaults kind to subagent with a session-derived label", async () => {
+    const broker = getExecutionBroker()
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    const leg = broker.list()[0]
+    expect(leg.kind).toBe("subagent")
+    expect(leg.label).toContain(SESSION.slice(0, 8))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
   })
 })

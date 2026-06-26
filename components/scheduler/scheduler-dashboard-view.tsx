@@ -27,6 +27,7 @@ import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils
 import { useSchedulerDashboardView } from "@/hooks/scheduler/use-scheduler-dashboard-view"
 import { TaskExecutionChart } from "./task-execution-chart"
 import { UnifiedRecentRuns } from "./unified-recent-runs"
+import { ExecutionMonitorPanel } from "@/components/execution/execution-monitor-panel"
 import { StatCard } from "./stat-card"
 import { SchedulerDashboardViewToggle } from "./scheduler-dashboard-view-toggle"
 import { SchedulerCalendarView } from "./scheduler-calendar-view"
@@ -222,6 +223,9 @@ function OverviewBody({
   return (
     <div className="space-y-5">
       <KindSummaryStrip countsByKind={countsByKind} activeCountsByKind={activeCountsByKind} />
+      {/* Live cross-subsystem execution monitor (chat + headless legs + active
+          workflow runs + scheduler executions), governed by the ExecutionBroker. */}
+      <ExecutionMonitorPanel />
       {/* Stats cards row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {/* Total Tasks */}

@@ -328,6 +328,21 @@ jest.mock("@/stores/chat", () => ({
   selectIsAtStreamCap: (s: unknown, id: string) => selectIsAtStreamCapMock(s, id),
 }))
 
+// The unified execution broker governs the concurrency cap; stub it so a test
+// can flip the session at/over capacity without standing up the real broker.
+const isAtCapacityMock = jest.fn((_resource: string, _id?: string) => false)
+jest.mock("@/lib/execution/broker", () => ({
+  getExecutionBroker: () => ({
+    isAtCapacity: (resource: string, id?: string) => isAtCapacityMock(resource, id),
+  }),
+}))
+// Chat admission is exercised in lib/execution/chat-lease.test.ts; here it is a
+// no-op so the hook's send path stays isolated from the real broker.
+const acquireChatLeaseMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/execution/chat-lease", () => ({
+  acquireChatLease: (...args: unknown[]) => acquireChatLeaseMock(...args),
+}))
+
 const settingsState = {
   settings: { alwaysAllowTools: [] as string[], artifacts: { autoCreate: false } },
   toggleAlwaysAllow: jest.fn().mockResolvedValue(undefined),
@@ -429,6 +444,8 @@ beforeEach(() => {
   chatState.setPendingCommandOverrides.mockClear()
   chatState.clearEphemeralSkillIds.mockClear()
   selectIsAtStreamCapMock.mockReset().mockReturnValue(false)
+  isAtCapacityMock.mockReset().mockReturnValue(false)
+  acquireChatLeaseMock.mockReset().mockResolvedValue(undefined)
   subscribers.length = 0
   settingsSubscribers.length = 0
   mockGetTwinRuntimeSettings.mockReset()
@@ -1529,7 +1546,7 @@ describe("useClaudeChat — concurrent sessions", () => {
   })
 
   it("send() is blocked (no sidecar call) when the concurrency cap is reached", async () => {
-    selectIsAtStreamCapMock.mockReturnValue(true)
+    isAtCapacityMock.mockReturnValue(true)
     const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {

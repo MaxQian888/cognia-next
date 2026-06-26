@@ -127,7 +127,9 @@ import type {
   SendContent,
   SendOptions,
 } from "@/lib/claude/types"
-import { useChatStore, selectIsAtStreamCap, type ChatStatus } from "@/stores/chat"
+import { useChatStore, type ChatStatus } from "@/stores/chat"
+import { getExecutionBroker } from "@/lib/execution/broker"
+import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
   selectSessionSubagents,
@@ -715,11 +717,14 @@ export function useClaudeChat() {
       if (typeof content === "string" && !content.trim()) return
       if (Array.isArray(content) && content.length === 0) return
 
-      // Concurrency cap backstop: never start a 4th concurrent stream. The
-      // composer already disables send + shows the inline over-cap notice; this
-      // guards programmatic sends too. A session that is already streaming is
-      // not blocked from continuing (it is excluded from the cap count).
-      if (selectIsAtStreamCap(useChatStore.getState(), sessionId)) {
+      // Concurrency cap backstop: never start a turn over the global execution
+      // ceiling. The composer already disables send + shows the inline over-cap
+      // notice; this guards programmatic sends too. A session that is already
+      // streaming is a continuation and never blocked (the broker exempts it).
+      // The cap now reflects the unified ExecutionBroker occupancy — headless
+      // legs (scheduler / connector / workflow / team) included — not just the
+      // renderer's streaming panels.
+      if (getExecutionBroker().isAtCapacity("ai-turn", sessionId)) {
         console.warn("send blocked: concurrent stream cap reached", { sessionId })
         return
       }
@@ -894,6 +899,21 @@ export function useClaudeChat() {
       const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
       if (!callOptions?.skipUserAppend) {
         store.getState().replaceSessionMessages(sessionId, next)
+      }
+      // Register this chat turn with the global execution broker so it counts
+      // toward — and is observable / cancellable via — the same governor as
+      // every headless leg. Acquired before the `streaming` flip so the broker
+      // watcher releases it on settle; gated by the `isAtCapacity` check above,
+      // so it admits immediately. Best-effort: a broker hiccup never blocks the
+      // turn the user already committed to.
+      try {
+        await acquireChatLease({
+          sessionId,
+          projectId: session?.projectId,
+          label: session?.title || `#${sessionId.slice(0, 8)}`,
+        })
+      } catch (leaseErr) {
+        console.warn("chat lease acquire failed; sending without admission", leaseErr)
       }
       store.getState().setSessionStatus(sessionId, "streaming")
       perfMark("stream-start")

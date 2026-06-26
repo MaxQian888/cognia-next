@@ -12,6 +12,8 @@ import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 import { nextToolTimestamps } from "@/lib/claude/run-record"
+import { useSyncExternalStore } from "react"
+import { getExecutionBroker, DEFAULT_AI_TURN_LIMIT } from "@/lib/execution/broker"
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
@@ -147,10 +149,14 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
   }
 }
 
-/** Maximum number of sessions allowed to stream concurrently. Over-cap sends
- * are blocked (never silently queued / dropped) — the composer disables send
- * and surfaces an inline notice; `send()` defends as a backstop. */
-export const MAX_CONCURRENT_STREAMS = 3
+/**
+ * Renderer-facing display of the concurrent-stream ceiling. The AUTHORITATIVE
+ * cap now lives in the unified {@link getExecutionBroker} (`ai-turn` limit),
+ * which also counts headless legs — see `selectIsAtStreamCap` /
+ * `useIsAtStreamCap` below. Re-exported from the broker default so any consumer
+ * referencing the constant reflects the unified ceiling.
+ */
+export const MAX_CONCURRENT_STREAMS = DEFAULT_AI_TURN_LIMIT
 
 /** Top-level fields the active session's slice is mirrored onto. */
 type ProjectedField =
@@ -764,17 +770,19 @@ export function selectStreamingCount(state: {
 }
 
 /**
- * True when starting a *new* stream on `sessionId` would exceed
- * `MAX_CONCURRENT_STREAMS`. A session that is already streaming is never
- * blocked from continuing (it is excluded from the count comparison).
+ * True when starting a *new* turn on `sessionId` would exceed the unified
+ * execution ceiling. Delegates to the {@link getExecutionBroker} so the cap
+ * reflects GLOBAL occupancy — every headless leg (scheduler / connector /
+ * workflow / team) included — not just this renderer's streaming panels. A
+ * session that already has an active leg is a continuation and never blocked
+ * (the broker exempts it). The `state` arg is retained for call-site
+ * compatibility but is no longer read.
  */
 export function selectIsAtStreamCap(
-  state: { sessions: Record<string, SessionChatSlice> },
+  _state: { sessions: Record<string, SessionChatSlice> },
   sessionId: string
 ): boolean {
-  const streaming = selectStreamingSessionIds(state)
-  if (streaming.includes(sessionId)) return false
-  return streaming.length >= MAX_CONCURRENT_STREAMS
+  return getExecutionBroker().isAtCapacity("ai-turn", sessionId)
 }
 
 const EMPTY_MESSAGES: UIMessage[] = []
@@ -810,9 +818,18 @@ export function useSessionMessagesLoadError(sessionId: string | null): string | 
     sessionId ? (s.sessions[sessionId]?.messagesLoadError ?? null) : null
   )
 }
-/** Reactive cap check for a pane's composer (disable send + show notice). */
+/**
+ * Reactive cap check for a pane's composer (disable send + show notice).
+ * Subscribes to the unified {@link getExecutionBroker} so the composer reacts to
+ * global occupancy changes (incl. headless legs), not just this store's slices.
+ */
 export function useIsAtStreamCap(sessionId: string | null): boolean {
-  return useChatStore((s) => (sessionId ? selectIsAtStreamCap(s, sessionId) : false))
+  const broker = getExecutionBroker()
+  return useSyncExternalStore(
+    broker.subscribe,
+    () => (sessionId ? broker.isAtCapacity("ai-turn", sessionId) : false),
+    () => false
+  )
 }
 
 const EMPTY_STEER: SteerEntry[] = []

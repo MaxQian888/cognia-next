@@ -14,6 +14,13 @@ jest.mock("./task-execution-chart", () => ({
   TaskExecutionChart: () => <div data-testid="task-execution-chart-stub" />,
 }))
 
+// Stub the execution monitor — it has its own dedicated test and pulls live
+// Dexie / broker sources we don't want to stand up for the dashboard layout test.
+jest.mock("@/components/execution/execution-monitor-panel", () => ({
+  __esModule: true,
+  ExecutionMonitorPanel: () => <div data-testid="execution-monitor-stub" />,
+}))
+
 // Stub the calendar/timeline views — they have their own dedicated tests; here
 // we only assert the dashboard routes to the right one for the active mode.
 jest.mock("./scheduler-calendar-view", () => ({
