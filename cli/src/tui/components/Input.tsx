@@ -164,7 +164,7 @@ const LineView = React.memo(function LineView({
   )
 })
 
-export function Input({
+function InputImpl({
   input,
   dispatch,
   onSubmit,
@@ -685,3 +685,11 @@ export function Input({
     </Box>
   )
 }
+
+/**
+ * Memoized so the composer doesn't re-render (and re-run slash/mention matching)
+ * on every streaming delta while it sits idle below the transcript. The parent
+ * must keep callback props (`onSubmit`, `onHistoryPush`, `onPopupOpenChange`,
+ * `onToggleSkill`) reference-stable for the memo to skip — see App.tsx.
+ */
+export const Input = React.memo(InputImpl)

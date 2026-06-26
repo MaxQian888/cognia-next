@@ -54,6 +54,35 @@ describe("captureEventToActions", () => {
     ])
   })
 
+  it("prefers the tool_use id as the correlation key when present", () => {
+    const actions = captureEventToActions({
+      type: "tool-call",
+      toolName: "bash",
+      input: { command: "ls" },
+      id: "tu_42",
+    })
+    expect(actions).toEqual([
+      { type: "TOOL_CALL", callKey: "tu_42", toolName: "bash", input: { command: "ls" } },
+    ])
+  })
+
+  it("gives two identical concurrent calls distinct keys via their ids", () => {
+    const a = captureEventToActions({
+      type: "tool-call",
+      toolName: "read",
+      input: { p: "x" },
+      id: "tu_1",
+    })
+    const b = captureEventToActions({
+      type: "tool-call",
+      toolName: "read",
+      input: { p: "x" },
+      id: "tu_2",
+    })
+    expect((a[0] as { callKey: string }).callKey).toBe("tu_1")
+    expect((b[0] as { callKey: string }).callKey).toBe("tu_2")
+  })
+
   it("maps an ExitPlanMode tool-call with its plan input intact (the reducer's plan signal)", () => {
     const actions = captureEventToActions({
       type: "tool-call",
@@ -95,6 +124,12 @@ describe("captureEventToActions", () => {
     expect(captureEventToActions({ type: "tool-result", toolName: "bash", result: "ok" })).toEqual([
       { type: "TOOL_RESULT", toolName: "bash", result: "ok" },
     ])
+  })
+
+  it("uses the result's tool_use id as the callKey (no input needed)", () => {
+    expect(
+      captureEventToActions({ type: "tool-result", toolName: "bash", result: "ok", id: "tu_7" })
+    ).toEqual([{ type: "TOOL_RESULT", toolName: "bash", callKey: "tu_7", result: "ok" }])
   })
 
   it("maps a usage event to SET_USAGE", () => {

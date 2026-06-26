@@ -141,6 +141,58 @@ describe("useAgentSession", () => {
     expect(h.actions.at(-1)).toEqual({ type: "RESET", sessionId: "ses-2" })
   })
 
+  it("clear mid-turn aborts the in-flight turn (clean interrupt, no stray error cell)", async () => {
+    // /clear bypasses the busy gate, so it can fire while a turn streams. Killing
+    // the sidecar from under a live capture must route through the abort path
+    // (TURN_ABORTED) not the error path (TURN_ERROR), and the RESET must wipe it.
+    const actions: TuiAction[] = []
+    const dispatch = (a: TuiAction) => actions.push(a)
+    let capturedSignal: AbortSignal | undefined
+    const send = jest.fn(
+      (_p: string, opts: { signal?: AbortSignal }) =>
+        new Promise<RunAndCaptureResult>((_resolve, reject) => {
+          capturedSignal = opts.signal
+          opts.signal?.addEventListener("abort", () => reject(new Error("aborted")))
+        })
+    )
+    const create = jest.fn(() => ({
+      sessionId: "s",
+      send,
+      close: jest.fn(async () => {}),
+      isLive: () => true,
+    })) as unknown as CreateSession
+    const capture = {
+      beginTurn: jest.fn(),
+      onToolCall: jest.fn(),
+      list: jest.fn(() => []),
+      store: { restore: jest.fn() },
+    }
+    const { result: hook } = renderHook(() =>
+      useAgentSession({
+        config,
+        dispatch,
+        createSession: create,
+        subscribeSidecar: () => () => undefined,
+        requestCompact: jest.fn(async () => undefined),
+        createCheckpoints: () => capture as never,
+      })
+    )
+    let turn: Promise<unknown>
+    await act(async () => {
+      turn = hook.current.send("hi") // hangs until aborted
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await hook.current.clear("ses-2")
+      await turn
+    })
+    expect(capturedSignal?.aborted).toBe(true)
+    const types = actions.map((a) => a.type)
+    expect(types).toContain("TURN_ABORTED")
+    expect(types).not.toContain("TURN_ERROR")
+    expect(actions.at(-1)).toEqual({ type: "RESET", sessionId: "ses-2" })
+  })
+
   it("switchModel and switchThinking dispatch and drop the session", async () => {
     const h = harness()
     await act(async () => {

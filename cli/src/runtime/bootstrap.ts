@@ -18,9 +18,13 @@ import { StdioTransport, type SidecarHandle } from "./stdio-transport"
 
 /** Minimal spawned-child surface the bootstrap consumes. */
 export interface SpawnedChild {
-  stdin: { write(chunk: string): void } | null
+  stdin: {
+    write(chunk: string): void
+    on?(event: "error", cb: (err: Error) => void): unknown
+  } | null
   stdout: NodeJS.ReadableStream | null
   on(event: "exit", cb: (code: number | null) => void): unknown
+  on(event: "error", cb: (err: Error) => void): unknown
   kill(signal?: NodeJS.Signals): void
 }
 
@@ -148,11 +152,38 @@ function toHandle(child: SpawnedChild): SidecarHandle {
     throw new Error("spawned sidecar is missing stdin/stdout pipes")
   }
   const stdin = child.stdin
+  const stdout = child.stdout
+  // Single teardown notifier, deduped: a crashed sidecar can fire both 'exit'
+  // and an async stream 'error' — the transport must only see one.
+  let exitCb: ((code: number | null) => void) | null = null
+  let notified = false
+  const notifyExit = (code: number | null) => {
+    if (notified) return
+    notified = true
+    exitCb?.(code)
+  }
+  child.on("exit", notifyExit)
+  // A sidecar crash makes the next `stdin.write` emit an asynchronous 'error'
+  // (EPIPE), and a spawn fault (ENOENT) fires 'error' on the child. Without
+  // these handlers Node treats them as unhandled stream errors and crashes the
+  // whole CLI. Route every fault to the same teardown as a clean exit so the
+  // transport rejects pending waiters / emits `sidecar_exited` instead.
+  child.on("error", () => notifyExit(null))
+  stdin.on?.("error", () => notifyExit(null))
+  stdout.on?.("error", () => notifyExit(null))
   return {
-    stdin: { write: (chunk) => stdin.write(chunk) },
-    stdout: child.stdout,
+    stdin: {
+      write: (chunk) => {
+        try {
+          stdin.write(chunk)
+        } catch {
+          notifyExit(null)
+        }
+      },
+    },
+    stdout,
     onExit: (cb) => {
-      child.on("exit", cb)
+      exitCb = cb
     },
   }
 }

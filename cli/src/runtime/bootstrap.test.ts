@@ -14,21 +14,40 @@ import {
 } from "./bootstrap"
 import { StdioTransport } from "./stdio-transport"
 
-function fakeChild() {
+function fakeChild(opts: { failWrite?: boolean } = {}) {
   const stdout = new PassThrough()
   const writes: string[] = []
   let exitCb: ((code: number | null) => void) | null = null
+  let errorCb: ((err: Error) => void) | null = null
+  let stdinErrorCb: ((err: Error) => void) | null = null
   const kill = jest.fn()
   const child = {
-    stdin: { write: (c: string) => void writes.push(c) },
+    stdin: {
+      write: (c: string) => {
+        if (opts.failWrite) throw new Error("EPIPE")
+        writes.push(c)
+      },
+      on: (_e: "error", cb: (err: Error) => void) => {
+        stdinErrorCb = cb
+      },
+    },
     stdout,
-    on: (_e: "exit", cb: (code: number | null) => void) => {
-      exitCb = cb
+    on: (e: "exit" | "error", cb: (arg: never) => void) => {
+      if (e === "error") errorCb = cb as (err: Error) => void
+      else exitCb = cb as (code: number | null) => void
       return child
     },
     kill,
   }
-  return { child, stdout, writes, kill, exit: (c = 0) => exitCb?.(c) }
+  return {
+    child,
+    stdout,
+    writes,
+    kill,
+    exit: (c = 0) => exitCb?.(c),
+    emitError: (err = new Error("boom")) => errorCb?.(err),
+    emitStdinError: (err = new Error("EPIPE")) => stdinErrorCb?.(err),
+  }
 }
 
 describe("resolveSidecarScript", () => {
@@ -117,6 +136,46 @@ describe("bootstrapSidecar", () => {
       bootstrapSidecar({ spawn, scriptPath: "/x/claude-host.mjs", readyTimeoutMs: 20 })
     ).rejects.toThrow(/did not become ready/)
     expect(f.kill).toHaveBeenCalled()
+  })
+
+  it("tears down (not crash) when the child emits an 'error' event", async () => {
+    const f = fakeChild()
+    const spawn: SpawnFn = () => {
+      setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
+      return f.child
+    }
+    const boot = await bootstrapSidecar({ spawn, scriptPath: "/x/claude-host.mjs" })
+    f.emitError(new Error("ENOENT")) // would be an unhandled crash without the handler
+    await expect(
+      boot.transport.call("claude_send", { sessionId: "s", prompt: "x" })
+    ).rejects.toThrow(/sidecar not running/)
+  })
+
+  it("tears down when the child stdin emits an 'error' event", async () => {
+    const f = fakeChild()
+    const spawn: SpawnFn = () => {
+      setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
+      return f.child
+    }
+    const boot = await bootstrapSidecar({ spawn, scriptPath: "/x/claude-host.mjs" })
+    f.emitStdinError() // async EPIPE on the pipe
+    await expect(
+      boot.transport.call("claude_send", { sessionId: "s", prompt: "x" })
+    ).rejects.toThrow(/sidecar not running/)
+  })
+
+  it("tears down when a stdin write throws synchronously (broken pipe)", async () => {
+    const f = fakeChild({ failWrite: true })
+    const spawn: SpawnFn = () => {
+      setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
+      return f.child
+    }
+    const boot = await bootstrapSidecar({ spawn, scriptPath: "/x/claude-host.mjs" })
+    // First send: the write throws EPIPE, is caught in toHandle, and triggers teardown.
+    await boot.transport.call("claude_send", { sessionId: "s", prompt: "x" })
+    await expect(
+      boot.transport.call("claude_send", { sessionId: "s", prompt: "y" })
+    ).rejects.toThrow(/sidecar not running/)
   })
 
   it("shutdown kills the child once", async () => {

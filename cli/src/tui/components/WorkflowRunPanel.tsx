@@ -51,7 +51,7 @@ function categoryColor(
   }
 }
 
-export function WorkflowRunPanel({
+function WorkflowRunPanelImpl({
   run,
   maxRows = DEFAULT_MAX_ROWS,
 }: {
@@ -142,3 +142,7 @@ export function WorkflowRunPanel({
     </Box>
   )
 }
+
+// Memoized: `run` keeps its reference between streaming deltas, so the panel
+// re-renders only when the workflow-run slice actually changes.
+export const WorkflowRunPanel = React.memo(WorkflowRunPanelImpl)

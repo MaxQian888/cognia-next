@@ -252,6 +252,13 @@ export function useAgentSession({
   }, [createSession])
 
   const dropSession = useCallback(async () => {
+    // Abort any in-flight turn FIRST. /clear, /resume, fork, and model/provider/
+    // thinking/agent-mode switches all funnel through here and can fire mid-turn
+    // (slash commands bypass the busy gate). Killing the sidecar from under a live
+    // capture would reject it as a non-abort error → a stray "error" cell landing
+    // in the freshly-RESET session. Aborting first routes it through the clean
+    // (recoverable) interrupt path before the reset wipes the old cells.
+    abortRef.current?.abort()
     const current = sessionRef.current
     sessionRef.current = null
     if (current) await current.close()
@@ -282,6 +289,9 @@ export function useAgentSession({
   )
 
   const dropCopilotSession = useCallback(async () => {
+    // Same rationale as dropSession: abort a live copilot turn before tearing the
+    // session down (both turn kinds share `abortRef`).
+    abortRef.current?.abort()
     const current = copilotRef.current
     copilotRef.current = null
     if (current) await current.close()

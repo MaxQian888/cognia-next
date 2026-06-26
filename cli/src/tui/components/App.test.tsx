@@ -406,6 +406,40 @@ describe("App", () => {
     expect(resolved).toBe(true)
   })
 
+  it("closes a pending permission overlay on Ctrl+C interrupt (no lingering prompt)", async () => {
+    const create: CreateSession = () => ({
+      sessionId: "ses-perm-int",
+      async send(_prompt, opts) {
+        // Block on the gate forever — the user interrupts before deciding.
+        await opts.gate({
+          toolName: "ls",
+          displayName: "ls",
+          input: { path: "." },
+          requestId: "r1",
+          sessionId: "s",
+        } as never)
+        return result("done")
+      },
+      close: jest.fn(),
+    })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} now={() => 1000} />
+    )
+    type("go")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Allow ls"))
+    // Ctrl+C while busy + overlay open → interrupt AND dismiss the prompt.
+    await act(async () => {
+      __fireInput("c", { ctrl: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).not.toContain("Allow ls"))
+    expect(container.textContent).toContain("Interrupted")
+  })
+
   it("persists an 'Allow always' choice and invalidates options", async () => {
     const persistToolApproval = jest.fn()
     const invalidate = jest.fn()

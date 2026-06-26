@@ -466,6 +466,19 @@ export function App({
   // Whether the composer popup currently owns input — read by the wheel handler
   // so the transcript doesn't scroll while the popup is being wheel-scrolled.
   const composerPopupOpen = useRef(false)
+  // Stable callbacks for the memoized <Input>: an inline arrow / default-param
+  // arrow would be a fresh reference each render and defeat React.memo, making
+  // the composer re-render (and re-run slash/mention matching) on every delta.
+  const handlePopupOpenChange = useCallback((open: boolean) => {
+    composerPopupOpen.current = open
+  }, [])
+  const persistHistoryRef = useRef(persistHistory)
+  useEffect(() => {
+    persistHistoryRef.current = persistHistory
+  }, [persistHistory])
+  const handleHistoryPush = useCallback((entry: string) => {
+    persistHistoryRef.current(entry)
+  }, [])
 
   // Bridge the `ask_user` elicitation store into the overlay system: when the
   // agent calls `ask_user`, mirror the active prompt into an `askUser` overlay
@@ -1784,6 +1797,13 @@ export function App({
         if (busy) {
           agent.abort()
           abortRuntime()
+          // A turn-blocking overlay (permission prompt / ask_user question) would
+          // otherwise linger after the abort with an orphaned resolver. Close the
+          // permission overlay; settle ask_user as cancelled so its store doesn't
+          // immediately re-open it (the bridge re-fires on an unresolved prompt).
+          if (state.overlay.kind === "permission") dispatch({ type: "OVERLAY_CLOSE" })
+          else if (state.overlay.kind === "askUser")
+            askUser.resolve({ selected: [], text: "", cancelled: true })
           dispatch({ type: "NOTICE", message: "Interrupted · Press Ctrl+C again to exit" })
         } else {
           dispatch({ type: "NOTICE", message: "Press Ctrl+C again to exit" })
@@ -2802,7 +2822,7 @@ export function App({
               input={state.input}
               dispatch={dispatch}
               onSubmit={handleSubmit}
-              onHistoryPush={persistHistory}
+              onHistoryPush={handleHistoryPush}
               // Inert while a backtrack-to-edit selection is active (App owns ↑/↓/
               // Enter then); otherwise stays active even during a turn so a `btw`
               // steer can be typed mid-stream (`handleSubmit` queues it).
@@ -2816,9 +2836,7 @@ export function App({
               mode={state.config.permissionMode}
               enabledSkillIds={enabledSkillIds}
               onToggleSkill={toggleSkillEnabled}
-              onPopupOpenChange={(open) => {
-                composerPopupOpen.current = open
-              }}
+              onPopupOpenChange={handlePopupOpenChange}
             />
           )}
           <Mascot

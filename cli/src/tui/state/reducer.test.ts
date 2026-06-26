@@ -309,6 +309,43 @@ describe("tuiReducer", () => {
     expect(s.inflight.tools.find((t) => t.toolName === "bash")?.status).toBe("running")
   })
 
+  it("TOOL_RESULT whose key AND name both match nothing does NOT hijack the lone running tool", () => {
+    // A late/duplicate keyed result (its own tool already resolved or it collided)
+    // whose name also doesn't match must be dropped, not force-attached to
+    // whatever single tool is in flight via the sole-running fallback.
+    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} })
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "k-stale", toolName: "glob", result: "wrong" })
+    expect(s.inflight.tools[0].status).toBe("running")
+    expect(s.inflight.tools[0].result).toBeUndefined()
+  })
+
+  it("TOOL_RESULT still pairs by name when only the callKey is stale (oldest same-name)", () => {
+    // The name tier is the legitimate fallback: a result with a non-matching key
+    // but a matching tool name pairs to the oldest running tool of that name.
+    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} })
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "k-stale", toolName: "bash", result: "ok" })
+    expect(s.inflight.tools[0].status).toBe("done")
+    expect(s.inflight.tools[0].result).toBe("ok")
+  })
+
+  it("two identical concurrent calls with distinct ids both render and pair to their own result", () => {
+    // Same name + same input but distinct tool_use ids → distinct callKeys. The
+    // dedup must NOT collapse them, and each result pairs to its own card.
+    let s = reduce(base(), {
+      type: "TOOL_CALL",
+      callKey: "tu_1",
+      toolName: "read",
+      input: { p: "x" },
+    })
+    s = reduce(s, { type: "TOOL_CALL", callKey: "tu_2", toolName: "read", input: { p: "x" } })
+    expect(s.inflight.tools).toHaveLength(2)
+    expect(s.toolStats.read.calls).toBe(2)
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "tu_2", toolName: "read", result: "second" })
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "tu_1", toolName: "read", result: "first" })
+    expect(s.inflight.tools.find((t) => t.callKey === "tu_1")?.result).toBe("first")
+    expect(s.inflight.tools.find((t) => t.callKey === "tu_2")?.result).toBe("second")
+  })
+
   it("TURN_START pushes a user cell and enters streaming", () => {
     const s = reduce(base(), { type: "TURN_START", prompt: "do it" })
     expect(s.cells[0]).toMatchObject({ kind: "user", text: "do it" })

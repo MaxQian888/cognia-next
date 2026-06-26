@@ -359,7 +359,11 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         : -1
       if (idx < 0 && action.toolName)
         idx = runningOf(state.inflight.tools, (c) => c.toolName === action.toolName)
-      if (idx < 0) idx = soleRunning(state.inflight.tools)
+      // The sole-running fallback is ONLY for a nameless, keyless result — a
+      // result that DID carry a key/name but matched nothing (a late/duplicate
+      // result, or its tool already moved to cells) must NOT be force-attached to
+      // an unrelated tool that happens to be the lone one in flight.
+      if (idx < 0 && !action.callKey && !action.toolName) idx = soleRunning(state.inflight.tools)
       if (idx >= 0) {
         // Found in inflight — update in place so the live frame re-renders it
         // (⏳→✓/✗). Do NOT move it to cells yet; it stays in inflight.tools until
@@ -390,9 +394,10 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         fallbackIdx = state.cells.findIndex(
           (c) => c.kind === "tool" && c.status === "running" && c.toolName === action.toolName
         )
-      if (fallbackIdx < 0) {
-        // Same single-candidate guard as inflight: only pair a nameless result to
-        // a lone running cell, never guess among several.
+      if (fallbackIdx < 0 && !action.callKey && !action.toolName) {
+        // Same single-candidate guard as inflight, and likewise only for a
+        // nameless, keyless result: pair it to a lone running cell, never guess
+        // among several and never override an unmatched keyed/named result.
         const running = state.cells.filter((c) => c.kind === "tool" && c.status === "running")
         if (running.length === 1) fallbackIdx = state.cells.indexOf(running[0])
       }
