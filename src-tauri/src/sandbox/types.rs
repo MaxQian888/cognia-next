@@ -207,6 +207,24 @@ pub struct SandboxHealth {
     pub last_error: String,
 }
 
+/// Result of an ACTIVE confinement probe (`sandbox_health_check`). Unlike
+/// `SandboxHealth` — which only reports whether the backend binary exists —
+/// this is produced by actually running commands inside the sandbox and
+/// observing that confinement is enforced. A present-but-broken backend
+/// (rejected SBPL profile, corrupt runner) yields `confined: false`, and so
+/// does a backend that runs commands UNconfined.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbeReport {
+    /// Stable backend id (mirrors `SandboxHealth.backend`).
+    pub backend: String,
+    /// True only when BOTH sub-probes pass: a trivial command ran to
+    /// completion under confinement AND a write outside the writable set was
+    /// blocked. Anything else ⇒ false.
+    pub confined: bool,
+    /// Human-readable detail: which sub-probe failed, or `"ok"`.
+    pub detail: String,
+}
+
 /// Helper module for `serde(with = …)` on `Duration` — emits a plain
 /// integer-seconds count rather than the default `{secs, nanos}` blob that
 /// would otherwise pollute IPC payloads.

@@ -78,6 +78,17 @@ pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
     Ok(current_backend().health())
 }
 
+/// ACTIVE confinement probe. Distinct from `sandbox_health_probe` (which only
+/// checks the backend binary exists and is cheap enough to poll): this spawns
+/// real confined commands to verify confinement is actually enforced, so it is
+/// invoked on-demand (a "Verify confinement" action), NOT on the status poll.
+/// A present-but-broken backend reports `confined: false` here even though the
+/// cheap probe shows "Active".
+#[tauri::command]
+pub async fn sandbox_health_check() -> Result<crate::sandbox::types::ProbeReport, String> {
+    Ok(current_backend().probe_confinement().await)
+}
+
 /// Canonicalize every path a policy carries (writable / readable /
 /// target_files). Rejects control characters, relative paths, and `..`
 /// traversal, and resolves symlinks on the existing prefix so the

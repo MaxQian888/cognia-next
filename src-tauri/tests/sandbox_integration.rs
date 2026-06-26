@@ -34,6 +34,26 @@ fn sample_cmd(argv: Vec<&str>, cwd: &str) -> SandboxCommand {
     }
 }
 
+/// True when the backend can actually run a trivial `exit 0` under the
+/// generated profile on THIS host. Lets the active-probe tests skip on
+/// environments whose kernel rejects the restrictive profile (the probe logic
+/// is independently covered by the mock unit tests) instead of reporting a
+/// false confinement failure.
+#[allow(dead_code)]
+async fn backend_can_run_trivially(backend: &impl SandboxedExec) -> bool {
+    let policy = SandboxPolicy::Bash {
+        writable: vec![PathBuf::from("/tmp")],
+        readable: vec![],
+        network: NetworkPolicy::Off,
+        max_cpu_seconds: 0,
+        max_memory_mb: 0,
+    };
+    matches!(
+        backend.run(sample_cmd(vec!["sh", "-c", "exit 0"], "/tmp"), policy).await,
+        Ok(r) if r.exit_code == 0 && !r.timed_out
+    )
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
@@ -65,6 +85,26 @@ mod linux {
             "stdout: {:?}",
             result.stdout
         );
+    }
+
+    #[tokio::test]
+    async fn probe_confinement_reports_confined_on_real_bwrap() {
+        let backend = LinuxSandboxBackend::new(None);
+        if !backend.is_available() {
+            eprintln!("skipping — system bwrap not present");
+            return;
+        }
+        if !backend_can_run_trivially(&backend).await {
+            eprintln!("skipping — bwrap cannot run a trivial command in this environment");
+            return;
+        }
+        let report = backend.probe_confinement().await;
+        assert!(
+            report.confined,
+            "real bwrap backend should prove confinement: {}",
+            report.detail
+        );
+        assert_eq!(report.detail, "ok");
     }
 
     #[tokio::test]
@@ -141,6 +181,29 @@ mod macos {
             "stdout: {:?}",
             result.stdout
         );
+    }
+
+    #[tokio::test]
+    async fn probe_confinement_reports_confined_on_real_sandbox_exec() {
+        let backend = MacOsSandboxBackend::new();
+        if !backend.is_available() {
+            eprintln!("skipping — /usr/bin/sandbox-exec missing");
+            return;
+        }
+        if !backend_can_run_trivially(&backend).await {
+            // Some macOS builds' seatbelt rejects the generated restrictive
+            // profile (e.g. very new Darwin under a nested test sandbox). The
+            // probe logic itself is covered by the mock unit tests.
+            eprintln!("skipping — sandbox-exec cannot run a trivial command in this environment");
+            return;
+        }
+        let report = backend.probe_confinement().await;
+        assert!(
+            report.confined,
+            "real sandbox-exec backend should prove confinement: {}",
+            report.detail
+        );
+        assert_eq!(report.detail, "ok");
     }
 }
 

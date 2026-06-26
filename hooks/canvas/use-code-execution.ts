@@ -48,10 +48,11 @@ export function useCodeExecution(): UseCodeExecutionReturn {
   const abortRef = useRef(false)
 
   const isDesktop = useNativeStore((state) => state.isDesktop)
-  // ADR-0028 Phase 3 — when the global sandbox toggle is on, Python code in
-  // the Canvas panel executes through the OS sandbox backend rather than a
-  // bare interpreter. JS/HTML/CSS are unaffected (already iframe-confined).
-  const sandboxEnabled = useSettingsStore((s) => s.settings?.sandboxDefaultEnabled ?? false)
+  // ADR-0028 — Canvas Python executes through the OS sandbox backend rather
+  // than a bare interpreter. Confined by DEFAULT (independent of the chat-tool
+  // `sandboxDefaultEnabled` flag); a user can opt out in Settings → Sandbox.
+  // JS/HTML/CSS are unaffected (already iframe-confined).
+  const sandboxEnabled = useSettingsStore((s) => s.settings?.canvasCodeSandboxEnabled ?? true)
 
   const execute = useCallback(
     async (

@@ -197,4 +197,66 @@ mod tests {
         assert_eq!(h.backend, "mock");
         assert!(h.available);
     }
+
+    fn ok_result(exit_code: i32) -> Result<SandboxResult, SandboxError> {
+        Ok(SandboxResult {
+            exit_code,
+            stdout: String::new(),
+            stderr: String::new(),
+            duration: Duration::from_millis(0),
+            timed_out: false,
+        })
+    }
+
+    #[tokio::test]
+    async fn probe_confinement_confined_when_trivial_runs_and_write_blocked() {
+        let mock = MockSandboxBackend::new();
+        // LIFO: push the negative (write denied, exit 1) first so it is popped
+        // SECOND; the positive (exit 0) is popped first.
+        mock.set_next_result(ok_result(1));
+        mock.set_next_result(ok_result(0));
+        let report = mock.probe_confinement().await;
+        assert_eq!(report.backend, "mock");
+        assert!(report.confined, "detail: {}", report.detail);
+        assert_eq!(report.detail, "ok");
+    }
+
+    #[tokio::test]
+    async fn probe_confinement_fails_when_trivial_command_errors() {
+        let mock = MockSandboxBackend::new();
+        mock.set_next_result(Err(SandboxError::BackendFailed {
+            reason: "broken profile".into(),
+        }));
+        let report = mock.probe_confinement().await;
+        assert!(!report.confined);
+        assert!(
+            report.detail.contains("trivial"),
+            "detail: {}",
+            report.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_confinement_fails_when_write_not_blocked() {
+        let mock = MockSandboxBackend::new();
+        // Both arms return exit 0 → the negative write "succeeded" ⇒ not confined.
+        mock.set_next_result(ok_result(0)); // negative (popped second)
+        mock.set_next_result(ok_result(0)); // positive (popped first)
+        let report = mock.probe_confinement().await;
+        assert!(!report.confined);
+        assert!(
+            report.detail.contains("NOT blocked"),
+            "detail: {}",
+            report.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_confinement_reports_unavailable() {
+        let mock = MockSandboxBackend::new();
+        mock.set_unavailable();
+        let report = mock.probe_confinement().await;
+        assert!(!report.confined);
+        assert!(report.detail.contains("unavailable"));
+    }
 }

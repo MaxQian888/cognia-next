@@ -35,6 +35,12 @@
   "backend": {
     "label": "Backend"
   },
+  "canvasSandbox": {
+    "description": "Run code from the Canvas panel (Python especially) through the OS sandbox. When off, Canvas code runs unconfined with full host access.",
+    "label": "Sandbox Canvas code execution",
+    "note": "On by default. Disabling lets Canvas Python reach your filesystem and network — only turn it off on a machine you trust.",
+    "title": "Canvas code sandbox"
+  },
   "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
   "enable": {
     "description": "Run high-risk tools through the OS sandbox by default in every session. Individual sessions and characters can still override this.",
@@ -78,6 +84,12 @@
       "placeholder": "/home/me/projects\n/tmp/cognia-work"
     }
   },
+  "probe": {
+    "failed": "Confinement check failed",
+    "label": "Probe",
+    "ok": "Confinement verified",
+    "running": "Verifying…"
+  },
   "retryButton": "Run health probe",
   "status": {
     "down": "Unavailable",
@@ -98,6 +110,7 @@
     "title": "Default sandbox tier"
   },
   "title": "Sandbox",
+  "verifyButton": "Verify confinement",
   "version": {
     "label": "Version"
   }
