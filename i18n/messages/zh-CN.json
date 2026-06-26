@@ -2133,6 +2133,13 @@
       "label": "上下文已压缩",
       "manual": "手动"
     },
+    "compaction": {
+      "notification": "上下文已压缩",
+      "notificationDetail": "{from} → {to} tokens",
+      "undo": "撤销压缩",
+      "undoFailed": "无法恢复对话",
+      "undoSuccess": "对话已恢复"
+    },
     "composer": {
       "ariaAttachImage": "添加图片",
       "ariaMessage": "消息",
@@ -2510,6 +2517,8 @@
       },
       "skills": {
         "aria": "本会话已激活的技能",
+        "attachedInert": "本会话已停用 — 不会发送",
+        "attachedTitle": "已附加到下一条消息",
         "counter": "{active}/{total} 个技能",
         "description": "仅对当前会话开关技能。如需永久修改，请编辑角色设置。",
         "title": "技能",
@@ -13902,7 +13911,29 @@
     },
     "close": "关闭",
     "compaction": {
+      "algorithm": {
+        "description": "触发压缩时，如何压缩较早的对话轮次。",
+        "heading": "压缩方式",
+        "label": "压缩方式",
+        "options": {
+          "hybrid": "混合（保留近期 + 摘要）",
+          "recursive": "递归（分块摘要）",
+          "selective": "选择性（保留重要，摘要其余）",
+          "sliding-window": "滑动窗口（丢弃最旧）",
+          "summary": "摘要"
+        }
+      },
+      "anthropicNotice": {
+        "description": "这些设置仅对非 Anthropic 模型生效。Anthropic 自管压缩，仅压缩指令与通知生效。",
+        "fieldDisabledTooltip": "在 Anthropic 路径下不生效。",
+        "heading": "Anthropic 自行管理压缩"
+      },
       "description": "压缩较早的对话轮次，让长对话保持在模型的上下文窗口内。",
+      "enableUndo": {
+        "description": "捕获快照，以便在会话存活期间撤销一次压缩。",
+        "heading": "允许撤销",
+        "label": "启用压缩撤销"
+      },
       "enabled": {
         "description": "当上下文窗口接近占满时，自动压缩较早的对话轮次。",
         "heading": "自动压缩",
@@ -13914,15 +13945,52 @@
         "label": "压缩指令",
         "placeholder": "例如：聚焦于决策、文件路径与未解决的问题。"
       },
+      "importance": {
+        "description": "选择性策略会保留重要性达到或超过该值的消息。",
+        "heading": "重要性阈值",
+        "label": "重要性阈值百分比",
+        "suffix": "%"
+      },
       "keepRecent": {
         "description": "保留多少条最近的对话轮次不被压缩、原样保留。",
         "heading": "保留最近轮次",
         "label": "保留的最近轮次数"
       },
+      "messageCount": {
+        "description": "对话达到该消息条数时触发压缩。",
+        "heading": "消息条数阈值",
+        "label": "消息条数阈值"
+      },
+      "notify": {
+        "description": "每次对话被压缩时显示提示。",
+        "heading": "压缩通知",
+        "label": "显示压缩通知"
+      },
+      "preserveSystem": {
+        "description": "原样保留所有系统消息，而非对穿插其中的系统消息做摘要。",
+        "heading": "保留系统消息",
+        "label": "保留系统消息"
+      },
+      "preserveToolMeta": {
+        "description": "截断较大的工具结果时，保留工具名称与状态。",
+        "heading": "保留工具元数据",
+        "label": "保留工具调用元数据"
+      },
+      "recursiveChunkSize": {
+        "description": "递归摘要时每个分块包含的消息数。",
+        "heading": "递归分块大小",
+        "label": "递归分块大小"
+      },
+      "retained": {
+        "description": "压缩到至多窗口的该比例，留出余量。",
+        "heading": "保留阈值",
+        "label": "保留阈值百分比",
+        "suffix": "% 窗口"
+      },
       "strategy": {
         "builtin": "内置",
         "description": "选择插件贡献的压缩策略，或使用内置默认策略。",
-        "heading": "策略",
+        "heading": "插件策略",
         "label": "压缩策略"
       },
       "threshold": {
@@ -13931,7 +13999,27 @@
         "label": "触发阈值百分比",
         "suffix": "% 窗口"
       },
-      "title": "上下文压缩"
+      "title": "上下文压缩",
+      "toolResultCap": {
+        "description": "压缩时将每个工具结果上限设为该 token 数。",
+        "heading": "工具结果上限",
+        "label": "工具结果最大 token 数"
+      },
+      "trigger": {
+        "description": "触发压缩的条件。",
+        "heading": "触发方式",
+        "label": "触发方式",
+        "options": {
+          "manual": "仅手动",
+          "message-count": "消息条数",
+          "token-threshold": "Token 阈值"
+        }
+      },
+      "useAISummarization": {
+        "description": "使用模型进行摘要。关闭时使用抽取式（非 AI）摘要。",
+        "heading": "AI 摘要",
+        "label": "使用 AI 摘要"
+      }
     },
     "composerAssistance": {
       "description": "用 LLM 帮你撰写消息——润色、行内补全与建议。",
@@ -18035,9 +18123,11 @@
     },
     "composer": {
       "skillPicker": {
+        "builtinGroupHeading": "内置技能",
         "description": "选择仅在下一条消息中生效的技能。",
         "empty": "未找到技能。",
         "groupHeading": "可用技能",
+        "inertChip": "{name} 已在本会话停用，不会发送。",
         "removeChip": "移除 {name}",
         "searchPlaceholder": "搜索技能…",
         "title": "附加技能",
