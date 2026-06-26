@@ -1508,6 +1508,7 @@ export type ExternalAgentEventType =
   | "progress"
   | "error"
   | "done"
+  | "hook_fire"
 
 /**
  * Base event interface
@@ -1721,6 +1722,25 @@ export interface ExternalAgentDoneEvent extends ExternalAgentEventBase {
 }
 
 /**
+ * Hook-fire event — a synthetic event the manager emits when a consequential
+ * settings.json/plugin lifecycle hook fired for this external-agent turn
+ * (blocked a tool, injected context, or warned). Mirrors the built-in agent's
+ * Rust `hook_fire` system event; `event-to-parts` projects it into a
+ * `hook-notice` part rendered inline by the chat. No-op fires are never emitted.
+ */
+export interface ExternalAgentHookFireEvent extends ExternalAgentEventBase {
+  type: "hook_fire"
+  /** Lifecycle event name, e.g. "PreToolUse" / "PostToolUse". */
+  event: string
+  toolName?: string
+  /** Derived status, by precedence block > context > warning. */
+  outcome: "blocked" | "context" | "warning"
+  block?: string
+  additionalContext?: string
+  warnings: string[]
+}
+
+/**
  * Union of all event types
  */
 export type ExternalAgentEvent =
@@ -1744,6 +1764,7 @@ export type ExternalAgentEvent =
   | ExternalAgentProgressEvent
   | ExternalAgentErrorEvent
   | ExternalAgentDoneEvent
+  | ExternalAgentHookFireEvent
 
 // ============================================================================
 // External Agent Execution

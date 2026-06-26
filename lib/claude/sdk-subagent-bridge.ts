@@ -16,6 +16,7 @@
 
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgent, SubAgentStatus } from "@/types/agent/sub-agent"
+import { createSubAgentNode, indeterminateSubagentProgress } from "@/lib/claude/subagent-projection"
 import type {
   SDKMessage,
   SDKTaskStartedMessage,
@@ -27,14 +28,11 @@ import type {
 } from "@/lib/claude/types"
 
 /**
- * Indeterminate progress from the tool-call count a run has made — a subagent
- * has no real completion percentage, so this rises monotonically and is capped
- * below 100 (only task_updated→completed reaches 100). Mirrors Gap 1's
- * `dispatchProgressForToolCount` so both surfaces feel identical.
+ * Indeterminate progress from the tool-call count — shared with the
+ * `dispatch_agent` engine via {@link indeterminateSubagentProgress} so both
+ * surfaces feel identical.
  */
-function progressForToolUses(toolUses: number): number {
-  return Math.min(95, Math.max(0, toolUses) * 10)
-}
+const progressForToolUses = indeterminateSubagentProgress
 
 /** tool_use_id (the spawning Task tool_use) → task_id (our node key). */
 const toolUseToTask = new Map<string, string>()
@@ -45,29 +43,15 @@ export function __resetSdkSubagentBridge(): void {
 }
 
 function baseNode(taskId: string, sessionId: string, name: string, task: string): SubAgent {
-  const now = new Date()
-  return {
+  // SDK-native subagents always run at depth 1 under the spawning chat session.
+  return createSubAgentNode({
     id: taskId,
-    parentAgentId: sessionId,
     name,
-    description: name,
     task,
-    initialTask: task,
-    threadId: taskId,
-    status: "running",
-    config: {},
-    messages: [],
-    sources: [],
-    logs: [],
-    progress: 0,
-    createdAt: now,
-    lastActivityAt: now,
-    startedAt: now,
-    retryCount: 0,
-    order: 0,
+    parentAgentId: sessionId,
     depth: 1,
-    context: { parentAgentId: sessionId, sessionId, startTime: now, currentStep: 0 },
-  } as SubAgent
+    sessionId,
+  })
 }
 
 function mapStatus(s: string | undefined): SubAgentStatus | undefined {
@@ -102,7 +86,12 @@ function onTaskProgress(m: SDKTaskProgressMessage): void {
       message: `Running ${m.last_tool_name}`,
     })
   }
-  if (m.usage) store.setProgress(m.task_id, progressForToolUses(m.usage.tool_uses))
+  if (m.usage) {
+    store.setProgress(m.task_id, progressForToolUses(m.usage.tool_uses))
+    // Honest raw count for the chat SubagentPart "N tools" counter, alongside
+    // the derived pseudo-percentage kept for other surfaces.
+    store.setToolUses(m.task_id, m.usage.tool_uses)
+  }
 }
 
 function onTaskUpdated(m: SDKTaskUpdatedMessage): void {

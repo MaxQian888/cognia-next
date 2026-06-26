@@ -83,6 +83,35 @@ describe("SubagentPart", () => {
     expect(screen.getByText("noLogsYet")).toBeInTheDocument()
   })
 
+  it("shows the honest tool-use count while running (no progress bar)", () => {
+    useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "running", toolUses: 4 }))
+    render(<SubagentPart part={basePart} />)
+    expect(screen.getByTestId("subagent-tools-count").textContent).toContain('"n":4')
+    // The old determinate progress bar must be gone.
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+  })
+
+  it("shows the tool-use count in simplified mode too", () => {
+    useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "running", toolUses: 2 }))
+    render(<SubagentPart part={basePart} mode="simplified" />)
+    expect(screen.getByTestId("subagent-tools-count").textContent).toContain('"n":2')
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+  })
+
+  it("hides the tool-use count once the run is no longer running", () => {
+    useSubagentRuntimeStore
+      .getState()
+      .upsert(makeSubAgent({ status: "completed", toolUses: 9, completedAt: new Date() }))
+    render(<SubagentPart part={{ ...basePart, completedAt: Date.now() }} />)
+    expect(screen.queryByTestId("subagent-tools-count")).not.toBeInTheDocument()
+  })
+
+  it("omits the tool-use count when running but no tools have run yet", () => {
+    useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "running", toolUses: 0 }))
+    render(<SubagentPart part={basePart} />)
+    expect(screen.queryByTestId("subagent-tools-count")).not.toBeInTheDocument()
+  })
+
   it("renders an Open-in-workspace link with the subagent id encoded", () => {
     render(<SubagentPart part={basePart} />)
     const link = screen.getByTestId("subagent-open") as HTMLAnchorElement

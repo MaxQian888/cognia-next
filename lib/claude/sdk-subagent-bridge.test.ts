@@ -80,7 +80,8 @@ describe("applySdkSubagentBridge — lifecycle", () => {
     )
     const n = node("T1")!
     expect(n.logs.some((l) => l.message.includes("Read"))).toBe(true)
-    expect(n.progress).toBe(30) // 3 tool_uses * 10
+    expect(n.progress).toBe(30) // 3 tool_uses * 10 (derived pseudo-percentage)
+    expect(n.toolUses).toBe(3) // honest raw count
   })
 
   it("completes the subagent on task_updated status completed", () => {

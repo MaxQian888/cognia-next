@@ -24,6 +24,7 @@
 import type { UIMessage } from "ai"
 import type {
   ExternalAgentEvent,
+  ExternalAgentHookFireEvent,
   ExternalAgentMessageDeltaEvent,
   ExternalAgentThinkingEvent,
   ExternalAgentToolResultEvent,
@@ -65,9 +66,28 @@ export function applyExternalAgentEventToParts(
       return applyToolUseEnd(parts, event as ExternalAgentToolUseEndEvent)
     case "tool_result":
       return applyToolResult(parts, event as ExternalAgentToolResultEvent)
+    case "hook_fire":
+      return applyHookFire(parts, event as ExternalAgentHookFireEvent)
     default:
       return parts as Part[]
   }
+}
+
+// Project a consequential hook fire into an inline `hook-notice` part, sitting
+// where it fired among the turn's other parts (e.g. right where a blocked tool
+// would have been). Renders via MessageRenderer's `hook-notice` part case,
+// reusing the same row UI as the built-in agent's hook notices.
+function applyHookFire(parts: readonly Part[], event: ExternalAgentHookFireEvent): Part[] {
+  const part: MutablePart = {
+    type: "hook-notice",
+    event: event.event,
+    toolName: event.toolName,
+    outcome: event.outcome,
+    block: event.block,
+    additionalContext: event.additionalContext,
+    warnings: event.warnings ?? [],
+  }
+  return [...parts, part as unknown as Part]
 }
 
 /**

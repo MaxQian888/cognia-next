@@ -3,6 +3,7 @@ import {
   getDispatchBudget,
   releaseDispatchBudget,
   isDispatchBudgetExhausted,
+  isDispatchBudgetFinite,
   __clearAllDispatchBudgetsForTesting,
 } from "./dispatch-budget"
 
@@ -52,5 +53,27 @@ describe("dispatch-budget", () => {
     expect(getDispatchBudget("root")).toBeUndefined()
     const g2 = getOrCreateDispatchBudget("root", 100)
     expect(g2.status().used).toBe(0)
+  })
+
+  describe("isDispatchBudgetFinite", () => {
+    it("is true for a positive limit", () => {
+      getOrCreateDispatchBudget("root", 1000)
+      expect(isDispatchBudgetFinite("root")).toBe(true)
+    })
+
+    it("is false for an unlimited (0) budget", () => {
+      getOrCreateDispatchBudget("root", 0)
+      expect(isDispatchBudgetFinite("root")).toBe(false)
+    })
+
+    it("is false for a negative limit (clamped to unlimited)", () => {
+      getOrCreateDispatchBudget("root", -5)
+      expect(isDispatchBudgetFinite("root")).toBe(false)
+    })
+
+    it("is false for a missing root/guard", () => {
+      expect(isDispatchBudgetFinite(undefined)).toBe(false)
+      expect(isDispatchBudgetFinite("never-created")).toBe(false)
+    })
   })
 })

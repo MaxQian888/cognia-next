@@ -10,8 +10,9 @@
  */
 
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
-import type { SubAgent, SubAgentLog } from "@/types/agent/sub-agent"
+import type { SubAgent } from "@/types/agent/sub-agent"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { createSubAgentNode, indeterminateSubagentProgress } from "@/lib/claude/subagent-projection"
 
 export interface DispatchRunStartParams {
   /** Unique id for this run (also the tree node id). */
@@ -36,40 +37,16 @@ export interface DispatchRunStartParams {
 const CHAT_PARENT = "__chat__"
 
 function baseSubAgent(p: DispatchRunStartParams): SubAgent {
-  const now = new Date()
-  return {
+  return createSubAgentNode({
     id: p.id,
-    parentAgentId: p.parentAgentId ?? CHAT_PARENT,
     name: p.name,
-    description: p.name,
     task: p.task,
-    initialTask: p.task,
-    threadId: p.id,
-    status: "running",
-    config: {},
-    messages: [],
-    sources: [],
-    logs: [],
-    progress: 0,
-    createdAt: now,
-    lastActivityAt: now,
-    startedAt: now,
-    retryCount: 0,
-    order: 0,
+    parentAgentId: p.parentAgentId ?? CHAT_PARENT,
     depth: p.depth,
     ...(p.parentSubagentId ? { parentSubagentId: p.parentSubagentId } : {}),
-    ...(p.parentSessionId
-      ? {
-          context: {
-            parentAgentId: p.parentAgentId ?? CHAT_PARENT,
-            sessionId: p.parentSessionId,
-            startTime: now,
-            currentStep: 0,
-          },
-        }
-      : {}),
+    ...(p.parentSessionId ? { sessionId: p.parentSessionId } : {}),
     ...(p.backgrounded ? { backgrounded: true } : {}),
-  }
+  })
 }
 
 /** Record a subagent run starting (running, progress 0). */
@@ -129,25 +106,12 @@ export function recordDispatchFailed(id: string, error: string): void {
   })
 }
 
-/** Set a run's live progress (0..100; clamped by the store). */
-export function recordDispatchProgress(id: string, progress: number): void {
-  useSubagentRuntimeStore.getState().setProgress(id, progress)
-}
-
-/** Append a timestamped log line to a run (no-op for an unknown run). */
-export function recordDispatchLog(id: string, level: SubAgentLog["level"], message: string): void {
-  useSubagentRuntimeStore.getState().appendLog(id, { timestamp: new Date(), level, message })
-}
-
 /**
- * Heuristic "indeterminate" progress from the number of tool calls a run has
- * made so far — a real subagent has no completion percentage, so this rises
- * monotonically and is capped below 100 (only `recordDispatchComplete` reaches
- * 100). 10% per tool call, capped at 95%.
+ * Indeterminate progress from the tool-call count — re-exported from the shared
+ * {@link indeterminateSubagentProgress} so both subagent engines stay identical.
+ * Kept as a named export for the existing callers/tests.
  */
-export function dispatchProgressForToolCount(toolCalls: number): number {
-  return Math.min(95, Math.max(0, toolCalls) * 10)
-}
+export const dispatchProgressForToolCount = indeterminateSubagentProgress
 
 /**
  * Build a {@link CaptureStreamEvent} sink for a single dispatched run. It folds
@@ -159,16 +123,24 @@ export function dispatchProgressForToolCount(toolCalls: number): number {
 export function createDispatchEventSink(id: string): (event: CaptureStreamEvent) => void {
   let toolCalls = 0
   return (event) => {
+    const store = useSubagentRuntimeStore.getState()
     if (event.type === "tool-call") {
       toolCalls += 1
-      recordDispatchLog(id, "info", `Running ${event.toolName}`)
-      recordDispatchProgress(id, dispatchProgressForToolCount(toolCalls))
+      // One batched store write (log + progress + toolUses) per tool-call —
+      // a single map spread + subscriber notification instead of three.
+      store.applyRunEvent(id, {
+        log: { timestamp: new Date(), level: "info", message: `Running ${event.toolName}` },
+        progress: dispatchProgressForToolCount(toolCalls),
+        toolUses: toolCalls,
+      })
     } else if (event.type === "tool-result") {
-      recordDispatchLog(
-        id,
-        event.isError ? "warn" : "info",
-        `${event.toolName} ${event.isError ? "failed" : "done"}`
-      )
+      store.applyRunEvent(id, {
+        log: {
+          timestamp: new Date(),
+          level: event.isError ? "warn" : "info",
+          message: `${event.toolName} ${event.isError ? "failed" : "done"}`,
+        },
+      })
     }
   }
 }

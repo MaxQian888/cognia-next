@@ -203,3 +203,43 @@ describe("buildPartsFromExternalAgentEvents — integration", () => {
     expect(buildPartsFromExternalAgentEvents(events)).toEqual([])
   })
 })
+
+describe("applyExternalAgentEventToParts — hook_fire", () => {
+  it("appends an inline hook-notice part carrying the decision", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "hook_fire",
+        event: "PreToolUse",
+        toolName: "Bash",
+        outcome: "blocked",
+        block: "command matches denylist",
+        warnings: ["hook timed out after 5000ms"],
+      } as unknown as ExternalAgentEvent)
+    )
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "hook-notice",
+      event: "PreToolUse",
+      toolName: "Bash",
+      outcome: "blocked",
+      block: "command matches denylist",
+      warnings: ["hook timed out after 5000ms"],
+    })
+  })
+
+  it("defaults warnings to [] and sits after the preceding tool part", () => {
+    const events: ExternalAgentEvent[] = [
+      ev({ type: "tool_use_start", toolUseId: "t1", toolName: "Bash", rawInput: {} }),
+      ev({
+        type: "hook_fire",
+        event: "PostToolUse",
+        outcome: "context",
+        additionalContext: "loaded ctx",
+      } as unknown as ExternalAgentEvent),
+    ]
+    const parts = buildPartsFromExternalAgentEvents(events)
+    expect(parts.map((p) => (p as { type: string }).type)).toEqual(["tool-Bash", "hook-notice"])
+    expect(parts[1]).toMatchObject({ outcome: "context", warnings: [] })
+  })
+})

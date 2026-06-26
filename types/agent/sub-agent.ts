@@ -284,6 +284,12 @@ export interface SubAgent {
   logs: SubAgentLog[]
   /** Progress percentage (0-100) */
   progress: number
+  /**
+   * Number of tool calls the run has made so far — an honest, monotonic
+   * activity counter surfaced in the chat `SubagentPart` ("N tools"). Unlike
+   * {@link progress} (a derived pseudo-percentage), this is the raw count.
+   */
+  toolUses?: number
   /** Creation timestamp */
   createdAt: Date
   /** Last activity timestamp for sorting/selecting live threads */

@@ -25,7 +25,9 @@ import {
   fireAgentHook,
   observeExternalAgentEvent,
   gateExternalAgentPermission,
+  noticeFromDecision,
   type AgentHookContext,
+  type ExternalHookFireNotice,
 } from "./agent-hooks"
 
 const ctx: AgentHookContext = { agentId: "a1", sessionId: "s1", cwd: "/repo" }
@@ -83,13 +85,13 @@ describe("fireAgentHook", () => {
 })
 
 describe("observeExternalAgentEvent", () => {
-  it("fires SessionStart on session_start", () => {
-    observeExternalAgentEvent(ctx, { type: "session_start", timestamp: new Date() })
+  it("fires SessionStart on session_start", async () => {
+    await observeExternalAgentEvent(ctx, { type: "session_start", timestamp: new Date() })
     expect(eventsFor("SessionStart")).toHaveLength(1)
   })
 
-  it("dispatches the System-A tool-call hook on tool_use_start", () => {
-    observeExternalAgentEvent(ctx, {
+  it("dispatches the System-A tool-call hook on tool_use_start", async () => {
+    await observeExternalAgentEvent(ctx, {
       type: "tool_use_start",
       toolUseId: "t1",
       toolName: "Bash",
@@ -99,8 +101,8 @@ describe("observeExternalAgentEvent", () => {
     expect(dispatchExternalAgentToolCall).toHaveBeenCalledWith("a1", "s1", "Bash", { cmd: "ls" })
   })
 
-  it("defaults rawInput to {} when tool_use_start omits it", () => {
-    observeExternalAgentEvent(ctx, {
+  it("defaults rawInput to {} when tool_use_start omits it", async () => {
+    await observeExternalAgentEvent(ctx, {
       type: "tool_use_start",
       toolUseId: "t1",
       toolName: "Bash",
@@ -109,8 +111,8 @@ describe("observeExternalAgentEvent", () => {
     expect(dispatchExternalAgentToolCall).toHaveBeenCalledWith("a1", "s1", "Bash", {})
   })
 
-  it("falls back to 'unknown' tool name on a tool_result without one", () => {
-    observeExternalAgentEvent(ctx, {
+  it("falls back to 'unknown' tool name on a tool_result without one", async () => {
+    await observeExternalAgentEvent(ctx, {
       type: "tool_result",
       toolUseId: "t1",
       result: "ok",
@@ -120,8 +122,8 @@ describe("observeExternalAgentEvent", () => {
     expect(call?.[1]?.toolName).toBe("unknown")
   })
 
-  it("ignores unrelated event types", () => {
-    observeExternalAgentEvent(ctx, {
+  it("ignores unrelated event types", async () => {
+    await observeExternalAgentEvent(ctx, {
       type: "permission_response",
       response: { requestId: "r", granted: true },
       timestamp: new Date(),
@@ -130,8 +132,8 @@ describe("observeExternalAgentEvent", () => {
     expect(dispatchExternalAgentToolCall).not.toHaveBeenCalled()
   })
 
-  it("fires PostToolUse on a successful tool_result", () => {
-    observeExternalAgentEvent(ctx, {
+  it("fires PostToolUse on a successful tool_result", async () => {
+    await observeExternalAgentEvent(ctx, {
       type: "tool_result",
       toolUseId: "t1",
       toolName: "Bash",
@@ -142,8 +144,8 @@ describe("observeExternalAgentEvent", () => {
     expect(eventsFor("PostToolUseFailure")).toHaveLength(0)
   })
 
-  it("fires PostToolUseFailure on an errored tool_result", () => {
-    observeExternalAgentEvent(ctx, {
+  it("fires PostToolUseFailure on an errored tool_result", async () => {
+    await observeExternalAgentEvent(ctx, {
       type: "tool_result",
       toolUseId: "t1",
       toolName: "Bash",
@@ -154,15 +156,95 @@ describe("observeExternalAgentEvent", () => {
     expect(eventsFor("PostToolUseFailure")).toHaveLength(1)
   })
 
-  it("fires Stop + SessionEnd on done", () => {
-    observeExternalAgentEvent(ctx, { type: "done", success: true, timestamp: new Date() })
+  it("fires Stop + SessionEnd on done", async () => {
+    await observeExternalAgentEvent(ctx, { type: "done", success: true, timestamp: new Date() })
     expect(eventsFor("Stop")).toHaveLength(1)
     expect(eventsFor("SessionEnd")).toHaveLength(1)
   })
 
-  it("fires StopFailure on error", () => {
-    observeExternalAgentEvent(ctx, { type: "error", error: "nope", timestamp: new Date() })
+  it("fires StopFailure on error", async () => {
+    await observeExternalAgentEvent(ctx, { type: "error", error: "nope", timestamp: new Date() })
     expect(eventsFor("StopFailure")).toHaveLength(1)
+  })
+
+  it("emits a hook notice when a PostToolUse fire is consequential", async () => {
+    invoke.mockResolvedValue({ block: null, additionalContext: null, warnings: ["slow hook"] })
+    const emit = jest.fn()
+    await observeExternalAgentEvent(
+      ctx,
+      {
+        type: "tool_result",
+        toolUseId: "t1",
+        toolName: "Bash",
+        result: "ok",
+        timestamp: new Date(),
+      },
+      emit
+    )
+    expect(emit).toHaveBeenCalledTimes(1)
+    const notice = emit.mock.calls[0][0] as ExternalHookFireNotice
+    expect(notice).toMatchObject({ event: "PostToolUse", toolName: "Bash", outcome: "warning" })
+    expect(notice.warnings).toEqual(["slow hook"])
+  })
+
+  it("does not emit for a no-op fire", async () => {
+    const emit = jest.fn()
+    await observeExternalAgentEvent(
+      ctx,
+      {
+        type: "tool_result",
+        toolUseId: "t1",
+        toolName: "Bash",
+        result: "ok",
+        timestamp: new Date(),
+      },
+      emit
+    )
+    expect(emit).not.toHaveBeenCalled()
+  })
+})
+
+describe("noticeFromDecision", () => {
+  it("returns null for a missing or no-op decision", () => {
+    expect(noticeFromDecision("PreToolUse", "Bash", null)).toBeNull()
+    expect(
+      noticeFromDecision("PreToolUse", "Bash", {
+        block: null,
+        additionalContext: null,
+        warnings: [],
+      })
+    ).toBeNull()
+    expect(
+      noticeFromDecision("PreToolUse", "Bash", {
+        block: "   ",
+        additionalContext: "",
+        warnings: [],
+      })
+    ).toBeNull()
+  })
+
+  it("derives outcome by precedence block > context > warning", () => {
+    expect(
+      noticeFromDecision("PreToolUse", "Bash", {
+        block: "no",
+        additionalContext: "ctx",
+        warnings: ["w"],
+      })
+    ).toMatchObject({ outcome: "blocked", block: "no" })
+    expect(
+      noticeFromDecision("PostToolUse", "Bash", {
+        block: null,
+        additionalContext: "ctx",
+        warnings: ["w"],
+      })
+    ).toMatchObject({ outcome: "context", additionalContext: "ctx" })
+    expect(
+      noticeFromDecision("Stop", undefined, {
+        block: null,
+        additionalContext: null,
+        warnings: ["w"],
+      })
+    ).toMatchObject({ outcome: "warning", warnings: ["w"] })
   })
 })
 
@@ -229,5 +311,39 @@ describe("gateExternalAgentPermission", () => {
       "unknown",
       undefined
     )
+  })
+
+  it("emits a blocked hook notice when PreToolUse blocks", async () => {
+    invoke.mockResolvedValue({ block: "policy violation", additionalContext: null, warnings: [] })
+    const deny = jest.fn().mockResolvedValue(undefined)
+    const emit = jest.fn()
+    await gateExternalAgentPermission(ctx, permEvent(), deny, emit)
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit.mock.calls[0][0]).toMatchObject({
+      event: "PreToolUse",
+      toolName: "Bash",
+      outcome: "blocked",
+      block: "policy violation",
+    })
+  })
+
+  it("emits a context notice for a non-blocking consequential PreToolUse", async () => {
+    invoke.mockResolvedValue({ block: null, additionalContext: "extra ctx", warnings: [] })
+    const deny = jest.fn().mockResolvedValue(undefined)
+    const emit = jest.fn()
+    const blocked = await gateExternalAgentPermission(ctx, permEvent(), deny, emit)
+    expect(blocked).toBe(false)
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit.mock.calls[0][0]).toMatchObject({
+      outcome: "context",
+      additionalContext: "extra ctx",
+    })
+  })
+
+  it("does not emit for a no-op PreToolUse fire", async () => {
+    const deny = jest.fn().mockResolvedValue(undefined)
+    const emit = jest.fn()
+    await gateExternalAgentPermission(ctx, permEvent(), deny, emit)
+    expect(emit).not.toHaveBeenCalled()
   })
 })

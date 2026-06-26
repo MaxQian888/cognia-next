@@ -41,7 +41,17 @@ interface RuntimeSlice {
   upsert: (subAgent: SubAgent) => void
   setStatus: (id: string, status: SubAgentStatus) => void
   setProgress: (id: string, progress: number) => void
+  setToolUses: (id: string, toolUses: number) => void
   appendLog: (id: string, log: SubAgentLog) => void
+  /**
+   * Apply log + progress + toolUses for a single run event in ONE store write
+   * (one map spread, one subscriber notification) instead of 3 separate
+   * mutators. The hot path is `dispatch-runtime`'s tool-call event sink.
+   */
+  applyRunEvent: (
+    id: string,
+    patch: { log?: SubAgentLog; progress?: number; toolUses?: number }
+  ) => void
   pushStreamText: (id: string, text: string) => void
   remove: (id: string) => void
   clearRuntime: () => void
@@ -101,6 +111,15 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
           const clamped = Math.max(0, Math.min(100, progress))
           return { subAgents: { ...s.subAgents, [id]: { ...sa, progress: clamped } } }
         }),
+      setToolUses: (id, toolUses) =>
+        set((s) => {
+          const sa = s.subAgents[id]
+          if (!sa) return s
+          // Monotonic, honest tool-call count (never negative). Drives the
+          // chat SubagentPart "N tools" counter.
+          const count = Math.max(0, Math.floor(toolUses))
+          return { subAgents: { ...s.subAgents, [id]: { ...sa, toolUses: count } } }
+        }),
       appendLog: (id, log) =>
         set((s) => {
           const sa = s.subAgents[id]
@@ -111,6 +130,29 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
               [id]: { ...sa, logs: [...sa.logs, log].slice(-50), lastActivityAt: new Date() },
             },
           }
+        }),
+      applyRunEvent: (id, patch) =>
+        set((s) => {
+          const sa = s.subAgents[id]
+          if (!sa) return s
+          // Apply the same caps/clamps the single mutators use, but in one pass.
+          const next: SubAgent = { ...sa }
+          let changed = false
+          if (patch.log) {
+            next.logs = [...sa.logs, patch.log].slice(-50)
+            next.lastActivityAt = new Date()
+            changed = true
+          }
+          if (typeof patch.progress === "number") {
+            next.progress = Math.max(0, Math.min(100, patch.progress))
+            changed = true
+          }
+          if (typeof patch.toolUses === "number") {
+            next.toolUses = Math.max(0, Math.floor(patch.toolUses))
+            changed = true
+          }
+          if (!changed) return s
+          return { subAgents: { ...s.subAgents, [id]: next } }
         }),
       // Coalesce a growing streaming-text line into ONE log entry (marked
       // `data.stream === "text"`): replace a trailing stream-text entry, else

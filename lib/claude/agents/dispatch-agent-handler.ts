@@ -18,9 +18,17 @@
  */
 
 import { parseDispatchAgentArgs, type NormalizedDispatch } from "./dispatch-agent-tool"
-import { getDispatchContext, getResolvedPermissionCeiling } from "./dispatch-context-registry"
+import {
+  getDispatchContext,
+  getResolvedPermissionCeiling,
+  clearResolvedPermissionCeiling,
+} from "./dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
-import { getOrCreateDispatchBudget, releaseDispatchBudget } from "./dispatch-budget"
+import {
+  getOrCreateDispatchBudget,
+  releaseDispatchBudget,
+  isDispatchBudgetFinite,
+} from "./dispatch-budget"
 import {
   startRendererBackgroundRun,
   collectRendererBackgroundResult,
@@ -216,7 +224,20 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
     const d = parsed.dispatches[0]
     return runOne(d, d.subagentId)
   }
-  // Parallel fan-out: all siblings run concurrently, share the subtree budget.
+  // Parallel fan-out shares the subtree budget. The guard is a post-hoc
+  // accumulator (`add` runs AFTER each run), so under a FINITE budget concurrent
+  // siblings would all clear the pre-spend exhaustion gate and overshoot in one
+  // batch. When the budget is finite, serialize the fan-out so each sibling sees
+  // the prior siblings' draw-down and `isDispatchBudgetExhausted` trips mid-batch.
+  // An unlimited budget has nothing to overshoot, so it stays fully parallel.
+  if (isDispatchBudgetFinite(caller.budgetRoot)) {
+    const out: string[] = []
+    for (let i = 0; i < parsed.dispatches.length; i++) {
+      const d = parsed.dispatches[i]
+      out.push(await runOne(d, `${d.subagentId}#${i + 1}`))
+    }
+    return out.join("\n\n---\n\n")
+  }
   const settled = await Promise.all(
     parsed.dispatches.map((d, i) => runOne(d, `${d.subagentId}#${i + 1}`))
   )
@@ -233,4 +254,18 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
  */
 export function releaseDispatchBudgetForSession(sessionId: string): void {
   releaseDispatchBudget(`dispatch:${sessionId}`)
+}
+
+/**
+ * Drop ALL per-session dispatch state at chat session teardown: the subtree
+ * budget guard AND the resolved permission ceiling. `resolveSendOptions`
+ * deposits a ceiling under the chat session id on every send (not just dispatch
+ * turns), so — like the budget guard — it leaks one entry per distinct session
+ * id for the renderer's lifetime unless cleared here. Subagent/team sessions are
+ * ephemeral and clear their own ceiling in their executor `finally`; only the
+ * long-lived chat session needs this teardown hook.
+ */
+export function releaseDispatchStateForSession(sessionId: string): void {
+  releaseDispatchBudgetForSession(sessionId)
+  clearResolvedPermissionCeiling(sessionId)
 }

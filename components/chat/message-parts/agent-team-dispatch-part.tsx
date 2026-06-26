@@ -9,6 +9,7 @@
  * Phase 8 of the ClaudeCode 完整化 plan.
  */
 
+import { memo } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { ArrowRightIcon, ExternalLinkIcon, UsersIcon } from "lucide-react"
@@ -25,9 +26,14 @@ interface Props {
   mode?: AgentFlowMode
 }
 
-export function AgentTeamDispatchPart({ part, fromName, mode = "standard" }: Props) {
+export const AgentTeamDispatchPart = memo(function AgentTeamDispatchPart({
+  part,
+  fromName,
+  mode = "standard",
+}: Props) {
   const t = useTranslations("chat.agentTeamDispatch")
   const compact = mode === "simplified"
+  const memberHref = `/agent-teams?focus=${part.to}`
   return (
     <Card
       className={cn(
@@ -38,20 +44,20 @@ export function AgentTeamDispatchPart({ part, fromName, mode = "standard" }: Pro
       data-mode={mode}
     >
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <UsersIcon className="size-3 shrink-0" />
+        <UsersIcon className="size-3 shrink-0" aria-hidden />
         <span className="font-medium">{fromName ?? t("supervisor")}</span>
-        <ArrowRightIcon className="size-3 shrink-0" />
+        <ArrowRightIcon className="size-3 shrink-0" aria-hidden />
         <Badge variant="secondary" className="text-[10px]" data-testid="dispatch-to">
           {part.toName}
         </Badge>
         {compact ? (
           <Link
-            href={`/agent-teams?focus=${part.to}`}
+            href={memberHref}
             className="ml-auto inline-flex items-center gap-1 underline"
             data-testid="dispatch-open"
           >
             {t("openMember")}
-            <ExternalLinkIcon className="size-3" />
+            <ExternalLinkIcon className="size-3" aria-hidden />
           </Link>
         ) : null}
       </div>
@@ -59,15 +65,15 @@ export function AgentTeamDispatchPart({ part, fromName, mode = "standard" }: Pro
         <>
           <p className="mt-1 whitespace-pre-wrap text-xs">{part.task}</p>
           <Link
-            href={`/agent-teams?focus=${part.to}`}
+            href={memberHref}
             className="mt-1.5 inline-flex items-center gap-1 text-[11px] underline"
             data-testid="dispatch-open"
           >
             {t("openMember")}
-            <ExternalLinkIcon className="size-3" />
+            <ExternalLinkIcon className="size-3" aria-hidden />
           </Link>
         </>
       )}
     </Card>
   )
-}
+})

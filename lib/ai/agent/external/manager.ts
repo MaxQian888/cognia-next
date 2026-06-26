@@ -10,6 +10,7 @@ import type {
   ExternalAgentSession,
   ExternalAgentMessage,
   ExternalAgentEvent,
+  ExternalAgentHookFireEvent,
   ExternalAgentResult,
   ExternalAgentExecutionOptions,
   ExternalAgentInstance,
@@ -52,6 +53,7 @@ import {
   observeExternalAgentEvent,
   gateExternalAgentPermission,
   type AgentHookContext,
+  type EmitHookNotice,
 } from "./agent-hooks"
 import {
   getExternalAgentExecutionBlock,
@@ -1833,18 +1835,35 @@ export class ExternalAgentManager {
 
         // Settings.json (System B) + plugin (System A) hooks. A blocking
         // PreToolUse hook denies the permission and suppresses the event so the
-        // user is never prompted for a tool the hook already rejected.
+        // user is never prompted for a tool the hook already rejected. A
+        // consequential fire is forwarded as a synthetic `hook_fire` event so
+        // the chat shows an inline hook-notice row.
+        const emitHookNotice: EmitHookNotice = (notice) => {
+          const hookEvent: ExternalAgentHookFireEvent = {
+            type: "hook_fire",
+            timestamp: new Date(),
+            sessionId: session.id,
+            ...notice,
+          }
+          this.emitEvent(agentId, hookEvent)
+          options?.onEvent?.(hookEvent)
+          void traceBridge.onEvent(hookEvent)
+        }
         if (event.type === "permission_request") {
-          const blocked = await gateExternalAgentPermission(hookCtx, event, (requestId, reason) =>
-            this.respondToPermission(agentId, session.id, {
-              requestId,
-              granted: false,
-              reason: `hook denied: ${reason}`,
-            })
+          const blocked = await gateExternalAgentPermission(
+            hookCtx,
+            event,
+            (requestId, reason) =>
+              this.respondToPermission(agentId, session.id, {
+                requestId,
+                granted: false,
+                reason: `hook denied: ${reason}`,
+              }),
+            emitHookNotice
           )
           if (blocked) continue
         } else {
-          observeExternalAgentEvent(hookCtx, event)
+          void observeExternalAgentEvent(hookCtx, event, emitHookNotice)
         }
 
         // Emit to listeners
@@ -2013,22 +2032,39 @@ export class ExternalAgentManager {
             await this.connect(agentId)
           }
 
+          const emitHookNotice: EmitHookNotice = (notice) => {
+            const hookEvent: ExternalAgentHookFireEvent = {
+              type: "hook_fire",
+              timestamp: new Date(),
+              sessionId: session.id,
+              ...notice,
+            }
+            this.emitEvent(agentId, hookEvent)
+            options?.onEvent?.(hookEvent)
+            void traceBridge.onEvent(hookEvent)
+          }
           const wrappedOptions: ExternalAgentExecutionOptions = {
             ...options,
             onEvent: (event) => {
               // Headless path: hooks fire-and-forget. A blocking PreToolUse hook
               // still denies the tool via respondToPermission; there is no
-              // permission UI to suppress on this path.
+              // permission UI to suppress on this path. A consequential fire is
+              // forwarded as a synthetic `hook_fire` event so the chat shows an
+              // inline hook-notice row.
               if (event.type === "permission_request") {
-                void gateExternalAgentPermission(hookCtx, event, (requestId, reason) =>
-                  this.respondToPermission(agentId, session.id, {
-                    requestId,
-                    granted: false,
-                    reason: `hook denied: ${reason}`,
-                  })
+                void gateExternalAgentPermission(
+                  hookCtx,
+                  event,
+                  (requestId, reason) =>
+                    this.respondToPermission(agentId, session.id, {
+                      requestId,
+                      granted: false,
+                      reason: `hook denied: ${reason}`,
+                    }),
+                  emitHookNotice
                 )
               } else {
-                observeExternalAgentEvent(hookCtx, event)
+                void observeExternalAgentEvent(hookCtx, event, emitHookNotice)
               }
               options?.onEvent?.(event)
               void traceBridge.onEvent(event)

@@ -1,10 +1,15 @@
-import { runDispatchAgentTool, releaseDispatchBudgetForSession } from "./dispatch-agent-handler"
+import {
+  runDispatchAgentTool,
+  releaseDispatchBudgetForSession,
+  releaseDispatchStateForSession,
+} from "./dispatch-agent-handler"
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
 import { getSettings } from "@/lib/db/settings"
 import {
   registerDispatchContext,
   recordResolvedPermissionCeiling,
+  getResolvedPermissionCeiling,
   __clearAllDispatchContextsForTesting,
 } from "./dispatch-context-registry"
 import {
@@ -254,5 +259,57 @@ describe("runDispatchAgentTool — call modes", () => {
     expect(getDispatchBudget("dispatch:chat-xyz")).toBeDefined()
     releaseDispatchBudgetForSession("chat-xyz")
     expect(getDispatchBudget("dispatch:chat-xyz")).toBeUndefined()
+  })
+
+  it("releaseDispatchStateForSession drops the budget guard AND the resolved ceiling", () => {
+    getOrCreateDispatchBudget("dispatch:chat-xyz", 1000)
+    recordResolvedPermissionCeiling("chat-xyz", { allowedTools: ["Read"] })
+    expect(getDispatchBudget("dispatch:chat-xyz")).toBeDefined()
+    expect(getResolvedPermissionCeiling("chat-xyz")).toBeDefined()
+    releaseDispatchStateForSession("chat-xyz")
+    expect(getDispatchBudget("dispatch:chat-xyz")).toBeUndefined()
+    expect(getResolvedPermissionCeiling("chat-xyz")).toBeUndefined()
+  })
+})
+
+describe("runDispatchAgentTool — fan-out concurrency vs budget", () => {
+  // Track peak concurrent dispatches so we can distinguish serialized from
+  // parallel fan-out without depending on wall-clock timing.
+  const trackingDispatch = () => {
+    let active = 0
+    let peak = 0
+    mockDispatch.mockImplementation(async (_id, prompt) => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise((r) => setTimeout(r, 0))
+      active -= 1
+      return ok(`R:${prompt}`)
+    })
+    return () => peak
+  }
+
+  const twoDispatches = {
+    dispatches: [
+      { subagentId: "a", prompt: "one" },
+      { subagentId: "b", prompt: "two" },
+    ],
+  }
+
+  it("serializes parallel fan-out under a FINITE budget (peak concurrency 1)", async () => {
+    mockGetSettings.mockResolvedValue({
+      subagentNesting: { enabled: true, maxDepth: 2, tokenBudget: 100, timeoutMs: 0 },
+    } as never)
+    const peak = trackingDispatch()
+    const out = await runDispatchAgentTool({ sessionId: "chat-finite", args: twoDispatches })
+    expect(peak()).toBe(1)
+    expect(out).toContain("R:one")
+    expect(out).toContain("R:two")
+  })
+
+  it("keeps parallel fan-out under an UNLIMITED budget (peak concurrency 2)", async () => {
+    // Default beforeEach settings carry tokenBudget: 0 (unlimited).
+    const peak = trackingDispatch()
+    await runDispatchAgentTool({ sessionId: "chat-unlimited", args: twoDispatches })
+    expect(peak()).toBe(2)
   })
 })

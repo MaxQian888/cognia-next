@@ -82,14 +82,3 @@ export function buildSubagentTree(parts: readonly unknown[] | undefined): Subage
   roots.sort(stableSort)
   return roots
 }
-
-/** Flatten the tree depth-first (roots first) — handy for indented list rendering. */
-export function flattenSubagentTree(nodes: SubagentTreeNode[]): SubagentTreeNode[] {
-  const out: SubagentTreeNode[] = []
-  const walk = (n: SubagentTreeNode) => {
-    out.push(n)
-    for (const c of n.children) walk(c)
-  }
-  for (const n of nodes) walk(n)
-  return out
-}

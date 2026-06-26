@@ -169,12 +169,29 @@ describe("applySubagentsToMessages", () => {
 })
 
 describe("subagentSignature", () => {
-  it("changes when status or progress changes, stable otherwise", () => {
+  it("changes when status changes, stable otherwise", () => {
     const base = makeSubAgent({ id: "s1", status: "running", progress: 10 })
     const sig1 = subagentSignature([base])
     expect(subagentSignature([{ ...base }])).toBe(sig1)
-    expect(subagentSignature([{ ...base, progress: 50 }])).not.toBe(sig1)
     expect(subagentSignature([{ ...base, status: "completed" }])).not.toBe(sig1)
+  })
+
+  it("IGNORES progress changes (the transcript card never renders progress)", () => {
+    const base = makeSubAgent({ id: "s1", status: "running", progress: 10 })
+    const sig1 = subagentSignature([base])
+    expect(subagentSignature([{ ...base, progress: 50 }])).toBe(sig1)
+    expect(subagentSignature([{ ...base, progress: 95 }])).toBe(sig1)
+  })
+
+  it("changes when the final-response summary appears", () => {
+    const base = makeSubAgent({ id: "s1", status: "running" })
+    const sig1 = subagentSignature([base])
+    const withSummary = makeSubAgent({
+      id: "s1",
+      status: "running",
+      result: { finalResponse: "done", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    expect(subagentSignature([withSummary])).not.toBe(sig1)
   })
 
   it("is order-independent", () => {

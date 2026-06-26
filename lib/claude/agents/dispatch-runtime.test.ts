@@ -3,8 +3,6 @@ import {
   recordDispatchComplete,
   recordDispatchFailed,
   recordDispatchRejected,
-  recordDispatchProgress,
-  recordDispatchLog,
   dispatchProgressForToolCount,
   createDispatchEventSink,
 } from "./dispatch-runtime"
@@ -102,23 +100,6 @@ describe("dispatch-runtime producer", () => {
     expect(sa.status).toBe("rejected")
     expect(sa.rejection?.reason).toBe("max-depth")
   })
-
-  it("records live progress (clamped) for a known run", () => {
-    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    recordDispatchProgress("n1", 42)
-    expect(read("n1").progress).toBe(42)
-    recordDispatchProgress("n1", 999)
-    expect(read("n1").progress).toBe(100)
-  })
-
-  it("appends a timestamped log line for a known run", () => {
-    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    recordDispatchLog("n1", "info", "Running Bash")
-    const logs = read("n1").logs
-    expect(logs).toHaveLength(1)
-    expect(logs[0]).toMatchObject({ level: "info", message: "Running Bash" })
-    expect(logs[0].timestamp).toBeInstanceOf(Date)
-  })
 })
 
 describe("dispatchProgressForToolCount", () => {
@@ -141,7 +122,8 @@ describe("createDispatchEventSink", () => {
     sink({ type: "tool-call", toolName: "Read", input: {} })
     const sa = read("n1")
     expect(sa.logs.map((l) => l.message)).toEqual(["Running Bash", "Running Read"])
-    expect(sa.progress).toBe(20)
+    expect(sa.progress).toBe(20) // derived pseudo-percentage
+    expect(sa.toolUses).toBe(2) // honest raw count
   })
 
   it("logs tool results, warning on errors", () => {

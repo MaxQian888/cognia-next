@@ -36,6 +36,13 @@ describe("AgentTeamDispatchPart", () => {
     expect(screen.getByText(/Investigate the schema/)).toBeInTheDocument()
   })
 
+  it("marks decorative icons aria-hidden (no SR noise)", () => {
+    const { container } = render(<AgentTeamDispatchPart part={base} fromName="Captain" />)
+    const icons = container.querySelectorAll("svg")
+    expect(icons.length).toBeGreaterThan(0)
+    icons.forEach((svg) => expect(svg).toHaveAttribute("aria-hidden"))
+  })
+
   it("renders an Open-member link pointing at the focus query param", () => {
     render(<AgentTeamDispatchPart part={base} />)
     const link = screen.getByTestId("dispatch-open") as HTMLAnchorElement

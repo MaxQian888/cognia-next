@@ -1,4 +1,15 @@
-import { buildSubagentTree, flattenSubagentTree } from "./subagent-tree"
+import { buildSubagentTree, type SubagentTreeNode } from "./subagent-tree"
+
+/** Local DFS flatten (roots first) — used to assert traversal/cycle behavior. */
+function flatten(nodes: SubagentTreeNode[]): SubagentTreeNode[] {
+  const out: SubagentTreeNode[] = []
+  const walk = (n: SubagentTreeNode) => {
+    out.push(n)
+    for (const c of n.children) walk(c)
+  }
+  for (const n of nodes) walk(n)
+  return out
+}
 import type { SubagentPart } from "./parts-extensions"
 
 const part = (over: Partial<SubagentPart> & { subagentId: string }): SubagentPart => ({
@@ -58,7 +69,7 @@ describe("buildSubagentTree", () => {
       part({ subagentId: "a", parentSubagentId: "b" }),
       part({ subagentId: "b", parentSubagentId: "a" }),
     ])
-    const ids = flattenSubagentTree(tree)
+    const ids = flatten(tree)
       .map((n) => n.part.subagentId)
       .sort()
     expect(ids).toContain("a")
@@ -77,6 +88,6 @@ describe("buildSubagentTree", () => {
       part({ subagentId: "b", parentSubagentId: "a", startedAt: 2 }),
       part({ subagentId: "d", startedAt: 4 }),
     ])
-    expect(flattenSubagentTree(tree).map((n) => n.part.subagentId)).toEqual(["a", "b", "d"])
+    expect(flatten(tree).map((n) => n.part.subagentId)).toEqual(["a", "b", "d"])
   })
 })

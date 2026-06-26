@@ -124,4 +124,60 @@ describe("SubagentTree", () => {
       expect(screen.getByTestId("subagent-toggle-b").getAttribute("aria-expanded")).toBe("false")
     })
   })
+
+  describe("accessibility tree semantics", () => {
+    it("exposes role=tree / treeitem / group with aria-level for nesting", () => {
+      render(
+        <SubagentTree
+          parts={
+            [
+              part({ subagentId: "a", startedAt: 1 }),
+              part({ subagentId: "b", parentSubagentId: "a", startedAt: 2 }),
+            ] as never
+          }
+        />
+      )
+      expect(screen.getByRole("tree")).toBeInTheDocument()
+      const items = screen.getAllByRole("treeitem")
+      expect(items.length).toBe(2)
+      // Root is level 1, the nested child is level 2.
+      const nodeA = screen.getByTestId("subagent-tree-node-a")
+      const nodeB = screen.getByTestId("subagent-tree-node-b")
+      expect(nodeA).toHaveAttribute("aria-level", "1")
+      expect(nodeB).toHaveAttribute("aria-level", "2")
+      // A parent treeitem advertises expandability + wraps children in a group.
+      expect(nodeA).toHaveAttribute("aria-expanded")
+      expect(nodeA.querySelector('[role="group"]')).not.toBeNull()
+      // A leaf does not claim expandability.
+      expect(nodeB).not.toHaveAttribute("aria-expanded")
+    })
+  })
+
+  describe("content-signature memo (B1)", () => {
+    it("preserves per-node toggle state across a new-array-same-content re-render", () => {
+      // The adapter replaces `message.parts` with a fresh array on every
+      // streaming token. The tree must memoize on a CONTENT signature (not the
+      // array ref) so a token that doesn't change subagent structure neither
+      // rebuilds the tree nor drops interactive state.
+      const v1 = [part({ subagentId: "a", startedAt: 1 }), part({ subagentId: "b", startedAt: 2 })]
+      const { rerender } = render(<SubagentTree parts={v1 as never} mode="simplified" />)
+      fireEvent.click(screen.getByTestId("subagent-toggle-a"))
+      expect(screen.getByTestId("subagent-toggle-a").getAttribute("aria-expanded")).toBe("true")
+
+      // Brand-new array, structurally identical content (new object refs).
+      const v2 = [part({ subagentId: "a", startedAt: 1 }), part({ subagentId: "b", startedAt: 2 })]
+      expect(v2).not.toBe(v1)
+      rerender(<SubagentTree parts={v2 as never} mode="simplified" />)
+      expect(screen.getByTestId("subagent-toggle-a").getAttribute("aria-expanded")).toBe("true")
+    })
+
+    it("rebuilds when a subagent's status actually changes", () => {
+      const v1 = [part({ subagentId: "a", status: "running", startedAt: 1 })]
+      const { rerender } = render(<SubagentTree parts={v1 as never} mode="standard" />)
+      expect(screen.getByTestId("subagent-part-a").dataset.status).toBe("running")
+      const v2 = [part({ subagentId: "a", status: "completed", startedAt: 1 })]
+      rerender(<SubagentTree parts={v2 as never} mode="standard" />)
+      expect(screen.getByTestId("subagent-part-a").dataset.status).toBe("completed")
+    })
+  })
 })

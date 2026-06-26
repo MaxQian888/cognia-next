@@ -115,13 +115,19 @@ export function applySubagentsToMessages(messages: UIMessage[], subs: SubAgent[]
 }
 
 /**
- * Cheap change-signature for a set of subagents — id/status/progress/summary.
+ * Cheap change-signature for a set of subagents — id/status/summary-presence.
  * The chat-side subscriber compares this against the last applied value so a
  * no-op subagent-store mutation doesn't trigger a redundant message rewrite.
+ *
+ * `progress` is deliberately EXCLUDED: the chat transcript card renders the live
+ * tool-use count (read directly from the store per-card), never a progress
+ * percentage, so a progress tick has no transcript effect — including it here
+ * would rewrite the whole message array (full `MessageRenderer` re-render) for
+ * nothing. `toolUses`/`logs` are likewise excluded for the same reason.
  */
 export function subagentSignature(subs: SubAgent[]): string {
   return subs
-    .map((s) => `${s.id}:${s.status}:${s.progress}:${s.result?.finalResponse ? 1 : 0}`)
+    .map((s) => `${s.id}:${s.status}:${s.result?.finalResponse ? 1 : 0}`)
     .sort()
     .join("|")
 }

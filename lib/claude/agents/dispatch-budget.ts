@@ -20,7 +20,13 @@ const SILENT_NOTIFIER: TeamNotifier = {
   resume: () => {},
 }
 
-const guards = new Map<string, BudgetGuard>()
+interface DispatchBudgetEntry {
+  guard: BudgetGuard
+  /** Resolved token limit; `0` means unlimited. */
+  limit: number
+}
+
+const guards = new Map<string, DispatchBudgetEntry>()
 
 /**
  * Get the shared guard for a subtree, creating it (with `limitTokens`) on first
@@ -28,20 +34,21 @@ const guards = new Map<string, BudgetGuard>()
  */
 export function getOrCreateDispatchBudget(rootRunId: string, limitTokens: number): BudgetGuard {
   const existing = guards.get(rootRunId)
-  if (existing) return existing
+  if (existing) return existing.guard
+  const limit = Math.max(0, limitTokens)
   const guard = createBudgetGuard({
     runId: rootRunId,
-    limit: Math.max(0, limitTokens),
+    limit,
     onCritical: "notify",
     notifier: SILENT_NOTIFIER,
   })
-  guards.set(rootRunId, guard)
+  guards.set(rootRunId, { guard, limit })
   return guard
 }
 
 /** Read the existing guard for a subtree, or `undefined` if none was created. */
 export function getDispatchBudget(rootRunId: string): BudgetGuard | undefined {
-  return guards.get(rootRunId)
+  return guards.get(rootRunId)?.guard
 }
 
 /** Drop a subtree's guard once the top-level dispatch finishes. */
@@ -60,9 +67,23 @@ export function releaseDispatchBudget(rootRunId: string): void {
  */
 export function isDispatchBudgetExhausted(rootRunId: string | undefined): boolean {
   if (!rootRunId) return false
-  const guard = guards.get(rootRunId)
-  if (!guard) return false
-  return guard.status().level === "critical"
+  const entry = guards.get(rootRunId)
+  if (!entry) return false
+  return entry.guard.status().level === "critical"
+}
+
+/**
+ * Whether a subtree runs under a FINITE token budget (`limit > 0`). Callers use
+ * this to decide concurrency: a finite budget must serialize parallel fan-out so
+ * each sibling sees the prior siblings' draw-down (the guard is a post-hoc
+ * accumulator, so concurrent siblings would otherwise all clear the pre-spend
+ * `isDispatchBudgetExhausted` gate and overshoot in one batch). An unlimited
+ * budget has nothing to overshoot, so its fan-out stays fully parallel.
+ */
+export function isDispatchBudgetFinite(rootRunId: string | undefined): boolean {
+  if (!rootRunId) return false
+  const entry = guards.get(rootRunId)
+  return entry ? entry.limit > 0 : false
 }
 
 /** Test-only: drop all guards. */

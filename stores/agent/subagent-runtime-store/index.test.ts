@@ -159,6 +159,21 @@ describe("subagent-runtime-store — runtime slice", () => {
     expect(snapshot().subAgents.missing).toBeUndefined()
   })
 
+  it("setToolUses stores a floored, non-negative count", () => {
+    snapshot().upsert(makeSubAgent())
+    snapshot().setToolUses("sa-1", 4)
+    expect(snapshot().subAgents["sa-1"]?.toolUses).toBe(4)
+    snapshot().setToolUses("sa-1", 7.9)
+    expect(snapshot().subAgents["sa-1"]?.toolUses).toBe(7)
+    snapshot().setToolUses("sa-1", -3)
+    expect(snapshot().subAgents["sa-1"]?.toolUses).toBe(0)
+  })
+
+  it("setToolUses is a no-op when the subagent is unknown", () => {
+    snapshot().setToolUses("missing", 5)
+    expect(snapshot().subAgents.missing).toBeUndefined()
+  })
+
   it("appendLog appends in order", () => {
     snapshot().upsert(makeSubAgent({ logs: [] }))
     const a: SubAgentLog = { timestamp: new Date(), level: "info", message: "first" }
@@ -206,6 +221,59 @@ describe("subagent-runtime-store — runtime slice", () => {
   it("pushStreamText is a no-op when the subagent is unknown", () => {
     expect(() => snapshot().pushStreamText("missing", "x")).not.toThrow()
     expect(snapshot().subAgents.missing).toBeUndefined()
+  })
+
+  describe("applyRunEvent (batched log + progress + toolUses)", () => {
+    it("applies all three fields in one write, with the same caps/clamps", () => {
+      snapshot().upsert(makeSubAgent({ logs: [], progress: 0, toolUses: 0 }))
+      snapshot().applyRunEvent("sa-1", {
+        log: { timestamp: new Date(), level: "info", message: "Running Bash" },
+        progress: 150,
+        toolUses: 3.9,
+      })
+      const sa = snapshot().subAgents["sa-1"]!
+      expect(sa.logs).toHaveLength(1)
+      expect(sa.logs[0].message).toBe("Running Bash")
+      expect(sa.progress).toBe(100) // clamped
+      expect(sa.toolUses).toBe(3) // floored
+      expect(sa.lastActivityAt).toBeInstanceOf(Date)
+    })
+
+    it("applies a partial patch (log only) without touching progress/toolUses", () => {
+      snapshot().upsert(makeSubAgent({ logs: [], progress: 42, toolUses: 5 }))
+      snapshot().applyRunEvent("sa-1", {
+        log: { timestamp: new Date(), level: "warn", message: "Bash failed" },
+      })
+      const sa = snapshot().subAgents["sa-1"]!
+      expect(sa.logs[0].message).toBe("Bash failed")
+      expect(sa.progress).toBe(42)
+      expect(sa.toolUses).toBe(5)
+    })
+
+    it("returns the SAME state reference for a no-op patch (no spurious notify)", () => {
+      snapshot().upsert(makeSubAgent())
+      const before = snapshot().subAgents
+      snapshot().applyRunEvent("sa-1", {})
+      expect(snapshot().subAgents).toBe(before)
+    })
+
+    it("caps the log at the last 50 entries", () => {
+      snapshot().upsert(makeSubAgent({ logs: [] }))
+      for (let i = 0; i < 60; i++) {
+        snapshot().applyRunEvent("sa-1", {
+          log: { timestamp: new Date(), level: "info", message: `m${i}` },
+        })
+      }
+      const logs = snapshot().subAgents["sa-1"]!.logs
+      expect(logs).toHaveLength(50)
+      expect(logs[0].message).toBe("m10")
+      expect(logs[49].message).toBe("m59")
+    })
+
+    it("is a no-op when the subagent is unknown", () => {
+      snapshot().applyRunEvent("missing", { progress: 10 })
+      expect(snapshot().subAgents.missing).toBeUndefined()
+    })
   })
 
   it("remove drops a single subagent", () => {

@@ -18,7 +18,7 @@
  * Phase 8 of the ClaudeCode 完整化 plan.
  */
 
-import { useEffect, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import {
@@ -37,7 +37,6 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
@@ -68,14 +67,74 @@ interface Props {
   onToggle?: () => void
 }
 
-export function SubagentPart({ part, mode = "standard", open, onToggle }: Props) {
+/** Minimal structural shape of a runtime log entry (level + message). */
+type SubagentLogEntry = { level: string; message: string }
+
+/**
+ * Shared progress-detail body — summary paragraph, the tail of the log stream,
+ * and the "open in workspace" link. Identical between the simplified and the
+ * standard/detailed cards (previously duplicated verbatim), and the only place
+ * that slices the (potentially long) log array, which it memoizes so the 1s
+ * `now` tick on a running subagent doesn't re-slice unchanged logs.
+ */
+const SubagentLogBody = memo(function SubagentLogBody({
+  summary,
+  logs,
+  lastLog,
+  subagentId,
+}: {
+  summary?: string
+  logs: SubagentLogEntry[]
+  lastLog?: SubagentLogEntry
+  subagentId: string
+}) {
+  const t = useTranslations("chat.subagentPart")
+  const tailLogs = useMemo(() => logs.slice(-50), [logs])
+  return (
+    <>
+      {summary ? <p className="rounded bg-muted/30 p-2 text-xs">{summary}</p> : null}
+      {logs.length > 0 ? (
+        <div className="space-y-0.5" data-testid="subagent-logs">
+          {tailLogs.map((log, i) => (
+            <p key={i} className="font-mono text-[11px] text-muted-foreground">
+              <span className="mr-1 uppercase">[{log.level}]</span>
+              {log.message}
+            </p>
+          ))}
+        </div>
+      ) : lastLog ? (
+        <p className="font-mono text-[11px] text-muted-foreground">{lastLog.message}</p>
+      ) : (
+        <p className="text-[11px] italic text-muted-foreground">{t("noLogsYet")}</p>
+      )}
+      <Link
+        href={`/agent-teams?focus=subagent:${subagentId}`}
+        className="inline-flex items-center gap-1 text-xs underline"
+        data-testid="subagent-open"
+      >
+        {t("openInWorkspace")}
+        <ExternalLinkIcon className="size-3" />
+      </Link>
+    </>
+  )
+})
+
+export const SubagentPart = memo(function SubagentPart({
+  part,
+  mode = "standard",
+  open,
+  onToggle,
+}: Props) {
   const t = useTranslations("chat.subagentPart")
   const tStatus = useTranslations("agentStatus")
   // Live read for progress + logs; falls back to the static part snapshot.
   const live = useSubagentRuntimeStore((s) => s.subAgents[part.subagentId])
 
   const status = live?.status ?? part.status
-  const progress = live?.progress ?? part.progress
+  // Honest live tool-call count (Claude Code / Codex style) — replaces the old
+  // pseudo-percentage progress bar, which implied a completion ratio a subagent
+  // run doesn't actually have.
+  const toolUses = live?.toolUses ?? 0
   const cfg = SUB_AGENT_STATUS_CONFIG[status]
   const logs = live?.logs ?? []
   const lastLog = logs[logs.length - 1]
@@ -112,35 +171,6 @@ export function SubagentPart({ part, mode = "standard", open, onToggle }: Props)
       {rejection.reason === "cycle" ? t("rejected.cycle") : t("rejected.maxDepth")}
     </p>
   ) : null
-
-  const detailBody = (
-    <>
-      <Progress value={progress} className="h-1.5" />
-      {part.summary ? <p className="rounded bg-muted/30 p-2 text-xs">{part.summary}</p> : null}
-      {logs.length > 0 ? (
-        <div className="space-y-0.5" data-testid="subagent-logs">
-          {logs.slice(-50).map((log, i) => (
-            <p key={i} className="font-mono text-[11px] text-muted-foreground">
-              <span className="mr-1 uppercase">[{log.level}]</span>
-              {log.message}
-            </p>
-          ))}
-        </div>
-      ) : lastLog ? (
-        <p className="font-mono text-[11px] text-muted-foreground">{lastLog.message}</p>
-      ) : (
-        <p className="text-[11px] italic text-muted-foreground">{t("noLogsYet")}</p>
-      )}
-      <Link
-        href={`/agent-teams?focus=subagent:${part.subagentId}`}
-        className="inline-flex items-center gap-1 text-xs underline"
-        data-testid="subagent-open"
-      >
-        {t("openInWorkspace")}
-        <ExternalLinkIcon className="size-3" />
-      </Link>
-    </>
-  )
 
   // Simplified mode: one glanceable row, expandable to the full detail body.
   if (mode === "simplified") {
@@ -192,6 +222,14 @@ export function SubagentPart({ part, mode = "standard", open, onToggle }: Props)
               {t("tokens", { n: tokenTotal })}
             </Badge>
           ) : null}
+          {isRunning && toolUses > 0 ? (
+            <span
+              className="shrink-0 text-[11px] text-muted-foreground tabular-nums"
+              data-testid="subagent-tools-count"
+            >
+              {t("toolsRunCount", { n: toolUses })}
+            </span>
+          ) : null}
           <span className="shrink-0 text-[11px] text-muted-foreground">
             {t("durationMs", { ms: durationMs })}
           </span>
@@ -202,7 +240,14 @@ export function SubagentPart({ part, mode = "standard", open, onToggle }: Props)
         </button>
         {rejectionBanner}
         <MotionCollapse open={isOpen}>
-          <div className="space-y-2 border-t px-3 py-2.5">{detailBody}</div>
+          <div className="space-y-2 border-t px-3 py-2.5">
+            <SubagentLogBody
+              summary={part.summary}
+              logs={logs}
+              lastLog={lastLog}
+              subagentId={part.subagentId}
+            />
+          </div>
         </MotionCollapse>
       </div>
     )
@@ -254,39 +299,34 @@ export function SubagentPart({ part, mode = "standard", open, onToggle }: Props)
                 {t("tokens", { n: tokenTotal })}
               </Badge>
             ) : null}
-            <span className="ml-auto text-[11px] text-muted-foreground">
+            {isRunning && toolUses > 0 ? (
+              <span
+                className="ml-auto text-[11px] text-muted-foreground tabular-nums"
+                data-testid="subagent-tools-count"
+              >
+                {t("toolsRunCount", { n: toolUses })}
+              </span>
+            ) : null}
+            <span
+              className={cn(
+                "text-[11px] text-muted-foreground",
+                !(isRunning && toolUses > 0) && "ml-auto"
+              )}
+            >
               {t("durationMs", { ms: durationMs })}
             </span>
           </CollapsibleTrigger>
         </div>
         {rejectionBanner}
-        <Progress value={progress} className="mt-2 h-1.5" />
         <CollapsibleContent className="mt-2 space-y-2">
-          {part.summary ? <p className="rounded bg-muted/30 p-2 text-xs">{part.summary}</p> : null}
-          {logs.length > 0 ? (
-            <div className="space-y-0.5" data-testid="subagent-logs">
-              {logs.slice(-50).map((log, i) => (
-                <p key={i} className="font-mono text-[11px] text-muted-foreground">
-                  <span className="mr-1 uppercase">[{log.level}]</span>
-                  {log.message}
-                </p>
-              ))}
-            </div>
-          ) : lastLog ? (
-            <p className="font-mono text-[11px] text-muted-foreground">{lastLog.message}</p>
-          ) : (
-            <p className="text-[11px] italic text-muted-foreground">{t("noLogsYet")}</p>
-          )}
-          <Link
-            href={`/agent-teams?focus=subagent:${part.subagentId}`}
-            className="inline-flex items-center gap-1 text-xs underline"
-            data-testid="subagent-open"
-          >
-            {t("openInWorkspace")}
-            <ExternalLinkIcon className="size-3" />
-          </Link>
+          <SubagentLogBody
+            summary={part.summary}
+            logs={logs}
+            lastLog={lastLog}
+            subagentId={part.subagentId}
+          />
         </CollapsibleContent>
       </Collapsible>
     </div>
   )
-}
+})
