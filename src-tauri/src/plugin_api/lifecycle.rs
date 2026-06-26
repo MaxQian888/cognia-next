@@ -501,7 +501,9 @@ mod tests {
             &state,
             "demo".into(),
             "local".into(),
-            InstallPayload { manifest_json: None },
+            InstallPayload {
+                manifest_json: None,
+            },
         )
         .await
         .unwrap_err();

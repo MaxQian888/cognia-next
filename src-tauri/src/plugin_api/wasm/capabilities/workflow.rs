@@ -51,6 +51,7 @@ mod tests {
         HostState {
             plugin_id: id.into(),
             capabilities: CapabilitySet::default(),
+            shell_allowlist: Vec::new(),
             call_timeout_ms: 30_000,
             limits: wasmtime::StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),

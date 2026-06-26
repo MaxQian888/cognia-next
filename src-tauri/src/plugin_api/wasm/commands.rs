@@ -57,6 +57,18 @@ fn granted_permissions(runtime: &PluginRuntimeState, plugin_id: &str) -> Vec<Str
         .unwrap_or_default()
 }
 
+/// The plugin's declared `shellCommands` allowlist, mirrored into the runtime
+/// by `plugin_set_shell_allowlist` on enable. Reused verbatim by the WASM
+/// `process.exec` gate so it matches the TS-plugin `shell:execute` gate.
+fn granted_shell_commands(runtime: &PluginRuntimeState, plugin_id: &str) -> Vec<String> {
+    runtime
+        .shell_allowlist
+        .read()
+        .get(plugin_id)
+        .cloned()
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn plugin_wasm_activate(
     state: State<'_, WasmPluginState>,
@@ -81,6 +93,7 @@ pub async fn plugin_wasm_activate(
     };
 
     let perms = granted_permissions(&runtime, &plugin_id);
+    let shell_allow = granted_shell_commands(&runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
     let mut store = WasmPluginHost::build_activation_store(
         &super::host::LoadedPlugin {
@@ -91,6 +104,7 @@ pub async fn plugin_wasm_activate(
         },
         &data_dir,
         &perms,
+        &shell_allow,
     )?;
 
     let linker = WasmPluginHost::version_linker(&plugin_api_version)?;
@@ -151,6 +165,7 @@ pub async fn plugin_wasm_call(
     };
 
     let perms = granted_permissions(&runtime, &plugin_id);
+    let shell_allow = granted_shell_commands(&runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
     let mut store = WasmPluginHost::build_activation_store(
         &super::host::LoadedPlugin {
@@ -161,6 +176,7 @@ pub async fn plugin_wasm_call(
         },
         &data_dir,
         &perms,
+        &shell_allow,
     )?;
 
     let linker = WasmPluginHost::version_linker(&plugin_api_version)?;

@@ -55,6 +55,7 @@ mod tests {
         HostState {
             plugin_id: "p".into(),
             capabilities: CapabilitySet::from_iter(caps.iter().map(|s| (*s).to_string())),
+            shell_allowlist: Vec::new(),
             call_timeout_ms: 30_000,
             limits: wasmtime::StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),

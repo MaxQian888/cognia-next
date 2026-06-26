@@ -133,11 +133,14 @@ impl WasmPluginHost {
 
     /// Build a fresh `Store<HostState>` for an activation. The capability
     /// set is sourced from the per-plugin permission ledger (passed in by
-    /// the caller after consulting the on-disk grant file).
+    /// the caller after consulting the on-disk grant file). `shell_allowlist`
+    /// is the plugin's declared `shellCommands`, mirrored from
+    /// `PluginRuntimeState`, and gates `process.exec` deny-by-default.
     pub fn build_activation_store(
         plugin: &LoadedPlugin,
         plugin_data_dir: &Path,
         granted_permissions: &[String],
+        shell_allowlist: &[String],
     ) -> Result<wasmtime::Store<HostState>, String> {
         let mut caps = CapabilitySet::default();
         for p in granted_permissions {
@@ -171,6 +174,9 @@ impl WasmPluginHost {
         .map_err(|e| format!("build store: {e}"))?;
         // Ensure the plugin id is reflected in the freshly built state.
         store.data_mut().plugin_id = plugin.manifest.id.clone();
+        // Mirror the declared shell-command allowlist so `process.exec` can
+        // enforce it deny-by-default.
+        store.data_mut().shell_allowlist = shell_allowlist.to_vec();
         Ok(store)
     }
 
@@ -311,5 +317,33 @@ mod tests {
     fn unload_returns_false_when_unknown() {
         let state = WasmPluginState::default();
         assert!(!WasmPluginHost::unload(&state, "ghost"));
+    }
+
+    #[tokio::test]
+    async fn build_activation_store_mirrors_shell_allowlist() {
+        // The smallest valid component (empty `(component)` preamble) lets us
+        // build a store without a real .wasm; we only assert on HostState.
+        const EMPTY_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+        let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = LoadedPlugin {
+            manifest: manifest_v01(),
+            plugin_path: tmp.path().to_path_buf(),
+            component,
+            plugin_api_version: "0.1.0".into(),
+        };
+        let data_dir = tmp.path().join("data");
+        let store = WasmPluginHost::build_activation_store(
+            &plugin,
+            &data_dir,
+            &["process:spawn".to_string()],
+            &["git".to_string(), "node".to_string()],
+        )
+        .expect("store builds");
+        assert_eq!(
+            store.data().shell_allowlist,
+            vec!["git".to_string(), "node".to_string()]
+        );
+        assert!(store.data().capabilities.allows("process:spawn"));
     }
 }

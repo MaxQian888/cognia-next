@@ -1377,7 +1377,15 @@ export class PluginEventHooks {
   }
 
   /**
-   * Dispatch pre-compact hook - allows plugins to customize context compression
+   * Dispatch pre-compact hook - allows plugins to customize context compression.
+   *
+   * NOTE: this dispatcher is part of the public plugin `onPreCompact` API
+   * surface but is not yet wired into a live compaction trigger. The Anthropic
+   * path self-manages compaction inside the Agent SDK, and the generic
+   * (AI-SDK) path summarizes in the sidecar, which cannot call back into `lib/`
+   * (`types/plugin/plugin-compaction-strategy.ts:11-14`). Kept for contract
+   * parity (mirrored in the Python `PluginHook.ON_PRE_COMPACT` enum and guarded
+   * by `runtime-proof-audit.test.ts`).
    */
   async dispatchPreCompact(
     context: import("@/types/plugin/plugin-hooks").PreCompactContext

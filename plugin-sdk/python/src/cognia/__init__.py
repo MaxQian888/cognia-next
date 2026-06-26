@@ -45,6 +45,7 @@ from .runtime import (
 from .types import (
     AuthProviderDef,
     ChatMiddlewareDef,
+    CompactionStrategyDef,
     ContextProviderDef,
     DensityPresetContribution,
     DeploymentFilterDef,
@@ -126,6 +127,7 @@ __all__ = [
     "ModalMountDef",
     "TerminalCompletionProviderDef",
     "RoutingStrategyDef",
+    "CompactionStrategyDef",
     "DeploymentFilterDef",
     "ProtocolAdapterDef",
     "ToolRouteDef",

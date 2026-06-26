@@ -620,7 +620,13 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
         json!({ "tool_name": tool_name, "tool_input": input }),
     )
     .await;
-    emit_hook_diagnostics(&app, hooks::HookEvent::PermissionRequest, &pr);
+    emit_hook_diagnostics(
+        &app,
+        hooks::HookEvent::PermissionRequest,
+        &session_id,
+        Some(tool_name.as_str()),
+        &pr,
+    );
 
     let decision =
         hooks::run_pre_tool_use(&settings, &session_id, cwd.as_deref(), &tool_name, &input).await;
@@ -628,6 +634,17 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
     for w in &decision.warnings {
         log::warn!("PreToolUse[{tool_name}]: {w}");
     }
+
+    // Surface the PreToolUse fire (block / warnings) as a hook row before the
+    // block reason is moved out below. Blocked fires render in place of the
+    // dropped `type:"log"` deny line that used to be the only signal.
+    emit_hook_fire(
+        &app,
+        &session_id,
+        &hooks::hook_event_name(hooks::HookEvent::PreToolUse),
+        Some(tool_name.as_str()),
+        &decision,
+    );
 
     if let Some(reason) = decision.block {
         let payload = json!({
@@ -640,16 +657,11 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
         if let Err(e) = state.write_command(&payload).await {
             log::error!("failed to write hook deny: {e}");
         }
-        // Emit a compact log to the frontend so the user sees that a tool was
-        // blocked silently — they would otherwise see no UI at all.
-        let _ = app.emit(
-            SIDECAR_EVENT,
-            &json!({
-              "type": "log",
-              "level": "info",
-              "message": format!("PreToolUse hook denied {tool_name}: {reason}"),
-            }),
-        );
+        // The blocked PreToolUse fire was already surfaced as a hook row above
+        // (`emit_hook_fire`), which replaces the old compact `type:"log"` deny
+        // line. The `"hook denied:"` message prefix written into the deny payload
+        // lets the adapter suppress a duplicate permission-denied notice.
+        //
         // PermissionDenied fires after a hook-driven deny.
         let denied = hooks::run_tool_scoped(
             &settings,
@@ -660,7 +672,13 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
             json!({ "tool_name": tool_name, "reason": reason }),
         )
         .await;
-        emit_hook_diagnostics(&app, hooks::HookEvent::PermissionDenied, &denied);
+        emit_hook_diagnostics(
+            &app,
+            hooks::HookEvent::PermissionDenied,
+            &session_id,
+            Some(tool_name.as_str()),
+            &denied,
+        );
         return;
     }
 
@@ -670,24 +688,84 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
     }
 }
 
-/// Log a hook's warnings and surface any `additionalContext` it contributed as
-/// a compact frontend log line. Observational lifecycle hooks can't re-inject
-/// context mid-stream, so this is how the user sees a hook did something.
-fn emit_hook_diagnostics(app: &AppHandle, event: hooks::HookEvent, decision: &hooks::HookDecision) {
+/// Status of a consequential hook fire, by precedence: block > context >
+/// warning. `None` means the fire was a no-op (nothing to show).
+pub(crate) fn hook_fire_outcome(decision: &hooks::HookDecision) -> Option<&'static str> {
+    if decision.block.is_some() {
+        Some("blocked")
+    } else if decision.additional_context.is_some() {
+        Some("context")
+    } else if !decision.warnings.is_empty() {
+        Some("warning")
+    } else {
+        None
+    }
+}
+
+/// Build the synthetic `hook_fire` SDK-system envelope, or `None` for a no-op
+/// fire. Split from [`emit_hook_fire`] so the gate + shape are unit-testable
+/// without a live `AppHandle`.
+pub(crate) fn build_hook_fire_payload(
+    session_id: &str,
+    event_name: &str,
+    tool_name: Option<&str>,
+    decision: &hooks::HookDecision,
+) -> Option<Value> {
+    let outcome = hook_fire_outcome(decision)?;
+    Some(json!({
+      "type": "event",
+      "sessionId": session_id,
+      "event": {
+        "type": "system",
+        "subtype": "hook_fire",
+        "hook_event": event_name,
+        "tool_name": tool_name,
+        "outcome": outcome,
+        "block": decision.block,
+        "additional_context": decision.additional_context,
+        "warnings": decision.warnings,
+      },
+    }))
+}
+
+/// Project a *consequential* hook fire into the chat timeline as a synthetic
+/// SDK `system` event (`subtype:"hook_fire"`). It rides the same
+/// `claude://message` → `applySdkEvent` pipeline the frontend already uses for
+/// `permission_denied` / `compact_boundary`, so the row persists like any other
+/// message. A no-op fire (nothing blocked, no context, no warnings) emits
+/// nothing — hook rows are invisible unless the hook actually did something.
+///
+/// `outcome` is derived by precedence (block > context > warning) so the row can
+/// pick a status colour; the full decision still travels so the expanded row can
+/// show the reason, injected-context summary, and every warning.
+pub(crate) fn emit_hook_fire(
+    app: &AppHandle,
+    session_id: &str,
+    event_name: &str,
+    tool_name: Option<&str>,
+    decision: &hooks::HookDecision,
+) {
+    if let Some(payload) = build_hook_fire_payload(session_id, event_name, tool_name, decision) {
+        let _ = app.emit(SIDECAR_EVENT, &payload);
+    }
+}
+
+/// Log a hook's warnings server-side, then surface a consequential fire to the
+/// chat timeline via [`emit_hook_fire`]. Observational lifecycle hooks can't
+/// re-inject context mid-stream, so this row is how the user sees a hook did
+/// something.
+fn emit_hook_diagnostics(
+    app: &AppHandle,
+    event: hooks::HookEvent,
+    session_id: &str,
+    tool_name: Option<&str>,
+    decision: &hooks::HookDecision,
+) {
     let name = hooks::hook_event_name(event);
     for w in &decision.warnings {
         log::warn!("{name}: {w}");
     }
-    if let Some(ctx) = &decision.additional_context {
-        let _ = app.emit(
-            SIDECAR_EVENT,
-            &json!({
-              "type": "log",
-              "level": "info",
-              "message": format!("{name} hook context: {ctx}"),
-            }),
-        );
-    }
+    emit_hook_fire(app, session_id, &name, tool_name, decision);
 }
 
 /// Observe one SDK-stream message and fire the matching settings.json lifecycle
@@ -737,7 +815,7 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
                 fields,
             )
             .await;
-            emit_hook_diagnostics(&app, event, &decision);
+            emit_hook_diagnostics(&app, event, &session_id, Some(tool_name.as_str()), &decision);
         }
     }
 
@@ -754,7 +832,7 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
                 ch.fields,
             )
             .await;
-            emit_hook_diagnostics(&app, ch.event, &decision);
+            emit_hook_diagnostics(&app, ch.event, &session_id, None, &decision);
         }
     }
 
@@ -874,5 +952,81 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("not running"), "unexpected error: {err}");
+    }
+
+    fn decision(
+        block: Option<&str>,
+        context: Option<&str>,
+        warnings: &[&str],
+    ) -> hooks::HookDecision {
+        hooks::HookDecision {
+            block: block.map(String::from),
+            additional_context: context.map(String::from),
+            warnings: warnings.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn hook_fire_outcome_is_none_for_no_op() {
+        assert_eq!(hook_fire_outcome(&decision(None, None, &[])), None);
+        assert_eq!(hook_fire_outcome(&hooks::HookDecision::default()), None);
+    }
+
+    #[test]
+    fn hook_fire_outcome_follows_block_context_warning_precedence() {
+        // Block wins over everything.
+        assert_eq!(
+            hook_fire_outcome(&decision(Some("nope"), Some("ctx"), &["w"])),
+            Some("blocked")
+        );
+        // Context wins over a warning when there is no block.
+        assert_eq!(
+            hook_fire_outcome(&decision(None, Some("ctx"), &["w"])),
+            Some("context")
+        );
+        // Warning-only.
+        assert_eq!(
+            hook_fire_outcome(&decision(None, None, &["timed out"])),
+            Some("warning")
+        );
+    }
+
+    #[test]
+    fn build_hook_fire_payload_skips_no_op() {
+        assert!(build_hook_fire_payload("s1", "PreToolUse", Some("Bash"), &decision(None, None, &[]))
+            .is_none());
+    }
+
+    #[test]
+    fn build_hook_fire_payload_shapes_a_blocked_fire() {
+        let payload = build_hook_fire_payload(
+            "s1",
+            "PreToolUse",
+            Some("Bash"),
+            &decision(Some("denylist"), None, &["hook timed out after 5000ms"]),
+        )
+        .expect("consequential fire should build a payload");
+
+        assert_eq!(payload["type"], "event");
+        assert_eq!(payload["sessionId"], "s1");
+        let ev = &payload["event"];
+        assert_eq!(ev["type"], "system");
+        assert_eq!(ev["subtype"], "hook_fire");
+        assert_eq!(ev["hook_event"], "PreToolUse");
+        assert_eq!(ev["tool_name"], "Bash");
+        assert_eq!(ev["outcome"], "blocked");
+        assert_eq!(ev["block"], "denylist");
+        assert_eq!(ev["additional_context"], Value::Null);
+        assert_eq!(ev["warnings"][0], "hook timed out after 5000ms");
+    }
+
+    #[test]
+    fn build_hook_fire_payload_omits_tool_name_as_null() {
+        let payload =
+            build_hook_fire_payload("s1", "UserPromptSubmit", None, &decision(None, Some("ctx"), &[]))
+                .expect("context fire should build a payload");
+        assert_eq!(payload["event"]["tool_name"], Value::Null);
+        assert_eq!(payload["event"]["outcome"], "context");
+        assert_eq!(payload["event"]["additional_context"], "ctx");
     }
 }

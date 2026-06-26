@@ -146,6 +146,9 @@ impl cognia::plugin::process::Host for HostState {
     ) -> Result<cognia::plugin::process::ExecResult, String> {
         process::check(self)?;
         process::validate(&program, &args)?;
+        // DENY-by-default: the program must be in the plugin's declared
+        // `shellCommands` allowlist — parity with the TS `shell:execute` gate.
+        process::check_program_allowed(self, &program)?;
         let timeout_ms = options.timeout_ms.unwrap_or(self.call_timeout_ms as u32);
 
         let mut cmd = std::process::Command::new(&program);
@@ -313,6 +316,7 @@ mod tests {
         HostState {
             plugin_id: "demo".into(),
             capabilities: CapabilitySet::from_iter(caps.iter().map(|s| (*s).to_string())),
+            shell_allowlist: Vec::new(),
             call_timeout_ms: 30_000,
             limits: wasmtime::StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),

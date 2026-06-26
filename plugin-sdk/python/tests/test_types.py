@@ -105,6 +105,7 @@ def test_manifest_definition_mirrors_are_available_from_package_root():
         "ModalMountDef",
         "TerminalCompletionProviderDef",
         "RoutingStrategyDef",
+        "CompactionStrategyDef",
         "DeploymentFilterDef",
         "ProtocolAdapterDef",
         "ToolRouteDef",
@@ -128,6 +129,7 @@ def test_field_driven_manifest_definitions_to_dict():
         "ModalMountDef",
         "TerminalCompletionProviderDef",
         "RoutingStrategyDef",
+        "CompactionStrategyDef",
         "DeploymentFilterDef",
         "ProtocolAdapterDef",
         "ToolRouteDef",
@@ -237,6 +239,27 @@ def test_field_driven_manifest_definitions_to_dict():
                 "export": "create_strategy",
                 "description": "choose low latency",
             },
+        ),
+        (
+            cognia_types.CompactionStrategyDef(
+                id="acme:keyfacts",
+                label="Key facts",
+                summary_prompt="Extract only key facts.",
+                keep_recent=8,
+                fraction=0.75,
+            ),
+            {
+                "id": "acme:keyfacts",
+                "label": "Key facts",
+                "summaryPrompt": "Extract only key facts.",
+                "keepRecent": 8,
+                "fraction": 0.75,
+            },
+        ),
+        (
+            # Optional fields omitted → only the id is emitted.
+            cognia_types.CompactionStrategyDef(id="acme:minimal"),
+            {"id": "acme:minimal"},
         ),
         (
             cognia_types.DeploymentFilterDef(

@@ -68,6 +68,11 @@ impl CapabilitySet {
 pub struct HostState {
     pub plugin_id: String,
     pub capabilities: CapabilitySet,
+    /// Declared shell-command allowlist (program names) from the plugin's
+    /// manifest `shellCommands`, mirrored from `PluginRuntimeState` at
+    /// activation. DENY-by-default gate for `process.exec` — parity with the
+    /// TS-plugin `shell:execute` gate. Empty ⇒ no program may be spawned.
+    pub shell_allowlist: Vec<String>,
     pub call_timeout_ms: u64,
     pub limits: StoreLimits,
     pub table: ResourceTable,
@@ -131,6 +136,9 @@ pub fn build_store(
         HostState {
             plugin_id: String::new(), // overwritten below for clarity
             capabilities,
+            // Empty by default; `build_activation_store` mirrors the plugin's
+            // declared `shellCommands` in after construction.
+            shell_allowlist: Vec::new(),
             call_timeout_ms,
             limits,
             table: ResourceTable::new(),

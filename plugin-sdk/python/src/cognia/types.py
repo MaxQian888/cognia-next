@@ -436,6 +436,35 @@ class RoutingStrategyDef:
 
 
 @dataclass(frozen=True)
+class CompactionStrategyDef:
+    """A compaction-strategy contribution (``manifest.compactionStrategies``).
+
+    Declarative only — mirrors the TS ``PluginCompactionStrategyDef``
+    (``types/plugin/plugin-compaction-strategy.ts``). The strategy supplies the
+    summary prompt + numeric knobs that ``resolveSendOptions`` threads into the
+    sidecar; there is no executable entry point.
+    """
+
+    id: str
+    label: Optional[str] = None
+    summary_prompt: Optional[str] = None
+    keep_recent: Optional[int] = None
+    fraction: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"id": self.id}
+        if self.label is not None:
+            out["label"] = self.label
+        if self.summary_prompt is not None:
+            out["summaryPrompt"] = self.summary_prompt
+        if self.keep_recent is not None:
+            out["keepRecent"] = self.keep_recent
+        if self.fraction is not None:
+            out["fraction"] = self.fraction
+        return out
+
+
+@dataclass(frozen=True)
 class DeploymentFilterDef:
     """A lazy deployment filter contribution (``manifest.deploymentFilters``)."""
 

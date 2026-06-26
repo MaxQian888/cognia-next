@@ -133,6 +133,30 @@ pub struct PluginRuntimeState {
     pub shell_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
+/// True when `program` matches an entry in `allowlist` by file stem.
+/// DENY-by-default: an empty allowlist or empty program name yields `false`.
+/// Matches on the file stem so a declared `git` tolerates `git` / `git.exe` /
+/// an absolute path ending in `git`, but never an undeclared command. Shared
+/// by the TS-plugin shell gate (`PluginRuntimeState::shell_command_allowed`)
+/// and the WASM `process.exec` gate (`wasm::capabilities::process`) so both
+/// enforce identical semantics from a single source of truth.
+pub(crate) fn program_in_allowlist(allowlist: &[String], program: &str) -> bool {
+    let stem = |s: &str| {
+        std::path::Path::new(s.trim())
+            .file_stem()
+            .and_then(|x| x.to_str())
+            .unwrap_or(s)
+            .to_ascii_lowercase()
+    };
+    let prog = stem(program);
+    if prog.is_empty() {
+        return false;
+    }
+    allowlist
+        .iter()
+        .any(|c| !c.trim().is_empty() && stem(c) == prog)
+}
+
 impl PluginRuntimeState {
     /// Construct a fresh runtime state. `install_dir` is created lazily on
     /// first write — we don't fail construction if the parent doesn't yet
@@ -167,21 +191,10 @@ impl PluginRuntimeState {
     /// declares `git` tolerates `git` / `git.exe` / an absolute path ending in
     /// `git`, but never a command the manifest never declared.
     pub fn shell_command_allowed(&self, plugin_id: &str, program: &str) -> bool {
-        let stem = |s: &str| {
-            std::path::Path::new(s.trim())
-                .file_stem()
-                .and_then(|x| x.to_str())
-                .unwrap_or(s)
-                .to_ascii_lowercase()
-        };
-        let prog = stem(program);
-        if prog.is_empty() {
-            return false;
-        }
         self.shell_allowlist
             .read()
             .get(plugin_id)
-            .is_some_and(|cmds| cmds.iter().any(|c| !c.trim().is_empty() && stem(c) == prog))
+            .is_some_and(|cmds| program_in_allowlist(cmds, program))
     }
 
     pub(crate) fn plugin_dir(&self, plugin_id: &str) -> PathBuf {
