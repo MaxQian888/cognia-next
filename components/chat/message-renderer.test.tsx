@@ -336,6 +336,25 @@ describe("custom extension parts", () => {
     // (mocked) SubagentPart card for each node.
     expect(document.querySelector("[data-test='subagent-part']")).toBeTruthy()
   })
+
+  it("renders an inline hook-notice part (external agent)", () => {
+    const msg: UIMessage = {
+      id: "h1",
+      role: "assistant",
+      parts: [
+        {
+          type: "hook-notice",
+          event: "PreToolUse",
+          toolName: "Bash",
+          outcome: "blocked",
+          block: "command matches denylist",
+          warnings: [],
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelector("[data-testid='hook-notice-blocked']")).toBeTruthy()
+  })
 })
 
 // ── tool parts ────────────────────────────────────────────────────────────────

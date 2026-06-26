@@ -157,6 +157,34 @@ describe("MessageList", () => {
     expect(screen.getByText("world")).toBeInTheDocument()
   })
 
+  it("routes a hook-notice system message to HookNoticeMarker, not MessageRenderer", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const hookMsg: UIMessage = {
+      id: "hk1",
+      role: "system",
+      parts: [
+        {
+          type: "hook-notice",
+          event: "PreToolUse",
+          toolName: "Bash",
+          outcome: "blocked",
+          block: "command matches denylist",
+          warnings: [],
+        },
+      ] as unknown as UIMessage["parts"],
+    }
+    render(
+      <Wrapper>
+        <MessageList messages={[hookMsg]} status="idle" />
+      </Wrapper>
+    )
+    // The real HookNoticeMarker mounts (it is not mocked); MessageRenderer
+    // (mocked to emit `data-test="msg-*"`) must NOT be used for this row.
+    expect(screen.getByTestId("hook-notice-blocked")).toBeInTheDocument()
+    expect(screen.getByText("Before tool")).toBeInTheDocument()
+    expect(document.querySelector(`[data-test="msg-hk1"]`)).toBeNull()
+  })
+
   it("renders a short list in document flow (no virtualized [data-index] rows)", () => {
     const Wrapper = withAdapter(makeAdapter())
     const msgs = manyMsgs(10) // 10 <= threshold → flow path

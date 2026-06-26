@@ -111,6 +111,13 @@
     "label": "Context compacted",
     "manual": "manual"
   },
+  "compaction": {
+    "notification": "Context compacted",
+    "notificationDetail": "{from} → {to} tokens",
+    "undo": "Undo compaction",
+    "undoFailed": "Couldn't restore the conversation",
+    "undoSuccess": "Conversation restored"
+  },
   "composer": {
     "ariaAttachImage": "Attach image",
     "ariaMessage": "Message",
@@ -240,6 +247,15 @@
       "bashHintPrefix": "Press",
       "bashHintSuffix": "to run as a shell command.",
       "bashTitle": "Run shell command",
+      "categories": {
+        "chat": "Chat",
+        "diagnostics": "Diagnostics",
+        "goal": "Goal",
+        "help": "Help",
+        "other": "Other",
+        "system": "System",
+        "template": "Prompts"
+      },
       "comingSoon": "Coming soon",
       "fileTitle": "Reference a file or folder",
       "filesSection": "Files",
@@ -247,9 +263,13 @@
       "noCommandMatches": "No commands match \"/{query}\".",
       "noCommands": "No commands available.",
       "noFiles": "No files match \"{query}\".",
+      "pinAction": "Pin /{name}",
+      "pinnedSection": "Pinned",
+      "recentSection": "Recent",
       "searching": "Searching…",
       "searchingShort": "searching…",
       "slashTitle": "Slash command",
+      "unpinAction": "Unpin /{name}",
       "workspaceEmpty": "Workspace is empty.",
       "workspaceMissing": "Set a working directory in session settings to use @-references."
     },
@@ -447,6 +467,8 @@
     },
     "skills": {
       "aria": "Skills active in this session",
+      "attachedInert": "Disabled for this session — won't be sent",
+      "attachedTitle": "Attached to the next message",
       "counter": "{active}/{total} skills",
       "description": "Toggle skills off for this session only. Edit the character to change them permanently.",
       "title": "Skills",
@@ -466,6 +488,33 @@
     "loadError": "Couldn't load this conversation.",
     "loading": "Loading conversation…",
     "retry": "Retry"
+  },
+  "hookNotice": {
+    "event": {
+      "Notification": "Notification",
+      "PermissionDenied": "Permission denied",
+      "PermissionRequest": "Permission request",
+      "PostCompact": "After compaction",
+      "PostToolUse": "After tool",
+      "PostToolUseFailure": "After tool failure",
+      "PreToolUse": "Before tool",
+      "SessionEnd": "Session end",
+      "SessionStart": "Session start",
+      "Stop": "Stop",
+      "StopFailure": "Stop (failed)",
+      "SubagentStop": "Subagent stop",
+      "UserPromptSubmit": "Prompt submitted"
+    },
+    "outcome": {
+      "blocked": "blocked",
+      "context": "context injected",
+      "warning": "warning"
+    },
+    "section": {
+      "context": "Injected context",
+      "reason": "Reason"
+    },
+    "toggle": "Toggle hook details"
   },
   "inlineError": {
     "dismiss": "Dismiss",
@@ -834,7 +883,8 @@
     },
     "rowAria": "{name} sub-agent — {status}",
     "title": "Sub-agent",
-    "tokens": "{n} tokens"
+    "tokens": "{n} tokens",
+    "toolsRunCount": "{n, plural, one {# tool} other {# tools}}"
   },
   "terminalTool": {
     "bashLabel": "Bash",

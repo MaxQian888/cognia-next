@@ -38,9 +38,17 @@ jest.mock("@/lib/db/sessions", () => ({
 }))
 
 const setActiveSessionMock = jest.fn()
-jest.mock("@/stores/chat", () => ({
-  useChatStore: { getState: () => ({ setActiveSession: setActiveSessionMock }) },
-}))
+// Mutable so a test can stage ad-hoc (ephemeral) skill attachments; reset in
+// beforeEach. Read lazily inside the selector, so no factory-eval TDZ.
+let mockEphemeralSkillIds: string[] = []
+jest.mock("@/stores/chat", () => {
+  const useChatStore = (selector?: (s: { ephemeralSkillIds: string[] }) => unknown) => {
+    const state = { ephemeralSkillIds: mockEphemeralSkillIds }
+    return selector ? selector(state) : state
+  }
+  useChatStore.getState = () => ({ setActiveSession: setActiveSessionMock })
+  return { useChatStore }
+})
 
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
@@ -133,6 +141,7 @@ describe("SessionSettingsSheet", () => {
     mockCloseSession.mockResolvedValue(undefined)
     mockFork.mockResolvedValue({ id: "fork_1" })
     setActiveSessionMock.mockClear()
+    mockEphemeralSkillIds = []
   })
 
   it("renders nothing interactive when closed", () => {
@@ -304,6 +313,27 @@ describe("SessionSettingsSheet", () => {
     const c = mkCharacter({ id: "c1", skillIds: ["s1"] })
     const skill: Skill = { id: "s1", name: "skill-x", content: "...", createdAt: 0, updatedAt: 0 }
     const adapter = makeAdapter({ useCharacter: () => c, useSkillsByIds: () => [skill] })
+    render(
+      <DataAdapterProvider adapter={adapter}>
+        <SessionSettingsSheet
+          session={mkSession({ characterId: "c1" })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+    expect(screen.getByLabelText(/skills active/i)).toBeInTheDocument()
+  })
+
+  it("renders the skills badge from ad-hoc attachments even when the character has none", () => {
+    mockEphemeralSkillIds = ["e1"]
+    const c = mkCharacter({ id: "c1" }) // no character skillIds
+    const ephSkill: Skill = { id: "e1", name: "ad-hoc", content: "...", createdAt: 0, updatedAt: 0 }
+    const adapter = makeAdapter({
+      useCharacter: () => c,
+      // Args-aware: character resolves to none, ephemeral resolves to the attachment.
+      useSkillsByIds: (ids?: readonly string[]) => (ids?.includes("e1") ? [ephSkill] : []),
+    })
     render(
       <DataAdapterProvider adapter={adapter}>
         <SessionSettingsSheet

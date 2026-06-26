@@ -23,6 +23,10 @@ import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
 import { MCPToolCard, isStructuredMcpToolType } from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
+import {
+  HookNoticeRow,
+  type HookNoticePartData,
+} from "@/components/chat/message-parts/hook-notice-part"
 import { DiagnosticsCard } from "@/components/chat/message-parts/diagnostics-card"
 import { SlashCommandResultChip } from "@/components/chat/message-parts/slash-command-result-chip"
 import {
@@ -191,6 +195,11 @@ function MessageRendererInner({
     return characterById.get(senderId) ?? null
   }, [senderId, characterById])
 
+  // Segment the parts into tool-activity groups + standalone parts. Memoized on
+  // `message.parts` so it doesn't re-run on every token or on unrelated local
+  // state (editing/draft/shared/branchOpen) before the memoized children skip.
+  const segments = useMemo(() => groupAgentParts(message.parts), [message.parts])
+
   // Mention highlighting pattern over known character names. Honor longest
   // match first so e.g. `@Alice Smith` wins over `@Alice`.
   const mentionPattern = useMemo(() => {
@@ -329,7 +338,7 @@ function MessageRendererInner({
             {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
             {/* into one activity group. Subagent parts are transparent here and */}
             {/* render once below as a dispatch tree. */}
-            {groupAgentParts(message.parts).map((segment, si) => {
+            {segments.map((segment, si) => {
               if (segment.kind === "group") {
                 const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
                   part: e.part as ToolUIPart,
@@ -800,6 +809,13 @@ function renderPart(
 
   if (type === "canvas") {
     return <CanvasInlinePart key={key} part={part as unknown as CanvasInlinePartType} />
+  }
+
+  if (type === "hook-notice") {
+    // Inline hook-notice part — emitted by external agents (event-to-parts).
+    // The built-in agent's hook notices are whole system messages routed by
+    // message-list, so they never reach renderPart.
+    return <HookNoticeRow key={key} data={part as unknown as HookNoticePartData} />
   }
 
   if (type === "a2ui") {

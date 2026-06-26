@@ -356,6 +356,21 @@ describe("useChatStore", () => {
       act(() => result.current.clearEphemeralSkillIds())
       expect(result.current.ephemeralSkillIds).toEqual([])
     })
+
+    it("removeEphemeralSkillIds drops the given ids (e.g. on skill delete)", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setEphemeralSkillIds(["a", "b", "c"]))
+      act(() => result.current.removeEphemeralSkillIds(["b", "x"]))
+      expect(result.current.ephemeralSkillIds).toEqual(["a", "c"])
+    })
+
+    it("removeEphemeralSkillIds is a no-op when nothing matches", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setEphemeralSkillIds(["a"]))
+      const before = result.current.ephemeralSkillIds
+      act(() => result.current.removeEphemeralSkillIds(["z"]))
+      expect(result.current.ephemeralSkillIds).toBe(before)
+    })
   })
 
   describe("clear", () => {

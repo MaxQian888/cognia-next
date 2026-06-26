@@ -132,6 +132,10 @@ export function SessionSettingsSheet({
   const presets = useMemo(() => presetsRaw ?? [], [presetsRaw])
   const character = useCharacter(session.characterId)
   const skills = useSkillsByIds(character?.skillIds)
+  // Ad-hoc skills attached to the next message (composer state) so the badge
+  // counter + attached section reflect the net effective set for the send.
+  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds)
+  const ephemeralSkills = useSkillsByIds(ephemeralSkillIds)
   const disabledSkillIds = useMemo(
     () => new Set(session.disabledSkillIds ?? []),
     [session.disabledSkillIds]
@@ -454,7 +458,10 @@ export function SessionSettingsSheet({
           </Section>
 
           {/* 角色与能力 */}
-          {(presets.length > 0 || character?.twinId || (skills?.length ?? 0) > 0) && (
+          {(presets.length > 0 ||
+            character?.twinId ||
+            (skills?.length ?? 0) > 0 ||
+            (ephemeralSkills?.length ?? 0) > 0) && (
             <Section label={t("sheet.sections.role")}>
               {presets.length > 0 && (
                 <div className="space-y-1.5">
@@ -496,11 +503,12 @@ export function SessionSettingsSheet({
                     twinSettings={character.twinSettings}
                   />
                 )}
-                {(skills?.length ?? 0) > 0 && (
+                {((skills?.length ?? 0) > 0 || (ephemeralSkills?.length ?? 0) > 0) && (
                   <SkillsBadge
                     skills={skills ?? []}
                     disabled={disabledSkillIds}
                     onToggle={handleSkillToggle}
+                    ephemeralSkills={ephemeralSkills ?? []}
                   />
                 )}
               </div>

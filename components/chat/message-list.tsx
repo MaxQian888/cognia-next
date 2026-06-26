@@ -10,6 +10,7 @@ import {
   isCompactBoundaryMessage,
 } from "./message-parts/compact-boundary-part"
 import { SessionNoticeMarker, isSessionNoticeMessage } from "./message-parts/session-notice-part"
+import { HookNoticeMarker, isHookNoticeMessage } from "./message-parts/hook-notice-part"
 import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { useChatStore } from "@/stores/chat"
@@ -21,6 +22,7 @@ import { InfoIcon } from "lucide-react"
 import { useCharacters } from "@/lib/data-hooks/context"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
+import { useCompactionToast } from "@/hooks/chat/use-compaction-toast"
 import type { Character } from "@/lib/claude/types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -82,6 +84,9 @@ export function MessageList({
   // Auto-play the latest assistant reply aloud when the turn finishes (gated on
   // ttsEnabled + ttsAutoPlay inside the hook).
   useChatAutoPlayTTS({ messages, status, characterById, directCharacter })
+
+  // Toast on each new compaction boundary (gated on showCompressionNotification).
+  useCompactionToast(messages)
 
   // Right-edge conversation-timeline minimap: long conversations only,
   // desktop only, and not disabled in settings.
@@ -195,6 +200,8 @@ export function MessageList({
       <CompactBoundaryMarker message={m} />
     ) : isSessionNoticeMessage(m) ? (
       <SessionNoticeMarker message={m} />
+    ) : isHookNoticeMessage(m) ? (
+      <HookNoticeMarker message={m} />
     ) : isMobile ? (
       <LongPress onLongPress={() => setActionMessage(m)}>
         <MessageRenderer

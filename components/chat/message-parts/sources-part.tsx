@@ -8,6 +8,7 @@
  * "View source" link that deep-links into the Twin workbench.
  */
 
+import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -63,6 +64,11 @@ function partition(sources: SourcesPartItem[]) {
 
 export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) {
   const t = useTranslations("chat.sourcesPart")
+  // Both the retrieval-only check (a `.every` pass) and the partition (an O(n)
+  // bucketing that allocates four arrays) only depend on the sources array;
+  // memoize them so unrelated parent re-renders don't repeat the work.
+  const isRetrievalOnly = useMemo(() => isOnlyRetrieval(part.sources ?? []), [part.sources])
+  const buckets = useMemo(() => partition(part.sources ?? []), [part.sources])
   const hasSources = Boolean(part.sources && part.sources.length > 0)
   // A degraded twin turn must still render — the warning is the point — even
   // when retrieval came back empty.
@@ -84,8 +90,8 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
 
   // Default-open when the only sources are twin-* so the user discovers the
   // retrieval feedback without an extra click. Explicit prop wins.
-  const open = defaultOpen ?? isOnlyRetrieval(part.sources)
-  const { twinRag, twinStyle, memory, other } = partition(part.sources)
+  const open = defaultOpen ?? isRetrievalOnly
+  const { twinRag, twinStyle, memory, other } = buckets
 
   return (
     <>
@@ -178,7 +184,7 @@ function buildTwinDeepLink(ref: NonNullable<SourcesPartItem["chunkRef"]>): strin
   return `/twin?${params.toString()}`
 }
 
-function SourceRow({ source }: { source: SourcesPartItem }) {
+const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem }) {
   const t = useTranslations("chat.sourcesPart")
   const body = (
     <div
@@ -240,6 +246,6 @@ function SourceRow({ source }: { source: SourcesPartItem }) {
     )
   }
   return <div className="rounded px-1 py-0.5">{body}</div>
-}
+})
 
 export default SourcesPart

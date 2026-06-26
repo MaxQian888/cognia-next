@@ -14,7 +14,7 @@
  *  - detailed   — expanded by default; children render with `forceOpen`.
  */
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
   CheckCircleIcon,
@@ -80,6 +80,22 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
     }
   }
 
+  // Stable per-index toggle so the memoized `ToolCallRow` children don't all
+  // re-render when one row's open state changes. A fresh inline closure here
+  // would make every row's `onToggle` prop unequal and defeat the row memo.
+  const toggleRow = useCallback((i: number) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }, [])
+  const rowToggles = useMemo(
+    () => entries.map((_, i) => () => toggleRow(i)),
+    [entries.length, toggleRow] // eslint-disable-line react-hooks/exhaustive-deps -- positional handlers keyed on count
+  )
+
   const body: ReactNode =
     mode === "simplified" ? (
       <div className="space-y-1">
@@ -88,14 +104,7 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
             key={entry.key}
             part={entry.part}
             expanded={expandedRows.has(i)}
-            onToggle={() =>
-              setExpandedRows((prev) => {
-                const next = new Set(prev)
-                if (next.has(i)) next.delete(i)
-                else next.add(i)
-                return next
-              })
-            }
+            onToggle={rowToggles[i]}
           />
         ))}
       </div>

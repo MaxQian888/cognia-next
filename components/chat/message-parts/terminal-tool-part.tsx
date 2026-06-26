@@ -12,7 +12,7 @@
  * inside this part so the action lives next to the command preview.
  */
 
-import { useState } from "react"
+import { memo, useCallback, useMemo, useState } from "react"
 import type { ToolUIPart } from "ai"
 import { useTranslations } from "next-intl"
 import { TerminalSquareIcon } from "lucide-react"
@@ -20,7 +20,10 @@ import { TerminalSquareIcon } from "lucide-react"
 import { Tool, ToolBody, ToolContent, ToolHeader, ToolInput } from "@/components/ai-elements/tool"
 import { Terminal, TerminalHeader, TerminalStatus } from "@/components/ai-elements/terminal"
 import { Button } from "@/components/ui/button"
-import { TerminalTabPicker } from "@/components/chat/terminal-tab-picker"
+import {
+  TerminalTabPicker,
+  type TerminalTabPickerProps,
+} from "@/components/chat/terminal-tab-picker"
 import { runInDockTab } from "@/lib/terminal/run-in-dock"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -51,11 +54,11 @@ function extractRunningOutput(output: unknown): string | undefined {
   return undefined
 }
 
-export function TerminalToolPart({ part }: TerminalToolPartProps) {
+export const TerminalToolPart = memo(function TerminalToolPart({ part }: TerminalToolPartProps) {
   const t = useTranslations("chat.terminalTool")
   const running = part.state === "input-available"
-  const command = extractCommand(part.input)
-  const liveOutput = extractRunningOutput(part.output)
+  const command = useMemo(() => extractCommand(part.input), [part.input])
+  const liveOutput = useMemo(() => extractRunningOutput(part.output), [part.output])
   const chatSessionId = useChatStore((s) =>
     typeof (s as { activeSessionId?: string }).activeSessionId === "string"
       ? (s as { activeSessionId: string }).activeSessionId
@@ -72,6 +75,45 @@ export function TerminalToolPart({ part }: TerminalToolPartProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const canRun = !!command && command.length > 0 && !!chatSessionId
+
+  // Stable handler so the picker isn't handed a fresh async closure on every
+  // streaming re-render while the Bash call is in flight.
+  const handlePick = useCallback(
+    async (choice: Parameters<TerminalTabPickerProps["onPick"]>[0]) => {
+      if (!command || !chatSessionId) return
+      setBusy(true)
+      try {
+        if (choice.kind === "existing") {
+          await runInDockTab({
+            chatSessionId,
+            tabId: choice.row.id,
+            command,
+          })
+        } else {
+          await runInDockTab({
+            chatSessionId,
+            newTab: {
+              req: {
+                shell: resolveDefaultShell({
+                  projectShell: project?.terminalConfig?.shell,
+                  settingShell: settingsShell,
+                }),
+                cwd: project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined,
+                env: project?.terminalConfig?.env,
+                projectId: project?.id,
+                rows: 24,
+                cols: 80,
+              },
+            },
+            command,
+          })
+        }
+      } finally {
+        setBusy(false)
+      }
+    },
+    [command, chatSessionId, project, settingsShell]
+  )
 
   return (
     <Tool defaultOpen={running} data-testid="terminal-tool-part">
@@ -94,46 +136,7 @@ export function TerminalToolPart({ part }: TerminalToolPartProps) {
         )}
         {canRun ? (
           <div className="mt-2 flex justify-end">
-            <TerminalTabPicker
-              open={pickerOpen}
-              onOpenChange={setPickerOpen}
-              onPick={async (choice) => {
-                if (!command || !chatSessionId) return
-                setBusy(true)
-                try {
-                  if (choice.kind === "existing") {
-                    await runInDockTab({
-                      chatSessionId,
-                      tabId: choice.row.id,
-                      command,
-                    })
-                  } else {
-                    await runInDockTab({
-                      chatSessionId,
-                      newTab: {
-                        req: {
-                          shell: resolveDefaultShell({
-                            projectShell: project?.terminalConfig?.shell,
-                            settingShell: settingsShell,
-                          }),
-                          cwd:
-                            project?.terminalConfig?.cwd?.trim() ||
-                            project?.rootDir?.trim() ||
-                            undefined,
-                          env: project?.terminalConfig?.env,
-                          projectId: project?.id,
-                          rows: 24,
-                          cols: 80,
-                        },
-                      },
-                      command,
-                    })
-                  }
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
+            <TerminalTabPicker open={pickerOpen} onOpenChange={setPickerOpen} onPick={handlePick}>
               <Button
                 size="sm"
                 variant="ghost"
@@ -150,6 +153,6 @@ export function TerminalToolPart({ part }: TerminalToolPartProps) {
       </ToolContent>
     </Tool>
   )
-}
+})
 
 export default TerminalToolPart

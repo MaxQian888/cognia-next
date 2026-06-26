@@ -1,21 +1,61 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { UIMessage } from "ai"
 import { CompactBoundaryMarker, isCompactBoundaryMessage } from "./compact-boundary-part"
+import {
+  registerUndoSnapshot,
+  hasUndoSnapshot,
+  __resetUndoRegistryForTesting,
+} from "@/lib/claude/compaction-undo"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
 }))
 
-const boundary = (part: Record<string, unknown>): UIMessage =>
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) },
+}))
+
+const restoreSessionMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/claude/ipc", () => ({
+  restoreSession: (...args: unknown[]) => restoreSessionMock(...args),
+}))
+
+let mockStoreState: {
+  activeSessionId: string | null
+  replaceMessages: jest.Mock
+  messages: UIMessage[]
+}
+jest.mock("@/stores/chat", () => ({
+  useChatStore: Object.assign((sel: (s: unknown) => unknown) => sel(mockStoreState), {
+    getState: () => mockStoreState,
+  }),
+}))
+
+const boundary = (part: Record<string, unknown>, id = "compact-1"): UIMessage =>
   ({
-    id: "compact-1",
+    id,
     role: "system",
     parts: [{ type: "compact-boundary", ...part }],
   }) as unknown as UIMessage
+
+beforeEach(() => {
+  __resetUndoRegistryForTesting()
+  toastSuccess.mockClear()
+  toastError.mockClear()
+  restoreSessionMock.mockClear()
+  mockStoreState = {
+    activeSessionId: "sess-1",
+    replaceMessages: jest.fn(),
+    messages: [],
+  }
+})
 
 describe("isCompactBoundaryMessage", () => {
   it("recognises the synthetic marker", () => {
@@ -45,7 +85,6 @@ describe("CompactBoundaryMarker", () => {
   it("shows the before/after token detail when both counts are present", () => {
     render(<CompactBoundaryMarker message={boundary({ preTokens: 120000, postTokens: 8000 })} />)
     expect(screen.getByTestId("compact-boundary")).toBeInTheDocument()
-    // Echoed key carries the compact-formatted from/to numbers.
     expect(screen.getByText(/detail:.*120K.*8K/)).toBeInTheDocument()
   })
 
@@ -57,5 +96,40 @@ describe("CompactBoundaryMarker", () => {
   it("falls back to the auto label otherwise", () => {
     render(<CompactBoundaryMarker message={boundary({ trigger: "auto" })} />)
     expect(screen.getByText(/auto/)).toBeInTheDocument()
+  })
+
+  it("does not show an undo button without a live snapshot", () => {
+    render(<CompactBoundaryMarker message={boundary({ undoToken: "compact-1" })} />)
+    expect(screen.queryByTestId("compact-undo")).not.toBeInTheDocument()
+  })
+
+  it("restores the conversation when undo is clicked", async () => {
+    const snapshot = [{ role: "user", content: "m0" }]
+    registerUndoSnapshot({ token: "compact-1", createdAt: 1, snapshot })
+    const msg = boundary({ undoToken: "compact-1", preTokens: 1, postTokens: 1 })
+    mockStoreState.messages = [
+      msg,
+      { id: "other", role: "user", parts: [] } as unknown as UIMessage,
+    ]
+
+    render(<CompactBoundaryMarker message={msg} />)
+    const btn = screen.getByTestId("compact-undo")
+    await userEvent.click(btn)
+
+    await waitFor(() => expect(restoreSessionMock).toHaveBeenCalledWith("sess-1", snapshot))
+    // Boundary marker removed from the transcript; snapshot cleared.
+    expect(mockStoreState.replaceMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "other" }),
+    ])
+    expect(hasUndoSnapshot("compact-1")).toBe(false)
+    expect(toastSuccess).toHaveBeenCalled()
+  })
+
+  it("toasts an error when restore fails", async () => {
+    registerUndoSnapshot({ token: "compact-1", createdAt: 1, snapshot: [{ role: "user" }] })
+    restoreSessionMock.mockRejectedValueOnce(new Error("boom"))
+    render(<CompactBoundaryMarker message={boundary({ undoToken: "compact-1" })} />)
+    await userEvent.click(screen.getByTestId("compact-undo"))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 })

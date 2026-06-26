@@ -111,6 +111,13 @@
     "label": "上下文已压缩",
     "manual": "手动"
   },
+  "compaction": {
+    "notification": "上下文已压缩",
+    "notificationDetail": "{from} → {to} tokens",
+    "undo": "撤销压缩",
+    "undoFailed": "无法恢复对话",
+    "undoSuccess": "对话已恢复"
+  },
   "composer": {
     "ariaAttachImage": "添加图片",
     "ariaMessage": "消息",
@@ -240,6 +247,15 @@
       "bashHintPrefix": "按",
       "bashHintSuffix": "以 shell 命令运行。",
       "bashTitle": "执行 shell 命令",
+      "categories": {
+        "chat": "对话",
+        "diagnostics": "诊断",
+        "goal": "目标",
+        "help": "帮助",
+        "other": "其他",
+        "system": "系统",
+        "template": "提示词"
+      },
       "comingSoon": "即将上线",
       "fileTitle": "引用文件或文件夹",
       "filesSection": "文件",
@@ -247,9 +263,13 @@
       "noCommandMatches": "没有匹配「/{query}」的命令。",
       "noCommands": "暂无可用命令。",
       "noFiles": "没有匹配「{query}」的文件。",
+      "pinAction": "置顶 /{name}",
+      "pinnedSection": "置顶",
+      "recentSection": "最近使用",
       "searching": "搜索中…",
       "searchingShort": "搜索中…",
       "slashTitle": "斜杠命令",
+      "unpinAction": "取消置顶 /{name}",
       "workspaceEmpty": "工作区为空。",
       "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
     },
@@ -447,6 +467,8 @@
     },
     "skills": {
       "aria": "本会话已激活的技能",
+      "attachedInert": "本会话已停用 — 不会发送",
+      "attachedTitle": "已附加到下一条消息",
       "counter": "{active}/{total} 个技能",
       "description": "仅对当前会话开关技能。如需永久修改，请编辑角色设置。",
       "title": "技能",
@@ -466,6 +488,33 @@
     "loadError": "无法加载此对话。",
     "loading": "正在加载对话…",
     "retry": "重试"
+  },
+  "hookNotice": {
+    "event": {
+      "Notification": "通知",
+      "PermissionDenied": "权限被拒绝",
+      "PermissionRequest": "权限请求",
+      "PostCompact": "压缩后",
+      "PostToolUse": "工具调用后",
+      "PostToolUseFailure": "工具失败后",
+      "PreToolUse": "工具调用前",
+      "SessionEnd": "会话结束",
+      "SessionStart": "会话开始",
+      "Stop": "停止",
+      "StopFailure": "停止（失败）",
+      "SubagentStop": "子代理停止",
+      "UserPromptSubmit": "提交提示词"
+    },
+    "outcome": {
+      "blocked": "已拦截",
+      "context": "已注入上下文",
+      "warning": "警告"
+    },
+    "section": {
+      "context": "注入的上下文",
+      "reason": "原因"
+    },
+    "toggle": "展开/折叠 Hook 详情"
   },
   "inlineError": {
     "dismiss": "忽略",
@@ -834,7 +883,8 @@
     },
     "rowAria": "{name} 子代理 — {status}",
     "title": "子代理",
-    "tokens": "{n} tokens"
+    "tokens": "{n} tokens",
+    "toolsRunCount": "{n} 次工具调用"
   },
   "terminalTool": {
     "bashLabel": "Bash",

@@ -142,7 +142,7 @@ describe("ContextUsageIndicator", () => {
     })
     render(<ContextUsageIndicator modelId="big" providerId="cp" />)
     const node = screen.getByTestId("context-usage-indicator")
-    // Without the override, "big" is unknown → 200k default; the custom
+    // Without the override, "big" is unknown → 128k default; the custom
     // metadata lifts it to 500k.
     expect(node).toHaveAttribute("data-max-tokens", "500000")
   })

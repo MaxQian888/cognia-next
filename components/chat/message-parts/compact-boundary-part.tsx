@@ -6,10 +6,19 @@
 // `compact_boundary` system message into a `system`-role UIMessage carrying a
 // single `compact-boundary` part; the message list swaps this marker in for
 // the normal `MessageRenderer` so it shows no avatar / actions / usage chrome.
+//
+// When the generic-path compaction captured an undo snapshot, an "Undo" action
+// is offered while the snapshot is still live (in-memory, this session only).
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ScissorsIcon } from "lucide-react"
+import { ScissorsIcon, Undo2Icon } from "lucide-react"
+import { toast } from "sonner"
 import type { UIMessage } from "ai"
+
+import { useChatStore } from "@/stores/chat"
+import { restoreSession } from "@/lib/claude/ipc"
+import { getUndoSnapshot, hasUndoSnapshot, clearUndoSnapshot } from "@/lib/claude/compaction-undo"
 
 const compactNum = new Intl.NumberFormat("en-US", { notation: "compact" })
 
@@ -18,6 +27,9 @@ export interface CompactBoundaryPartData {
   trigger?: string
   preTokens?: number
   postTokens?: number
+  strategy?: string
+  /** Present when a live undo snapshot exists for this boundary. */
+  undoToken?: string
 }
 
 /** True when a message is the synthetic compact-boundary marker. */
@@ -31,7 +43,12 @@ export function isCompactBoundaryMessage(message: UIMessage): boolean {
 
 export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
   const t = useTranslations("chat.compactBoundary")
+  const tc = useTranslations("chat.compaction")
   const part = message.parts[0] as unknown as CompactBoundaryPartData
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const replaceMessages = useChatStore((s) => s.replaceMessages)
+  const [undoing, setUndoing] = useState(false)
+
   const detail =
     part.preTokens !== undefined && part.postTokens !== undefined
       ? t("detail", {
@@ -41,6 +58,27 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
       : part.trigger === "manual"
         ? t("manual")
         : t("auto")
+
+  const canUndo = !!part.undoToken && hasUndoSnapshot(part.undoToken) && !!activeSessionId
+
+  const onUndo = async () => {
+    if (!part.undoToken || !activeSessionId) return
+    const entry = getUndoSnapshot(part.undoToken)
+    if (!entry) return
+    setUndoing(true)
+    try {
+      await restoreSession(activeSessionId, entry.snapshot)
+      clearUndoSnapshot(part.undoToken)
+      // Drop this boundary marker from the visible transcript.
+      const remaining = useChatStore.getState().messages.filter((m) => m.id !== message.id)
+      replaceMessages(remaining)
+      toast.success(tc("undoSuccess"))
+    } catch {
+      toast.error(tc("undoFailed"))
+    } finally {
+      setUndoing(false)
+    }
+  }
 
   return (
     <div
@@ -53,6 +91,18 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
       <ScissorsIcon className="size-3 shrink-0" aria-hidden />
       <span className="shrink-0">{t("label")}</span>
       <span className="shrink-0 text-muted-foreground/70">· {detail}</span>
+      {canUndo && (
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={undoing}
+          data-testid="compact-undo"
+          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+        >
+          <Undo2Icon className="size-3" aria-hidden />
+          {tc("undo")}
+        </button>
+      )}
       <div className="h-px flex-1 bg-border" />
     </div>
   )

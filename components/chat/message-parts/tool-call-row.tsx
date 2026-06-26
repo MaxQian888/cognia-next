@@ -10,7 +10,7 @@
  * group's expand-all/collapse-all) and uncontrolled (internal state) use.
  */
 
-import { useState } from "react"
+import { memo, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   CheckCircleIcon,
@@ -77,17 +77,25 @@ export interface ToolCallRowProps {
   onToggle?: () => void
 }
 
-export function ToolCallRow({ part, expanded, onToggle }: ToolCallRowProps) {
+export const ToolCallRow = memo(function ToolCallRow({
+  part,
+  expanded,
+  onToggle,
+}: ToolCallRowProps) {
   const t = useTranslations("chat.agentFlow")
   const [internalOpen, setInternalOpen] = useState(false)
   const controlled = expanded !== undefined
   const open = controlled ? expanded : internalOpen
 
-  const summary = summarizeToolCall(part)
+  // Both summarizers scan the tool input/output (describeToolResult splits the
+  // full output into lines); memoize on the part identity — which the chat
+  // store replaces per delta, the same assumption MessagePart's memo relies on —
+  // so they don't re-run when an unrelated sibling row toggles or streams.
+  const summary = useMemo(() => summarizeToolCall(part), [part])
+  const result = useMemo(() => describeToolResult(part), [part])
   const Icon = ICON_MAP[summary.iconKey]
   const glyph = STATUS_GLYPH[part.state]
   const statusLabel = t(`status.${glyph.key}`)
-  const result = describeToolResult(part)
 
   const handleToggle = () => {
     if (controlled) onToggle?.()
@@ -135,7 +143,7 @@ export function ToolCallRow({ part, expanded, onToggle }: ToolCallRowProps) {
       </MotionCollapse>
     </div>
   )
-}
+})
 
 const TONE_CLASS: Record<ToolResultDescriptor["tone"], string> = {
   neutral: "text-muted-foreground",
@@ -144,7 +152,11 @@ const TONE_CLASS: Record<ToolResultDescriptor["tone"], string> = {
 }
 
 /** Translated result summary chip — "12 matches" / "+5 −2" / first error line. */
-function ToolResultChip({ descriptor }: { descriptor: ToolResultDescriptor }) {
+const ToolResultChip = memo(function ToolResultChip({
+  descriptor,
+}: {
+  descriptor: ToolResultDescriptor
+}) {
   const t = useTranslations("chat.agentFlow")
   let label: string
   switch (descriptor.kind) {
@@ -179,4 +191,4 @@ function ToolResultChip({ descriptor }: { descriptor: ToolResultDescriptor }) {
       {label}
     </span>
   )
-}
+})

@@ -405,6 +405,8 @@ interface ChatState {
   setEphemeralSkillIds: (ids: string[]) => void
   toggleEphemeralSkill: (id: string) => void
   clearEphemeralSkillIds: () => void
+  /** Drop ids from the ephemeral attachment list (e.g. after a skill is deleted). */
+  removeEphemeralSkillIds: (ids: string[]) => void
   setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
   bumpLastSendAttempt: (sessionId: string) => void
   clearLastSend: (sessionId: string) => void
@@ -669,6 +671,12 @@ export const useChatStore = create<ChatState>((set) => ({
         : [...s.ephemeralSkillIds, id],
     })),
   clearEphemeralSkillIds: () => set({ ephemeralSkillIds: [] }),
+  removeEphemeralSkillIds: (ids) =>
+    set((s) => {
+      const drop = new Set(ids)
+      const next = s.ephemeralSkillIds.filter((id) => !drop.has(id))
+      return next.length === s.ephemeralSkillIds.length ? s : { ephemeralSkillIds: next }
+    }),
   setLastSend: (sessionId, entry) =>
     set((s) => ({
       lastSendBySession: { ...s.lastSendBySession, [sessionId]: entry },

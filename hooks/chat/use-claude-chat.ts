@@ -1291,12 +1291,13 @@ export function useClaudeChat() {
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
         useChatStore.getState().closeSession(sessionId)
-        // Drop this session's nested-dispatch budget guard so it doesn't leak
-        // for the renderer's lifetime (it's kept alive across a turn's multiple
-        // dispatch_agent calls, so teardown is the only safe release point).
-        const { releaseDispatchBudgetForSession } =
+        // Drop this session's nested-dispatch state (budget guard + resolved
+        // permission ceiling) so neither leaks for the renderer's lifetime. Both
+        // are keyed by session id and kept alive across a turn's multiple
+        // dispatch_agent calls, so teardown is the only safe release point.
+        const { releaseDispatchStateForSession } =
           await import("@/lib/claude/agents/dispatch-agent-handler")
-        releaseDispatchBudgetForSession(sessionId)
+        releaseDispatchStateForSession(sessionId)
       }
     },
     [registry]
