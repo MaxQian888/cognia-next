@@ -48,6 +48,16 @@ jest.mock("@/lib/twin/ingest/redact", () => ({
   hasNoLeakingPii: (...args: unknown[]) => hasNoLeakingPii(...args),
 }))
 
+const answerRemoteControlQuery = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/remote-control/query-answerer", () => ({
+  answerRemoteControlQuery: (...args: unknown[]) => answerRemoteControlQuery(...args),
+}))
+
+const recordRemoteRunOutcome = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/remote-control-run-status", () => ({
+  recordRemoteRunOutcome: (...args: unknown[]) => recordRemoteRunOutcome(...args),
+}))
+
 beforeEach(() => {
   jest.clearAllMocks()
 })
@@ -66,7 +76,7 @@ describe("RemoteControlReceiver", () => {
     expect(hydrate).not.toHaveBeenCalled()
   })
 
-  it("subscribes to all three remote-control events and hydrates on desktop", async () => {
+  it("subscribes to all remote-control events and hydrates on desktop", async () => {
     mockedIsTauri.mockReturnValue(true)
     const handlers: Record<string, (event: { payload: unknown }) => void> = {}
     mockListen.mockImplementation(
@@ -87,8 +97,48 @@ describe("RemoteControlReceiver", () => {
       expect(handlers["remote-control://emit-event"]).toBeDefined()
       expect(handlers["remote-control://inbound-call"]).toBeDefined()
       expect(handlers["remote-control://command"]).toBeDefined()
+      expect(handlers["remote-control://query"]).toBeDefined()
     })
     expect(hydrate).toHaveBeenCalled()
+  })
+
+  it("routes query events through answerRemoteControlQuery", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    let queryHandler: ((e: { payload: unknown }) => void) | null = null
+    mockListen.mockImplementation(
+      async (eventName: string, handler: (e: { payload: unknown }) => void) => {
+        if (eventName === "remote-control://query") queryHandler = handler
+        return jest.fn()
+      }
+    )
+    render(
+      <RemoteControlReceiver>
+        <div />
+      </RemoteControlReceiver>
+    )
+    await waitFor(() => expect(queryHandler).not.toBeNull())
+    const query = { requestId: "rcq_1", kind: "tasks", params: {} }
+    queryHandler!({ payload: query })
+    await waitFor(() => expect(answerRemoteControlQuery).toHaveBeenCalledWith(query))
+  })
+
+  it("ignores query events with no requestId or kind", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    let queryHandler: ((e: { payload: unknown }) => void) | null = null
+    mockListen.mockImplementation(
+      async (eventName: string, handler: (e: { payload: unknown }) => void) => {
+        if (eventName === "remote-control://query") queryHandler = handler
+        return jest.fn()
+      }
+    )
+    render(
+      <RemoteControlReceiver>
+        <div />
+      </RemoteControlReceiver>
+    )
+    await waitFor(() => expect(queryHandler).not.toBeNull())
+    queryHandler!({ payload: { requestId: "rcq_1" } })
+    expect(answerRemoteControlQuery).not.toHaveBeenCalled()
   })
 
   it("routes command events through dispatchRemoteCommand", async () => {
@@ -119,6 +169,11 @@ describe("RemoteControlReceiver", () => {
           result: "accepted",
           fields: { args: { workflowId: "wf_1" } },
         })
+      )
+    )
+    await waitFor(() =>
+      expect(recordRemoteRunOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run_1", target: "workflow.run", status: "accepted" })
       )
     )
   })

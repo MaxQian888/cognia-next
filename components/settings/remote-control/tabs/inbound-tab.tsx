@@ -23,7 +23,9 @@ import { remoteControlGetToken, remoteControlRotateToken } from "@/lib/tauri/rem
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 import {
   isLoopbackAllowlistEntry,
+  isSensitiveRemoteCommandTarget,
   REMOTE_COMMAND_TARGETS,
+  SENSITIVE_REMOTE_COMMAND_TARGETS,
   validateCidrOrIp,
 } from "@/types/remote-control"
 
@@ -337,9 +339,39 @@ export function InboundTab() {
                 <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
                   POST /api/v1/commands/{target}
                 </code>
+                {isSensitiveRemoteCommandTarget(target) && (
+                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                    {t("sensitiveBadge")}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">{t("sensitiveHeading")}</CardTitle>
+          <CardDescription>{t("sensitiveHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="rc-allow-sensitive" className="text-sm">
+              {t("sensitiveToggleLabel")}
+            </Label>
+            <Switch
+              id="rc-allow-sensitive"
+              checked={inbound.allowSensitiveTargets}
+              onCheckedChange={(checked) => void updateInbound({ allowSensitiveTargets: checked })}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("sensitiveTargetsList", {
+              targets: SENSITIVE_REMOTE_COMMAND_TARGETS.join(", "),
+            })}
+          </p>
+          <p className="text-xs text-muted-foreground">{t("capabilityRestartNote")}</p>
         </CardContent>
       </Card>
 

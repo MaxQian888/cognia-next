@@ -28,11 +28,20 @@ export interface RemoteControlInboundConfig {
   /** Per-token rate limit, in requests per minute. */
   rateLimitPerMin: number
   /**
-   * Token capability (Tailscale-style read/write split). `read` permits only
-   * `GET /api/v1/health`; `write` permits the trigger routes. Applied at listener
-   * start — changing it takes effect on the next stop/start, like port/allowlist.
+   * Token capability (Tailscale-style read/write split). `read` permits the
+   * health probe + every `GET` read endpoint; `write` additionally permits the
+   * mutating `POST` routes. Applied at listener start — changing it takes
+   * effect on the next stop/start, like port/allowlist.
    */
   capability: TokenCapability
+  /**
+   * When false (default), the inbound server rejects sensitive command targets
+   * (`SENSITIVE_REMOTE_COMMAND_TARGETS` — model-cost / off-device side effects)
+   * with `403 sensitive_target_disabled` even for a `write` token. A
+   * config-gated guardrail beyond the binary capability. Takes effect on the
+   * next stop/start.
+   */
+  allowSensitiveTargets: boolean
 }
 
 export interface RemoteControlOutboundHeader {
@@ -76,8 +85,16 @@ export interface RemoteControlInboundCallLog {
   id: string
   /** ISO-8601 timestamp. */
   at: string
-  /** Which endpoint was hit. */
-  route: "/api/v1/health" | "/api/v1/tasks/:id/run" | "/api/v1/events"
+  /**
+   * Concrete request path that was hit, as reported by the Rust middleware
+   * (`request.uri().path()`). Known shapes: `/api/v1/health`,
+   * `/api/v1/tasks/<id>/run`, `/api/v1/events`, `/api/v1/commands/<target>`,
+   * and the read surface (`/api/v1/targets`, `/api/v1/tasks`,
+   * `/api/v1/workflows/<id>/runs`, `/api/v1/goals`, `/api/v1/audit`,
+   * `/api/v1/runs/<runId>`). Kept as a free `string` because the value is the
+   * concrete (un-templated) path, so no finite union can match it at runtime.
+   */
+  route: string
   /** HTTP status returned to the caller. */
   status: number
   /** Caller's source IP (from ConnectInfo). */
@@ -116,23 +133,54 @@ export type RemoteCommandTarget =
   | "scheduler.task.run"
   | "scheduler.event"
   | "workflow.run"
+  | "workflow.cancel"
   | "goal.create"
   | "goal.continue"
+  | "goal.pause"
+  | "goal.resume"
+  | "goal.stop"
   | "team.dispatch"
+  | "team.stop"
   | "plan.run"
+  | "chat.send"
+  | "connector.send"
 
 export const REMOTE_COMMAND_TARGETS: readonly RemoteCommandTarget[] = [
   "scheduler.task.run",
   "scheduler.event",
   "workflow.run",
+  "workflow.cancel",
   "goal.create",
   "goal.continue",
+  "goal.pause",
+  "goal.resume",
+  "goal.stop",
   "team.dispatch",
+  "team.stop",
   "plan.run",
+  "chat.send",
+  "connector.send",
 ]
 
 export function isRemoteCommandTarget(value: string): value is RemoteCommandTarget {
   return (REMOTE_COMMAND_TARGETS as readonly string[]).includes(value)
+}
+
+/**
+ * Targets that cause model-cost or outbound (off-device) side effects. The
+ * inbound server additionally requires `RemoteControlInboundConfig
+ * .allowSensitiveTargets = true` to dispatch these — a config-gated guardrail
+ * beyond the binary read/write capability. Mirrors `SENSITIVE_TARGETS` in
+ * `src-tauri/src/remote_control/server.rs`.
+ */
+export const SENSITIVE_REMOTE_COMMAND_TARGETS: readonly RemoteCommandTarget[] = [
+  "chat.send",
+  "connector.send",
+  "goal.create",
+]
+
+export function isSensitiveRemoteCommandTarget(value: string): boolean {
+  return (SENSITIVE_REMOTE_COMMAND_TARGETS as readonly string[]).includes(value)
 }
 
 /** Wire shape emitted by the Rust `/api/v1/commands/:target` route. */
@@ -152,6 +200,33 @@ export interface RemoteCommandResult {
   runId: string
   status: RemoteCommandResultStatus
   detail?: string
+}
+
+// ---------------------------------------------------------------------------
+// Read surface (GET) — the inbound server round-trips a read to the renderer.
+// Rust emits `remote-control://query`; the renderer answers via the
+// `remote_control_query_response` command. `targets` is answered natively in
+// Rust and never reaches the renderer.
+// ---------------------------------------------------------------------------
+
+export type RemoteControlQueryKind = "tasks" | "workflow.runs" | "goals" | "audit" | "run.status"
+
+export const REMOTE_CONTROL_QUERY_KINDS: readonly RemoteControlQueryKind[] = [
+  "tasks",
+  "workflow.runs",
+  "goals",
+  "audit",
+  "run.status",
+]
+
+/** Wire shape emitted on `remote-control://query`. */
+export interface RemoteControlQueryEvent {
+  /** Server-generated correlation id; echoed back to resolve the round-trip. */
+  requestId: string
+  /** Which read to run. Forward-compatible: unknown kinds answer with an error. */
+  kind: RemoteControlQueryKind | string
+  /** Per-kind params (e.g. `{ workflowId }`, `{ sessionId }`). */
+  params?: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +296,34 @@ export interface RemoteControlAuditEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Run-status projection (result-loop closure). Backed by the Dexie
+// `remoteControlRunStatus` table (schema v92). Keyed by the server-issued
+// `runId` so `GET /api/v1/runs/:runId` can report a command's outcome.
+// ---------------------------------------------------------------------------
+
+export type RemoteControlRunStatusValue =
+  | "accepted" // dispatched, no terminal signal yet
+  | "rejected" // handler refused (bad args / not found / PII block)
+  | "replayed" // idempotency-cache replay
+  | "running" // a terminal-aware subsystem reports the run is live
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+
+export interface RemoteControlRunStatusRow {
+  /** Server-issued correlation id (primary key). */
+  runId: string
+  target: RemoteCommandTarget
+  status: RemoteControlRunStatusValue
+  /** Short human-readable detail (the dispatch result's `detail`). */
+  detail?: string
+  /** epoch ms — first stamp (dispatch time). */
+  startedAt: number
+  /** epoch ms — most recent stamp. */
+  updatedAt: number
+}
+
+// ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
 
@@ -238,6 +341,7 @@ export const DEFAULT_REMOTE_CONTROL_CONFIG: RemoteControlConfig = {
     allowlist: [...DEFAULT_REMOTE_CONTROL_ALLOWLIST],
     rateLimitPerMin: DEFAULT_REMOTE_CONTROL_RATE_LIMIT_PER_MIN,
     capability: DEFAULT_TOKEN_CAPABILITY,
+    allowSensitiveTargets: false,
   },
   outbound: {
     hasSigningSecret: false,

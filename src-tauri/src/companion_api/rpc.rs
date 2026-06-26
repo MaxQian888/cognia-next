@@ -38,6 +38,8 @@
 //! Read-only commands skip the cache entirely: they are cheap to re-run and
 //! their idempotency is structural (same args → same result).
 
+use std::collections::HashSet;
+
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -494,9 +496,21 @@ const CONTROL_COMMANDS: &[&str] = &[
     "backup_import",
 ];
 
+/// O(1) membership mirrors of the command allowlists above. The `&[&str]`
+/// arrays stay the source of truth (the spec-parity and source-scan tests
+/// iterate them), while these hashed sets are consulted on the per-request
+/// hot path — classifying a command no longer linear-scans ~200 entries up
+/// to three times per RPC.
+static KNOWN_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| KNOWN_COMMANDS.iter().copied().collect());
+static READ_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| READ_ONLY_COMMANDS.iter().copied().collect());
+static CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| CONTROL_COMMANDS.iter().copied().collect());
+
 /// True when `name` requires the remote-control capability.
 fn is_control_command(name: &str) -> bool {
-    CONTROL_COMMANDS.contains(&name)
+    CONTROL_COMMANDS_SET.contains(name)
 }
 
 /// Public read-only accessor for the remote-control command set. Used by
@@ -641,7 +655,7 @@ pub async fn rpc_handler(
     // intentionally `None`). Keep `KNOWN_COMMANDS` in lockstep with the
     // `match name` arms in `dispatch()` below — drift will silently bypass
     // the 503 path for genuinely unknown commands.
-    if !KNOWN_COMMANDS.contains(&name.as_str()) {
+    if !KNOWN_COMMANDS_SET.contains(name.as_str()) {
         return Err(RpcError::unknown_command(&name));
     }
 
@@ -666,7 +680,7 @@ pub async fn rpc_handler(
         return Err(RpcError::rate_limited(retry_after.as_secs()));
     }
 
-    let is_read_only = READ_ONLY_COMMANDS.contains(&name.as_str());
+    let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
 
     // Cache look-up (non-read-only commands only).
     if !is_read_only {
@@ -809,7 +823,7 @@ pub(super) async fn dispatch(
     // `dispatch` directly without that check — enforcing it here keeps the two
     // transports' command surfaces identical (no DataChannel superset) and
     // guarantees every reachable arm is a documented, allowlisted command.
-    if !KNOWN_COMMANDS.contains(&name) {
+    if !KNOWN_COMMANDS_SET.contains(name) {
         return Err(RpcError::unknown_command(name));
     }
 
@@ -2550,6 +2564,19 @@ mod tests {
         assert!(KNOWN_COMMANDS.contains(&"message_update"));
         assert!(KNOWN_COMMANDS.contains(&"message_delete"));
         assert!(KNOWN_COMMANDS.contains(&"session_list"));
+    }
+
+    #[test]
+    fn hashed_command_sets_mirror_their_arrays() {
+        // The hot-path O(1) sets are derived from the `&[&str]` arrays. Equal
+        // lengths prove the derivation is wired *and* that no array carries a
+        // duplicate command name (a dup would silently shrink the set).
+        assert_eq!(KNOWN_COMMANDS_SET.len(), KNOWN_COMMANDS.len());
+        assert_eq!(READ_ONLY_COMMANDS_SET.len(), READ_ONLY_COMMANDS.len());
+        assert_eq!(CONTROL_COMMANDS_SET.len(), CONTROL_COMMANDS.len());
+        for c in KNOWN_COMMANDS {
+            assert!(KNOWN_COMMANDS_SET.contains(c));
+        }
     }
 
     // ── Wave 4.1 classification sentinels ────────────────────────────────────

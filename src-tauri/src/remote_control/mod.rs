@@ -21,16 +21,25 @@ pub mod idempotency;
 pub mod keyring;
 pub mod rate_limit;
 pub mod server;
+pub mod spec_parity;
 pub mod types;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
 use parking_lot::Mutex;
 use tauri::AppHandle;
+use tokio::sync::oneshot;
 
 use server::{RequestObserver, ServerHandle};
 use types::{RemoteControlConfig, RemoteControlError, RemoteControlStatus};
+
+/// Pending GET read round-trips keyed by request id. A read handler registers a
+/// oneshot before emitting `remote-control://query`; `remote_control_query_response`
+/// resolves it with the renderer's Dexie read. Entries the renderer never
+/// answers are dropped on timeout. Mirrors `gateway::DecisionRegistry`.
+pub type QueryRegistry = Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>;
 
 /// Snapshot pushed into the renderer-side ring buffer. Keep field names in
 /// the same camelCase shape as `types/remote-control/index.ts`.
@@ -46,6 +55,10 @@ pub struct InboundCallEntry {
 
 pub struct RemoteControlState {
     inner: Mutex<RemoteControlInner>,
+    /// In-flight GET read round-trips (server ⇄ renderer). Shared with the
+    /// running server via an `Arc` so a push from `remote_control_query_response`
+    /// resolves the waiting handler without a restart.
+    queries: Arc<QueryRegistry>,
 }
 
 struct RemoteControlInner {
@@ -75,6 +88,16 @@ impl RemoteControlState {
                 status,
                 server: None,
             }),
+            queries: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Resolve a pending GET read round-trip (called by
+    /// `remote_control_query_response`). Unknown / already-timed-out request ids
+    /// are a silent no-op.
+    pub fn resolve_query(&self, request_id: &str, payload: serde_json::Value) {
+        if let Some(tx) = self.queries.lock().remove(request_id) {
+            let _ = tx.send(payload);
         }
     }
 
@@ -119,7 +142,7 @@ impl RemoteControlState {
             .map_err(RemoteControlError::Keyring)?
             .ok_or(RemoteControlError::TokenMissing)?;
 
-        let (port, allowlist, rate_limit, capability) = {
+        let (port, allowlist, rate_limit, capability, allow_sensitive_targets) = {
             let inner = self.inner.lock();
             if inner.server.is_some() {
                 return Err(RemoteControlError::AlreadyRunning(
@@ -131,6 +154,7 @@ impl RemoteControlState {
                 inner.config.inbound.allowlist.clone(),
                 inner.config.inbound.rate_limit_per_min,
                 inner.config.inbound.capability,
+                inner.config.inbound.allow_sensitive_targets,
             )
         };
 
@@ -140,7 +164,15 @@ impl RemoteControlState {
         });
 
         let handle = server::spawn_server(
-            app_handle, port, token, allowlist, rate_limit, capability, observer,
+            app_handle,
+            port,
+            token,
+            allowlist,
+            rate_limit,
+            capability,
+            allow_sensitive_targets,
+            self.queries.clone(),
+            observer,
         )
         .await?;
 
@@ -282,5 +314,23 @@ mod tests {
         let state = RemoteControlState::new();
         let err = state.stop().unwrap_err();
         assert!(matches!(err, RemoteControlError::NotRunning));
+    }
+
+    #[tokio::test]
+    async fn resolve_query_delivers_to_the_waiting_oneshot() {
+        let state = RemoteControlState::new();
+        let (tx, rx) = oneshot::channel();
+        state.queries.lock().insert("rcq-1".into(), tx);
+        state.resolve_query("rcq-1", serde_json::json!({ "tasks": [] }));
+        let got = rx.await.unwrap();
+        assert_eq!(got, serde_json::json!({ "tasks": [] }));
+        // The entry was removed from the registry.
+        assert!(state.queries.lock().is_empty());
+    }
+
+    #[test]
+    fn resolve_query_for_unknown_id_is_a_noop() {
+        let state = RemoteControlState::new();
+        state.resolve_query("never-registered", serde_json::json!(null)); // must not panic
     }
 }

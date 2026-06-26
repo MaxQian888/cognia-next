@@ -58,6 +58,10 @@ tags:
     description: Trigger a configured scheduler task to run now.
   - name: events
     description: Emit a Tauri event into the renderer.
+  - name: commands
+    description: Dispatch a generic subsystem command (workflow / goal / team / plan / chat / connector).
+  - name: reads
+    description: GET read surface (catalog + run status). Reachable by a `read`-capability token.
 
 security:
   - bearerAuth: []
@@ -198,6 +202,255 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SimpleError" }
 
+  /api/v1/commands/{target}:
+    post:
+      operationId: runCommand
+      tags: [commands]
+      summary: Dispatch a generic subsystem command by target.
+      description: |
+        Emits the `remote-control://command` Tauri event. The renderer's
+        dispatch registry (`lib/remote-control/dispatch.ts`) routes by `target`
+        into each subsystem's existing headless run entry and returns a
+        `RemoteCommandResult` that is recorded in the durable audit log and the
+        `remoteControlRunStatus` projection — poll `GET /api/v1/runs/{runId}`
+        for the outcome.
+
+        Unknown targets are rejected with 404 *before* the event is emitted, so
+        a typo never fires a dead event. The server-generated `runId` is
+        returned in the 202 body for correlation.
+
+        ## Idempotency
+
+        Supply an `Idempotency-Key` header to make a retry safe: a replay within
+        the TTL returns the original `runId` (and an `idempotent-replayed: true`
+        response header) without re-dispatching. A cron/CI double-fire therefore
+        does not double-execute.
+
+        ## Capability + sensitivity
+
+        Requires a `write` token. A subset of targets (see
+        [`SENSITIVE_TARGETS`](#/components/schemas/RemoteCommandTarget)) cause
+        model-cost or outbound side effects (`chat.send`, `connector.send`,
+        `goal.create`) and additionally require
+        `RemoteControlInboundConfig.allowSensitiveTargets = true`, else 403.
+      parameters:
+        - in: path
+          name: target
+          required: true
+          schema: { $ref: "#/components/schemas/RemoteCommandTarget" }
+          description: Logical subsystem command target.
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string }
+          description: Optional caller-supplied dedupe key (UUID recommended).
+      requestBody:
+        required: false
+        description: Free-form per-target args. Default `{}`. Each renderer-side handler validates its own required shape.
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandRequestBody" }
+            examples:
+              goalPause: { value: { args: { goalId: "g_42" } } }
+              workflowRun: { value: { args: { workflowId: "wf_7", runParams: {} } } }
+      responses:
+        "202":
+          description: |
+            Command accepted and dispatched. `runId` correlates the run in the
+            audit log + `GET /api/v1/runs/{runId}`. The `idempotent-replayed`
+            response header is `true` when this is a deduped replay.
+          headers:
+            idempotent-replayed:
+              schema: { type: boolean }
+              description: Present and `true` when the response is an idempotency-cache replay.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommandAcceptedResponse" }
+              examples:
+                accepted: { value: { accepted: true, runId: "run_3f2a91c0" } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: |
+            Either the token lacks `write` capability, or the target is in
+            `SENSITIVE_TARGETS` and `allowSensitiveTargets` is off.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples:
+                capability: { value: { error: "insufficient capability" } }
+                sensitive: { value: { error: "sensitive_target_disabled" } }
+        "404":
+          description: Unknown command target (not in `RemoteCommandTarget`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples: { unknown: { value: { error: "unknown command target" } } }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          description: Tauri event emit failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+
+  # ── Read surface (GET) ──────────────────────────────────────────────────────
+  # All GET reads are reachable by a `read`-capability token. Every read except
+  # `/targets` round-trips to the renderer (it owns Dexie); a closed / busy
+  # window returns 503 `window_unavailable` after a bounded wait. `/targets` is
+  # answered natively in Rust and is always available.
+
+  /api/v1/targets:
+    get:
+      operationId: listTargets
+      tags: [reads]
+      summary: List the dispatchable command targets (+ which are sensitive).
+      responses:
+        "200":
+          description: Target allowlist.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [targets, sensitive]
+                properties:
+                  targets:
+                    { type: array, items: { $ref: "#/components/schemas/RemoteCommandTarget" } }
+                  sensitive:
+                    { type: array, items: { $ref: "#/components/schemas/RemoteCommandTarget" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/tasks:
+    get:
+      operationId: listTasks
+      tags: [reads]
+      summary: Scheduler task catalog (summarised, PII-gated).
+      responses:
+        "200":
+          description: Task summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/WindowUnavailable" }
+
+  /api/v1/workflows/{id}/runs:
+    get:
+      operationId: listWorkflowRuns
+      tags: [reads]
+      summary: Run history for a workflow (most recent first).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          description: Workflow id.
+      responses:
+        "200":
+          description: Run summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/WindowUnavailable" }
+
+  /api/v1/goals:
+    get:
+      operationId: listGoals
+      tags: [reads]
+      summary: Goals for a background session (redacted objective only).
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema: { type: string }
+          description: Background session id the goals belong to.
+      responses:
+        "200":
+          description: Goal summaries (`objective` is the PII-redacted `safeObjective`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  goals: { type: array, items: { type: object, additionalProperties: true } }
+        "400":
+          description: Missing `sessionId`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/WindowUnavailable" }
+
+  /api/v1/audit:
+    get:
+      operationId: listAudit
+      tags: [reads]
+      summary: Recent inbound remote-control audit entries (PII-gated fields).
+      responses:
+        "200":
+          description: Audit entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  audit: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/WindowUnavailable" }
+
+  /api/v1/runs/{runId}:
+    get:
+      operationId: getRunStatus
+      tags: [reads]
+      summary: Outcome of a dispatched command run.
+      description: |
+        Reads the `remoteControlRunStatus` projection, falling back to the
+        durable `workflowRuns` row for workflow targets (which share the same
+        `runId`, so terminal status survives a restart). Long-running
+        autonomous targets (`goal.create`, `team.dispatch`, `plan.run`,
+        `chat.send`) report `accepted` at dispatch; full terminal tracking for
+        those is a follow-up. `run` is `null` for an unknown runId.
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: "Run status, or `{ run: null }` when unknown."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run:
+                    oneOf:
+                      - { type: "null" }
+                      - { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/WindowUnavailable" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -244,6 +497,17 @@ components:
           schema: { $ref: "#/components/schemas/SimpleError" }
           examples:
             limit: { value: { error: "rate limit exceeded" } }
+    WindowUnavailable:
+      description: |
+        A read that round-trips to the renderer could not be answered: the
+        Cognia window is closed or too busy to respond within the bounded
+        timeout. Retry once a window is open. (`/api/v1/targets` is answered
+        natively and never returns this.)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            unavailable: { value: { error: "window_unavailable" } }
 
   schemas:
     HealthResponse:
@@ -267,6 +531,55 @@ components:
       additionalProperties: false
       properties:
         error: { type: string }
+
+    # ── Generic command surface ──────────────────────────────────────────────
+
+    RemoteCommandTarget:
+      description: |
+        Logical subsystem command target accepted by `POST /api/v1/commands/{target}`.
+        This enum is the cross-language source of truth: the Rust `KNOWN_TARGETS`
+        allowlist (`src-tauri/src/remote_control/server.rs`) and the TS
+        `REMOTE_COMMAND_TARGETS` union (`types/remote-control/index.ts`) are both
+        held in lock-step with it by parity tests.
+
+        Targets marked **sensitive** (`chat.send`, `connector.send`,
+        `goal.create`) cause model-cost or outbound side effects and require
+        `RemoteControlInboundConfig.allowSensitiveTargets = true`.
+      type: string
+      enum:
+        - scheduler.task.run
+        - scheduler.event
+        - workflow.run
+        - workflow.cancel
+        - goal.create
+        - goal.continue
+        - goal.pause
+        - goal.resume
+        - goal.stop
+        - team.dispatch
+        - team.stop
+        - plan.run
+        - chat.send
+        - connector.send
+
+    CommandRequestBody:
+      type: object
+      additionalProperties: false
+      properties:
+        args:
+          type: object
+          additionalProperties: true
+          description: Free-form per-target args; each renderer handler validates its own shape.
+
+    CommandAcceptedResponse:
+      type: object
+      required: [accepted, runId]
+      additionalProperties: false
+      properties:
+        accepted: { type: boolean, enum: [true] }
+        runId:
+          type: string
+          description: Server-generated correlation id. Poll `GET /api/v1/runs/{runId}` for the outcome.
 
     # ── Request bodies ───────────────────────────────────────────────────────
 
@@ -362,6 +675,15 @@ components:
           items: { type: string, description: "CIDR string (`127.0.0.1/32`, `192.168.0.0/16`)." }
           default: ["127.0.0.1/32"]
         rateLimitPerMin: { type: integer, minimum: 0, default: 60 }
+        capability:
+          type: string
+          enum: [read, write]
+          default: write
+          description: "`read` → health + GET reads; `write` → also the POST command/task/event routes."
+        allowSensitiveTargets:
+          type: boolean
+          default: false
+          description: "When false, `SENSITIVE` command targets are rejected with 403 even for a write token."
 
     RemoteControlStatus:
       description: Live status reported by the renderer's Settings page.

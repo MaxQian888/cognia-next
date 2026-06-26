@@ -31,6 +31,12 @@ pub struct RemoteControlInboundConfig {
     /// this field existed deserialize as `Write`.
     #[serde(default)]
     pub capability: Capability,
+    /// When false, sensitive command targets (`SENSITIVE_TARGETS` — model-cost /
+    /// off-device side effects) are rejected with 403 even for a `write` token.
+    /// `#[serde(default)]` so older persisted configs deserialize as `false`
+    /// (the safe default).
+    #[serde(default)]
+    pub allow_sensitive_targets: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +69,7 @@ impl Default for RemoteControlConfig {
                 allowlist: vec!["127.0.0.1/32".to_string()],
                 rate_limit_per_min: 60,
                 capability: Capability::Write,
+                allow_sensitive_targets: false,
             },
             outbound: RemoteControlOutboundConfig {
                 has_signing_secret: false,

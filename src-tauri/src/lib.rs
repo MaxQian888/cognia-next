@@ -700,6 +700,7 @@ pub fn run() {
             remote_control::commands::remote_control_update_config,
             remote_control::commands::remote_control_set_signing_secret,
             remote_control::commands::remote_control_get_signing_secret,
+            remote_control::commands::remote_control_query_response,
             gateway::commands::gateway_get_status,
             gateway::commands::gateway_update_config,
             gateway::commands::gateway_start,

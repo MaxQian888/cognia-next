@@ -80,6 +80,19 @@ pub async fn remote_control_get_signing_secret() -> Result<Option<String>, Remot
     rc_keyring::read_signing_secret().map_err(RemoteControlError::Keyring)
 }
 
+/// Answer a GET read the inbound server requested via `remote-control://query`.
+/// `payload` is the renderer's Dexie read result (already PII-gated). Unknown /
+/// already-timed-out request ids are a silent no-op.
+#[tauri::command]
+pub async fn remote_control_query_response(
+    state: State<'_, RemoteControlState>,
+    request_id: String,
+    payload: serde_json::Value,
+) -> Result<(), RemoteControlError> {
+    state.resolve_query(&request_id, payload);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

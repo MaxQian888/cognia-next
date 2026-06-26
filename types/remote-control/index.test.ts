@@ -6,8 +6,10 @@ import {
   DEFAULT_TOKEN_CAPABILITY,
   REMOTE_COMMAND_TARGETS,
   REMOTE_CONTROL_RECENT_CALLS_LIMIT,
+  SENSITIVE_REMOTE_COMMAND_TARGETS,
   isLoopbackAllowlistEntry,
   isRemoteCommandTarget,
+  isSensitiveRemoteCommandTarget,
   validateCidrOrIp,
 } from "./index"
 
@@ -44,16 +46,34 @@ describe("remote-control type defaults", () => {
 describe("remote command targets", () => {
   it("recognises every known target", () => {
     expect(REMOTE_COMMAND_TARGETS).toContain("workflow.run")
+    expect(REMOTE_COMMAND_TARGETS).toContain("workflow.cancel")
     expect(REMOTE_COMMAND_TARGETS).toContain("goal.create")
     expect(REMOTE_COMMAND_TARGETS).toContain("goal.continue")
-    expect(REMOTE_COMMAND_TARGETS).toHaveLength(7)
+    expect(REMOTE_COMMAND_TARGETS).toContain("goal.pause")
+    expect(REMOTE_COMMAND_TARGETS).toContain("goal.resume")
+    expect(REMOTE_COMMAND_TARGETS).toContain("goal.stop")
+    expect(REMOTE_COMMAND_TARGETS).toContain("team.stop")
+    expect(REMOTE_COMMAND_TARGETS).toContain("chat.send")
+    expect(REMOTE_COMMAND_TARGETS).toContain("connector.send")
+    expect(REMOTE_COMMAND_TARGETS).toHaveLength(14)
     expect(isRemoteCommandTarget("plan.run")).toBe(true)
     expect(isRemoteCommandTarget("team.dispatch")).toBe(true)
     expect(isRemoteCommandTarget("nope")).toBe(false)
   })
 
-  it("defaults a fresh token to write capability", () => {
+  it("flags only the model-cost / off-device targets as sensitive", () => {
+    expect(SENSITIVE_REMOTE_COMMAND_TARGETS).toEqual(["chat.send", "connector.send", "goal.create"])
+    expect(isSensitiveRemoteCommandTarget("chat.send")).toBe(true)
+    expect(isSensitiveRemoteCommandTarget("connector.send")).toBe(true)
+    expect(isSensitiveRemoteCommandTarget("goal.create")).toBe(true)
+    // Side-effect-free targets are not sensitive.
+    expect(isSensitiveRemoteCommandTarget("workflow.run")).toBe(false)
+    expect(isSensitiveRemoteCommandTarget("goal.pause")).toBe(false)
+  })
+
+  it("defaults a fresh token to write capability with sensitive targets off", () => {
     expect(DEFAULT_TOKEN_CAPABILITY).toBe("write")
+    expect(DEFAULT_REMOTE_CONTROL_CONFIG.inbound.allowSensitiveTargets).toBe(false)
   })
 })
 

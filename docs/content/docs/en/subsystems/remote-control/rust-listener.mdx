@@ -23,14 +23,32 @@ description: server.rs — spawn_server, the axum router, the four-stage middlew
 read back from `listener.local_addr()` so the caller records the real port.
 
 ```rust
-// src-tauri/src/remote_control/server.rs:100
+// src-tauri/src/remote_control/server.rs
 let app = Router::new()
     .route("/api/v1/health", get(health))
     .route("/api/v1/tasks/:id/run", post(run_task))
     .route("/api/v1/events", post(emit_event))
+    .route("/api/v1/commands/:target", post(run_command))
+    // Read surface (GET) — reachable by a `read`-capability token.
+    .route("/api/v1/targets", get(get_targets))
+    .route("/api/v1/tasks", get(get_tasks))
+    .route("/api/v1/workflows/:id/runs", get(get_workflow_runs))
+    .route("/api/v1/goals", get(get_goals))
+    .route("/api/v1/audit", get(get_audit))
+    .route("/api/v1/runs/:runId", get(get_run_status))
     .layer(from_fn_with_state(state.clone(), middleware))
-    .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES)); // 8 * 1024, server.rs:46
+    .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES)); // 8 * 1024
 ```
+
+Capability tiering (`route_needs_write`): a `read` token may hit the health probe and every `GET`
+read endpoint; mutating methods (`POST`) require `write`. The generic `POST /api/v1/commands/:target`
+route additionally rejects **sensitive** targets (`chat.send`, `connector.send`, `goal.create`) with
+`403 sensitive_target_disabled` unless `RemoteControlInboundConfig.allowSensitiveTargets` is on.
+
+Every `GET` read except `/targets` (answered natively in Rust) round-trips to the renderer via a
+`remote-control://query` event + a `QueryRegistry` oneshot, resolved by the
+`remote_control_query_response` command; a closed/busy window returns `503 window_unavailable` after a
+bounded wait. The full wire contract lives in `docs/api/remote-control.openapi.yaml`.
 
 `AppState` (`server.rs:54`) is `Clone` and carries the `AppHandle`, an `Arc<String>` token, the
 parsed allowlist, the rate limiter, and the `Arc<dyn RequestObserver>`:

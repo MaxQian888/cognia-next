@@ -84,7 +84,7 @@ import type { ChatInputHistoryRow } from "./chat-input-history"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { Loop, LoopEvent } from "@/types/loop"
 import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
-import type { RemoteControlAuditEntry } from "@/types/remote-control"
+import type { RemoteControlAuditEntry, RemoteControlRunStatusRow } from "@/types/remote-control"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
@@ -2137,6 +2137,16 @@ export class CogniaDB extends Dexie {
           "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt]",
       })
       .upgrade(backfillTriggeredBySourceV91)
+
+    // v92 — Remote-control run-status projection. Closes the result loop for the
+    // inbound `/api/v1/commands/:target` surface: the renderer stamps each
+    // server-issued `runId` with its dispatch outcome (and, where a subsystem
+    // emits a terminal signal, the final status) so `GET /api/v1/runs/:runId`
+    // can report it. Pure additive — no upgrade hook. See
+    // `lib/db/remote-control-run-status.ts`.
+    this.version(92).stores({
+      remoteControlRunStatus: "&runId, target, status, startedAt, updatedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2166,6 +2176,8 @@ export class CogniaDB extends Dexie {
   petAchievements!: Table<PetAchievementRecord, string>
   // v72 — Remote-control durable audit. See `lib/db/remote-control-audit.ts`.
   remoteControlAudit!: Table<RemoteControlAuditEntry, string>
+  // v92 — Remote-control run-status projection. See `lib/db/remote-control-run-status.ts`.
+  remoteControlRunStatus!: Table<RemoteControlRunStatusRow, string>
   // v73 — Pet Live2D models + asset blobs. See `lib/db/pet-models.ts`.
   petModels!: Table<PetModelRow, string>
   petModelFiles!: Table<PetModelFileRow, string>

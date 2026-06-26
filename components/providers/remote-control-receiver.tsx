@@ -26,6 +26,7 @@ import type {
   EmitEventRequest,
   RemoteCommand,
   RemoteControlInboundCallLog,
+  RemoteControlQueryEvent,
   TriggerTaskRequest,
 } from "@/types/remote-control"
 import type { SchedulerEventType } from "@/lib/scheduler/event-integration"
@@ -77,12 +78,19 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
         }
       )
 
-      const [{ dispatchRemoteCommand }, { appendRemoteControlAudit }, { hasNoLeakingPii }] =
-        await Promise.all([
-          import("@/lib/remote-control/dispatch"),
-          import("@/lib/db/remote-control-audit"),
-          import("@/lib/twin/ingest/redact"),
-        ])
+      const [
+        { dispatchRemoteCommand },
+        { appendRemoteControlAudit },
+        { hasNoLeakingPii },
+        { answerRemoteControlQuery },
+        { recordRemoteRunOutcome },
+      ] = await Promise.all([
+        import("@/lib/remote-control/dispatch"),
+        import("@/lib/db/remote-control-audit"),
+        import("@/lib/twin/ingest/redact"),
+        import("@/lib/remote-control/query-answerer"),
+        import("@/lib/db/remote-control-run-status"),
+      ])
       const off4 = await listen<RemoteCommand>("remote-control://command", (event) => {
         const command = event.payload
         if (!command?.target) {
@@ -91,6 +99,14 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
         }
         log.info("remote-control: command", { target: command.target, runId: command.runId })
         void dispatchRemoteCommand(command).then((result) => {
+          // Result-loop closure: stamp the run-status projection so
+          // `GET /api/v1/runs/:runId` can report the dispatch outcome.
+          void recordRemoteRunOutcome({
+            runId: result.runId,
+            target: command.target,
+            status: result.status,
+            detail: result.detail,
+          }).catch((error) => log.warn("remote-control: run-status write failed", { error }))
           // Durable audit: args are PII-gated before persistence; a leak stores
           // a redacted marker instead of the raw args.
           const safe = hasNoLeakingPii(JSON.stringify(command.args ?? {}))
@@ -112,13 +128,24 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
         })
       })
 
+      const off5 = await listen<RemoteControlQueryEvent>("remote-control://query", (event) => {
+        const query = event.payload
+        if (!query?.requestId || !query.kind) {
+          log.warn("remote-control://query missing requestId/kind", { payload: event.payload })
+          return
+        }
+        log.info("remote-control: query", { kind: query.kind, requestId: query.requestId })
+        void answerRemoteControlQuery(query)
+      })
+
       if (cancelled) {
         off1()
         off2()
         off3()
         off4()
+        off5()
       } else {
-        unlisteners.push(off1, off2, off3, off4)
+        unlisteners.push(off1, off2, off3, off4, off5)
       }
     })().catch((error) => {
       log.error("remote-control: failed to subscribe to Tauri events", error as Error)

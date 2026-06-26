@@ -147,6 +147,26 @@ describe("InboundTab — desktop", () => {
     render(<InboundTab />)
     expect(screen.getByText(/commands\/workflow\.run/)).toBeInTheDocument()
     expect(screen.getByText(/commands\/plan\.run/)).toBeInTheDocument()
+    // Sensitive targets carry a badge in the list.
+    expect(screen.getByText(/commands\/chat\.send/)).toBeInTheDocument()
+  })
+
+  it("toggles allowSensitiveTargets through updateInbound", async () => {
+    useRemoteControlStore.setState({
+      status: {
+        inboundRunning: false,
+        boundPort: null,
+        lastCallAt: null,
+        inboundCallsTotal: 0,
+        hasInboundToken: true,
+      },
+    })
+    render(<InboundTab />)
+    expect(useRemoteControlStore.getState().config.inbound.allowSensitiveTargets).toBe(false)
+    fireEvent.click(screen.getByLabelText(/allow sensitive targets/i))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.inbound.allowSensitiveTargets).toBe(true)
+    )
   })
 
   it("calls fetch with bearer header when testing the listener", async () => {
