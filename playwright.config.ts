@@ -36,6 +36,12 @@ const iosEnabled = process.env.PLAYWRIGHT_MOBILE_IOS === "1"
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false, // connector + workflow tests share Dexie singleton in dev
+  // Each test's beforeEach reloads through AccountGate (the dev-unlock marker is
+  // sessionStorage, reset per browser context) and waits for the test-globals
+  // bridge to mount. Under Turbopack dev that mount races route compilation and
+  // can approach 30s on the first hit of a route, so the default 30s test budget
+  // is too tight. A static-export CI build mounts fast and never approaches this.
+  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 60_000),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,

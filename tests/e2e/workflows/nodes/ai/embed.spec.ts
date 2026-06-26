@@ -25,7 +25,7 @@ test.describe("workflow node — ai.embed", () => {
     const wfId = await seedAndOpenWorkflow(page, "ai-embed")
     await assertNodeOnCanvas(page, { kind: "ai.embed", label: "Embed" })
     await openNodeInspector(page, "ai.embed")
-    await expect(page.locator("#ins-text, [name=text]").first()).toBeVisible()
+    await expect(page.locator("#ins-input, [data-field=input]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "ai.embed" })
   })

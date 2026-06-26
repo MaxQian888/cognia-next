@@ -25,7 +25,7 @@ test.describe("workflow node — ai.classify", () => {
     const wfId = await seedAndOpenWorkflow(page, "ai-classify")
     await assertNodeOnCanvas(page, { kind: "ai.classify", label: "Classify" })
     await openNodeInspector(page, "ai.classify")
-    await expect(page.locator("#ins-categories, [name=categories]").first()).toBeVisible()
+    await expect(page.locator("#ins-labelsRaw, [data-field=labelsRaw]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "ai.classify" })
   })

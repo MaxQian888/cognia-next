@@ -27,6 +27,17 @@ declare global {
   interface Window {
     __cogniaResetDb?: () => Promise<void>
     __cogniaSeedWorkflow?: (kind: SeededWorkflowKind) => Promise<string>
+    __cogniaSeedRawWorkflow?: (draft: unknown) => Promise<string>
+    __cogniaReadRuns?: (workflowId: string) => Promise<
+      Array<{
+        id: string
+        status: string
+        startedAt?: number
+        completedAt?: number
+        error?: unknown
+        events: Array<Record<string, unknown>>
+      }>
+    >
     __cogniaSeedCharacter?: (draft: {
       name: string
       role?: string
@@ -100,7 +111,7 @@ export function ExposeTestGlobals(): null {
 
     void (async () => {
       const [
-        { __resetDbForTesting, getDb, whenSeeded },
+        { __resetDbForTesting, getDb, whenSeeded, activateAccountDatabase },
         { companionStorage },
         { buildWorkflowFixture },
       ] = await Promise.all([
@@ -109,7 +120,15 @@ export function ExposeTestGlobals(): null {
         import("./workflow-fixtures"),
       ])
 
+      const ACCOUNT_DB_PREFIX = "cognia-account-"
+
       window.__cogniaResetDb = async () => {
+        // The main Dexie db is account-scoped (`cognia-account-<id>`). Capture
+        // the active db BEFORE the reset so we can re-point at the same account
+        // afterwards: `__resetDbForTesting()` clears the active selection, so a
+        // bare `getDb()` would fall back to the LEGACY db and seed data would
+        // land where the (account-scoped) app never reads it.
+        const prevName = getDb().name
         try {
           await getDb().delete()
         } catch {
@@ -117,6 +136,9 @@ export function ExposeTestGlobals(): null {
           // drop below recovers.
         }
         __resetDbForTesting()
+        if (prevName.startsWith(ACCOUNT_DB_PREFIX)) {
+          activateAccountDatabase(prevName.slice(ACCOUNT_DB_PREFIX.length))
+        }
         getDb()
         await whenSeeded()
         const db = getDb()
@@ -128,8 +150,17 @@ export function ExposeTestGlobals(): null {
         await db.teams.clear().catch(() => undefined)
         await db.skills.clear().catch(() => undefined)
         await db.connectorDrafts.clear().catch(() => undefined)
+        // Preserve the dev-unlock marker across the storage wipe: the app is
+        // gated behind AccountGate, and E2E seeds an unlocked account whose
+        // unlock lives in sessionStorage. Clearing it would re-lock the gate on
+        // the next navigation (e.g. assertLatestRunStatus's goto), blanking the
+        // app. The account registry DB itself is a separate DB untouched here.
+        const devUnlock = window.sessionStorage.getItem("cognia-dev-unlocked-account")
         window.localStorage.clear()
         window.sessionStorage.clear()
+        if (devUnlock) {
+          window.sessionStorage.setItem("cognia-dev-unlocked-account", devUnlock)
+        }
         // Mock base URLs survive a reset by design — specs configure them
         // once via __cogniaSetMockBaseUrls and expect them to stick.
       }
@@ -139,6 +170,54 @@ export function ExposeTestGlobals(): null {
         const draft = buildWorkflowFixture(kind)
         const wf = await createWorkflow(draft)
         return wf.id
+      }
+
+      // Seed an ARBITRARY workflow graph (not a predefined fixture kind). Runs
+      // inside the app bundle so `@/`-aliased imports resolve — they do NOT in
+      // raw page.evaluate under Turbopack dev. Specs that need a bespoke graph
+      // (e.g. a node engineered to fail) use this instead of `import()`ing
+      // `@/lib/db/workflows` from page context.
+      window.__cogniaSeedRawWorkflow = async (draft) => {
+        const { createWorkflow } = await import("@/lib/db/workflows")
+        const wf = await createWorkflow(draft as Parameters<typeof createWorkflow>[0])
+        return wf.id
+      }
+
+      // Read a workflow's runs (with embedded events) straight from the
+      // account-scoped Dexie db. The bridge runs in the app bundle, so this
+      // works where a page.evaluate `import("@/lib/db/schema")` would fail to
+      // resolve. Lets specs assert REAL run outcomes (status / events / branch
+      // arm / iteration count) instead of pill visibility.
+      window.__cogniaReadRuns = async (workflowId) => {
+        const db = getDb()
+        const rows = await db.workflowRuns
+          .where("workflowId")
+          .equals(workflowId)
+          .sortBy("startedAt")
+        // The per-step timeline lives in a SEPARATE table (`workflowRunEvents`,
+        // keyed by `runId`), not embedded on the run row — so a spec asserting
+        // "the failing step carries an error" must read both. We fold the
+        // timeline (oldest → newest) plus the run-level `error` into each run.
+        return Promise.all(
+          rows.map(async (r) => {
+            const row = r as unknown as {
+              id: string
+              status: string
+              startedAt?: number
+              completedAt?: number
+              error?: unknown
+            }
+            const events = await db.workflowRunEvents.where("runId").equals(row.id).sortBy("ts")
+            return {
+              id: row.id,
+              status: row.status,
+              startedAt: row.startedAt,
+              completedAt: row.completedAt,
+              error: row.error,
+              events: events as unknown as Array<Record<string, unknown>>,
+            }
+          })
+        )
       }
 
       window.__cogniaSeedCharacter = async (draft) => {

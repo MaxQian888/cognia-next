@@ -25,7 +25,7 @@ test.describe("workflow node — action.github.commentIssue", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-github-comment-issue")
     await assertNodeOnCanvas(page, { kind: "action.github.commentIssue", label: "Comment Issue" })
     await openNodeInspector(page, "action.github.commentIssue")
-    await expect(page.locator("#ins-body, [name=body]").first()).toBeVisible()
+    await expect(page.locator("#ins-body, [data-field=body]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.github.commentIssue" })
   })

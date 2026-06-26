@@ -94,13 +94,35 @@ export async function launchTauriCdp(): Promise<TauriCdpHandle> {
 
   const cdpPort = Number(process.env.WEBVIEW2_REMOTE_DEBUGGING_PORT ?? DEFAULT_CDP_PORT)
 
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort} --remote-allow-origins=*`,
+  }
+
+  // Chat-core E2E enabler: point the REAL Claude sidecar at the in-process mock
+  // Anthropic server (published by global-setup as `E2E_ANTHROPIC_BASE_URL`,
+  // booted before this launcher runs) so specs can drive the full
+  // compose → sidecar → stream → render path without calling api.anthropic.com.
+  //
+  // How it reaches the sidecar: the Tauri binary inherits this env, and the
+  // sidecar spawn (`src-tauri/src/claude/sidecar.rs`) only OVERRIDES
+  // ANTHROPIC_BASE_URL when a base URL is configured in the vault — which is
+  // empty in the E2E flow — so the inherited value passes through to the
+  // `@anthropic-ai/claude-agent-sdk` untouched. Test-helper only; production
+  // binaries are built without these vars and never see them.
+  const mockAnthropic = process.env.E2E_ANTHROPIC_BASE_URL
+  if (mockAnthropic && !process.env.PLAYWRIGHT_TAURI_REAL_ANTHROPIC) {
+    childEnv.ANTHROPIC_BASE_URL = mockAnthropic
+    childEnv.ANTHROPIC_API_KEY = process.env.E2E_ANTHROPIC_API_KEY ?? "test-e2e-key"
+    // Drop any inherited OAuth bearer: the SDK prefers it over the API key,
+    // which would bypass the mock base URL. Auth-mode mixing is undefined.
+    delete childEnv.CLAUDE_CODE_OAUTH_TOKEN
+  }
+
   const children: ChildProcess[] = []
   const child = spawn(tauriBin, [], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort} --remote-allow-origins=*`,
-    },
+    env: childEnv,
     shell: false,
   })
   children.push(child)

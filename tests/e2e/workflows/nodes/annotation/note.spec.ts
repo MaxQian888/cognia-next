@@ -22,7 +22,7 @@ test.describe("workflow node — annotation.note", () => {
     const wfId = await seedAndOpenWorkflow(page, "annotation-note")
     await assertNodeOnCanvas(page, { kind: "annotation.note", label: "Note" })
     await openNodeInspector(page, "annotation.note")
-    await expect(page.locator("#ins-text, [name=text]").first()).toBeVisible()
+    await expect(page.locator("#ins-text, [data-field=text]").first()).toBeVisible()
     // The color picker uses radio buttons with `data-testid=note-color-<value>`.
     await expect(page.getByTestId(/note-color-/).first()).toBeVisible()
     await saveWorkflow(page)

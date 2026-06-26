@@ -30,13 +30,27 @@ export async function openNodeInspector(page: Page, kind: string): Promise<void>
   await expect(page.getByTestId("workflow-inspector")).toBeVisible()
 }
 
-/** Fill an inspector input by its DOM id (most inspector fields use `#ins-<param>`). */
+/**
+ * Fill an inspector input by its `params` key.
+ *
+ * Inspector forms do NOT share a single id convention — each node-config form
+ * picks its own prefix (`#http-method`, `#wh-status`, …) and the SchemaForm
+ * fallback uses a random `useId()`. The one form-agnostic anchor is the
+ * `data-field="<param>"` attribute that `Field` stamps on every field wrapper
+ * (`components/.../forms/shared.tsx`). We scope to that wrapper and target the
+ * inner editable control. `#ins-<param>` is kept as a first guess for the rare
+ * field that does id by param name.
+ */
 export async function fillInspectorField(
   page: Page,
   paramId: string,
   value: string
 ): Promise<void> {
-  const locator = page.locator(`#ins-${paramId}`)
+  const direct = page.locator(`#ins-${paramId}`)
+  const scoped = page
+    .locator(`[data-field="${paramId}"]`)
+    .locator("input, textarea, [contenteditable='true']")
+  const locator = (await direct.count()) ? direct.first() : scoped.first()
   await expect(locator).toBeVisible()
   await locator.fill(value)
 }
@@ -62,17 +76,68 @@ export async function triggerRun(
   }
 }
 
+/** A run record read straight from Dexie, including the embedded per-step
+ *  event log. Mirrors the shape `editor-multi-step-orchestration.spec.ts`
+ *  reads (`run.events[].stepId`). */
+export interface RunRecord {
+  id: string
+  status: "succeeded" | "failed" | "running" | string
+  startedAt?: number
+  completedAt?: number
+  /** Run-level error (set when `status === "failed"`), read from the run row. */
+  error?: unknown
+  /** Per-step timeline, read from the `workflowRunEvents` table (oldest → newest). */
+  events: Array<{
+    stepId?: string
+    type?: string
+    status?: string
+    [key: string]: unknown
+  }>
+}
+
+/** Read every run for a workflow (oldest → newest) directly from Dexie,
+ *  including the embedded events. Use this to assert REAL run outcomes —
+ *  status, output, which branch arm ran, iteration counts — instead of the
+ *  weak "some status pill is visible somewhere" check. Reuses the proven
+ *  `import("@/lib/db/schema")` page-context pattern. */
+export async function readRuns(page: Page, workflowId: string): Promise<RunRecord[]> {
+  // Routes through the `__cogniaReadRuns` bridge (runs in the app bundle).
+  // A raw `page.evaluate(import("@/lib/db/schema"))` does NOT resolve the `@/`
+  // alias under Turbopack dev, so the bridge is the only reliable reader.
+  return page.evaluate(async (wfId) => {
+    const w = window as Window & {
+      __cogniaReadRuns?: (id: string) => Promise<RunRecord[]>
+    }
+    if (typeof w.__cogniaReadRuns !== "function") {
+      throw new Error("window.__cogniaReadRuns is not wired")
+    }
+    return w.__cogniaReadRuns(wfId)
+  }, workflowId)
+}
+
+/** The most recently started run for a workflow, or null if none has landed. */
+export async function readLatestRun(page: Page, workflowId: string): Promise<RunRecord | null> {
+  const runs = await readRuns(page, workflowId)
+  return runs.length ? runs[runs.length - 1] : null
+}
+
 /** Navigate to the workflow's runs page and assert the most recent run row
- *  matches the expected status. */
+ *  matches the expected status.
+ *
+ *  Binds to the ACTUAL latest run row read from Dexie (not "any matching pill
+ *  is visible"), so a node that silently stops running — leaving a stale
+ *  succeeded pill on screen — is now caught. */
 export async function assertLatestRunStatus(
   page: Page,
   workflowId: string,
   status: "succeeded" | "failed" | "running" = "succeeded"
 ): Promise<void> {
-  await page.goto(`/workflows/runs?id=${workflowId}`)
-  await expect(page.getByTestId("run-list")).toBeVisible({ timeout: 20_000 })
-  const pill = page.getByTestId(`run-status-${status}`).first()
-  await expect(pill).toBeVisible({ timeout: 20_000 })
+  // Reads the actual latest run row from the account-scoped Dexie db via the
+  // bridge — no dependency on navigating to (and cold-compiling) the runs page,
+  // and binds to the real run status rather than "some pill is visible".
+  await expect
+    .poll(async () => (await readLatestRun(page, workflowId))?.status, { timeout: 30_000 })
+    .toBe(status)
 }
 
 /** Reload the editor route and confirm the canvas comes back with the same node. */

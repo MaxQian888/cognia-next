@@ -23,7 +23,7 @@ test.describe("workflow node — action.desktop.screenshot", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-screenshot")
     await assertNodeOnCanvas(page, { kind: "action.desktop.screenshot", label: "Screenshot" })
     await openNodeInspector(page, "action.desktop.screenshot")
-    await expect(page.locator("#ins-region, [name=region]").first()).toBeVisible()
+    await expect(page.locator("#ins-selector, [data-field=selector]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.desktop.screenshot" })
   })

@@ -25,7 +25,7 @@ test.describe("workflow node — action.github.labelIssue", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-github-label-issue")
     await assertNodeOnCanvas(page, { kind: "action.github.labelIssue", label: "Label" })
     await openNodeInspector(page, "action.github.labelIssue")
-    await expect(page.locator("#ins-labels, [name=labels]").first()).toBeVisible()
+    await expect(page.locator("#ins-add, [data-field=add]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.github.labelIssue" })
   })

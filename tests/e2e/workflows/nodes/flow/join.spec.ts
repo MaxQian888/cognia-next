@@ -24,7 +24,7 @@ test.describe("workflow node — flow.join", () => {
     const wfId = await seedAndOpenWorkflow(page, "flow-split-join")
     await assertNodeOnCanvas(page, { kind: "flow.join", label: "Join" })
     await openNodeInspector(page, "flow.join")
-    await expect(page.locator("#ins-strategy, [name=strategy]").first()).toBeVisible()
+    await expect(page.locator("#ins-joinPolicy, [data-field=joinPolicy]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.join" })
   })

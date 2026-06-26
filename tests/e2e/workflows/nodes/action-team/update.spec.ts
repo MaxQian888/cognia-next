@@ -22,7 +22,7 @@ test.describe("workflow node — action.team.update", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-team-update")
     await assertNodeOnCanvas(page, { kind: "action.team.update", label: "Update" })
     await openNodeInspector(page, "action.team.update")
-    await expect(page.locator("#ins-teamId, [name=teamId]").first()).toBeVisible()
+    await expect(page.locator("#ins-teamId, [data-field=teamId]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.team.update" })
   })

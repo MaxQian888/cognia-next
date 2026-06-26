@@ -22,7 +22,7 @@ test.describe("workflow node — flow.split", () => {
     const wfId = await seedAndOpenWorkflow(page, "flow-split-join")
     await assertNodeOnCanvas(page, { kind: "flow.split", label: "Split" })
     await openNodeInspector(page, "flow.split")
-    await expect(page.locator("#ins-branches, [name=branches]").first()).toBeVisible()
+    await expect(page.locator("#ins-branchLabels, [data-field=branchLabels]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.split" })
   })

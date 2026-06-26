@@ -22,7 +22,7 @@ test.describe("workflow node — action.desktop.keys", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-keys")
     await assertNodeOnCanvas(page, { kind: "action.desktop.keys", label: "Keys" })
     await openNodeInspector(page, "action.desktop.keys")
-    await expect(page.locator("#ins-sequence, [name=sequence]").first()).toBeVisible()
+    await expect(page.locator("#ins-chord, [data-field=chord]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.desktop.keys" })
   })

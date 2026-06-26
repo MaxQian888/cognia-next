@@ -24,7 +24,7 @@ test.describe("workflow node — flow.branch", () => {
     const wfId = await seedAndOpenWorkflow(page, "branch")
     await assertNodeOnCanvas(page, { kind: "flow.branch", label: "Branch" })
     await openNodeInspector(page, "flow.branch")
-    await expect(page.locator("#ins-condition, [name=condition]").first()).toBeVisible()
+    await expect(page.locator("#ins-condition, [data-field=condition]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.branch" })
   })

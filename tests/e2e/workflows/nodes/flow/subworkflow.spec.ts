@@ -23,7 +23,7 @@ test.describe("workflow node — flow.subworkflow", () => {
     const wfId = await seedAndOpenWorkflow(page, "flow-subworkflow")
     await assertNodeOnCanvas(page, { kind: "flow.subworkflow", label: "Sub" })
     await openNodeInspector(page, "flow.subworkflow")
-    await expect(page.locator("#ins-workflowId, [name=workflowId]").first()).toBeVisible()
+    await expect(page.locator("#ins-workflowId, [data-field=workflowId]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.subworkflow" })
   })

@@ -24,7 +24,7 @@ test.describe("workflow node — flow.switch", () => {
     const wfId = await seedAndOpenWorkflow(page, "flow-switch")
     await assertNodeOnCanvas(page, { kind: "flow.switch", label: "Switch" })
     await openNodeInspector(page, "flow.switch")
-    await expect(page.locator("#ins-subject, [name=subject]").first()).toBeVisible()
+    await expect(page.locator("#ins-subject, [data-field=subject]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.switch" })
   })

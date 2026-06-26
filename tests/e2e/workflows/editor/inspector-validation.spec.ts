@@ -18,7 +18,7 @@ test.describe("workflow editor — inspector validation", () => {
     await seedAndOpenWorkflow(page, "ai-prompt")
     await openNodeInspector(page, "ai.prompt")
 
-    const userPrompt = page.locator("#ins-userPrompt, [name=userPrompt]").first()
+    const userPrompt = page.locator("#ins-userPrompt, [data-field=userPrompt]").first()
     await userPrompt.fill("")
     await saveWorkflow(page)
 

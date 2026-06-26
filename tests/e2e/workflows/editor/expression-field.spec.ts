@@ -17,7 +17,7 @@ test.describe("workflow editor — expression field", () => {
     await seedAndOpenWorkflow(page, "data-transform")
     await openNodeInspector(page, "data.transform")
 
-    const expr = page.locator("#ins-expression, [name=expression]").first()
+    const expr = page.locator("#ins-expression, [data-field=expression]").first()
     await expr.click()
     await expr.fill("{{ ")
     // The popover surfaces nearby variables (trigger.firedAt etc.).

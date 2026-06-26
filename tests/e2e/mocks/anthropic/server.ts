@@ -98,6 +98,44 @@ export interface MockAnthropicServer {
   reset(): void
 }
 
+/**
+ * Write one Anthropic Messages SSE response carrying `chunks` as text deltas.
+ * Shared by the explicit `stream-text` scenario AND any request that sets
+ * `stream: true` (the Claude Agent SDK / claude-code CLI the chat sidecar
+ * spawns always streams), so the real chat path can consume this same mock.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function writeMessagesSse(res: any, chunks: string[], model: string): void {
+  res.set("content-type", "text/event-stream")
+  res.set("cache-control", "no-cache")
+  res.set("connection", "keep-alive")
+  res.flushHeaders?.()
+  const id = `msg_${Math.random().toString(36).slice(2, 10)}`
+  res.write(`event: message_start\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "message_start", message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 0 } } })}\n\n`
+  )
+  res.write(`event: content_block_start\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`
+  )
+  for (const chunk of chunks) {
+    res.write(`event: content_block_delta\n`)
+    res.write(
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: chunk } })}\n\n`
+    )
+  }
+  res.write(`event: content_block_stop\n`)
+  res.write(`data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`)
+  res.write(`event: message_delta\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: chunks.join("").length } })}\n\n`
+  )
+  res.write(`event: message_stop\n`)
+  res.write(`data: ${JSON.stringify({ type: "message_stop" })}\n\n`)
+  res.end()
+}
+
 export function createMockAnthropicServer(): MockAnthropicServer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const app = createExpressApp() as any
@@ -183,55 +221,36 @@ export function createMockAnthropicServer(): MockAnthropicServer {
           .status(scenario.status)
           .json({ type: "error", error: { type: "api_error", message: scenario.message } })
         return
-      case "stream-text": {
-        // Server-sent events stream framing.
-        res.set("content-type", "text/event-stream")
-        res.set("cache-control", "no-cache")
-        res.set("connection", "keep-alive")
-        res.flushHeaders?.()
-        const id = `msg_${Math.random().toString(36).slice(2, 10)}`
-        res.write(`event: message_start\n`)
-        res.write(
-          `data: ${JSON.stringify({ type: "message_start", message: { id, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 0 } } })}\n\n`
-        )
-        res.write(`event: content_block_start\n`)
-        res.write(
-          `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`
-        )
-        for (const chunk of scenario.chunks) {
-          res.write(`event: content_block_delta\n`)
-          res.write(
-            `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: chunk } })}\n\n`
-          )
-        }
-        res.write(`event: content_block_stop\n`)
-        res.write(`data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`)
-        res.write(`event: message_delta\n`)
-        res.write(
-          `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: scenario.chunks.join("").length } })}\n\n`
-        )
-        res.write(`event: message_stop\n`)
-        res.write(`data: ${JSON.stringify({ type: "message_stop" })}\n\n`)
-        res.end()
-        return
-      }
-      default: {
-        const text = renderText(body)
-        const out: MessagesResponse = {
-          id: `msg_${Math.random().toString(36).slice(2, 10)}`,
-          type: "message",
-          role: "assistant",
-          model: body.model,
-          content: [{ type: "text", text }],
-          stop_reason: "end_turn",
-          usage: {
-            input_tokens: Math.max(1, Math.ceil(text.length / 4)),
-            output_tokens: text.length,
-          },
-        }
-        res.json(out)
-      }
     }
+
+    // Non-error scenarios: echo / canned / json / stream-text. The chat sidecar
+    // (Claude Agent SDK CLI) always sets `stream: true`; the workflow ai.*
+    // executors call non-streaming. Serve SSE for either an explicit
+    // `stream-text` scenario OR any streaming request, so ONE shared mock backs
+    // both the chat path and the workflow path.
+    const wantsStream = body.stream === true
+    if (scenario.kind === "stream-text") {
+      writeMessagesSse(res, scenario.chunks, body.model)
+      return
+    }
+    const text = renderText(body)
+    if (wantsStream) {
+      writeMessagesSse(res, [text], body.model)
+      return
+    }
+    const out: MessagesResponse = {
+      id: `msg_${Math.random().toString(36).slice(2, 10)}`,
+      type: "message",
+      role: "assistant",
+      model: body.model,
+      content: [{ type: "text", text }],
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: Math.max(1, Math.ceil(text.length / 4)),
+        output_tokens: text.length,
+      },
+    }
+    res.json(out)
   })
 
   // ── POST /v1/oauth/token (form-encoded; PKCE exchange + refresh) ─────────

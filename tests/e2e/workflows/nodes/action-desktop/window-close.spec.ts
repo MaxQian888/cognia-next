@@ -22,7 +22,7 @@ test.describe("workflow node — action.desktop.windowClose", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-window-close")
     await assertNodeOnCanvas(page, { kind: "action.desktop.windowClose", label: "Close" })
     await openNodeInspector(page, "action.desktop.windowClose")
-    await expect(page.locator("#ins-windowTitle, [name=windowTitle]").first()).toBeVisible()
+    await expect(page.locator("#ins-selector, [data-field=selector]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.desktop.windowClose" })
   })

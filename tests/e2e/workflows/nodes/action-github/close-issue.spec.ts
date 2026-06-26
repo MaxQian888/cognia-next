@@ -25,7 +25,7 @@ test.describe("workflow node — action.github.closeIssue", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-github-close-issue")
     await assertNodeOnCanvas(page, { kind: "action.github.closeIssue", label: "Close" })
     await openNodeInspector(page, "action.github.closeIssue")
-    await expect(page.locator("#ins-number, [name=number]").first()).toBeVisible()
+    await expect(page.locator("#ins-issueNumber, [data-field=issueNumber]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.github.closeIssue" })
   })

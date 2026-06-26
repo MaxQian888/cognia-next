@@ -24,7 +24,7 @@ test.describe("workflow node — flow.wait", () => {
     const wfId = await seedAndOpenWorkflow(page, "flow-wait")
     await assertNodeOnCanvas(page, { kind: "flow.wait", label: "Wait" })
     await openNodeInspector(page, "flow.wait")
-    await expect(page.locator("#ins-durationMs, [name=durationMs]").first()).toBeVisible()
+    await expect(page.locator("#ins-durationMs, [data-field=durationMs]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.wait" })
   })

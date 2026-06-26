@@ -24,7 +24,7 @@ test.describe("workflow node — data.template", () => {
     const wfId = await seedAndOpenWorkflow(page, "data-template")
     await assertNodeOnCanvas(page, { kind: "data.template", label: "Template" })
     await openNodeInspector(page, "data.template")
-    await expect(page.locator("#ins-template, [name=template]").first()).toBeVisible()
+    await expect(page.locator("#ins-template, [data-field=template]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "data.template" })
   })

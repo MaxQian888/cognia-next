@@ -631,7 +631,14 @@ const FIXTURES = {
       id: "n_tc",
       type: "action.team.create",
       label: "Create",
-      params: { name: "E2E Team", description: "demo" },
+      // The executor (and `createTeam`) reject a team with zero members, so the
+      // fixture seeds one. `mention_round_robin` (the default orchestration) is
+      // valid with a single member and needs no supervisor.
+      params: {
+        name: "E2E Team",
+        description: "demo",
+        members: [{ characterId: "char_fixture", role: "member" }],
+      },
     }),
   "action-team-update": () =>
     single("E2E Team Update", {

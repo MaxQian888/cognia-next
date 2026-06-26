@@ -20,12 +20,17 @@ test.describe("workflow node — flow.loop", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded flow.loop renders + items / maxIterations are editable", async ({ page }) => {
+  test("seeded flow.loop renders + mode / inputExpression are editable", async ({ page }) => {
     const wfId = await seedAndOpenWorkflow(page, "flow-loop")
     await assertNodeOnCanvas(page, { kind: "flow.loop", label: "Loop" })
     await openNodeInspector(page, "flow.loop")
-    await expect(page.locator("#ins-items, [name=items]").first()).toBeVisible()
-    await expect(page.locator("#ins-maxIterations, [name=maxIterations]").first()).toBeVisible()
+    // The fixture seeds a typeVersion-1 loop, so `LoopConfigV1` renders: `mode`
+    // is always shown, and forEach mode (the fixture's mode) shows
+    // `inputExpression`. (`source`/`maxIterations` are typeVersion-2 fields.)
+    await expect(page.locator("#ins-mode, [data-field=mode]").first()).toBeVisible()
+    await expect(
+      page.locator("#ins-inputExpression, [data-field=inputExpression]").first()
+    ).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.loop" })
   })

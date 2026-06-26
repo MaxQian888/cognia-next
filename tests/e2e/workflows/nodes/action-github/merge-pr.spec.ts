@@ -25,7 +25,7 @@ test.describe("workflow node — action.github.mergePr", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-github-merge-pr")
     await assertNodeOnCanvas(page, { kind: "action.github.mergePr", label: "Merge PR" })
     await openNodeInspector(page, "action.github.mergePr")
-    await expect(page.locator("#ins-mergeMethod, [name=mergeMethod]").first()).toBeVisible()
+    await expect(page.locator("#ins-mergeMethod, [data-field=mergeMethod]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.github.mergePr" })
   })

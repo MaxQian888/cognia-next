@@ -22,7 +22,7 @@ test.describe("workflow node — action.desktop.windowFocus", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-window-focus")
     await assertNodeOnCanvas(page, { kind: "action.desktop.windowFocus", label: "Focus" })
     await openNodeInspector(page, "action.desktop.windowFocus")
-    await expect(page.locator("#ins-windowTitle, [name=windowTitle]").first()).toBeVisible()
+    await expect(page.locator("#ins-selector, [data-field=selector]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.desktop.windowFocus" })
   })

@@ -25,8 +25,10 @@ test.describe("workflow node — trigger.connector.inbound", () => {
       label: "Connector Inbound",
     })
     await openNodeInspector(page, "trigger.connector.inbound")
-    await expect(page.locator("#ins-adapterId, [name=adapterId]").first()).toBeVisible()
-    await expect(page.locator("#ins-filterPattern, [name=filterPattern]").first()).toBeVisible()
+    await expect(page.locator("#ins-adapterId, [data-field=adapterId]").first()).toBeVisible()
+    await expect(
+      page.locator("#ins-conversationKey, [data-field=conversationKey]").first()
+    ).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "trigger.connector.inbound" })
   })

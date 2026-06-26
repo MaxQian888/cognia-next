@@ -27,7 +27,7 @@ test.describe("workflow node — ai.extract", () => {
     const wfId = await seedAndOpenWorkflow(page, "ai-extract")
     await assertNodeOnCanvas(page, { kind: "ai.extract", label: "Extract" })
     await openNodeInspector(page, "ai.extract")
-    await expect(page.locator("#ins-schemaJson, [name=schemaJson]").first()).toBeVisible()
+    await expect(page.locator("#ins-schemaJson, [data-field=schemaJson]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "ai.extract" })
   })

@@ -22,7 +22,7 @@ test.describe("workflow node — action.desktop.type", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-type")
     await assertNodeOnCanvas(page, { kind: "action.desktop.type", label: "Type" })
     await openNodeInspector(page, "action.desktop.type")
-    await expect(page.locator("#ins-text, [name=text]").first()).toBeVisible()
+    await expect(page.locator("#ins-text, [data-field=text]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.desktop.type" })
   })

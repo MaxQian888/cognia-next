@@ -25,7 +25,7 @@ test.describe("workflow node — action.github.generateChangelog", () => {
     const wfId = await seedAndOpenWorkflow(page, "action-github-generate-changelog")
     await assertNodeOnCanvas(page, { kind: "action.github.generateChangelog", label: "Changelog" })
     await openNodeInspector(page, "action.github.generateChangelog")
-    await expect(page.locator("#ins-previousTag, [name=previousTag]").first()).toBeVisible()
+    await expect(page.locator("#ins-since, [data-field=since]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.github.generateChangelog" })
   })
