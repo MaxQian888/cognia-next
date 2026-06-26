@@ -353,6 +353,7 @@ pub fn run() {
             claude::commands::claude_send,
             claude::commands::claude_interrupt,
             claude::commands::claude_compact,
+            claude::commands::claude_restore,
             claude::commands::claude_approve,
             claude::commands::claude_plugin_tool_response,
             claude::commands::claude_tool_result_decision,

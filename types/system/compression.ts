@@ -238,24 +238,10 @@ export interface CompressionAIConfig {
   baseURL?: string
 }
 
-/**
- * Provider cache capability profile for KV cache / prefix caching awareness
- * Used to optimize compression behavior based on inference framework capabilities
- */
-export type ProviderCacheType = "auto" | "manual" | "none"
-
-export interface ProviderCacheProfile {
-  /** Whether the provider supports prefix caching (KV cache reuse) */
-  supportsPrefixCache: boolean
-  /** Cache type: auto (OpenAI), manual (Anthropic cache_control), none */
-  cacheType: ProviderCacheType
-  /** Discount ratio for cached tokens (0-1, e.g. 0.5 = 50% off for OpenAI, 0.9 = 90% off for Anthropic) */
-  cachedTokenDiscount: number
-  /** Whether explicit cache_control breakpoints are required (Anthropic) */
-  requiresCacheControl: boolean
-  /** How important prefix stability is for this provider */
-  prefixStabilityImportance: "critical" | "high" | "low"
-}
+// NOTE: the provider cache-capability profile that used to live here was an
+// orphan (zero importers). The canonical implementation is
+// `packages/provider-embedding/src/provider-cache-profile.ts`
+// (`ProviderCacheProfile` / `ProviderCacheType`) — import it from there.
 
 /**
  * Frozen compression summary persisted per session

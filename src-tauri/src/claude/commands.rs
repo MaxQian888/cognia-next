@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
-use super::sidecar::{spawn as spawn_sidecar, SidecarState};
+use super::sidecar::{emit_hook_fire, spawn as spawn_sidecar, SidecarState};
 use crate::hooks;
 
 /// Options the frontend can pass per-send. Mirrors a subset of the SDK's
@@ -190,7 +190,7 @@ pub async fn claude_send(
     options: Option<SendOptions>,
 ) -> Result<(), String> {
     let _perf = crate::perf::guard("claude.send");
-    spawn_sidecar(app, state.inner().clone()).await?;
+    spawn_sidecar(app.clone(), state.inner().clone()).await?;
     let opts_value = match options {
         Some(o) => {
             o.validate()?;
@@ -226,6 +226,16 @@ pub async fn claude_send(
             &prompt_text,
         )
         .await;
+        // Surface a consequential UserPromptSubmit fire as a hook row before the
+        // decision fields are consumed below (block short-circuits the turn,
+        // additional_context is folded into the prompt).
+        emit_hook_fire(
+            &app,
+            &session_id,
+            &hooks::hook_event_name(hooks::HookEvent::UserPromptSubmit),
+            None,
+            &decision,
+        );
         if let Some(reason) = decision.block {
             return Err(format!("hook blocked: {reason}"));
         }
@@ -308,6 +318,19 @@ pub async fn claude_compact(
     focus: Option<String>,
 ) -> Result<(), String> {
     let msg = json!({ "type": "compact", "sessionId": session_id, "focus": focus });
+    state.write_command(&msg).await
+}
+
+/// Undo a prior compaction by restoring the pre-compaction message snapshot.
+/// Mirrors `claude_compact` — a fire-and-forget control message the sidecar's
+/// read loop routes to the session's `restoreConversation` (generic path only).
+#[tauri::command]
+pub async fn claude_restore(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    messages: Value,
+) -> Result<(), String> {
+    let msg = json!({ "type": "restore", "sessionId": session_id, "messages": messages });
     state.write_command(&msg).await
 }
 

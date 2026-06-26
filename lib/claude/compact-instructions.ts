@@ -20,11 +20,31 @@
 import { CONVERSATION_SUMMARY_SYSTEM_PROMPT } from "@/lib/ai/generation/summarizer"
 import { AUTO_COMPACT_FRACTION } from "@/lib/claude/usage"
 import type { ResolvedCompaction } from "@/lib/claude/types"
-import type { CompressionSettings, SessionCompressionOverrides } from "@/types/system/compression"
+import {
+  DEFAULT_COMPRESSION_SETTINGS,
+  type CompressionSettings,
+  type SessionCompressionOverrides,
+} from "@/types/system/compression"
 import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 
 /** Default number of most-recent turns kept verbatim (mirrors the sidecar). */
 export const DEFAULT_KEEP_RECENT = 6
+
+/** Default cap on summary output tokens (mirrors `CompressionModelConfig.maxSummaryTokens`). */
+export const DEFAULT_MAX_SUMMARY_TOKENS = 500
+
+/**
+ * `resolveCompaction`'s output, plus the two draft fields the (async, registry-
+ * bound) `resolveSendOptions` consumes to resolve summary-provider credentials.
+ * `resolveCompaction` stays pure; `resolveSendOptions` finalises `summary{}` and
+ * strips these draft keys before assigning `opts.compaction`.
+ */
+export interface ResolvedCompactionDraft extends ResolvedCompaction {
+  /** Requested alternate summary provider id (creds resolved downstream). */
+  summaryProvider?: string
+  /** Requested alternate summary model id. */
+  summaryModel?: string
+}
 
 /**
  * Appended to the live agent's system prompt (gated on compaction enabled).
@@ -85,8 +105,9 @@ function pctToFraction(p: number | undefined): number | undefined {
  * user `focus` layered on top. Kept pure (no registry / I/O) so it is unit
  * tested directly — `resolveSendOptions` looks the strategy up and calls this.
  */
-export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompaction {
+export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompactionDraft {
   const { appComp, charOv, sessOv, strategy } = input
+  const D = DEFAULT_COMPRESSION_SETTINGS
 
   const enabled =
     sessOv?.compressionEnabled ?? charOv?.compressionEnabled ?? appComp?.enabled ?? true
@@ -113,5 +134,56 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
       : strategy.summaryPrompt
     : buildCompactionSummaryPrompt(focus)
 
-  return { enabled, fraction, keepRecent, focus, summaryPrompt }
+  // --- Strategy / trigger (overridable per session + character) ---
+  const compStrategy =
+    sessOv?.compressionStrategy ?? charOv?.compressionStrategy ?? appComp?.strategy ?? D.strategy
+  const trigger =
+    sessOv?.compressionTrigger ?? charOv?.compressionTrigger ?? appComp?.trigger ?? D.trigger
+  const messageCountThreshold =
+    sessOv?.messageCountThreshold ??
+    charOv?.messageCountThreshold ??
+    appComp?.messageCountThreshold ??
+    D.messageCountThreshold
+
+  // --- App-level knobs (no per-session override field) ---
+  const preserveSystemMessages = appComp?.preserveSystemMessages ?? D.preserveSystemMessages
+  const useAISummarization = appComp?.useAISummarization ?? D.useAISummarization
+  const importanceThreshold = appComp?.importanceThreshold ?? D.importanceThreshold
+  const maxToolResultTokens = appComp?.maxToolResultTokens ?? D.maxToolResultTokens
+  const preserveToolCallMetadata = appComp?.preserveToolCallMetadata ?? D.preserveToolCallMetadata
+  const recursiveChunkSize = appComp?.recursiveChunkSize ?? D.recursiveChunkSize
+  const retainedFraction =
+    pctToFraction(appComp?.retainedThreshold) ?? pctToFraction(D.retainedThreshold)
+  const captureUndoSnapshot = appComp?.enableUndo ?? D.enableUndo
+
+  // --- Summary model / cap (cheap-model path; creds resolved downstream) ---
+  const cfgMaxSummary = appComp?.compressionModel?.maxSummaryTokens
+  const maxSummaryTokens =
+    typeof cfgMaxSummary === "number" && cfgMaxSummary > 0
+      ? cfgMaxSummary
+      : (D.compressionModel.maxSummaryTokens ?? DEFAULT_MAX_SUMMARY_TOKENS)
+  const summaryProvider = appComp?.compressionModel?.provider?.trim() || undefined
+  const summaryModel = appComp?.compressionModel?.model?.trim() || undefined
+
+  return {
+    enabled,
+    fraction,
+    keepRecent,
+    focus,
+    summaryPrompt,
+    maxSummaryTokens,
+    strategy: compStrategy,
+    trigger,
+    messageCountThreshold,
+    preserveSystemMessages,
+    useAISummarization,
+    importanceThreshold,
+    maxToolResultTokens,
+    preserveToolCallMetadata,
+    recursiveChunkSize,
+    retainedFraction,
+    captureUndoSnapshot,
+    summaryProvider,
+    summaryModel,
+  }
 }

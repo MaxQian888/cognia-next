@@ -17,8 +17,12 @@
 /** Mirrors `lib/claude/usage.ts:AUTO_COMPACT_FRACTION`. */
 export const AUTO_COMPACT_FRACTION = 0.835
 
-/** Safe default window for an unknown / unrecognised model id (conservative). */
-const DEFAULT_CONTEXT_WINDOW = 128_000
+/**
+ * Safe default window for an unknown / unrecognised model id (conservative).
+ * Mirrors `lib/claude/usage.ts:DEFAULT_CONTEXT_WINDOW`; exported so the parity
+ * test (`lib/claude/usage.compaction-parity.test.ts`) can assert agreement.
+ */
+export const DEFAULT_CONTEXT_WINDOW = 128_000
 
 // First match wins; mirrors the ordering in `lib/claude/usage.ts`.
 const MODEL_CONTEXT_WINDOWS = [
@@ -26,13 +30,15 @@ const MODEL_CONTEXT_WINDOWS = [
   [/[-._]1m(\b|$)/i, 1_000_000],
   [/claude-opus-4-(6|7|8)/i, 1_000_000],
   [/claude-sonnet-4-(6|7|8)/i, 1_000_000],
-  [/claude-(opus|sonnet|haiku)/i, 200_000],
+  // Matches family-first (`claude-sonnet-4-5`) and version-first 3.x
+  // (`claude-3-5-sonnet`, `claude-3-opus`); 1M-tier patterns above win first.
+  [/claude(-[\d.]+)*-(opus|sonnet|haiku)/i, 200_000],
   [/gpt-4o/i, 128_000],
   [/gpt-4\.1/i, 1_000_000],
   [/(^|[^a-z])o[134]([^a-z]|$)/i, 200_000],
   [/gemini-(1\.5|2\.5|3)/i, 1_000_000],
-  // DeepSeek's chat/reasoner models expose a 64k window.
-  [/deepseek/i, 64_000],
+  // DeepSeek V3 / V3.1 (deepseek-chat, deepseek-reasoner) expose a 128k window.
+  [/deepseek/i, 128_000],
 ]
 
 /** Context-window size for a model id (mirrors the renderer's table). */
@@ -69,46 +75,133 @@ export function estimateTokens(messages) {
 }
 
 /**
- * Should the next turn compact first? Fires when the last turn's real input
- * token count crossed the auto-compact fraction of the model's window.
+ * Should the next turn compact first?
+ *
+ * - `trigger === "manual"` → never auto-fires (manual compaction uses `force`).
+ * - `trigger === "message-count"` → fires when `messageCount` reaches the
+ *   configured `messageCountThreshold` (token-independent).
+ * - otherwise (token-threshold / default) → fires when the last turn's real
+ *   input token count crossed the auto-compact fraction of the model's window.
  */
-export function shouldCompact({ lastInputTokens, modelId, fraction = AUTO_COMPACT_FRACTION }) {
+export function shouldCompact({
+  lastInputTokens,
+  modelId,
+  fraction = AUTO_COMPACT_FRACTION,
+  trigger,
+  messageCount,
+  messageCountThreshold,
+}) {
+  if (trigger === "manual") return false
+  if (trigger === "message-count") {
+    if (typeof messageCount !== "number" || typeof messageCountThreshold !== "number") return false
+    return messageCountThreshold > 0 && messageCount >= messageCountThreshold
+  }
   if (typeof lastInputTokens !== "number" || lastInputTokens <= 0) return false
   const window = getContextWindow(modelId)
   return lastInputTokens >= window * fraction
 }
 
+// --- Frozen-summary markers ------------------------------------------------
+// A compaction summary is spliced as a `role:"user"` message whose text opens
+// with a sentinel tag carrying a monotonically-increasing version. Marking it
+// lets `planCompaction` PROTECT prior summaries (keep them in the head instead
+// of feeding them back into `middle`), which is what stops the lossy
+// "summary-of-summary" recursion and keeps the prompt-cache prefix stable.
+
+/** Sentinel prefix every spliced summary message opens with. */
+export const SUMMARY_OPEN_TAG = "<conversation-summary"
+
+/** True when `m` is a previously-spliced compaction summary. */
+export function isSummaryMessage(m) {
+  return (
+    !!m &&
+    m.role === "user" &&
+    typeof m.content === "string" &&
+    m.content.startsWith(SUMMARY_OPEN_TAG)
+  )
+}
+
+/** Version parsed from a summary message's `v="N"` header (0 when absent). */
+export function summaryVersion(m) {
+  if (!isSummaryMessage(m)) return 0
+  const match = m.content.match(/^<conversation-summary\s+v="(\d+)"/)
+  return match ? Number(match[1]) : 0
+}
+
+/** Render one versioned, prefix-cache-stable summary message. */
+export function makeSummaryMessage(summary, version) {
+  const v = Number.isFinite(version) && version > 0 ? version : 1
+  return {
+    role: "user",
+    content: `${SUMMARY_OPEN_TAG} v="${v}">\nSummary of earlier conversation (compacted to save context):\n${summary}\n</conversation-summary>`,
+  }
+}
+
 /**
- * Split the conversation into the leading system block (`head`), the older
- * user/assistant messages to summarize (`middle`), and the most recent
- * messages to keep verbatim (`tail`). Returns null when there is nothing old
- * enough to be worth summarizing.
+ * Split the conversation into:
+ *  - `systemHead` — the leading `role:"system"` block (never summarized),
+ *  - `frozen` — the contiguous prior summary messages right after it (PROTECTED;
+ *    carried forward verbatim, never re-summarized),
+ *  - `middle` — the genuinely-new user/assistant messages to summarize,
+ *  - `tail` — the most-recent `keepRecentMessages` kept verbatim.
+ * `head` = `systemHead` + `frozen` (kept for back-compat). Returns null when
+ * there is nothing new enough to be worth summarizing.
  *
  * @param {{ conversation: Array<{role:string, content:any}>, keepRecentMessages: number }} p
  */
 export function planCompaction({ conversation, keepRecentMessages }) {
-  let headEnd = 0
-  while (headEnd < conversation.length && conversation[headEnd].role === "system") headEnd++
-  const head = conversation.slice(0, headEnd)
-  const rest = conversation.slice(headEnd)
+  let i = 0
+  while (i < conversation.length && conversation[i].role === "system") i++
+  const systemHead = conversation.slice(0, i)
+  let j = i
+  while (j < conversation.length && isSummaryMessage(conversation[j])) j++
+  const frozen = conversation.slice(i, j)
+  const head = conversation.slice(0, j)
+  const rest = conversation.slice(j)
   const keep = Math.max(0, keepRecentMessages)
   if (rest.length <= keep) return null
   const middle = rest.slice(0, rest.length - keep)
   const tail = rest.slice(rest.length - keep)
   if (middle.length === 0) return null
-  return { head, middle, tail }
+  return { head, systemHead, frozen, middle, tail }
 }
 
 /**
- * Rebuild the conversation as `head` + a single summary user message + `tail`.
- * Returns the original array unchanged when there is nothing to compact.
+ * REUSE mode: keep prior `frozen` summaries byte-identical and append ONE new
+ * versioned summary of the genuinely-new `middle`. This is what gives prefix-
+ * cache stability — the leading `[system…, frozen…]` block never changes.
  */
-export function applyCompaction({ conversation, keepRecentMessages, summary }) {
+export function applyCompactionIncremental({
+  conversation,
+  keepRecentMessages,
+  summary,
+  nextVersion,
+}) {
   const plan = planCompaction({ conversation, keepRecentMessages })
   if (!plan) return conversation
-  const summaryMessage = {
-    role: "user",
-    content: `<conversation-summary>\nSummary of earlier conversation (compacted to save context):\n${summary}\n</conversation-summary>`,
-  }
-  return [...plan.head, summaryMessage, ...plan.tail]
+  return [
+    ...plan.systemHead,
+    ...plan.frozen,
+    makeSummaryMessage(summary, nextVersion),
+    ...plan.tail,
+  ]
+}
+
+/**
+ * REGENERATE mode: collapse all prior frozen summaries + the new summary into a
+ * single fresh summary message. Accepts a one-time prefix-cache break to bound
+ * growth once too many frozen summaries have accumulated.
+ */
+export function applyCompactionRegenerated({ conversation, keepRecentMessages, summary, version }) {
+  const plan = planCompaction({ conversation, keepRecentMessages })
+  if (!plan) return conversation
+  return [...plan.systemHead, makeSummaryMessage(summary, version), ...plan.tail]
+}
+
+/**
+ * Back-compat wrapper: a single incremental compaction at version 1. Retained
+ * for callers/tests that just want "head + summary + tail".
+ */
+export function applyCompaction({ conversation, keepRecentMessages, summary }) {
+  return applyCompactionIncremental({ conversation, keepRecentMessages, summary, nextVersion: 1 })
 }

@@ -3,10 +3,12 @@ import { AUTO_COMPACT_FRACTION } from "@/lib/claude/usage"
 import {
   COMPACT_HANDOFF_SNIPPET,
   DEFAULT_KEEP_RECENT,
+  DEFAULT_MAX_SUMMARY_TOKENS,
   buildCompactionSummaryPrompt,
   resolveCompactInstructions,
   resolveCompaction,
 } from "./compact-instructions"
+import { DEFAULT_COMPRESSION_SETTINGS } from "@/types/system/compression"
 
 describe("compact-instructions", () => {
   describe("buildCompactionSummaryPrompt", () => {
@@ -98,6 +100,56 @@ describe("compact-instructions", () => {
         strategy: { id: "s", fraction: 0.9 },
       })
       expect(r.fraction).toBeCloseTo(0.6)
+    })
+
+    it("threads the dormant-feature fields with documented defaults", () => {
+      const r = resolveCompaction({})
+      const D = DEFAULT_COMPRESSION_SETTINGS
+      expect(r.maxSummaryTokens).toBe(DEFAULT_MAX_SUMMARY_TOKENS)
+      expect(r.strategy).toBe(D.strategy)
+      expect(r.trigger).toBe(D.trigger)
+      expect(r.messageCountThreshold).toBe(D.messageCountThreshold)
+      expect(r.preserveSystemMessages).toBe(D.preserveSystemMessages)
+      expect(r.useAISummarization).toBe(D.useAISummarization)
+      expect(r.importanceThreshold).toBe(D.importanceThreshold)
+      expect(r.maxToolResultTokens).toBe(D.maxToolResultTokens)
+      expect(r.preserveToolCallMetadata).toBe(D.preserveToolCallMetadata)
+      expect(r.recursiveChunkSize).toBe(D.recursiveChunkSize)
+      expect(r.retainedFraction).toBeCloseTo(D.retainedThreshold / 100)
+      expect(r.captureUndoSnapshot).toBe(D.enableUndo)
+      // Draft-only fields are absent unless a compressionModel is configured.
+      expect(r.summaryProvider).toBeUndefined()
+      expect(r.summaryModel).toBeUndefined()
+      expect(r.summary).toBeUndefined()
+    })
+
+    it("overrides strategy/trigger/message-count per session and character", () => {
+      const r = resolveCompaction({
+        appComp: { strategy: "summary", trigger: "token-threshold", messageCountThreshold: 50 },
+        charOv: { compressionStrategy: "hybrid", messageCountThreshold: 40 },
+        sessOv: { compressionTrigger: "message-count", messageCountThreshold: 30 },
+      })
+      expect(r.strategy).toBe("hybrid") // character beats app
+      expect(r.trigger).toBe("message-count") // session beats app
+      expect(r.messageCountThreshold).toBe(30) // session beats character/app
+    })
+
+    it("surfaces a configured summary model + cap as draft fields", () => {
+      const r = resolveCompaction({
+        appComp: {
+          compressionModel: { provider: "openai", model: "gpt-4o-mini", maxSummaryTokens: 300 },
+        },
+      })
+      expect(r.maxSummaryTokens).toBe(300)
+      expect(r.summaryProvider).toBe("openai")
+      expect(r.summaryModel).toBe("gpt-4o-mini")
+    })
+
+    it("ignores a non-positive maxSummaryTokens and falls back to the default", () => {
+      expect(
+        resolveCompaction({ appComp: { compressionModel: { maxSummaryTokens: 0 } } })
+          .maxSummaryTokens
+      ).toBe(DEFAULT_MAX_SUMMARY_TOKENS)
     })
   })
 })
