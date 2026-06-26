@@ -8,6 +8,9 @@ jest.mock("@/lib/browser/agent-engine", () => {
       nodes: [],
     })),
     act: jest.fn(async () => ({ ok: true, error: null, generation: 3 })),
+    pressKey: jest.fn(async () => ({ ok: true, error: null, generation: 3 })),
+    scroll: jest.fn(async () => ({ ok: true, error: null, generation: 3 })),
+    evaluate: jest.fn(async () => ({ ok: true, value: "Home" })),
     readConsole: jest.fn(async () => [{ level: "warn", text: "x", ts: 1 }]),
     readNetwork: jest.fn(async () => []),
     getPage: jest.fn(async () => ({ url: "http://localhost/", title: "t" })),
@@ -16,6 +19,8 @@ jest.mock("@/lib/browser/agent-engine", () => {
     reload: jest.fn(async () => {}),
     stop: jest.fn(async () => {}),
     waitForText: jest.fn(async () => ({ ok: true, timedOut: false })),
+    waitForSelector: jest.fn(async () => ({ ok: true, timedOut: false })),
+    waitForNetworkIdle: jest.fn(async () => ({ ok: true, timedOut: false })),
     screenshot: jest.fn(async () => ({ bytes: "AAAA", width: 10, height: 10, capturedAt: 0 })),
   }
   return {
@@ -76,8 +81,85 @@ describe("browser-tools plugin", () => {
         "browser_read_console",
         "browser_read_network",
         "browser_get_page",
+        "browser_press_key",
+        "browser_scroll",
+        "browser_evaluate",
       ])
     )
+  })
+
+  it("browser_press_key forwards the chord (and optional ref) and refreshes the snapshot", async () => {
+    const tools = await collectTools()
+    const res = (await tools.browser_press_key({ key: "ctrl+a", ref: "e1" })) as {
+      result: { ok: boolean }
+      snapshot: { generation: number }
+    }
+    expect(engine.pressKey).toHaveBeenCalledWith("ctrl+a", "e1")
+    expect(res.result.ok).toBe(true)
+    expect(res.snapshot.generation).toBe(3)
+  })
+
+  it("browser_scroll forwards ref/direction/amount", async () => {
+    const tools = await collectTools()
+    await tools.browser_scroll({ direction: "bottom", amount: 200 })
+    expect(engine.scroll).toHaveBeenCalledWith({
+      reference: undefined,
+      direction: "bottom",
+      amount: 200,
+    })
+  })
+
+  it("browser_click forwards modifiers when given", async () => {
+    const tools = await collectTools()
+    await tools.browser_click({ ref: "e1", modifiers: ["ctrl"] })
+    expect(engine.act).toHaveBeenCalledWith("e1", "click", { modifiers: ["ctrl"] })
+  })
+
+  it("browser_snapshot forwards includeText", async () => {
+    const tools = await collectTools()
+    await tools.browser_snapshot({ includeText: true })
+    expect(engine.snapshot).toHaveBeenCalledWith({ includeText: true })
+  })
+
+  it("browser_evaluate runs on the trusted localhost preview", async () => {
+    const tools = await collectTools()
+    await tools.browser_navigate({ url: "http://localhost:3000/" })
+    const res = (await tools.browser_evaluate({ expression: "document.title" })) as {
+      ok: boolean
+      value: unknown
+    }
+    expect(engine.evaluate).toHaveBeenCalledWith("document.title")
+    expect(res).toEqual({ ok: true, value: "Home" })
+  })
+
+  it("browser_evaluate is blocked on a public (untrusted) origin", async () => {
+    const tools = await collectTools()
+    await tools.browser_navigate({ url: "https://example.com/" })
+    const res = (await tools.browser_evaluate({ expression: "document.cookie" })) as {
+      ok: boolean
+      error: string
+    }
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/mcp__playwright__/)
+    expect(engine.evaluate).not.toHaveBeenCalled()
+    // Restore trusted origin for any later tests sharing module state.
+    await tools.browser_navigate({ url: "http://localhost:3000/" })
+  })
+
+  it("browser_wait_for waits on a CSS selector when given", async () => {
+    const tools = await collectTools()
+    await tools.browser_wait_for({ selector: ".ready", timeoutMs: 500 })
+    expect(engine.waitForSelector).toHaveBeenCalledWith(".ready", {
+      mode: undefined,
+      timeoutMs: 500,
+    })
+    expect(engine.waitForText).not.toHaveBeenCalled()
+  })
+
+  it("browser_wait_for waits for network idle when requested", async () => {
+    const tools = await collectTools()
+    await tools.browser_wait_for({ networkIdle: true, timeoutMs: 800 })
+    expect(engine.waitForNetworkIdle).toHaveBeenCalledWith({ timeoutMs: 800 })
   })
 
   it("browser_navigate sets the url and returns a fresh snapshot + untrusted flag", async () => {

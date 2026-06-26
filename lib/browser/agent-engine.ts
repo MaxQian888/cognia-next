@@ -13,18 +13,26 @@ import {
   type BrowserActionResult,
   type BrowserSnapshot,
   type ConsoleEntry,
+  type EvaluateResult,
   type NetworkEntry,
+  type SnapshotOptions,
   type TrustTier,
 } from "@/lib/browser/protocol"
 
 export interface BrowserEngine {
   navigate(url: string): Promise<void>
-  snapshot(): Promise<BrowserSnapshot>
+  snapshot(opts?: SnapshotOptions): Promise<BrowserSnapshot>
   act(
     reference: string,
     action: string,
     args: Record<string, unknown>
   ): Promise<BrowserActionResult>
+  /** Press a key chord (Enter, Tab, ctrl+a, …); ref optional (focused element). */
+  pressKey(key: string, reference?: string): Promise<BrowserActionResult>
+  /** Scroll an element into view (ref) or the page (direction/amount). */
+  scroll(args: ScrollArgs): Promise<BrowserActionResult>
+  /** Evaluate a JS expression in the page (trust-gated by the caller). */
+  evaluate(expr: string): Promise<EvaluateResult>
   readConsole(): Promise<ConsoleEntry[]>
   readNetwork(): Promise<NetworkEntry[]>
   back(): Promise<void>
@@ -33,13 +41,28 @@ export interface BrowserEngine {
   stop(): Promise<void>
   getPage(): Promise<{ url: string; title: string }>
   waitForText(text: string, opts?: WaitForOptions): Promise<WaitForResult>
+  waitForSelector(selector: string, opts?: WaitForOptions): Promise<WaitForResult>
+  waitForNetworkIdle(opts?: NetworkIdleOptions): Promise<WaitForResult>
   screenshot(): Promise<Screenshot>
 }
 
+export interface ScrollArgs {
+  reference?: string
+  direction?: "up" | "down" | "left" | "right" | "top" | "bottom"
+  amount?: number
+}
+
 export interface WaitForOptions {
-  /** Wait for the text to appear (default) or disappear. */
+  /** Wait for the condition to be met (default) or to clear. */
   mode?: "appear" | "disappear"
   timeoutMs?: number
+  intervalMs?: number
+}
+
+export interface NetworkIdleOptions {
+  timeoutMs?: number
+  /** How long the network must stay quiet (no in-flight + no completions). */
+  idleMs?: number
   intervalMs?: number
 }
 
@@ -48,18 +71,56 @@ export interface WaitForResult {
   timedOut: boolean
 }
 
+/**
+ * Poll `check` until it returns the desired truthiness (`appear` → true,
+ * `disappear` → false) or the timeout elapses. Shared by the text/selector
+ * waits.
+ */
+async function pollUntil(
+  check: () => Promise<boolean>,
+  opts: WaitForOptions
+): Promise<WaitForResult> {
+  const mode = opts.mode ?? "appear"
+  const timeoutMs = opts.timeoutMs ?? 5000
+  const intervalMs = opts.intervalMs ?? 200
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const has = await check()
+    if ((mode === "appear" && has) || (mode === "disappear" && !has)) {
+      return { ok: true, timedOut: false }
+    }
+    if (Date.now() >= deadline) return { ok: false, timedOut: true }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+}
+
 /** Drives the in-app embedded webview via the Tauri `browser_embed_*` commands. */
 export class EmbeddedEngine implements BrowserEngine {
   navigate(url: string) {
     emitAgentActivity(`navigate ${url}`)
     return browserClient.embedNavigate(url)
   }
-  snapshot() {
-    return browserClient.embedSnapshot()
+  snapshot(opts?: SnapshotOptions) {
+    return browserClient.embedSnapshot(opts)
   }
   act(reference: string, action: string, args: Record<string, unknown>) {
     emitAgentActivity(`${action} ${reference}`)
     return browserClient.embedAct(reference, action, args)
+  }
+  pressKey(key: string, reference = "") {
+    emitAgentActivity(`key ${key}`)
+    return browserClient.embedAct(reference, "key", { key })
+  }
+  scroll(args: ScrollArgs) {
+    emitAgentActivity(
+      args.reference ? `scroll ${args.reference}` : `scroll ${args.direction ?? "down"}`
+    )
+    const { reference = "", ...rest } = args
+    return browserClient.embedAct(reference, "scroll", rest as Record<string, unknown>)
+  }
+  evaluate(expr: string) {
+    emitAgentActivity("evaluate")
+    return browserClient.embedEvaluate(expr)
   }
   readConsole() {
     return browserClient.embedReadConsole()
@@ -90,17 +151,30 @@ export class EmbeddedEngine implements BrowserEngine {
     ])
     return { url, title }
   }
-  async waitForText(text: string, opts: WaitForOptions = {}): Promise<WaitForResult> {
-    const mode = opts.mode ?? "appear"
-    const timeoutMs = opts.timeoutMs ?? 5000
+  waitForText(text: string, opts: WaitForOptions = {}): Promise<WaitForResult> {
+    return pollUntil(() => browserClient.embedHasText(text), opts)
+  }
+  waitForSelector(selector: string, opts: WaitForOptions = {}): Promise<WaitForResult> {
+    return pollUntil(() => browserClient.embedHasSelector(selector), opts)
+  }
+  async waitForNetworkIdle(opts: NetworkIdleOptions = {}): Promise<WaitForResult> {
+    const timeoutMs = opts.timeoutMs ?? 10000
+    const idleMs = opts.idleMs ?? 500
     const intervalMs = opts.intervalMs ?? 200
     const deadline = Date.now() + timeoutMs
+    let lastCompleted: number | null = null
+    let stableSince = Date.now()
     for (;;) {
-      const has = await browserClient.embedHasText(text)
-      if ((mode === "appear" && has) || (mode === "disappear" && !has)) {
-        return { ok: true, timedOut: false }
+      const st = await browserClient.embedNetworkState()
+      const now = Date.now()
+      const idle = st.pending === 0 && st.completed === lastCompleted
+      if (idle) {
+        if (now - stableSince >= idleMs) return { ok: true, timedOut: false }
+      } else {
+        lastCompleted = st.completed
+        stableSince = now
       }
-      if (Date.now() >= deadline) return { ok: false, timedOut: true }
+      if (now >= deadline) return { ok: false, timedOut: true }
       await new Promise((resolve) => setTimeout(resolve, intervalMs))
     }
   }

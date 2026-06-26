@@ -12,6 +12,9 @@ jest.mock("@/lib/browser/client", () => ({
     embedGetUrl: jest.fn(async () => "http://localhost/"),
     embedGetTitle: jest.fn(async () => "Home"),
     embedHasText: jest.fn(async () => true),
+    embedHasSelector: jest.fn(async () => true),
+    embedEvaluate: jest.fn(async () => ({ ok: true, value: "ok" })),
+    embedNetworkState: jest.fn(async () => ({ pending: 0, completed: 0 })),
     embedCapture: jest.fn(async () => ({ bytes: "AAAA", width: 10, height: 10, capturedAt: 0 })),
   },
 }))
@@ -73,6 +76,86 @@ describe("EmbeddedEngine", () => {
     expect(mockClient.embedForward).toHaveBeenCalled()
     expect(mockClient.embedReload).toHaveBeenCalled()
     expect(mockClient.embedStop).toHaveBeenCalled()
+  })
+
+  it("snapshot forwards options", async () => {
+    await new EmbeddedEngine().snapshot({ includeText: true })
+    expect(mockClient.embedSnapshot).toHaveBeenCalledWith({ includeText: true })
+  })
+
+  it("pressKey routes a key action through embedAct (default focused target)", async () => {
+    await new EmbeddedEngine().pressKey("ctrl+a")
+    expect(mockClient.embedAct).toHaveBeenCalledWith("", "key", { key: "ctrl+a" })
+  })
+
+  it("pressKey targets a ref when given", async () => {
+    await new EmbeddedEngine().pressKey("Enter", "e7")
+    expect(mockClient.embedAct).toHaveBeenCalledWith("e7", "key", { key: "Enter" })
+  })
+
+  it("scroll by ref strips the reference into the action target", async () => {
+    await new EmbeddedEngine().scroll({ reference: "e3" })
+    expect(mockClient.embedAct).toHaveBeenCalledWith("e3", "scroll", {})
+  })
+
+  it("scroll by direction passes a page scroll with no ref", async () => {
+    await new EmbeddedEngine().scroll({ direction: "bottom", amount: 500 })
+    expect(mockClient.embedAct).toHaveBeenCalledWith("", "scroll", {
+      direction: "bottom",
+      amount: 500,
+    })
+  })
+
+  it("evaluate delegates to embedEvaluate", async () => {
+    const res = await new EmbeddedEngine().evaluate("document.title")
+    expect(mockClient.embedEvaluate).toHaveBeenCalledWith("document.title")
+    expect(res).toEqual({ ok: true, value: "ok" })
+  })
+})
+
+describe("EmbeddedEngine.waitForSelector", () => {
+  it("resolves once the selector is present", async () => {
+    mockClient.embedHasSelector.mockResolvedValueOnce(true)
+    const res = await new EmbeddedEngine().waitForSelector(".ready", { timeoutMs: 1000 })
+    expect(res).toEqual({ ok: true, timedOut: false })
+    expect(mockClient.embedHasSelector).toHaveBeenCalledWith(".ready")
+  })
+
+  it("times out when the selector never matches", async () => {
+    mockClient.embedHasSelector.mockResolvedValue(false)
+    const res = await new EmbeddedEngine().waitForSelector(".nope", { timeoutMs: 0 })
+    expect(res).toEqual({ ok: false, timedOut: true })
+  })
+})
+
+describe("EmbeddedEngine.waitForNetworkIdle", () => {
+  it("resolves when no requests are pending and the completed count is stable", async () => {
+    mockClient.embedNetworkState.mockResolvedValue({ pending: 0, completed: 4 })
+    const res = await new EmbeddedEngine().waitForNetworkIdle({ idleMs: 0, timeoutMs: 1000 })
+    expect(res).toEqual({ ok: true, timedOut: false })
+  })
+
+  it("times out while requests stay in flight", async () => {
+    mockClient.embedNetworkState.mockResolvedValue({ pending: 2, completed: 1 })
+    const res = await new EmbeddedEngine().waitForNetworkIdle({ timeoutMs: 0 })
+    expect(res).toEqual({ ok: false, timedOut: true })
+  })
+
+  it("waits out the quiet window before declaring idle", async () => {
+    jest.useFakeTimers()
+    // First poll: in-flight; subsequent polls: settled at completed=3.
+    mockClient.embedNetworkState
+      .mockResolvedValueOnce({ pending: 1, completed: 2 })
+      .mockResolvedValue({ pending: 0, completed: 3 })
+    const p = new EmbeddedEngine().waitForNetworkIdle({
+      idleMs: 150,
+      intervalMs: 100,
+      timeoutMs: 5000,
+    })
+    await jest.advanceTimersByTimeAsync(400)
+    const res = await p
+    expect(res.ok).toBe(true)
+    jest.useRealTimers()
   })
 })
 

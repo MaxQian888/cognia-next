@@ -22,6 +22,7 @@ import {
   defineNativeAnthropicTool,
   defineSubagent,
   defineAgentTeamTemplate,
+  defineContextProvider,
 } from "@cognia/plugin-sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 // ADR-0026 §5 §D — i18n strings are now declared in `manifest.i18n` below
@@ -36,6 +37,7 @@ import {
   type TextEditorAction,
 } from "@/lib/automation/anthropic-action-mapper"
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
+import { clickScreenText, findScreenText } from "@/lib/automation/ocr-click"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
 import { getActiveComputerUseTarget } from "@/lib/claude/computer-use-target-state"
 import { getActiveSandboxConfine } from "@/lib/claude/sandbox-confine-state"
@@ -151,6 +153,8 @@ const PLUGIN_ID = "cognia-computer-use"
 const TOOL_COMPUTER_USE = "computer_use"
 const TOOL_BASH = "bash"
 const TOOL_TEXT_EDITOR = "text_editor"
+const TOOL_FIND_TEXT = "find_text"
+const TOOL_CLICK_TEXT = "click_text"
 
 // JSON Schema for the `computer_use` plugin tool. Mirrors Anthropic's
 // `computer_20251124` input shape: a discriminated union over `action`. We
@@ -268,6 +272,59 @@ const TEXT_EDITOR_DESCRIPTION =
   "exact unique substring; `insert` appends `new_str` after `insert_line`; " +
   "`undo_edit` reverts the most recent mutating action against `path`."
 
+const FIND_TEXT_SCHEMA = {
+  type: "object",
+  properties: {
+    text: {
+      type: "string",
+      description: "Visible text to locate (case-insensitive). Omit to list every readable block.",
+    },
+    languages: {
+      type: "array",
+      items: { type: "string" },
+      description: "BCP-47 OCR languages (e.g. en, zh). Defaults to the user's configured set.",
+    },
+  },
+} as const
+
+const CLICK_TEXT_SCHEMA = {
+  type: "object",
+  required: ["text"],
+  properties: {
+    text: { type: "string", description: "Visible on-screen label to click." },
+    occurrence: {
+      type: "integer",
+      minimum: 1,
+      description: "Which match to click when several blocks match (1-based, default 1).",
+    },
+    button: { type: "string", enum: ["left", "right", "middle"] },
+    double: { type: "boolean", description: "Double-click instead of a single click." },
+    languages: { type: "array", items: { type: "string" } },
+  },
+} as const
+
+const FIND_TEXT_DESCRIPTION =
+  "OCR the current screen and return on-screen text blocks with their screen coordinates " +
+  "(ranked best-first when `text` is given; otherwise everything readable). Use this to locate " +
+  "UI text before clicking, instead of eyeballing a screenshot. Needs an OCR provider that emits " +
+  "bounding boxes (e.g. tesseract / windows-ocr)."
+
+const CLICK_TEXT_DESCRIPTION =
+  "Find visible text on the screen via OCR and click its center — no pixel-coordinate guessing. " +
+  "`text` is the label to click; `occurrence` (1-based) disambiguates repeats; `button`/`double` " +
+  "control the click. Returns an error listing the match count when the text isn't found."
+
+// Comparative guidance so the model picks the right automation surface for a
+// task — the computer-use plugin previously shipped no ambient context.
+const SURFACE_GUIDANCE =
+  "Automation surfaces — pick by target: (1) computer_use + find_text/click_text → ANY native " +
+  "desktop app or arbitrary screen (pixel + OCR; find_text/click_text resolve on-screen text to a " +
+  "coordinate so you don't guess pixels). (2) browser_* tools → the in-app preview webview, best for " +
+  "localhost / your own dev server (DOM-accurate: snapshot refs, click/type/press_key, evaluate). " +
+  "(3) mcp__playwright__* → arbitrary PUBLIC websites (headless, reliable cross-origin). (4) web_fetch / " +
+  "web_search → read-only page content, no interaction. Prefer DOM (browser_*) over pixels when the " +
+  "target is a web page you control; prefer computer_use for native apps; prefer Playwright for public sites."
+
 function buildPluginTools(): PluginTool[] {
   return [
     {
@@ -320,10 +377,71 @@ function buildPluginTools(): PluginTool[] {
         )
       },
     },
+    {
+      name: TOOL_FIND_TEXT,
+      pluginId: PLUGIN_ID,
+      definition: {
+        name: TOOL_FIND_TEXT,
+        description: FIND_TEXT_DESCRIPTION,
+        category: "automation",
+        requiresApproval: true,
+        parametersSchema: FIND_TEXT_SCHEMA as unknown as Record<string, unknown>,
+      },
+      execute: async (args) => {
+        const a = (args ?? {}) as { text?: string; languages?: string[] }
+        try {
+          return await findScreenText({
+            query: a.text,
+            languages: a.languages,
+            ctx: buildChatCallContext(),
+          })
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      },
+    },
+    {
+      name: TOOL_CLICK_TEXT,
+      pluginId: PLUGIN_ID,
+      definition: {
+        name: TOOL_CLICK_TEXT,
+        description: CLICK_TEXT_DESCRIPTION,
+        category: "automation",
+        requiresApproval: true,
+        parametersSchema: CLICK_TEXT_SCHEMA as unknown as Record<string, unknown>,
+      },
+      execute: async (args) => {
+        const a = (args ?? {}) as {
+          text?: string
+          occurrence?: number
+          button?: "left" | "right" | "middle"
+          double?: boolean
+          languages?: string[]
+        }
+        try {
+          return await clickScreenText({
+            query: String(a.text ?? ""),
+            occurrence: a.occurrence,
+            button: a.button,
+            doubleClick: a.double,
+            languages: a.languages,
+            ctx: buildChatCallContext(),
+          })
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      },
+    },
   ]
 }
 
-const PLUGIN_TOOL_NAMES = [TOOL_COMPUTER_USE, TOOL_BASH, TOOL_TEXT_EDITOR] as const
+const PLUGIN_TOOL_NAMES = [
+  TOOL_COMPUTER_USE,
+  TOOL_BASH,
+  TOOL_TEXT_EDITOR,
+  TOOL_FIND_TEXT,
+  TOOL_CLICK_TEXT,
+] as const
 
 const SLASH_MESSAGES: Record<string, { description: string; body: string }> = {
   en: {
@@ -488,6 +606,16 @@ const definition: PluginDefinition = {
         "ctx.agent.registerTool unavailable — computer-use chat path will not surface tools"
       )
     }
+
+    // Comparative surface guidance — steers the model to the right tool family
+    // (computer_use vs browser_* vs Playwright vs web_fetch). See SURFACE_GUIDANCE.
+    ctx.agent?.context?.registerProvider?.(
+      defineContextProvider({
+        id: "computer-use:surface-guidance",
+        name: "Automation surface guidance",
+        provide: () => SURFACE_GUIDANCE,
+      })
+    )
   },
   deactivate: async (ctx?: PluginContext) => {
     if (ctx?.pluginId) {

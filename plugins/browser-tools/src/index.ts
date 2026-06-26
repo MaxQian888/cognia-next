@@ -50,7 +50,7 @@ const definition: PluginDefinition = {
         id: "browser-tools:availability",
         name: "Browser tools availability",
         provide: () =>
-          "Browser tools drive the in-app preview webview (best for localhost / your own dev server): browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs), browser_click/type/fill_form/select/hover (target by ref), browser_wait_for (wait for text to appear/disappear), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot. For arbitrary PUBLIC websites the embedded preview is best-effort only (cross-origin iframes are invisible, synthetic events are untrusted, response bodies are unavailable) — prefer the Playwright MCP tools (mcp__playwright__*) for those if the Playwright MCP server is attached.",
+          'Browser tools drive the in-app preview webview (best for localhost / your own dev server): browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs; pass includeText:true to also read headings/paragraphs; shadow-DOM and same-origin iframe nodes are included), browser_click (optional modifiers:["ctrl","shift"])/type/fill_form/select/hover (target by ref), browser_press_key (Enter/Tab/Escape/Arrow*/ctrl+a — for shortcuts & navigation; use browser_type for text), browser_scroll (by ref or page direction), browser_evaluate (run a JS expression — trusted localhost only), browser_wait_for (text, a CSS selector, or networkIdle), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot. For arbitrary PUBLIC websites the embedded preview is best-effort only (cross-origin iframes are invisible, synthetic events are untrusted, response bodies are unavailable) — prefer the Playwright MCP tools (mcp__playwright__*) for those if the Playwright MCP server is attached.',
       })
     )
 
@@ -93,10 +93,97 @@ const definition: PluginDefinition = {
       definition: {
         name: "browser_snapshot",
         description:
-          "Capture the accessibility-tree snapshot of the preview. Returns ref'd nodes; prefer this over a screenshot.",
-        parametersSchema: { type: "object", properties: {} },
+          "Capture the accessibility-tree snapshot of the preview. Returns ref'd nodes (incl. shadow-DOM and same-origin iframe nodes); prefer this over a screenshot. Pass includeText:true to also surface salient non-interactive text (headings, list items, etc.).",
+        parametersSchema: {
+          type: "object",
+          properties: { includeText: { type: "boolean" } },
+        },
       },
-      execute: async () => engineFor().engine.snapshot(),
+      execute: async (args) =>
+        engineFor().engine.snapshot({
+          includeText: !!(args as { includeText?: boolean })?.includeText,
+        }),
+    })
+
+    reg({
+      name: "browser_press_key",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "browser_press_key",
+        description:
+          "Press a key chord on the page: a named key (Enter, Tab, Escape, Backspace, Delete, Home, End, PageUp, PageDown, ArrowUp/Down/Left/Right, F1–F24) or a chord (ctrl+a, shift+Tab, alt+ArrowLeft). Optionally target a ref; default is the focused element. For typing text use browser_type, not this.",
+        parametersSchema: {
+          type: "object",
+          properties: { key: { type: "string" }, ref: { type: "string" } },
+          required: ["key"],
+        },
+      },
+      execute: async (args) => {
+        const a = (args ?? {}) as { key?: string; ref?: string }
+        const result = await engineFor().engine.pressKey(String(a.key ?? ""), a.ref)
+        return withSnapshot({ result })
+      },
+    })
+
+    reg({
+      name: "browser_scroll",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "browser_scroll",
+        description:
+          "Scroll the preview: pass a `ref` to scroll that element into view, or a page `direction` (up/down/left/right/top/bottom) with an optional pixel `amount`.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            ref: { type: "string" },
+            direction: {
+              type: "string",
+              enum: ["up", "down", "left", "right", "top", "bottom"],
+            },
+            amount: { type: "number" },
+          },
+        },
+      },
+      execute: async (args) => {
+        const a = (args ?? {}) as {
+          ref?: string
+          direction?: "up" | "down" | "left" | "right" | "top" | "bottom"
+          amount?: number
+        }
+        const result = await engineFor().engine.scroll({
+          reference: a.ref,
+          direction: a.direction,
+          amount: a.amount,
+        })
+        return withSnapshot({ result })
+      },
+    })
+
+    reg({
+      name: "browser_evaluate",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "browser_evaluate",
+        description:
+          'Evaluate a JavaScript EXPRESSION in the page and return its JSON value (e.g. "document.title" or "[...document.querySelectorAll(\'a\')].map(a=>a.href)"). Single expression only — no statements. Enabled only on the trusted localhost preview; blocked on public origins.',
+        parametersSchema: {
+          type: "object",
+          properties: { expression: { type: "string" } },
+          required: ["expression"],
+        },
+      },
+      execute: async (args) => {
+        const expr = String((args as { expression?: string })?.expression ?? "")
+        const { engine, untrusted } = engineFor()
+        if (untrusted) {
+          return {
+            ok: false,
+            error:
+              "browser_evaluate is disabled on public origins (untrusted page). Use the Playwright MCP tools (mcp__playwright__*) for public sites.",
+          }
+        }
+        return engine.evaluate(expr)
+      },
     })
 
     const actTool = (
@@ -124,12 +211,19 @@ const definition: PluginDefinition = {
           const callArgs: Record<string, unknown> = {}
           if ("text" in a) callArgs.text = a.text
           if ("value" in a) callArgs.value = a.value
+          if ("modifiers" in a) callArgs.modifiers = a.modifiers
           const result = await engineFor().engine.act(ref, action, callArgs)
           return withSnapshot({ result })
         },
       })
 
-    actTool("browser_click", "click", {}, ["ref"], "Click the element with the given ref.")
+    actTool(
+      "browser_click",
+      "click",
+      { modifiers: { type: "array", items: { type: "string" } } },
+      ["ref"],
+      'Click the element with the given ref. Optional `modifiers` (e.g. ["ctrl"], ["shift"]) for modifier-clicks.'
+    )
     actTool(
       "browser_type",
       "type",
@@ -186,27 +280,41 @@ const definition: PluginDefinition = {
       definition: {
         name: "browser_wait_for",
         description:
-          "Wait until the preview's visible text contains `text` (mode 'appear', default) or no longer contains it ('disappear'), up to `timeoutMs`. Returns the wait result plus a fresh snapshot.",
+          "Wait for a condition, up to `timeoutMs`: visible `text` appears/disappears (default), an element matching a CSS `selector` appears/disappears, or the network goes idle (`networkIdle: true` — no in-flight or new requests). Provide exactly one of text/selector/networkIdle. Returns the wait result plus a fresh snapshot.",
         parametersSchema: {
           type: "object",
           properties: {
             text: { type: "string" },
+            selector: { type: "string" },
+            networkIdle: { type: "boolean" },
             mode: { type: "string", enum: ["appear", "disappear"] },
             timeoutMs: { type: "number" },
           },
-          required: ["text"],
         },
       },
       execute: async (args) => {
         const a = (args ?? {}) as {
           text?: string
+          selector?: string
+          networkIdle?: boolean
           mode?: "appear" | "disappear"
           timeoutMs?: number
         }
-        const result = await engineFor().engine.waitForText(String(a.text ?? ""), {
-          mode: a.mode,
-          timeoutMs: a.timeoutMs,
-        })
+        const engine = engineFor().engine
+        let result
+        if (a.networkIdle) {
+          result = await engine.waitForNetworkIdle({ timeoutMs: a.timeoutMs })
+        } else if (a.selector) {
+          result = await engine.waitForSelector(a.selector, {
+            mode: a.mode,
+            timeoutMs: a.timeoutMs,
+          })
+        } else {
+          result = await engine.waitForText(String(a.text ?? ""), {
+            mode: a.mode,
+            timeoutMs: a.timeoutMs,
+          })
+        }
         return withSnapshot({ result })
       },
     })

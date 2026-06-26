@@ -398,6 +398,14 @@ enigo = "0.6"
 # the lock.
 core-graphics = "0.25"
 core-foundation = "0.10"
+# macOS Accessibility (AX) element tree — backs the bounded `read_tree` / `find`
+# Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs). High-level
+# AXUIElement wrapper; we only read role/title/children (no core-foundation type
+# passing across crate boundaries), so its older core-foundation pin coexists
+# with ours in the lock without interop. Coordinate hit-test (`pick_at_point`)
+# stays on the osascript path — AXUIElementCopyElementAtPosition would force a
+# raw-ref wrap across that core-foundation version boundary.
+accessibility = "0.1"
 
 [target."cfg(unix)".dependencies]
 # Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the

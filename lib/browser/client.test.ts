@@ -74,6 +74,39 @@ describe("browserClient agent methods", () => {
     await expect(browserClient.embedSnapshot()).rejects.toThrow("kaboom")
   })
 
+  it("embedSnapshot forwards options as a JSON args string", async () => {
+    call.mockResolvedValueOnce(
+      JSON.stringify({
+        ok: true,
+        error: null,
+        snapshot: { generation: 1, url: "u", title: "t", nodes: [] },
+      })
+    )
+    await browserClient.embedSnapshot({ includeText: true })
+    expect(call).toHaveBeenCalledWith("browser_embed_snapshot", {
+      args: JSON.stringify({ includeText: true }),
+    })
+  })
+
+  it("embedEvaluate forwards the expression and parses the envelope", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: true, value: "Home" }))
+    const res = await browserClient.embedEvaluate("document.title")
+    expect(call).toHaveBeenCalledWith("browser_embed_evaluate", { expr: "document.title" })
+    expect(res).toEqual({ ok: true, value: "Home" })
+  })
+
+  it("embedHasSelector forwards the selector", async () => {
+    call.mockResolvedValueOnce(true)
+    expect(await browserClient.embedHasSelector(".ready")).toBe(true)
+    expect(call).toHaveBeenCalledWith("browser_embed_has_selector", { selector: ".ready" })
+  })
+
+  it("embedNetworkState parses the counters", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ pending: 1, completed: 4 }))
+    expect(await browserClient.embedNetworkState()).toEqual({ pending: 1, completed: 4 })
+    expect(call).toHaveBeenCalledWith("browser_embed_network_state", {})
+  })
+
   it("embedAct passes reference/action/serialized args", async () => {
     call.mockResolvedValueOnce(JSON.stringify({ ok: true, error: null, generation: 2 }))
     const res = await browserClient.embedAct("e1", "click", {})

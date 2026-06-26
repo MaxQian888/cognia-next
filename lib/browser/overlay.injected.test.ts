@@ -126,15 +126,24 @@ describe("overlay.injected select mode", () => {
 })
 
 type Win = Record<string, unknown> & {
-  __cogniaSnapshot: () => string
+  __cogniaSnapshot: (optsJson?: string) => string
   __cogniaAct: (ref: string, action: string, argsJson: string) => string
   __cogniaDrainConsole: () => string
   __cogniaDrainNetwork: () => string
   __cogniaHasText: (text: string) => boolean
+  __cogniaHasSelector: (selector: string) => boolean
   __cogniaOverlay: {
     resolveRef: (ref: string) => unknown
     installNetworkHook: () => void
     hasText: (text: string) => boolean
+    parseKeyChord: (raw: string) => {
+      ctrlKey: boolean
+      shiftKey: boolean
+      altKey: boolean
+      metaKey: boolean
+      key: string
+    }
+    networkState: () => { pending: number; completed: number }
   }
 }
 
@@ -202,6 +211,166 @@ describe("__cogniaAct", () => {
     const res = JSON.parse(win().__cogniaAct("e999", "click", "{}"))
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/ref/i)
+  })
+
+  it("applies modifier flags to a click", () => {
+    let mods: { ctrl: boolean; shift: boolean } | null = null
+    document.getElementById("b")!.addEventListener("click", (e) => {
+      mods = { ctrl: (e as MouseEvent).ctrlKey, shift: (e as MouseEvent).shiftKey }
+    })
+    JSON.parse(
+      win().__cogniaAct(refFor("button"), "click", JSON.stringify({ modifiers: ["ctrl", "shift"] }))
+    )
+    expect(mods).toEqual({ ctrl: true, shift: true })
+  })
+})
+
+describe("__cogniaAct key", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<input id="n" type="text" />`
+    install()
+  })
+  function refFor(role: string) {
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    return snap.nodes.find((n: { role: string }) => n.role === role).ref
+  }
+
+  it("dispatches a named key with keydown/keyup on the ref'd element", () => {
+    const seen: Array<{ type: string; key: string }> = []
+    const input = document.getElementById("n")!
+    input.addEventListener("keydown", (e) =>
+      seen.push({ type: "down", key: (e as KeyboardEvent).key })
+    )
+    input.addEventListener("keyup", (e) => seen.push({ type: "up", key: (e as KeyboardEvent).key }))
+    const res = JSON.parse(
+      win().__cogniaAct(refFor("textbox"), "key", JSON.stringify({ key: "Enter" }))
+    )
+    expect(res.ok).toBe(true)
+    expect(seen).toEqual([
+      { type: "down", key: "Enter" },
+      { type: "up", key: "Enter" },
+    ])
+  })
+
+  it("sets modifier flags for a chord", () => {
+    let mod: { ctrl: boolean; key: string } | null = null
+    document.addEventListener("keydown", (e) => {
+      mod = { ctrl: (e as KeyboardEvent).ctrlKey, key: (e as KeyboardEvent).key }
+    })
+    JSON.parse(win().__cogniaAct("", "key", JSON.stringify({ key: "ctrl+a" })))
+    expect(mod).toEqual({ ctrl: true, key: "a" })
+  })
+
+  it("emits keypress for a printable char without modifiers", () => {
+    const types: string[] = []
+    document.addEventListener("keypress", () => types.push("keypress"))
+    JSON.parse(win().__cogniaAct("", "key", JSON.stringify({ key: "x" })))
+    expect(types).toEqual(["keypress"])
+  })
+
+  it("returns an error for an unparseable chord", () => {
+    const res = JSON.parse(win().__cogniaAct("", "key", JSON.stringify({ key: "ctrl+" })))
+    expect(res.ok).toBe(false)
+  })
+})
+
+describe("__cogniaAct scroll", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<button id="b">B</button>`
+    install()
+  })
+  it("scrolls a ref'd element into view", () => {
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    const ref = snap.nodes[0].ref
+    let scrolled = false
+    ;(win().__cogniaOverlay.resolveRef(ref) as HTMLElement).scrollIntoView = () => {
+      scrolled = true
+    }
+    const res = JSON.parse(win().__cogniaAct(ref, "scroll", "{}"))
+    expect(res.ok).toBe(true)
+    expect(scrolled).toBe(true)
+  })
+  it("page-scrolls by direction without a ref", () => {
+    const calls: Array<[number, number]> = []
+    ;(window as unknown as { scrollBy: (x: number, y: number) => void }).scrollBy = (x, y) =>
+      calls.push([x, y])
+    const res = JSON.parse(
+      win().__cogniaAct("", "scroll", JSON.stringify({ direction: "down", amount: 300 }))
+    )
+    expect(res.ok).toBe(true)
+    expect(calls).toEqual([[0, 300]])
+  })
+  it("rejects an unknown direction", () => {
+    const res = JSON.parse(
+      win().__cogniaAct("", "scroll", JSON.stringify({ direction: "sideways" }))
+    )
+    expect(res.ok).toBe(false)
+  })
+})
+
+describe("parseKeyChord", () => {
+  it("canonicalizes modifier aliases and a main key", () => {
+    install()
+    const chord = win().__cogniaOverlay.parseKeyChord("control+shift+t")
+    expect(chord).toMatchObject({ ctrlKey: true, shiftKey: true, key: "t" })
+  })
+  it("maps named keys", () => {
+    install()
+    expect(win().__cogniaOverlay.parseKeyChord("pgdn")).toMatchObject({ key: "PageDown" })
+    expect(win().__cogniaOverlay.parseKeyChord("F5")).toMatchObject({ key: "F5" })
+  })
+  it("throws on two main keys", () => {
+    install()
+    expect(() => win().__cogniaOverlay.parseKeyChord("a+b")).toThrow(/more than one/)
+  })
+})
+
+describe("snapshot richness", () => {
+  it("descends shadow DOM", () => {
+    install()
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    const root = host.attachShadow({ mode: "open" })
+    root.innerHTML = `<button>Shadow Btn</button>`
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    const names = snap.nodes.map((n: { name: string }) => n.name)
+    expect(names).toContain("Shadow Btn")
+  })
+
+  it("includes salient text only when includeText is set", () => {
+    document.body.innerHTML = `<h1>Title Here</h1><button>Go</button>`
+    install()
+    const lean = JSON.parse(win().__cogniaSnapshot()).snapshot
+    expect(lean.nodes.some((n: { role: string }) => n.role === "heading")).toBe(false)
+    const rich = JSON.parse(win().__cogniaSnapshot(JSON.stringify({ includeText: true }))).snapshot
+    const heading = rich.nodes.find((n: { role: string }) => n.role === "heading")
+    expect(heading.name).toBe("Title Here")
+  })
+})
+
+describe("hasSelector + networkState", () => {
+  it("reports selector presence", () => {
+    document.body.innerHTML = `<div class="ready"></div>`
+    install()
+    expect(win().__cogniaHasSelector(".ready")).toBe(true)
+    expect(win().__cogniaHasSelector(".missing")).toBe(false)
+  })
+
+  it("tracks pending and completed fetch counts", async () => {
+    install()
+    let resolveFetch: (v: { status: number; ok: boolean }) => void = () => {}
+    ;(window as unknown as { fetch: unknown }).fetch = () =>
+      new Promise((r) => {
+        resolveFetch = r
+      })
+    win().__cogniaOverlay.installNetworkHook()
+    const p = (window as unknown as { fetch: () => Promise<unknown> }).fetch()
+    expect(win().__cogniaOverlay.networkState().pending).toBe(1)
+    resolveFetch({ status: 200, ok: true })
+    await p
+    const st = win().__cogniaOverlay.networkState()
+    expect(st.pending).toBe(0)
+    expect(st.completed).toBe(1)
   })
 })
 
