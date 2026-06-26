@@ -12,7 +12,6 @@ import { StatusBadge } from "@/components/status-badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
@@ -333,7 +332,6 @@ function MemberRow({
             </SelectContent>
           </Select>
         </div>
-        {member.progress > 0 && <Progress value={member.progress} className="mt-2 h-1" />}
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

@@ -28,8 +28,10 @@ export interface TeamMentionChipsProps {
   /**
    * Optional availability map. When provided, chips for unavailable runtimes
    * dim their visuals and surface a tooltip explaining the missing setup.
+   * Partial — callers may supply a subset of runtimes; absent ones default to
+   * "ready" (see the `?? "ready"` fallback below).
    */
-  availability?: RuntimeAvailabilityMap
+  availability?: Partial<RuntimeAvailabilityMap>
 }
 
 export function TeamMentionChips({
@@ -63,7 +65,10 @@ export function TeamMentionChips({
                 title={tooltip}
                 onClick={() => onPick(target)}
                 className={cn(
-                  "h-7 shrink-0 gap-1.5 rounded-full px-2 text-xs",
+                  // Match the composer's soft-filled pill family (rounded-md +
+                  // muted fill + soft border) so in-box @mentions and these
+                  // one-click chips read as one visual language.
+                  "h-7 shrink-0 gap-1.5 rounded-md bg-muted/40 px-2 text-xs hover:bg-muted hover:text-foreground",
                   unavailable && "opacity-60"
                 )}
               >
@@ -94,37 +99,12 @@ function statusTooltip(
 ): string {
   switch (status) {
     case "missing-key":
-      return safeT(t, "missingKey", "Set an Anthropic API key in Settings → Providers")
+      return t("missingKey")
     case "no-agent":
-      return safeT(
-        t,
-        "noAgent",
-        `No external agent configured for ${runtime}. Add one in Settings → External Agents.`,
-        { runtime }
-      )
+      return t("noAgent", { runtime })
     case "disconnected":
-      return safeT(
-        t,
-        "disconnected",
-        `${runtime} is configured but not connected. Open Settings → External Agents to connect.`,
-        { runtime }
-      )
+      return t("disconnected", { runtime })
     default:
       return ""
   }
-}
-
-function safeT(
-  t: (key: string, params?: Record<string, string>) => string,
-  key: string,
-  fallback: string,
-  params?: Record<string, string>
-): string {
-  try {
-    const value = t(key, params)
-    if (value && value !== key) return value
-  } catch {
-    /* fall through */
-  }
-  return fallback
 }

@@ -101,6 +101,14 @@ describe("AgentTeamMembers", () => {
     expect(status.textContent ?? "").toMatch(/Executing/i)
   })
 
+  it("does not render a determinate progress bar even when progress > 0", () => {
+    // The pseudo-percentage member bar was removed in favor of the honest
+    // live activity surfaced in the Activity panel.
+    const worker = teammate({ id: "tm_1", name: "Worker One", progress: 80 })
+    render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+  })
+
   it("opens the add-teammate dialog when Add teammate is clicked", async () => {
     render(<AgentTeamMembers teamId="team_x" teammates={[]} leadId="" />)
     const addBtn = screen.getByRole("button", { name: /Add teammate/i })
