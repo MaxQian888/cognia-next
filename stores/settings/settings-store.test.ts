@@ -154,6 +154,7 @@ describe("load", () => {
         lsp: false,
       },
       updates: { autoCheck: true },
+      canvasCodeSandboxEnabled: true,
     })
   })
 

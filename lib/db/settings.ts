@@ -31,6 +31,9 @@ export const DEFAULTS: AppSettings = {
   activeProjectId: undefined,
   permissionMode: "default",
   alwaysAllowTools: [],
+  // Canvas-executed code is confined by default (ADR-0028); independently
+  // overridable from Settings → Sandbox (does not affect chat-tool sandboxing).
+  canvasCodeSandboxEnabled: true,
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   routingFallbackEnabled: true,
   apiKey: undefined,

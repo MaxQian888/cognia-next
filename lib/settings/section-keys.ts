@@ -160,7 +160,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   ],
   network: ["networkProxy"],
   security: ["biometricRequiredFor", "pluginSecurityPosture"],
-  sandbox: ["sandboxDefaultEnabled", "sandboxTier", "automationPolicy"],
+  sandbox: ["sandboxDefaultEnabled", "canvasCodeSandboxEnabled", "sandboxTier", "automationPolicy"],
   lsp: ["lsp"],
   ocr: ["ocrSettings"],
   "source-control": ["gitSettings"],

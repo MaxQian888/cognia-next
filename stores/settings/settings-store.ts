@@ -367,6 +367,9 @@ const DEFAULTS: AppSettings = {
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   updates: { autoCheck: true },
+  // Canvas-executed code is confined by default (ADR-0028); independently
+  // overridable from Settings → Sandbox.
+  canvasCodeSandboxEnabled: true,
 }
 
 async function syncApiKeyToTauri(key: string | null | undefined) {

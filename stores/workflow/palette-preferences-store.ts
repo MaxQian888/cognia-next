@@ -8,6 +8,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
+import { pushRecent, toggleInList } from "@/lib/utils/recency-list"
 
 /** How many recently-used kinds to keep. */
 export const RECENT_LIMIT = 8
@@ -27,24 +28,13 @@ export const usePalettePreferencesStore = create<PalettePreferencesState>()(
       recentlyUsedNodeKinds: [],
 
       toggleFavorite: (kind) =>
-        set((s) => {
-          const has = s.favoriteNodeKinds.includes(kind)
-          return {
-            favoriteNodeKinds: has
-              ? s.favoriteNodeKinds.filter((k) => k !== kind)
-              : [...s.favoriteNodeKinds, kind],
-          }
-        }),
+        set((s) => ({ favoriteNodeKinds: toggleInList(s.favoriteNodeKinds, kind) })),
 
       isFavorite: (kind) => get().favoriteNodeKinds.includes(kind),
 
       recordUsed: (kind) =>
         set((s) => ({
-          // Most-recent first, de-duplicated, capped at RECENT_LIMIT.
-          recentlyUsedNodeKinds: [kind, ...s.recentlyUsedNodeKinds.filter((k) => k !== kind)].slice(
-            0,
-            RECENT_LIMIT
-          ),
+          recentlyUsedNodeKinds: pushRecent(s.recentlyUsedNodeKinds, kind, RECENT_LIMIT),
         })),
     }),
     {
