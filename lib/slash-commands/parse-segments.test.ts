@@ -13,6 +13,17 @@ function shape(segments: InputSegment[]) {
   )
 }
 
+/** Shape helper that also renders mention segments (mentions: true mode). */
+function richShape(segments: ReturnType<typeof parseSegments>) {
+  return segments.map((s) => {
+    if (s.kind === "command") return { k: "cmd", name: s.name, raw: s.raw }
+    if (s.kind === "mention") {
+      return { k: "men", name: s.name, raw: s.raw, start: s.start, end: s.end }
+    }
+    return { k: "txt", value: s.value, start: s.start, end: s.end }
+  })
+}
+
 describe("parseSegments", () => {
   it("returns an empty list for empty input", () => {
     expect(parseSegments("", isKnown)).toEqual([])
@@ -109,5 +120,62 @@ describe("parseSegments", () => {
   it("preserves positional arg spacing inside args", () => {
     const out = shape(parseSegments("/model   opus   fast", isKnown))
     expect(out[0]).toMatchObject({ k: "cmd", name: "model", args: "opus   fast" })
+  })
+
+  it("does NOT emit mention segments by default", () => {
+    const out = parseSegments("see @lib/db now", isKnown)
+    expect(out.every((s) => s.kind === "text" || s.kind === "command")).toBe(true)
+    expect(out).toEqual([{ kind: "text", value: "see @lib/db now", start: 0, end: 15 }])
+  })
+})
+
+describe("parseSegments with mentions enabled", () => {
+  it("splits an @mention out of surrounding text", () => {
+    const out = richShape(parseSegments("see @lib/db now", isKnown, { mentions: true }))
+    expect(out).toEqual([
+      { k: "txt", value: "see ", start: 0, end: 4 },
+      { k: "men", name: "lib/db", raw: "@lib/db", start: 4, end: 11 },
+      { k: "txt", value: " now", start: 11, end: 15 },
+    ])
+  })
+
+  it("recognises a mention at the very start", () => {
+    const out = richShape(parseSegments("@bob hi", isKnown, { mentions: true }))
+    expect(out).toEqual([
+      { k: "men", name: "bob", raw: "@bob", start: 0, end: 4 },
+      { k: "txt", value: " hi", start: 4, end: 7 },
+    ])
+  })
+
+  it("does NOT treat an email or path-@ as a mention", () => {
+    const out = richShape(parseSegments("mail user@host and a/@b", isKnown, { mentions: true }))
+    expect(out.some((s) => s.k === "men")).toBe(false)
+    expect(out).toEqual([{ k: "txt", value: "mail user@host and a/@b", start: 0, end: 23 }])
+  })
+
+  it("ignores a lone @ (no token)", () => {
+    const out = richShape(parseSegments("a @ b", isKnown, { mentions: true }))
+    expect(out.some((s) => s.k === "men")).toBe(false)
+  })
+
+  it("interleaves command + mention + prose, staying contiguous", () => {
+    const input = "/review auth\nplease ping @alice and @bob"
+    const segs = parseSegments(input, isKnown, { mentions: true })
+    const mentions = segs
+      .filter((s) => s.kind === "mention")
+      .map((s) => s.kind === "mention" && s.name)
+    expect(mentions).toEqual(["alice", "bob"])
+    // contiguity preserved across the split
+    let cursor = 0
+    for (const s of segs) {
+      expect(s.start).toBe(cursor)
+      cursor = s.end
+    }
+    expect(cursor).toBe(input.length)
+  })
+
+  it("leaves mention-free text as a single segment", () => {
+    const out = richShape(parseSegments("just words here", isKnown, { mentions: true }))
+    expect(out).toEqual([{ k: "txt", value: "just words here", start: 0, end: 15 }])
   })
 })

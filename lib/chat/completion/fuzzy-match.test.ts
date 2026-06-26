@@ -1,4 +1,4 @@
-import { fuzzyScore, fuzzyFilterSort } from "./fuzzy-match"
+import { fuzzyScore, fuzzyMatch, fuzzyFilterSort, fuzzyFilterSortRanked } from "./fuzzy-match"
 
 describe("fuzzyScore", () => {
   it("returns 0 for an empty query (neutral match)", () => {
@@ -46,6 +46,72 @@ describe("fuzzyScore", () => {
     const short = fuzzyScore("co", "cost")!
     const long = fuzzyScore("co", "context")!
     expect(short).toBeGreaterThan(long)
+  })
+})
+
+describe("fuzzyMatch", () => {
+  it("returns neutral score and no positions for an empty query", () => {
+    expect(fuzzyMatch("", "anything")).toEqual({ score: 0, positions: [] })
+  })
+
+  it("returns null when not a subsequence", () => {
+    expect(fuzzyMatch("xyz", "model")).toBeNull()
+  })
+
+  it("reports the matched indices in order", () => {
+    const m = fuzzyMatch("mdl", "model")!
+    // m(0) d(2) l(4) in "model"
+    expect(m.positions).toEqual([0, 2, 4])
+  })
+
+  it("reports contiguous indices for a prefix match", () => {
+    const m = fuzzyMatch("mod", "model")!
+    expect(m.positions).toEqual([0, 1, 2])
+  })
+
+  it("reports boundary indices across a slashed name", () => {
+    const m = fuzzyMatch("gc", "git/commit")!
+    // g at 0, c at 4 (right after the slash boundary)
+    expect(m.positions).toEqual([0, 4])
+  })
+
+  it("agrees with fuzzyScore on the score", () => {
+    expect(fuzzyMatch("co", "cost")!.score).toBe(fuzzyScore("co", "cost"))
+  })
+})
+
+describe("fuzzyFilterSortRanked", () => {
+  const commands = [
+    { name: "clear", description: "Clear the conversation" },
+    { name: "compact", description: "Compact context" },
+    { name: "cost", description: "Show session cost" },
+    { name: "model", description: "Pick the model" },
+    { name: "review", description: "Review the diff" },
+  ]
+
+  it("returns all items with empty positions for an empty query", () => {
+    const result = fuzzyFilterSortRanked(commands, "", (c) => c.name)
+    expect(result.map((r) => r.item.name)).toEqual(["clear", "compact", "cost", "model", "review"])
+    expect(result.every((r) => r.positions.length === 0)).toBe(true)
+  })
+
+  it("ranks like fuzzyFilterSort and carries primary positions", () => {
+    const result = fuzzyFilterSortRanked(commands, "co", (c) => c.name)
+    expect(result.map((r) => r.item.name)).toEqual(["cost", "compact"])
+    expect(result[0].positions).toEqual([0, 1]) // c,o in "cost"
+  })
+
+  it("keeps description-only hits with NO primary positions", () => {
+    const result = fuzzyFilterSortRanked(commands, "diff", (c) => c.name, {
+      secondaryText: (c) => c.description,
+    })
+    expect(result.map((r) => r.item.name)).toEqual(["review"])
+    expect(result[0].positions).toEqual([])
+  })
+
+  it("respects the limit option", () => {
+    const result = fuzzyFilterSortRanked(commands, "c", (c) => c.name, { limit: 2 })
+    expect(result).toHaveLength(2)
   })
 })
 

@@ -116,8 +116,10 @@ import {
   type SystemMessageBlock,
   type SlashCommandResultBlock,
 } from "@/lib/slash-commands/system-blocks"
-import { parseSegments } from "@/lib/slash-commands/parse-segments"
+import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
+import { pillDeleteRange } from "./composer-pill-delete"
 import { runSegments } from "@/lib/slash-commands/run-segments"
+import { useComposerCommandStore } from "@/stores/chat/composer-command-store"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
 import { ComposerGhostText } from "./composer/composer-ghost-text"
 import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
@@ -448,12 +450,24 @@ function ComposerInner(props: InnerProps) {
     [customCommands]
   )
 
-  // Segment the live input so the chip overlay can paint a pill under every
-  // recognised `/command`. Same parse + command map used at submit time.
+  // Segment the live input for the submit-time command pipeline (`runSegments`)
+  // and the `hasCommand` check. NO mentions here — `runSegments` expects the
+  // plain command/text view.
   const segments = useMemo(
     () => parseSegments(controller.textInput.value, (name) => commandMap.has(name)),
     [controller.textInput.value, commandMap]
   )
+
+  // The chip overlay's view: derive `@mention` pills from the already-parsed
+  // `segments` (commands pass through, only text is sub-split) so we don't run a
+  // second full tokenizer pass over the input on every keystroke.
+  const overlaySegments = useMemo(() => splitMentionSegments(segments), [segments])
+
+  // Recent / pinned slash commands for the popover's empty-query view.
+  const recentCommands = useComposerCommandStore((s) => s.recentCommands)
+  const pinnedCommands = useComposerCommandStore((s) => s.pinnedCommands)
+  const noteCommandUsed = useComposerCommandStore((s) => s.noteCommandUsed)
+  const togglePinnedCommand = useComposerCommandStore((s) => s.togglePin)
 
   // Shell-style ↑/↓ recall of previously sent messages for this session.
   const history = useInputHistory(sessionId)
@@ -534,8 +548,15 @@ function ComposerInner(props: InnerProps) {
         // message. Both action handlers and templates are expanded on submit by
         // `runSegments` (see the submit handler), so the behavior is uniform:
         // pick → stays in the box → Enter sends.
-        const args = trigger.query.replace(new RegExp(`^${cmd.name}\\s*`), "").trim()
-        insertReplacement(`/${cmd.name}${args ? ` ${args}` : ""} `)
+        //
+        // Replace the whole typed `/<query>` token with `/<name>`. `trigger.query`
+        // is only the command-name fragment the user typed (the slash token ends
+        // at the first whitespace), so it must NOT be re-appended as args — doing
+        // so turned a fuzzy pick like "res" → /reset into "/reset res". Any real
+        // args typed after a space live outside [tokenStart, tokenEnd) and are
+        // preserved by spliceToken, which also adds the trailing space.
+        insertReplacement(`/${cmd.name}`)
+        noteCommandUsed(cmd.name)
       } else if (item.kind === "file") {
         const e = item.entry
         addReferencedPath({
@@ -570,6 +591,7 @@ function ComposerInner(props: InnerProps) {
       insertReplacement,
       props,
       dismissPopover,
+      noteCommandUsed,
       tCommands,
       tMemory,
     ]
@@ -586,6 +608,7 @@ function ComposerInner(props: InnerProps) {
         const replacement = `/${current.command.name}${args ? ` ${args}` : ""}`
         const { value, caret } = spliceToken(cur, current.tokenStart, current.tokenEnd, replacement)
         controller.textInput.setInput(value)
+        noteCommandUsed(current.command.name)
         requestAnimationFrame(() => {
           const ta = textareaRef.current
           if (ta) {
@@ -596,7 +619,7 @@ function ComposerInner(props: InnerProps) {
         return null
       })
     },
-    [controller.textInput]
+    [controller.textInput, noteCommandUsed]
   )
 
   const handleParamFormCancel = useCallback(() => {
@@ -677,6 +700,14 @@ function ComposerInner(props: InnerProps) {
       // what gets sent.
       const hasCommand = segments.some((s) => s.kind === "command")
       if (hasCommand) {
+        // Remember every runnable command sent (covers typed-not-picked ones).
+        // Skip disabled/coming-soon commands so they can't pollute Recent — the
+        // pick path already guards them before noteCommandUsed.
+        for (const seg of segments) {
+          if (seg.kind === "command" && !commandMap.get(seg.name)?.disabled) {
+            noteCommandUsed(seg.name)
+          }
+        }
         const { outgoingText, overrides, ranAction } = await runSegments(segments, {
           commandMap,
           runAction: async (command, args) => {
@@ -729,6 +760,7 @@ function ComposerInner(props: InnerProps) {
     history,
     clearAfterSendEnabled,
     pastedBlocks,
+    noteCommandUsed,
   ])
 
   // --- Textarea key handling --------------------------------------------
@@ -743,6 +775,14 @@ function ComposerInner(props: InnerProps) {
         e.preventDefault()
         const next = nextPermissionMode(permissionMode)
         setPermissionMode(next)
+        return
+      }
+      // While an IME composition is active, Enter / Arrow / Tab / Escape belong
+      // to the candidate window — let them fall through so picking a Chinese (or
+      // Japanese, etc.) candidate doesn't accidentally confirm/navigate the
+      // popover. `nativeEvent.isComposing` is authoritative for the keystroke
+      // that ends composition; the state flag is a belt-and-suspenders backup.
+      if (trigger && (isComposing || e.nativeEvent.isComposing)) {
         return
       }
       if (trigger) {
@@ -777,6 +817,44 @@ function ComposerInner(props: InnerProps) {
           }
           if (popoverRef.current?.confirm()) {
             e.preventDefault()
+            return
+          }
+        }
+      }
+      // Atomic pill delete: a Backspace/Delete next to an already-inserted
+      // `/command` or `@mention` removes the WHOLE token in one keystroke, so a
+      // picked chip deletes as a unit instead of nibbling `/rese`. Only when no
+      // popover is open (mid-typing edits stay normal), not composing, plain key
+      // (let ⌥/⌘ word/line deletes through), and the selection is collapsed.
+      if (
+        !trigger &&
+        !isComposing &&
+        !e.nativeEvent.isComposing &&
+        (e.key === "Backspace" || e.key === "Delete") &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey
+      ) {
+        const ta = e.currentTarget
+        if (ta.selectionStart === ta.selectionEnd) {
+          const range = pillDeleteRange(
+            controller.textInput.value,
+            ta.selectionStart,
+            overlaySegments,
+            e.key === "Backspace" ? "backward" : "forward"
+          )
+          if (range) {
+            e.preventDefault()
+            const cur = controller.textInput.value
+            const next = cur.slice(0, range.start) + cur.slice(range.end)
+            controller.textInput.setInput(next)
+            requestAnimationFrame(() => {
+              const ta2 = textareaRef.current
+              if (ta2) {
+                ta2.setSelectionRange(range.start, range.start)
+                ta2.focus()
+              }
+            })
             return
           }
         }
@@ -857,6 +935,7 @@ function ComposerInner(props: InnerProps) {
       isComposing,
       history,
       controller.textInput,
+      overlaySegments,
       ghost,
       inputHistoryRecall,
       sendOnEnter,
@@ -1164,7 +1243,11 @@ function ComposerInner(props: InnerProps) {
         onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
       />
       <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
-      <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
+      <SkillChipRow
+        ids={ephemeralSkillIds}
+        onRemove={toggleEphemeralSkill}
+        disabledIds={props.session?.disabledSkillIds}
+      />
       {/* Folded large-paste chips — only those whose placeholder is still in the
           text (manual deletion drops the chip too). */}
       {(() => {
@@ -1296,7 +1379,7 @@ function ComposerInner(props: InnerProps) {
           <ComposerChipOverlay
             ref={chipOverlayRef}
             value={controller.textInput.value}
-            segments={segments}
+            segments={overlaySegments}
           />
           <ComposerGhostText
             ref={ghostOverlayRef}
@@ -1459,6 +1542,9 @@ function ComposerInner(props: InnerProps) {
         anchor={containerEl}
         mentionables={props.mentionables}
         chatAgents={chatAgents}
+        recentCommands={recentCommands}
+        pinnedCommands={pinnedCommands}
+        onTogglePin={togglePinnedCommand}
         onPick={onPickPopoverItem}
         onDismiss={dismissPopover}
       />

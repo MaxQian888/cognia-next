@@ -13,13 +13,21 @@ function isBoundary(ch: string): boolean {
   return ch === " " || ch === "/" || ch === "-" || ch === "_" || ch === "." || ch === ":"
 }
 
+/** A scored match plus the target indices each query char landed on. */
+export interface FuzzyMatchResult {
+  score: number
+  /** Indices in `target` (original casing) of every matched character. */
+  positions: number[]
+}
+
 /**
- * Score how well `query` fuzzy-matches `target`. Higher is better.
- * Returns `null` when `query` is not a subsequence of `target`.
- * An empty query returns `0` (neutral — every candidate matches equally).
+ * Score how well `query` fuzzy-matches `target` AND report which target indices
+ * the query characters matched. Higher score is better. Returns `null` when
+ * `query` is not a subsequence of `target`. An empty query returns score `0`
+ * (neutral) with no positions — every candidate matches equally.
  */
-export function fuzzyScore(query: string, target: string): number | null {
-  if (query.length === 0) return 0
+export function fuzzyMatch(query: string, target: string): FuzzyMatchResult | null {
+  if (query.length === 0) return { score: 0, positions: [] }
   const q = query.toLowerCase()
   const t = target.toLowerCase()
 
@@ -28,10 +36,12 @@ export function fuzzyScore(query: string, target: string): number | null {
   let prevMatch = -1
   let consecutive = 0
   let firstMatch = -1
+  const positions: number[] = []
 
   for (let ti = 0; ti < t.length && qi < q.length; ti++) {
     if (t[ti] !== q[qi]) continue
     if (firstMatch === -1) firstMatch = ti
+    positions.push(ti)
     let charScore = 1
     // Word-boundary matches read as "intentional" — weight them heavily.
     if (ti === 0 || isBoundary(t[ti - 1])) charScore += 3
@@ -55,7 +65,19 @@ export function fuzzyScore(query: string, target: string): number | null {
   // Prefer matches that start early and shorter targets overall.
   score -= firstMatch * 0.2
   score -= t.length * 0.05
-  return score
+  return { score, positions }
+}
+
+/**
+ * Score how well `query` fuzzy-matches `target`. Higher is better.
+ * Returns `null` when `query` is not a subsequence of `target`.
+ * An empty query returns `0` (neutral — every candidate matches equally).
+ *
+ * Thin wrapper over {@link fuzzyMatch} that drops the positions — kept so
+ * existing call sites that only need the score stay unchanged.
+ */
+export function fuzzyScore(query: string, target: string): number | null {
+  return fuzzyMatch(query, target)?.score ?? null
 }
 
 export interface FuzzyFilterOptions<T> {
@@ -78,24 +100,58 @@ export function fuzzyFilterSort<T>(
   getText: (item: T) => string,
   options: FuzzyFilterOptions<T> = {}
 ): T[] {
+  // Same ranking + secondary-text fallback as the ranked variant; this just
+  // drops the match positions callers here don't need.
+  return fuzzyFilterSortRanked(items, query, getText, options).map((r) => r.item)
+}
+
+/** An item kept by {@link fuzzyFilterSortRanked}, with its primary-text hits. */
+export interface RankedItem<T> {
+  item: T
+  /**
+   * Indices in the item's PRIMARY text that matched the query. Empty for an
+   * empty query and for items kept only via their secondary text (so the
+   * caller highlights the name only when the name actually matched).
+   */
+  positions: number[]
+}
+
+/**
+ * Like {@link fuzzyFilterSort}, but also returns the matched primary-text
+ * positions for each kept item so the UI can highlight them. Ranking and
+ * secondary-text fallback behave identically to `fuzzyFilterSort`.
+ */
+export function fuzzyFilterSortRanked<T>(
+  items: readonly T[],
+  query: string,
+  getText: (item: T) => string,
+  options: FuzzyFilterOptions<T> = {}
+): RankedItem<T>[] {
   const q = query.trim()
   if (!q) {
-    return options.limit != null ? items.slice(0, options.limit) : [...items]
+    const kept = options.limit != null ? items.slice(0, options.limit) : [...items]
+    return kept.map((item) => ({ item, positions: [] }))
   }
 
-  const scored: { item: T; score: number; idx: number }[] = []
+  const scored: { item: T; score: number; positions: number[]; idx: number }[] = []
   items.forEach((item, idx) => {
-    let score = fuzzyScore(q, getText(item))
-    if (score === null && options.secondaryText) {
-      const secondary = options.secondaryText(item)
-      const secondaryScore = secondary ? fuzzyScore(q, secondary) : null
-      // Demote description-only hits so a name match always wins.
-      if (secondaryScore !== null) score = secondaryScore - 100
+    const primary = fuzzyMatch(q, getText(item))
+    if (primary !== null) {
+      scored.push({ item, score: primary.score, positions: primary.positions, idx })
+      return
     }
-    if (score !== null) scored.push({ item, score, idx })
+    if (options.secondaryText) {
+      const secondary = options.secondaryText(item)
+      const secondaryMatch = secondary ? fuzzyMatch(q, secondary) : null
+      // Demote description-only hits so a name match always wins; no primary
+      // positions to highlight in that case.
+      if (secondaryMatch !== null) {
+        scored.push({ item, score: secondaryMatch.score - 100, positions: [], idx })
+      }
+    }
   })
 
   scored.sort((a, b) => b.score - a.score || a.idx - b.idx)
-  const result = scored.map((s) => s.item)
-  return options.limit != null ? result.slice(0, options.limit) : result
+  const ranked = scored.map((s) => ({ item: s.item, positions: s.positions }))
+  return options.limit != null ? ranked.slice(0, options.limit) : ranked
 }

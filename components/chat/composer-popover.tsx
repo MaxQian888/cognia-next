@@ -26,6 +26,8 @@ import {
   BookMarkedIcon,
   FileIcon,
   FolderIcon,
+  PinIcon,
+  PinOffIcon,
   SlashIcon,
   TerminalIcon,
 } from "lucide-react"
@@ -33,7 +35,13 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
-import { fuzzyFilterSort } from "@/lib/chat/completion/fuzzy-match"
+import { fuzzyFilterSortRanked } from "@/lib/chat/completion/fuzzy-match"
+import { MatchHighlight } from "@/components/chat/completion/match-highlight"
+import {
+  orderedCommandsForEmptyQuery,
+  slashGroupLabel,
+  type SlashGroup,
+} from "./composer-popover-groups"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import {
@@ -48,7 +56,14 @@ import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-tar
 import type { ComposerTrigger, TriggerKind } from "./composer-trigger"
 
 export type PopoverItem =
-  | { kind: "slash"; command: SlashCommand }
+  | {
+      kind: "slash"
+      command: SlashCommand
+      /** Matched indices in the command name (non-empty query only). */
+      positions?: number[]
+      /** Section tag for the empty-query grouped view. */
+      group?: SlashGroup
+    }
   | { kind: "file"; entry: WorkspaceEntry }
   | { kind: "memory"; scope: "project" | "user"; preview: string }
   | { kind: "agent"; target: MentionTarget }
@@ -82,6 +97,12 @@ interface Props {
    * team (`mentionMode="agents"`) composers.
    */
   chatAgents?: readonly SubagentMentionTarget[]
+  /** Recently-used command names (newest first) for the empty-query view. */
+  recentCommands?: readonly string[]
+  /** Pinned command names (pin order) for the empty-query view + pin toggles. */
+  pinnedCommands?: readonly string[]
+  /** Toggle a command's pinned state from a row's pin button. */
+  onTogglePin?: (name: string) => void
   /** Called when the user picks an item. */
   onPick: (item: PopoverItem) => void
   /** Called when the user dismisses the popover (Escape / outside click). */
@@ -96,7 +117,19 @@ interface ItemList {
 }
 
 export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function ComposerPopover(
-  { trigger, cwd, slashCommands, anchor, mentionables, chatAgents, onPick, onDismiss },
+  {
+    trigger,
+    cwd,
+    slashCommands,
+    anchor,
+    mentionables,
+    chatAgents,
+    recentCommands,
+    pinnedCommands,
+    onTogglePin,
+    onPick,
+    onDismiss,
+  },
   ref
 ) {
   const t = useTranslations("chat.composer.popover")
@@ -179,12 +212,24 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       return { items: [], loading: false, error: null, emptyMessage: "" }
     }
     if (trigger.kind === "slash") {
-      // Fuzzy-rank by command name (primary) and description (secondary) so
-      // typing `/gc` surfaces `git/commit` and the best match sorts first —
-      // matching the scored behavior the @-mention picker already uses.
-      const items: PopoverItem[] = fuzzyFilterSort(slashCommands, trigger.query, (c) => c.name, {
-        secondaryText: (c) => c.description,
-      }).map((command) => ({ kind: "slash" as const, command }))
+      const query = trigger.query.trim()
+      // Empty query → grouped view: Pinned → Recent → per-category, each with a
+      // section header. Non-empty → flat fuzzy-ranked list with matched-char
+      // highlight (ranking wins; grouping would fight the relevance order).
+      const items: PopoverItem[] =
+        query === ""
+          ? orderedCommandsForEmptyQuery(
+              slashCommands,
+              recentCommands ?? [],
+              pinnedCommands ?? []
+            ).map(({ command, group }) => ({ kind: "slash" as const, command, group }))
+          : fuzzyFilterSortRanked(slashCommands, trigger.query, (c) => c.name, {
+              secondaryText: (c) => c.description,
+            }).map(({ item, positions }) => ({
+              kind: "slash" as const,
+              command: item,
+              positions,
+            }))
       return {
         items,
         loading: false,
@@ -249,7 +294,18 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       error: null,
       emptyMessage: base.emptyMessage,
     }
-  }, [trigger, slashCommands, fileList, t, tMemory, tAgent, mentionables, chatAgents])
+  }, [
+    trigger,
+    slashCommands,
+    fileList,
+    t,
+    tMemory,
+    tAgent,
+    mentionables,
+    chatAgents,
+    recentCommands,
+    pinnedCommands,
+  ])
 
   // Clamp the highlight whenever the visible list shrinks below it. The
   // updater form means the clamp is idempotent if it fires multiple times.
@@ -292,6 +348,13 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
 
   const open = trigger !== null && anchor !== null
   const title = useMemo(() => triggerTitle(trigger?.kind, t, tAgent), [trigger?.kind, t, tAgent])
+  // O(1) pin lookups per row instead of a linear scan of pinnedCommands.
+  const pinnedSet = useMemo(() => new Set(pinnedCommands ?? []), [pinnedCommands])
+  // Hoisted out of the per-row header check so it isn't recomputed N times.
+  const hasSubagentSection = useMemo(
+    () => displayList.items.some((i) => i.kind === "subagent"),
+    [displayList.items]
+  )
 
   return (
     <Popover open={open} onOpenChange={(v) => (!v ? onDismiss() : undefined)}>
@@ -324,21 +387,12 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         ) : (
           <ul ref={listRef} className="max-h-72 overflow-auto py-1">
             {displayList.items.map((item, idx) => {
-              // Combined `@` mode mixes subagents + files. Render a (non-
-              // selectable, no `data-index`) section header at each kind change
-              // so keyboard navigation still walks the flat item array. Only
-              // active when subagents are present — pure file/slash lists stay
-              // header-free.
-              const showSections = displayList.items.some((i) => i.kind === "subagent")
-              const prevKind = idx === 0 ? undefined : displayList.items[idx - 1].kind
-              const header =
-                showSections &&
-                item.kind !== prevKind &&
-                (item.kind === "subagent" || item.kind === "file")
-                  ? item.kind === "subagent"
-                    ? t("agentsSection")
-                    : t("filesSection")
-                  : null
+              // Section headers are non-selectable (no `data-index`, absent from
+              // the flat item array) so keyboard nav still walks every real row.
+              // Two sources: combined `@` mode (subagents/files by kind change),
+              // and the empty-query slash view (Pinned/Recent/category groups).
+              const prev = idx === 0 ? undefined : displayList.items[idx - 1]
+              const header = sectionHeader(item, prev, hasSubagentSection, t)
               return (
                 <Fragment key={itemKey(item, idx)}>
                   {header ? (
@@ -351,8 +405,9 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                   ) : null}
                   <li
                     data-index={idx}
+                    data-active={idx === highlight ? "true" : undefined}
                     className={cn(
-                      "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm",
+                      "group/row flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-sm",
                       idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/40"
                     )}
                     onMouseEnter={() => setHighlight(idx)}
@@ -362,7 +417,11 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                       onPick(item)
                     }}
                   >
-                    <ItemRow item={item} />
+                    <ItemRow
+                      item={item}
+                      pinned={item.kind === "slash" ? pinnedSet.has(item.command.name) : false}
+                      onTogglePin={onTogglePin}
+                    />
                   </li>
                 </Fragment>
               )
@@ -404,6 +463,31 @@ function triggerTitle(
   }
 }
 
+/**
+ * Section-header label for a row, or null when no header precedes it. Covers the
+ * empty-query slash grouping (Pinned/Recent/category) and the combined-`@` mode
+ * (subagents/files). Headers carry no `data-index`, so keyboard nav is unaffected.
+ */
+function sectionHeader(
+  item: PopoverItem,
+  prev: PopoverItem | undefined,
+  hasSubagentSection: boolean,
+  t: (key: string, params?: Record<string, string | number | Date>) => string
+): string | null {
+  if (item.kind === "slash" && item.group) {
+    const prevGroup = prev && prev.kind === "slash" ? prev.group : undefined
+    return item.group !== prevGroup ? slashGroupLabel(item.group, t, safeLookup) : null
+  }
+  if (
+    hasSubagentSection &&
+    item.kind !== prev?.kind &&
+    (item.kind === "subagent" || item.kind === "file")
+  ) {
+    return item.kind === "subagent" ? t("agentsSection") : t("filesSection")
+  }
+  return null
+}
+
 function safeLookup(
   t: (key: string, params?: Record<string, string | number | Date>) => string,
   key: string,
@@ -430,7 +514,15 @@ function itemKey(item: PopoverItem, idx: number): string {
 
 // Memoised so navigating the highlight (a parent-level class change) only
 // re-renders the two affected rows, not the entire candidate list.
-const ItemRow = memo(function ItemRow({ item }: { item: PopoverItem }) {
+const ItemRow = memo(function ItemRow({
+  item,
+  pinned,
+  onTogglePin,
+}: {
+  item: PopoverItem
+  pinned: boolean
+  onTogglePin?: (name: string) => void
+}) {
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
   if (item.kind === "slash") {
@@ -438,7 +530,9 @@ const ItemRow = memo(function ItemRow({ item }: { item: PopoverItem }) {
     return (
       <>
         <SlashIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className={cn("font-mono text-xs", c.disabled && "opacity-60")}>/{c.name}</span>
+        <span className={cn("font-mono text-xs", c.disabled && "opacity-60")}>
+          /<MatchHighlight text={c.name} positions={item.positions ?? []} />
+        </span>
         {c.argumentHint ? (
           <span className="text-xs text-muted-foreground">{c.argumentHint}</span>
         ) : null}
@@ -447,6 +541,30 @@ const ItemRow = memo(function ItemRow({ item }: { item: PopoverItem }) {
         >
           {c.disabled ? t("comingSoon") : c.description}
         </span>
+        {onTogglePin ? (
+          <button
+            type="button"
+            aria-label={
+              pinned ? t("unpinAction", { name: c.name }) : t("pinAction", { name: c.name })
+            }
+            className={cn(
+              "shrink-0 rounded p-0.5 text-muted-foreground transition-opacity hover:text-foreground",
+              pinned
+                ? "opacity-100"
+                : // Reveal on row hover / keyboard-highlight at pointer-fine; always
+                  // visible on touch (no hover, no keyboard) so pinning is reachable.
+                  "opacity-0 group-hover/row:opacity-100 group-data-[active=true]/row:opacity-100 [@media(hover:none)]:opacity-100"
+            )}
+            onMouseDown={(e) => {
+              // A pin click must not pick/insert the command underneath it.
+              e.preventDefault()
+              e.stopPropagation()
+              onTogglePin(c.name)
+            }}
+          >
+            {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+          </button>
+        ) : null}
         <span className="rounded border px-1 text-[10px] text-muted-foreground">{c.scope}</span>
       </>
     )

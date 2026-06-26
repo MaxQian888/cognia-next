@@ -100,10 +100,12 @@ describe("ComposerPopover — keyboard navigation handle", () => {
       picked = ref.current!.confirm()
     })
     expect(picked).toBe(true)
-    expect(onPick).toHaveBeenCalledWith({
-      kind: "slash",
-      command: expect.objectContaining({ name: "cost" }),
-    })
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "slash",
+        command: expect.objectContaining({ name: "cost" }),
+      })
+    )
   })
 
   it("navigate() moves the highlight before confirming", () => {
@@ -114,10 +116,12 @@ describe("ComposerPopover — keyboard navigation handle", () => {
     act(() => {
       ref.current!.confirm()
     })
-    expect(onPick).toHaveBeenCalledWith({
-      kind: "slash",
-      command: expect.objectContaining({ name: "compact" }),
-    })
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "slash",
+        command: expect.objectContaining({ name: "compact" }),
+      })
+    )
   })
 
   it("navigate() wraps around the list", () => {
@@ -129,10 +133,12 @@ describe("ComposerPopover — keyboard navigation handle", () => {
       ref.current!.confirm()
     })
     // Wrapping up from index 0 lands on the last item ("compact").
-    expect(onPick).toHaveBeenCalledWith({
-      kind: "slash",
-      command: expect.objectContaining({ name: "compact" }),
-    })
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "slash",
+        command: expect.objectContaining({ name: "compact" }),
+      })
+    )
   })
 
   it("confirm() returns false when the list is empty", () => {
@@ -229,5 +235,90 @@ describe("ComposerPopover — combined @ panel (subagents + files)", () => {
       />
     )
     expect(screen.queryByText("agentsSection")).not.toBeInTheDocument()
+  })
+})
+
+describe("ComposerPopover — highlight, grouping & pinning", () => {
+  function setupSlash(
+    trigger: ComposerTrigger | null,
+    extra: Partial<React.ComponentProps<typeof ComposerPopover>> = {}
+  ) {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const ref = createRef<ComposerPopoverHandle>()
+    const onPick = (extra.onPick as jest.Mock) ?? jest.fn()
+    render(
+      <ComposerPopover
+        ref={ref}
+        trigger={trigger}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        onPick={onPick}
+        onDismiss={jest.fn()}
+        {...extra}
+      />
+    )
+    return { ref, onPick }
+  }
+
+  it("highlights the matched characters in a row name", () => {
+    setupSlash(slashTrigger("co"))
+    // "cost" row → "co" wrapped in a <mark>.
+    const marks = document.querySelectorAll("mark")
+    expect(Array.from(marks).some((m) => m.textContent === "co")).toBe(true)
+  })
+
+  it("renders Pinned / Recent / category section headers for an empty query", () => {
+    setupSlash(slashTrigger(""), {
+      pinnedCommands: ["model"],
+      recentCommands: ["cost"],
+      onTogglePin: jest.fn(),
+    })
+    expect(screen.getByText("Pinned")).toBeInTheDocument()
+    expect(screen.getByText("Recent")).toBeInTheDocument()
+    // Remaining uncategorized commands fall under "Other".
+    expect(screen.getByText("Other")).toBeInTheDocument()
+  })
+
+  it("keyboard nav skips headers — confirm() at index 0 picks the pinned command", () => {
+    const { ref, onPick } = setupSlash(slashTrigger(""), {
+      pinnedCommands: ["model"],
+      recentCommands: ["cost"],
+      onTogglePin: jest.fn(),
+    })
+    act(() => {
+      ref.current!.confirm()
+    })
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "slash",
+        command: expect.objectContaining({ name: "model" }),
+        group: "pinned",
+      })
+    )
+  })
+
+  it("renders a pin button that toggles without picking the command", () => {
+    const onTogglePin = jest.fn()
+    const onPick = jest.fn()
+    setupSlash(slashTrigger(""), { onTogglePin, onPick })
+    // Pin a command via its aria-label (mocked t echoes the key + params).
+    const pinButtons = screen.getAllByRole("button", { name: /pinAction/ })
+    expect(pinButtons.length).toBeGreaterThan(0)
+    act(() => {
+      pinButtons[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
+    })
+    expect(onTogglePin).toHaveBeenCalledTimes(1)
+    // The mousedown must NOT bubble into a row pick.
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
+  it("shows an unpin affordance for an already-pinned command", () => {
+    setupSlash(slashTrigger(""), {
+      pinnedCommands: ["model"],
+      onTogglePin: jest.fn(),
+    })
+    expect(screen.getAllByRole("button", { name: /unpinAction/ }).length).toBeGreaterThan(0)
   })
 })

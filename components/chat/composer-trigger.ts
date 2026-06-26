@@ -13,6 +13,8 @@
 //   - The token ends at the next whitespace; backspacing over the trigger
 //     char dismisses the popover.
 
+import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
+
 export type TriggerKind = "slash" | "file" | "bash" | "memory" | "agent"
 
 export type MentionMode = "files" | "agents" | "combined"
@@ -107,8 +109,7 @@ export function detectTrigger(
   for (let i = caret - 1; i >= 0; i--) {
     const ch = value[i]
     if (ch === "@") {
-      const prev = i === 0 ? "" : value[i - 1]
-      if (prev !== "" && !/\s/.test(prev)) {
+      if (!isMentionStart(value, i)) {
         // Looks like an email or `path/@thing` — skip.
         return null
       }
@@ -127,13 +128,6 @@ export function detectTrigger(
     if (/\s/.test(ch)) break
   }
   return null
-}
-
-function findTokenEnd(value: string, start: number, hardEnd: number): number {
-  for (let i = start; i < hardEnd; i++) {
-    if (/\s/.test(value[i])) return i
-  }
-  return hardEnd
 }
 
 /**

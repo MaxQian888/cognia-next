@@ -13,7 +13,7 @@
 
 import { forwardRef, memo } from "react"
 import { cn } from "@/lib/utils"
-import { TEXTAREA_TYPOGRAPHY } from "../composer-chip-overlay"
+import { TEXTAREA_TYPOGRAPHY, OVERLAY_FONT_SIZE } from "../composer-chip-overlay"
 
 interface ComposerGhostTextProps {
   /** The full textarea value the ghost trails. */
@@ -40,6 +40,7 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
             "block min-h-6 w-full break-words whitespace-pre-wrap",
             TEXTAREA_TYPOGRAPHY
           )}
+          style={{ fontSize: OVERLAY_FONT_SIZE }}
         >
           <span className="text-transparent">{value}</span>
           <span className="text-muted-foreground/50">{ghost}</span>

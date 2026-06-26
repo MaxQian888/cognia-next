@@ -143,9 +143,10 @@ describe("Composer — slash popover (keyboard, end-to-end)", () => {
     fireEvent.keyDown(ta, { key: "Enter" })
     await new Promise((r) => setTimeout(r, 30))
 
-    // Deferred-execution UX: confirm drops the picked `/cmd` into the box (the
-    // partial "co" the user typed survives as trailing args), and sends nothing.
-    expect(ta.value.startsWith(`/${expected}`)).toBe(true)
+    // Deferred-execution UX: confirm REPLACES the typed `/co` token with the
+    // full `/cmd ` and sends nothing. The partial "co" must NOT linger as args
+    // (that produced "/reset res"-style garbage).
+    expect(ta.value).toBe(`/${expected} `)
     expect(onSend).not.toHaveBeenCalled()
     expect(rows()).toHaveLength(0) // popover dismissed
   })
@@ -163,9 +164,65 @@ describe("Composer — slash popover (keyboard, end-to-end)", () => {
     fireEvent.keyDown(ta, { key: "Tab" })
     await new Promise((r) => setTimeout(r, 30))
 
-    expect(ta.value.startsWith(`/${expected}`)).toBe(true)
+    expect(ta.value).toBe(`/${expected} `)
     expect(onSend).not.toHaveBeenCalled()
     expect(rows()).toHaveLength(0) // popover dismissed
+  })
+
+  it("replaces a partial query when picking — never leaves it as args (no '/reset res')", async () => {
+    const { ta } = renderComposer()
+    // Type a partial prefix, then pick the highlighted completion.
+    await typeValue(ta, "/cl")
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 30))
+    // The whole `/cl` token is replaced by a single `/<name> ` token with a lone
+    // trailing space — no embedded args. The bug produced "/clear cl " (the typed
+    // "cl" leaked in as an argument), which has an interior space and fails this.
+    expect(ta.value).toMatch(/^\/\S+ $/)
+    expect(ta.value).not.toMatch(/\bcl\b/)
+  })
+
+  it("Backspace deletes a picked command as one chip (not char-by-char)", async () => {
+    const { ta } = renderComposer()
+    await typeValue(ta, "/cl")
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(ta.value).toMatch(/^\/\S+ $/) // "/clear "
+
+    // Caret sits after the chip + trailing space (where the pick left it).
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+    fireEvent.keyDown(ta, { key: "Backspace" })
+    await new Promise((r) => setTimeout(r, 30))
+    // One Backspace removed the whole command token + its space.
+    expect(ta.value).toBe("")
+  })
+
+  it("does not hijack ArrowDown/Enter while an IME composition is active", async () => {
+    const { ta, onSend } = renderComposer()
+    await typeValue(ta, "/co")
+    await waitFor(() => expect(rows().length).toBeGreaterThan(1))
+    expect(highlightedIndex()).toBe(0)
+
+    // Mid-composition keystrokes belong to the IME candidate window — the
+    // popover must ignore them so a Chinese candidate Enter doesn't pick a cmd.
+    fireEvent.keyDown(ta, { key: "ArrowDown", isComposing: true })
+    expect(highlightedIndex()).toBe(0) // highlight unchanged
+
+    fireEvent.keyDown(ta, { key: "Enter", isComposing: true })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(ta.value).toBe("/co") // nothing spliced
+    expect(onSend).not.toHaveBeenCalled()
+    expect(rows().length).toBeGreaterThan(1) // popover still open
+
+    // Once composition ends, navigation + Enter confirm as normal.
+    fireEvent.keyDown(ta, { key: "ArrowDown" })
+    expect(highlightedIndex()).toBe(1)
+    const expected = nameOf(rowTexts()[1])
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(ta.value.startsWith(`/${expected}`)).toBe(true)
   })
 
   it("ArrowUp from the first row wraps the highlight to the last row", async () => {
