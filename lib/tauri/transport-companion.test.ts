@@ -17,6 +17,7 @@ import {
   CompanionError,
   CompanionTransport,
   __resetCompanionConfigCacheForTests,
+  __setBackoffRandomForTests,
   classifyWsHost,
   clearCompanionConfig,
   hydrateCompanionConfig,
@@ -673,6 +674,46 @@ describe("WebSocket reconnect", () => {
   beforeEach(() => {
     setConfig()
     jest.useFakeTimers()
+    // Pin the backoff jitter to its midpoint (factor 1.0) so these tests can
+    // assert the exact 1s → 2s → 4s schedule.
+    __setBackoffRandomForTests(() => 0.5)
+  })
+
+  afterEach(() => {
+    __setBackoffRandomForTests(null)
+  })
+
+  it("jitters the reconnect delay around the base backoff", async () => {
+    // Max jitter (factor 1.15) pushes the first 1s step out past 1000ms.
+    __setBackoffRandomForTests(() => 1)
+    transport = new CompanionTransport()
+    transport.subscribe("ch:test", jest.fn())
+    const ws1 = MockWebSocket.lastInstance!
+    ws1.triggerOpen()
+    ws1.triggerClose()
+
+    await jest.advanceTimersByTimeAsync(1000)
+    expect(MockWebSocket.instances.length).toBe(1) // not yet — jitter widened it
+    await jest.advanceTimersByTimeAsync(150)
+    expect(MockWebSocket.instances.length).toBe(2)
+  })
+
+  it("does not schedule a reconnect while the OS reports offline", async () => {
+    const onLineSpy = jest.spyOn(window.navigator, "onLine", "get").mockReturnValue(false)
+    try {
+      transport = new CompanionTransport()
+      transport.subscribe("ch:test", jest.fn())
+      const ws1 = MockWebSocket.lastInstance!
+      ws1.triggerOpen()
+      ws1.triggerClose()
+
+      // Even after well past every backoff step, no new socket is created —
+      // the online listener owns resumption when connectivity returns.
+      await jest.advanceTimersByTimeAsync(60_000)
+      expect(MockWebSocket.instances.length).toBe(1)
+    } finally {
+      onLineSpy.mockRestore()
+    }
   })
 
   it("reconnects after close with backoff 1s → 2s → 4s", async () => {

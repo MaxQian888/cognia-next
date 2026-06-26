@@ -31,6 +31,12 @@ export type SyncableTable =
   // Mobile mirrors these so the Inbox can render pinned/unread state when
   // the companion server is unreachable.
   | "conversationOverrides"
+  // Companion read-mostly views: mirror /goal console + long-term memory so
+  // the phone can show goal progress and recalled memories from Dexie while
+  // the desktop is unreachable. Both are authored on the desktop; mobile is
+  // a viewer.
+  | "goals"
+  | "memories"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

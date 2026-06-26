@@ -16,6 +16,7 @@ import {
   BellIcon,
   BookmarkIcon,
   BookOpenIcon,
+  BrainIcon,
   CalendarClockIcon,
   ChartBarIcon,
   DatabaseIcon,
@@ -31,6 +32,7 @@ import {
   SaveIcon,
   SlidersHorizontalIcon,
   SmartphoneIcon,
+  TargetIcon,
   TerminalSquareIcon,
   TypeIcon,
   UserRoundIcon,
@@ -201,6 +203,14 @@ export const ME_ENTRIES: MeEntry[] = [
     section: "automation",
     keywords: ["schedule", "cron", "task", "计划", "定时", "任务"],
   },
+  {
+    id: "goals",
+    icon: TargetIcon,
+    labelKey: "goalsRow",
+    href: "/goals",
+    section: "automation",
+    keywords: ["goal", "objective", "progress", "目标", "进度"],
+  },
 
   // === Data ===
   {
@@ -226,6 +236,14 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/storage",
     section: "data",
     keywords: ["storage", "usage", "disk", "存储", "用量"],
+  },
+  {
+    id: "memory",
+    icon: BrainIcon,
+    labelKey: "memoryRow",
+    href: "/memory",
+    section: "data",
+    keywords: ["memory", "recall", "long-term", "记忆", "长期记忆"],
   },
 
   // === About ===

@@ -135,6 +135,10 @@ export async function readDexieDelta(
       return readSettingsDelta(since)
     case "conversationOverrides":
       return readConversationOverridesDelta(since)
+    case "goals":
+      return readGoalsDelta(since)
+    case "memories":
+      return readMemoriesDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -148,8 +152,11 @@ async function readCharactersDelta(since: number): Promise<SyncDelta<Character>>
 }
 
 async function readSkillsDelta(since: number): Promise<SyncDelta<Skill>> {
-  const all = await getDb().skills.toArray()
-  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+  // skills carries an `updatedAt` index (schema `id, name, updatedAt, ...`),
+  // so pull only the rows past the cursor instead of scanning the whole
+  // table into memory and filtering — a large skill library otherwise
+  // hydrated every row on every pull. Mirrors readSessionsDelta.
+  const rows = await getDb().skills.where("updatedAt").above(since).toArray()
   return finalizeDelta("skills", rows, since)
 }
 
@@ -202,6 +209,22 @@ async function readConversationOverridesDelta(since: number): Promise<SyncDelta<
   // archived / lastReadAt so the Inbox renders correct buckets offline.
   const rows = await getDb().conversationOverrides.where("updatedAt").above(since).toArray()
   return finalizeDelta("conversationOverrides", rows as unknown as UpdatedAtRow[], since)
+}
+
+async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {
+  // chatGoals carries an `updatedAt` index (schema `…, createdAt, updatedAt`),
+  // so pull only the rows past the cursor instead of scanning the whole table.
+  const rows = await getDb().chatGoals.where("updatedAt").above(since).toArray()
+  return finalizeDelta("goals", rows as UpdatedAtRow[], since)
+}
+
+async function readMemoriesDelta(since: number): Promise<SyncDelta<unknown>> {
+  // memories has an `updatedAt` field but NOT an index on it (schema indexes
+  // scope/type/status/…), so we can't `.where("updatedAt").above`. Read all
+  // and filter — mirrors readPluginsDelta. The personal memory store is small.
+  const all = await getDb().memories.toArray()
+  const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
+  return finalizeDelta("memories", rows as UpdatedAtRow[], since)
 }
 
 /**

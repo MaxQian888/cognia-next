@@ -179,6 +179,24 @@ const WS_CLOSE_GRACE_MS = 30_000
 /** HTTP call timeout (ms). */
 const CALL_TIMEOUT_MS = 30_000
 
+/** Jitter randomness source — overridable so reconnect-timing tests stay
+ * deterministic while production gets real spread. */
+let backoffRandom: () => number = Math.random
+
+/** Test seam: pin the jitter source. Pass `null` to restore `Math.random`. */
+export function __setBackoffRandomForTests(fn: (() => number) | null): void {
+  backoffRandom = fn ?? Math.random
+}
+
+/**
+ * Spread a backoff delay by ±15% so a fleet of devices that all dropped on
+ * the same Wi-Fi flap don't reconnect in lockstep and hammer the desktop in a
+ * synchronized thundering herd.
+ */
+function withJitter(ms: number): number {
+  return Math.round(ms * (0.85 + backoffRandom() * 0.3))
+}
+
 // ---------------------------------------------------------------------------
 // CompanionTransport
 // ---------------------------------------------------------------------------
@@ -279,10 +297,14 @@ export class CompanionTransport implements Transport {
     // TransportRtc surface returns the same `result` payload the HTTP path
     // would, so callers see no difference.
     const isReadOnly = READ_ONLY_COMMANDS.has(name)
+    // Mint the idempotency key once and reuse it across the RTC attempt and
+    // the HTTPS fallback. If the DataChannel write reached the server and ran
+    // before the channel hard-failed, the fallback request carrying the same
+    // key lets the server dedupe instead of double-executing the command.
+    const idempotencyKey = isReadOnly ? undefined : crypto.randomUUID()
     if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
       try {
         const params = args ?? {}
-        const idempotencyKey = isReadOnly ? undefined : crypto.randomUUID()
         return await this.rtc.call<T>(name, idempotencyKey ? { ...params, idempotencyKey } : params)
       } catch (err) {
         // Hard-fail on the data channel → fall back to HTTPS. The data
@@ -298,8 +320,8 @@ export class CompanionTransport implements Transport {
       Authorization: `Bearer ${config.deviceJwt}`,
       "Content-Type": "application/json",
     }
-    if (!isReadOnly) {
-      headers["Idempotency-Key"] = crypto.randomUUID()
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey
     }
 
     return this.fetchWithRetry<T>(url, headers, JSON.stringify(args ?? {}))
@@ -823,10 +845,17 @@ export class CompanionTransport implements Transport {
 
   private scheduleWsReconnect(): void {
     if (this.wsReconnectTimer !== null) return
+    // Don't schedule reconnect attempts while the OS reports no network: each
+    // would just burn a 30s timeout failing to connect. The online listener
+    // re-opens the socket (and resets the backoff) when connectivity returns.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      this.setConnectionState("offline")
+      return
+    }
     this.setConnectionState("reconnecting")
 
     const idx = Math.min(this.wsReconnectAttempt, WS_BACKOFF_MS.length - 1)
-    const delay = WS_BACKOFF_MS[idx]
+    const delay = withJitter(WS_BACKOFF_MS[idx])
     this.wsReconnectAttempt++
 
     this.wsReconnectTimer = setTimeout(() => {

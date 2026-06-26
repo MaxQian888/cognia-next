@@ -131,7 +131,9 @@ export function WorkflowList({ className }: WorkflowListProps) {
 
   const handleRefresh = async (): Promise<void> => {
     try {
-      await runSyncDown()
+      // This screen only renders workflows — pull-to-refresh shouldn't drag
+      // the other nine tables across the wire.
+      await runSyncDown({ only: ["workflows"] })
     } catch {
       // Orchestrator swallows handler-level failures; nothing more to do.
     }

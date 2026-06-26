@@ -23,6 +23,29 @@ jest.mock("@/lib/queue/outbound-queue", () => ({
   getQueueSummary: () => getQueueSummaryMock(),
 }))
 
+// Stand in for the Dexie live query: run the querier once on mount and on dep
+// change, surfacing the resolved value like the real hook would after a write.
+jest.mock("@/hooks/data", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest.mock factory is hoisted above imports, so React must be required inside it.
+  const React = require("react")
+  return {
+    useClientLiveQuery: <T,>(query: () => Promise<T> | T, deps: unknown[], initial: T): T => {
+      const [value, setValue] = React.useState(initial)
+      React.useEffect(() => {
+        let cancelled = false
+        void Promise.resolve(query()).then((r: T) => {
+          if (!cancelled) setValue(r)
+        })
+        return () => {
+          cancelled = true
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, deps)
+      return value
+    },
+  }
+})
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {

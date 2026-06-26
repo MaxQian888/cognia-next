@@ -121,7 +121,10 @@ export function DiscoverMobileBody() {
   // successful regardless of network state.
   const onRefresh = async () => {
     try {
-      await runSyncDown()
+      // Discover only renders the content tables below — scope the pull so it
+      // doesn't also sync sessions/messages/workflows/settings the user can't
+      // see from here.
+      await runSyncDown({ only: ["characters", "skills", "twinProfile", "plugins"] })
     } catch {
       // Transport may be uninitialised on web/dev — fall through.
     }

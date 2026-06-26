@@ -51,6 +51,8 @@ import {
 } from "@/lib/agent-team/runtime-targets"
 import { dispatchTeamMention } from "@/lib/agent-team/team-runtime-dispatcher"
 import { createCompositeStreamer } from "@/lib/agent-team/runtime-streamers"
+import { usePlatform } from "@/hooks/use-platform"
+import { TeamWorkspaceMobile } from "@/components/mobile/agent-teams/team-workspace-mobile"
 import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availability"
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
 import { getProviderModel } from "@cognia/provider-core/core/client"
@@ -352,10 +354,22 @@ function resolveExternalAgentIdByPreset(runtime: TeammateRuntime): string | null
   return match?.id ?? null
 }
 
+/**
+ * Platform router. The mobile companion renders a read-mostly workspace body
+ * (the desktop tab shell has no usable mobile layout); desktop keeps the full
+ * inner workspace. Dispatching here — not inside the inner component — keeps
+ * the rules-of-hooks intact (each branch is its own component).
+ */
+function AgentTeamWorkspaceRouter() {
+  const platform = usePlatform()
+  if (platform === "mobile") return <TeamWorkspaceMobile />
+  return <AgentTeamWorkspaceInner />
+}
+
 export default function AgentTeamWorkspacePage() {
   return (
     <Suspense fallback={null}>
-      <AgentTeamWorkspaceInner />
+      <AgentTeamWorkspaceRouter />
     </Suspense>
   )
 }

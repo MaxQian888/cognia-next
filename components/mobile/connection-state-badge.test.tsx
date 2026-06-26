@@ -3,6 +3,7 @@
  */
 
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { ConnectionStateBadge } from "./connection-state-badge"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
@@ -99,5 +100,16 @@ describe("ConnectionStateBadge", () => {
     const trigger = screen.getByTestId("connection-state-badge")
     expect(trigger.tagName.toLowerCase()).toBe("button")
     expect(trigger).toHaveAttribute("aria-label")
+  })
+
+  it("reveals the sync-status section once the controlled menu is opened", async () => {
+    // The menu is controlled (open/onOpenChange) so the relative-time clock
+    // only runs while it's open; opening it must still render the sync rows.
+    const user = userEvent.setup()
+    mockedUse.mockReturnValue("connected")
+    render(<ConnectionStateBadge />)
+    await user.click(screen.getByTestId("connection-state-badge"))
+    expect(await screen.findByText("Sync status")).toBeInTheDocument()
+    expect(await screen.findByTestId("connection-sync-row-sessions")).toBeInTheDocument()
   })
 })

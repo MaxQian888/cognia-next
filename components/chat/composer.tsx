@@ -151,6 +151,7 @@ import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
 import { ScreenshotButton } from "./composer/screenshot-button"
+import { CameraCaptureButton } from "./composer/camera-capture-button"
 import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
@@ -1364,7 +1365,11 @@ function ComposerInner(props: InnerProps) {
 
           <FolderPickerButton disabled={props.disabled} />
 
-          {isDesktop && <ScreenshotButton disabled={props.disabled} />}
+          {isDesktop ? (
+            <ScreenshotButton disabled={props.disabled} />
+          ) : isMobile ? (
+            <CameraCaptureButton disabled={props.disabled} />
+          ) : null}
 
           <VoiceTranscriptionBridge disabled={props.disabled} />
         </div>

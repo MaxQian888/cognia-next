@@ -34,6 +34,8 @@ import { syncAdapterInstances } from "./handlers/adapter-instances"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
+import { syncGoals } from "./handlers/goals"
+import { syncMemories } from "./handlers/memory"
 import { syncMessages } from "./handlers/messages"
 import { syncPlugins } from "./handlers/plugins"
 import { syncSessions } from "./handlers/sessions"
@@ -67,6 +69,11 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // never pulls it and the mobile inbox renders every conversation as
   // unread + unpinned.
   { table: "conversationOverrides", run: syncConversationOverrides },
+  // Companion read-mostly views (Goals console + long-term memory). Mobile
+  // mirrors these so the phone can show goal progress / recalled memories
+  // from Dexie offline; both are authored on the desktop.
+  { table: "goals", run: syncGoals },
+  { table: "memories", run: syncMemories },
 ]
 
 /**
