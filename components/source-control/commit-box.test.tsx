@@ -31,6 +31,7 @@ function setAiEnabled(enabled: boolean) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  window.localStorage.clear()
   act(() => {
     useGitStore.setState({ commitDraft: {}, commitAmend: false })
   })
@@ -63,6 +64,39 @@ describe("CommitBox", () => {
       fireEvent.keyDown(screen.getByTestId("commit-message"), { key: "Enter", ctrlKey: true })
     })
     expect(actions.commit).toHaveBeenCalled()
+  })
+
+  it("recalls a prior commit message with ArrowUp on the first line", async () => {
+    const actions = makeActions()
+    act(() => useGitStore.getState().setCommitDraft("/r", "feat: one"))
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    await act(async () => {
+      fireEvent.keyDown(screen.getByTestId("commit-message"), { key: "Enter", ctrlKey: true })
+    })
+    expect(actions.commit).toHaveBeenCalledWith("feat: one", { amend: false, signoff: false })
+    expect(useGitStore.getState().commitDraft["/r"]).toBe("") // cleared after commit
+    fireEvent.keyDown(screen.getByTestId("commit-message"), { key: "ArrowUp" })
+    expect(useGitStore.getState().commitDraft["/r"]).toBe("feat: one")
+  })
+
+  it("leaves caret line-navigation intact: ArrowUp on a lower line doesn't recall", async () => {
+    const actions = makeActions()
+    // Seed history with one committed message.
+    act(() => useGitStore.getState().setCommitDraft("/r", "feat: seed"))
+    const { rerender } = render(
+      <CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />
+    )
+    await act(async () => {
+      fireEvent.keyDown(screen.getByTestId("commit-message"), { key: "Enter", ctrlKey: true })
+    })
+    // New multi-line draft; place the caret on the SECOND line.
+    act(() => useGitStore.getState().setCommitDraft("/r", "line1\nline2"))
+    rerender(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    const ta = screen.getByTestId("commit-message") as HTMLTextAreaElement
+    ta.setSelectionRange(11, 11) // end of "line2"
+    fireEvent.keyDown(ta, { key: "ArrowUp" })
+    // Not on the first line → history is NOT engaged; draft is untouched.
+    expect(useGitStore.getState().commitDraft["/r"]).toBe("line1\nline2")
   })
 
   it("shows the amend label when amend is active and allows committing with no staged files", () => {
