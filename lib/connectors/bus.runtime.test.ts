@@ -35,6 +35,15 @@ jest.mock("@/lib/twin/ingest/redact", () => ({
   hasNoLeakingPii: () => true,
 }))
 
+// Inbound OCR is mocked so the image-gate true-branch can be asserted without
+// standing up the real OCR provider. The real `hasOcrableInboundImage` predicate
+// is kept (requireActual) so the gate still decides correctly.
+const mockRunInboundOcr = jest.fn(async () => undefined)
+jest.mock("./inbound-ocr", () => ({
+  ...jest.requireActual("./inbound-ocr"),
+  runInboundOcr: (...args: unknown[]) => mockRunInboundOcr(...(args as [])),
+}))
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeAdapter(id: string): PlatformAdapter {
@@ -125,6 +134,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     mockConnectorDecision.mockResolvedValue({ action: "allow" })
     mockPiiDeep.mockReset()
     mockPiiDeep.mockReturnValue(true)
+    mockRunInboundOcr.mockClear()
 
     // Seed adapter instances
     const autoRow = await createAdapterInstance({
@@ -155,6 +165,20 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     bus.registerAdapter(makeAdapter(autoAdapterId))
     bus.registerAdapter(makeAdapter(manualAdapterId))
     bus.routeHandler = routeHandler
+  })
+
+  it("runs inbound OCR only when an inbound image carries inline bytes (gate)", async () => {
+    const bus = getBus()
+    // Text-only inbound → gate false → OCR skipped.
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_text_no_ocr"))
+    expect(mockRunInboundOcr).not.toHaveBeenCalled()
+    // Inbound image with inline bytes → gate true → OCR invoked.
+    const imageEvent: NormalizedInboundEvent = {
+      ...privateEvent(autoAdapterId, "msg_image_ocr"),
+      segments: [{ type: "image", url: "img://x", dataBase64: "AAAA" } as never],
+    }
+    await bus.dispatchInboundFull(imageEvent)
+    expect(mockRunInboundOcr).toHaveBeenCalledTimes(1)
   })
 
   it("plugin onConnectorInbound block stops the turn (routeHandler not called)", async () => {

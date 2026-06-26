@@ -9,7 +9,12 @@ jest.mock("./audit", () => ({
   appendAudit: (...a: unknown[]) => appendAuditMock(...a),
 }))
 
-import { maybeOcrInboundSegments, runInboundOcr, type InboundOcrDeps } from "./inbound-ocr"
+import {
+  hasOcrableInboundImage,
+  maybeOcrInboundSegments,
+  runInboundOcr,
+  type InboundOcrDeps,
+} from "./inbound-ocr"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { OcrResult } from "@/types/ocr"
 
@@ -158,5 +163,21 @@ describe("runInboundOcr (production wrapper)", () => {
     appendAuditMock.mockClear()
     await runInboundOcr({ segments: [imageSeg({ dataBase64: "AAAA" })] })
     expect(appendAuditMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("hasOcrableInboundImage", () => {
+  it("is true only when an image segment carries non-empty inline bytes", () => {
+    expect(hasOcrableInboundImage([{ type: "text", text: "hi" } as MessageSegment])).toBe(false)
+    // Image arriving as a bare URL — no inline bytes, nothing to OCR.
+    expect(hasOcrableInboundImage([imageSeg()])).toBe(false)
+    expect(hasOcrableInboundImage([imageSeg({ dataBase64: "" })])).toBe(false)
+    expect(hasOcrableInboundImage([imageSeg({ dataBase64: "AAAA" })])).toBe(true)
+    expect(
+      hasOcrableInboundImage([
+        { type: "text", text: "hi" } as MessageSegment,
+        imageSeg({ dataBase64: "AAAA" }),
+      ])
+    ).toBe(true)
   })
 })

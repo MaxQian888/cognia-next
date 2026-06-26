@@ -22,8 +22,9 @@
 
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
-import { createAdapterInstance } from "@/lib/db/adapter-instances"
-import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
+import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { installRuntime, inboundEventToSendContent, type RunAndCaptureFn } from "./runtime"
 import { getBus, __resetBusForTesting } from "./bus"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
@@ -126,7 +127,15 @@ async function callHandler(
 ): Promise<void> {
   const bus = getBus()
   if (!bus.routeHandler) throw new Error("routeHandler not installed")
-  await bus.routeHandler(event, decision, resolved)
+  // Mirror the bus: it fetches the adapter + override rows once and threads
+  // them into the handler. Read the seeded rows here so the inboxPolicy /
+  // team / workflow branches still exercise their inputs. The bus guarantees a
+  // non-null adapter row before calling the handler (it returns early on a
+  // missing adapter), so synthesize a minimal one when a test didn't seed one.
+  const adapterRow =
+    (await getAdapterInstance(event.adapterId)) ?? ({ id: event.adapterId } as AdapterInstanceRow)
+  const override = (await readForResolution(event.conversationKey)) ?? null
+  await bus.routeHandler(event, decision, resolved, override, adapterRow)
 }
 
 /**

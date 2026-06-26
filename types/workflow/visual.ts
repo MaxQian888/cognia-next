@@ -746,6 +746,15 @@ export interface WorkflowRunRow {
    */
   triggeredBy?: WorkflowTriggeredFrom
   /**
+   * Denormalised copy of `triggeredBy.source` (Dexie v91), promoted to a
+   * top-level INDEXED column because Dexie cannot index nested object props.
+   * Lets `workflow-progress-runner` watch only IM-triggered runs via
+   * `.where("triggeredBySource").equals("im")` instead of scanning the whole
+   * `workflowRuns` table on every run. Stamped at run creation and backfilled
+   * for legacy rows (`triggeredBy?.source ?? "ui"`).
+   */
+  triggeredBySource?: string
+  /**
    * Dead-letter / replay metadata (A3). All additive + non-indexed (no Dexie
    * version bump): the dead-letter panel queries the existing `status` index
    * for `"failed"` rows.

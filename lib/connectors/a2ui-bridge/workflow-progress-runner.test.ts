@@ -51,7 +51,7 @@ function makeWorkflowSnapshot(): VisualWorkflow {
 }
 
 async function putRun(partial: Partial<WorkflowRunRow>): Promise<WorkflowRunRow> {
-  const row: WorkflowRunRow = {
+  const base: WorkflowRunRow = {
     id: "run1",
     workflowId: "wf1",
     status: "running",
@@ -66,6 +66,13 @@ async function putRun(partial: Partial<WorkflowRunRow>): Promise<WorkflowRunRow>
       sessionId: "s1",
     },
     ...partial,
+  }
+  // Mirror the orchestrator (orchestrator.ts): stamp the denormalised
+  // `triggeredBySource` column the progress-runner's v91 indexed liveQuery
+  // filters on, derived from the final `triggeredBy`.
+  const row: WorkflowRunRow = {
+    ...base,
+    triggeredBySource: base.triggeredBySource ?? base.triggeredBy?.source ?? "ui",
   }
   await getDb().workflowRuns.put(row)
   return row

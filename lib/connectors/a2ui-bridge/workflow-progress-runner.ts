@@ -155,7 +155,11 @@ export function startWorkflowProgressRunner(
   const listSubs = opts.listSubscriptions ?? listFanoutForWorkflow
 
   const runsObservable = liveQuery(async () => {
-    return getDb().workflowRuns.toArray()
+    // Only IM-triggered runs need progress fan-out. Query the v91
+    // `triggeredBySource` index so UI/API workflow runs never wake this
+    // watcher (previously this scanned the whole `workflowRuns` table and
+    // filtered `triggeredBy.source === "im"` in JS).
+    return getDb().workflowRuns.where("triggeredBySource").equals("im").toArray()
   })
 
   runsSub = runsObservable.subscribe({
@@ -192,9 +196,12 @@ async function reconcileWatchers(
 ): Promise<void> {
   const seen = new Set<string>()
   for (const row of rows) {
+    // The liveQuery already restricts to `triggeredBySource === "im"`, so a row
+    // here is IM-sourced; we still need its adapterId + conversationKey to fan
+    // out. `triggeredBy` is guaranteed present for IM rows, but null-guard it
+    // defensively in case a hand-written row slips the index.
     const tb = row.triggeredBy
-    if (!tb || tb.source !== "im") continue
-    if (!tb.adapterId || !tb.conversationKey) continue
+    if (!tb || !tb.adapterId || !tb.conversationKey) continue
     seen.add(row.id)
 
     let watcher = watchers.get(row.id)

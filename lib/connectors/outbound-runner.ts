@@ -34,6 +34,7 @@ import {
 } from "@/lib/db/outbound-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import {
   markResponded,
   readForResolution,
@@ -352,7 +353,18 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
    * Process a single outbound job. Called inside a conversation lane so
    * ordering is guaranteed within each conversation.
    */
-  async function processJob(jobId: string, adapterId: string): Promise<void> {
+  async function processJob(
+    jobId: string,
+    adapterId: string,
+    // Per-drain caches: jobs batched in one drain pass frequently share an
+    // adapter (a busy bot fanning to many conversations) or a conversation
+    // (a multi-segment burst). The adapter + override rows are stable across a
+    // single sub-second drain, so read each once per pass and reuse — a config
+    // change (mute / quiet-hours toggle) lands on the next drain. Omitted by
+    // any non-drain caller, which then reads fresh every time (current behaviour).
+    adapterCache?: Map<string, AdapterInstanceRow | undefined>,
+    overrideCache?: Map<string, ConversationOverrideRow | null>
+  ): Promise<void> {
     const now = clock()
     const { breaker, bucket } = getAdapterState(adapterId)
 
@@ -365,7 +377,13 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     const { idempotencyKey } = request.metadata
 
     // ── Muted / quiet-hours check ─────────────────────────────────────────
-    const adapterRow = await getAdapterInstance(adapterId)
+    let adapterRow: AdapterInstanceRow | undefined
+    if (adapterCache?.has(adapterId)) {
+      adapterRow = adapterCache.get(adapterId)
+    } else {
+      adapterRow = await getAdapterInstance(adapterId)
+      adapterCache?.set(adapterId, adapterRow)
+    }
     if (adapterRow) {
       if (adapterRow.muted === true) {
         // Muted: defer by 60 s, do NOT count as failure
@@ -386,7 +404,13 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // Phase 1.4). When the operator sets a quiet window on the override
       // row, the runner consults that instead of the adapter-level one so
       // a single Telegram bot can have different on-call windows per chat.
-      const convOverride = await readForResolution(conversationKey).catch(() => null)
+      let convOverride: ConversationOverrideRow | null
+      if (overrideCache?.has(conversationKey)) {
+        convOverride = overrideCache.get(conversationKey) ?? null
+      } else {
+        convOverride = (await readForResolution(conversationKey).catch(() => null)) ?? null
+        overrideCache?.set(conversationKey, convOverride)
+      }
       const effectiveQuietHours = convOverride?.quietHours ?? adapterRow.quietHours
       if (effectiveQuietHours) {
         const { from, to, tz } = effectiveQuietHours
@@ -723,13 +747,18 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // `pending` while its lane spins up.
       try {
         const due = await listDueNow()
+        // Per-drain caches shared across all jobs scheduled in this pass so a
+        // busy adapter / conversation reads its (stable) adapter + override row
+        // once instead of once per job. Recreated each pass → bounded staleness.
+        const adapterCache = new Map<string, AdapterInstanceRow | undefined>()
+        const overrideCache = new Map<string, ConversationOverrideRow | null>()
         for (const job of due) {
           if (inFlight.has(job.id)) continue
           inFlight.add(job.id)
           const { id: jobId, adapterId, conversationKey } = job
           getLane(conversationKey).enqueue(async () => {
             try {
-              await processJob(jobId, adapterId)
+              await processJob(jobId, adapterId, adapterCache, overrideCache)
             } finally {
               inFlight.delete(jobId)
               // Re-evaluate: the job may have been rescheduled to a sooner

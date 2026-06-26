@@ -130,6 +130,7 @@ import type {
 import { accountDatabaseName } from "@/lib/accounts/account-db"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
+import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
 
 /**
  * Idempotently backfill `roots` on a project row from the legacy
@@ -2123,6 +2124,19 @@ export class CogniaDB extends Dexie {
     this.version(90).stores({
       sessionFolders: "id, projectId, [projectId+order], name, createdAt, updatedAt",
     })
+
+    // v91 — Denormalised `triggeredBySource` index on `workflowRuns`. Promotes
+    // `triggeredBy.source` to a top-level indexed column (Dexie can't index
+    // nested props) so the IM progress-runner watches only IM-triggered runs
+    // via `.where("triggeredBySource").equals("im")` instead of scanning the
+    // whole table. Restates the full workflowRuns index list (Dexie replaces,
+    // not merges, a table's index list). Backfill stamps legacy rows.
+    this.version(91)
+      .stores({
+        workflowRuns:
+          "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt]",
+      })
+      .upgrade(backfillTriggeredBySourceV91)
   }
 
   sessionState!: Table<SessionStateRow, string>

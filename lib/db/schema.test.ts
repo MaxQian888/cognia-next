@@ -516,6 +516,54 @@ describe("getDb", () => {
     expect(scoped.sort()).toEqual(["s-orphan", "s-owned"])
   })
 
+  // v91 — Denormalised `triggeredBySource` index on `workflowRuns`. The upgrade
+  // backfills the new top-level column from `triggeredBy.source` (legacy rows
+  // with no `triggeredBy` default to "ui"), and the new index resolves only the
+  // IM-triggered runs the progress-runner cares about. End-to-end through the
+  // production schema (v90 → v91), exercising the real index + upgrade hook.
+  it("v91 upgrade backfills triggeredBySource and indexes IM-triggered runs", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v90 with the pre-v91 workflowRuns index (no triggeredBySource).
+    legacy.version(90).stores({
+      workflowRuns:
+        "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt]",
+    })
+    await legacy.open()
+    await legacy.table("workflowRuns").bulkPut([
+      {
+        id: "run-im",
+        workflowId: "wf-1",
+        status: "running",
+        startedAt: 1,
+        triggeredBy: { source: "im", adapterId: "tg-1", conversationKey: "telegram:tg-1:42" },
+      },
+      {
+        id: "run-ui",
+        workflowId: "wf-1",
+        status: "succeeded",
+        startedAt: 2,
+        triggeredBy: { source: "ui" },
+      },
+      // Legacy run with no triggeredBy at all → defaults to "ui".
+      { id: "run-legacy", workflowId: "wf-2", status: "succeeded", startedAt: 3 },
+    ])
+    legacy.close()
+
+    // Re-open through production schema — v91 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(91)
+
+    expect((await db.workflowRuns.get("run-im"))?.triggeredBySource).toBe("im")
+    expect((await db.workflowRuns.get("run-ui"))?.triggeredBySource).toBe("ui")
+    expect((await db.workflowRuns.get("run-legacy"))?.triggeredBySource).toBe("ui")
+
+    // The new index resolves only the IM-triggered run.
+    const imRuns = await db.workflowRuns.where("triggeredBySource").equals("im").primaryKeys()
+    expect(imRuns).toEqual(["run-im"])
+  })
+
   // v50 — Built-in characters → first-party character pack (ADR-0030
   // Amendment). The legacy `char_builtin_*` Dexie rows must pick up
   // `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, and

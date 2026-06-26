@@ -44,6 +44,22 @@ export interface InboundOcrDeps {
 }
 
 /**
+ * True when at least one segment is an image carrying inline bytes
+ * (`dataBase64`) — the only case `runInboundOcr` does any work. Lets the
+ * inbound pipeline skip the settings read + OCR-dep build entirely for the
+ * common text-only / URL-only message (an image that arrives as a bare URL /
+ * platform key has no inline bytes and is skipped by `maybeOcrInboundSegments`
+ * anyway).
+ */
+export function hasOcrableInboundImage(segments: MessageSegment[]): boolean {
+  return segments.some((seg) => {
+    if (seg.type !== "image") return false
+    const b64 = (seg as InboundImageSegment).dataBase64
+    return typeof b64 === "string" && b64.length > 0
+  })
+}
+
+/**
  * Mutate image segments in place, attaching `ocrText` when extraction
  * succeeds. Pure w.r.t. its injected deps so it's unit-testable without the
  * keyring / Dexie / a real provider.

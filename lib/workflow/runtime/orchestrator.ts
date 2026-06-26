@@ -182,6 +182,10 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     startedAt,
     workflowSnapshot: validated as VisualWorkflow,
     ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
+    // Denormalised indexed column (Dexie v91) so the IM progress-runner can
+    // query `.where("triggeredBySource").equals("im")` instead of scanning the
+    // whole table. "ui" is the default origin for non-IM/non-API runs.
+    triggeredBySource: input.triggeredBy?.source ?? "ui",
   }
   // If we're resuming, the row may already exist — Dexie's `put` handles both.
   await getDb().workflowRuns.put(runRow)

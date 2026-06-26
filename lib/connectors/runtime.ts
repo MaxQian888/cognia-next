@@ -31,8 +31,7 @@ import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { createDraft } from "@/lib/db/connector-drafts"
-import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { readForResolution } from "@/lib/db/conversation-overrides"
+import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
@@ -283,7 +282,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
   bus.routeHandler = async (
     event: NormalizedInboundEvent,
     decision: RouteDecision,
-    resolved: ResolvedBinding
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
   ): Promise<void> => {
     const now = Date.now()
 
@@ -309,8 +310,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
     // session the user switched to; fall back to the most-recently-updated
     // bound session, then create one. The override read is best-effort — a
     // failure degrades to "most-recent / create", today's behaviour.
-    const step1Override = await readForResolution(event.conversationKey).catch(() => undefined)
-    let session = await findActiveSessionForConversation(event.conversationKey, step1Override)
+    // Reuse the override row the bus already fetched (Step 3) — it is
+    // immutable for this inbound event, so a second Dexie read here would be
+    // pure waste. Null when the conversation has no override.
+    let session = await findActiveSessionForConversation(
+      event.conversationKey,
+      override ?? undefined
+    )
     if (!session) {
       session = await createPlatformSession(event, resolved.characterId)
     }
@@ -331,29 +337,19 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // still produces SOMETHING for the user. The capture wrapper itself
         // is wrapped in try/catch so a sidecar failure becomes an
         // "adapter.error" audit row, not an unhandled rejection.
-        let adapterRow
-        let overrideRow
+        // `adapterRow` and `override` were already fetched by the bus and
+        // threaded in — no re-read here.
         let appSettings: AppSettings | undefined
         let character
-        try {
-          adapterRow = await getAdapterInstance(event.adapterId)
-        } catch {
-          adapterRow = undefined
-        }
-        try {
-          overrideRow = await readForResolution(event.conversationKey)
-        } catch {
-          overrideRow = undefined
-        }
         // ── Team dispatch (control-plane multi-agent) ──
         // When the conversation is bound to an Agent Team, route the turn to
         // the team runtime instead of the single-character `runAndCapture`
         // path. The team's progress + final result fan back to this
         // conversation via the workflow-progress-runner (triggeredFrom). Skip
         // the rest of the ai-run branch on success.
-        if (overrideRow?.teamId) {
+        if (override?.teamId) {
           const res = await startTeamRunFromIM({
-            teamId: overrideRow.teamId,
+            teamId: override.teamId,
             goal: event.plainText,
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
@@ -365,7 +361,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             at: Date.now(),
             conversationKey: event.conversationKey,
             ...(res.started ? {} : { reason: res.reason ?? "team_dispatch_failed" }),
-            fields: { teamId: overrideRow.teamId, sourceMessageId: storedMsg.id },
+            fields: { teamId: override.teamId, sourceMessageId: storedMsg.id },
           })
           break
         }
@@ -377,9 +373,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // nodes as `$trigger.payload.message`; progress + final fan back through
         // the same `workflow-progress-runner` the team path uses. Skip the rest
         // of the ai-run branch on dispatch.
-        if (overrideRow?.workflowId) {
+        if (override?.workflowId) {
           const res = await startWorkflowFromIM({
-            workflowId: overrideRow.workflowId,
+            workflowId: override.workflowId,
             runParams: { message: event.plainText },
             triggeredFrom: {
               source: "im",
@@ -394,7 +390,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             at: Date.now(),
             conversationKey: event.conversationKey,
             ...(res.ok ? {} : { reason: res.reason ?? "workflow_dispatch_failed" }),
-            fields: { workflowId: overrideRow.workflowId, sourceMessageId: storedMsg.id },
+            fields: { workflowId: override.workflowId, sourceMessageId: storedMsg.id },
           })
           break
         }
@@ -436,9 +432,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         }
 
         const inboxPolicy: InboxSendPolicy = {
-          quietHours: adapterRow?.quietHours,
-          muted: adapterRow?.muted,
-          forcedMode: overrideRow?.mode,
+          quietHours: adapterRow.quietHours,
+          muted: adapterRow.muted,
+          forcedMode: override?.mode,
         }
 
         // Twin runtime injection (parity with the in-app chat path in
@@ -457,6 +453,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           conversationKey: event.conversationKey,
           platformBinding: session.platformBinding,
           inboxPolicy,
+          // Reuse the rows the bus already fetched — skips two Dexie re-reads
+          // inside resolveSendOptions (provider/model override + capability matrix).
+          imOverrideRow: override,
+          imAdapterRow: adapterRow,
           twinDeps: twinHandshake,
           twinUserMessage: twinHandshake ? event.plainText : undefined,
           // Open the connector turn's agent-trace ROOT span so the whole ai-run
@@ -498,14 +498,14 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const targetAdapter = bus.getAdapter(event.adapterId)
         // Live in-turn activity card (control-plane visibility — the
         // cc-connect-style "the agent is working" live card). Default ON
-        // (`overrideRow?.liveActivity !== false`); operators can suppress it
+        // (`override?.liveActivity !== false`); operators can suppress it
         // for noisy channels. The dispatcher is inert in suppress mode
         // (adapter without `edit()`), so constructing it is cheap. Every card
         // dispatch flows through `enqueueOutbound`, so it inherits the
         // outbound runner's rate-limit / circuit-breaker / quiet-hours /
         // idempotency gates automatically. See
         // `lib/connectors/activity/turn-activity-dispatcher.ts`.
-        const liveActivityEnabled = overrideRow?.liveActivity !== false
+        const liveActivityEnabled = override?.liveActivity !== false
         const activityDispatcher = liveActivityEnabled
           ? new TurnActivityDispatcher({
               adapterId: event.adapterId,
@@ -515,7 +515,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               i18n: resolveActivityI18n(appSettings?.language),
               enqueue: enqueueOutbound,
               supportsEdit: () => typeof targetAdapter?.edit === "function",
-              canAppend: () => overrideRow?.appendActivity !== false,
+              canAppend: () => override?.appendActivity !== false,
               getJob: (id) => getDb().outboundQueue.get(id),
               onAudit: (kind, fields) => {
                 void appendAudit({
@@ -535,7 +535,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             conversationRef: event.conversationRef,
-            approvalMode: overrideRow?.approvalMode,
+            approvalMode: override?.approvalMode,
           }),
           ...(activityDispatcher
             ? {
