@@ -217,7 +217,7 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
       "sess1",
       "edit",
       expect.objectContaining({ maxTurns: 9 }),
-      expect.any(Object)
+      expect.objectContaining({ execution: expect.objectContaining({ kind: "team" }) })
     )
   })
 

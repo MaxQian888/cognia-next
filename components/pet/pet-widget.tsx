@@ -63,7 +63,12 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   usePetBubbles(settings.enabled && !settings.mutedBubbles)
   // Owns every `talked` bubble (LLM side channel + template fallback). Main
   // window only — overlay talk replays here through the cross-window bridge.
-  usePetSpeak({ profile, view, enabled: settings.enabled && !settings.mutedBubbles })
+  usePetSpeak({
+    profile,
+    view,
+    enabled: settings.enabled && !settings.mutedBubbles,
+    activeCharacterId,
+  })
   // Proactive speech (opt-in): event comments / idle chatter / time greetings.
   usePetProactive({ profile, view, enabled: settings.enabled && !settings.mutedBubbles })
 

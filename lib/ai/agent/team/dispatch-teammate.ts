@@ -194,6 +194,11 @@ async function runToolEnabled(
     const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
       signal,
       ...(onCaptureEvent ? { onEvent: onCaptureEvent } : {}),
+      execution: {
+        kind: "team",
+        label: `Team ${session.id.slice(0, 8)}`,
+        ...(session.projectId ? { projectId: session.projectId } : {}),
+      },
     })
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {

@@ -14,6 +14,7 @@ import { levelProgress } from "@/lib/pet/xp/leveling"
 import type { PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
 import { usePetStore } from "@/stores/pet/pet-store"
+import { useCommandHistory, handleHistoryArrowKey } from "@/hooks/use-command-history"
 import { PetStatCard } from "./pet-stat-card"
 import { NeedBar } from "./need-bar"
 
@@ -45,9 +46,13 @@ export function PetInteractionPanel({
   const grewStats = usePetStore((s) => s.lastGrewStats)
   const [talkOpen, setTalkOpen] = useState(false)
   const [talkText, setTalkText] = useState("")
+  // ↑/↓ recall of previous things said to the pet, persisted globally (one pet
+  // talk surface) so phrases can be repeated across sessions.
+  const history = useCommandHistory({ persistKey: "cmdhist:pet-talk" })
 
   const submitTalk = () => {
     const text = talkText.trim()
+    history.record(text)
     onTalk(text || undefined)
     setTalkText("")
   }
@@ -112,9 +117,13 @@ export function PetInteractionPanel({
             aria-label={t("talkInput.placeholder")}
             className="h-8 text-xs"
             maxLength={500}
-            onChange={(e) => setTalkText(e.target.value)}
+            onChange={(e) => {
+              setTalkText(e.target.value)
+              history.noteEdit()
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") submitTalk()
+              if (handleHistoryArrowKey(e, history, setTalkText)) return
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) submitTalk()
             }}
           />
           <Button

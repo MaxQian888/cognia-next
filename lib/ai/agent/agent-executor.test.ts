@@ -195,7 +195,7 @@ describe("executeAgent", () => {
         "s1",
         "do work",
         { model: "claude" },
-        expect.any(Object)
+        expect.objectContaining({ execution: expect.objectContaining({ kind: "subagent" }) })
       )
       expect(mockStreamText).not.toHaveBeenCalled()
     })

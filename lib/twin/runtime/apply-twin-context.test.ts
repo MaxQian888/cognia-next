@@ -39,7 +39,12 @@ import { getPluginEventHooks } from "@/lib/plugin"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"
-import { ensureTwinProfile, appendStyleSamples, getTwinProfile } from "@/lib/db/twin-profile"
+import {
+  ensureTwinProfile,
+  appendStyleSamples,
+  appendPlaybooks,
+  getTwinProfile,
+} from "@/lib/db/twin-profile"
 import { __resetTwinBm25Cache, keywordSearch } from "./bm25-index"
 import type { Character } from "@/lib/claude/types"
 import type { IVectorStore, VectorSearchResult, SearchOptions } from "@cognia/vector/store"
@@ -144,6 +149,46 @@ describe("applyTwinContext", () => {
     expect(result.applied?.systemPrompt).toContain("BASE_SYSTEM_PROMPT")
     expect(result.applied?.systemPrompt).toContain("You are Twin Alice.")
     expect(result.applied?.metadata.retrievedChunkIds).toEqual([])
+  })
+
+  it("injects the profile's distilled playbooks into the stable prompt", async () => {
+    mockEmbedding()
+    await ensureTwinProfile("twin_alice")
+    await appendPlaybooks("twin_alice", [
+      {
+        id: "pb_1",
+        title: "Escalation",
+        trigger: "a deploy fails",
+        steps: [
+          { order: 1, action: "roll back" },
+          { order: 2, action: "page on-call" },
+        ],
+        examples: [],
+        confidence: 0.9,
+      },
+      {
+        id: "pb_2",
+        title: "Promoted",
+        trigger: "already a skill",
+        steps: [{ order: 1, action: "noop" }],
+        examples: [],
+        confidence: 0.95,
+        promotedToSkillId: "skill_x",
+      },
+    ])
+
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "hi",
+      deps: { ...baseDeps, store: makeFakeStore() },
+    })
+
+    expect(result.applied?.systemPrompt).toContain("## How you typically handle situations")
+    expect(result.applied?.systemPrompt).toContain("When a deploy fails: roll back → page on-call")
+    // Promoted playbooks are filtered out — they already live as Skills.
+    expect(result.applied?.systemPrompt).not.toContain("already a skill")
+    // Playbooks ride the cached prefix, not the per-turn dynamic segment.
+    expect(result.applied?.cacheSegments.stable).toContain("## How you typically handle situations")
   })
 
   it("injects retrieved chunks + their source titles into the prompt", async () => {

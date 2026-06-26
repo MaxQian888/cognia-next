@@ -383,6 +383,11 @@ async function runToolEnabledStandalone(
       signal: config.abortSignal,
       ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.onEvent ? { onEvent: config.onEvent } : {}),
+      execution: {
+        kind: "subagent",
+        label: `Subagent ${session.id.slice(0, 8)}`,
+        ...(session.projectId ? { projectId: session.projectId } : {}),
+      },
       ...(permissionResponderFor(config.canUseTool, config.abortSignal)
         ? { onPermissionRequest: permissionResponderFor(config.canUseTool, config.abortSignal) }
         : {}),

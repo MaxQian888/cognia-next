@@ -369,6 +369,7 @@ export async function applyTwinContext(
     twinName: character.name || character.twinId,
     voiceSummary: profile?.voiceSummary,
     entities: profile?.entities ?? [],
+    playbooks: profile?.playbooks ?? [],
     retrievedChunks,
     styleSamples,
   })

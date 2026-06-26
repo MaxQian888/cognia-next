@@ -28,6 +28,10 @@ function setup() {
 }
 
 describe("PetInteractionPanel", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
   it("renders the stat card and the three need bars", () => {
     setup()
     expect(screen.getByTestId("pet-stat-card")).toBeInTheDocument()
@@ -74,6 +78,18 @@ describe("PetInteractionPanel", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     expect(h.onTalk).toHaveBeenCalledWith("hi Boba")
     expect(input).toHaveValue("")
+  })
+
+  it("recalls a previously said phrase with ArrowUp", () => {
+    const h = setup()
+    fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
+    const input = screen.getByPlaceholderText("Say something to your pet…")
+    fireEvent.change(input, { target: { value: "good boy" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(h.onTalk).toHaveBeenCalledWith("good boy")
+    expect(input).toHaveValue("")
+    fireEvent.keyDown(input, { key: "ArrowUp" })
+    expect(input).toHaveValue("good boy")
   })
 
   it("submits bare talk (no text) as undefined via the send button", () => {

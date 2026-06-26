@@ -57,9 +57,12 @@ export interface UsePetSpeakArgs {
   view: PetView | undefined
   /** Same gate as `usePetBubbles` — pet enabled and bubbles not muted. */
   enabled: boolean
+  /** The active session's bound character id — colours the pet's voice with the
+   *  character (and its twin) persona. `null`/`undefined` → no persona layer. */
+  activeCharacterId?: string | null
 }
 
-export function usePetSpeak({ profile, view, enabled }: UsePetSpeakArgs): void {
+export function usePetSpeak({ profile, view, enabled, activeCharacterId }: UsePetSpeakArgs): void {
   const t = useTranslations("pet")
   const locale = useLocale()
   const setBubble = usePetStore((s) => s.setBubble)
@@ -69,12 +72,16 @@ export function usePetSpeak({ profile, view, enabled }: UsePetSpeakArgs): void {
   const inFlight = useRef(false)
   /** Lazily-built memory retriever deps, cached after the first talk. */
   const memoryDeps = useRef<ApplyMemoryContextDeps | null | undefined>(undefined)
+  /** Resolved persona prose per character id — avoids re-hitting Dexie every talk.
+   *  Stores the RAW composed string (or null); the PII gate is re-applied at use
+   *  time, so a cache hit never skips the privacy check. */
+  const personaCache = useRef<Map<string, string | null>>(new Map())
 
   // The bus subscription is long-lived; read the freshest props through a ref
   // so a profile/settings change doesn't churn the subscription.
-  const latest = useRef({ profile, view, appSettings, locale })
+  const latest = useRef({ profile, view, appSettings, locale, activeCharacterId })
   useEffect(() => {
-    latest.current = { profile, view, appSettings, locale }
+    latest.current = { profile, view, appSettings, locale, activeCharacterId }
   })
 
   useEffect(() => {
@@ -148,10 +155,30 @@ export function usePetSpeak({ profile, view, enabled }: UsePetSpeakArgs): void {
           queryText: userText,
         })
 
+        // Persona layer: colour the voice with the bound character (+ its twin).
+        // Resolved lazily and cached per character id; dynamic import keeps the
+        // character/twin loaders out of the widget's module graph (same pattern
+        // as the memory deps above). PII-gate the composed string before use —
+        // it's additive, so a trip omits the persona rather than the whole turn.
+        const charId = current.activeCharacterId ?? null
+        let persona: string | undefined
+        if (charId) {
+          let resolved = personaCache.current.get(charId)
+          if (resolved === undefined) {
+            resolved =
+              (await import("@/lib/pet/llm/character-persona")
+                .then((m) => m.resolveCharacterPersona(charId))
+                .catch(() => null)) ?? null
+            personaCache.current.set(charId, resolved)
+          }
+          if (resolved && hasNoLeakingPii(resolved)) persona = resolved
+        }
+
         return speakAsPet(client, {
           soul,
           bones: view.effectiveBones,
           userText,
+          persona,
           state: {
             mood: view.mood,
             energy: Math.round(view.needs.energy),

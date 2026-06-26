@@ -15,7 +15,7 @@
  * sources for this answer".
  */
 
-import type { ProfileEntity, StyleSample, TwinChunk } from "@/types/twin"
+import type { Playbook, ProfileEntity, StyleSample, TwinChunk } from "@/types/twin"
 
 export interface ApplyTemplateInput {
   /** The character's existing systemPrompt (may be empty for fresh twins). */
@@ -26,6 +26,13 @@ export interface ApplyTemplateInput {
   voiceSummary?: string
   /** Person / team / project entries to surface in the entity dictionary. */
   entities: ProfileEntity[]
+  /**
+   * Distilled behavioural playbooks (trigger → steps). Per-profile, so they
+   * ride the STABLE segment. Already-promoted playbooks (those adopted into a
+   * Skill) are filtered out here so they aren't double-injected. Defaults to
+   * none.
+   */
+  playbooks?: Playbook[]
   /** Retrieved chunks for THIS turn (already filtered by the RAG step). */
   retrievedChunks: Array<{
     chunk: TwinChunk
@@ -40,6 +47,8 @@ export interface ApplyTemplateInput {
   maxEntitiesShown?: number
   /** Maximum length for `voiceSummary` before truncation. Defaults to 200. */
   maxVoiceSummary?: number
+  /** Maximum playbooks to inject (highest-confidence first). Defaults to 5. */
+  maxPlaybooksShown?: number
 }
 
 export interface AppliedTemplate {
@@ -95,6 +104,37 @@ function formatEntityDictionary(entities: ProfileEntity[], maxShown: number): st
     .join("\n")
 }
 
+/** Per-entry cap so one verbose playbook can't dominate the stable budget. */
+const MAX_PLAYBOOK_ENTRY_LEN = 200
+
+/**
+ * Render the high-confidence, not-yet-promoted playbooks as terse
+ * "When {trigger}: {steps}" lines. Skips playbooks already adopted into a Skill
+ * (`promotedToSkillId`), sorts by confidence desc, caps to `maxShown`, and caps
+ * each entry's length. Returns `""` when nothing survives filtering.
+ */
+function formatPlaybooks(playbooks: Playbook[], maxShown: number): string {
+  const eligible = playbooks
+    .filter((p) => !p.promotedToSkillId)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, maxShown)
+  if (eligible.length === 0) return ""
+  return eligible
+    .map((p) => {
+      const steps = [...p.steps]
+        .sort((a, b) => a.order - b.order)
+        .map((s) => s.action.trim())
+        .filter(Boolean)
+        .join(" → ")
+      let entry = `When ${p.trigger.trim()}: ${steps}`
+      if (entry.length > MAX_PLAYBOOK_ENTRY_LEN) {
+        entry = `${entry.slice(0, MAX_PLAYBOOK_ENTRY_LEN).trimEnd()}…`
+      }
+      return `- ${entry}`
+    })
+    .join("\n")
+}
+
 function formatRetrievedChunks(chunks: ApplyTemplateInput["retrievedChunks"]): string {
   if (chunks.length === 0) return ""
   return chunks
@@ -126,6 +166,7 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
   const dynamicSections: string[] = []
   const maxVoice = input.maxVoiceSummary ?? 200
   const maxEntities = input.maxEntitiesShown ?? 20
+  const maxPlaybooks = input.maxPlaybooksShown ?? 5
 
   // 1. Original character prompt
   const base = input.baseSystemPrompt?.trim()
@@ -149,6 +190,15 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
     )
   }
   sections.push(identityLines.join("\n"))
+
+  // 2b. Behavioural playbooks (stable per-profile) — how the user typically
+  // handles recurring situations. Distilled, not-yet-promoted entries only;
+  // promoted ones already live as accepted Skills. Stays in `sections` so it
+  // sits inside the cached prefix.
+  const playbooksSection = formatPlaybooks(input.playbooks ?? [], maxPlaybooks)
+  if (playbooksSection) {
+    sections.push(["## How you typically handle situations", playbooksSection].join("\n"))
+  }
 
   // 3. Retrieved knowledge (per-turn)
   const retrieved = formatRetrievedChunks(input.retrievedChunks)

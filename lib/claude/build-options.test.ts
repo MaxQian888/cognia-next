@@ -123,7 +123,13 @@ import {
   __getActiveSpanForTesting,
   __resetAgentTraceEmitterForTesting,
 } from "@cognia/agent-trace/emitter"
-import { listTeamMembers, resolveMemberConfig, resolveSendOptions } from "./build-options"
+import {
+  _resetImPromptMemosForTest,
+  listTeamMembers,
+  resolveMemberConfig,
+  resolveSendOptions,
+} from "./build-options"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
 import type { Project } from "@/types"
 
@@ -3161,5 +3167,42 @@ describe("resolveSendOptions — forwardSubagentText (SDK-subagent bridge)", () 
       character: makeChar({ id: "c1" }),
     })
     expect(direct.forwardSubagentText).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — IM prompt-fragment memos", () => {
+  const imAdapterRow = {
+    id: "tg-cap",
+    updatedAt: 999,
+    lastKnownCapabilities: { button: "native" },
+  } as unknown as AdapterInstanceRow
+
+  const capSession = () =>
+    makeSession({
+      id: "s-cap",
+      platformBinding: {
+        adapterId: "tg-cap",
+        platform: "telegram",
+        conversationKey: "c-cap",
+        conversationRef: { platform: "telegram", adapterId: "tg-cap", chatId: 7 },
+      },
+    })
+
+  it("builds then reuses the capability prompt across turns (memo miss + hit)", async () => {
+    _resetImPromptMemosForTest()
+    // First turn → cache miss → builds the prompt from the threaded adapter row.
+    const first = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    expect(first.appendSystemPrompt).toContain("delivered via telegram")
+    // Second turn (same id+updatedAt+platform) → cache hit → identical prompt.
+    const second = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    expect(second.appendSystemPrompt).toBe(first.appendSystemPrompt)
+  })
+
+  it("reuses the built-in skills manifest across turns for the same IM channel", async () => {
+    _resetImPromptMemosForTest()
+    const first = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    const second = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    // The lark.* tool allowlist is identical across turns (manifest memo hit).
+    expect(second.allowedTools).toEqual(first.allowedTools)
   })
 })

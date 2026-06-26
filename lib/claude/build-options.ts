@@ -39,6 +39,7 @@ import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/su
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
+import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
 import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
@@ -334,6 +335,17 @@ export interface BuildOptionsContext {
    */
   inboxPolicy?: InboxSendPolicy | null
   /**
+   * Pre-fetched connector rows threaded from the connector runtime so the
+   * resolver skips re-reading the same immutable rows from Dexie within one
+   * inbound ai-run. `imOverrideRow` feeds the per-channel provider/model
+   * override + computer-use gate; `imAdapterRow` feeds the A2UI capability
+   * matrix. `undefined` (the default, and what direct chat / other callers
+   * pass) keeps the resolver's own dynamic-import Dexie read; `null` means
+   * "looked up, none found" and also skips the read.
+   */
+  imOverrideRow?: ConversationOverrideRow | null
+  imAdapterRow?: AdapterInstanceRow | null
+  /**
    * Pre-resolved MCP server list, injected by desktop-independent callers
    * (the standalone agent CLI) that cannot reach Dexie. When provided —
    * including an empty array — the resolver uses it verbatim instead of
@@ -570,6 +582,45 @@ async function resolveDispatchAgentGate(ctx: BuildOptionsContext): Promise<
   return undefined
 }
 
+/**
+ * Tiny bounded-LRU set used by the IM prompt-fragment memos below. Evicts the
+ * oldest key once `cap` is reached. Private to the resolver.
+ */
+function lruSet<V>(cache: Map<string, V>, key: string, value: V, cap: number): void {
+  if (cache.size >= cap && !cache.has(key)) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
+  }
+  cache.set(key, value)
+}
+
+// Memo for the per-channel A2UI capability prompt. Its inputs
+// (`lastKnownCapabilities` + `lastKnownSkillCapabilities`) change only when the
+// adapter row is rewritten, which always bumps `updatedAt`
+// (adapter-instances.ts:88) — so `${id}:${updatedAt}:${platform}` invalidates
+// exactly on a capability change while reusing the assembled string across a
+// conversation's turns. Bounded so many adapters can't grow it without limit.
+const CAPABILITY_PROMPT_CACHE_CAP = 32
+const capabilityPromptCache = new Map<string, string>()
+
+// Memo for the built-in skills manifest. Its output is a pure function of
+// (platform, channel capabilities [static per platform], registry [static],
+// override allowlist/access tier). The override row bumps `updatedAt` when its
+// `allowedBuiltInSkillIds` change, so the key captures every input. Manifest
+// entries carry NO per-conversation data (manifest.ts:88), so sharing the result
+// across conversations on the same platform/override is safe.
+const BUILTIN_SKILLS_MANIFEST_CACHE_CAP = 32
+const builtInSkillsManifestCache = new Map<
+  string,
+  Awaited<ReturnType<typeof import("@/lib/skills/built-in/manifest").buildBuiltInSkillManifest>>
+>()
+
+/** Test-only — clear the IM prompt-fragment memos between cases. */
+export function _resetImPromptMemosForTest(): void {
+  capabilityPromptCache.clear()
+  builtInSkillsManifestCache.clear()
+}
+
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
   const opts: SendOptions = {}
@@ -642,7 +693,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let imOverrideRow:
     | Awaited<ReturnType<typeof import("@/lib/db/conversation-overrides").readForResolution>>
     | undefined
-  if (session?.platformBinding?.adapterId && session.platformBinding.conversationKey) {
+  if (ctx.imOverrideRow !== undefined) {
+    // The connector runtime already fetched this row (bus Step 3) and threaded
+    // it through — reuse it instead of a second Dexie read. `null` ⇒ no override.
+    imOverrideRow = ctx.imOverrideRow ?? undefined
+  } else if (session?.platformBinding?.adapterId && session.platformBinding.conversationKey) {
     try {
       const { readForResolution } = await import("@/lib/db/conversation-overrides")
       imOverrideRow = await readForResolution(session.platformBinding.conversationKey)
@@ -1270,21 +1325,39 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let connectorCapabilityPrompt: string | null = null
   if (session?.platformBinding?.adapterId) {
     try {
-      const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
-      const adapterRow = await getAdapterInstance(session.platformBinding.adapterId)
+      // Reuse the adapter row threaded from the connector runtime (bus Step 2)
+      // when present; otherwise fall back to a Dexie read (desktop / other
+      // callers don't pass it).
+      let adapterRow = ctx.imAdapterRow
+      if (adapterRow === undefined) {
+        const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+        adapterRow = await getAdapterInstance(session.platformBinding.adapterId)
+      }
       const matrix = adapterRow?.lastKnownCapabilities
-      if (matrix && Object.keys(matrix).length > 0) {
-        const { buildCapabilityPromptSection } =
-          await import("@/lib/connectors/a2ui-bridge/capability-evaluator")
-        // ADR-0026 — also pass the cached built-in skill capabilities so
-        // the prompt declares which lark.* (and future) skill families
-        // this channel can serve. Intersected against the per-channel
-        // allowlist below.
-        connectorCapabilityPrompt = buildCapabilityPromptSection(
-          session.platformBinding.platform,
-          matrix,
-          adapterRow?.lastKnownSkillCapabilities
-        )
+      if (adapterRow && matrix && Object.keys(matrix).length > 0) {
+        const capCacheKey = `${adapterRow.id}:${adapterRow.updatedAt}:${session.platformBinding.platform}`
+        const cachedPrompt = capabilityPromptCache.get(capCacheKey)
+        if (cachedPrompt !== undefined) {
+          connectorCapabilityPrompt = cachedPrompt
+        } else {
+          const { buildCapabilityPromptSection } =
+            await import("@/lib/connectors/a2ui-bridge/capability-evaluator")
+          // ADR-0026 — also pass the cached built-in skill capabilities so
+          // the prompt declares which lark.* (and future) skill families
+          // this channel can serve. Intersected against the per-channel
+          // allowlist below.
+          connectorCapabilityPrompt = buildCapabilityPromptSection(
+            session.platformBinding.platform,
+            matrix,
+            adapterRow.lastKnownSkillCapabilities
+          )
+          lruSet(
+            capabilityPromptCache,
+            capCacheKey,
+            connectorCapabilityPrompt,
+            CAPABILITY_PROMPT_CACHE_CAP
+          )
+        }
       }
     } catch {
       // Best-effort — missing adapter row / capability matrix shouldn't
@@ -1316,33 +1389,51 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   > = []
   if (builtInSkillsRequested) {
     try {
-      // Side-effect import so every family's registerBuiltInSkill() runs
-      // before the manifest builder walks the registry.
-      await import("@/lib/skills/built-in")
-      const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
-      // Resolve the bound channel's declared capabilities so the manifest's
-      // `requires` filter can hide skills the channel can't serve (e.g. a
-      // skill needing `rich-card.lark` for its HITL confirm card). Static
-      // per-platform — no live adapter build needed. Desktop (no binding)
-      // leaves this undefined; the filter no-ops there.
-      let channelCapabilities:
-        | readonly import("@/types/connectors/capability").Capability[]
-        | undefined
-      if (session?.platformBinding?.adapterId) {
-        const { getPlatformCapabilities } = await import("@/lib/connectors/platform-capabilities")
-        channelCapabilities = getPlatformCapabilities(session.platformBinding.platform)
+      // Memo key: every input that shapes the manifest. Platform + isImSession
+      // gate the platform/access/requires filters; the override's `updatedAt`
+      // bumps whenever its `allowedBuiltInSkillIds` change. Channel capabilities
+      // + registry are static, so they need no key component.
+      const skillsCacheKey = `${session?.platformBinding?.platform ?? "none"}:${Boolean(
+        session?.platformBinding?.adapterId
+      )}:${imOverrideRow?.id ?? "none"}:${imOverrideRow?.updatedAt ?? 0}`
+      const cachedManifest = builtInSkillsManifestCache.get(skillsCacheKey)
+      if (cachedManifest !== undefined) {
+        builtInSkillsManifest = cachedManifest
+      } else {
+        // Side-effect import so every family's registerBuiltInSkill() runs
+        // before the manifest builder walks the registry.
+        await import("@/lib/skills/built-in")
+        const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
+        // Resolve the bound channel's declared capabilities so the manifest's
+        // `requires` filter can hide skills the channel can't serve (e.g. a
+        // skill needing `rich-card.lark` for its HITL confirm card). Static
+        // per-platform — no live adapter build needed. Desktop (no binding)
+        // leaves this undefined; the filter no-ops there.
+        let channelCapabilities:
+          | readonly import("@/types/connectors/capability").Capability[]
+          | undefined
+        if (session?.platformBinding?.adapterId) {
+          const { getPlatformCapabilities } = await import("@/lib/connectors/platform-capabilities")
+          channelCapabilities = getPlatformCapabilities(session.platformBinding.platform)
+        }
+        builtInSkillsManifest = buildBuiltInSkillManifest({
+          imBinding: session?.platformBinding?.adapterId
+            ? {
+                adapterId: session.platformBinding.adapterId,
+                platform: session.platformBinding.platform,
+                conversationKey: session.platformBinding.conversationKey ?? "",
+              }
+            : undefined,
+          imOverrideRow: imOverrideRow ?? undefined,
+          channelCapabilities,
+        })
+        lruSet(
+          builtInSkillsManifestCache,
+          skillsCacheKey,
+          builtInSkillsManifest,
+          BUILTIN_SKILLS_MANIFEST_CACHE_CAP
+        )
       }
-      builtInSkillsManifest = buildBuiltInSkillManifest({
-        imBinding: session?.platformBinding?.adapterId
-          ? {
-              adapterId: session.platformBinding.adapterId,
-              platform: session.platformBinding.platform,
-              conversationKey: session.platformBinding.conversationKey ?? "",
-            }
-          : undefined,
-        imOverrideRow: imOverrideRow ?? undefined,
-        channelCapabilities,
-      })
       for (const entry of builtInSkillsManifest) {
         allowed.add(entry.name)
       }
