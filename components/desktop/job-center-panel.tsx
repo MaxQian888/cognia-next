@@ -21,6 +21,8 @@ import {
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import { clearSettledBackgroundTasks, listBackgroundTaskRecords } from "@/lib/db/background-tasks"
 import { useClientLiveQuery } from "@/hooks/data"
+import { ExecutionMonitorPanel } from "@/components/execution/execution-monitor-panel"
+import { useExecutionMonitor } from "@/components/execution/use-execution-monitor"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,10 +64,20 @@ export function JobCenterPanel() {
     return () => window.clearInterval(id)
   }, [])
 
+  // Live cross-subsystem executions (broker legs + workflow steps + scheduler),
+  // governed by the ExecutionBroker — the same source the scheduler dashboard
+  // renders, surfaced here so the global status-bar entry is the one place to see
+  // everything running. SSR/static-export safe (server snapshot is empty).
+  const { runningCount } = useExecutionMonitor()
+
   const active = useMemo(() => records.filter((record) => record.status === "running"), [records])
   const history = useMemo(() => records.filter((record) => record.status !== "running"), [records])
   const hasAttention =
-    active.length > 0 || history.some((record) => record.status === "interrupted")
+    active.length > 0 ||
+    runningCount > 0 ||
+    history.some((record) => record.status === "interrupted")
+  const badgeCount = records.length + runningCount
+  const defaultTab = runningCount > 0 ? "running" : "active"
 
   const clearSettled = async () => {
     try {
@@ -87,12 +99,12 @@ export function JobCenterPanel() {
         >
           <BriefcaseBusinessIcon aria-hidden className="size-3" />
           <span>{t("trigger")}</span>
-          {records.length > 0 ? (
+          {badgeCount > 0 ? (
             <Badge
               variant={hasAttention ? "secondary" : "outline"}
               className="h-4 min-w-4 px-1 text-[10px]"
             >
-              {records.length}
+              {badgeCount}
             </Badge>
           ) : null}
         </button>
@@ -103,9 +115,17 @@ export function JobCenterPanel() {
           <SheetDescription>{t("description")}</SheetDescription>
         </SheetHeader>
 
-        <Tabs defaultValue="active" className="min-h-0 flex-1 gap-0">
+        <Tabs defaultValue={defaultTab} className="min-h-0 flex-1 gap-0">
           <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
             <TabsList>
+              <TabsTrigger value="running">
+                {t("tabs.running")}
+                {runningCount > 0 ? (
+                  <Badge variant="secondary" className="ml-1 h-4 min-w-4 px-1 text-[10px]">
+                    {runningCount}
+                  </Badge>
+                ) : null}
+              </TabsTrigger>
               <TabsTrigger value="active">
                 {t("tabs.active")}
                 <Badge variant="secondary" className="ml-1 h-4 min-w-4 px-1 text-[10px]">
@@ -131,6 +151,13 @@ export function JobCenterPanel() {
             </Button>
           </div>
 
+          <TabsContent value="running" className="min-h-0">
+            <ScrollArea className="h-[min(68vh,38rem)]">
+              <div className="p-4">
+                <ExecutionMonitorPanel />
+              </div>
+            </ScrollArea>
+          </TabsContent>
           <TabsContent value="active" className="min-h-0">
             <TaskList
               records={active}

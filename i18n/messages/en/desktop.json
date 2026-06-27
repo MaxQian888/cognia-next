@@ -169,7 +169,8 @@
     },
     "tabs": {
       "active": "Active",
-      "history": "History"
+      "history": "History",
+      "running": "Running"
     },
     "title": "Job Center",
     "toast": {

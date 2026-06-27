@@ -39,8 +39,13 @@ type ArtifactPanelAction =
   | "close"
   | "copy"
   | "download"
+  | "openInNewTab"
   | "revealInExplorer"
   | "versionHistory"
+
+/** Artifact view modes. `split` (code + live preview side-by-side) is the wide
+ * docked-panel Codex experience; it is only offered for previewable types. */
+export type ArtifactViewMode = "code" | "preview" | "edit" | "review" | "split"
 
 export function useArtifactPanelState() {
   const t = useTranslations("artifacts")
@@ -93,7 +98,7 @@ export function useArtifactPanelState() {
   const canOpenEmbeddedDesigner = runtimeAdapter?.authoring.embeddedDesigner ?? false
 
   // Local state
-  const [viewMode, setViewMode] = useState<"code" | "preview" | "edit" | "review">("code")
+  const [viewMode, setViewMode] = useState<ArtifactViewMode>("code")
   const [copied, setCopied] = useState(false)
   const [designerOpen, setDesignerOpen] = useState(false)
   const [editContent, setEditContent] = useState("")
@@ -297,6 +302,29 @@ export function useArtifactPanelState() {
     }
   }
 
+  // Codex-style "open in new tab": pop a runnable html/svg artifact into a full
+  // browser tab via a Blob URL. Static-export safe (no api route). Revoked after
+  // a grace period so the opened tab has time to load.
+  const handleOpenInNewTab = useCallback(() => {
+    if (!activeArtifact) return
+    const mimeType = activeArtifact.type === "svg" ? "image/svg+xml" : "text/html"
+    try {
+      const blob = new Blob([activeArtifact.content], { type: mimeType })
+      const url = URL.createObjectURL(blob)
+      window.open(url, "_blank", "noopener,noreferrer")
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+      loggers.ui.info("artifacts.action.open-in-new-tab", {
+        artifactId: activeArtifact.id,
+        type: activeArtifact.type,
+      })
+    } catch (error) {
+      loggers.ui.error("artifacts.action.open-in-new-tab-failed", error, {
+        artifactId: activeArtifact.id,
+      })
+      throw error
+    }
+  }, [activeArtifact])
+
   const handleRevealInExplorer = async () => {
     if (!isDesktop || !lastDownloadPath) return
     try {
@@ -325,6 +353,9 @@ export function useArtifactPanelState() {
 
   const isPreviewable = activeArtifact ? canPreview(activeArtifact.type) : false
   const isDesignable = canOpenEmbeddedDesigner
+  // Only html/svg render directly in a bare browser tab (react needs the
+  // sandboxed bundler; other types aren't standalone documents).
+  const isOpenableInNewTab = activeArtifact?.type === "html" || activeArtifact?.type === "svg"
   const panelMode: "desktop" | "tablet" | "mobile" | "fullscreen" = isFullscreen
     ? "fullscreen"
     : isMobileViewport
@@ -352,6 +383,7 @@ export function useArtifactPanelState() {
   const overflowActions: ArtifactPanelAction[] = [
     "copy",
     "download",
+    ...(isOpenableInNewTab ? ["openInNewTab" as const] : []),
     ...(isDesktop && lastDownloadPath ? ["revealInExplorer" as const] : []),
     "versionHistory",
   ]
@@ -382,6 +414,7 @@ export function useArtifactPanelState() {
     // Derived
     isPreviewable,
     isDesignable,
+    isOpenableInNewTab,
     panelMode,
     panelWidth,
     primaryActions,
@@ -396,6 +429,7 @@ export function useArtifactPanelState() {
     toggleFullscreen,
     handleCopy,
     handleDownload,
+    handleOpenInNewTab,
     handleRevealInExplorer,
   }
 }

@@ -1,2 +1,3 @@
 export { useArtifactList } from "./use-artifact-list"
-export { useArtifactPanelState } from "./use-artifact-panel"
+export { useArtifactPanelState, type ArtifactViewMode } from "./use-artifact-panel"
+export { useArtifactDockShortcuts } from "./use-artifact-dock-shortcuts"

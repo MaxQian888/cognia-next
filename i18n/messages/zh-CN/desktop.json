@@ -169,7 +169,8 @@
     },
     "tabs": {
       "active": "活动",
-      "history": "历史"
+      "history": "历史",
+      "running": "正在运行"
     },
     "title": "任务中心",
     "toast": {

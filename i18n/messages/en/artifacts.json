@@ -27,6 +27,15 @@
   },
   "designerUnsupportedDescription": "The designer subsystem isn't included in this build of cognia-next. Artifact \"{title}\" is read-only here.",
   "designerUnsupportedTitle": "Designer is unavailable",
+  "dock": {
+    "collapse": "Collapse panel",
+    "hideHistory": "Hide artifact history",
+    "openInNewTab": "Open in new tab",
+    "showHistory": "Show artifact history",
+    "splitView": "Split",
+    "title": "Artifacts",
+    "toggleHint": "Toggle panel (Ctrl/Cmd+J)"
+  },
   "download": "Download",
   "duplicate": "Duplicate",
   "editInCanvas": "Edit in Canvas",

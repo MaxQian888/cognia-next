@@ -202,8 +202,10 @@ jest.mock("@/components/desktop/channel-list", () => ({
 jest.mock("@/components/shell/member-list", () => ({
   MemberList: () => <div data-testid="member-list" />,
 }))
-jest.mock("@/components/artifacts/artifact-panel", () => ({
-  ArtifactPanel: () => <div data-testid="artifact-panel" />,
+jest.mock("@/components/artifacts/artifact-workspace-dock", () => ({
+  ArtifactWorkspaceDock: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="artifact-workspace-dock">{children}</div>
+  ),
 }))
 jest.mock("@/components/canvas", () => ({
   CanvasShell: () => <div data-testid="canvas-shell" />,

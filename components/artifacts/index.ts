@@ -1,4 +1,7 @@
 export { ArtifactPanel } from "./artifact-panel"
+export { ArtifactPanelContent, type ArtifactPanelMode } from "./artifact-panel-content"
+export { ArtifactDock } from "./artifact-dock"
+export { ArtifactWorkspaceDock } from "./artifact-workspace-dock"
 export { ArtifactList, ArtifactListCompact } from "./artifact-list"
 export {
   ArtifactCard,
