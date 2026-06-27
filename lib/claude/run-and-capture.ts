@@ -774,7 +774,14 @@ async function captureAssistantReplyCore(
       // Any other event for our session is provider progress → (re)arm the
       // idle watchdog. Arming on the first event (not before) means a slow
       // cold start is bounded by the wall-clock timeout, not this one.
-      armIdle()
+      //
+      // EXCEPT while a tool is in flight: the provider stream is legitimately
+      // silent until the tool returns (a `dispatch_agent` subagent run can take
+      // minutes), and the SDK re-includes the completed tool_use block in every
+      // later assistant snapshot — so an unconditional re-arm here would restart
+      // the idle timer off a stray repeat and trip the watchdog mid-tool. The
+      // `tool_result` handler re-arms once `inFlightToolIds` drains.
+      if (inFlightToolIds.size === 0) armIdle()
 
       if (evt.type === "sdk_session_id") {
         if (typeof evt.sdkSessionId === "string" && evt.sdkSessionId) {

@@ -393,6 +393,32 @@ describe("runAndCaptureAssistantReply", () => {
     }
   })
 
+  it("stays paused when a later snapshot repeats the in-flight tool_use (long dispatch never trips idle)", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking")) // arms idle
+      fire(toolUseEventWithId("tu_1", "dispatch_agent", { subagentId: "x", prompt: "go" })) // pauses idle
+      // The SDK re-includes the completed tool_use block in EVERY later assistant
+      // snapshot. Such a stray repeat must NOT re-arm the watchdog while the tool
+      // is in flight — a subagent dispatch is legitimately silent for minutes, and
+      // re-arming here is exactly what tripped the main turn's idle watchdog.
+      fire(toolUseEventWithId("tu_1", "dispatch_agent", { subagentId: "x", prompt: "go" }))
+      jest.advanceTimersByTime(500) // far past the 100ms idle window
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      fire(userToolResultEvent("tu_1", "subagent done"))
+      fire(assistantEvent("done"))
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "done" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("keeps the watchdog paused until the LAST of several parallel tools finishes", async () => {
     jest.useFakeTimers()
     try {

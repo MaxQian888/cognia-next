@@ -21,6 +21,14 @@ export interface AgentDefinition {
   disallowedTools?: string[]
   /** Model alias (`opus` / `sonnet` / `haiku`) or full id; defaults to the parent's model. */
   model?: string
+  /**
+   * Provider id this subagent runs on (`anthropic` / `openai` / `deepseek` / …).
+   * Honored by the renderer dispatch path (`executeAgent` / `runCliSubagent`),
+   * which can route a subagent to a DIFFERENT provider than the parent session.
+   * NOTE: the SDK-native Task tool (Anthropic channel) ignores this — cross-
+   * provider runs flow through the `dispatch_agent` plugin tool, not native Task.
+   */
+  provider?: string
   /** Max round-trips before the SDK stops looping the subagent. */
   maxTurns?: number
   /** Reasoning effort dial. */

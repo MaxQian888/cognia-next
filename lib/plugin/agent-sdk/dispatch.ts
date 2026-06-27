@@ -138,6 +138,9 @@ export async function dispatchSubagent(
     toolsEnabled: options.toolsEnabled ?? true,
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     ...(def.model ? { model: def.model } : {}),
+    // Cross-provider subagent: route the run to the def's provider (with its own
+    // credentials) instead of the dispatching session's provider.
+    ...(def.provider ? { provider: def.provider } : {}),
     ...(def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}),
     // Parent ceiling: clamp THIS child's resolved tool surface against the
     // dispatching agent's ceiling (fail-closed). The child's own dispatchContext

@@ -90,6 +90,16 @@ describe("dispatchSubagent", () => {
     expect(res.runId).toEqual(expect.any(String))
   })
 
+  it("forwards a cross-provider def.provider to executeAgent", async () => {
+    await dispatchSubagent({ ...subagent, provider: "anthropic" }, "go")
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({ provider: "anthropic" })
+  })
+
+  it("omits provider when the def names none", async () => {
+    await dispatchSubagent(subagent, "go")
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("provider")
+  })
+
   it("resolves a registered subagent by id", async () => {
     mockGetSubagent.mockReturnValue(subagent)
     await dispatchSubagent("reviewer", "go")

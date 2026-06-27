@@ -27,7 +27,11 @@ import {
   type SubAgentLog,
   type SubAgentStatus,
   type SubAgentTemplate,
+  type SubAgentToolCall,
 } from "@/types/agent/sub-agent"
+
+/** Cap on the live tool-call list retained per run (most recent kept). */
+const MAX_SUBAGENT_TOOL_CALLS = 100
 
 interface TemplatesSlice {
   templates: Record<string, SubAgentTemplate>
@@ -50,7 +54,15 @@ interface RuntimeSlice {
    */
   applyRunEvent: (
     id: string,
-    patch: { log?: SubAgentLog; progress?: number; toolUses?: number }
+    patch: {
+      log?: SubAgentLog
+      progress?: number
+      toolUses?: number
+      /** Push a freshly-started tool call (state "running"). */
+      toolStart?: { id: string; name: string; input?: Record<string, unknown> }
+      /** Resolve a previously-started tool call by id (output / error). */
+      toolEnd?: { id: string; output?: unknown; isError?: boolean }
+    }
   ) => void
   pushStreamText: (id: string, text: string) => void
   remove: (id: string) => void
@@ -150,6 +162,42 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
           if (typeof patch.toolUses === "number") {
             next.toolUses = Math.max(0, Math.floor(patch.toolUses))
             changed = true
+          }
+          if (patch.toolStart) {
+            const call: SubAgentToolCall = {
+              id: patch.toolStart.id,
+              name: patch.toolStart.name,
+              state: "running",
+              ...(patch.toolStart.input ? { input: patch.toolStart.input } : {}),
+            }
+            next.toolCalls = [...(sa.toolCalls ?? []), call].slice(-MAX_SUBAGENT_TOOL_CALLS)
+            changed = true
+          }
+          if (patch.toolEnd) {
+            const { id: callId, output, isError } = patch.toolEnd
+            const calls = next.toolCalls ?? sa.toolCalls ?? []
+            // Resolve the most recent running call with this id.
+            let resolved = false
+            const updated = calls
+              .slice()
+              .reverse()
+              .map((c) => {
+                if (!resolved && c.id === callId) {
+                  resolved = true
+                  return {
+                    ...c,
+                    state: isError ? ("error" as const) : ("done" as const),
+                    ...(output !== undefined ? { output } : {}),
+                    ...(isError ? { isError: true } : {}),
+                  }
+                }
+                return c
+              })
+              .reverse()
+            if (resolved) {
+              next.toolCalls = updated
+              changed = true
+            }
           }
           if (!changed) return s
           return { subAgents: { ...s.subAgents, [id]: next } }

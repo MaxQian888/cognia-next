@@ -872,19 +872,24 @@
     "viewSource": "View source"
   },
   "subagentPart": {
+    "abort": "Stop sub-agent",
     "backgroundRunning": "Running in background…",
     "depthBadge": "depth {n}",
     "durationMs": "{ms}ms",
+    "logsTailNote": "Showing the last {n} log entries",
     "noLogsYet": "No log entries yet — sub-agent is initializing.",
     "openInWorkspace": "Open in workspace",
     "rejected": {
       "cycle": "Dispatch rejected — would create a cycle.",
       "maxDepth": "Dispatch rejected — max nesting depth reached."
     },
+    "resultHeading": "Result",
     "rowAria": "{name} sub-agent — {status}",
     "title": "Sub-agent",
     "tokens": "{n} tokens",
-    "toolsRunCount": "{n, plural, one {# tool} other {# tools}}"
+    "tokensBreakdown": "{prompt} prompt · {completion} completion · {total} total tokens",
+    "toolsRunCount": "{n, plural, one {# tool} other {# tools}}",
+    "toolsTailNote": "Showing the last {n} tool calls"
   },
   "terminalTool": {
     "bashLabel": "Bash",

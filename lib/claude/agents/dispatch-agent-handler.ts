@@ -37,9 +37,11 @@ import {
   recordDispatchStart,
   recordDispatchComplete,
   recordDispatchFailed,
+  recordDispatchCancelled,
   recordDispatchRejected,
   createDispatchEventSink,
 } from "./dispatch-runtime"
+import { registerSubagentRun, unregisterSubagentRun } from "./subagent-cancel-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
 
 /** Fallback cap when nesting settings can't be read. */
@@ -138,7 +140,9 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
 
   const runOne = async (d: NormalizedDispatch, label: string): Promise<string> => {
     const childRunId = newRunId()
-    const backgroundAbort = d.background ? new AbortController() : null
+    // Every run (foreground OR background) gets a controller so the chat card's
+    // Abort button can stop it via the cancel registry.
+    const abort = new AbortController()
     const childDepth = caller.parentDepth + 1
     recordDispatchStart({
       id: childRunId,
@@ -149,6 +153,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       parentSessionId: req.sessionId,
       backgrounded: d.background,
     })
+    registerSubagentRun(childRunId, abort)
 
     const [{ dispatchSubagent }, { getDispatchableSubagentDef }] = await Promise.all([
       import("@/lib/plugin/agent-sdk/dispatch"),
@@ -165,7 +170,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       _parentChain: caller.parentChain,
       _budgetRootRunId: caller.budgetRoot,
       _onEvent: createDispatchEventSink(childRunId),
-      ...(backgroundAbort ? { abortSignal: backgroundAbort.signal } : {}),
+      abortSignal: abort.signal,
       ...(caller.deadlineMs ? { _deadlineMs: caller.deadlineMs } : {}),
       ...(caller.parentCeiling ? { _permissionCeiling: caller.parentCeiling } : {}),
     })
@@ -186,17 +191,24 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
             ...(r.usage ? { usage: r.usage } : {}),
           })
         }
+        unregisterSubagentRun(childRunId)
         return r
       })
       .catch((err): PluginSubagentDispatchResult => {
         const msg = err instanceof Error ? err.message : String(err)
-        recordDispatchFailed(childRunId, msg)
+        // An aborted run is a user cancellation, not a failure.
+        if (abort.signal.aborted) {
+          recordDispatchCancelled(childRunId)
+        } else {
+          recordDispatchFailed(childRunId, msg)
+        }
+        unregisterSubagentRun(childRunId)
         return {
           text: msg,
           channel: "text",
           toolsAvailable: false,
           runId: childRunId,
-          finishReason: "error",
+          finishReason: abort.signal.aborted ? "cancelled" : "error",
         }
       })
 
@@ -212,7 +224,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
           startedAt: Date.now(),
         },
         promise,
-        backgroundAbort ? { cancel: () => backgroundAbort.abort() } : undefined
+        { cancel: () => abort.abort() }
       )
       return `[${d.subagentId}] started in background (runId: ${childRunId}). Collect later with dispatch_agent({collect:"${childRunId}"}).`
     }

@@ -22,7 +22,18 @@ import {
   cancelRendererBackgroundRun,
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import { requestCancelSubagentRun, liveSubagentRunCount } from "./subagent-cancel-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+
+/** Spin the event loop until `pred()` is truthy or attempts run out. */
+async function waitFor<T>(pred: () => T | undefined, attempts = 100): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    const v = pred()
+    if (v) return v
+    await new Promise((r) => setTimeout(r, 0))
+  }
+  throw new Error("waitFor: condition never met")
+}
 
 jest.mock("@/lib/plugin/agent-sdk/dispatch", () => ({
   __esModule: true,
@@ -215,6 +226,42 @@ describe("runDispatchAgentTool — call modes", () => {
 
     expect(cancelRendererBackgroundRun(runId!)).toBe(true)
     expect(signal?.aborted).toBe(true)
+  })
+
+  it("registers every foreground run in the cancel registry and aborting marks it cancelled", async () => {
+    // Dispatch hangs until its abort signal fires, then rejects — mirroring a
+    // user-cancelled run.
+    mockDispatch.mockImplementation(
+      (_id, _prompt, opts) =>
+        new Promise<PluginSubagentDispatchResult>((_res, rej) => {
+          const signal = (opts as { abortSignal?: AbortSignal }).abortSignal
+          signal?.addEventListener("abort", () => rej(new Error("aborted by user")))
+        })
+    )
+    const pending = runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "long" },
+    })
+
+    // The foreground run is registered (Abort button can reach it) and running.
+    // (liveSubagentRunCount is process-global; assert the delta, not an absolute.)
+    const running = await waitFor(() =>
+      Object.values(useSubagentRuntimeStore.getState().subAgents).find(
+        (r) => r.status === "running"
+      )
+    )
+    const liveBefore = liveSubagentRunCount()
+    expect(liveBefore).toBeGreaterThanOrEqual(1)
+
+    expect(requestCancelSubagentRun(running.id)).toBe(true)
+    const out = await pending
+    expect(out).toMatch(/aborted by user/i)
+
+    // Aborted → cancelled, NOT failed; and the registry entry is cleaned up.
+    const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)
+    expect(runs.some((r) => r.status === "cancelled")).toBe(true)
+    expect(runs.some((r) => r.status === "failed")).toBe(false)
+    expect(liveSubagentRunCount()).toBe(liveBefore - 1)
   })
 
   it("returns a clear message when collecting an unknown run", async () => {

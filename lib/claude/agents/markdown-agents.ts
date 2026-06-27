@@ -16,6 +16,8 @@
  * Frontmatter:
  *   description: string        (help shown to the dispatcher)
  *   model:       string?       (sonnet/opus/haiku or full id)
+ *   provider:    string?       (anthropic/openai/deepseek/… — run on a different
+ *                               provider than the session; pairs with `model`)
  *   tools | allowed-tools:     string[] | comma-string  (allowlist)
  *   disallowedTools | disallowed-tools: string[] | comma-string
  * Body = the subagent's system prompt.
@@ -83,6 +85,12 @@ export function parseMarkdownAgent(
   const def: AgentDefinition = { description, prompt }
 
   if (typeof data.model === "string" && data.model.trim()) def.model = data.model.trim()
+
+  // Provider override — lets a `.cognia/agents/*.md` run on a different provider
+  // than the active session (e.g. `provider: anthropic` + `model: sonnet`).
+  if (typeof data.provider === "string" && data.provider.trim()) {
+    def.provider = data.provider.trim()
+  }
 
   const tools = normalizeToolList(data.tools ?? data["allowed-tools"])
   if (tools) def.tools = tools

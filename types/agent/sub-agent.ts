@@ -16,6 +16,26 @@ export interface SubAgentTokenUsage {
 }
 
 /**
+ * A single live tool call made by a running sub-agent. Surfaced inline in the
+ * chat `SubagentPart` (the tool list under an expanded card) — distinct from the
+ * glanceable {@link SubAgent.toolUses} counter, which is just the count.
+ */
+export interface SubAgentToolCall {
+  /** Stable id (the tool-call id when the engine provides one). */
+  id: string
+  /** Tool name (e.g. "read", "grep", "bash"). */
+  name: string
+  /** Tool input arguments, when known. */
+  input?: Record<string, unknown>
+  /** Tool output, set once the call resolves. */
+  output?: unknown
+  /** True when the call ended in an error. */
+  isError?: boolean
+  /** Lifecycle state of this call. */
+  state: "running" | "done" | "error"
+}
+
+/**
  * Cancellation token for aborting SubAgent execution
  */
 export interface CancellationToken {
@@ -290,6 +310,12 @@ export interface SubAgent {
    * {@link progress} (a derived pseudo-percentage), this is the raw count.
    */
   toolUses?: number
+  /**
+   * Ordered live tool calls (start → resolve), capped to the most recent ~100.
+   * Powers the inline tool list under an expanded `SubagentPart` card. Distinct
+   * from {@link toolUses} (the glanceable count).
+   */
+  toolCalls?: SubAgentToolCall[]
   /** Creation timestamp */
   createdAt: Date
   /** Last activity timestamp for sorting/selecting live threads */

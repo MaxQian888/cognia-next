@@ -123,6 +123,8 @@ function onChildFrame(evt: SDKAssistantMessage | SDKUserMessage): void {
     const b = block as {
       type?: string
       text?: string
+      id?: string
+      tool_use_id?: string
       name?: string
       input?: unknown
       content?: unknown
@@ -131,18 +133,29 @@ function onChildFrame(evt: SDKAssistantMessage | SDKUserMessage): void {
     if (b.type === "text" && typeof b.text === "string" && b.text) {
       store.pushStreamText(taskId, b.text)
     } else if (b.type === "tool_use" && b.name) {
-      store.appendLog(taskId, {
-        timestamp: new Date(),
-        level: "info",
-        message: b.name,
-        data: b.input,
+      // Log + populate the inline tool list (toolCalls) in one write so the
+      // SDK-native Task engine matches the dispatch_agent engine.
+      store.applyRunEvent(taskId, {
+        log: { timestamp: new Date(), level: "info", message: b.name, data: b.input },
+        toolStart: {
+          id: b.id ?? `${taskId}:${b.name}`,
+          name: b.name,
+          ...(b.input && typeof b.input === "object"
+            ? { input: b.input as Record<string, unknown> }
+            : {}),
+        },
       })
     } else if (b.type === "tool_result") {
-      store.appendLog(taskId, {
-        timestamp: new Date(),
-        level: b.is_error ? "error" : "info",
-        message: "tool_result",
-        data: b.content,
+      store.applyRunEvent(taskId, {
+        log: {
+          timestamp: new Date(),
+          level: b.is_error ? "error" : "info",
+          message: "tool_result",
+          data: b.content,
+        },
+        ...(b.tool_use_id
+          ? { toolEnd: { id: b.tool_use_id, output: b.content, isError: b.is_error } }
+          : {}),
       })
     }
   }

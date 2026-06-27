@@ -65,6 +65,7 @@ export function createSubAgentNode(seed: SubAgentNodeSeed): SubAgent {
     logs: [],
     progress: 0,
     toolUses: 0,
+    toolCalls: [],
     createdAt: now,
     lastActivityAt: now,
     startedAt: now,

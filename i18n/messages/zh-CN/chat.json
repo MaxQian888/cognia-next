@@ -872,19 +872,24 @@
     "viewSource": "查看原文"
   },
   "subagentPart": {
+    "abort": "停止子代理",
     "backgroundRunning": "后台运行中…",
     "depthBadge": "深度 {n}",
     "durationMs": "{ms}ms",
+    "logsTailNote": "仅显示最近 {n} 条日志",
     "noLogsYet": "暂无日志 — 子代理正在初始化。",
     "openInWorkspace": "在工作区打开",
     "rejected": {
       "cycle": "派发被拒 — 会形成循环。",
       "maxDepth": "派发被拒 — 已达最大嵌套深度。"
     },
+    "resultHeading": "结果",
     "rowAria": "{name} 子代理 — {status}",
     "title": "子代理",
     "tokens": "{n} tokens",
-    "toolsRunCount": "{n} 次工具调用"
+    "tokensBreakdown": "{prompt} 输入 · {completion} 输出 · 共 {total} tokens",
+    "toolsRunCount": "{n} 次工具调用",
+    "toolsTailNote": "仅显示最近 {n} 次工具调用"
   },
   "terminalTool": {
     "bashLabel": "Bash",

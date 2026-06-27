@@ -226,6 +226,44 @@ describe("applySdkSubagentBridge — rich logs via parent_tool_use_id", () => {
     expect(entry!.level).toBe("error")
   })
 
+  it("projects tool_use → tool_result into the node's toolCalls (running → error)", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      {
+        type: "assistant",
+        parent_tool_use_id: "tu1",
+        uuid: "u",
+        session_id: "sdk",
+        message: {
+          id: "m",
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call-1", name: "Grep", input: { q: "z" } }],
+        },
+      } as never,
+      SID
+    )
+    let n = node("T1")!
+    expect(n.toolCalls).toHaveLength(1)
+    expect(n.toolCalls![0]).toMatchObject({ name: "Grep", state: "running" })
+
+    applySdkSubagentBridge(
+      {
+        type: "user",
+        parent_tool_use_id: "tu1",
+        uuid: "u",
+        session_id: "sdk",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "call-1", content: "out", is_error: true }],
+        },
+      } as never,
+      SID
+    )
+    n = node("T1")!
+    expect(n.toolCalls).toHaveLength(1)
+    expect(n.toolCalls![0]).toMatchObject({ name: "Grep", state: "error", isError: true })
+  })
+
   it("ignores parent_tool_use_id frames with no known task (dispatch_agent path)", () => {
     applySdkSubagentBridge(
       {

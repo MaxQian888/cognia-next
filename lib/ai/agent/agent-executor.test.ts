@@ -166,6 +166,15 @@ describe("executeAgent", () => {
       expect(result.text).toBe("web")
       expect(mockRunAndCapture).not.toHaveBeenCalled()
     })
+
+    it("routes a per-run provider override as the explicit resolveFeatureProvider id", async () => {
+      primeTextChannel(["ok"])
+      await executeAgent("hi", { provider: "anthropic" })
+      expect(mockResolveProvider).toHaveBeenCalledWith(
+        expect.objectContaining({ providerId: "anthropic", selectionMode: "explicit-provider" }),
+        expect.anything()
+      )
+    })
   })
 
   describe("tool-enabled channel (sidecar)", () => {
@@ -213,6 +222,18 @@ describe("executeAgent", () => {
       await executeAgent("x", { toolsEnabled: true })
       const ctx = mockResolveSendOptions.mock.calls[0][0]
       expect(ctx).not.toHaveProperty("permissionCeiling")
+    })
+
+    it("routes a cross-provider run via the session's providerOverride", async () => {
+      await executeAgent("x", { toolsEnabled: true, provider: "anthropic" })
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect((ctx.session as { providerOverride?: string }).providerOverride).toBe("anthropic")
+    })
+
+    it("leaves the session provider untouched when no override is given", async () => {
+      await executeAgent("x", { toolsEnabled: true })
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect((ctx.session as { providerOverride?: string }).providerOverride).toBeUndefined()
     })
 
     it("synthesises a character when no characterId is given", async () => {

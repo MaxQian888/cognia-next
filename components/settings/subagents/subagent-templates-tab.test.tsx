@@ -15,6 +15,31 @@ jest.mock("next-intl", () => ({
 
 jest.mock("nanoid", () => ({ nanoid: () => "fixed-id" }))
 
+// The provider:model picker is a Popover+Command (hard to drive in jsdom and
+// already covered by its own test). Mock it to a button that fires onSelect with
+// a fixed provider+model, so we can assert the tab WIRES both fields.
+jest.mock("@/components/settings/provider/routing/provider-model-combobox", () => ({
+  ProviderModelCombobox: ({
+    providerId,
+    modelId,
+    onSelect,
+  }: {
+    providerId?: string
+    modelId?: string
+    onSelect: (p: string, m: string) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="mock-pm-combobox"
+      data-provider={providerId ?? ""}
+      data-model={modelId ?? ""}
+      onClick={() => onSelect("anthropic", "claude-sonnet-4-5")}
+    >
+      pm
+    </button>
+  ),
+}))
+
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
 jest.mock("@/components/ui/sonner", () => ({
@@ -285,9 +310,6 @@ describe("SubagentTemplatesTab", () => {
     fireEvent.change(screen.getByTestId("editor-timeout"), {
       target: { value: "300000" },
     })
-    fireEvent.change(screen.getByTestId("editor-model"), {
-      target: { value: "claude-opus-4-5" },
-    })
     fireEvent.change(screen.getByTestId("editor-temperature"), {
       target: { value: "0.7" },
     })
@@ -295,7 +317,30 @@ describe("SubagentTemplatesTab", () => {
     const saved = useSubagentRuntimeStore.getState().templates["fixed-id"]
     expect(saved?.config?.maxSteps).toBe(20)
     expect(saved?.config?.timeout).toBe(300000)
-    expect(saved?.config?.model).toBe("claude-opus-4-5")
     expect(saved?.config?.temperature).toBe(0.7)
+  })
+
+  it("provider:model picker wires BOTH provider and model onto the config", () => {
+    render(<SubagentTemplatesTab />)
+    fireEvent.click(screen.getByTestId("subagent-template-new"))
+    fireEvent.change(screen.getByTestId("editor-name"), { target: { value: "Cross Agent" } })
+    // The picker fires onSelect(provider, model) as one unit.
+    fireEvent.click(screen.getByTestId("mock-pm-combobox"))
+    fireEvent.click(screen.getByTestId("editor-submit"))
+    const saved = useSubagentRuntimeStore.getState().templates["fixed-id"]
+    expect(saved?.config?.provider).toBe("anthropic")
+    expect(saved?.config?.model).toBe("claude-sonnet-4-5")
+  })
+
+  it("clear button removes both provider and model (inherit the session)", () => {
+    render(<SubagentTemplatesTab />)
+    fireEvent.click(screen.getByTestId("subagent-template-new"))
+    fireEvent.change(screen.getByTestId("editor-name"), { target: { value: "Clear Agent" } })
+    fireEvent.click(screen.getByTestId("mock-pm-combobox")) // sets provider+model
+    fireEvent.click(screen.getByTestId("editor-model-clear")) // unsets both
+    fireEvent.click(screen.getByTestId("editor-submit"))
+    const saved = useSubagentRuntimeStore.getState().templates["fixed-id"]
+    expect(saved?.config?.provider).toBeUndefined()
+    expect(saved?.config?.model).toBeUndefined()
   })
 })

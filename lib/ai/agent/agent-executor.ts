@@ -90,6 +90,15 @@ export interface ExecuteAgentConfig {
   customProviders?: CustomProviderDefinition[]
   defaultProvider?: string
   /**
+   * Per-run provider override (cross-provider subagents). When set, this run
+   * targets THIS provider instead of the default — on the sidecar channel via
+   * the session's `providerOverride`, on the text channel as the explicit
+   * `resolveFeatureProvider` provider id. Lets a subagent run on a different
+   * provider than the dispatching session (e.g. a DeepSeek chat delegating to a
+   * Claude reviewer). Omit to inherit the default/session provider.
+   */
+  provider?: string
+  /**
    * Opt into the tool-enabled sidecar pipeline. When `true` AND the
    * desktop sidecar is reachable, the run goes through `resolveSendOptions`
    * + `runAndCaptureAssistantReply` so the host's tool surface (Bash, Read,
@@ -350,7 +359,14 @@ async function runToolEnabledStandalone(
   }
   try {
     const appSettings = await settingsDb.getSettings().catch(() => undefined)
-    const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
+    const baseSessionRow = (await sessionsDb.getSession(session.id)) ?? session
+    // Cross-provider override: route THIS run through the requested provider via
+    // the session's `providerOverride` (which `resolveSendOptions` honors over
+    // appSettings). Applied to an in-memory copy only — never persisted, so a
+    // reused persistent session keeps its own provider.
+    const sessionRow = config.provider
+      ? { ...baseSessionRow, providerOverride: config.provider }
+      : baseSessionRow
     const sendOptions = await buildOpts.resolveSendOptions({
       session: sessionRow,
       character,
@@ -439,8 +455,11 @@ export async function executeAgent(
     // Requested tools but no sidecar — fall through to the text-only channel.
   }
 
+  // A per-run `provider` override wins over the snapshot default so a
+  // cross-provider subagent targets its own provider on the text channel too.
+  const overrideProvider = config.provider ?? config.defaultProvider
   const snapshot = createProviderSettingsSnapshot({
-    defaultProvider: config.defaultProvider,
+    defaultProvider: overrideProvider,
     providerSettings: config.providerSettings,
     customProviders: config.customProviders,
   })
