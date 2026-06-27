@@ -82,10 +82,19 @@ export function estimateTokens(messages) {
  *   configured `messageCountThreshold` (token-independent).
  * - otherwise (token-threshold / default) → fires when the last turn's real
  *   input token count crossed the auto-compact fraction of the model's window.
+ *
+ * `contextWindow` is the AUTHORITATIVE window the renderer resolved from the
+ * provider catalog (`resolveSendOptions` → `SendOptions.compaction.contextWindow`).
+ * Prefer it over {@link getContextWindow}'s regex table: that table is a
+ * conservative mirror that drifts (e.g. it floors every `deepseek*` id at 128k,
+ * so a real 1M deepseek-v4 would auto-compact at ~107k instead of ~835k). The
+ * regex window is only the fallback for callers that don't thread the resolved
+ * value (older sessions, the parity test).
  */
 export function shouldCompact({
   lastInputTokens,
   modelId,
+  contextWindow,
   fraction = AUTO_COMPACT_FRACTION,
   trigger,
   messageCount,
@@ -97,7 +106,10 @@ export function shouldCompact({
     return messageCountThreshold > 0 && messageCount >= messageCountThreshold
   }
   if (typeof lastInputTokens !== "number" || lastInputTokens <= 0) return false
-  const window = getContextWindow(modelId)
+  const window =
+    typeof contextWindow === "number" && contextWindow > 0
+      ? contextWindow
+      : getContextWindow(modelId)
   return lastInputTokens >= window * fraction
 }
 

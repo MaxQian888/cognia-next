@@ -510,6 +510,32 @@ describe("resolveSendOptions — compaction config", () => {
     })
     expect(opts.compaction?.summary).toBeUndefined()
   })
+
+  it("pins the catalog window so the sidecar trigger ignores its 128k deepseek floor", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "deepseek", model: "deepseek-v4-pro" }),
+      appSettings: {
+        defaultProvider: "deepseek",
+        providerSettings: { deepseek: { apiKey: "sk-ds" } },
+        compaction: { enabled: true },
+      } as unknown as AppSettings,
+    })
+    // deepseek-v4-pro is 1M in the provider catalog — NOT the regex table's
+    // 128k floor that would auto-compact at ~107k.
+    expect(opts.compaction?.contextWindow).toBe(1_048_576)
+  })
+
+  it("omits contextWindow when compaction is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "deepseek", model: "deepseek-v4-pro" }),
+      appSettings: {
+        defaultProvider: "deepseek",
+        providerSettings: { deepseek: { apiKey: "sk-ds" } },
+        compaction: { enabled: false },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.contextWindow).toBeUndefined()
+  })
 })
 
 describe("resolveSendOptions — opencode vault auto-fallback", () => {
@@ -1962,12 +1988,33 @@ describe("resolveSendOptions — reasoning effort (thinking level)", () => {
     expect(opts.effort).toBeUndefined()
   })
 
+  it("flags droppedCapabilityWarning when effort is dropped for an unsupported model", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "high", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.droppedCapabilityWarning).toEqual({
+      capability: "effort",
+      model: "claude-haiku-4-5",
+      provider: "anthropic",
+    })
+  })
+
   it("keeps effort when the resolved model supports it (Opus 4.6)", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", effort: "high", model: "claude-opus-4-6" }),
       appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
     })
     expect(opts.effort).toBe("high")
+    expect(opts.droppedCapabilityWarning).toBeUndefined()
+  })
+
+  it("does not flag a warning when no effort was requested", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.droppedCapabilityWarning).toBeUndefined()
   })
 })
 

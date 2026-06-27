@@ -46,6 +46,15 @@ export interface ResolvedCompaction {
   enabled?: boolean
   /** Window fraction (0..1) at which auto-compaction triggers. Default `AUTO_COMPACT_FRACTION`. */
   fraction?: number
+  /**
+   * Authoritative context-window size (tokens) for the active model, resolved
+   * from the provider catalog by `resolveSendOptions`. The generic (AI-SDK)
+   * compaction trigger prefers this over its own conservative regex table, which
+   * floors families like `deepseek*` at 128k and would otherwise auto-compact a
+   * real 1M model (e.g. deepseek-v4) at ~107k. Absent ⇒ the sidecar falls back
+   * to that table.
+   */
+  contextWindow?: number
   /** Number of most-recent turns kept verbatim. Default 6. */
   keepRecent?: number
   /** Free-form focus / compact instructions merged into the summary prompt. */
@@ -551,6 +560,16 @@ export interface SendOptions {
      */
     overBudgetWarning?: { providerId: string; spend: number; budget: number }
   }
+
+  /**
+   * Advisory capability-gate notice: the user requested a feature (e.g. a
+   * reasoning `effort` level) that the resolved model does not support per
+   * its models.dev metadata, so the parameter was silently dropped to avoid
+   * a provider 400. The renderer surfaces a once-per-model toast; the send
+   * proceeds regardless. Sidecar-protocol metadata only — the sidecar
+   * ignores it (mirrors `routingDecision`).
+   */
+  droppedCapabilityWarning?: { capability: "effort"; model: string; provider?: string }
 
   /**
    * Inbox / connector-driven gate. Set by `resolveSendOptions` when the

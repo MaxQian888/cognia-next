@@ -78,6 +78,8 @@ import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
 import { isCodexChatProviderId, isOpencodeChatProviderId } from "@/types/subscription"
 import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
+import { getModelConfig } from "@cognia/provider-types/provider"
+import { getModelContextWindow } from "@/lib/claude/usage"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
@@ -2212,6 +2214,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
     }
 
+    // Pin the AUTHORITATIVE window so the sidecar's generic compaction trigger
+    // stops re-deriving it from its conservative regex table (which floors every
+    // `deepseek*` id at 128k — auto-compacting a real 1M deepseek-v4 at ~107k).
+    // Catalog `contextLength` first (covers deepseek-v4 = 1M), regex table as the
+    // floor for ids the catalog doesn't carry.
+    if (resolved.enabled && opts.model) {
+      const catalogWindow = getModelConfig(providerId, opts.model)?.contextLength
+      const window =
+        typeof catalogWindow === "number" && catalogWindow > 0
+          ? catalogWindow
+          : getModelContextWindow(opts.model)
+      if (window > 0) resolved.contextWindow = window
+    }
+
     opts.compaction = resolved
 
     if (resolved.enabled) {
@@ -2344,6 +2360,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const effort = imOverrideRow?.reasoningOverride ?? session?.effort ?? appSettings?.defaultEffort
   if (effort && (!opts.model || modelSupportsEffort(opts.provider, opts.model))) {
     opts.effort = effort
+  } else if (effort && opts.model) {
+    // User asked for a reasoning level the resolved model can't honour, so it
+    // was dropped above (a capable→Haiku model switch is the common cause).
+    // Flag it so the chat hook can surface a once-per-model advisory toast —
+    // otherwise the setting vanishes with zero feedback.
+    opts.droppedCapabilityWarning = {
+      capability: "effort",
+      model: opts.model,
+      provider: opts.provider,
+    }
   }
 
   // --- Token-level streaming (includePartialMessages) ----------------------

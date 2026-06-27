@@ -654,6 +654,7 @@
     "distribution": "Distribution",
     "distributionPriority": "Priority order",
     "distributionWeighted": "Weighted",
+    "droppedEffortToast": "Model {model} does not support a reasoning effort level, so that setting was ignored for this request.",
     "editAlias": "Edit alias",
     "entriesTitle": "Provider chain",
     "entryConditions": "Entry conditions",

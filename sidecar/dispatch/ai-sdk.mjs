@@ -682,6 +682,11 @@ export function dispatchAiSdk({
           : {
               lastInputTokens,
               modelId: model,
+              // Authoritative window resolved by the renderer (catalog-backed);
+              // falls back to the regex table inside `shouldCompact` when absent.
+              ...(typeof comp.contextWindow === "number"
+                ? { contextWindow: comp.contextWindow }
+                : {}),
               ...(typeof comp.fraction === "number" ? { fraction: comp.fraction } : {}),
             }
       if (!shouldCompact(args)) return

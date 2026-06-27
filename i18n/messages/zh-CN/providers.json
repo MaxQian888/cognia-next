@@ -654,6 +654,7 @@
     "distribution": "分发方式",
     "distributionPriority": "优先级顺序",
     "distributionWeighted": "加权",
+    "droppedEffortToast": "模型 {model} 不支持思考强度（reasoning effort），本次请求已忽略该设置。",
     "editAlias": "编辑别名",
     "entriesTitle": "服务商链",
     "entryConditions": "条目条件",

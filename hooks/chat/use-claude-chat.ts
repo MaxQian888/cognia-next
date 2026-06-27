@@ -33,6 +33,7 @@ import { renderLoopIterationMessage } from "@/lib/loop/prompts"
 import type { LoopStatus } from "@/types/loop"
 import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
+import { notifyDroppedCapabilityOnce } from "@/lib/claude/dropped-capability-toast"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import { buildSteerPayload, steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
@@ -822,6 +823,13 @@ export function useClaudeChat() {
       // available. Surface once per provider per local day; never blocks.
       notifyOverBudgetOnce(sendOptions.routingDecision?.overBudgetWarning, (v) =>
         tRouting("overBudgetToast", v)
+      )
+
+      // Advisory capability drop — the chosen reasoning effort was silently
+      // dropped because the resolved model can't honour it. Surface once per
+      // model so the setting doesn't vanish without feedback; never blocks.
+      notifyDroppedCapabilityOnce(sendOptions.droppedCapabilityWarning, (v) =>
+        tRouting("droppedEffortToast", v)
       )
 
       // Plugin opt-in — fire `onUserPromptSubmit` before the network call.

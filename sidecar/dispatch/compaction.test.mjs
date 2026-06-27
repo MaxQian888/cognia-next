@@ -44,6 +44,40 @@ test("shouldCompact fires only at/above the threshold", () => {
   assert.equal(shouldCompact({ lastInputTokens: null, modelId: "gpt-4o" }), false)
 })
 
+test("shouldCompact prefers an authoritative contextWindow over the regex table", () => {
+  // deepseek-v4 is really 1M, but the regex table floors `deepseek*` at 128k.
+  // Without the override it would compact at ~107k; with the real 1M window the
+  // same prompt is only ~11% full and must NOT trigger.
+  assert.equal(
+    shouldCompact({ lastInputTokens: 110_000, modelId: "deepseek-v4-pro" }),
+    true,
+    "regex-table fallback floors deepseek at 128k → fires early"
+  )
+  assert.equal(
+    shouldCompact({
+      lastInputTokens: 110_000,
+      modelId: "deepseek-v4-pro",
+      contextWindow: 1_000_000,
+    }),
+    false,
+    "authoritative 1M window → 110k is far below threshold"
+  )
+  // It still fires once the prompt crosses the 1M threshold (≈835k).
+  assert.equal(
+    shouldCompact({
+      lastInputTokens: 900_000,
+      modelId: "deepseek-v4-pro",
+      contextWindow: 1_000_000,
+    }),
+    true
+  )
+  // A non-positive / non-numeric override is ignored (falls back to the table).
+  assert.equal(
+    shouldCompact({ lastInputTokens: 110_000, modelId: "gpt-4o", contextWindow: 0 }),
+    true
+  )
+})
+
 test("shouldCompact honours a custom fraction (settings override)", () => {
   // 128k window, fraction 0.5 → threshold 64_000.
   assert.equal(shouldCompact({ lastInputTokens: 50_000, modelId: "gpt-4o", fraction: 0.5 }), false)
