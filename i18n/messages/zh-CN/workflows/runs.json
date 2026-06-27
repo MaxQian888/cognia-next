@@ -120,6 +120,12 @@
     "stackToggleHide": "隐藏调用栈",
     "stackToggleShow": "显示调用栈"
   },
+  "runToast": {
+    "failed": "工作流「{name}」运行失败",
+    "started": "正在运行「{name}」…",
+    "succeeded": "工作流「{name}」已完成",
+    "view": "查看运行"
+  },
   "status": {
     "cancelled": "已取消",
     "failed": "已失败",

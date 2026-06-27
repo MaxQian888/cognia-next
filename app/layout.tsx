@@ -59,6 +59,7 @@ import { PluginModalRoot } from "@/components/plugins/dialogs/plugin-modal-root"
 import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consent-overlay"
 import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
 import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
+import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import {
@@ -266,6 +267,11 @@ export default async function RootLayout({
                        * `lib/plugin/error-bus.ts`. Coexists with the narrower
                        * enable-failure toaster above. */}
                       <PluginErrorToaster />
+                      {/* Global live progress for workflow runs started outside
+                       * the editor (library Run button, /workflow chat command,
+                       * IM/API). Editor/run-list runs keep their own inline
+                       * toasts. */}
+                      <WorkflowRunToaster />
                       {/* Thread D4 — bounces sidecar/external-agent orchestration
                        *  calls (agent_dispatch / team_run / plugin_tool_invoke)
                        *  to the renderer entry points. No-op in web. */}

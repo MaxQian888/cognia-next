@@ -684,7 +684,12 @@ export interface WorkflowTriggerBinding {
  * to `triggeredBy.conversationKey` via `enqueueOutbound`.
  */
 export interface WorkflowTriggeredFrom {
-  source: "im" | "ui" | "api"
+  /**
+   * `"chat"` = the main chat `/workflow` slash command; `"desktop"` = the
+   * library card Run button. Both are surfaced by the global run-progress
+   * toaster (`"ui"` — editor/run-list — keeps its own inline toasts).
+   */
+  source: "im" | "ui" | "api" | "chat" | "desktop"
   adapterId?: string
   conversationKey?: string
   sessionId?: string

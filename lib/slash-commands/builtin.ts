@@ -30,6 +30,7 @@ import { dispatchGoalSubcommand } from "./actions/goal"
 import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
+import { handleRunWorkflow } from "./actions/run-saved-workflow"
 
 /**
  * Names of the sections in the Settings page (URL `?section=` values).
@@ -457,6 +458,14 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       const result = await dispatchRememberCommand(ctx)
       if (result?.system) ctx.pushSystemMessage(result.system)
     },
+  },
+  {
+    name: "workflow",
+    description: "Run a saved workflow from chat by name or id. Progress shows as a toast.",
+    scope: "builtin",
+    category: "system",
+    argumentHint: "<name | id>",
+    handler: handleRunWorkflow,
   },
   // Workflow Copilot commands — only active inside workflow-editor sessions.
   // Each handler self-gates on activeSessionId so the picker never lists

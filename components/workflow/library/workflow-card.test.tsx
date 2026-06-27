@@ -168,4 +168,18 @@ describe("WorkflowCard", () => {
     fireEvent.click(await screen.findByTestId("workflow-action-tags-wf_a"))
     expect(await screen.findByTestId("workflow-tags-input")).toBeInTheDocument()
   })
+
+  it("renders a direct Run button that opens the run dialog", async () => {
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-card-run-wf_a"))
+    expect(await screen.findByTestId("workflow-run-dialog")).toBeInTheDocument()
+  })
+
+  it("opens the run dialog from the actions menu", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    fireEvent.click(await screen.findByTestId("workflow-action-run-wf_a"))
+    expect(await screen.findByTestId("workflow-run-dialog")).toBeInTheDocument()
+  })
 })

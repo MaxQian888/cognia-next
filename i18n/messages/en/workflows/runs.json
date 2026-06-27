@@ -120,6 +120,12 @@
     "stackToggleHide": "Hide stack trace",
     "stackToggleShow": "Show stack trace"
   },
+  "runToast": {
+    "failed": "Workflow “{name}” failed",
+    "started": "Running “{name}”…",
+    "succeeded": "Workflow “{name}” finished",
+    "view": "View run"
+  },
   "status": {
     "cancelled": "Cancelled",
     "failed": "Failed",

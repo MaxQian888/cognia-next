@@ -102,4 +102,12 @@ describe("WorkflowRow", () => {
     fireEvent.click(await screen.findByTestId("workflow-action-rename-wf_a"))
     expect(await screen.findByTestId("workflow-rename-input")).toBeInTheDocument()
   })
+
+  it("opens the run dialog from the menu", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowRow workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-row-menu-wf_a"))
+    fireEvent.click(await screen.findByTestId("workflow-action-run-wf_a"))
+    expect(await screen.findByTestId("workflow-run-dialog")).toBeInTheDocument()
+  })
 })
