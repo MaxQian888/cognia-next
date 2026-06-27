@@ -110,11 +110,13 @@ import {
   aggregateByDay,
   aggregateByModel,
   aggregateBySession,
+  analyzeUsageContributors,
   buildUsageFilename,
   filterByRange,
   toUsageCsv,
   toUsageJson,
   type ModelUsageRow,
+  type UsageContributors,
 } from "@/lib/usage/session-analytics"
 import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
 import type { SubscriptionUsageRow } from "@/types/subscription"
@@ -158,7 +160,7 @@ const LEVEL_TEXT: Record<UsageLevel, string> = {
 /* ── Section folding ────────────────────────────────────────────────────── */
 
 /** Ids of the collapsible sections, in render order. */
-const SECTION_IDS = ["window", "trend", "models", "cost", "sessions", "raw"] as const
+const SECTION_IDS = ["window", "trend", "models", "insights", "cost", "sessions", "raw"] as const
 type SectionId = (typeof SECTION_IDS)[number]
 
 /**
@@ -224,6 +226,10 @@ export function SubscriptionUsageTab() {
     [sessionRows, rangeDays, now, surface]
   )
   const models = useMemo(() => aggregateByModel(filteredSessionRows), [filteredSessionRows])
+  const contributors = useMemo(
+    () => analyzeUsageContributors(filteredSessionRows),
+    [filteredSessionRows]
+  )
   // Which surfaces actually appear in-range — drives the filter's visibility so
   // the toggle only shows up once non-chat usage exists.
   const availableSurfaces = useMemo(() => {
@@ -297,13 +303,20 @@ export function SubscriptionUsageTab() {
         />
       </MotionReveal>
       <MotionReveal index={4}>
+        <InsightsCard
+          contributors={contributors}
+          open={isOpen("insights")}
+          onToggle={() => toggleSection("insights")}
+        />
+      </MotionReveal>
+      <MotionReveal index={5}>
         <CostOverTimeCard
           rows={filteredSessionRows}
           open={isOpen("cost")}
           onToggle={() => toggleSection("cost")}
         />
       </MotionReveal>
-      <MotionReveal index={5}>
+      <MotionReveal index={6}>
         <TopSessionsCard
           rows={filteredSessionRows}
           mode={mode}
@@ -311,7 +324,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("sessions")}
         />
       </MotionReveal>
-      <MotionReveal index={6}>
+      <MotionReveal index={7}>
         <RawSamplesCard
           rows={snapshotRows}
           rangeDays={rangeDays}
@@ -1013,6 +1026,63 @@ function ModelBreakdownCard({
           </Table>
         </div>
       </div>
+    </UsageSection>
+  )
+}
+
+/* ── Contributing-factor insights ──────────────────────────────────────── */
+
+/**
+ * "What's contributing to your usage?" — Claude-Code-style characteristics of
+ * the in-range usage (long-context turns, automated-surface cost share). Each is
+ * an independent characteristic, not a breakdown that sums to 100%, and is shown
+ * only when it applies; when none do, an empty hint keeps the section honest.
+ */
+function InsightsCard({
+  contributors,
+  open,
+  onToggle,
+}: {
+  contributors: UsageContributors
+  open: boolean
+  onToggle: () => void
+}) {
+  const t = useTranslations("subscription.usage.insights")
+  const items = contributors.contributors
+  return (
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-insights-section"
+    >
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="usage-insights-empty">
+          {t("empty")}
+        </p>
+      ) : (
+        <ul className="space-y-3" data-testid="usage-insights-list">
+          {items.map((item) => (
+            <li key={item.id} className="flex gap-2.5" data-testid={`usage-insight-${item.id}`}>
+              <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-sm font-medium">
+                  {t(
+                    `${item.id === "high-context" ? "highContext" : "automatedSurface"}.headline`,
+                    {
+                      pct: item.pct,
+                    }
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(`${item.id === "high-context" ? "highContext" : "automatedSurface"}.advice`)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </UsageSection>
   )
 }

@@ -5,10 +5,12 @@ import {
   aggregateByDay,
   aggregateByModel,
   aggregateBySession,
+  analyzeUsageContributors,
   buildUsageFilename,
   effectiveCostUsd,
   estimateCostFromTotals,
   filterByRange,
+  HIGH_CONTEXT_THRESHOLD,
   toUsageCsv,
   toUsageJson,
   type PricingResolver,
@@ -224,6 +226,43 @@ describe("filterByRange", () => {
     const out = filterByRange(rows, 7, NOW)
     expect(out).toHaveLength(1)
     expect(out[0]!.at).toBe(NOW - 2 * 86_400_000)
+  })
+})
+
+describe("analyzeUsageContributors", () => {
+  it("returns no contributors for empty rows", () => {
+    expect(analyzeUsageContributors([])).toEqual({ turns: 0, contributors: [] })
+  })
+
+  it("flags the high-context share from prompt tokens incl. cache", () => {
+    const rows = [
+      row({ inputTokens: HIGH_CONTEXT_THRESHOLD + 1 }),
+      row({ inputTokens: 100, cacheReadTokens: HIGH_CONTEXT_THRESHOLD }),
+      row({ inputTokens: 100 }),
+    ]
+    const out = analyzeUsageContributors(rows)
+    const ctx = out.contributors.find((c) => c.id === "high-context")
+    // 2 of 3 turns exceed the threshold → 67%.
+    expect(ctx?.pct).toBe(67)
+  })
+
+  it("flags the automated-surface cost share, excluding chat", () => {
+    const rows = [
+      row({ surface: "chat", costUsd: 1 }),
+      row({ surface: "agent-team", costUsd: 2 }),
+      row({ surface: "workflow", costUsd: 1 }),
+    ]
+    const out = analyzeUsageContributors(rows)
+    const auto = out.contributors.find((c) => c.id === "automated-surface")
+    // 3 of 4 cost dollars came from non-chat surfaces → 75%.
+    expect(auto?.pct).toBe(75)
+  })
+
+  it("omits a characteristic that does not apply and honors a custom threshold", () => {
+    const rows = [row({ surface: "chat", costUsd: 1, inputTokens: 60_000 })]
+    const out = analyzeUsageContributors(rows, { highContextThreshold: 50_000 })
+    expect(out.contributors.map((c) => c.id)).toEqual(["high-context"])
+    expect(out.contributors[0]!.pct).toBe(100)
   })
 })
 

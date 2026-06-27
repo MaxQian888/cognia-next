@@ -201,6 +201,73 @@ export function aggregateBySession(
   )
 }
 
+/* ── Contributing-factor insights ─────────────────────────────────────────── */
+
+/** Context size (prompt tokens incl. cache) above which a turn is "long-context". */
+export const HIGH_CONTEXT_THRESHOLD = 150_000
+
+/**
+ * One "what's contributing to your usage" characteristic. These are *independent*
+ * characteristics of the usage in range (not a breakdown that sums to 100%), so
+ * each carries its own percentage and is shown only when it actually applies.
+ */
+export interface UsageContributor {
+  id: "high-context" | "automated-surface"
+  /** This characteristic's share, 0–100 rounded (% of turns or % of cost). */
+  pct: number
+}
+
+export interface UsageContributors {
+  /** Turns (rows) the analysis ran over. */
+  turns: number
+  contributors: UsageContributor[]
+}
+
+/**
+ * Derive Claude-Code-style contributing-factor insights from the in-range
+ * `sessionUsage` rows — mirroring the `/usage` "what's contributing" block but
+ * from this machine's local data only:
+ *
+ *  • **high-context** — % of turns whose prompt (input + cache read + cache
+ *    write) exceeded {@link HIGH_CONTEXT_THRESHOLD}. Long sessions cost more even
+ *    when cached.
+ *  • **automated-surface** — % of *cost* that came from non-interactive surfaces
+ *    (agent team, workflows, connectors, goals), each of which runs its own
+ *    requests. The closest honest proxy for the "subagent-heavy" insight given
+ *    the data we persist.
+ *
+ * Parallel-session share is intentionally omitted — the execution broker is
+ * in-memory only, so there is no persisted data to derive it from. Pure.
+ */
+export function analyzeUsageContributors(
+  rows: readonly SessionUsageRow[],
+  opts: { highContextThreshold?: number; resolve?: PricingResolver } = {}
+): UsageContributors {
+  const threshold = opts.highContextThreshold ?? HIGH_CONTEXT_THRESHOLD
+  const resolve = opts.resolve ?? resolveModelPricingUsd
+  const turns = rows.length
+  const contributors: UsageContributor[] = []
+  if (turns === 0) return { turns, contributors }
+
+  const highContext = rows.filter(
+    (r) => r.inputTokens + r.cacheReadTokens + r.cacheCreationTokens > threshold
+  ).length
+  const highPct = Math.round((highContext / turns) * 100)
+  if (highPct > 0) contributors.push({ id: "high-context", pct: highPct })
+
+  let totalCost = 0
+  let automatedCost = 0
+  for (const r of rows) {
+    const c = effectiveCostUsd(r, resolve)
+    totalCost += c
+    if ((r.surface ?? "chat") !== "chat") automatedCost += c
+  }
+  const autoPct = totalCost > 0 ? Math.round((automatedCost / totalCost) * 100) : 0
+  if (autoPct > 0) contributors.push({ id: "automated-surface", pct: autoPct })
+
+  return { turns, contributors }
+}
+
 /** Keep rows whose `at` falls within the last `rangeDays`. `null` keeps all. */
 export function filterByRange(
   rows: readonly SessionUsageRow[],

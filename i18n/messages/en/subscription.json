@@ -488,6 +488,19 @@
       "json": "Download JSON",
       "label": "Export"
     },
+    "insights": {
+      "automatedSurface": {
+        "advice": "Agent teams, workflows and connectors each run their own requests. Be deliberate about what runs unattended, and consider a cheaper model for simple jobs.",
+        "headline": "{pct}% of cost came from automated surfaces"
+      },
+      "description": "Independent characteristics of your usage in this range — from local sessions on this machine, not a breakdown that sums to 100%.",
+      "empty": "No notable usage characteristics in this range.",
+      "highContext": {
+        "advice": "Longer sessions cost more even when cached. Compact mid-task, or start a new chat when switching to a new task.",
+        "headline": "{pct}% of turns ran at >150k context"
+      },
+      "title": "What's contributing to your usage?"
+    },
     "loading": "Loading…",
     "models": {
       "cacheHitRate": "Cache hit rate",
