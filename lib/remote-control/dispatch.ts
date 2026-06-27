@@ -19,8 +19,11 @@
 
 import type {
   RemoteCommand,
+  RemoteCommandDispatchResult,
   RemoteCommandResult,
+  RemoteCommandSettleOutcome,
   RemoteCommandTarget,
+  RemoteControlRunStatusValue,
 } from "@/types/remote-control"
 import { loggers } from "@/lib/logging"
 
@@ -39,11 +42,34 @@ function str(args: Record<string, unknown>, key: string): string | null {
   return typeof v === "string" && v.length > 0 ? v : null
 }
 
+/** Read a finite-number arg, or undefined. */
+function num(args: Record<string, unknown>, key: string): number | undefined {
+  const v = args[key]
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined
+}
+
+/** Normalize a thrown value to a short string for the run-status detail. */
+function errText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Wrap a fire-and-forget run promise into a `settle` that resolves at the run's
+ * terminal point. The receiver advances the `remoteControlRunStatus` projection
+ * with the resolved status once the underlying run finishes — turning the
+ * dispatch-time `accepted` stamp into `succeeded`/`failed`/`cancelled`.
+ */
+function settleFrom(
+  promise: Promise<RemoteCommandSettleOutcome>
+): Promise<RemoteCommandSettleOutcome> {
+  return promise.catch((error) => ({ status: "failed", detail: errText(error) }))
+}
+
 /** Workflow run statuses past which a soft-cancel is a no-op. Mirrors the set
  * in `lib/companion/desktop-write-source.ts`. */
 const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"])
 
-type RemoteCommandHandler = (command: RemoteCommand) => Promise<RemoteCommandResult>
+type RemoteCommandHandler = (command: RemoteCommand) => Promise<RemoteCommandDispatchResult>
 
 /**
  * One handler per target. Keyed by the `RemoteCommandTarget` union so the type
@@ -87,19 +113,32 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     const teamId = str(args, "teamId")
     if (!teamId) return reject(runId, "teamId required")
     const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
-    // Fire-and-forget: agentTeamManager.start awaits the full run, so we
-    // intentionally do NOT await it here (the dispatchAgentTeam wrapper
-    // would block the inbound 202 for the entire run).
-    void agentTeamManager.start(teamId)
-    return accept(runId, `team ${teamId}`)
+    // Fire-and-forget for the 202: `agentTeamManager.start` awaits the full run,
+    // so we do NOT await it inline (that would block the inbound ack for the
+    // whole run). Its resolution IS the terminal signal — wire it to `settle`.
+    const settle = settleFrom(
+      agentTeamManager
+        .start(teamId)
+        .then(() => ({ status: "succeeded" as const, detail: `team ${teamId} finished` }))
+    )
+    return { ...accept(runId, `team ${teamId}`), settle }
   },
 
   "plan.run": async ({ args, runId }) => {
     const planId = str(args, "planId")
     if (!planId) return reject(runId, "planId required")
     const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
-    void getPlanRuntime().runPlan(planId)
-    return accept(runId, `plan ${planId}`)
+    // `runPlan` resolves at the plan's terminal status (or null when the plan
+    // isn't runnable). Map it onto the run-status projection via `settle`.
+    const settle = settleFrom(
+      getPlanRuntime()
+        .runPlan(planId)
+        .then((r) => {
+          if (!r) return { status: "rejected" as const, detail: "plan not runnable" }
+          return { status: mapPlanStatus(r.status), detail: `plan ${planId} ${r.status}` }
+        })
+    )
+    return { ...accept(runId, `plan ${planId}`), settle }
   },
 
   "goal.continue": async ({ args, runId }) => {
@@ -119,8 +158,21 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     // (YAGNI) — add a session-mint step here if product wants it.
     if (!sessionId) return reject(runId, "sessionId required")
     const { getGoalRuntime } = await import("@/lib/goal/runtime")
-    void getGoalRuntime().createGoal({ sessionId, rawObjective })
-    return accept(runId, "goal created")
+    // `createGoal` resolves as soon as the goal row exists; the goal loop runs
+    // in the background, so promise-settle is NOT terminal here. Instead, stamp
+    // the returned `goalId` as the run's `correlationId` so the
+    // `GET /api/v1/runs/:runId` read can derive the live status straight from
+    // the authoritative `goals` table (mirrors the `workflowRuns` fallback).
+    const settle = settleFrom(
+      getGoalRuntime()
+        .createGoal({ sessionId, rawObjective })
+        .then(async (goal) => {
+          const { setRemoteRunCorrelation } = await import("@/lib/db/remote-control-run-status")
+          await setRemoteRunCorrelation(runId, goal.id)
+          return { status: "running" as const, detail: `goal ${goal.id} running` }
+        })
+    )
+    return { ...accept(runId, "goal created"), settle }
   },
 
   "goal.pause": async ({ args, runId }) => {
@@ -189,12 +241,20 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     const { isPiiSafeSendContent } = await import("@/lib/connectors/ai-loop/safe-send-prompt")
     if (!isPiiSafeSendContent(prompt)) return reject(runId, "pii_blocked")
     const { runAndCaptureAssistantReply } = await import("@/lib/claude/run-and-capture")
-    // Fire-and-forget: a full turn is 90s+, so we do NOT await it — the inbound
-    // 202 already went out. The execution broker governs + can cancel the leg.
-    void runAndCaptureAssistantReply(sessionId, prompt, undefined, {
-      execution: { kind: "subagent", runId, label: `remote chat ${sessionId.slice(0, 8)}` },
-    }).catch((error) => log.warn("remote chat.send turn failed", { error }))
-    return accept(runId, `chat ${sessionId}`)
+    // Fire-and-forget for the 202: a full turn is 90s+, so we do NOT await it
+    // inline — the inbound ack already went out. The execution broker governs +
+    // can cancel the leg. The turn promise resolves at end-of-turn → `settle`.
+    const settle = settleFrom(
+      runAndCaptureAssistantReply(sessionId, prompt, undefined, {
+        execution: { kind: "subagent", runId, label: `remote chat ${sessionId.slice(0, 8)}` },
+      })
+        .then(() => ({ status: "succeeded" as const, detail: `chat ${sessionId} replied` }))
+        .catch((error) => {
+          log.warn("remote chat.send turn failed", { error })
+          return { status: "failed" as const, detail: errText(error) }
+        })
+    )
+    return { ...accept(runId, `chat ${sessionId}`), settle }
   },
 
   "connector.send": async (command) => {
@@ -225,6 +285,75 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     })
     return accept(runId, `connector ${adapterId} job ${job.id}`)
   },
+
+  "terminal.exec": async ({ args, runId }) => {
+    const command = str(args, "command")
+    if (!command) return reject(runId, "command required")
+    // SENSITIVE target. `runHeadlessExec` is the existing unattended-execution
+    // seam: it still enforces `settings.terminal.allowUnattendedExecution` (the
+    // master switch, fails closed) + the command safety classifier + the audit
+    // trail. We surface only the exit status — never stdout — to avoid PII
+    // egress and oversized run-status rows.
+    const { runHeadlessExec } = await import("@/lib/terminal/headless-exec")
+    const settle = settleFrom(
+      runHeadlessExec({
+        command,
+        cwd: str(args, "cwd") ?? undefined,
+        shell: str(args, "shell") ?? undefined,
+        timeoutMs: num(args, "timeoutMs"),
+        runId,
+        source: "workflow",
+      }).then((outcome): RemoteCommandSettleOutcome => {
+        if (!outcome.ok) return { status: "failed", detail: outcome.reason }
+        if (outcome.timedOut) return { status: "failed", detail: "timed out" }
+        return outcome.exitCode === 0
+          ? { status: "succeeded", detail: "exit 0" }
+          : { status: "failed", detail: `exit ${outcome.exitCode ?? "?"}` }
+      })
+    )
+    return { ...accept(runId, "terminal exec"), settle }
+  },
+
+  "plugin.enable": async ({ args, runId }) => {
+    const pluginId = str(args, "pluginId")
+    if (!pluginId) return reject(runId, "pluginId required")
+    const { getPluginManager } = await import("@/lib/plugin/core/manager")
+    const settle = settleFrom(
+      getPluginManager()
+        .enablePlugin(pluginId, "remote-control")
+        .then(() => ({ status: "succeeded" as const, detail: `plugin ${pluginId} enabled` }))
+    )
+    return { ...accept(runId, `plugin ${pluginId} enable`), settle }
+  },
+
+  "plugin.disable": async ({ args, runId }) => {
+    const pluginId = str(args, "pluginId")
+    if (!pluginId) return reject(runId, "pluginId required")
+    const { getPluginManager } = await import("@/lib/plugin/core/manager")
+    const settle = settleFrom(
+      getPluginManager()
+        .disablePlugin(pluginId, "remote-control")
+        .then(() => ({ status: "succeeded" as const, detail: `plugin ${pluginId} disabled` }))
+    )
+    return { ...accept(runId, `plugin ${pluginId} disable`), settle }
+  },
+}
+
+/** Map a `PlanStatus` onto the remote run-status projection value. */
+function mapPlanStatus(status: string): RemoteControlRunStatusValue {
+  switch (status) {
+    case "completed":
+      return "succeeded"
+    case "failed":
+      return "failed"
+    case "cancelled":
+      return "cancelled"
+    case "executing":
+    case "paused":
+      return "running"
+    default:
+      return "running"
+  }
 }
 
 /** The canonical runtime list of dispatchable targets (parity test source). */
@@ -232,7 +361,9 @@ export function dispatchableTargets(): RemoteCommandTarget[] {
   return Object.keys(HANDLERS) as RemoteCommandTarget[]
 }
 
-export async function dispatchRemoteCommand(command: RemoteCommand): Promise<RemoteCommandResult> {
+export async function dispatchRemoteCommand(
+  command: RemoteCommand
+): Promise<RemoteCommandDispatchResult> {
   const { target, runId } = command
   const handler = HANDLERS[target] as RemoteCommandHandler | undefined
   if (!handler) return reject(runId, `unknown target: ${String(target)}`)

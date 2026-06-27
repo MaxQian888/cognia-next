@@ -83,7 +83,7 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
         { appendRemoteControlAudit },
         { hasNoLeakingPii },
         { answerRemoteControlQuery },
-        { recordRemoteRunOutcome },
+        { recordRemoteRunOutcome, markRemoteRunStatus },
       ] = await Promise.all([
         import("@/lib/remote-control/dispatch"),
         import("@/lib/db/remote-control-audit"),
@@ -98,10 +98,12 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
           return
         }
         log.info("remote-control: command", { target: command.target, runId: command.runId })
-        void dispatchRemoteCommand(command).then((result) => {
+        void dispatchRemoteCommand(command).then(async (result) => {
           // Result-loop closure: stamp the run-status projection so
-          // `GET /api/v1/runs/:runId` can report the dispatch outcome.
-          void recordRemoteRunOutcome({
+          // `GET /api/v1/runs/:runId` can report the dispatch outcome. Awaited so
+          // the `accepted` row exists BEFORE a fast handler's `settle` resolves
+          // (otherwise the terminal mark would race ahead of the row and no-op).
+          await recordRemoteRunOutcome({
             runId: result.runId,
             target: command.target,
             status: result.status,
@@ -125,6 +127,14 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
             idempotencyKey: command.idempotencyKey,
             fields: safe ? { args: command.args } : { redacted: true },
           }).catch((error) => log.warn("remote-control: audit write failed", { error }))
+          // Terminal closure: long-running handlers expose a `settle` promise
+          // that resolves at the run's terminal point; advance the projection
+          // past `accepted` once it does.
+          if (result.settle) {
+            void result.settle
+              .then((outcome) => markRemoteRunStatus(result.runId, outcome.status, outcome.detail))
+              .catch((error) => log.warn("remote-control: settle write failed", { error }))
+          }
         })
       })
 

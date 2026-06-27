@@ -7,6 +7,7 @@ import {
   markRemoteRunStatus,
   pruneRemoteRunStatus,
   recordRemoteRunOutcome,
+  setRemoteRunCorrelation,
 } from "./remote-control-run-status"
 import type { RemoteControlRunStatusRow } from "@/types/remote-control"
 
@@ -70,6 +71,43 @@ describe("remote-control run status", () => {
 
   it("markRemoteRunStatus is a no-op for an unknown runId", async () => {
     await markRemoteRunStatus("missing", "failed")
+    expect(await getRemoteRunStatus("missing")).toBeUndefined()
+  })
+
+  it("records a correlationId and preserves it across a replay", async () => {
+    await recordRemoteRunOutcome({
+      runId: "run_1",
+      target: "goal.create",
+      status: "accepted",
+      correlationId: "g_1",
+      now: 1000,
+    })
+    expect((await getRemoteRunStatus("run_1"))?.correlationId).toBe("g_1")
+    // A replay that omits the correlationId must not wipe it.
+    await recordRemoteRunOutcome({
+      runId: "run_1",
+      target: "goal.create",
+      status: "replayed",
+      now: 2000,
+    })
+    expect((await getRemoteRunStatus("run_1"))?.correlationId).toBe("g_1")
+  })
+
+  it("setRemoteRunCorrelation attaches the id to an existing row", async () => {
+    await recordRemoteRunOutcome({
+      runId: "run_1",
+      target: "goal.create",
+      status: "accepted",
+      now: 1000,
+    })
+    await setRemoteRunCorrelation("run_1", "g_42", 3000)
+    const row = await getRemoteRunStatus("run_1")
+    expect(row?.correlationId).toBe("g_42")
+    expect(row?.updatedAt).toBe(3000)
+  })
+
+  it("setRemoteRunCorrelation is a no-op for an unknown runId", async () => {
+    await setRemoteRunCorrelation("missing", "g_1")
     expect(await getRemoteRunStatus("missing")).toBeUndefined()
   })
 

@@ -31,30 +31,51 @@ export interface RecordRunOutcomeInput {
   /** The dispatch result status (`accepted` | `rejected` | `replayed`). */
   status: RemoteCommandResultStatus
   detail?: string
+  /** Subsystem-internal id this run maps to (e.g. `goalId`). Optional. */
+  correlationId?: string
   /** epoch ms; defaults to `Date.now()`. Injectable for tests. */
   now?: number
 }
 
 /**
  * Stamp the dispatch-time outcome of a command run. Idempotent on `runId`: a
- * replay overwrites the row (preserving the original `startedAt`).
+ * replay overwrites the row (preserving the original `startedAt` and any
+ * `correlationId` a later settle may have written).
  */
 export async function recordRemoteRunOutcome(
   input: RecordRunOutcomeInput
 ): Promise<RemoteControlRunStatusRow> {
   const now = input.now ?? Date.now()
   const existing = await getDb().remoteControlRunStatus.get(input.runId)
+  const correlationId = input.correlationId ?? existing?.correlationId
   const row: RemoteControlRunStatusRow = {
     runId: input.runId,
     target: input.target,
     status: input.status,
     detail: input.detail,
+    ...(correlationId !== undefined ? { correlationId } : {}),
     startedAt: existing?.startedAt ?? now,
     updatedAt: now,
   }
   await getDb().remoteControlRunStatus.put(row)
   await pruneRemoteRunStatus()
   return row
+}
+
+/**
+ * Attach the subsystem-internal id a remote run maps to (e.g. the `goalId`
+ * returned by `createGoal`). No-op when no row exists for `runId` — the row is
+ * always written by the receiver before a handler's settle resolves. Preserves
+ * `startedAt`; bumps `updatedAt`.
+ */
+export async function setRemoteRunCorrelation(
+  runId: string,
+  correlationId: string,
+  now: number = Date.now()
+): Promise<void> {
+  const existing = await getDb().remoteControlRunStatus.get(runId)
+  if (!existing) return
+  await getDb().remoteControlRunStatus.update(runId, { correlationId, updatedAt: now })
 }
 
 /**

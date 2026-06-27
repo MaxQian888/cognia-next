@@ -55,20 +55,30 @@ describe("remote command targets", () => {
     expect(REMOTE_COMMAND_TARGETS).toContain("team.stop")
     expect(REMOTE_COMMAND_TARGETS).toContain("chat.send")
     expect(REMOTE_COMMAND_TARGETS).toContain("connector.send")
-    expect(REMOTE_COMMAND_TARGETS).toHaveLength(14)
+    expect(REMOTE_COMMAND_TARGETS).toContain("terminal.exec")
+    expect(REMOTE_COMMAND_TARGETS).toContain("plugin.enable")
+    expect(REMOTE_COMMAND_TARGETS).toContain("plugin.disable")
+    expect(REMOTE_COMMAND_TARGETS).toHaveLength(17)
     expect(isRemoteCommandTarget("plan.run")).toBe(true)
     expect(isRemoteCommandTarget("team.dispatch")).toBe(true)
     expect(isRemoteCommandTarget("nope")).toBe(false)
   })
 
-  it("flags only the model-cost / off-device targets as sensitive", () => {
-    expect(SENSITIVE_REMOTE_COMMAND_TARGETS).toEqual(["chat.send", "connector.send", "goal.create"])
+  it("flags only the model-cost / off-device / host-command targets as sensitive", () => {
+    expect(SENSITIVE_REMOTE_COMMAND_TARGETS).toEqual([
+      "chat.send",
+      "connector.send",
+      "goal.create",
+      "terminal.exec",
+    ])
     expect(isSensitiveRemoteCommandTarget("chat.send")).toBe(true)
     expect(isSensitiveRemoteCommandTarget("connector.send")).toBe(true)
     expect(isSensitiveRemoteCommandTarget("goal.create")).toBe(true)
+    expect(isSensitiveRemoteCommandTarget("terminal.exec")).toBe(true)
     // Side-effect-free targets are not sensitive.
     expect(isSensitiveRemoteCommandTarget("workflow.run")).toBe(false)
     expect(isSensitiveRemoteCommandTarget("goal.pause")).toBe(false)
+    expect(isSensitiveRemoteCommandTarget("plugin.enable")).toBe(false)
   })
 
   it("defaults a fresh token to write capability with sensitive targets off", () => {

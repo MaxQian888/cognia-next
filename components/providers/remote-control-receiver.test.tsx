@@ -54,8 +54,10 @@ jest.mock("@/lib/remote-control/query-answerer", () => ({
 }))
 
 const recordRemoteRunOutcome = jest.fn().mockResolvedValue(undefined)
+const markRemoteRunStatus = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/remote-control-run-status", () => ({
   recordRemoteRunOutcome: (...args: unknown[]) => recordRemoteRunOutcome(...args),
+  markRemoteRunStatus: (...args: unknown[]) => markRemoteRunStatus(...args),
 }))
 
 beforeEach(() => {
@@ -175,6 +177,34 @@ describe("RemoteControlReceiver", () => {
       expect(recordRemoteRunOutcome).toHaveBeenCalledWith(
         expect.objectContaining({ runId: "run_1", target: "workflow.run", status: "accepted" })
       )
+    )
+  })
+
+  it("advances the run-status projection when a handler exposes a settle hook", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    dispatchRemoteCommand.mockResolvedValueOnce({
+      runId: "run_9",
+      status: "accepted",
+      settle: Promise.resolve({ status: "succeeded", detail: "team done" }),
+    })
+    let commandHandler: ((e: { payload: unknown }) => void) | null = null
+    mockListen.mockImplementation(
+      async (eventName: string, handler: (e: { payload: unknown }) => void) => {
+        if (eventName === "remote-control://command") commandHandler = handler
+        return jest.fn()
+      }
+    )
+    render(
+      <RemoteControlReceiver>
+        <div />
+      </RemoteControlReceiver>
+    )
+    await waitFor(() => expect(commandHandler).not.toBeNull())
+    commandHandler!({
+      payload: { target: "team.dispatch", args: { teamId: "tm_1" }, runId: "run_9" },
+    })
+    await waitFor(() =>
+      expect(markRemoteRunStatus).toHaveBeenCalledWith("run_9", "succeeded", "team done")
     )
   })
 

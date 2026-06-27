@@ -91,8 +91,12 @@ export interface RemoteControlInboundCallLog {
    * `/api/v1/tasks/<id>/run`, `/api/v1/events`, `/api/v1/commands/<target>`,
    * and the read surface (`/api/v1/targets`, `/api/v1/tasks`,
    * `/api/v1/workflows/<id>/runs`, `/api/v1/goals`, `/api/v1/audit`,
-   * `/api/v1/runs/<runId>`). Kept as a free `string` because the value is the
-   * concrete (un-templated) path, so no finite union can match it at runtime.
+   * `/api/v1/runs`, `/api/v1/runs/<runId>`, `/api/v1/teams`,
+   * `/api/v1/teams/<id>`, `/api/v1/workflows`, `/api/v1/plugins`,
+   * `/api/v1/connectors`, `/api/v1/backups`, `/api/v1/ocr/cache`,
+   * `/api/v1/sessions/<id>/messages`). Kept as a free `string` because the
+   * value is the concrete (un-templated) path, so no finite union can match it
+   * at runtime.
    */
   route: string
   /** HTTP status returned to the caller. */
@@ -144,6 +148,9 @@ export type RemoteCommandTarget =
   | "plan.run"
   | "chat.send"
   | "connector.send"
+  | "terminal.exec"
+  | "plugin.enable"
+  | "plugin.disable"
 
 export const REMOTE_COMMAND_TARGETS: readonly RemoteCommandTarget[] = [
   "scheduler.task.run",
@@ -160,6 +167,9 @@ export const REMOTE_COMMAND_TARGETS: readonly RemoteCommandTarget[] = [
   "plan.run",
   "chat.send",
   "connector.send",
+  "terminal.exec",
+  "plugin.enable",
+  "plugin.disable",
 ]
 
 export function isRemoteCommandTarget(value: string): value is RemoteCommandTarget {
@@ -177,6 +187,10 @@ export const SENSITIVE_REMOTE_COMMAND_TARGETS: readonly RemoteCommandTarget[] = 
   "chat.send",
   "connector.send",
   "goal.create",
+  // Runs an arbitrary shell command on the host (under the unattended-execution
+  // safety classifier + master switch). Highest-blast-radius target — gated
+  // behind `allowSensitiveTargets` on top of the `write` capability.
+  "terminal.exec",
 ]
 
 export function isSensitiveRemoteCommandTarget(value: string): boolean {
@@ -202,6 +216,23 @@ export interface RemoteCommandResult {
   detail?: string
 }
 
+/**
+ * Renderer-only extension of {@link RemoteCommandResult}. `settle` is a
+ * NON-SERIALIZED promise the dispatch handler attaches for long-running
+ * targets; it resolves at the run's terminal point so the receiver can advance
+ * the `remoteControlRunStatus` projection past `accepted`. It never crosses the
+ * Tauri/HTTP boundary — the 202 + dispatch ack already went out by the time it
+ * resolves.
+ */
+export interface RemoteCommandDispatchResult extends RemoteCommandResult {
+  settle?: Promise<RemoteCommandSettleOutcome>
+}
+
+export interface RemoteCommandSettleOutcome {
+  status: RemoteControlRunStatusValue
+  detail?: string
+}
+
 // ---------------------------------------------------------------------------
 // Read surface (GET) — the inbound server round-trips a read to the renderer.
 // Rust emits `remote-control://query`; the renderer answers via the
@@ -209,7 +240,21 @@ export interface RemoteCommandResult {
 // Rust and never reaches the renderer.
 // ---------------------------------------------------------------------------
 
-export type RemoteControlQueryKind = "tasks" | "workflow.runs" | "goals" | "audit" | "run.status"
+export type RemoteControlQueryKind =
+  | "tasks"
+  | "workflow.runs"
+  | "goals"
+  | "audit"
+  | "run.status"
+  | "teams"
+  | "team"
+  | "workflows"
+  | "plugins"
+  | "connectors"
+  | "backups"
+  | "ocr.cache"
+  | "runs"
+  | "messages"
 
 export const REMOTE_CONTROL_QUERY_KINDS: readonly RemoteControlQueryKind[] = [
   "tasks",
@@ -217,6 +262,15 @@ export const REMOTE_CONTROL_QUERY_KINDS: readonly RemoteControlQueryKind[] = [
   "goals",
   "audit",
   "run.status",
+  "teams",
+  "team",
+  "workflows",
+  "plugins",
+  "connectors",
+  "backups",
+  "ocr.cache",
+  "runs",
+  "messages",
 ]
 
 /** Wire shape emitted on `remote-control://query`. */
@@ -317,6 +371,15 @@ export interface RemoteControlRunStatusRow {
   status: RemoteControlRunStatusValue
   /** Short human-readable detail (the dispatch result's `detail`). */
   detail?: string
+  /**
+   * Subsystem-internal id this remote run maps to (e.g. the `goalId` for a
+   * `goal.create`), set once the underlying runtime hands one back. Lets the
+   * `GET /api/v1/runs/:runId` read derive a live terminal status from the
+   * authoritative subsystem table — the same trick `workflow.run` uses via the
+   * shared `runId` in `workflowRuns`. NON-INDEXED (no Dexie version bump); old
+   * rows simply lack it.
+   */
+  correlationId?: string
   /** epoch ms — first stamp (dispatch time). */
   startedAt: number
   /** epoch ms — most recent stamp. */

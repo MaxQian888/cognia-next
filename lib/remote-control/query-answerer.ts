@@ -34,6 +34,30 @@ function str(params: Record<string, unknown>, key: string): string | null {
   return typeof v === "string" && v.length > 0 ? v : null
 }
 
+/** Concatenate a UIMessage's text parts (tool/file parts carry no readable text). */
+function extractMessageText(parts: unknown): string {
+  if (!Array.isArray(parts)) return ""
+  return parts
+    .filter(
+      (p): p is { type: string; text: string } =>
+        !!p &&
+        typeof p === "object" &&
+        (p as { type?: unknown }).type === "text" &&
+        typeof (p as { text?: unknown }).text === "string"
+    )
+    .map((p) => p.text)
+    .join("")
+}
+
+/** Map a goal's lifecycle status onto the remote run-status projection value. */
+function mapGoalStatus(status: string, isTerminal: boolean): string {
+  if (status === "completed") return "succeeded"
+  if (status === "stopped") return "cancelled"
+  // budget_limited / turn_limited / timed_out / preempted — a non-success exit.
+  if (isTerminal) return "failed"
+  return "running"
+}
+
 async function resolveQuery(kind: string, params: Record<string, unknown>): Promise<unknown> {
   switch (kind) {
     case "tasks": {
@@ -124,6 +148,26 @@ async function resolveQuery(kind: string, params: Record<string, unknown>): Prom
       const { getRemoteRunStatus } = await import("@/lib/db/remote-control-run-status")
       const row = await getRemoteRunStatus(runId)
       if (!row) return { run: null }
+      // `goal.create` runs the goal loop in the background after the command
+      // resolves, so the stored stamp stalls at `running`. Derive the live
+      // status from the authoritative `goals` table via the `correlationId`
+      // (`goalId`) — the same terminal-aware trick `workflow.run` uses above.
+      if (row.target === "goal.create" && row.correlationId) {
+        const { getGoal } = await import("@/lib/db/goals")
+        const goal = await getGoal(row.correlationId)
+        if (goal) {
+          const { isTerminalGoalStatus } = await import("@/types/goal")
+          return {
+            run: {
+              runId: row.runId,
+              target: row.target,
+              status: mapGoalStatus(goal.status, isTerminalGoalStatus(goal.status)),
+              startedAt: row.startedAt,
+              updatedAt: Date.now(),
+            },
+          }
+        }
+      }
       return {
         run: {
           runId: row.runId,
@@ -134,6 +178,124 @@ async function resolveQuery(kind: string, params: Record<string, unknown>): Prom
           updatedAt: row.updatedAt,
         },
       }
+    }
+    case "teams": {
+      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+      return {
+        teams: agentTeamManager.list().map((t) => ({
+          id: t.id,
+          name: safeText(t.name),
+          status: t.status,
+        })),
+      }
+    }
+    case "team": {
+      const teamId = str(params, "teamId")
+      if (!teamId) throw new Error("teamId required")
+      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+      const t = agentTeamManager.get(teamId)
+      if (!t) return { team: null }
+      return {
+        team: {
+          id: t.id,
+          name: safeText(t.name),
+          status: t.status,
+          description: safeText(t.description),
+          task: safeText(t.task),
+        },
+      }
+    }
+    case "workflows": {
+      const { listWorkflows } = await import("@/lib/db/workflows")
+      const rows = await listWorkflows()
+      return {
+        workflows: rows.slice(0, READ_LIMIT).map((w) => ({
+          id: w.id,
+          name: safeText(w.name),
+          nodeCount: Array.isArray(w.nodes) ? w.nodes.length : 0,
+          isTemplate: w.isTemplate ?? false,
+          updatedAt: w.updatedAt,
+        })),
+      }
+    }
+    case "plugins": {
+      const { listPlugins } = await import("@/lib/db/plugins")
+      const rows = await listPlugins()
+      return {
+        plugins: rows.map((p) => ({
+          id: p.id,
+          name: safeText(p.name),
+          version: p.version,
+          type: p.type,
+          source: p.source,
+          enabled: p.enabled,
+          status: p.status,
+        })),
+      }
+    }
+    case "connectors": {
+      const { listAdapterInstances } = await import("@/lib/db/adapter-instances")
+      const rows = await listAdapterInstances()
+      return {
+        connectors: rows.map((c) => ({
+          id: c.id,
+          type: c.type,
+          displayName: safeText(c.displayName),
+          enabled: c.enabled,
+          transportMode: c.transportMode,
+        })),
+      }
+    }
+    case "backups": {
+      const { listBackupHistory } = await import("@/lib/db/backup-history")
+      const rows = await listBackupHistory({ limit: READ_LIMIT })
+      return {
+        backups: rows.map((b) => ({
+          id: b.id,
+          completedAt: b.completedAt,
+          type: b.type,
+          success: b.success,
+          encryption: b.encryption,
+          sizeBytes: b.sizeBytes,
+          error: safeText(b.errorMessage),
+        })),
+      }
+    }
+    case "ocr.cache": {
+      const { ocrCacheStats } = await import("@/lib/db/ocr-results")
+      return { ocrCache: await ocrCacheStats() }
+    }
+    case "runs": {
+      const { listRemoteRunStatus } = await import("@/lib/db/remote-control-run-status")
+      const rows = await listRemoteRunStatus(READ_LIMIT)
+      return {
+        runs: rows.map((r) => ({
+          runId: r.runId,
+          target: r.target,
+          status: r.status,
+          detail: safeText(r.detail),
+          startedAt: r.startedAt,
+          updatedAt: r.updatedAt,
+        })),
+      }
+    }
+    case "messages": {
+      const sessionId = str(params, "sessionId")
+      if (!sessionId) throw new Error("sessionId required")
+      const { listMessages } = await import("@/lib/db/messages")
+      const rows = await listMessages(sessionId)
+      // PII red-line: message bodies are the most sensitive read on the surface.
+      // Gate each row's text individually and DROP any that fails — never emit a
+      // partially-redacted body. Tool/file-only messages carry no text and are
+      // likewise dropped (this is a conversational-text summary).
+      const messages = rows
+        .slice(-READ_LIMIT)
+        .map((m) => {
+          const text = safeText(extractMessageText((m as { parts?: unknown }).parts))
+          return text ? { id: m.id, role: m.role, text } : null
+        })
+        .filter((m): m is NonNullable<typeof m> => m !== null)
+      return { messages }
     }
     default:
       throw new Error(`unknown query kind: ${kind}`)

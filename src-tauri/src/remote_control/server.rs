@@ -73,13 +73,21 @@ const KNOWN_TARGETS: &[&str] = &[
     "plan.run",
     "chat.send",
     "connector.send",
+    "terminal.exec",
+    "plugin.enable",
+    "plugin.disable",
 ];
 
 /// Targets that cause model-cost or off-device side effects. Dispatch requires
 /// `RemoteControlInboundConfig.allow_sensitive_targets = true` in addition to a
 /// `write` token. Mirrors `SENSITIVE_REMOTE_COMMAND_TARGETS` in
 /// `types/remote-control/index.ts`.
-const SENSITIVE_TARGETS: &[&str] = &["chat.send", "connector.send", "goal.create"];
+const SENSITIVE_TARGETS: &[&str] = &[
+    "chat.send",
+    "connector.send",
+    "goal.create",
+    "terminal.exec",
+];
 
 fn is_sensitive_target(target: &str) -> bool {
     SENSITIVE_TARGETS.contains(&target)
@@ -175,10 +183,19 @@ pub async fn spawn_server(
         // Read surface (GET). `read` capability is sufficient.
         .route("/api/v1/targets", get(get_targets))
         .route("/api/v1/tasks", get(get_tasks))
+        .route("/api/v1/workflows", get(get_workflows))
         .route("/api/v1/workflows/:id/runs", get(get_workflow_runs))
         .route("/api/v1/goals", get(get_goals))
         .route("/api/v1/audit", get(get_audit))
+        .route("/api/v1/runs", get(get_runs))
         .route("/api/v1/runs/:runId", get(get_run_status))
+        .route("/api/v1/teams", get(get_teams))
+        .route("/api/v1/teams/:id", get(get_team))
+        .route("/api/v1/plugins", get(get_plugins))
+        .route("/api/v1/connectors", get(get_connectors))
+        .route("/api/v1/backups", get(get_backups))
+        .route("/api/v1/ocr/cache", get(get_ocr_cache))
+        .route("/api/v1/sessions/:id/messages", get(get_session_messages))
         .layer(from_fn_with_state(state.clone(), middleware))
         .layer(axum::middleware::map_response(add_csp_header))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
@@ -363,6 +380,52 @@ async fn get_audit(State(state): State<AppState>) -> Response {
 /// workflow targets (which share the same runId).
 async fn get_run_status(State(state): State<AppState>, Path(run_id): Path<String>) -> Response {
     run_query(&state, "run.status", json!({ "runId": run_id })).await
+}
+
+/// `GET /api/v1/runs` — most-recent dispatched command runs + their status.
+async fn get_runs(State(state): State<AppState>) -> Response {
+    run_query(&state, "runs", json!({})).await
+}
+
+/// `GET /api/v1/workflows` — visual workflow definitions (id / name / size).
+async fn get_workflows(State(state): State<AppState>) -> Response {
+    run_query(&state, "workflows", json!({})).await
+}
+
+/// `GET /api/v1/teams` — agent-team roster + status.
+async fn get_teams(State(state): State<AppState>) -> Response {
+    run_query(&state, "teams", json!({})).await
+}
+
+/// `GET /api/v1/teams/:id` — a single agent team's detail.
+async fn get_team(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    run_query(&state, "team", json!({ "teamId": id })).await
+}
+
+/// `GET /api/v1/plugins` — installed plugin catalog + enabled state.
+async fn get_plugins(State(state): State<AppState>) -> Response {
+    run_query(&state, "plugins", json!({})).await
+}
+
+/// `GET /api/v1/connectors` — configured platform-connector adapter instances.
+async fn get_connectors(State(state): State<AppState>) -> Response {
+    run_query(&state, "connectors", json!({})).await
+}
+
+/// `GET /api/v1/backups` — recent backup history rows.
+async fn get_backups(State(state): State<AppState>) -> Response {
+    run_query(&state, "backups", json!({})).await
+}
+
+/// `GET /api/v1/ocr/cache` — OCR result-cache stats (row count + bytes).
+async fn get_ocr_cache(State(state): State<AppState>) -> Response {
+    run_query(&state, "ocr.cache", json!({})).await
+}
+
+/// `GET /api/v1/sessions/:id/messages` — per-session chat text (PII-gated row by
+/// row in the renderer; non-conformant rows are dropped, never partially sent).
+async fn get_session_messages(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    run_query(&state, "messages", json!({ "sessionId": id })).await
 }
 
 /// Round-trip a read to the renderer: register a oneshot, emit
@@ -596,10 +659,13 @@ mod tests {
             "plan.run",
             "chat.send",
             "connector.send",
+            "terminal.exec",
+            "plugin.enable",
+            "plugin.disable",
         ] {
             assert!(KNOWN_TARGETS.contains(&t), "missing target {t}");
         }
-        assert_eq!(KNOWN_TARGETS.len(), 14);
+        assert_eq!(KNOWN_TARGETS.len(), 17);
     }
 
     #[test]
@@ -613,6 +679,9 @@ mod tests {
         // Side-effect-free targets must NOT be flagged sensitive.
         assert!(!is_sensitive_target("workflow.run"));
         assert!(!is_sensitive_target("goal.pause"));
-        assert_eq!(SENSITIVE_TARGETS.len(), 3);
+        assert!(!is_sensitive_target("plugin.enable"));
+        // terminal.exec runs an arbitrary shell command — it MUST be sensitive.
+        assert!(is_sensitive_target("terminal.exec"));
+        assert_eq!(SENSITIVE_TARGETS.len(), 4);
     }
 }
