@@ -1240,6 +1240,15 @@
     },
     "designerUnsupportedDescription": "The designer subsystem isn't included in this build of cognia-next. Artifact \"{title}\" is read-only here.",
     "designerUnsupportedTitle": "Designer is unavailable",
+    "dock": {
+      "collapse": "Collapse panel",
+      "hideHistory": "Hide artifact history",
+      "openInNewTab": "Open in new tab",
+      "showHistory": "Show artifact history",
+      "splitView": "Split",
+      "title": "Artifacts",
+      "toggleHint": "Toggle panel (Ctrl/Cmd+J)"
+    },
     "download": "Download",
     "duplicate": "Duplicate",
     "editInCanvas": "Edit in Canvas",
@@ -2922,19 +2931,24 @@
       "viewSource": "View source"
     },
     "subagentPart": {
+      "abort": "Stop sub-agent",
       "backgroundRunning": "Running in background…",
       "depthBadge": "depth {n}",
       "durationMs": "{ms}ms",
+      "logsTailNote": "Showing the last {n} log entries",
       "noLogsYet": "No log entries yet — sub-agent is initializing.",
       "openInWorkspace": "Open in workspace",
       "rejected": {
         "cycle": "Dispatch rejected — would create a cycle.",
         "maxDepth": "Dispatch rejected — max nesting depth reached."
       },
+      "resultHeading": "Result",
       "rowAria": "{name} sub-agent — {status}",
       "title": "Sub-agent",
       "tokens": "{n} tokens",
-      "toolsRunCount": "{n, plural, one {# tool} other {# tools}}"
+      "tokensBreakdown": "{prompt} prompt · {completion} completion · {total} total tokens",
+      "toolsRunCount": "{n, plural, one {# tool} other {# tools}}",
+      "toolsTailNote": "Showing the last {n} tool calls"
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -3413,7 +3427,8 @@
       },
       "tabs": {
         "active": "Active",
-        "history": "History"
+        "history": "History",
+        "running": "Running"
       },
       "title": "Job Center",
       "toast": {
@@ -9575,7 +9590,9 @@
         "builtin": "Built-in",
         "featured": "Featured",
         "popular": "Popular",
-        "recent": "Recent"
+        "recent": "Recent",
+        "shared": "Shared",
+        "workspace": "Workspace"
       }
     },
     "marketplaceCard": {
@@ -11003,6 +11020,7 @@
       "distribution": "Distribution",
       "distributionPriority": "Priority order",
       "distributionWeighted": "Weighted",
+      "droppedEffortToast": "Model {model} does not support a reasoning effort level, so that setting was ignored for this request.",
       "editAlias": "Edit alias",
       "entriesTitle": "Provider chain",
       "entryConditions": "Entry conditions",
@@ -17586,11 +17604,14 @@
         "editorMaxNestingDepth": "Max nesting depth",
         "editorMaxSteps": "Max steps",
         "editorModel": "Model",
+        "editorModelClear": "Clear",
         "editorModelPlaceholder": "e.g. claude-sonnet-4-5",
         "editorName": "Name",
         "editorNamePlaceholder": "Web research",
         "editorPriority": "Priority",
         "editorProvider": "Provider",
+        "editorProviderModel": "Provider / Model",
+        "editorProviderModelHint": "Run this subagent on a specific provider + model (cross-provider). Leave unset to inherit the session's.",
         "editorProviderPlaceholder": "e.g. anthropic",
         "editorRemoveVariable": "Remove variable",
         "editorSystemPrompt": "System prompt",
@@ -19325,6 +19346,19 @@
         "json": "Download JSON",
         "label": "Export"
       },
+      "insights": {
+        "automatedSurface": {
+          "advice": "Agent teams, workflows and connectors each run their own requests. Be deliberate about what runs unattended, and consider a cheaper model for simple jobs.",
+          "headline": "{pct}% of cost came from automated surfaces"
+        },
+        "description": "Independent characteristics of your usage in this range — from local sessions on this machine, not a breakdown that sums to 100%.",
+        "empty": "No notable usage characteristics in this range.",
+        "highContext": {
+          "advice": "Longer sessions cost more even when cached. Compact mid-task, or start a new chat when switching to a new task.",
+          "headline": "{pct}% of turns ran at >150k context"
+        },
+        "title": "What's contributing to your usage?"
+      },
       "loading": "Loading…",
       "models": {
         "cacheHitRate": "Cache hit rate",
@@ -19603,6 +19637,7 @@
       "coreRead": "Read a text file with line numbers; pages large files; lists directories.",
       "coreTodoWrite": "Update the session task list shown to the user.",
       "coreWrite": "Create or overwrite a file (requires a prior read of existing files).",
+      "currentTime": "Get the current date and time (UTC plus a localized string for a given timezone).",
       "directoryCreate": "Create a directory (recursive by default).",
       "directoryDelete": "Delete a directory. Recursive option for non-empty trees.",
       "fileAppend": "Append UTF-8 text to a file. Creates the file if missing.",
@@ -20380,7 +20415,18 @@
       },
       "renameFailed": "Failed to rename workflow",
       "renamed": "Workflow renamed",
+      "run": "Run",
       "runCountBadge": "{count} runs",
+      "runDialog": {
+        "cancel": "Cancel",
+        "description": "Start this workflow now. Optionally pass a JSON payload as the trigger input.",
+        "invalidJson": "Payload must be valid JSON.",
+        "payloadLabel": "Trigger payload (optional)",
+        "payloadPlaceholder": "{ \"key\": \"value\" }",
+        "runButton": "Run workflow",
+        "title": "Run “{name}”"
+      },
+      "runStarted": "Workflow run started",
       "saveAsTemplate": "Save as template",
       "saveAsTemplateFailed": "Couldn’t save as template",
       "savedAsTemplate": "Saved as template",
@@ -23985,6 +24031,12 @@
         "searchPlaceholder": "Search logs…",
         "stackToggleHide": "Hide stack trace",
         "stackToggleShow": "Show stack trace"
+      },
+      "runToast": {
+        "failed": "Workflow “{name}” failed",
+        "started": "Running “{name}”…",
+        "succeeded": "Workflow “{name}” finished",
+        "view": "View run"
       },
       "status": {
         "cancelled": "Cancelled",

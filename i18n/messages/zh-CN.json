@@ -1240,6 +1240,15 @@
     },
     "designerUnsupportedDescription": "本版本 cognia-next 未集成设计器。Artifact「{title}」在此处为只读。",
     "designerUnsupportedTitle": "设计器不可用",
+    "dock": {
+      "collapse": "折叠面板",
+      "hideHistory": "隐藏产物历史",
+      "openInNewTab": "在新标签页打开",
+      "showHistory": "显示产物历史",
+      "splitView": "分屏",
+      "title": "产物",
+      "toggleHint": "切换面板 (Ctrl/Cmd+J)"
+    },
     "download": "下载",
     "duplicate": "复制",
     "editInCanvas": "在画布中编辑",
@@ -2922,19 +2931,24 @@
       "viewSource": "查看原文"
     },
     "subagentPart": {
+      "abort": "停止子代理",
       "backgroundRunning": "后台运行中…",
       "depthBadge": "深度 {n}",
       "durationMs": "{ms}ms",
+      "logsTailNote": "仅显示最近 {n} 条日志",
       "noLogsYet": "暂无日志 — 子代理正在初始化。",
       "openInWorkspace": "在工作区打开",
       "rejected": {
         "cycle": "派发被拒 — 会形成循环。",
         "maxDepth": "派发被拒 — 已达最大嵌套深度。"
       },
+      "resultHeading": "结果",
       "rowAria": "{name} 子代理 — {status}",
       "title": "子代理",
       "tokens": "{n} tokens",
-      "toolsRunCount": "{n} 次工具调用"
+      "tokensBreakdown": "{prompt} 输入 · {completion} 输出 · 共 {total} tokens",
+      "toolsRunCount": "{n} 次工具调用",
+      "toolsTailNote": "仅显示最近 {n} 次工具调用"
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -3413,7 +3427,8 @@
       },
       "tabs": {
         "active": "活动",
-        "history": "历史"
+        "history": "历史",
+        "running": "正在运行"
       },
       "title": "任务中心",
       "toast": {
@@ -9575,7 +9590,9 @@
         "builtin": "内置",
         "featured": "精选",
         "popular": "热门",
-        "recent": "最近上架"
+        "recent": "最近上架",
+        "shared": "共享",
+        "workspace": "工作区"
       }
     },
     "marketplaceCard": {
@@ -11003,6 +11020,7 @@
       "distribution": "分发方式",
       "distributionPriority": "优先级顺序",
       "distributionWeighted": "加权",
+      "droppedEffortToast": "模型 {model} 不支持思考强度（reasoning effort），本次请求已忽略该设置。",
       "editAlias": "编辑别名",
       "entriesTitle": "服务商链",
       "entryConditions": "条目条件",
@@ -17586,11 +17604,14 @@
         "editorMaxNestingDepth": "最大嵌套深度",
         "editorMaxSteps": "最大步数",
         "editorModel": "模型",
+        "editorModelClear": "清除",
         "editorModelPlaceholder": "例如：claude-sonnet-4-5",
         "editorName": "名称",
         "editorNamePlaceholder": "网络调研",
         "editorPriority": "优先级",
         "editorProvider": "提供商",
+        "editorProviderModel": "提供商 / 模型",
+        "editorProviderModelHint": "让此子代理运行在指定的提供商 + 模型上（可跨提供商）。留空则继承会话的设置。",
         "editorProviderPlaceholder": "例如：anthropic",
         "editorRemoveVariable": "移除变量",
         "editorSystemPrompt": "系统提示",
@@ -19325,6 +19346,19 @@
         "json": "下载 JSON",
         "label": "导出"
       },
+      "insights": {
+        "automatedSurface": {
+          "advice": "智能体团队、工作流和连接器各自会发起独立请求。谨慎安排无人值守的运行，简单任务可考虑使用更便宜的模型。",
+          "headline": "{pct}% 的成本来自自动化场景"
+        },
+        "description": "本时间范围内用量的独立特征——来自本机本地会话，并非加总为 100% 的占比拆分。",
+        "empty": "本时间范围内没有显著的用量特征。",
+        "highContext": {
+          "advice": "更长的会话即便命中缓存也更昂贵。可在任务中途压缩上下文，或切换新任务时另开会话。",
+          "headline": "{pct}% 的轮次运行在 >150k 上下文"
+        },
+        "title": "哪些因素在推高你的用量？"
+      },
       "loading": "加载中…",
       "models": {
         "cacheHitRate": "缓存命中率",
@@ -19603,6 +19637,7 @@
       "coreRead": "带行号读取文本文件；大文件分页；可列目录。",
       "coreTodoWrite": "更新展示给用户的会话任务清单。",
       "coreWrite": "创建或覆盖文件（覆盖已有文件需先读取）。",
+      "currentTime": "获取当前日期与时间（UTC 以及指定时区的本地化字符串）。",
       "directoryCreate": "创建目录，默认递归。",
       "directoryDelete": "删除目录，可选 recursive 用于删除非空目录。",
       "fileAppend": "向文件追加 UTF-8 文本，文件不存在时自动创建。",
@@ -20380,7 +20415,18 @@
       },
       "renameFailed": "重命名工作流失败",
       "renamed": "工作流已重命名",
+      "run": "运行",
       "runCountBadge": "{count} 次运行",
+      "runDialog": {
+        "cancel": "取消",
+        "description": "立即运行该工作流。可选择以 JSON 形式传入触发输入。",
+        "invalidJson": "载荷必须是合法的 JSON。",
+        "payloadLabel": "触发载荷（可选）",
+        "payloadPlaceholder": "{ \"key\": \"value\" }",
+        "runButton": "运行工作流",
+        "title": "运行「{name}」"
+      },
+      "runStarted": "工作流运行已开始",
       "saveAsTemplate": "另存为模板",
       "saveAsTemplateFailed": "另存为模板失败",
       "savedAsTemplate": "已另存为模板",
@@ -23985,6 +24031,12 @@
         "searchPlaceholder": "搜索日志…",
         "stackToggleHide": "隐藏调用栈",
         "stackToggleShow": "显示调用栈"
+      },
+      "runToast": {
+        "failed": "工作流「{name}」运行失败",
+        "started": "正在运行「{name}」…",
+        "succeeded": "工作流「{name}」已完成",
+        "view": "查看运行"
       },
       "status": {
         "cancelled": "已取消",
