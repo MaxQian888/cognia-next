@@ -1,4 +1,10 @@
-import { isSubagentTool, runningSubagents, subagentName, subagentTask } from "./subagent"
+import {
+  inflightSubagentRows,
+  isSubagentTool,
+  runningSubagents,
+  subagentName,
+  subagentTask,
+} from "./subagent"
 import type { ToolCell } from "../state/types"
 
 const tool = (over: Partial<ToolCell>): ToolCell => ({
@@ -71,5 +77,31 @@ describe("runningSubagents", () => {
       tool({ id: "c", toolName: "dispatch_agent", input: { subagentId: "planner" } }),
     ])
     expect(result).toEqual({ name: "planner", count: 2 })
+  })
+})
+
+describe("inflightSubagentRows", () => {
+  it("keeps only running sub-agent dispatches, one row each", () => {
+    const rows = inflightSubagentRows([
+      tool({
+        callKey: "k1",
+        input: { subagent_type: "reviewer", description: "find bugs" },
+      }),
+      tool({ callKey: "k2", toolName: "bash", status: "running" }),
+      tool({ callKey: "k3", toolName: "task", status: "done" }),
+      tool({
+        callKey: "k4",
+        toolName: "dispatch_agent",
+        input: { subagentId: "planner", prompt: "plan it" },
+      }),
+    ])
+    expect(rows).toEqual([
+      { callKey: "k1", name: "reviewer", task: "find bugs" },
+      { callKey: "k4", name: "planner", task: "plan it" },
+    ])
+  })
+
+  it("returns an empty list when nothing is running", () => {
+    expect(inflightSubagentRows([])).toEqual([])
   })
 })

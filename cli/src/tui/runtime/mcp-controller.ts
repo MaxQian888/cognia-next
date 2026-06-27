@@ -195,6 +195,34 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
   )
 }
 
+/**
+ * Boot-time auth check: probe enabled remote servers once and emit a NOTICE for
+ * each that needs authorization (the proactive startup hint Claude Code shows),
+ * guiding the user to the existing `/mcp auth <name>` flow. Stdio servers never
+ * need auth, so they're skipped; connected / failed probes stay silent to avoid
+ * startup noise. Mirrors {@link mcpPanel} but opens no overlay.
+ */
+export async function mcpAuthStartupNotices(deps: McpDeps): Promise<void> {
+  const remote = loadServers(deps).filter((s) => s.enabled && s.transport !== "stdio")
+  if (remote.length === 0) return
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  await Promise.all(
+    remote.map((s) =>
+      probe(s, { statusOnly: true })
+        .then((r) => r.status)
+        .catch(() => "failed" as McpServerStatus)
+        .then((status) => {
+          if (status === "needs_auth") {
+            deps.dispatch({
+              type: "NOTICE",
+              message: `⚠ MCP server "${s.name}" needs authorization — run /mcp auth ${s.name}`,
+            })
+          }
+        })
+    )
+  )
+}
+
 /** Re-probe a single server (the panel's `r` reconnect action). Patches its row
  * to `pending` first, then the fresh status — the rest of the board is untouched. */
 export async function mcpReconnect(name: string, deps: McpDeps): Promise<void> {

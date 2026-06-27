@@ -85,3 +85,55 @@ export function analyzeSession(input: AnalyzeSessionInput = {}): SessionAnalysis
     topTools,
   }
 }
+
+/** A "what's contributing to your usage" finding: a headline + one tip. */
+export interface SessionInsight {
+  /** Stable id (for keys / tests). */
+  id: "high-context" | "subagent-heavy"
+  /** The headline, e.g. "73% of turns ran at >150k context". */
+  headline: string
+  /** One actionable line of advice. */
+  advice: string
+}
+
+/**
+ * Derive the Claude-Code-style "what's contributing to your usage" insights from
+ * this session's local analysis. Mirrors the `/usage` characteristics block:
+ * each finding is an independent characteristic (not a breakdown that sums to
+ * 100%), shown only when it actually applies (its percentage is positive). Pure.
+ */
+export function sessionInsights(analysis: SessionAnalysis): SessionInsight[] {
+  const insights: SessionInsight[] = []
+  if (analysis.highContextPct > 0) {
+    insights.push({
+      id: "high-context",
+      headline: `${analysis.highContextPct}% of turns ran at >${formatThreshold(
+        analysis.highContextThreshold
+      )} context`,
+      advice:
+        "Longer sessions cost more even when cached. /compact mid-task, or /clear when switching to a new task.",
+    })
+  }
+  // Subagent share of tool activity — each dispatched subagent runs its own
+  // requests, so a high share is a real cost lever.
+  const subagentPct =
+    analysis.totalToolCalls > 0
+      ? Math.round((analysis.dispatchCalls / analysis.totalToolCalls) * 100)
+      : 0
+  if (subagentPct > 0) {
+    insights.push({
+      id: "subagent-heavy",
+      headline: `${subagentPct}% of tool calls dispatched a subagent`,
+      advice:
+        "Each subagent runs its own requests. Be deliberate about spawning them — and consider a cheaper model for simple subagents.",
+    })
+  }
+  return insights
+}
+
+/** Humanize the context threshold for an insight headline (150000 → "150k"). */
+function formatThreshold(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`
+  return String(tokens)
+}

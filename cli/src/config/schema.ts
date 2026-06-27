@@ -414,6 +414,26 @@ const customLimitsSourceSchema = z
   .strict()
 
 /**
+ * Per-subagent provider/model override. Keyed by subagent id in
+ * {@link cliConfigFileSchema.subagentModels}. Either field may be set on its
+ * own: `model` alone swaps the model within the inherited provider; `provider`
+ * alone re-routes to another configured provider (taking its default model).
+ * Both empty would be meaningless, so the entry is required to carry ≥1 field —
+ * the `/agents models` panel deletes the entry entirely on "inherit".
+ */
+export const subagentModelOverrideSchema = z
+  .object({
+    provider: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((v) => Boolean(v.provider || v.model), {
+    message: "subagent model override needs a provider or model",
+  })
+
+export type SubagentModelOverride = z.infer<typeof subagentModelOverrideSchema>
+
+/**
  * The `config.json` shape. Every field is optional — an empty file is valid and
  * resolves entirely from defaults + env + flags.
  */
@@ -452,6 +472,14 @@ export const cliConfigFileSchema = z
     skillTool: z.boolean().optional(),
     /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
     slashCommandTool: z.boolean().optional(),
+    /**
+     * Per-subagent provider/model overrides (subagent id → {@link
+     * SubagentModelOverride}), edited from the `/agents models` panel. Overlaid
+     * onto a discovered subagent's definition before dispatch, so it wins over
+     * the agent's markdown frontmatter `model`/`provider`. Absent ids inherit
+     * (frontmatter, else the active provider's default model).
+     */
+    subagentModels: z.record(z.string(), subagentModelOverrideSchema).optional(),
     /** Customizable footer: which segments to show, in order, and the palette. */
     statusBar: statusBarSchema.optional(),
     /** Terminal mascot (enabled + style). Absent ⇒ shown in the `clawd` style. */
@@ -529,6 +557,10 @@ export const cliConfigFileSchema = z
      * the transcript; `"select"` keeps native click-drag text selection (losing
      * wheel-scroll). Only meaningful in the fullscreen layout on a TTY. */
     mouse: z.enum(MOUSE_MODES).optional(),
+    /** Whether the TUI updates the terminal window/tab title to reflect live
+     * session state (working / needs input / background activity / idle). Absent
+     * ⇒ enabled; set `false` to leave the terminal title untouched. */
+    terminalTitle: z.boolean().optional(),
     /** Clipboard OSC 52 strategy for `/copy` & the copy keybinding. Absent ⇒
      * `"auto"` (native helper locally, OSC 52 over SSH). */
     clipboard: clipboardSchema.optional(),
@@ -568,6 +600,17 @@ export const cliConfigFileSchema = z
      * excluded (they self-bound). Absent ⇒ 120000. Set `0` to disable.
      */
     toolExecutionTimeoutMs: z.number().int().min(0).optional(),
+    /**
+     * Idle (read) timeout for a DISPATCHED subagent turn, in milliseconds. A
+     * subagent runs autonomously and several can fan out concurrently over the
+     * single sidecar, so the provider gap between tool legs routinely exceeds the
+     * interactive {@link streamIdleTimeoutMs} (60s) under load — which spuriously
+     * killed heavy subagents. This bound is therefore far more generous and only
+     * catches a genuinely dead stream; the subagent is really bounded by
+     * `toolExecutionTimeoutMs` + the step/turn budget. Absent ⇒ 300000. Set `0`
+     * to disable.
+     */
+    subagentStreamIdleTimeoutMs: z.number().int().min(0).optional(),
   })
   .strict()
 
@@ -626,6 +669,10 @@ export interface ResolvedConfig {
   skillTool?: boolean
   /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
   slashCommandTool?: boolean
+  /** Per-subagent provider/model overrides (subagent id → override), edited from
+   * the `/agents models` panel. Overlaid onto a discovered subagent's definition
+   * before dispatch. Absent ids inherit (frontmatter, else active default). */
+  subagentModels?: Record<string, SubagentModelOverride>
   /** Customizable footer config (segments + theme). Absent = default layout. */
   statusBar?: StatusBarConfig
   /** Terminal mascot config (enabled + style). Absent = shown in `clawd` style. */
@@ -672,6 +719,9 @@ export interface ResolvedConfig {
   /** Fullscreen mouse model (`select` / `scroll`). Absent ⇒ `scroll` (wheel
    * scrolls the transcript). Only meaningful in the fullscreen layout on a TTY. */
   mouse?: MouseMode
+  /** Whether the TUI updates the terminal window/tab title with live session
+   * state. Absent ⇒ enabled; `false` leaves the terminal title untouched. */
+  terminalTitle?: boolean
   /** Clipboard OSC 52 strategy (`auto` / `always` / `never`). Absent ⇒ `auto`
    * (native helper locally, OSC 52 escape over SSH). */
   clipboard?: ClipboardConfig
@@ -693,6 +743,15 @@ export interface ResolvedConfig {
    * otherwise hang the whole turn until the wall-clock. Exec tools self-bound
    * and are excluded. Absent ⇒ 120000; `0` disables. */
   toolExecutionTimeoutMs?: number
+  /** Idle (read) timeout (ms) for a DISPATCHED subagent turn. A subagent is
+   * autonomous (no user watching) and several can fan out concurrently over the
+   * one sidecar — so the gap between a tool result and the model's next token
+   * routinely exceeds the interactive 60s idle under provider load, which
+   * spuriously killed heavy subagents ("stream idle for 60000ms"). This idle is
+   * therefore far more generous than {@link streamIdleTimeoutMs}; the subagent is
+   * really bounded by `toolExecutionTimeoutMs` + the step/turn budget, with this
+   * only catching a genuinely dead stream. Absent ⇒ 300000; `0` disables. */
+  subagentStreamIdleTimeoutMs?: number
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */
@@ -711,4 +770,5 @@ export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
   streamIdleTimeoutMs: 60_000,
   aiSdkMaxSteps: 256,
   toolExecutionTimeoutMs: 120_000,
+  subagentStreamIdleTimeoutMs: 300_000,
 }

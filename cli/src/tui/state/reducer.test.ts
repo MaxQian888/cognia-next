@@ -169,6 +169,54 @@ describe("tuiReducer", () => {
     expect(s.inflight.text).toBe("Hello")
   })
 
+  it("bumps streamSeq on each live stream-activity delta", () => {
+    const s0 = base()
+    expect(s0.streamSeq).toBe(0)
+    const s1 = reduce(s0, { type: "INFLIGHT_TEXT", delta: "a" })
+    expect(s1.streamSeq).toBe(1)
+    const s2 = reduce(s1, { type: "INFLIGHT_THINKING", delta: "t" })
+    expect(s2.streamSeq).toBe(2)
+    const s3 = reduce(s2, {
+      type: "TOOL_CALL",
+      callKey: "k1",
+      toolName: "bash",
+      input: { command: "ls" },
+    })
+    expect(s3.streamSeq).toBe(3)
+    const s4 = reduce(s3, {
+      type: "TOOL_RESULT",
+      callKey: "k1",
+      toolName: "bash",
+      result: "ok",
+      isError: false,
+    })
+    expect(s4.streamSeq).toBe(4)
+  })
+
+  it("does not bump streamSeq for non-stream actions or no-op deltas", () => {
+    const s0 = base()
+    // TURN_START is lifecycle, not stream activity.
+    const s1 = reduce(s0, { type: "TURN_START", prompt: "go" })
+    expect(s1.streamSeq).toBe(0)
+    // A duplicate TOOL_CALL for an already-running callKey is a no-op (state
+    // unchanged) so the counter must not advance.
+    const sCall = reduce(s1, {
+      type: "TOOL_CALL",
+      callKey: "dup",
+      toolName: "bash",
+      input: { command: "ls" },
+    })
+    expect(sCall.streamSeq).toBe(1)
+    const sDup = reduce(sCall, {
+      type: "TOOL_CALL",
+      callKey: "dup",
+      toolName: "bash",
+      input: { command: "ls" },
+    })
+    expect(sDup).toBe(sCall)
+    expect(sDup.streamSeq).toBe(1)
+  })
+
   it("INFLIGHT_TEXT flushes pending reasoning to a thinking cell first", () => {
     const s = reduce(
       base(),
@@ -1366,6 +1414,23 @@ describe("tuiReducer", () => {
     // Latest usage replaces; cost accumulates.
     expect(s.usage?.inputTokens).toBe(200)
     expect(s.sessionTotals.costUsd).toBeCloseTo(0.3)
+  })
+
+  it("SET_USAGE attributes each turn to its model in modelTotals", () => {
+    let s = reduce(base(), { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 0.1 } })
+    s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 200, totalCostUsd: 0.2 } })
+    // Same model both turns → one bucket whose total mirrors the session total.
+    const keys = Object.keys(s.modelTotals)
+    expect(keys).toHaveLength(1)
+    expect(s.modelTotals[keys[0]].inputTokens).toBe(300)
+    expect(s.modelTotals[keys[0]].costUsd).toBeCloseTo(s.sessionTotals.costUsd)
+  })
+
+  it("RESET clears the per-model totals", () => {
+    let s = reduce(base(), { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 0.1 } })
+    expect(Object.keys(s.modelTotals)).toHaveLength(1)
+    s = reduce(s, { type: "RESET", sessionId: "next" })
+    expect(s.modelTotals).toEqual({})
   })
 
   it("SET_USAGE appends each turn's total tokens to the trend history", () => {

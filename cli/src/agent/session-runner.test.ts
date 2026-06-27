@@ -763,9 +763,9 @@ describe("createAgentSession", () => {
   })
 
   it("surfaces dispatch_agent on the Anthropic channel when the SDK-native agents list is empty", async () => {
-    // The CLI host never populates `options.agents` (project-instruction fs is
-    // absent), so the SDK-native Task tool is unavailable on Anthropic too — we
-    // advertise the provider-agnostic plugin tool so subagents stay reachable.
+    // The CLI's own plugin dispatch tool is the single dispatch path on BOTH
+    // channels (it round-trips to `runCliSubagent`), so it is always advertised —
+    // here with an empty `options.agents`, the simplest case.
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({
       config: cfg(), // provider anthropic
@@ -784,9 +784,13 @@ describe("createAgentSession", () => {
     expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
   })
 
-  it("does NOT surface dispatch_agent when the SDK-native agents list is already populated", async () => {
-    // When `options.agents` carries SDK-native subagents, a second plugin-tool
-    // dispatch would just confuse the model — advertise nothing.
+  it("surfaces dispatch_agent AND drops the desktop-populated SDK-native agents map", async () => {
+    // Regression guard: `resolveSendOptions` now populates `options.agents` in
+    // direct chat with the desktop's subagents, which target a Dexie executor the
+    // CLI lacks AND on the ai-sdk channel never become a dispatch tool. The CLI
+    // must (a) still advertise its own plugin dispatch tool — the single working
+    // dispatch path — and (b) drop the desktop agent map so the Anthropic channel
+    // does not surface a second, non-functional native Task tool.
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({
       config: cfg(),
@@ -803,7 +807,8 @@ describe("createAgentSession", () => {
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     const sendOptions = capture.mock.calls[0][2] as SendOptions
-    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBeFalsy()
+    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
+    expect(sendOptions.agents).toBeUndefined()
   })
 
   it("does not surface dispatch_agent when there are no discovered subagents", async () => {
@@ -848,6 +853,35 @@ describe("createAgentSession", () => {
     const dispatchTool = sendOptions.pluginTools?.find((t) => t.name === DISPATCH_AGENT_TOOL_NAME)
     expect(dispatchTool).toBeDefined()
     // The built-in is targetable: its id is in the subagentId enum.
+    const enumIds =
+      (dispatchTool?.jsonSchema as { properties?: { subagentId?: { enum?: string[] } } })
+        ?.properties?.subagentId?.enum ?? []
+    expect(enumIds).toContain("general-purpose")
+  })
+
+  it("keeps the built-in general-purpose subagent when agent discovery throws", async () => {
+    // `resolveAgents` rejecting (corrupt `.cognia/agents` dir, fs error) must not
+    // strand the model with no dispatch tool — the fallback re-applies the
+    // built-ins so dispatch stays available.
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ provider: "opencode-go" }),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture,
+      resolveAgents: async () => {
+        throw new Error("discovery blew up")
+      },
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    const dispatchTool = sendOptions.pluginTools?.find((t) => t.name === DISPATCH_AGENT_TOOL_NAME)
+    expect(dispatchTool).toBeDefined()
     const enumIds =
       (dispatchTool?.jsonSchema as { properties?: { subagentId?: { enum?: string[] } } })
         ?.properties?.subagentId?.enum ?? []

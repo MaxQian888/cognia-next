@@ -21,6 +21,10 @@ export const ALT_SCREEN_ON = "\x1b[?1049h"
 export const ALT_SCREEN_OFF = "\x1b[?1049l"
 /** Clear the whole screen + scrollback and home the cursor. */
 export const CLEAR_HOME = "\x1b[2J\x1b[3J\x1b[H"
+/** Hide the hardware terminal cursor (DEC `?25l`). */
+export const HIDE_CURSOR = "\x1b[?25l"
+/** Show the hardware terminal cursor (DEC `?25h`). */
+export const SHOW_CURSOR = "\x1b[?25h"
 
 /**
  * Enable button (incl. wheel) mouse tracking with SGR extended coordinates.
@@ -93,10 +97,21 @@ export function enterAltScreen(out: ScreenStream = process.stdout): void {
   if (!out.isTTY) return
   out.write(ALT_SCREEN_ON)
   out.write(CLEAR_HOME)
+  // Hide the hardware cursor: the composer renders its own block cursor, so the
+  // real one must stay hidden while the TUI owns the screen. This is NOT
+  // redundant with Ink's own hide — Ink hides the cursor exactly once (a latch),
+  // while switching INTO the alternate buffer (`?1049h` above) makes the terminal
+  // re-reveal it. On a live re-entry Ink won't hide it again, so without this the
+  // real cursor strands itself at the bottom of the frame (looks like a stray
+  // cursor parked at the status line).
+  out.write(HIDE_CURSOR)
 }
 
-/** Leave the alternate screen buffer, restoring the prior terminal contents. */
+/** Leave the alternate screen buffer, restoring the prior terminal contents and
+ * the hardware cursor (we hid it on entry; the user's normal terminal expects it
+ * back). */
 export function exitAltScreen(out: ScreenStream = process.stdout): void {
   if (!out.isTTY) return
   out.write(ALT_SCREEN_OFF)
+  out.write(SHOW_CURSOR)
 }

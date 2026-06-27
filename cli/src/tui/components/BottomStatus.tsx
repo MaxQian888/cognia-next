@@ -14,7 +14,7 @@
  * while streaming (idle costs no ticks). The timer is never asserted in tests.
  */
 import React, { useEffect, useState } from "react"
-import { Box, Text } from "ink"
+import { Box, Text, type DOMElement } from "ink"
 import Spinner from "ink-spinner"
 
 import { useTheme } from "../theme/context"
@@ -27,6 +27,11 @@ import type { ActivityState, ToolCell, TurnStatus } from "../state/types"
 /** Display width of the steer-queue preview lines (per entry). */
 const QUEUE_PREVIEW_MAX = 3
 
+/** Silence (ms since the last stream delta) after which the stall hint shows.
+ * Kept well below the sidecar's idle watchdog (`config.streamIdleTimeoutMs`,
+ * default 60s) so the user is told "still waiting" before any timeout fires. */
+const STALL_MS = 10_000
+
 function truncate(text: string, max: number): string {
   if (max <= 0 || text.length <= max) return text
   return text.slice(0, Math.max(0, max - 1)) + "…"
@@ -38,6 +43,7 @@ function BottomStatusImpl({
   tools = [],
   steerQueue = [],
   since,
+  lastActivityAt,
   subagentRunning,
   backgroundSubagents = 0,
   interruptedBackgroundSubagents = 0,
@@ -45,6 +51,7 @@ function BottomStatusImpl({
   verbose = false,
   backtrackArmed = false,
   columns = 80,
+  chipRowRef,
 }: {
   turnStatus: TurnStatus
   activity?: ActivityState
@@ -54,6 +61,9 @@ function BottomStatusImpl({
   steerQueue?: string[]
   /** Timestamp (ms) the current turn entered "streaming", or null when idle. */
   since?: number | null
+  /** Timestamp (ms) of the last live stream delta, or null when idle. Drives the
+   * stall hint when the stream goes silent past {@link STALL_MS}. */
+  lastActivityAt?: number | null
   /** The sub-agent dispatches running in the current turn. */
   subagentRunning?: { name: string; count: number } | null
   /** Detached background subagent runs still in flight. */
@@ -68,6 +78,9 @@ function BottomStatusImpl({
   backtrackArmed?: boolean
   /** Terminal width, for tool-detail / queue-preview truncation. */
   columns?: number
+  /** Ref on the run-state chip row so the App can hit-test a click on the
+   * subagent chip and open the `/agents` panel. */
+  chipRowRef?: React.Ref<DOMElement>
 }) {
   const theme = useTheme()
   const busy = turnStatus !== "idle"
@@ -88,6 +101,11 @@ function BottomStatusImpl({
     }
   }, [streaming, since])
   const elapsed = since != null ? formatElapsed(now - since) : null
+
+  // Stall hint: the stream has gone quiet (no delta for ≥ STALL_MS) while still
+  // streaming. Reuses the same once-a-second `now` tick as the elapsed timer.
+  const stalledMs = streaming && lastActivityAt != null ? Math.max(0, now - lastActivityAt) : 0
+  const stalled = stalledMs >= STALL_MS
 
   const detailLines = runningToolLines(tools, columns, 3)
 
@@ -170,6 +188,13 @@ function BottomStatusImpl({
         </Text>
       ) : null}
 
+      {stalled ? (
+        <Text color={theme.muted} dimColor>
+          {"  ⏳ Waiting for API response · "}
+          {formatElapsed(stalledMs)}
+        </Text>
+      ) : null}
+
       {detailLines.map((line, i) => (
         <Text key={`detail-${i}`} color={theme.muted} dimColor>
           {"  "}
@@ -178,15 +203,17 @@ function BottomStatusImpl({
       ))}
 
       {chips.length > 0 ? (
-        <Text wrap="wrap">
-          {"  "}
-          {chips.map((chip, i) => (
-            <React.Fragment key={i}>
-              {i > 0 ? <Text color={theme.muted}> · </Text> : null}
-              {chip}
-            </React.Fragment>
-          ))}
-        </Text>
+        <Box ref={chipRowRef} flexShrink={0}>
+          <Text wrap="wrap">
+            {"  "}
+            {chips.map((chip, i) => (
+              <React.Fragment key={i}>
+                {i > 0 ? <Text color={theme.muted}> · </Text> : null}
+                {chip}
+              </React.Fragment>
+            ))}
+          </Text>
+        </Box>
       ) : null}
 
       {queuePreview.map((entry, i) => (

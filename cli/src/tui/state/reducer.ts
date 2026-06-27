@@ -12,7 +12,13 @@
 import { emptyInputState } from "./initial"
 import { isTodoTool, parseTodos } from "../format/tools"
 import { formatCompactBoundary } from "../format/compaction"
-import { accumulateUsage, contextTokens, emptySessionTotals, turnCostUsd } from "../format/usage"
+import {
+  accumulateModelTotals,
+  accumulateUsage,
+  contextTokens,
+  emptySessionTotals,
+  turnCostUsd,
+} from "../format/usage"
 import { resolveActiveModel } from "../../config/active-model"
 import {
   isExitPlanTool,
@@ -26,6 +32,7 @@ import type {
   Cell,
   Inflight,
   InputBuffer,
+  InputEditOp,
   Overlay,
   ToolCell,
   TodoCell,
@@ -34,6 +41,22 @@ import type {
   TuiState,
   UsageInfo,
 } from "./types"
+import {
+  insertText,
+  insertNewline,
+  backspace,
+  deleteWordLeft,
+  deleteToLineStart,
+  deleteToLineEnd,
+  moveLeft,
+  moveRight,
+  moveUp,
+  moveDown,
+  moveHome,
+  moveEnd,
+  moveWordLeft,
+  moveWordRight,
+} from "../input/buffer"
 
 function makeId(seq: number): string {
   return `c${seq}`
@@ -93,6 +116,35 @@ const UNDO_LIMIT = 100
 function pushBounded(stack: InputBuffer[], entry: InputBuffer): InputBuffer[] {
   const next = [...stack, entry]
   return next.length > UNDO_LIMIT ? next.slice(next.length - UNDO_LIMIT) : next
+}
+
+/** Apply one editor op to a buffer (the reducer side of INPUT_EDIT). */
+function applyInputEdit(buffer: InputBuffer, edit: InputEditOp): InputBuffer {
+  switch (edit.op) {
+    case "insert":
+      return insertText(buffer, edit.text)
+    case "newline":
+      return insertNewline(buffer)
+    case "backspace":
+      return backspace(buffer)
+    case "delete-word":
+      return deleteWordLeft(buffer)
+    case "kill-to-start":
+      return deleteToLineStart(buffer)
+    case "kill-to-end":
+      return deleteToLineEnd(buffer)
+    case "move":
+      return {
+        left: moveLeft,
+        right: moveRight,
+        up: moveUp,
+        down: moveDown,
+        home: moveHome,
+        end: moveEnd,
+        "word-left": moveWordLeft,
+        "word-right": moveWordRight,
+      }[edit.dir](buffer)
+  }
 }
 
 function sameBufferText(a: InputBuffer, b: InputBuffer): boolean {
@@ -178,6 +230,8 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.options.length
     case "config":
       return overlay.rows.length
+    case "subagentModels":
+      return overlay.rows.length
     case "settings":
       return overlay.sections[overlay.section]?.rows.length ?? 0
     case "sessions":
@@ -201,7 +255,27 @@ function withOverlayIndex(overlay: Overlay, index: number): Overlay {
   return { ...overlay, index } as Overlay
 }
 
+/** Actions that signal live stream activity — each bumps `streamSeq` so the App
+ * can timestamp "last activity" for the stall hint without the reducer touching
+ * a clock (which is unavailable in the build and would break determinism). */
+const STREAM_ACTIVITY = new Set<TuiAction["type"]>([
+  "INFLIGHT_TEXT",
+  "INFLIGHT_THINKING",
+  "TOOL_CALL",
+  "TOOL_RESULT",
+  "SET_USAGE",
+])
+
 export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
+  const next = reduceInner(state, action)
+  // Bump the monotonic stream-activity counter on each delta (only when the
+  // action actually produced new state) so the stall watcher re-arms.
+  return next !== state && STREAM_ACTIVITY.has(action.type)
+    ? { ...next, streamSeq: next.streamSeq + 1 }
+    : next
+}
+
+function reduceInner(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
     // ── Streaming ─────────────────────────────────────────────────────────────
     case "INFLIGHT_TEXT": {
@@ -419,15 +493,25 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
     }
 
     // ── Usage (per-turn, streamed from the SDK result message) ──────────────────
-    case "SET_USAGE":
+    case "SET_USAGE": {
+      // Attribute this turn to the model that ran it (resolved from the active
+      // config) so the panel can break usage down per model like `/usage`.
+      const turnModel = resolveActiveModel(state.config) ?? "default"
       return {
         ...state,
         usage: action.usage,
         sessionTotals: accumulateUsage(state.sessionTotals, action.usage, state.modelMeta?.pricing),
+        modelTotals: accumulateModelTotals(
+          state.modelTotals,
+          turnModel,
+          action.usage,
+          state.modelMeta?.pricing
+        ),
         usageHistory: pushUsageHistory(state.usageHistory, action.usage),
         costHistory: pushCostHistory(state.costHistory, action.usage, state.modelMeta?.pricing),
         usageSeenThisTurn: true,
       }
+    }
     case "SET_RATE_LIMITS":
       // Account-level live quota — persists across /clear (a fresh chat doesn't
       // reset the API key's per-window remaining), overwritten by each response.
@@ -506,6 +590,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
               usage: fallbackUsage,
               sessionTotals: accumulateUsage(
                 state.sessionTotals,
+                fallbackUsage,
+                state.modelMeta?.pricing
+              ),
+              modelTotals: accumulateModelTotals(
+                state.modelTotals,
+                resolveActiveModel(state.config) ?? "default",
                 fallbackUsage,
                 state.modelMeta?.pricing
               ),
@@ -780,6 +870,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         overlay: { kind: "none" },
         usage: undefined,
         sessionTotals: emptySessionTotals(),
+        modelTotals: {},
         usageHistory: [],
         toolStats: {},
         usageSeenThisTurn: false,
@@ -1014,6 +1105,23 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         input: {
           ...state.input,
           buffer: action.buffer,
+          undo: textChanged ? pushBounded(state.input.undo, prev) : state.input.undo,
+          redo: textChanged ? [] : state.input.redo,
+        },
+      }
+    }
+    case "INPUT_EDIT": {
+      // Apply the op to the LIVE buffer so a burst of keystrokes batched into one
+      // render compose sequentially (a→ab→abc) instead of each recomputing from a
+      // stale closure and the last one winning (which dropped all but one key).
+      const prev = state.input.buffer
+      const next = applyInputEdit(prev, action.edit)
+      const textChanged = !sameBufferText(prev, next)
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          buffer: next,
           undo: textChanged ? pushBounded(state.input.undo, prev) : state.input.undo,
           redo: textChanged ? [] : state.input.redo,
         },

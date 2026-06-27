@@ -34,9 +34,8 @@ import {
   type RateLimitMeter,
   type RateLimitSnapshot,
 } from "../../format/rate-limits"
-import { formatTokens } from "../../format/usage"
 import { useTheme } from "../../theme/context"
-import type { SessionAnalysis } from "../../format/usage-analysis"
+import { sessionInsights, type SessionAnalysis } from "../../format/usage-analysis"
 import type { LimitsMeter, ProviderLimits } from "@/types/subscription"
 
 /** Bar width in columns. */
@@ -149,22 +148,24 @@ function ProviderBlock({
 
 function SessionSummary({ analysis }: { analysis: SessionAnalysis }) {
   const theme = useTheme()
+  const insights = sessionInsights(analysis)
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color={theme.muted}>This session (local)</Text>
+      <Text color={theme.accent}>What&apos;s contributing to your usage?</Text>
+      <Text color={theme.muted} dimColor>
+        Approximate, from this session on this machine — not a subscription-wide breakdown. These
+        are independent characteristics of your usage, not a breakdown.
+      </Text>
       <Text dimColor>Turns this session: {analysis.turns}</Text>
-      {analysis.highContextPct > 0 && (
-        <Text dimColor>
-          {analysis.highContextPct}% of turns ran at &gt;
-          {formatTokens(analysis.highContextThreshold)} context
-        </Text>
-      )}
-      {analysis.dispatchCalls > 0 && (
-        <Text dimColor>
-          {analysis.dispatchCalls} subagent dispatch
-          {analysis.dispatchCalls === 1 ? "" : "es"}
-        </Text>
-      )}
+      {insights.map((insight) => (
+        <Box key={insight.id} flexDirection="column" marginTop={1}>
+          <Text bold>{insight.headline}</Text>
+          <Text color={theme.muted} dimColor>
+            {"  "}
+            {insight.advice}
+          </Text>
+        </Box>
+      ))}
     </Box>
   )
 }

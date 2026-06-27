@@ -76,6 +76,22 @@ export function accumulateUsage(
   }
 }
 
+/**
+ * Fold one turn's usage into the per-model totals map, attributing it to the
+ * model that ran the turn. Empty/blank `modelId` is bucketed under "default" so a
+ * turn is never dropped. Pure — returns a new map.
+ */
+export function accumulateModelTotals(
+  modelTotals: Record<string, SessionTotals>,
+  modelId: string,
+  usage: UsageInfo,
+  pricing?: Partial<ModelPricing>
+): Record<string, SessionTotals> {
+  const key = modelId || "default"
+  const prev = modelTotals[key] ?? emptySessionTotals()
+  return { ...modelTotals, [key]: accumulateUsage(prev, usage, pricing) }
+}
+
 /** Tokens currently occupying the context window (the prompt side of a turn). */
 export function contextTokens(usage: UsageInfo | undefined): number {
   if (!usage) return 0
@@ -290,4 +306,45 @@ export function usagePanelRows(
     )
   }
   return rows
+}
+
+/** One model's cumulative usage, humanized for the "Usage by model" table. */
+export interface ModelUsageRow {
+  /** Model id (the bucket key; "default" when the turn carried no model). */
+  model: string
+  input: string
+  output: string
+  cacheRead: string
+  cacheWrite: string
+  cost: string
+  /** Raw cost for sorting/sharing — heaviest model first. */
+  costUsd: number
+  /** Raw total tokens (in+out) for sorting when costs tie (all-unpriced). */
+  totalTokens: number
+}
+
+/**
+ * Build the per-model usage rows for the panel's "Usage by model" section,
+ * mirroring Claude Code's `/usage` breakdown (input / output / cache read /
+ * cache write + cost per model). Rows are sorted heaviest-first: by cost, then
+ * by total tokens (so an all-unpriced session still ranks sensibly), then by
+ * model id for a stable order. Models that contributed no tokens are dropped.
+ */
+export function modelUsageRows(modelTotals: Record<string, SessionTotals>): ModelUsageRow[] {
+  return Object.entries(modelTotals)
+    .map(([model, t]) => ({
+      model,
+      input: formatTokens(t.inputTokens),
+      output: formatTokens(t.outputTokens),
+      cacheRead: formatTokens(t.cacheReadTokens),
+      cacheWrite: formatTokens(t.cacheCreationTokens),
+      cost: formatCost(t.costUsd),
+      costUsd: t.costUsd,
+      totalTokens: t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheCreationTokens,
+    }))
+    .filter((r) => r.totalTokens > 0)
+    .sort(
+      (a, b) =>
+        b.costUsd - a.costUsd || b.totalTokens - a.totalTokens || a.model.localeCompare(b.model)
+    )
 }

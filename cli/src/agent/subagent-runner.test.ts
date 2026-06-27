@@ -140,6 +140,46 @@ describe("runCliSubagent", () => {
     expect((capture.mock.calls[1][2] as SendOptions).aiSdkMaxSteps).toBe(200)
   })
 
+  it("runs with no wall-clock and the generous subagent idle window", async () => {
+    const capture = jest.fn().mockResolvedValue(captureResult())
+    await runCliSubagent(def(), "go", "p", {
+      config: cfg({ streamIdleTimeoutMs: 60_000, subagentStreamIdleTimeoutMs: 240_000 }),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set<string>(),
+      disabledMcpTools: new Set<string>(),
+      resolveOptions: async () => ({ provider: "opencode-go" }) as unknown as SendOptions,
+      capture,
+      closeSession: jest.fn().mockResolvedValue(undefined),
+      mintId: () => "x",
+    })
+    const capOpts = capture.mock.calls[0][3] as { timeoutMs?: number; idleTimeoutMs?: number }
+    // No hidden 5-minute wall-clock (a long subagent must not be killed), and the
+    // generous subagent idle — NOT the interactive 60s — bounds a dead stream.
+    expect(capOpts.timeoutMs).toBe(0)
+    expect(capOpts.idleTimeoutMs).toBe(240_000)
+  })
+
+  it("falls back to the interactive idle when no subagent idle is configured", async () => {
+    const capture = jest.fn().mockResolvedValue(captureResult())
+    await runCliSubagent(def(), "go", "p", {
+      config: cfg({ streamIdleTimeoutMs: 90_000, subagentStreamIdleTimeoutMs: undefined }),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set<string>(),
+      disabledMcpTools: new Set<string>(),
+      resolveOptions: async () => ({ provider: "opencode-go" }) as unknown as SendOptions,
+      capture,
+      closeSession: jest.fn().mockResolvedValue(undefined),
+      mintId: () => "x",
+    })
+    expect((capture.mock.calls[0][3] as { idleTimeoutMs?: number }).idleTimeoutMs).toBe(90_000)
+  })
+
   it("inherits the parent config's toolExecutionTimeoutMs into the child sendOptions", async () => {
     const capture = jest.fn().mockResolvedValue(captureResult())
     await runCliSubagent(def(), "go", "p", {
@@ -157,6 +197,44 @@ describe("runCliSubagent", () => {
       mintId: () => "x",
     })
     expect((capture.mock.calls[0][2] as SendOptions).toolExecutionTimeoutMs).toBe(30_000)
+  })
+
+  it("forwards the onEvent live-output sink into the capture options", async () => {
+    const capture = jest.fn().mockResolvedValue(captureResult())
+    const onEvent = jest.fn()
+    await runCliSubagent(def(), "go", "p", {
+      config: cfg(),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set<string>(),
+      disabledMcpTools: new Set<string>(),
+      resolveOptions: async () => ({ provider: "opencode-go" }) as unknown as SendOptions,
+      capture,
+      closeSession: jest.fn().mockResolvedValue(undefined),
+      mintId: () => "x",
+      onEvent,
+    })
+    expect((capture.mock.calls[0][3] as { onEvent?: unknown }).onEvent).toBe(onEvent)
+  })
+
+  it("omits onEvent from the capture options when no sink is provided", async () => {
+    const capture = jest.fn().mockResolvedValue(captureResult())
+    await runCliSubagent(def(), "go", "p", {
+      config: cfg(),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set<string>(),
+      disabledMcpTools: new Set<string>(),
+      resolveOptions: async () => ({ provider: "opencode-go" }) as unknown as SendOptions,
+      capture,
+      closeSession: jest.fn().mockResolvedValue(undefined),
+      mintId: () => "x",
+    })
+    expect((capture.mock.calls[0][3] as { onEvent?: unknown }).onEvent).toBeUndefined()
   })
 
   it("retires the child session even when the turn throws", async () => {
@@ -204,6 +282,77 @@ describe("runCliSubagent", () => {
     expect(childId).toMatch(/^parent::sub-[0-9a-f]{8}$/)
     expect(ipc.closeSession).toHaveBeenCalledWith(childId)
     expect(r.text).toBe("from default capture")
+  })
+
+  it("runs the subagent on a DIFFERENT configured provider (cross-provider) with its model", async () => {
+    let ctxSeen: BuildOptionsContext | null = null
+    await runCliSubagent(def({ provider: "anthropic", model: "sonnet" }), "go", "p", {
+      config: cfg({
+        providers: { "opencode-go": { apiKey: "k" }, anthropic: { authToken: "t" } },
+      }),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set<string>(),
+      disabledMcpTools: new Set<string>(),
+      resolveOptions: async (ctx) => {
+        ctxSeen = ctx
+        return { provider: "anthropic" } as unknown as SendOptions
+      },
+      capture: async () => captureResult(),
+      closeSession: async () => undefined,
+      mintId: () => "x",
+    })
+    // The child session re-routes to the subagent's provider + model.
+    expect(ctxSeen!.session?.providerOverride).toBe("anthropic")
+    expect(ctxSeen!.session?.model).toBe("sonnet")
+  })
+
+  it("falls back to the parent provider and drops the model when the provider is not configured", async () => {
+    let ctxSeen: BuildOptionsContext | null = null
+    await runCliSubagent(def({ provider: "anthropic", model: "sonnet" }), "go", "p", {
+      config: cfg(), // only opencode-go configured
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set<string>(),
+      disabledMcpTools: new Set<string>(),
+      resolveOptions: async (ctx) => {
+        ctxSeen = ctx
+        return { provider: "opencode-go" } as unknown as SendOptions
+      },
+      capture: async () => captureResult(),
+      closeSession: async () => undefined,
+      mintId: () => "x",
+    })
+    // Unconfigured provider → stay on the parent; the cross-provider model is NOT
+    // forced onto it (it would name a model the parent can't serve).
+    expect(ctxSeen!.session?.providerOverride).toBe("opencode-go")
+    expect(ctxSeen!.session?.model).not.toBe("sonnet")
+  })
+
+  it("swaps only the model within the parent provider when no provider is given", async () => {
+    let ctxSeen: BuildOptionsContext | null = null
+    await runCliSubagent(def({ model: "sub-model" }), "go", "p", {
+      config: cfg(),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set<string>(),
+      disabledMcpTools: new Set<string>(),
+      resolveOptions: async (ctx) => {
+        ctxSeen = ctx
+        return { provider: "opencode-go" } as unknown as SendOptions
+      },
+      capture: async () => captureResult(),
+      closeSession: async () => undefined,
+      mintId: () => "x",
+    })
+    expect(ctxSeen!.session?.providerOverride).toBe("opencode-go")
+    expect(ctxSeen!.session?.model).toBe("sub-model")
   })
 
   it("omits usage / finishReason when the capture result carries neither", async () => {

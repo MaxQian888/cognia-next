@@ -73,14 +73,25 @@ describe("settingsSections", () => {
     expect(rows.find((r) => r.id === "key:inspect")!.value).toBe("Ctrl+J")
   })
 
-  it("delegates provider/model/mode/thinking to existing commands", () => {
+  it("delegates provider/model/mode/thinking/subagent-models to existing commands", () => {
     const rows = settingsSections(cfg())[0].rows
     expect(rows.map((r) => (r.control as { command?: string }).command)).toEqual([
       "/provider",
       "/model",
       "/mode",
       "/think",
+      "/agents models",
     ])
+  })
+
+  it("summarises the subagent-models row by override count", () => {
+    expect(findRow(cfg(), "model", "subagentModels")!.value).toBe("inherit")
+    const withOverrides = findRow(
+      cfg({ subagentModels: { a: { model: "x" }, b: { model: "y" } } }),
+      "model",
+      "subagentModels"
+    )!
+    expect(withOverrides.value).toBe("2 overridden")
   })
 
   it("shows the current theme and offers an enum cycle over the theme choices", () => {

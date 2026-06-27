@@ -13,6 +13,7 @@ import {
   type MascotConfig,
   type RenderConfig,
   type StatusBarConfig,
+  type SubagentModelOverride,
 } from "./schema"
 import { userConfigPath, type FileReader } from "./load"
 import type { BuiltinToolsConfig } from "@/lib/claude/types"
@@ -318,6 +319,29 @@ export function setBuiltinHookOverride(
   const current = readUserConfig(home, fsx)
   const builtinHookOverrides = { ...current.builtinHookOverrides, [id]: enabled }
   return writeMergedConfig(home, { ...current, builtinHookOverrides }, fsx)
+}
+
+/**
+ * Set (or clear) one subagent's provider/model override in `config.json`'s
+ * `subagentModels` map (subagent id → override). Passing `null` DELETES that
+ * subagent's entry (reset to inherit). An object, not a scalar, so it can't go
+ * through {@link setConfigValue}; the schema's `.strict()` + the override's
+ * `.refine()` reject a malformed/empty override before anything is written.
+ * Returns the absolute path written.
+ */
+export function setSubagentModel(
+  home: string,
+  agentId: string,
+  override: SubagentModelOverride | null,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!agentId.trim()) throw new Error("subagent id is required")
+  const current = readUserConfig(home, fsx)
+  const subagentModels: Record<string, SubagentModelOverride> = { ...current.subagentModels }
+  if (override === null) delete subagentModels[agentId]
+  else subagentModels[agentId] = override
+  const next = Object.keys(subagentModels).length > 0 ? subagentModels : undefined
+  return writeMergedConfig(home, { ...current, subagentModels: next }, fsx)
 }
 
 /** A user-authored custom theme file: a base (built-in name or BaseColors

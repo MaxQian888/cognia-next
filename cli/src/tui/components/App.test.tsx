@@ -1015,7 +1015,7 @@ describe("App", () => {
     )
     type("/think")
     submit()
-    expect(container.textContent).toContain("Effort")
+    expect(container.textContent).toContain("Reasoning effort")
     // Seeded off (no level set) at slider index 0. Tab to the slider, then move
     // right twice (low → medium → high), clearing off, and confirm.
     act(() => __fireInput("", { tab: true }))

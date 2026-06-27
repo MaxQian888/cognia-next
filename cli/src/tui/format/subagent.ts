@@ -48,3 +48,22 @@ export function runningSubagents(tools: ToolCell[]): { name: string; count: numb
   if (running.length === 0) return null
   return { name: subagentName(running[running.length - 1].input), count: running.length }
 }
+
+/** One in-turn sub-agent dispatch still running, distilled for the agents panel. */
+export interface InflightSubagentRow {
+  /** The tool cell's correlation key — stable id for the panel row. */
+  callKey: string
+  name: string
+  task: string
+}
+
+/**
+ * All sub-agent dispatches still running among a turn's in-flight tools, each as
+ * a {@link InflightSubagentRow}. Unlike {@link runningSubagents} (a footer
+ * summary) this keeps every row so the agents panel can list them individually.
+ */
+export function inflightSubagentRows(tools: ToolCell[]): InflightSubagentRow[] {
+  return tools
+    .filter((t) => t.status === "running" && isSubagentTool(t.toolName))
+    .map((t) => ({ callKey: t.callKey, name: subagentName(t.input), task: subagentTask(t.input) }))
+}

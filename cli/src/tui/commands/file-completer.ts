@@ -30,13 +30,15 @@ export function activeAtToken(text: string): { token: string; start: number } | 
 }
 
 /**
- * Completions for an `@`-token: matching entries as insertable path strings.
+ * Completions for a path token, each prefixed with `sigil` so it inserts ready
+ * to use. The `@` composer reference uses the default sigil; the bash-mode
+ * completer ({@link ../commands/bash-completer}) passes `""` for bare paths.
  *
- * Matching is case-insensitive (so `@S` finds `src/`), and dotfiles are hidden
- * unless the prefix itself starts with `.` (so `@` skips `.git`/`.env` noise but
- * `@.` reveals them). Directories sort first, then alphabetically.
+ * Matching is case-insensitive (so `S` finds `src/`), and dotfiles are hidden
+ * unless the prefix itself starts with `.` (so a bare prefix skips `.git`/`.env`
+ * noise but `.` reveals them). Directories sort first, then alphabetically.
  */
-export function completeAtPath(token: string, listDir: ListDir): string[] {
+export function completePath(token: string, listDir: ListDir, sigil = "@"): string[] {
   const { dir, prefix } = splitToken(token)
   let entries: DirEntry[]
   try {
@@ -53,5 +55,10 @@ export function completeAtPath(token: string, listDir: ListDir): string[] {
       return e.name.toLowerCase().startsWith(lowerPrefix)
     })
     .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
-    .map((e) => "@" + base + e.name + (e.isDir ? "/" : ""))
+    .map((e) => sigil + base + e.name + (e.isDir ? "/" : ""))
+}
+
+/** Completions for an `@`-token: thin wrapper over {@link completePath}. */
+export function completeAtPath(token: string, listDir: ListDir): string[] {
+  return completePath(token, listDir, "@")
 }

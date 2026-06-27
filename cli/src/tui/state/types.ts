@@ -17,6 +17,8 @@ import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import type { MarketplaceBrowseEntry } from "../runtime/marketplace-filter"
 import type { McpPanelServer, McpPanelTool } from "../runtime/mcp-panel-model"
 import type { SkillPanelRow } from "../runtime/skill-panel-model"
+import type { AgentPanelRow } from "../runtime/agents-panel-model"
+import type { SubagentModelRow } from "../runtime/subagent-models-model"
 
 import type {
   ResolvedConfig,
@@ -412,6 +414,21 @@ export type Overlay =
   // warnings) and an enabled badge. Space toggles for the session, Enter opens
   // the detail pager, n/d create/delete. Query/highlight live in the component.
   | { kind: "skills"; rows: SkillPanelRow[] }
+  // Interactive agents panel (`/agents`, default Ctrl+B). A live board of the
+  // sub-agents running now — in-turn dispatches + background runs (live + settled
+  // from the journal). Index/highlight live in the component (like `mcp`); Enter
+  // opens a settled background run's output in the document pager, Esc closes.
+  | { kind: "agents"; rows: AgentPanelRow[] }
+  // The live "agent run page" — switch into one sub-agent's run and watch its
+  // streamed text / reasoning / tool activity token-by-token (read from the
+  // live-output store by `liveId`; the title/task are the static identity). Esc
+  // returns to the agents panel / chat.
+  | { kind: "agentRun"; liveId: string; name: string; task: string }
+  // `/agents models` panel — assign a provider/model to each dispatchable
+  // subagent. A controlled master list (cursor `index` in the overlay, like
+  // `settings`): ←/→ cycles the model, `p` the provider, `r` resets to inherit;
+  // each edit persists to `config.subagentModels` and reopens with fresh rows.
+  | { kind: "subagentModels"; rows: SubagentModelRow[]; index: number }
   // `ask_user` elicitation prompt (model-initiated). Opened when the agent calls
   // the `ask_user` tool — the request round-trips through `useAskUserStore`, the
   // App mirrors the active prompt into this overlay, and the AskUserDialog's
@@ -430,6 +447,20 @@ export interface InputBuffer {
   cursorRow: number
   cursorCol: number
 }
+
+/** A single reducer-applied editor operation (see the INPUT_EDIT action). The
+ * reducer maps each to the matching `input/buffer` transform on the live buffer. */
+export type InputEditOp =
+  | { op: "insert"; text: string }
+  | { op: "newline" }
+  | { op: "backspace" }
+  | { op: "delete-word" }
+  | { op: "kill-to-start" }
+  | { op: "kill-to-end" }
+  | {
+      op: "move"
+      dir: "left" | "right" | "up" | "down" | "home" | "end" | "word-left" | "word-right"
+    }
 
 export interface HistoryState {
   /** Past submissions, oldest first. */
@@ -483,6 +514,11 @@ export interface TuiState {
   modelMeta?: ModelMeta
   /** Cumulative cost/token totals across every turn this session. */
   sessionTotals: SessionTotals
+  /** Cumulative cost/token totals broken down by the model that ran each turn,
+   * keyed by model id — feeds the usage panel's "Usage by model" table (mirrors
+   * Claude Code's `/usage`). The turn's model is resolved from the active config
+   * at accumulation time. */
+  modelTotals: Record<string, SessionTotals>
   /** Per-turn total tokens (prompt incl. cache + output), capped — feeds the
    * usage panel's token-trend sparkline. Oldest → newest. */
   usageHistory: number[]
@@ -540,6 +576,10 @@ export interface TuiState {
   exit: boolean
   /** Monotonic counter feeding unique cell ids without Date.now/Math.random. */
   seq: number
+  /** Monotonic counter bumped on every live stream-activity action (text /
+   * thinking / tool / usage delta). The App watches it to timestamp "last
+   * activity" and surface the stall hint when the stream goes silent. */
+  streamSeq: number
   /** Active backtrack-to-edit selection: the index in `cells` of the user
    * message currently highlighted for editing. Absent when not selecting. */
   backtrack?: { index: number }
@@ -672,6 +712,11 @@ export type TuiAction =
   | { type: "SKILL_ROWS_SET_MANY"; ids: string[]; enabled: boolean }
   // Input editor
   | { type: "INPUT_SET"; buffer: InputBuffer }
+  /** Apply a single editor operation to the CURRENT buffer inside the reducer.
+   * Unlike INPUT_SET (which carries a buffer precomputed from the component's
+   * possibly-stale closure), this lets several keystrokes batched into one render
+   * apply sequentially — without it a fast burst collapses to just the last key. */
+  | { type: "INPUT_EDIT"; edit: InputEditOp }
   | { type: "INPUT_HISTORY"; history: HistoryState }
   | { type: "INPUT_ADD_PASTE"; id: string; text: string }
   | { type: "INPUT_CLEAR" }

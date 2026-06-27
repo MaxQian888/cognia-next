@@ -41,6 +41,7 @@ export function createInitialState(
     overlay: { kind: "none" },
     input: { ...input, history: { ...input.history, entries: history } },
     sessionTotals: emptySessionTotals(),
+    modelTotals: {},
     usageHistory: [],
     costHistory: [],
     toolStats: {},
@@ -53,5 +54,6 @@ export function createInitialState(
     renderEpoch: 0,
     exit: false,
     seq: 0,
+    streamSeq: 0,
   }
 }

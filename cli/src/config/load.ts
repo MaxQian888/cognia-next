@@ -149,6 +149,9 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     webTools: layer.webTools ?? acc.webTools,
     skillTool: layer.skillTool ?? acc.skillTool,
     slashCommandTool: layer.slashCommandTool ?? acc.slashCommandTool,
+    subagentModels: layer.subagentModels
+      ? { ...acc.subagentModels, ...layer.subagentModels }
+      : acc.subagentModels,
     statusBar: layer.statusBar
       ? { ...acc.statusBar, ...stripUndefined(layer.statusBar) }
       : acc.statusBar,
@@ -179,6 +182,8 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     streamIdleTimeoutMs: layer.streamIdleTimeoutMs ?? acc.streamIdleTimeoutMs,
     aiSdkMaxSteps: layer.aiSdkMaxSteps ?? acc.aiSdkMaxSteps,
     toolExecutionTimeoutMs: layer.toolExecutionTimeoutMs ?? acc.toolExecutionTimeoutMs,
+    subagentStreamIdleTimeoutMs:
+      layer.subagentStreamIdleTimeoutMs ?? acc.subagentStreamIdleTimeoutMs,
   }
 }
 

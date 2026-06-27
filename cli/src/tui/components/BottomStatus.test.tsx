@@ -28,6 +28,31 @@ describe("BottomStatus", () => {
     expect(text).toContain("esc to interrupt")
   })
 
+  it("shows the stall hint when the stream has been silent past the threshold", () => {
+    const { container } = render(
+      <BottomStatus
+        turnStatus="streaming"
+        since={Date.now()}
+        lastActivityAt={Date.now() - 11_000}
+      />
+    )
+    expect(container.textContent ?? "").toContain("Waiting for API response")
+  })
+
+  it("hides the stall hint while deltas are still arriving", () => {
+    const { container } = render(
+      <BottomStatus turnStatus="streaming" since={Date.now()} lastActivityAt={Date.now()} />
+    )
+    expect(container.textContent ?? "").not.toContain("Waiting for API response")
+  })
+
+  it("does not show the stall hint when idle even if lastActivityAt is stale", () => {
+    const { container } = render(
+      <BottomStatus turnStatus="idle" lastActivityAt={Date.now() - 60_000} />
+    )
+    expect(container.textContent ?? "").not.toContain("Waiting for API response")
+  })
+
   it("shows the stopping word while aborting", () => {
     const { container } = render(<BottomStatus turnStatus="aborting" />)
     expect(container.textContent ?? "").toContain("stopping")

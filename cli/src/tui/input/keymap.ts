@@ -85,7 +85,14 @@ export function interpretKey(
     return key.shift ? { type: "popup-toggle" } : { type: "popup-complete" }
   }
 
-  if (key.return) {
+  // Enter / submit. Ink names a carriage return (`\r`) and the kitty-protocol
+  // Enter as `return` (→ `key.return`). But some terminals — notably Windows
+  // consoles — deliver Enter as a bare line feed (`\n`) or CRLF (`\r\n`), which
+  // Ink names `enter` / leaves unnamed and surfaces through NO key flag at all.
+  // Without catching those raw forms, Enter silently inserts a newline instead
+  // of sending. Match only the exact newline keystrokes so a pasted body (which
+  // arrives coalesced as a longer chunk) keeps its newlines as text.
+  if (key.return || input === "\n" || input === "\r" || input === "\r\n") {
     if (ctx.popupOpen) return { type: "popup-accept" }
     if (key.shift || key.meta) return { type: "newline" }
     return { type: "submit" }

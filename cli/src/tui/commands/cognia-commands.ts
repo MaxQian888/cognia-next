@@ -116,11 +116,21 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "agents",
-    description: "list and dispatch subagents",
+    description: "view running subagents, list, and dispatch",
     category: "cognia",
-    handler: rt("agents", "list"),
+    handler: rt("agents", "panel"),
     subcommands: [
-      { name: "list", description: "list subagents", handler: rt("agents", "list") },
+      {
+        name: "panel",
+        description: "open the interactive running-agents panel (Ctrl+B)",
+        handler: rt("agents", "panel"),
+      },
+      { name: "list", description: "list subagents (text list)", handler: rt("agents", "list") },
+      {
+        name: "models",
+        description: "assign a provider/model to each subagent",
+        handler: rt("agents", "models"),
+      },
       {
         name: "run",
         description: "dispatch a subagent: run <id> <prompt>",

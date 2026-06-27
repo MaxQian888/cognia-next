@@ -6,9 +6,10 @@
  */
 import type { RuntimeRequest } from "../commands/types"
 import type { ResolvedConfig } from "../../config/schema"
-import type { TuiAction, UsageInfo } from "../state/types"
+import type { ToolCell, TuiAction, UsageInfo } from "../state/types"
 import os from "node:os"
-import { agentsDispatch, agentsList } from "./agents-controller"
+import { agentsDispatch, agentsList, agentsModelsPanel, agentsPanel } from "./agents-controller"
+import { inflightSubagentRows } from "../format/subagent"
 import { agentModeList } from "./agent-mode-controller"
 import { buildAgentsRunDispatch } from "../../agent/agents-run-dispatch"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
@@ -113,6 +114,8 @@ export interface RuntimeDeps {
   rateLimits?: import("../format/rate-limits").RateLimitSnapshot
   /** Pending `/init` staged draft (read by `/init apply`). */
   initDraft?: { target: string; content: string }
+  /** Live in-flight tool cells — feeds the `/agents` panel's in-turn rows. */
+  inflightTools?: ToolCell[]
 }
 
 /** The controller surface the router calls — swappable in tests. */
@@ -130,6 +133,8 @@ export interface RuntimeImpl {
   copilotExit: typeof copilotExit
   agentsList: typeof agentsList
   agentsDispatch: typeof agentsDispatch
+  agentsPanel: typeof agentsPanel
+  agentsModelsPanel: typeof agentsModelsPanel
   agentModeList: typeof agentModeList
   teamList: typeof teamList
   teamShow: typeof teamShow
@@ -220,6 +225,8 @@ const REAL: RuntimeImpl = {
   copilotExit,
   agentsList,
   agentsDispatch,
+  agentsPanel,
+  agentsModelsPanel,
   agentModeList,
   teamList,
   teamShow,
@@ -323,11 +330,22 @@ export async function runRuntimeRequest(
       return impl.workflowList(wd)
     }
     case "agents": {
+      if (req.action === "panel")
+        return impl.agentsPanel({
+          dispatch,
+          sessionId,
+          inflight: inflightSubagentRows(deps.inflightTools ?? []),
+        })
+      if (req.action === "models")
+        return impl.agentsModelsPanel({ dispatch, cwd, roots: deps.roots, config })
       const ad = {
         dispatch,
         cwd,
         roots: deps.roots,
         signal,
+        // The override map is read by the row builder for the panel, but the
+        // list/run paths overlay it so `/agents run` honours a saved choice.
+        ...(config.subagentModels ? { subagentModels: config.subagentModels } : {}),
         // `/agents run` executes a subagent over the live sidecar with the CLI's
         // own config/provider (the desktop `dispatchSubagent` default is gated on
         // `isTauri()` and reads provider from Dexie — neither holds in the CLI).

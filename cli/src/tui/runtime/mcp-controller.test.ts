@@ -4,6 +4,7 @@
 import {
   mcpAdd,
   mcpAuth,
+  mcpAuthStartupNotices,
   mcpList,
   mcpLogout,
   mcpPanel,
@@ -106,6 +107,50 @@ describe("mcpList", () => {
     const { dispatch, actions } = recorder()
     await mcpList({ ...base, dispatch, load: () => [] })
     expect((actions[0] as { message: string }).message).toContain("No MCP servers")
+  })
+})
+
+describe("mcpAuthStartupNotices", () => {
+  const remote = (name: string, enabled = true): McpServer =>
+    ({ id: `mcp_${name}`, name, transport: "http", config: {}, enabled }) as McpServer
+
+  it("emits a NOTICE only for enabled remote servers that need auth", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpAuthStartupNotices({
+      ...base,
+      dispatch,
+      load: () => [
+        remote("gh"), // needs_auth → notice
+        remote("ok"), // connected → silent
+        remote("off", false), // disabled → never probed
+        server("fs"), // stdio → never probed
+      ],
+      probeServer: async (s) =>
+        s.name === "gh" ? ok({ status: "needs_auth" }) : ok({ status: "connected" }),
+    })
+    expect(actions).toHaveLength(1)
+    expect((actions[0] as { type: string; message: string }).type).toBe("NOTICE")
+    expect((actions[0] as { message: string }).message).toContain('"gh"')
+    expect((actions[0] as { message: string }).message).toContain("/mcp auth gh")
+  })
+
+  it("stays silent when a probe throws (treated as failed, not auth)", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpAuthStartupNotices({
+      ...base,
+      dispatch,
+      load: () => [remote("flaky")],
+      probeServer: async () => {
+        throw new Error("boom")
+      },
+    })
+    expect(actions).toHaveLength(0)
+  })
+
+  it("does nothing when no remote servers are configured", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpAuthStartupNotices({ ...base, dispatch, load: () => [server("fs")] })
+    expect(actions).toHaveLength(0)
   })
 })
 

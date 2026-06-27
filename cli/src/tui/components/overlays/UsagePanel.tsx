@@ -15,7 +15,13 @@ import {
   panelFooterHint,
   usePanelScroll,
 } from "../../hooks/usePanelScroll"
-import { contextComposition, formatCost, formatTokens, usagePanelRows } from "../../format/usage"
+import {
+  contextComposition,
+  formatCost,
+  formatTokens,
+  modelUsageRows,
+  usagePanelRows,
+} from "../../format/usage"
 import { sparkline, stackedBar } from "../../format/charts"
 import { progressBar } from "../../format/status-bar"
 import { formatToolStatRow, topToolStats } from "../../format/tool-stats"
@@ -112,6 +118,34 @@ function Composition({ usage }: { usage?: UsageInfo }) {
   )
 }
 
+/**
+ * Per-model cumulative breakdown — Claude Code's `/usage` "Usage by model"
+ * section. One model per block: the id, then a dim detail line of input /
+ * output / cache-read / cache-write tokens and its cost. Heaviest model first.
+ */
+function UsageByModel({ modelTotals }: { modelTotals: Record<string, SessionTotals> }) {
+  const theme = useTheme()
+  const rows = modelUsageRows(modelTotals)
+  // A single model adds no information the Session rows don't already carry —
+  // the breakdown earns its space only once two+ models have run.
+  if (rows.length < 2) return null
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={theme.muted}>Usage by model</Text>
+      {rows.map((row) => (
+        <Box key={row.model} flexDirection="column">
+          <Text color={theme.accent}>{row.model}</Text>
+          <Text dimColor>
+            {"  "}
+            {row.input} in · {row.output} out · {row.cacheRead} cache r · {row.cacheWrite} cache w ·{" "}
+            <Text color={theme.success}>{row.cost}</Text>
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
 function TopTools({ toolStats }: { toolStats: Record<string, ToolStat> }) {
   const theme = useTheme()
   const rows = topToolStats(toolStats, 5)
@@ -141,6 +175,7 @@ export function UsagePanel({
   usageHistory = [],
   costHistory = [],
   toolStats = {},
+  modelTotals = {},
   viewportRows,
   onClose,
 }: {
@@ -157,6 +192,8 @@ export function UsagePanel({
   costHistory?: number[]
   /** Per-tool call/error tallies for the "top tools" breakdown. */
   toolStats?: Record<string, ToolStat>
+  /** Per-model cumulative totals for the "Usage by model" breakdown. */
+  modelTotals?: Record<string, SessionTotals>
   /** Test seam: viewport height in rows (defaults to the terminal height). */
   viewportRows?: number
   onClose: () => void
@@ -183,6 +220,7 @@ export function UsagePanel({
             {row.value}
           </Text>
         ))}
+        <UsageByModel modelTotals={modelTotals} />
         <TokenTrend history={usageHistory} />
         <CostTrend history={costHistory} />
         <Composition usage={usage} />

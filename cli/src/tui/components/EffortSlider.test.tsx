@@ -32,7 +32,7 @@ describe("EffortSlider", () => {
   it("renders the title, off row, slider labels and the focused-tier description", () => {
     const { container } = wrap(<EffortSlider {...props()} />)
     const text = container.textContent ?? ""
-    expect(text).toContain("Effort")
+    expect(text).toContain("Reasoning effort")
     expect(text).toContain("Use model default (off)")
     expect(text).toContain("Faster")
     expect(text).toContain("Smarter")
@@ -137,5 +137,53 @@ describe("EffortSlider", () => {
     wrap(<EffortSlider {...props({ onCancel })} />)
     press("", { escape: true })
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  it("a digit jumps directly to that tier (1-based) and confirms", () => {
+    const onConfirm = jest.fn()
+    wrap(<EffortSlider {...props({ index: 0, onConfirm })} />)
+    press("4") // tier 4 → index 3 (xhigh)
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 3 })
+  })
+
+  it("a digit clears off and engages the slider", () => {
+    const onConfirm = jest.fn()
+    wrap(<EffortSlider {...props({ off: true, index: 0, onConfirm })} />)
+    press("6") // ultracode
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 5 })
+  })
+
+  it("ignores a digit that names no tier (>levels)", () => {
+    const onConfirm = jest.fn()
+    wrap(<EffortSlider {...props({ index: 2, onConfirm })} />)
+    press("9") // only 6 tiers → no-op
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 2 })
+  })
+
+  it("'0' selects off without changing the slider index", () => {
+    const onConfirm = jest.fn()
+    wrap(<EffortSlider {...props({ off: false, index: 2, onConfirm })} />)
+    press("0")
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: true, index: 2 })
+  })
+
+  it("uses the full inline scale on a wide terminal", () => {
+    const { container } = wrap(<EffortSlider {...props()} width={100} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("ultracode")
+    expect(text).not.toContain("Tier")
+  })
+
+  it("collapses to a compact position readout on a narrow terminal", () => {
+    const { container } = wrap(<EffortSlider {...props({ index: 2 })} width={40} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("Tier")
+    expect(text).toContain("3/6") // index 2 → 3rd of 6 tiers
+    expect(text).toContain("Faster")
+    expect(text).toContain("Smarter")
   })
 })

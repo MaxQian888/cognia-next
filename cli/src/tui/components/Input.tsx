@@ -10,87 +10,42 @@
 import fs from "node:fs"
 import path from "node:path"
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Box, Text, useInput, useStdin, type DOMElement } from "ink"
+import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { SlashPalette } from "./SlashPalette"
 import { MentionPalette, orderByGroup } from "./MentionPalette"
 import { useTheme } from "../theme/context"
 import { moveIndex } from "./select-list-state"
-import {
-  backspace,
-  bufferFromText,
-  bufferText,
-  deleteToLineEnd,
-  deleteToLineStart,
-  deleteWordLeft,
-  insertNewline,
-  insertText,
-  moveDown,
-  moveEnd,
-  moveHome,
-  moveLeft,
-  moveRight,
-  moveUp,
-  moveTo,
-  moveWordLeft,
-  moveWordRight,
-  onFirstLine,
-  onLastLine,
-} from "../input/buffer"
+import { bufferFromText, bufferText, moveTo, onFirstLine, onLastLine } from "../input/buffer"
 import { historyDown, historyUp } from "../input/history"
-import { interpretKey } from "../input/keymap"
+import { interpretKey, type KeyFlags } from "../input/keymap"
 import { parseMouseEvent } from "../input/mouse"
 import { clickToCursor } from "../input/mouse-cursor"
+import { absoluteTopLeft } from "../input/element-position"
 import {
   collapsePaste,
   expandPastes,
   PASTE_CHAR_THRESHOLD,
   type PasteResult,
 } from "@/lib/paste-collapse"
-import { createPasteParser } from "../input/bracketed-paste"
 import { suggest } from "../input/autosuggest"
 import { matchSlash, slashQuery } from "../commands/matcher"
 import { listVisibleCommands } from "../commands/registry"
 import { buildCommandHint } from "../commands/command-hint"
 import { type ListDir } from "../commands/file-completer"
+import { activeBashPathToken, completeBashPath } from "../commands/bash-completer"
 import { detectMention } from "../mention/detector"
 import { acceptMention } from "../mention/accept"
 import { highlightMentions } from "../mention/highlight"
 import { createMentionProviders, type MentionProviders } from "../mention/providers"
 import { createMentionLoader } from "../mention/async-load"
 import type { MentionCandidate } from "../mention/types"
-import type { InputBuffer, InputState, TuiAction } from "../state/types"
+import type { InputBuffer, InputEditOp, InputState, TuiAction } from "../state/types"
 
 const PASTE_THRESHOLD = 4
 
 /** Width of the per-line prompt gutter (`"› "` / `"  "`) before the text. */
 const PROMPT_WIDTH = 2
-
-/** Structural view of an Ink DOM node's Yoga layout — `DOMElement`'s public type
- * doesn't surface these, but the reconciler attaches them at runtime. */
-type InkLayoutNode = {
-  yogaNode?: { getComputedTop?: () => number; getComputedLeft?: () => number }
-  parentNode?: InkLayoutNode
-}
-
-/**
- * Absolute terminal top-left (0-based) of an Ink node, summed from the Yoga
- * computed layout up the parent chain. Used to translate an absolute mouse-click
- * coordinate into a position within the composer. Returns null when the node
- * isn't laid out yet (first render, or the jsdom test mock with no Yoga).
- */
-function absoluteTopLeft(node: DOMElement | null): { top: number; left: number } | null {
-  let cur: InkLayoutNode | undefined = (node as unknown as InkLayoutNode | null) ?? undefined
-  if (!cur?.yogaNode) return null
-  let top = 0
-  let left = 0
-  while (cur?.yogaNode) {
-    top += cur.yogaNode.getComputedTop?.() ?? 0
-    left += cur.yogaNode.getComputedLeft?.() ?? 0
-    cur = cur.parentNode
-  }
-  return { top, left }
-}
 
 /**
  * Decide whether an inserted chunk should collapse to a `[Pasted …]` placeholder.
@@ -240,15 +195,34 @@ function InputImpl({
   const sQuery = slashQuery(text)
   const slashMatches = sQuery !== null ? matchSlash(sQuery, { history: input.history.entries }) : []
   const beforeCursor = buffer.lines[buffer.cursorRow].slice(0, buffer.cursorCol)
-  const detected = sQuery === null ? detectMention(beforeCursor) : null
+  // Bash shell-out mode (`!command …`): complete file-path ARGUMENTS, reusing the
+  // mention popup + accept pipeline with a synthetic `file` mention. `@`-mention
+  // detection is suppressed here so the two popups never collide.
+  const bashMode = text.startsWith("!")
+  const bashTok = bashMode ? activeBashPathToken(beforeCursor) : null
+  const detected: ReturnType<typeof detectMention> = bashMode
+    ? bashTok
+      ? { query: bashTok.token, start: bashTok.start, mode: "file" }
+      : null
+    : sQuery === null
+      ? detectMention(beforeCursor)
+      : null
   const mentionMode = detected?.mode
   const mentionQuery = detected?.query ?? ""
   const wantsFiles = mentionMode === "file" || mentionMode === "mixed"
 
-  // Files compute synchronously; skills/agents arrive via the effect below.
+  // Files compute synchronously; skills/agents arrive via the effect below. In
+  // bash mode the candidates are bare paths (no `@`), from the bash completer.
   const fileCandidates = useMemo(
-    () => (wantsFiles ? mentionProviders.files(mentionQuery, listDir) : []),
-    [wantsFiles, mentionQuery, mentionProviders, listDir]
+    () =>
+      bashMode
+        ? bashTok
+          ? completeBashPath(bashTok.token, listDir)
+          : []
+        : wantsFiles
+          ? mentionProviders.files(mentionQuery, listDir)
+          : [],
+    [bashMode, bashTok?.token, wantsFiles, mentionQuery, mentionProviders, listDir]
   )
   // Annotate skill rows with their live enabled state so the popup shows a ●/○
   // badge (and Shift+Tab can flip it). Files/agents pass through unchanged.
@@ -369,6 +343,17 @@ function InputImpl({
     dispatch({ type: "INPUT_SET", buffer: next })
   }
 
+  // Per-keystroke edits go through the reducer (applied to the LIVE buffer) rather
+  // than `setBuffer` (which carries a buffer precomputed from this render's
+  // closure). When several keystrokes batch into one render — the norm once Ink
+  // reads stdin directly — closure-computed edits all start from the same stale
+  // buffer and only the last survives (the "only one letter types" bug); reducer
+  // edits compose in order instead.
+  const editBuffer = (edit: InputEditOp) => {
+    setDismissed(null)
+    dispatch({ type: "INPUT_EDIT", edit })
+  }
+
   const doSubmit = () => {
     const raw = bufferText(buffer)
     if (raw.trim().length === 0) return
@@ -419,171 +404,152 @@ function InputImpl({
     }
   }
 
+  // Insert a chunk, collapsing it to a `[Pasted …]` placeholder when it's large.
+  // Ink ≥7 coalesces a bracketed paste (mount.tsx enables `ESC[?2004h`) into a
+  // SINGLE `useInput` callback, so a multi-line/huge paste arrives here as one
+  // `chunk` and `routePasteInsert` collapses it — no raw-stdin tee needed. (The
+  // old `createPasteParser` + `stdin.on("data")` shim, required when older Ink
+  // surfaced paste bodies char-by-char, attached a `data` listener that flipped
+  // stdin into flowing mode and starved Ink's paused-mode `readable` reads —
+  // silently killing ALL keyboard input, which looked like the composer losing
+  // focus. Ink owns paste coalescing now, so the shim is gone.)
   const applyInsert = (chunk: string) => {
     const r = routePasteInsert(chunk, pasteSeq.current)
     if (r.isLarge) {
       pasteSeq.current++
       dispatch({ type: "INPUT_ADD_PASTE", id: r.display, text: r.stored })
-      setBuffer(insertText(buffer, r.display))
+      editBuffer({ op: "insert", text: r.display })
     } else {
-      setBuffer(insertText(buffer, chunk))
+      editBuffer({ op: "insert", text: chunk })
     }
   }
 
-  // Keep the latest `applyInsert` reachable from the raw-stdin listener below
-  // without re-subscribing on every keystroke (the effect captures a stable ref).
-  const applyInsertRef = useRef(applyInsert)
+  // The key handler, rebuilt each render so it closes over current state.
+  const handleKey = (inputCh: string, key: KeyFlags) => {
+    // Mouse reports leak in as plain text when SGR tracking is on (fullscreen
+    // `scroll` mode). A left-click repositions the cursor where the user
+    // clicked; every other mouse event is swallowed here so it never lands in
+    // the buffer as literal `[<…M`. (The App separately routes the wheel to the
+    // scroll viewport.)
+    const mouse = parseMouseEvent(inputCh)
+    if (mouse) {
+      if (mouse.kind === "wheel" && popupOpen) {
+        // The wheel scrolls the open popup (the App skips the transcript while
+        // a popup owns input — see `onPopupOpenChange`). Up = previous row.
+        setPopupIndex(moveIndex(safeIndex, mouse.dir === "up" ? -1 : 1, popupLen))
+      } else if (mouse.kind === "click") {
+        const pos = absoluteTopLeft(linesRef.current)
+        if (pos) {
+          const target = clickToCursor({
+            clickRow: mouse.row - 1,
+            clickCol: mouse.col - 1,
+            boxTop: pos.top,
+            boxLeft: pos.left,
+            lines: buffer.lines,
+            promptWidth: PROMPT_WIDTH,
+          })
+          if (target) setBuffer(moveTo(buffer, target.row, target.col))
+        }
+      }
+      return
+    }
+    // Accept an inline ghost suggestion: → at the very end of the draft fills
+    // it in (a no-op move otherwise), before normal key interpretation.
+    if (suggestion && key.rightArrow && cursorAtEnd) {
+      setBuffer(bufferFromText(text + suggestion))
+      return
+    }
+    const intent = interpretKey(
+      inputCh,
+      key,
+      {
+        popupOpen,
+        onFirstLine: onFirstLine(buffer),
+        onLastLine: onLastLine(buffer),
+      },
+      keybindings
+    )
+    switch (intent.type) {
+      case "insert":
+        applyInsert(intent.text)
+        break
+      case "newline":
+        editBuffer({ op: "newline" })
+        break
+      case "backspace":
+        editBuffer({ op: "backspace" })
+        break
+      case "delete-word":
+        editBuffer({ op: "delete-word" })
+        break
+      case "kill-to-start":
+        editBuffer({ op: "kill-to-start" })
+        break
+      case "kill-to-end":
+        editBuffer({ op: "kill-to-end" })
+        break
+      case "undo":
+        // Undo/redo are reducer-owned (the undo stack lives in input state), so
+        // dispatch directly rather than routing through setBuffer.
+        setDismissed(null)
+        dispatch({ type: "INPUT_UNDO" })
+        break
+      case "redo":
+        setDismissed(null)
+        dispatch({ type: "INPUT_REDO" })
+        break
+      case "move":
+        editBuffer({ op: "move", dir: intent.dir })
+        break
+      case "history": {
+        const r = intent.dir === "up" ? historyUp(input.history, text) : historyDown(input.history)
+        dispatch({ type: "INPUT_HISTORY", history: r.history })
+        dispatch({ type: "INPUT_SET", buffer: bufferFromText(r.text) })
+        // Suppress the slash/mention palette for the recalled entry. A bare
+        // `/cmd` or `@skill` history line would otherwise re-open the popup,
+        // which unconditionally captures ↑/↓ (see keymap) and strands the user
+        // mid-cycle — unable to keep stepping through history. Marking the
+        // recalled text dismissed keeps `popupOpen` false until the user edits
+        // it (setBuffer clears `dismissed`), at which point completion resumes.
+        setDismissed(r.text)
+        break
+      }
+      case "submit":
+        doSubmit()
+        break
+      case "popup-move":
+        setPopupIndex(moveIndex(safeIndex, intent.delta, popupLen))
+        break
+      case "popup-accept":
+        acceptPopup()
+        break
+      case "popup-complete":
+        completePopup()
+        break
+      case "popup-toggle":
+        togglePopupSkill()
+        break
+      case "popup-cancel":
+        setDismissed(text)
+        break
+      default:
+        break
+    }
+  }
+  // Latest-ref wrapper. Ink registers the `useInput` callback once and is meant to
+  // invoke the freshest closure each keypress, but under our tsx/CJS bundle that
+  // capture doesn't refresh reliably — the handler strands on an early render and
+  // every closure read goes stale: `doSubmit` saw an empty buffer (Enter never
+  // sent) and the popup keys saw `popupOpen=false` (Tab did nothing, ↑/↓ fell
+  // through to history) even with the palette on screen. Updating the ref in an
+  // effect after every commit and calling it through a stable wrapper guarantees
+  // the handler always runs against current state. (Text edits also go through
+  // INPUT_EDIT so they survive even a same-tick burst, which no ref can cover.)
+  const onKeyRef = useRef(handleKey)
   useEffect(() => {
-    applyInsertRef.current = applyInsert
+    onKeyRef.current = handleKey
   })
-
-  // Bracketed-paste route. Terminals with bracketed paste enabled (mount.tsx
-  // writes `ESC[?2004h`) wrap a paste in `ESC[200~ … ESC[201~`. Ink's `useInput`
-  // would surface that body char-by-char; instead we tee the raw stdin through a
-  // `createPasteParser`, and when a full paste span completes we insert it as one
-  // atomic chunk — so a huge single-line paste collapses via the char threshold.
-  // The `keys` portion is left untouched; Ink's own `useInput` still handles it.
-  const { stdin, setRawMode, isRawModeSupported } = useStdin()
-  useEffect(() => {
-    if (disabled || !stdin) return
-    if (isRawModeSupported) setRawMode?.(true)
-    const parser = createPasteParser()
-    const onData = (data: Buffer | string) => {
-      const { pastes } = parser.feed(typeof data === "string" ? data : data.toString("utf8"))
-      for (const body of pastes) applyInsertRef.current(body)
-    }
-    stdin.on("data", onData)
-    return () => {
-      stdin.off?.("data", onData)
-    }
-  }, [stdin, disabled, isRawModeSupported, setRawMode])
-
-  useInput(
-    (inputCh, key) => {
-      // Mouse reports leak in as plain text when SGR tracking is on (fullscreen
-      // `scroll` mode). A left-click repositions the cursor where the user
-      // clicked; every other mouse event is swallowed here so it never lands in
-      // the buffer as literal `[<…M`. (The App separately routes the wheel to the
-      // scroll viewport.)
-      const mouse = parseMouseEvent(inputCh)
-      if (mouse) {
-        if (mouse.kind === "wheel" && popupOpen) {
-          // The wheel scrolls the open popup (the App skips the transcript while
-          // a popup owns input — see `onPopupOpenChange`). Up = previous row.
-          setPopupIndex(moveIndex(safeIndex, mouse.dir === "up" ? -1 : 1, popupLen))
-        } else if (mouse.kind === "click") {
-          const pos = absoluteTopLeft(linesRef.current)
-          if (pos) {
-            const target = clickToCursor({
-              clickRow: mouse.row - 1,
-              clickCol: mouse.col - 1,
-              boxTop: pos.top,
-              boxLeft: pos.left,
-              lines: buffer.lines,
-              promptWidth: PROMPT_WIDTH,
-            })
-            if (target) setBuffer(moveTo(buffer, target.row, target.col))
-          }
-        }
-        return
-      }
-      // Accept an inline ghost suggestion: → at the very end of the draft fills
-      // it in (a no-op move otherwise), before normal key interpretation.
-      if (suggestion && key.rightArrow && cursorAtEnd) {
-        setBuffer(bufferFromText(text + suggestion))
-        return
-      }
-      const intent = interpretKey(
-        inputCh,
-        key,
-        {
-          popupOpen,
-          onFirstLine: onFirstLine(buffer),
-          onLastLine: onLastLine(buffer),
-        },
-        keybindings
-      )
-      switch (intent.type) {
-        case "insert":
-          applyInsert(intent.text)
-          break
-        case "newline":
-          setBuffer(insertNewline(buffer))
-          break
-        case "backspace":
-          setBuffer(backspace(buffer))
-          break
-        case "delete-word":
-          setBuffer(deleteWordLeft(buffer))
-          break
-        case "kill-to-start":
-          setBuffer(deleteToLineStart(buffer))
-          break
-        case "kill-to-end":
-          setBuffer(deleteToLineEnd(buffer))
-          break
-        case "undo":
-          // Undo/redo are reducer-owned (the undo stack lives in input state), so
-          // dispatch directly rather than routing through setBuffer.
-          setDismissed(null)
-          dispatch({ type: "INPUT_UNDO" })
-          break
-        case "redo":
-          setDismissed(null)
-          dispatch({ type: "INPUT_REDO" })
-          break
-        case "move":
-          setBuffer(
-            {
-              left: moveLeft,
-              right: moveRight,
-              up: moveUp,
-              down: moveDown,
-              home: moveHome,
-              end: moveEnd,
-              "word-left": moveWordLeft,
-              "word-right": moveWordRight,
-            }[intent.dir](buffer)
-          )
-          break
-        case "history": {
-          const r =
-            intent.dir === "up" ? historyUp(input.history, text) : historyDown(input.history)
-          dispatch({ type: "INPUT_HISTORY", history: r.history })
-          dispatch({ type: "INPUT_SET", buffer: bufferFromText(r.text) })
-          // Suppress the slash/mention palette for the recalled entry. A bare
-          // `/cmd` or `@skill` history line would otherwise re-open the popup,
-          // which unconditionally captures ↑/↓ (see keymap) and strands the user
-          // mid-cycle — unable to keep stepping through history. Marking the
-          // recalled text dismissed keeps `popupOpen` false until the user edits
-          // it (setBuffer clears `dismissed`), at which point completion resumes.
-          setDismissed(r.text)
-          break
-        }
-        case "submit":
-          doSubmit()
-          break
-        case "popup-move":
-          setPopupIndex(moveIndex(safeIndex, intent.delta, popupLen))
-          break
-        case "popup-accept":
-          acceptPopup()
-          break
-        case "popup-complete":
-          completePopup()
-          break
-        case "popup-toggle":
-          togglePopupSkill()
-          break
-        case "popup-cancel":
-          setDismissed(text)
-          break
-        default:
-          break
-      }
-    },
-    { isActive: !disabled }
-  )
+  useInput((inputCh, key) => onKeyRef.current(inputCh, key), { isActive: !disabled })
 
   // Command mode: the first char of the draft selects a distinct submit path —
   // `!` shells out, `/` runs a slash command. Recoloring the whole composer makes

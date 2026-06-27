@@ -10,7 +10,7 @@ import fs from "node:fs"
 import os from "node:os"
 import { spawn } from "node:child_process"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
-import { Box, Text, useApp, useInput, useStdout } from "ink"
+import { Box, Text, measureElement, useApp, useInput, useStdout, type DOMElement } from "ink"
 
 import { Banner } from "./Banner"
 import { ScrollView } from "./ScrollView"
@@ -26,6 +26,13 @@ import {
   resetMouse,
   type ScreenStream,
 } from "../screen"
+import {
+  applyTerminalTitle,
+  resetTerminalTitle,
+  computeTitle,
+  type TitleStream,
+  type TitleEnv,
+} from "../terminal-title"
 import { parseMouseEvent } from "../input/mouse"
 import { ThemeProvider } from "../theme/context"
 import { RenderPrefsProvider } from "../render/context"
@@ -57,6 +64,14 @@ import { StatusPanel } from "./overlays/StatusPanel"
 import { DoctorPanel } from "./overlays/DoctorPanel"
 import { DocumentViewer } from "./overlays/DocumentViewer"
 import { InspectOverlay } from "./overlays/InspectOverlay"
+import { AgentsPanel } from "./overlays/AgentsPanel"
+import { AgentRunPage } from "./overlays/AgentRunPage"
+import { SubagentModelsPanel } from "./overlays/SubagentModelsPanel"
+import {
+  cycleSubagentModel,
+  cycleSubagentProvider,
+  recomputeSubagentModelRows,
+} from "../runtime/subagent-models-model"
 import { ConfirmOverlay } from "./overlays/ConfirmOverlay"
 import { PlanApprovalOverlay } from "./overlays/PlanApprovalOverlay"
 import { AskUserDialog } from "./overlays/AskUserDialog"
@@ -86,6 +101,7 @@ import { preprocessMentions } from "../mention/preprocess"
 import { skillSetEnabled } from "../runtime/skill-controller"
 import {
   mcpPanel as runMcpPanel,
+  mcpAuthStartupNotices,
   mcpReconnect,
   mcpToggleServerInPanel,
   mcpToggleTool,
@@ -127,6 +143,8 @@ import {
   countInterruptedCliBackgroundRuns,
   countRunningCliBackgroundRuns,
 } from "../../agent/subagent-background-tasks"
+import { getLiveSubagent } from "../../agent/subagent-live-output"
+import { absoluteTopLeft } from "../input/element-position"
 import { contextPercent } from "../format/usage"
 import { copyToClipboard, clipboardFailureMessage, type CopyResult } from "../clipboard"
 import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
@@ -154,6 +172,7 @@ import {
   setCustomTheme,
   setRenderConfig,
   setKeybindings,
+  setSubagentModel,
 } from "../../config/mutate"
 import { resolveKeybindings, matchAction } from "../input/keybindings"
 import { collectInspectables } from "../runtime/inspect"
@@ -166,6 +185,7 @@ import {
   resolveRenderConfig,
   resolveNotices,
   type ThinkingLevel,
+  type SubagentModelOverride,
 } from "../../config/schema"
 import { deriveEffortSliderState, modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
@@ -237,6 +257,13 @@ function readThemeFile(p: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Last path segment of `p` (project folder name), tolerant of either slash
+ * style and trailing separators. Feeds the dynamic terminal title. */
+function baseName(p: string): string {
+  const parts = p.split(/[\\/]+/).filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : p
 }
 
 // Register the feature-command clusters (Cognia runtime, MCP, plugins, skills)
@@ -355,6 +382,13 @@ export interface AppProps {
    * first frame and leave a blank screen until a resize. Defaults to false so
    * tests (which render App directly) still drive the full enter on mount. */
   altScreenPreEntered?: boolean
+  /** Sink for the dynamic terminal-title escapes; defaults to the Ink stdout.
+   * Kept distinct from {@link screenOut} so the title writes never pollute the
+   * alt-screen lifecycle assertions. Injected by tests to assert the title. */
+  titleOut?: TitleStream
+  /** Env slice steering terminal-title adaptation (tmux / screen / dumb);
+   * defaults to `process.env`. Injected by tests. */
+  titleEnv?: TitleEnv
 }
 
 export function App({
@@ -410,6 +444,8 @@ export function App({
   layoutCapability,
   screenOut,
   altScreenPreEntered,
+  titleOut,
+  titleEnv,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -418,6 +454,9 @@ export function App({
   const agent = useAgentSession({
     config: state.config,
     dispatch,
+    // Bind the chat session to the live app id so its transcript lands under the
+    // id `/export`/`/handoff`/`/resume` read (it tracks `/clear` + `/resume`).
+    sessionId: state.sessionId,
     createSession,
     getCellCount: () => state.cells.length,
     // Seed the live auto-approve set from THIS app's home (not the OS home) so
@@ -466,6 +505,9 @@ export function App({
   // Whether the composer popup currently owns input — read by the wheel handler
   // so the transcript doesn't scroll while the popup is being wheel-scrolled.
   const composerPopupOpen = useRef(false)
+  // The run-state chip row in the BottomStatus, so a click on the subagent chip
+  // opens the `/agents` panel (parity with Ctrl+B).
+  const subagentChipRef = useRef<DOMElement | null>(null)
   // Stable callbacks for the memoized <Input>: an inline arrow / default-param
   // arrow would be a fresh reference each render and defeat React.memo, making
   // the composer re-render (and re-run slash/mention matching) on every delta.
@@ -595,6 +637,17 @@ export function App({
   // reconnect / tools / remove). Built per render so it tracks the live config.
   const mcpPanelDeps = () => ({ dispatch, roots: [state.config.cwd, home], home })
 
+  // One-time boot check: warn (via a NOTICE cell) about any enabled remote MCP
+  // server that needs authorization, so the user isn't surprised at the first
+  // turn. Fires once per session as soon as we enter the chat phase; the probe is
+  // async and never blocks the first frame.
+  const mcpAuthChecked = useRef(false)
+  useEffect(() => {
+    if (state.phase !== "chat" || mcpAuthChecked.current) return
+    mcpAuthChecked.current = true
+    void mcpAuthStartupNotices({ dispatch, roots: [state.config.cwd, home], home })
+  }, [state.phase, state.config.cwd, home, dispatch])
+
   // Effective layout: the configured preference (default `fullscreen`) gated by
   // terminal capability — a non-TTY / dumb terminal always falls back to the
   // scrollback `<Static>` tree (which is also why every existing test, rendered
@@ -644,6 +697,36 @@ export function App({
     // never re-issues CLEAR_HOME. eslint-disable to keep the effect enter-once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullscreen, screen])
+
+  // Dynamic terminal title: reflect the live session state in the window / tab
+  // caption so a glance tells you whether the agent is working, blocked on you,
+  // or idle — even when the window isn't focused. Independent of the alt-screen
+  // layout (it works in scrollback mode too), so it writes to its own sink (not
+  // `screen`) and is terminal-type-adapted (tmux/screen/dumb) by the module.
+  const titleEnabled = state.config.terminalTitle !== false
+  const titleSink: TitleStream = titleOut ?? (stdout as unknown as TitleStream)
+  const awaitingInput = state.overlay.kind === "permission" || state.overlay.kind === "askUser"
+  const activityKind =
+    state.activity && state.activity.status === "running" ? state.activity.kind : undefined
+  const titleText = useMemo(
+    () =>
+      computeTitle({
+        busy,
+        awaitingInput,
+        activity: activityKind,
+        dir: baseName(state.config.cwd),
+      }),
+    [busy, awaitingInput, activityKind, state.config.cwd]
+  )
+  useEffect(() => {
+    if (titleEnabled) applyTerminalTitle(titleText, titleSink, titleEnv)
+  }, [titleEnabled, titleText, titleSink, titleEnv])
+  // Restore the terminal's default title on unmount (the per-state apply above
+  // owns live updates; this is the teardown so we never strand a stale caption).
+  useEffect(() => {
+    if (!titleEnabled) return
+    return () => resetTerminalTitle(titleSink, titleEnv)
+  }, [titleEnabled, titleSink, titleEnv])
 
   // Scroll controller for the fullscreen viewport (no-op in scrollback mode,
   // where the terminal's native scrollback handles it).
@@ -1308,6 +1391,7 @@ export function App({
             toolStats: state.toolStats,
             ...(state.rateLimits ? { rateLimits: state.rateLimits } : {}),
             ...(state.initDraft ? { initDraft: state.initDraft } : {}),
+            inflightTools: state.inflight.tools,
           })
             .catch((err: unknown) =>
               dispatch({
@@ -1697,6 +1781,38 @@ export function App({
     [state.config, runCommandLine, applyEffect]
   )
 
+  // `/agents models` panel edit: persist one subagent's provider/model override
+  // (or clear it on `null`), patch the live config, invalidate the session so the
+  // next dispatch picks up the change, and reopen the panel with rows recomputed
+  // against the new config (cursor index preserved). Mirrors `applySettings`.
+  const applySubagentModelEdit = useCallback(
+    (agentId: string, override: SubagentModelOverride | null) => {
+      const ov = state.overlay
+      if (ov.kind !== "subagentModels") return
+      const nextMap = { ...(state.config.subagentModels ?? {}) }
+      if (override === null) delete nextMap[agentId]
+      else nextMap[agentId] = override
+      const subagentModels = Object.keys(nextMap).length > 0 ? nextMap : undefined
+      const patch: Partial<ResolvedConfig> = { subagentModels }
+      try {
+        setSubagentModel(home, agentId, override)
+      } catch {
+        dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
+      }
+      dispatch({ type: "SET_CONFIG_PATCH", patch })
+      agent.invalidate()
+      dispatch({
+        type: "OVERLAY_OPEN",
+        overlay: {
+          kind: "subagentModels",
+          rows: recomputeSubagentModelRows(ov.rows, { ...state.config, ...patch }),
+          index: ov.index,
+        },
+      })
+    },
+    [state.overlay, state.config, home, agent]
+  )
+
   // Reverse-history-search handlers. The pure `searchHistory` matcher scans the
   // composer history (oldest-first); `fromIndex = entries.length` finds the most
   // recent match, and passing the last hit's index cycles to the next-older one.
@@ -1938,6 +2054,21 @@ export function App({
             if (mouse.dir === "up") scroll.lineUp()
             else scroll.lineDown()
           }
+        } else if (mouse.kind === "click") {
+          // A click on the BottomStatus subagent chip opens the `/agents` panel
+          // (parity with Ctrl+B). Only acts when an agent chip is actually shown
+          // and the click lands on its row.
+          const hasAgentChip =
+            runningSubagents(state.inflight.tools) != null ||
+            countRunningCliBackgroundRuns(state.sessionId) > 0
+          if (hasAgentChip && subagentChipRef.current) {
+            const pos = absoluteTopLeft(subagentChipRef.current)
+            if (pos) {
+              const height = measureElement(subagentChipRef.current).height || 1
+              const clickRow = mouse.row - 1
+              if (clickRow >= pos.top && clickRow < pos.top + height) runCommandLine("/agents")
+            }
+          }
         }
         return
       }
@@ -1999,6 +2130,13 @@ export function App({
       } else {
         dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "inspect", items, index: 0 } })
       }
+      return
+    }
+    // Open the running-agents panel: in-turn sub-agent dispatches + background
+    // runs. Routes through the command pipeline so the runtime dispatcher (which
+    // carries the live in-flight tools) builds the rows.
+    if (chord === "agentsPanel") {
+      runCommandLine("/agents")
       return
     }
     // Copy the latest assistant reply to the clipboard without entering find
@@ -2121,8 +2259,10 @@ export function App({
   const footerSubagentRunning = useMemo(() => runningSubagents(inflightTools), [inflightTools])
   const footerBackgroundSubagents = useMemo(() => {
     void inflightTools
-    return countRunningCliBackgroundRuns()
-  }, [inflightTools])
+    // Scope to this chat session so the footer counts only the background
+    // subagents the current session started (the registry is process-global).
+    return countRunningCliBackgroundRuns(state.sessionId)
+  }, [inflightTools, state.sessionId])
   const copilotName = state.copilot?.name
   const hasCopilot = state.copilot !== undefined
   const footerCopilot = useMemo(
@@ -2140,6 +2280,16 @@ export function App({
     const t = setTimeout(() => setStreamStartedAt(isStreaming ? Date.now() : null), 0)
     return () => clearTimeout(t)
   }, [isStreaming])
+
+  // Timestamp the last live stream delta, for the BottomStatus stall hint. The
+  // reducer bumps `streamSeq` on every text/thinking/tool/usage delta; this
+  // effect re-stamps "now" whenever it changes while streaming (mirrors the
+  // `since` capture above — deferred set, no impure work during render).
+  const [lastActivityAt, setLastActivityAt] = useState<number | null>(null)
+  useEffect(() => {
+    const t = setTimeout(() => setLastActivityAt(isStreaming ? Date.now() : null), 0)
+    return () => clearTimeout(t)
+  }, [isStreaming, state.streamSeq])
 
   // Startup phase: welcome banner + the "do you trust this folder?" gate only —
   // no transcript/composer/footer until the user proceeds.
@@ -2628,6 +2778,76 @@ export function App({
               onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
             />
           )}
+          {state.overlay.kind === "agents" && (
+            <AgentsPanel
+              rows={state.overlay.rows}
+              width={columns}
+              maxRows={overlayRows}
+              onView={(row) => {
+                // A row backed by the live-output store opens the live run page —
+                // watch its streamed text/thinking/tools (running OR recently
+                // settled). Otherwise fall back to the settled-output pager.
+                if (row.liveId && getLiveSubagent(row.liveId, state.sessionId)) {
+                  dispatch({
+                    type: "OVERLAY_OPEN",
+                    overlay: {
+                      kind: "agentRun",
+                      liveId: row.liveId,
+                      name: row.name,
+                      task: row.task,
+                    },
+                  })
+                } else if (row.output) {
+                  dispatch({
+                    type: "OVERLAY_OPEN",
+                    overlay: {
+                      kind: "document",
+                      title: row.name,
+                      body: row.output,
+                      format: "text",
+                    },
+                  })
+                } else {
+                  dispatch({ type: "OVERLAY_CLOSE" })
+                  dispatch({
+                    type: "NOTICE",
+                    message:
+                      row.status === "running"
+                        ? `"${row.name}" is still running — no output yet.`
+                        : `No output recorded for "${row.name}".`,
+                  })
+                }
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "agentRun" && (
+            <AgentRunPage
+              liveId={state.overlay.liveId}
+              name={state.overlay.name}
+              task={state.overlay.task}
+              width={columns}
+              getEntry={(id) => getLiveSubagent(id, state.sessionId)}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "subagentModels" && (
+            <SubagentModelsPanel
+              rows={state.overlay.rows}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onCycleModel={(row, delta) =>
+                applySubagentModelEdit(row.id, cycleSubagentModel(row, delta))
+              }
+              onCycleProvider={(row, delta) =>
+                applySubagentModelEdit(row.id, cycleSubagentProvider(row, delta))
+              }
+              onReset={(row) => applySubagentModelEdit(row.id, null)}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
           {state.overlay.kind === "askUser" && (
             <AskUserDialog request={state.overlay.request} onResolve={askUser.resolve} />
           )}
@@ -2649,6 +2869,7 @@ export function App({
               usageHistory={state.usageHistory}
               costHistory={state.costHistory}
               toolStats={state.toolStats}
+              modelTotals={state.modelTotals}
               onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
             />
           )}
@@ -2776,6 +2997,7 @@ export function App({
             tools={inflightTools}
             steerQueue={state.steerQueue}
             since={streamStartedAt}
+            lastActivityAt={lastActivityAt}
             subagentRunning={footerSubagentRunning}
             backgroundSubagents={footerBackgroundSubagents}
             interruptedBackgroundSubagents={interruptedBackgroundSubagents}
@@ -2783,6 +3005,7 @@ export function App({
             verbose={state.verbose}
             backtrackArmed={backtrackArmed}
             columns={columns}
+            chipRowRef={subagentChipRef}
           />
           {cursor.state.find && (
             <FindBar

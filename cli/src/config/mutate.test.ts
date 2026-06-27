@@ -15,6 +15,7 @@ import {
   setRenderConfig,
   setStatusBarConfig,
   setStringArrayConfig,
+  setSubagentModel,
   SETTABLE_KEYS,
   type ConfigMutateFs,
 } from "./mutate"
@@ -441,5 +442,75 @@ describe("setKeybindings", () => {
     })
     setKeybindings(HOME, { inspect: null }, m.fsx)
     expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ provider: "openai" })
+  })
+})
+
+describe("setSubagentModel", () => {
+  it("writes a new subagentModels entry", () => {
+    const m = memFs()
+    const target = setSubagentModel(
+      HOME,
+      "reviewer",
+      { provider: "anthropic", model: "sonnet" },
+      m.fsx
+    )
+    expect(JSON.parse(m.files.get(target)!)).toEqual({
+      subagentModels: { reviewer: { provider: "anthropic", model: "sonnet" } },
+    })
+  })
+
+  it("accepts a model-only override (no provider)", () => {
+    const m = memFs()
+    setSubagentModel(HOME, "reviewer", { model: "gpt-4o" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      subagentModels: { reviewer: { model: "gpt-4o" } },
+    })
+  })
+
+  it("merges with an existing map, preserving other agents", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "openai",
+        subagentModels: { a: { model: "x" } },
+      }),
+    })
+    setSubagentModel(HOME, "b", { model: "y" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      subagentModels: { a: { model: "x" }, b: { model: "y" } },
+    })
+  })
+
+  it("deletes one entry when override is null, keeping the rest", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        subagentModels: { a: { model: "x" }, b: { model: "y" } },
+      }),
+    })
+    setSubagentModel(HOME, "a", null, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      subagentModels: { b: { model: "y" } },
+    })
+  })
+
+  it("clears the subagentModels key entirely when the last entry is removed", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "openai",
+        subagentModels: { a: { model: "x" } },
+      }),
+    })
+    setSubagentModel(HOME, "a", null, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ provider: "openai" })
+  })
+
+  it("rejects an empty override (no provider or model)", () => {
+    expect(() => setSubagentModel(HOME, "a", {} as never, memFs().fsx)).toThrow()
+  })
+
+  it("rejects a blank agent id", () => {
+    expect(() => setSubagentModel(HOME, "  ", { model: "x" }, memFs().fsx)).toThrow(
+      /id is required/
+    )
   })
 })

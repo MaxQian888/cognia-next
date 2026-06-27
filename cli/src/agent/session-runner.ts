@@ -52,7 +52,11 @@ import {
   withCliAutoApprovedTools,
   withCliDisabledMcpTools,
 } from "./tool-suppression"
-import { buildAgents, discoverAgentFiles, type AgentSummary } from "./discover-agents"
+import {
+  applySubagentModelOverrides,
+  discoverDispatchableAgents,
+  type AgentSummary,
+} from "./discover-agents"
 import { withBuiltinAgents } from "./builtin-agents"
 import { discoverCustomAgentModes, resolveAgentMode as selectAgentMode } from "../config/agent-mode"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
@@ -237,7 +241,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const resolveAgents =
     params.resolveAgents ??
     (async () =>
-      withBuiltinAgents(buildAgents(await discoverAgentFiles([params.config.cwd, home]))))
+      applySubagentModelOverrides(
+        withBuiltinAgents(await discoverDispatchableAgents([params.config.cwd, home])),
+        params.config.subagentModels
+      ))
   const resolveAgentMode =
     params.resolveAgentMode ??
     (async () =>
@@ -312,19 +319,29 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         resolveDisabledMcpTools()
       )
       // Surface the `dispatch_agent` (Task) tool so the model can launch a
-      // subagent. The SDK-native Task tool is driven by `options.agents`, but the
-      // CLI host never populates it (project-instruction discovery needs a Tauri
-      // fs that isn't present here), so on BOTH channels the discovered subagents
-      // would be unreachable. We therefore advertise the provider-agnostic
-      // plugin-tool equivalent whenever `options.agents` is empty — the Anthropic
-      // path consumes `pluginTools` (a `cognia-plugin-tools` MCP server) exactly
-      // like the ai-sdk path, so the tool round-trips to the CLI handle either
-      // way. When `options.agents` IS populated (SDK-native dispatch present) we
-      // add nothing, to avoid two competing dispatch tools. Empty-guarded: no
-      // `.cognia/agents/*.md` ⇒ no tool advertised.
-      agents = await resolveAgents().catch(() => [])
-      const nativeAgentsPresent = Object.keys(options.agents ?? {}).length > 0
-      const manifest = nativeAgentsPresent ? null : buildCliSubagentToolManifest(agents)
+      // subagent. The CLI's dispatch is ALWAYS its own: a model call round-trips
+      // (`plugin_tool_exec` → the CLI handle → `runCliSubagent`) and runs over
+      // THIS host's sidecar/provider. So advertise the provider-agnostic
+      // plugin-tool unconditionally — the Anthropic path consumes `pluginTools`
+      // (a `cognia-plugin-tools` MCP server) exactly like the ai-sdk path, so the
+      // tool reaches the model on BOTH channels.
+      //
+      // We must NOT lean on the SDK-native Task tool driven by `options.agents`:
+      // `resolveSendOptions` now populates that in direct chat (the desktop's
+      // workflow-*/plugin/template subagents), but (a) those are wired to the
+      // desktop's Dexie-backed `executeAgent`, absent here, and (b) on the ai-sdk
+      // channel `options.agents` only drives the `@agent` identity overlay, never
+      // a dispatch tool — so the model saw NO way to delegate there. A non-empty
+      // `options.agents` also used to SUPPRESS this very tool (the removed
+      // `nativeAgentsPresent` guard), the regression that left dispatch dormant.
+      // So drop the desktop agent map and make the CLI plugin tool the single
+      // dispatch path. `withBuiltinAgents` guarantees ≥1 agent (general-purpose)
+      // even on discovery failure, so the manifest is non-null even with no
+      // `.cognia/agents/*.md`. The CLI sets no `options.agent` (see
+      // `toBuildContext`), so dropping the map can't strand an `@agent` reference.
+      agents = await resolveAgents().catch(() => withBuiltinAgents([]))
+      delete options.agents
+      const manifest = buildCliSubagentToolManifest(agents)
       if (manifest) {
         options.pluginTools = [...(options.pluginTools ?? []), manifest]
         subagentToolEnabled = true

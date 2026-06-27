@@ -16,7 +16,7 @@ const result = (): RunAndCaptureResult => ({
   a2uiSurfaceOrder: [],
 })
 
-function harness(opts: { isLive?: boolean } = {}) {
+function harness(opts: { isLive?: boolean; sessionId?: string } = {}) {
   const actions: TuiAction[] = []
   const dispatch = (a: TuiAction) => actions.push(a)
   const send = jest.fn(async () => result())
@@ -51,6 +51,7 @@ function harness(opts: { isLive?: boolean } = {}) {
     useAgentSession({
       config,
       dispatch,
+      ...(opts.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),
       createSession: create,
       subscribeSidecar,
       requestCompact,
@@ -88,6 +89,27 @@ describe("useAgentSession", () => {
       "TURN_START",
       "TURN_COMMIT",
     ])
+  })
+
+  it("binds the lazily-created session to the app session id (so /export finds the transcript)", async () => {
+    // Without this binding the runner mints its OWN id and writes the transcript
+    // there, while /export reads under the app id → "no turns".
+    const h = harness({ sessionId: "app-session-1" })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.create).toHaveBeenCalledWith({
+      config: expect.anything(),
+      sessionId: "app-session-1",
+    })
+  })
+
+  it("omits sessionId when the app id is unknown (runner mints its own)", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.create).toHaveBeenCalledWith({ config: expect.anything() })
   })
 
   it("interactive turns disable the wall-clock cap (timeoutMs: 0)", async () => {

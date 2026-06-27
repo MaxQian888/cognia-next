@@ -23,6 +23,7 @@ import {
 } from "@/lib/claude/build-options"
 import {
   runAndCaptureAssistantReply as defaultCapture,
+  type CaptureStreamEvent,
   type RunAndCaptureResult,
 } from "@/lib/claude/run-and-capture"
 import { closeSession as defaultCloseSession } from "@/lib/claude/ipc"
@@ -54,6 +55,11 @@ export interface RunCliSubagentDeps {
   approvedTools: Set<string>
   /** The per-tool MCP disable overlay to union into `disallowedTools`. */
   disabledMcpTools: Set<string>
+  /** Live-output sink: receives the subagent's streamed text / thinking / tool
+   * events so the TUI's agent run-page can watch the run token-by-token. The
+   * SAME {@link CaptureStreamEvent} stream the main turn parses — best-effort, so
+   * a throwing sink never affects the run. Omitted ⇒ no live capture. */
+  onEvent?: (event: CaptureStreamEvent) => void
   // ── Injected seams (tests) ──────────────────────────────────────────────────
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
   capture?: typeof defaultCapture
@@ -81,26 +87,48 @@ function defaultMintId(): string {
 
 /**
  * Build the cloned config the subagent runs with: the parent config with the
- * subagent's identity (`prompt`), model, and tool allowlist overlaid. The
- * `outputStyle` is dropped so the parent's response-mode append never leaks into
- * the subagent's system prompt (its `prompt` IS its identity).
+ * subagent's identity (`prompt`), provider, model, and tool allowlist overlaid.
+ * The `outputStyle` is dropped so the parent's response-mode append never leaks
+ * into the subagent's system prompt (its `prompt` IS its identity).
+ *
+ * Provider resolution (cross-provider subagents):
+ *   - `def.provider` set AND configured → the subagent runs on THAT provider
+ *     with its own credentials (a DeepSeek chat can delegate to a Claude agent).
+ *     `toBuildContext` derives the credential env / providerSettings from the
+ *     child's `provider`, so switching it is sufficient to re-route + re-auth.
+ *   - `def.provider` set but NOT configured → fall back to the parent provider
+ *     and DROP `def.model` (it would name a model the parent can't serve), so a
+ *     stale / unavailable provider never breaks the dispatch.
+ *   - `def.provider` omitted → inherit the parent provider; `def.model` (if any)
+ *     swaps the model within it.
  */
 function buildChildConfig(config: ResolvedConfig, def: PluginSubagentDef): ResolvedConfig {
   const child: ResolvedConfig = {
     ...config,
     systemPrompt: def.prompt,
     outputStyle: undefined,
-    ...(def.model ? { model: def.model } : {}),
     ...(def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}),
   }
+  // `null` = a provider was requested but isn't configured (inherit parent, no
+  // model swap); a string = the effective provider; `undefined` = none requested.
+  const requested = def.provider
+    ? config.providers[def.provider]
+      ? def.provider
+      : null
+    : undefined
+  if (requested === null) return child // unknown provider → inherit parent fully
+
+  const provider = requested ?? config.provider
+  child.provider = provider
   // `resolveActiveModel` reads the ACTIVE provider's remembered model first, then
   // the catalog default, and only falls back to the top-level `config.model` — so
   // a subagent's `model` override must land in the per-provider slot, otherwise
   // the provider's catalog default silently wins and the override is ignored.
   if (def.model) {
+    child.model = def.model
     child.providers = {
       ...config.providers,
-      [config.provider]: { ...config.providers[config.provider], model: def.model },
+      [provider]: { ...config.providers[provider], model: def.model },
     }
   }
   return child
@@ -162,8 +190,23 @@ export async function runCliSubagent(
   try {
     result = await capture(childSessionId, prompt, sendOptions, {
       ...(deps.signal ? { signal: deps.signal } : {}),
-      idleTimeoutMs: childConfig.streamIdleTimeoutMs,
+      // No hard wall-clock: a dispatched subagent is autonomous and may
+      // legitimately run for many minutes (deep analysis, many tool legs),
+      // exactly like the interactive parent turn (which passes `timeoutMs: 0`).
+      // Bounding it by a 5-minute wall-clock — the `run-and-capture` default
+      // that applies when `timeoutMs` is omitted — silently killed long
+      // subagents. It is bounded instead by the idle watchdog below, the
+      // per-tool execution deadline, and the step/turn budget.
+      timeoutMs: 0,
+      // Use the generous SUBAGENT idle window, not the interactive 60s. Several
+      // subagents fan out concurrently over the one sidecar, so the provider gap
+      // between a tool result and the next token routinely exceeds 60s under
+      // load — which spuriously tripped the watchdog ("stream idle for
+      // 60000ms"). Falls back to the interactive idle, then a 5-minute default.
+      idleTimeoutMs:
+        childConfig.subagentStreamIdleTimeoutMs ?? childConfig.streamIdleTimeoutMs ?? 300_000,
       onPermissionRequest: deps.gate,
+      ...(deps.onEvent ? { onEvent: deps.onEvent } : {}),
     })
   } finally {
     // Retire the child session's sidecar loop regardless of outcome.

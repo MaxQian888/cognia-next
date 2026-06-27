@@ -145,6 +145,15 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         value: config.thinkingLevel ?? "off",
         control: { type: "delegate", command: "/think" },
       },
+      {
+        id: "subagentModels",
+        label: "Subagent models…",
+        value: (() => {
+          const n = Object.keys(config.subagentModels ?? {}).length
+          return n > 0 ? `${n} overridden` : "inherit"
+        })(),
+        control: { type: "delegate", command: "/agents models" },
+      },
     ],
   }
 

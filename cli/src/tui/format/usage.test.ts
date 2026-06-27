@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import {
+  accumulateModelTotals,
   accumulateUsage,
   cacheHitRatio,
   contextComposition,
@@ -13,10 +14,11 @@ import {
   formatElapsed,
   formatFooter,
   formatTokens,
+  modelUsageRows,
   shortenCwd,
   usagePanelRows,
 } from "./usage"
-import type { UsageInfo } from "../state/types"
+import type { SessionTotals, UsageInfo } from "../state/types"
 
 describe("contextTokens", () => {
   it("sums prompt-side tokens including cache", () => {
@@ -31,8 +33,9 @@ describe("contextTokens", () => {
 
 describe("contextPercent", () => {
   it("computes occupancy against the model context window", () => {
-    // Default window is 200k → 20000 tokens = 10%.
-    const pct = contextPercent({ inputTokens: 20_000 }, "claude-unknown")
+    // A 200k-window model (matches the claude opus/sonnet/haiku pattern) →
+    // 20000 tokens = 10%.
+    const pct = contextPercent({ inputTokens: 20_000 }, "claude-3-5-sonnet")
     expect(pct).toBe(10)
   })
   it("clamps to 0..100", () => {
@@ -41,10 +44,10 @@ describe("contextPercent", () => {
   })
   it("uses the per-model window override when positive", () => {
     // 100k tokens against a 1M override = 10% (not 50% of the 200k fallback).
-    expect(contextPercent({ inputTokens: 100_000 }, "claude-unknown", 1_000_000)).toBe(10)
+    expect(contextPercent({ inputTokens: 100_000 }, "claude-3-5-sonnet", 1_000_000)).toBe(10)
   })
   it("ignores a non-positive override and falls back to the pattern table", () => {
-    expect(contextPercent({ inputTokens: 20_000 }, "claude-unknown", 0)).toBe(10)
+    expect(contextPercent({ inputTokens: 20_000 }, "claude-3-5-sonnet", 0)).toBe(10)
   })
 })
 
@@ -374,5 +377,71 @@ describe("formatElapsed", () => {
   it("clamps negative and undefined to 0s", () => {
     expect(formatElapsed(-5000)).toBe("0s")
     expect(formatElapsed(undefined)).toBe("0s")
+  })
+})
+
+describe("accumulateModelTotals", () => {
+  const pricing = { promptPer1M: 3, completionPer1M: 15 }
+
+  it("buckets a turn under its model and folds into the running total", () => {
+    let totals: Record<string, SessionTotals> = {}
+    totals = accumulateModelTotals(totals, "claude-opus-4-8", { inputTokens: 100 }, pricing)
+    totals = accumulateModelTotals(totals, "claude-opus-4-8", { outputTokens: 50 }, pricing)
+    expect(Object.keys(totals)).toEqual(["claude-opus-4-8"])
+    expect(totals["claude-opus-4-8"].inputTokens).toBe(100)
+    expect(totals["claude-opus-4-8"].outputTokens).toBe(50)
+  })
+
+  it("keeps separate buckets per model and never mutates the input map", () => {
+    const first = accumulateModelTotals({}, "haiku", { inputTokens: 10 }, pricing)
+    const second = accumulateModelTotals(first, "opus", { inputTokens: 20 }, pricing)
+    expect(Object.keys(second).sort()).toEqual(["haiku", "opus"])
+    // Original map untouched (immutability).
+    expect(Object.keys(first)).toEqual(["haiku"])
+    expect(second.haiku.inputTokens).toBe(10)
+    expect(second.opus.inputTokens).toBe(20)
+  })
+
+  it("buckets a blank model id under 'default' so no turn is dropped", () => {
+    const totals = accumulateModelTotals({}, "", { inputTokens: 5 }, pricing)
+    expect(totals.default.inputTokens).toBe(5)
+  })
+})
+
+describe("modelUsageRows", () => {
+  const totals = (over: Partial<SessionTotals>): SessionTotals => ({
+    ...emptySessionTotals(),
+    ...over,
+  })
+
+  it("returns one row per model, heaviest cost first, with humanized figures", () => {
+    const rows = modelUsageRows({
+      "claude-haiku-4-5": totals({ inputTokens: 2100, outputTokens: 16_400, costUsd: 0.55 }),
+      "claude-opus-4-8": totals({
+        inputTokens: 95_200,
+        outputTokens: 271_300,
+        cacheReadTokens: 64_800_000,
+        cacheCreationTokens: 1_200_000,
+        costUsd: 51.18,
+      }),
+    })
+    expect(rows.map((r) => r.model)).toEqual(["claude-opus-4-8", "claude-haiku-4-5"])
+    expect(rows[0]).toMatchObject({
+      input: "95k",
+      output: "271k",
+      cacheRead: "64.8M",
+      cacheWrite: "1.2M",
+      cost: "$51.18",
+    })
+    expect(rows[1].cost).toBe("$0.550")
+  })
+
+  it("drops models with no tokens and breaks cost ties by total tokens", () => {
+    const rows = modelUsageRows({
+      empty: totals({}),
+      a: totals({ inputTokens: 100, costUsd: 0 }),
+      b: totals({ inputTokens: 500, costUsd: 0 }),
+    })
+    expect(rows.map((r) => r.model)).toEqual(["b", "a"])
   })
 })

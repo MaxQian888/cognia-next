@@ -114,6 +114,7 @@ function cellsToEntries(cells: Cell[]): TranscriptEntry[] {
 export function useAgentSession({
   config,
   dispatch,
+  sessionId,
   createSession = createAgentSession,
   subscribeSidecar = (handler) => transport.subscribe(SIDECAR_EVENT, handler),
   requestCompact = compactSession,
@@ -129,6 +130,12 @@ export function useAgentSession({
 }: {
   config: ResolvedConfig
   dispatch: (action: TuiAction) => void
+  /** The app's current session id (from mount / `/clear` / `/resume`). The
+   * lazily-created chat session is bound to it so its on-disk transcript lands
+   * under the SAME id `/export`, `/handoff`, `/resume`, and the checkpoint store
+   * read from. Without this the runner would mint its own divergent id and
+   * `/export` would always report "no turns". */
+  sessionId?: string
   createSession?: CreateSession
   /** Subscribe to the sidecar event channel (injected for tests). */
   subscribeSidecar?: (handler: (payload: unknown) => void) => () => void
@@ -151,6 +158,13 @@ export function useAgentSession({
   useEffect(() => {
     configRef.current = config
   }, [config])
+  // The live app session id, mirrored into a ref so `ensureSession` binds the
+  // lazily-created session to it (and tracks `/clear`/`/resume` id changes)
+  // without recreating the callback on every id change.
+  const sessionIdRef = useRef(sessionId)
+  useEffect(() => {
+    sessionIdRef.current = sessionId
+  }, [sessionId])
   const sessionRef = useRef<AgentSession | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   // The live "Allow always" set consulted by the gate's silent auto-approver.
@@ -246,7 +260,17 @@ export function useAgentSession({
 
   const ensureSession = useCallback((): AgentSession => {
     if (!sessionRef.current) {
-      sessionRef.current = createSession({ config: configRef.current })
+      // Bind the session to the app's id (when known) so its transcript file is
+      // the one `/export`, `/handoff`, and `/resume` read back. Omitting it let
+      // the runner mint a divergent id — `/export` then found no file ("no
+      // turns"). The ref is read lazily on creation (never during render), so it
+      // reflects the latest `/clear`/`/resume` id.
+
+      const boundId = sessionIdRef.current
+      sessionRef.current = createSession({
+        config: configRef.current,
+        ...(boundId ? { sessionId: boundId } : {}),
+      })
     }
     return sessionRef.current
   }, [createSession])

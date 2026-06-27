@@ -37,6 +37,11 @@ import { type PermissionResponder } from "./permission-gate"
 import { runCliSubagent, type CliSubagentResult, type RunCliSubagentDeps } from "./subagent-runner"
 import { LOAD_SKILL_TOOL_NAME, handleCliLoadSkill } from "./skill-load-tool"
 import { startCliBackgroundRun, collectCliBackgroundResult } from "./subagent-background-tasks"
+import {
+  startLiveSubagent,
+  applyLiveSubagentEvent,
+  settleLiveSubagent,
+} from "./subagent-live-output"
 import { errorMessage } from "../tui/runtime/shared"
 
 /** Per-turn context the `dispatch_agent` handler reads, keyed by chat session id. */
@@ -134,7 +139,13 @@ export async function handleCliDispatchAgent(
   const parsed = parseDispatchAgentArgs(req.args)
   if (parsed.mode === "error") return { ...base, result: parsed.message }
   if (parsed.mode === "collect") {
-    const collected = await collectCliBackgroundResult(parsed.runId, { home: ctx.home })
+    // Scope the collect to the requesting session so a run started by a different
+    // chat session (or one cleared away with `/clear`) reads as unknown rather
+    // than leaking another session's subagent output back to this model.
+    const collected = await collectCliBackgroundResult(parsed.runId, {
+      home: ctx.home,
+      owner: req.sessionId,
+    })
     if (collected === undefined) {
       return {
         ...base,
@@ -147,13 +158,37 @@ export async function handleCliDispatchAgent(
   const run = ctx.run ?? runCliSubagent
   const mintRunId = ctx.mintRunId ?? defaultMintRunId
 
-  /** The synchronous body of one dispatch — never throws (errors collapse onto a line). */
-  const executeOne = async (d: NormalizedDispatch, label: string): Promise<string> => {
+  /** One dispatch's outcome: the line shown to the model + whether it FAILED.
+   * `ok: false` is reserved for genuine faults (the run threw, or an unknown
+   * subagent id) — NOT for a neutral interrupt or a non-success finish reason —
+   * so the dispatching tool call can render red ✗ rather than a green ✓ when a
+   * subagent actually failed. */
+  type DispatchOutcome = { text: string; ok: boolean }
+
+  /** The body of one dispatch — never throws (errors collapse onto a line).
+   * `liveId` ties the run to its TUI live-output entry: background runs pass their
+   * `runId` (so the `/agents` panel shows one row, not two); foreground runs leave
+   * it undefined and a fresh `live-…` id is minted. */
+  const executeOne = async (
+    d: NormalizedDispatch,
+    label: string,
+    liveId?: string
+  ): Promise<DispatchOutcome> => {
     const match = ctx.agents.find((a) => a.id === d.subagentId)
     if (!match) {
       const known = ctx.agents.map((a) => a.id).join(", ") || "(none)"
-      return `[${label}] Unknown subagent "${d.subagentId}". Available: ${known}.`
+      return {
+        text: `[${label}] Unknown subagent "${d.subagentId}". Available: ${known}.`,
+        ok: false,
+      }
     }
+    // Register the live-output entry so the TUI run-page can stream this run.
+    const live = startLiveSubagent({
+      ...(liveId ? { liveId } : {}),
+      name: d.subagentId,
+      task: d.prompt,
+      sessionId: req.sessionId,
+    })
     try {
       const r = await run(match.def, d.prompt, req.sessionId, {
         config: ctx.config,
@@ -164,21 +199,35 @@ export async function handleCliDispatchAgent(
         mcpServers: ctx.mcpServers,
         approvedTools: ctx.approvedTools,
         disabledMcpTools: ctx.disabledMcpTools,
+        onEvent: (event) => applyLiveSubagentEvent(live, event),
       })
-      return `[${label}]${metaSuffix(r)}\n${r.text}`
+      settleLiveSubagent(live, "done")
+      return { text: `[${label}]${metaSuffix(r)}\n${r.text}`, ok: true }
     } catch (err) {
-      return `[${label}] failed: ${errorMessage(err)}`
+      // A parent interrupt aborts the shared signal mid-run: report it as an
+      // interruption (not a fault) so the model gets an accurate signal instead
+      // of a raw abort-error string. An interrupt is neutral (`ok: true`) — it's
+      // a user action, not a subagent failure.
+      if (ctx.signal?.aborted) {
+        settleLiveSubagent(live, "interrupted")
+        return { text: `[${label}] interrupted.`, ok: true }
+      }
+      settleLiveSubagent(live, "error")
+      return { text: `[${label}] failed: ${errorMessage(err)}`, ok: false }
     }
   }
 
-  const runOne = async (d: NormalizedDispatch, label: string): Promise<string> => {
+  const runOne = async (d: NormalizedDispatch, label: string): Promise<DispatchOutcome> => {
     if (!d.background) return executeOne(d, label)
     // Background: surface an unknown id synchronously (cheap, avoids a useless
     // parked run), otherwise start the run, park it, and return its runId now.
     const match = ctx.agents.find((a) => a.id === d.subagentId)
     if (!match) {
       const known = ctx.agents.map((a) => a.id).join(", ") || "(none)"
-      return `[${label}] Unknown subagent "${d.subagentId}". Available: ${known}.`
+      return {
+        text: `[${label}] Unknown subagent "${d.subagentId}". Available: ${known}.`,
+        ok: false,
+      }
     }
     const runId = mintRunId()
     startCliBackgroundRun(
@@ -192,23 +241,33 @@ export async function handleCliDispatchAgent(
         startedAt: Date.now(),
         home: ctx.home,
       },
-      executeOne(d, d.subagentId)
+      // Share the background `runId` as the live-output id so the panel never
+      // shows the run twice (once live, once from the journal record).
+      executeOne(d, d.subagentId, runId).then((o) => o.text)
     )
-    return `[${d.subagentId}] started in background (runId: ${runId}). Collect later with dispatch_agent({collect:"${runId}"}).`
+    return {
+      text: `[${d.subagentId}] started in background (runId: ${runId}). Collect later with dispatch_agent({collect:"${runId}"}).`,
+      ok: true,
+    }
   }
 
-  let result: string
+  let outcomes: DispatchOutcome[]
   if (parsed.dispatches.length === 1) {
     const d = parsed.dispatches[0]
-    result = await runOne(d, d.subagentId)
+    outcomes = [await runOne(d, d.subagentId)]
   } else {
     // Parallel fan-out: all siblings run concurrently over the live sidecar.
-    const settled = await Promise.all(
+    outcomes = await Promise.all(
       parsed.dispatches.map((d, i) => runOne(d, `${d.subagentId}#${i + 1}`))
     )
-    result = settled.join("\n\n---\n\n")
   }
-  return { ...base, result }
+  const result = outcomes.map((o) => o.text).join("\n\n---\n\n")
+  // Surface the dispatch as a tool ERROR (red ✗, and a recoverable tool-error
+  // the model can react to) when EVERY dispatch failed — the common single
+  // dispatch that errored, or a fan-out where nothing succeeded. A mixed
+  // outcome stays a `result` so the partial successes still read normally.
+  const allFailed = outcomes.length > 0 && outcomes.every((o) => !o.ok)
+  return allFailed ? { ...base, error: result } : { ...base, result }
 }
 
 /**
