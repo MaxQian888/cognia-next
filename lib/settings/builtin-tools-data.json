@@ -393,6 +393,13 @@
           "riskLevel": "low",
           "requiresApproval": false,
           "alwaysLoad": true
+        },
+        {
+          "name": "current_time",
+          "descriptionKey": "tools.currentTime",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
         }
       ]
     },

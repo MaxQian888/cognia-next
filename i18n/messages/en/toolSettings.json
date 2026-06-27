@@ -56,6 +56,7 @@
     "coreRead": "Read a text file with line numbers; pages large files; lists directories.",
     "coreTodoWrite": "Update the session task list shown to the user.",
     "coreWrite": "Create or overwrite a file (requires a prior read of existing files).",
+    "currentTime": "Get the current date and time (UTC plus a localized string for a given timezone).",
     "directoryCreate": "Create a directory (recursive by default).",
     "directoryDelete": "Delete a directory. Recursive option for non-empty trees.",
     "fileAppend": "Append UTF-8 text to a file. Creates the file if missing.",

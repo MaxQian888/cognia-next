@@ -56,6 +56,7 @@
     "coreRead": "带行号读取文本文件；大文件分页；可列目录。",
     "coreTodoWrite": "更新展示给用户的会话任务清单。",
     "coreWrite": "创建或覆盖文件（覆盖已有文件需先读取）。",
+    "currentTime": "获取当前日期与时间（UTC 以及指定时区的本地化字符串）。",
     "directoryCreate": "创建目录，默认递归。",
     "directoryDelete": "删除目录，可选 recursive 用于删除非空目录。",
     "fileAppend": "向文件追加 UTF-8 文本，文件不存在时自动创建。",

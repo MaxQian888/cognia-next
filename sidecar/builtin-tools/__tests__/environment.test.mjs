@@ -1,10 +1,23 @@
 import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
 
-import { __testExports, listEnvTool, getEnvTool, systemInfoTool } from "../environment.mjs"
+import {
+  __testExports,
+  listEnvTool,
+  getEnvTool,
+  systemInfoTool,
+  currentTimeTool,
+} from "../environment.mjs"
 
-const { execListEnv, execGetEnv, execSystemInfo, isSecretKey, redactValue, safeUser } =
-  __testExports
+const {
+  execListEnv,
+  execGetEnv,
+  execSystemInfo,
+  execCurrentTime,
+  isSecretKey,
+  redactValue,
+  safeUser,
+} = __testExports
 
 function decode(r) {
   return JSON.parse(r.content[0].text)
@@ -117,8 +130,39 @@ test("system_info returns platform + arch + cpu count", async () => {
   assert.ok(typeof data.hostname === "string")
 })
 
+test("current_time returns UTC + epoch + localized fields", async () => {
+  const r = await execCurrentTime({})
+  const data = decode(r)
+  assert.ok(!Number.isNaN(Date.parse(data.iso)))
+  assert.ok(typeof data.utc === "string" && data.utc.length > 0)
+  assert.equal(typeof data.epochMs, "number")
+  assert.ok(data.epochMs > 0)
+  assert.equal(data.epochSec, Math.floor(data.epochMs / 1000))
+  assert.ok(typeof data.timezone === "string" && data.timezone.length > 0)
+  assert.ok(typeof data.local === "string" && data.local.length > 0)
+})
+
+test("current_time honors an explicit IANA timezone", async () => {
+  const r = await execCurrentTime({ timezone: "Asia/Shanghai" })
+  const data = decode(r)
+  assert.equal(data.timezone, "Asia/Shanghai")
+  assert.ok(data.local.includes("GMT+8") || data.local.includes("CST") || data.local.length > 0)
+})
+
+test("current_time rejects an invalid timezone", async () => {
+  const r = await execCurrentTime({ timezone: "Not/AReal_Zone" })
+  assert.equal(r.isError, true)
+  assert.match(r.content[0].text, /Invalid timezone/i)
+})
+
+test("current_time falls back to host timezone for an empty string", async () => {
+  const r = await execCurrentTime({ timezone: "" })
+  const data = decode(r)
+  assert.equal(data.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone)
+})
+
 test("exported tool definitions have name + description", () => {
-  for (const t of [listEnvTool, getEnvTool, systemInfoTool]) {
+  for (const t of [listEnvTool, getEnvTool, systemInfoTool, currentTimeTool]) {
     assert.equal(typeof t.name, "string")
     assert.ok(t.name.length > 0)
     assert.ok(typeof t.description === "string" && t.description.length > 0)
