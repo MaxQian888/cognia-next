@@ -39,6 +39,18 @@ describe("me-entries registry", () => {
     expect(byId("terminal")?.href).toBe("/me/terminal")
     expect(byId("remote-sessions")?.href).toBe("/remote-sessions")
   })
+
+  it("surfaces the dormant-field preference pages (speech, web-search, conversation)", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("speech")).toMatchObject({ href: "/me/speech", section: "appearance" })
+    expect(byId("web-search")).toMatchObject({ href: "/me/web-search", section: "connection" })
+    expect(byId("conversation")).toMatchObject({ href: "/me/conversation", section: "appearance" })
+  })
+
+  it("includes the standalone search surface entry", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("search")).toMatchObject({ href: "/search", section: "connection" })
+  })
 })
 
 describe("matchMeEntry", () => {
@@ -70,5 +82,12 @@ describe("matchMeEntry", () => {
   it("returns false when nothing matches", () => {
     const t = (k: string) => (k === "backupRow" ? "Backup" : k)
     expect(matchMeEntry(entry, "zzzzz", t)).toBe(false)
+  })
+
+  it("handles entries without keywords (label-only match)", () => {
+    const noKeywords: MeEntry = { ...entry, keywords: undefined }
+    const t = (k: string) => (k === "backupRow" ? "Backup" : k)
+    expect(matchMeEntry(noKeywords, "backup", t)).toBe(true)
+    expect(matchMeEntry(noKeywords, "restore", t)).toBe(false)
   })
 })

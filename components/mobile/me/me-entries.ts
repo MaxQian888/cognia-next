@@ -24,18 +24,22 @@ import {
   InfoIcon,
   KeyRoundIcon,
   LinkIcon,
+  MessagesSquareIcon,
   MessageSquareIcon,
   MonitorIcon,
   PaletteIcon,
+  SearchIcon,
   RadioTowerIcon,
   RefreshCwIcon,
   SaveIcon,
   SlidersHorizontalIcon,
   SmartphoneIcon,
+  SparklesIcon,
   TargetIcon,
   TerminalSquareIcon,
   TypeIcon,
   UserRoundIcon,
+  Volume2Icon,
 } from "lucide-react"
 
 export type MeSectionId =
@@ -159,8 +163,32 @@ export const ME_ENTRIES: MeEntry[] = [
     section: "appearance",
     keywords: ["preset", "system prompt", "预设", "系统提示词"],
   },
+  {
+    id: "speech",
+    icon: Volume2Icon,
+    labelKey: "speechRow",
+    href: "/me/speech",
+    section: "appearance",
+    keywords: ["speech", "voice", "tts", "stt", "audio", "语音", "朗读", "声音"],
+  },
+  {
+    id: "conversation",
+    icon: MessagesSquareIcon,
+    labelKey: "conversationRow",
+    href: "/me/conversation",
+    section: "appearance",
+    keywords: ["conversation", "title", "timeline", "minimap", "会话", "标题", "时间线"],
+  },
 
   // === Connection & extensions ===
+  {
+    id: "providers",
+    icon: KeyRoundIcon,
+    labelKey: "providersRow",
+    href: "/me/providers",
+    section: "connection",
+    keywords: ["api key", "provider", "byok", "anthropic", "openai", "密钥", "提供商", "模型"],
+  },
   {
     id: "connectors",
     icon: LinkIcon,
@@ -176,6 +204,22 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/ocr",
     section: "connection",
     keywords: ["ocr", "image", "pdf", "识别", "图片"],
+  },
+  {
+    id: "web-search",
+    icon: SearchIcon,
+    labelKey: "webSearchRow",
+    href: "/me/web-search",
+    section: "connection",
+    keywords: ["web search", "tavily", "perplexity", "results", "搜索", "联网"],
+  },
+  {
+    id: "search",
+    icon: SparklesIcon,
+    labelKey: "searchRow",
+    href: "/search",
+    section: "connection",
+    keywords: ["search", "ask the web", "research", "cited answer", "提问", "联网搜索", "引用"],
   },
   {
     id: "computer-use",

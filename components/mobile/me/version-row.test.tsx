@@ -26,7 +26,7 @@ describe("<VersionRow />", () => {
 
   it("renders the InfoIcon label", () => {
     render(<VersionRow loader={async () => null} />)
-    expect(screen.getByTestId("me-version-row")).toHaveTextContent("versionLabel")
+    expect(screen.getByTestId("me-version-row")).toHaveTextContent("Version")
   })
 
   it("tolerates a rejected loader (renders APP_VERSION only)", async () => {
