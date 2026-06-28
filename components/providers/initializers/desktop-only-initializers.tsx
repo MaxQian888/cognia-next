@@ -51,6 +51,10 @@ const WindowShowInitializer = dynamic(
   () => import("./window-show-initializer").then((m) => m.WindowShowInitializer),
   { ssr: false }
 )
+const WebviewHeartbeatInitializer = dynamic(
+  () => import("./webview-heartbeat-initializer").then((m) => m.WebviewHeartbeatInitializer),
+  { ssr: false }
+)
 const CodexUsageSchedulerInitializer = dynamic(
   () => import("./codex-usage-scheduler-initializer").then((m) => m.CodexUsageSchedulerInitializer),
   { ssr: false }
@@ -111,6 +115,7 @@ export function DesktopOnlyInitializers() {
   return (
     <>
       <WindowShowInitializer />
+      <WebviewHeartbeatInitializer />
       <CodexUsageSchedulerInitializer />
       <CliSyncInitializer />
       <ComputerUseKillSwitchInitializer />

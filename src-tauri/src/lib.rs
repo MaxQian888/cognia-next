@@ -47,6 +47,7 @@ mod vector;
 mod wallpaper;
 mod workflow;
 
+mod webview_watchdog;
 mod window_behavior;
 mod window_recovery;
 mod window_utils;
@@ -238,6 +239,10 @@ pub fn run() {
         // env-builder) consume it via `subscription_get_active`.
         .manage(subscription::ActiveAccountState::new())
         .manage(WindowBehavior::new())
+        // Runtime white-screen watchdog state (ADR window-recovery). Written by
+        // the renderer heartbeat command, read by the polling loop spawned in
+        // setup() once the main window exists.
+        .manage(webview_watchdog::WebviewWatchdog::new())
         .manage(std::sync::Arc::new(shortcuts::ShortcutRegistry::default()))
         .manage(connectors::ConnectorsState::new())
         .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
@@ -424,6 +429,8 @@ pub fn run() {
             window_behavior::set_close_behavior,
             window_behavior::get_close_behavior,
             window_behavior::resolve_close_request,
+            webview_watchdog::webview_heartbeat,
+            webview_watchdog::webview_take_recovery_notice,
             pet_window::open_pet_window,
             pet_window::close_pet_window,
             pet_window::destroy_pet_window,
@@ -1222,6 +1229,44 @@ pub fn run() {
                                     "main window still hidden 8s after boot; force-showing (renderer never signaled first paint)"
                                 );
                                 window_utils::bring_window_to_front(&window);
+                            }
+                        }
+                    });
+                }
+
+                // Runtime white-screen watchdog. The renderer beats a
+                // realm-lifetime heartbeat; if it goes silent while the window
+                // is visible (renderer process crash, hung main thread, a page
+                // navigated to a blank/broken document) the React error
+                // boundaries can't fire — the JS realm is dead — so this loop
+                // reloads the page back to its last-known-good route. This is
+                // the runtime counterpart to the boot-time force-show above and
+                // window_recovery's off-screen recenter.
+                {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        loop {
+                            tokio::time::sleep(webview_watchdog::POLL_INTERVAL).await;
+                            let Some(window) = handle.get_webview_window("main") else {
+                                continue;
+                            };
+                            let watchdog = handle.state::<webview_watchdog::WebviewWatchdog>();
+                            let visible = window.is_visible().unwrap_or(false);
+                            match watchdog.poll(std::time::Instant::now(), visible) {
+                                webview_watchdog::WatchdogAction::Recover => {
+                                    let url = watchdog.last_url();
+                                    webview_watchdog::recover(&window, url.as_deref());
+                                    watchdog.note_recovery(std::time::Instant::now());
+                                }
+                                webview_watchdog::WatchdogAction::GaveUp => {
+                                    if watchdog.mark_gave_up_logged() {
+                                        log::error!(
+                                            "webview-watchdog: page still blank after {} reloads; giving up auto-recovery",
+                                            webview_watchdog::MAX_RECOVERIES
+                                        );
+                                    }
+                                }
+                                webview_watchdog::WatchdogAction::Idle => {}
                             }
                         }
                     });
