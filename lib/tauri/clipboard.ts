@@ -8,10 +8,13 @@ import {
   clear as clearNative,
 } from "@tauri-apps/plugin-clipboard-manager"
 import { isTauri } from "@/lib/tauri"
+import { readText as capReadText, writeText as capWriteText } from "@/lib/capacitor/clipboard"
 
 /**
- * Read the system clipboard as text. Falls back to `navigator.clipboard` in
- * the browser. Returns `null` if either backend is unavailable.
+ * Read the system clipboard as text. Routes Tauri → desktop plugin, Capacitor
+ * mobile → native pasteboard, browser → `navigator.clipboard`. Returns `null`
+ * if no backend is available. The Capacitor wrapper self-gates to mobile, so
+ * the call is a fast `unsupported` no-op on web / Tauri.
  */
 export async function readClipboardText(): Promise<string | null> {
   if (isTauri()) {
@@ -22,6 +25,8 @@ export async function readClipboardText(): Promise<string | null> {
       return null
     }
   }
+  const cap = await capReadText()
+  if (cap.kind === "ok") return cap.value
   if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
     try {
       return await navigator.clipboard.readText()
@@ -32,12 +37,17 @@ export async function readClipboardText(): Promise<string | null> {
   return null
 }
 
-/** Write text to the system clipboard. Falls back to `navigator.clipboard`. */
+/**
+ * Write text to the system clipboard. Routes Tauri → desktop plugin, Capacitor
+ * mobile → native pasteboard, browser → `navigator.clipboard`.
+ */
 export async function writeClipboardText(text: string): Promise<void> {
   if (isTauri()) {
     await writeTextNative(text)
     return
   }
+  const cap = await capWriteText(text)
+  if (cap.kind === "ok") return
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text)
   }

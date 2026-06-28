@@ -63,6 +63,42 @@ describe("<CameraCaptureButton />", () => {
     expect(file).toBeInstanceOf(File)
     expect(file.type).toMatch(/^image\//)
     expect(toastError).not.toHaveBeenCalled()
+    // "prompt" lets native offer camera OR gallery (not camera-only).
+    expect(pickPhotoMock).toHaveBeenCalledWith(expect.objectContaining({ source: "prompt" }))
+  })
+
+  it("toasts captureFailed when the captured outcome has no dataUrl", async () => {
+    pickPhotoMock.mockResolvedValue({ kind: "captured", dataUrl: undefined, format: "jpeg" })
+    const user = userEvent.setup()
+    render(<CameraCaptureButton />)
+    await user.click(screen.getByRole("button"))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(addMock).not.toHaveBeenCalled()
+  })
+
+  it("toasts captureFailed when attaching the blob throws", async () => {
+    pickPhotoMock.mockResolvedValue({
+      kind: "captured",
+      dataUrl: "data:image/jpeg;base64,xxx",
+      format: "jpeg",
+    })
+    global.fetch = jest.fn(async () => {
+      throw new Error("network down")
+    }) as unknown as typeof fetch
+    const user = userEvent.setup()
+    render(<CameraCaptureButton />)
+    await user.click(screen.getByRole("button"))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(addMock).not.toHaveBeenCalled()
+  })
+
+  it("toasts and does not attach when capture is unsupported", async () => {
+    pickPhotoMock.mockResolvedValue({ kind: "unsupported" })
+    const user = userEvent.setup()
+    render(<CameraCaptureButton />)
+    await user.click(screen.getByRole("button"))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(addMock).not.toHaveBeenCalled()
   })
 
   it("toasts and does not attach when permission is denied", async () => {

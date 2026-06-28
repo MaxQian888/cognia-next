@@ -14,6 +14,13 @@ jest.mock("@tauri-apps/plugin-clipboard-manager", () => ({
   clear: jest.fn(),
 }))
 
+const capReadText = jest.fn()
+const capWriteText = jest.fn()
+jest.mock("@/lib/capacitor/clipboard", () => ({
+  readText: () => capReadText(),
+  writeText: (value: string) => capWriteText(value),
+}))
+
 import {
   readImage as readImageNative,
   readText as readTextNative,
@@ -41,6 +48,10 @@ describe("lib/tauri/clipboard", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     setTauri(false)
+    // Default: not on mobile — the Capacitor wrapper self-gates to `unsupported`
+    // so the browser `navigator.clipboard` paths run as before.
+    capReadText.mockResolvedValue({ kind: "unsupported" })
+    capWriteText.mockResolvedValue({ kind: "unsupported" })
     warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
   })
 
@@ -94,6 +105,17 @@ describe("lib/tauri/clipboard", () => {
       })
       await expect(readClipboardText()).resolves.toBeNull()
     })
+
+    it("uses the native Capacitor clipboard on mobile", async () => {
+      capReadText.mockResolvedValueOnce({ kind: "ok", value: "from native" })
+      const navReadText = jest.fn()
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { readText: navReadText },
+      })
+      await expect(readClipboardText()).resolves.toBe("from native")
+      expect(navReadText).not.toHaveBeenCalled()
+    })
   })
 
   describe("writeClipboardText", () => {
@@ -120,6 +142,18 @@ describe("lib/tauri/clipboard", () => {
         value: undefined,
       })
       await expect(writeClipboardText("hi")).resolves.toBeUndefined()
+    })
+
+    it("uses the native Capacitor clipboard on mobile without touching navigator", async () => {
+      capWriteText.mockResolvedValueOnce({ kind: "ok" })
+      const navWriteText = jest.fn()
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: navWriteText },
+      })
+      await writeClipboardText("hi")
+      expect(capWriteText).toHaveBeenCalledWith("hi")
+      expect(navWriteText).not.toHaveBeenCalled()
     })
   })
 

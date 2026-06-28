@@ -24,7 +24,9 @@ export function CameraCaptureButton({ disabled }: CameraCaptureButtonProps) {
   const attachments = usePromptInputAttachments()
 
   const onClick = async () => {
-    const outcome = await pickPhoto({ source: "camera", resultType: "dataUrl" })
+    // "prompt" lets the native sheet offer camera OR gallery; the web fallback
+    // drops the `capture` hint so the system picker isn't pinned to the camera.
+    const outcome = await pickPhoto({ source: "prompt", resultType: "dataUrl" })
     switch (outcome.kind) {
       case "captured": {
         if (!outcome.dataUrl) {
@@ -49,6 +51,9 @@ export function CameraCaptureButton({ disabled }: CameraCaptureButtonProps) {
         toast.error(t("permissionDenied"))
         return
       case "cancelled":
+        return
+      case "unsupported":
+        toast.error(t("unsupported"))
         return
       default:
         toast.error(t("captureFailed"))

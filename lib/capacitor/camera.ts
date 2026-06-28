@@ -52,6 +52,26 @@ const SOURCE_MAP: Record<CameraSource, "CAMERA" | "PHOTOS" | "PROMPT"> = {
 }
 
 /**
+ * True only when the native `@capacitor/camera` plugin is registered on the
+ * Capacitor bridge. Used to decide — synchronously, before any `await` — that
+ * we should take the web `<input>` fallback.
+ *
+ * Why it has to be synchronous: on a Capacitor device that ships the static
+ * `out/` bundle WITHOUT the native Camera plugin, `await loader()` runs a
+ * dynamic `import("@capacitor/camera")` that rejects across a macrotask. By
+ * the time the fallback's `input.click()` fires, the transient user activation
+ * from the tap is gone, so the file dialog never opens and neither `change`
+ * nor `cancel` fires — the picker promise hangs forever and the button looks
+ * dead. Short-circuiting here keeps `input.click()` in the same task as the
+ * tap. Injected loaders (tests / a future real loader) bypass this entirely.
+ */
+function hasNativeCamera(): boolean {
+  const cap = (globalThis as unknown as { Capacitor?: { Plugins?: Record<string, unknown> } })
+    .Capacitor?.Plugins
+  return Boolean(cap?.Camera)
+}
+
+/**
  * Opens a transient `<input type="file">` and resolves the chosen files
  * (empty array = the user dismissed the picker). This is the cross-shell
  * fallback for when the native `@capacitor/camera` plugin isn't present —
@@ -138,6 +158,13 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
     loader = defaultLoader,
     picker = defaultWebFilePicker,
   } = opts
+
+  // Fast path: when the real (default) loader would run but no native Camera
+  // plugin is registered, go straight to the web picker so `input.click()`
+  // stays inside the tap's user-activation window (see hasNativeCamera).
+  if (loader === defaultLoader && !hasNativeCamera()) {
+    return webPickPhoto(source, resultType, picker)
+  }
 
   let plugin: CameraShape
   try {
@@ -239,6 +266,11 @@ export async function pickMultiplePhotos(
   opts: PickMultipleOptions = {}
 ): Promise<PickMultipleOutcome> {
   const { quality = 80, limit = 9, loader = defaultLoader, picker = defaultWebFilePicker } = opts
+
+  // Same activation-preserving fast path as pickPhoto (see hasNativeCamera).
+  if (loader === defaultLoader && !hasNativeCamera()) {
+    return webPickMultiple(picker)
+  }
 
   let plugin: CameraShape
   try {
