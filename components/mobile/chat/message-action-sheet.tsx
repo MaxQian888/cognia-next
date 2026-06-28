@@ -28,6 +28,7 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { share } from "@/lib/capacitor/share"
+import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { BranchDialog } from "@/components/chat/branch-dialog"
 
@@ -63,7 +64,7 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
     if (!text) return
     setBusy(true)
     try {
-      await navigator.clipboard.writeText(text)
+      await writeClipboardText(text)
       toast.success(t("copySuccess"))
       onOpenChange(false)
     } catch (err) {

@@ -6,6 +6,7 @@ import {
   MessageActions,
   MessageContent,
 } from "@/components/ai-elements/message"
+import { Image } from "@/components/ai-elements/image"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Tool, ToolBody, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
@@ -901,10 +902,10 @@ function renderPart(
 
     if (url && mediaType?.startsWith("image/")) {
       return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <Image
           key={key}
           src={url}
+          mediaType={mediaType}
           alt={filename ?? t("attachmentAlt")}
           className="max-h-64 max-w-xs rounded-md border"
         />

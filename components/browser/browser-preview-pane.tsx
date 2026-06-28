@@ -9,6 +9,12 @@ import {
   BrowserAgentIndicator,
   useBrowserAgentActivity,
 } from "@/components/browser/browser-agent-indicator"
+import {
+  WebPreview,
+  WebPreviewBody,
+  WebPreviewNavigation,
+  WebPreviewUrl,
+} from "@/components/ai-elements/web-preview"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -84,11 +90,19 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     }
   }, [selection, comment, sessionId, rect, sendComment, clearSelection, t])
 
+  // Outside Tauri (web / Capacitor) there is no native webview to track a
+  // reserved region, so element-selection is unavailable. Fall back to the
+  // ai-elements WebPreview: a sandboxed iframe with a URL bar so web users can
+  // still preview a local dev server (its primary use). Cross-origin sites that
+  // forbid framing won't load, which is expected for a best-effort web preview.
   if (!isTauri()) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
-        {t("empty.hint")}
-      </div>
+      <WebPreview className="h-full rounded-none border-0" data-testid="browser-web-preview">
+        <WebPreviewNavigation>
+          <WebPreviewUrl placeholder={t("url.placeholder")} aria-label={t("url.placeholder")} />
+        </WebPreviewNavigation>
+        <WebPreviewBody className="bg-background" title={t("empty.title")} />
+      </WebPreview>
     )
   }
 

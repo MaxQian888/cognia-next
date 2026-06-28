@@ -65,11 +65,20 @@ beforeEach(() => {
   ;(toast.error as jest.Mock).mockClear()
 })
 
-it("shows the desktop-only hint outside Tauri", () => {
+it("falls back to the sandboxed WebPreview URL bar + iframe outside Tauri", () => {
   mockTauri = false
-  renderPane(<BrowserPreviewPane />)
-  expect(screen.getByText(/Enter a localhost URL/i)).toBeInTheDocument()
-  expect(screen.queryByPlaceholderText(/localhost:3000/i)).not.toBeInTheDocument()
+  const { container } = renderPane(<BrowserPreviewPane />)
+  // No native element-selection chrome; instead a WebPreview URL bar.
+  expect(screen.getByTestId("browser-web-preview")).toBeInTheDocument()
+  expect(screen.getByPlaceholderText("http://localhost:3000")).toBeInTheDocument()
+  // Typing a URL + Enter points the sandboxed iframe at it.
+  fireEvent.change(screen.getByPlaceholderText("http://localhost:3000"), {
+    target: { value: "https://localhost:3000" },
+  })
+  fireEvent.keyDown(screen.getByPlaceholderText("http://localhost:3000"), { key: "Enter" })
+  const iframe = container.querySelector("iframe")
+  expect(iframe).toHaveAttribute("src", "https://localhost:3000")
+  expect(iframe).toHaveAttribute("sandbox")
 })
 
 it("renders the empty state and URL bar in Tauri", () => {

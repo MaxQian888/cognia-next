@@ -44,6 +44,7 @@ import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extens
 import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
 import type { SubAgentToolCall, SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { AgentFlowMode } from "@/types/appearance"
+import { ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { ToolActivityGroup } from "@/components/chat/message-parts/tool-activity-group"
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
@@ -143,14 +144,17 @@ const SubagentLogBody = memo(function SubagentLogBody({
         </div>
       ) : null}
 
-      {/* Activity log (secondary to the tool list). */}
+      {/* Activity log (secondary to the tool list) — the sub-agent's narrated
+          chain of thought, rendered as a connected step timeline. */}
       {logs.length > 0 ? (
-        <div className="space-y-0.5" data-testid="subagent-logs">
+        <div className="space-y-2" data-testid="subagent-logs">
           {tailLogs.map((log, i) => (
-            <p key={i} className="font-mono text-[11px] text-muted-foreground">
-              <span className="mr-1 uppercase">[{log.level}]</span>
-              {log.message}
-            </p>
+            <ChainOfThoughtStep
+              key={i}
+              icon={log.level === "error" || log.level === "warn" ? AlertTriangleIcon : undefined}
+              status={i === tailLogs.length - 1 ? "active" : "complete"}
+              label={<span className="break-words font-mono text-[11px]">{log.message}</span>}
+            />
           ))}
           {logs.length >= 50 ? (
             <p

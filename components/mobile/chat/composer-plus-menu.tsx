@@ -35,6 +35,7 @@ export type ComposerAttachment =
   | { kind: "photo"; base64?: string; uri?: string; mime: string }
   | { kind: "photos"; items: Array<{ uri: string; mime: string }> }
   | { kind: "file"; file: File }
+  | { kind: "files"; files: File[] }
   | { kind: "voice"; recordingDataUrl: string; mimeType: string; durationMs?: number }
 
 export interface ComposerPlusMenuProps {
@@ -137,19 +138,23 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
   }
 
   const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    onAttach({ kind: "file", file })
-    if (onSend && file.type.startsWith("image/")) {
-      try {
-        const block = await packFileAsImageBlock(file)
-        if (block) await onSend([block])
-      } catch (err) {
-        onError?.("error", err instanceof Error ? err.message : String(err))
+    const files = e.target.files ? Array.from(e.target.files) : []
+    if (files.length === 0) return
+    onAttach({ kind: "files", files })
+    if (onSend) {
+      const images = files.filter((f) => f.type.startsWith("image/"))
+      if (images.length > 0) {
+        try {
+          const blocks = await Promise.all(images.map(packFileAsImageBlock))
+          const valid = blocks.filter((b): b is SendContentBlock => b !== null)
+          if (valid.length > 0) await onSend(valid)
+        } catch (err) {
+          onError?.("error", err instanceof Error ? err.message : String(err))
+        }
       }
     }
     setOpen(false)
-    e.target.value = "" // reset so the same file can be chosen again
+    e.target.value = "" // reset so the same files can be chosen again
   }
 
   const onVoiceStart = async () => {
@@ -243,6 +248,7 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
             <span>{t("file")}</span>
             <input
               type="file"
+              multiple
               className="sr-only"
               onChange={onFilePicked}
               data-testid="composer-plus-file-input"

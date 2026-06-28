@@ -200,6 +200,19 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(root.className).toContain("flex-wrap")
     expect(root.className).not.toContain("justify-between")
   })
+
+  // Regression: a long provider model id must ellipsize the model chip rather
+  // than push Effort / Permission / Sandbox onto a second line. They share one
+  // `flex-nowrap` + `min-w-0` row so the group shrinks as a unit.
+  it("groups Tier 1 controls in a non-wrapping, shrinkable row", () => {
+    const { container } = render(<BottomToolbar session={session} />)
+    const nowrapRow = container.querySelector(".flex-nowrap")
+    expect(nowrapRow).not.toBeNull()
+    expect(nowrapRow?.className).toContain("min-w-0")
+    // Effort + Permission live inside the same nowrap unit as the model chip.
+    expect(nowrapRow?.querySelector('[data-testid="effort-selector"]')).not.toBeNull()
+    expect(nowrapRow?.querySelector('[data-testid="permission-mode-indicator"]')).not.toBeNull()
+  })
 })
 
 describe("BottomToolbar — narrow-width More menu", () => {
@@ -234,6 +247,19 @@ describe("BottomToolbar — narrow-width More menu", () => {
     mockToolbarWidth = 300
     render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("effort-selector")).toBeInTheDocument()
+  })
+
+  // Regression: the compact toolbar must cap at TWO rows (Tier 1, then the
+  // overflow menu + context indicator sharing the second row) instead of
+  // letting `⋯` and the usage `%` each wrap onto their own line (three rows).
+  it("caps the compact toolbar at two rows via a flex-col root with a shared overflow row", () => {
+    mockToolbarWidth = 300
+    const { container } = render(<BottomToolbar session={session} />)
+    const root = container.firstChild as HTMLElement
+    expect(root.className).toContain("flex-col")
+    // The More trigger shares its row (justify-between) with the context usage.
+    const more = screen.getByTestId("composer-toolbar-more")
+    expect((more.parentElement as HTMLElement).className).toContain("justify-between")
   })
 })
 
