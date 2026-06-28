@@ -35,10 +35,36 @@ jest.mock("../profile/profile-section", () => ({
   ProfileSection: () => <div data-testid="stub-profile-section" />,
 }))
 
+let mockIsTauri = false
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => mockIsTauri,
+}))
+
+interface MockAccount {
+  id: string
+  displayName: string
+}
+let mockAccounts: MockAccount[] = []
+let mockActiveAccountId: string | null = null
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (selector: (s: unknown) => unknown) =>
+    selector({ accounts: mockAccounts, activeAccountId: mockActiveAccountId }),
+  selectActiveAccount: (s: { accounts: MockAccount[]; activeAccountId: string | null }) =>
+    s.accounts.find((a) => a.id === s.activeAccountId) ?? null,
+}))
+
+jest.mock("@/components/account/account-manage-dialog", () => ({
+  AccountManageDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="stub-manage-dialog" /> : null,
+}))
+
 import { AccountOverviewSection } from "./account-overview-section"
 
 beforeEach(() => {
   pushMock.mockReset()
+  mockIsTauri = false
+  mockAccounts = []
+  mockActiveAccountId = null
   useUserProfileMock.mockReturnValue({
     profile: {},
     resolvedDisplayName: null,
@@ -127,5 +153,32 @@ describe("AccountOverviewSection", () => {
     expect(screen.getByText('devicePaired:{"id":"ABCDEFGH"}')).toBeInTheDocument()
     await user.click(screen.getByTestId("account-overview-manage-devices"))
     expect(pushMock).toHaveBeenCalledWith("/settings?section=companion")
+  })
+
+  it("hides the local accounts card off Tauri", async () => {
+    mockIsTauri = false
+    render(<AccountOverviewSection />)
+    // Give the post-hydration effect a tick; the card must stay hidden.
+    await Promise.resolve()
+    expect(screen.queryByTestId("account-overview-manage-local")).not.toBeInTheDocument()
+  })
+
+  it("shows the local accounts card on Tauri and opens the manage dialog", async () => {
+    mockIsTauri = true
+    mockAccounts = [
+      { id: "acct_alpha", displayName: "Alpha" },
+      { id: "acct_beta", displayName: "Beta" },
+    ]
+    mockActiveAccountId = "acct_alpha"
+    const user = userEvent.setup()
+    render(<AccountOverviewSection />)
+
+    const manage = await screen.findByTestId("account-overview-manage-local")
+    expect(screen.getByTestId("account-overview-local-summary")).toHaveTextContent(
+      'localAccountsSummary:{"name":"Alpha","count":2}'
+    )
+    expect(screen.queryByTestId("stub-manage-dialog")).not.toBeInTheDocument()
+    await user.click(manage)
+    expect(screen.getByTestId("stub-manage-dialog")).toBeInTheDocument()
   })
 })

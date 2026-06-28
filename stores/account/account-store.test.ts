@@ -13,6 +13,10 @@ const mockGetState = jest.fn<
 >()
 const mockCreateRegistryAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()
 const mockRenameRegistryAccount = jest.fn<Promise<LocalAccountRecord>, [string, string]>()
+const mockUpdatePasswordVerifier = jest.fn<
+  Promise<LocalAccountRecord>,
+  [string, PasswordVerifierRecord]
+>()
 const mockSetActiveAccountId = jest.fn<Promise<void>, [string]>()
 const mockDeleteRegistryAccount = jest.fn<Promise<void>, [string, unknown?]>()
 
@@ -22,6 +26,7 @@ jest.mock("@/lib/accounts/account-db", () => ({
     getState: mockGetState,
     createAccount: mockCreateRegistryAccount,
     renameAccount: mockRenameRegistryAccount,
+    updatePasswordVerifier: mockUpdatePasswordVerifier,
     setActiveAccountId: mockSetActiveAccountId,
     deleteAccount: mockDeleteRegistryAccount,
   })),
@@ -116,6 +121,9 @@ beforeEach(() => {
   })
   mockRenameRegistryAccount.mockImplementation(async (id, displayName) =>
     account(id, displayName, verifier(id))
+  )
+  mockUpdatePasswordVerifier.mockImplementation(async (id, passwordVerifier) =>
+    account(id, id, passwordVerifier)
   )
   mockDropAccountDatabase.mockResolvedValue()
   mockPurgeAccountLocalState.mockResolvedValue()
@@ -407,6 +415,58 @@ describe("account store switching, locking, and lifecycle", () => {
 
     expect(store.getState().accounts[0].displayName).toBe("Alpha")
     expect(store.getState().error).toBe("rename failed")
+  })
+
+  it("changes a password after verifying the current one and re-minting the verifier", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "old-password")
+
+    const updated = await store
+      .getState()
+      .changePassword("acct_alpha", "old-password", "new-secret")
+
+    expect(mockVerifyPassword).toHaveBeenLastCalledWith("old-password", alpha.passwordVerifier)
+    expect(mockCreatePasswordVerifier).toHaveBeenLastCalledWith("new-secret")
+    expect(mockUpdatePasswordVerifier).toHaveBeenCalledWith("acct_alpha", verifier("new-secret"))
+    expect(updated.passwordVerifier).toEqual(verifier("new-secret"))
+    expect(store.getState().accounts[0].passwordVerifier).toEqual(verifier("new-secret"))
+    expect(store.getState().error).toBeNull()
+  })
+
+  it("rejects a password change when the current password is wrong", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    mockVerifyPassword.mockResolvedValueOnce(false)
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(
+      store.getState().changePassword("acct_alpha", "wrong", "new-secret")
+    ).rejects.toThrow(/Invalid local account password/)
+
+    expect(mockCreatePasswordVerifier).not.toHaveBeenCalled()
+    expect(mockUpdatePasswordVerifier).not.toHaveBeenCalled()
+    expect(store.getState().error).toMatch(/Invalid local account password/)
+  })
+
+  it("requires both the current and the new password to change a password", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(store.getState().changePassword("acct_alpha", "old", "  ")).rejects.toThrow(
+      /Local account password is required/
+    )
+
+    expect(mockVerifyPassword).not.toHaveBeenCalled()
+    expect(mockUpdatePasswordVerifier).not.toHaveBeenCalled()
   })
 
   it("deletes an inactive account with database and local-state cascade", async () => {

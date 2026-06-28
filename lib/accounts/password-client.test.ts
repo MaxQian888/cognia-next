@@ -59,6 +59,12 @@ describe("password-client", () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
+  it("rejects passwords below the minimum length before invoking native code", async () => {
+    await expect(createPasswordVerifier("short")).rejects.toThrow(/at least 8/)
+
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
   it("maps native string failures into Error objects", async () => {
     invokeMock.mockRejectedValueOnce("native unavailable")
 

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
 
 import { clonePasswordVerifier, type PasswordVerifierRecord } from "./account-types"
+import { assertPasswordMeetsPolicy } from "./password-policy"
 
 export const ACCOUNT_PASSWORD_CREATE_VERIFIER_COMMAND = "account_password_create_verifier"
 export const ACCOUNT_PASSWORD_VERIFY_COMMAND = "account_password_verify"
@@ -9,6 +10,7 @@ type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<
 
 export async function createPasswordVerifier(password: string): Promise<PasswordVerifierRecord> {
   assertUsablePassword(password)
+  assertPasswordMeetsPolicy(password)
   try {
     const verifier = await (invoke as InvokeFn)<unknown>(ACCOUNT_PASSWORD_CREATE_VERIFIER_COMMAND, {
       password,

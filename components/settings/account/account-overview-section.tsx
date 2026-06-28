@@ -10,6 +10,7 @@
  * mobile-coupled AccountCard component itself (it hard-links into `/me/*`).
  */
 
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 
@@ -18,10 +19,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { AccountManageDialog } from "@/components/account/account-manage-dialog"
 import { deterministicColor, initials } from "@/lib/ui/avatar"
+import { isTauri } from "@/lib/tauri"
 import { useUserProfile } from "@/lib/profile/use-user-profile"
 import { useActiveAnthropicCredential, useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
+import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
 
 import { ProfileSection } from "../profile/profile-section"
 
@@ -70,6 +74,16 @@ export function AccountOverviewSection() {
   const { credential } = useActiveAnthropicCredential()
   const { latest } = useAnthropicUsage(1)
   const { paired, shortDeviceId } = useCompanionConfig()
+  const accountCount = useAccountStore((state) => state.accounts.length)
+  const activeAccount = useAccountStore(selectActiveAccount)
+  const [manageOpen, setManageOpen] = useState(false)
+  // Local accounts are a Tauri-only concept; resolve post-hydration to keep the
+  // server + first client render in agreement (mirrors settings-sidebar.tsx).
+  const [desktopReady, setDesktopReady] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setDesktopReady(isTauri()), 0)
+    return () => clearTimeout(timer)
+  }, [])
 
   const displayName = resolvedDisplayName ?? t("fallbackName")
   const email = credential?.email ?? ""
@@ -156,6 +170,34 @@ export function AccountOverviewSection() {
         </CardContent>
       </Card>
 
+      {desktopReady ? (
+        <Card>
+          <CardContent className="flex items-center justify-between gap-3 pt-6">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{t("localAccountsTitle")}</p>
+              <p
+                className="truncate text-xs text-muted-foreground"
+                data-testid="account-overview-local-summary"
+              >
+                {t("localAccountsSummary", {
+                  name: activeAccount?.displayName ?? t("fallbackName"),
+                  count: accountCount,
+                })}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setManageOpen(true)}
+              data-testid="account-overview-manage-local"
+            >
+              {t("localAccountsManage")}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <ProfileSection />
 
       <Card>
@@ -209,6 +251,8 @@ export function AccountOverviewSection() {
           )}
         </CardContent>
       </Card>
+
+      {desktopReady ? <AccountManageDialog open={manageOpen} onOpenChange={setManageOpen} /> : null}
     </div>
   )
 }

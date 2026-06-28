@@ -14,6 +14,7 @@ import { SettingsHydrator } from "@/components/providers/settings-hydrator"
 import { SettingsSyncProvider } from "@/components/providers/settings-sync-provider"
 import { TauriProvider } from "@/components/providers/tauri-provider"
 import { LoggerProvider } from "@/components/providers/logger-provider"
+import { AccountAutoLock } from "@/components/account/account-auto-lock"
 import { AccountGate } from "@/components/account/account-gate"
 import { AccountStoreInitializer } from "@/components/providers/initializers/account-store-initializer"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
@@ -143,6 +144,7 @@ export default async function RootLayout({
           <LocaleGate>
             <AccountGate>
               <SettingsHydrator />
+              <AccountAutoLock />
               <SettingsSyncProvider>
                 <TauriProvider>
                   <TooltipProvider>

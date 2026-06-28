@@ -51,6 +51,11 @@ export interface AccountStoreState {
   unlockAccount: (accountId: string, password: string) => Promise<void>
   switchAccount: (accountId: string, password?: string) => Promise<void>
   renameAccount: (accountId: string, displayName: string) => Promise<LocalAccountRecord>
+  changePassword: (
+    accountId: string,
+    currentPassword: string,
+    newPassword: string
+  ) => Promise<LocalAccountRecord>
   deleteAccount: (accountId: string, options?: DeleteLocalAccountOptions) => Promise<void>
   lock: () => void
 }
@@ -260,6 +265,35 @@ export function createAccountStore(
             }
           })
           return renamed
+        } catch (error) {
+          throw setFailure(error)
+        }
+      },
+
+      changePassword: async (accountId, currentPassword, newPassword) => {
+        set({ error: null })
+        try {
+          assertPasswordProvided(currentPassword)
+          assertPasswordProvided(newPassword)
+          const account = await findAccount(accountId)
+          const ok = await verifyPassword(currentPassword, account.passwordVerifier)
+          if (!ok) {
+            throw new Error("Invalid local account password.")
+          }
+          const passwordVerifier = await createPasswordVerifier(newPassword)
+          const updated = await dependencies.registry.updatePasswordVerifier(
+            accountId,
+            passwordVerifier
+          )
+          set((state) => {
+            const accounts = upsertAccount(state.accounts, updated)
+            return {
+              accounts,
+              locked: computeLocked(accounts, state.activeAccountId, state.unlockedAccountId),
+              error: null,
+            }
+          })
+          return updated
         } catch (error) {
           throw setFailure(error)
         }

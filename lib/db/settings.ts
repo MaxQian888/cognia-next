@@ -136,6 +136,10 @@ export const DEFAULTS: AppSettings = {
   // are off until the user opts in via Settings → 应用安全.
   biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
 
+  // Auto-lock disabled by default — the local account stays unlocked until a
+  // manual lock or app exit. Opt-in from Settings → Security.
+  accountAutoLockMinutes: 0,
+
   // OCR subsystem preferences. Driven by the settings page at
   // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.
   ocrSettings: { ...DEFAULT_OCR_SETTINGS },

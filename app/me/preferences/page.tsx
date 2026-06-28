@@ -44,6 +44,8 @@ export default function MobilePreferencesPage() {
   const fontScale = settings?.fontScale ?? "md"
   const defaultModel = settings?.defaultModel ?? ""
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
+  const reduceMotion = settings?.reduceMotion ?? false
+  const telemetryEnabled = settings?.telemetryEnabled ?? false
 
   const update = async (patch: Partial<AppSettings>) => {
     await save(patch as never)
@@ -130,6 +132,23 @@ export default function MobilePreferencesPage() {
             checked={policy.signOut}
             onChange={(v) => void updateBiometric({ signOut: v })}
             testid="pref-biometric-sign-out"
+          />
+        </MeSection>
+
+        <MeSection title={tPanel("privacyTitle")} testid="me-section-pref-privacy">
+          <BiometricRow
+            label={tPanel("reduceMotion")}
+            help={tPanel("reduceMotionHelp")}
+            checked={reduceMotion}
+            onChange={(v) => void update({ reduceMotion: v })}
+            testid="pref-reduce-motion"
+          />
+          <BiometricRow
+            label={tPanel("telemetry")}
+            help={tPanel("telemetryHelp")}
+            checked={telemetryEnabled}
+            onChange={(v) => void update({ telemetryEnabled: v })}
+            testid="pref-telemetry"
           />
         </MeSection>
       </div>

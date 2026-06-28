@@ -14,11 +14,15 @@
  */
 
 import { useTranslations } from "next-intl"
-import { ShieldCheckIcon } from "lucide-react"
+import { LockKeyholeIcon, ShieldCheckIcon } from "lucide-react"
 import { motion } from "motion/react"
 
 import { Button } from "@/components/ui/button"
-import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsToggle,
+} from "@/components/settings/common/settings-section"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
@@ -32,6 +36,8 @@ const GUARD_ROWS: { key: keyof BiometricGuardPolicy; testid: string }[] = [
   { key: "signOut", testid: "biometric-sign-out" },
 ]
 
+const AUTO_LOCK_OPTIONS = [0, 5, 15, 30, 60] as const
+
 export function SecuritySection() {
   const t = useTranslations("settings.security")
   const settings = useSettingsStore((s) => s.settings)
@@ -39,6 +45,7 @@ export function SecuritySection() {
   const guard = useBiometricGuard()
 
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
+  const autoLockMinutes = settings?.accountAutoLockMinutes ?? 0
   const childVariants = useReducedMotionVariants(STAGGER_CHILD)
 
   const update = (patch: Partial<BiometricGuardPolicy>) => {
@@ -46,6 +53,9 @@ export function SecuritySection() {
       biometricRequiredFor: { ...policy, ...patch },
     })
   }
+
+  const autoLockLabel = (minutes: number) =>
+    minutes === 0 ? t("autoLock.off") : t("autoLock.option", { minutes })
 
   const onTestPrompt = () => {
     void guard(
@@ -94,6 +104,29 @@ export function SecuritySection() {
         >
           {t("testCta")}
         </Button>
+      </SettingsCard>
+
+      <SettingsCard
+        icon={<LockKeyholeIcon className="size-4" />}
+        title={t("autoLock.title")}
+        description={t("autoLock.description")}
+      >
+        <SettingsRow label={t("autoLock.label")} description={t("autoLock.help")}>
+          <select
+            id="account-auto-lock"
+            aria-label={t("autoLock.label")}
+            value={autoLockMinutes}
+            onChange={(e) => void save({ accountAutoLockMinutes: Number(e.target.value) })}
+            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
+            data-testid="account-auto-lock-select"
+          >
+            {AUTO_LOCK_OPTIONS.map((minutes) => (
+              <option key={minutes} value={minutes}>
+                {autoLockLabel(minutes)}
+              </option>
+            ))}
+          </select>
+        </SettingsRow>
       </SettingsCard>
     </div>
   )

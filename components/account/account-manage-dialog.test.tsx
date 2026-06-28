@@ -13,11 +13,17 @@ jest.mock("next-intl", () => ({
 
 const mockCreateAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()
 const mockRenameAccount = jest.fn<Promise<LocalAccountRecord>, [string, string]>()
+const mockChangePassword = jest.fn<Promise<LocalAccountRecord>, [string, string, string]>()
 const mockDeleteAccount = jest.fn<Promise<void>, [string, unknown?]>()
 
 let mockState: Pick<
   AccountStoreState,
-  "accounts" | "activeAccountId" | "createAccount" | "renameAccount" | "deleteAccount"
+  | "accounts"
+  | "activeAccountId"
+  | "createAccount"
+  | "renameAccount"
+  | "changePassword"
+  | "deleteAccount"
 >
 
 jest.mock("@/stores/account/account-store", () => ({
@@ -43,6 +49,7 @@ function setManageState(overrides: Partial<typeof mockState> = {}) {
     activeAccountId: "acct_alpha",
     createAccount: mockCreateAccount,
     renameAccount: mockRenameAccount,
+    changePassword: mockChangePassword,
     deleteAccount: mockDeleteAccount,
     ...overrides,
   }
@@ -56,6 +63,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockCreateAccount.mockResolvedValue(account("acct_created", "Created"))
   mockRenameAccount.mockImplementation(async (id, displayName) => account(id, displayName))
+  mockChangePassword.mockImplementation(async (id) => account(id, "Alpha"))
   mockDeleteAccount.mockResolvedValue()
   setManageState()
 })
@@ -67,16 +75,30 @@ describe("AccountManageDialog", () => {
       target: { value: "Gamma" },
     })
     fireEvent.change(screen.getByLabelText("newPasswordLabel"), {
-      target: { value: "secret" },
+      target: { value: "secret-pw" },
     })
     fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
 
     await waitFor(() =>
       expect(mockCreateAccount).toHaveBeenCalledWith({
         displayName: "Gamma",
-        password: "secret",
+        password: "secret-pw",
       })
     )
+  })
+
+  it("blocks creating an account below the minimum password length", () => {
+    renderDialog()
+    fireEvent.change(screen.getByLabelText("newDisplayNameLabel"), {
+      target: { value: "Gamma" },
+    })
+    fireEvent.change(screen.getByLabelText("newPasswordLabel"), {
+      target: { value: "short" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
+
+    expect(screen.getByText("passwordTooShort:8")).toBeInTheDocument()
+    expect(mockCreateAccount).not.toHaveBeenCalled()
   })
 
   it("renames the selected account", async () => {
@@ -88,6 +110,76 @@ describe("AccountManageDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "save" }))
 
     await waitFor(() => expect(mockRenameAccount).toHaveBeenCalledWith("acct_beta", "Renamed"))
+  })
+
+  it("changes the password for the selected account", async () => {
+    renderDialog()
+    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
+      target: { value: "old-password" },
+    })
+    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
+      target: { value: "new-secret" },
+    })
+    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
+      target: { value: "new-secret" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
+
+    await waitFor(() =>
+      expect(mockChangePassword).toHaveBeenCalledWith("acct_alpha", "old-password", "new-secret")
+    )
+    expect(await screen.findByText("passwordChanged")).toBeInTheDocument()
+  })
+
+  it("blocks the password change when the confirmation does not match", async () => {
+    renderDialog()
+    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
+      target: { value: "old-password" },
+    })
+    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
+      target: { value: "new-secret" },
+    })
+    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
+      target: { value: "different" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
+
+    expect(await screen.findByText("passwordMismatch")).toBeInTheDocument()
+    expect(mockChangePassword).not.toHaveBeenCalled()
+  })
+
+  it("blocks the password change below the minimum length", () => {
+    renderDialog()
+    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
+      target: { value: "old-password" },
+    })
+    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
+      target: { value: "short" },
+    })
+    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
+      target: { value: "short" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
+
+    expect(screen.getByText("passwordTooShort:8")).toBeInTheDocument()
+    expect(mockChangePassword).not.toHaveBeenCalled()
+  })
+
+  it("surfaces password change errors", async () => {
+    mockChangePassword.mockRejectedValueOnce(new Error("Invalid local account password."))
+    renderDialog()
+    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
+      target: { value: "wrong" },
+    })
+    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
+      target: { value: "new-secret" },
+    })
+    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
+      target: { value: "new-secret" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
+
+    expect(await screen.findByText("Invalid local account password.")).toBeInTheDocument()
   })
 
   it("deletes an inactive account after confirmation", async () => {
@@ -129,7 +221,7 @@ describe("AccountManageDialog", () => {
       target: { value: "Gamma" },
     })
     fireEvent.change(screen.getByLabelText("newPasswordLabel"), {
-      target: { value: "secret" },
+      target: { value: "secret-pw" },
     })
     fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
 

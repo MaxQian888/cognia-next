@@ -18,7 +18,9 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
+import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import { useAccountStore } from "@/stores/account/account-store"
+import { PasswordStrengthMeter } from "./password-strength-meter"
 
 export interface AccountManageDialogProps {
   open: boolean
@@ -31,6 +33,7 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
   const activeAccountId = useAccountStore((state) => state.activeAccountId)
   const createAccount = useAccountStore((state) => state.createAccount)
   const renameAccount = useAccountStore((state) => state.renameAccount)
+  const changePassword = useAccountStore((state) => state.changePassword)
   const deleteAccount = useAccountStore((state) => state.deleteAccount)
   const sorted = useMemo(
     () => [...accounts].sort((a, b) => a.displayName.localeCompare(b.displayName)),
@@ -41,6 +44,10 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
   const [newDisplayName, setNewDisplayName] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [editDisplayName, setEditDisplayName] = useState(selected?.displayName ?? "")
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [changeNewPassword, setChangeNewPassword] = useState("")
+  const [confirmNewPassword, setConfirmNewPassword] = useState("")
+  const [passwordChanged, setPasswordChanged] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -55,12 +62,20 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
     const account = sorted.find((candidate) => candidate.id === accountId)
     setSelectedId(accountId)
     setEditDisplayName(account?.displayName ?? "")
+    setCurrentPassword("")
+    setChangeNewPassword("")
+    setConfirmNewPassword("")
+    setPasswordChanged(false)
     setConfirmingDelete(false)
     setError(null)
   }
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (newPassword.length < PASSWORD_MIN_LENGTH) {
+      setError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
@@ -83,6 +98,33 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
     setError(null)
     try {
       await renameAccount(selected.id, editDisplayName)
+    } catch (err) {
+      setError(toErrorMessage(err, t("operationFailed")))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleChangePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selected) return
+    setPasswordChanged(false)
+    if (changeNewPassword.length < PASSWORD_MIN_LENGTH) {
+      setError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
+      return
+    }
+    if (changeNewPassword !== confirmNewPassword) {
+      setError(t("passwordMismatch"))
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await changePassword(selected.id, currentPassword, changeNewPassword)
+      setCurrentPassword("")
+      setChangeNewPassword("")
+      setConfirmNewPassword("")
+      setPasswordChanged(true)
     } catch (err) {
       setError(toErrorMessage(err, t("operationFailed")))
     } finally {
@@ -135,6 +177,7 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
                 placeholder={t("newPasswordPlaceholder")}
                 onChange={(event) => setNewPassword(event.target.value)}
               />
+              <PasswordStrengthMeter password={newPassword} />
               <Button type="submit" size="sm" disabled={submitting} className="gap-2">
                 <PlusIcon className="size-4" />
                 {t("createAccount")}
@@ -191,6 +234,52 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
                     {error}
                   </p>
                 )}
+                <Separator />
+                <form
+                  className="flex flex-col gap-2"
+                  aria-label={t("changePasswordHeading")}
+                  onSubmit={(event) => void handleChangePassword(event)}
+                >
+                  <p className="text-sm font-medium">{t("changePasswordHeading")}</p>
+                  <Label htmlFor="account-current-password">{t("currentPasswordLabel")}</Label>
+                  <Input
+                    id="account-current-password"
+                    type="password"
+                    value={currentPassword}
+                    autoComplete="current-password"
+                    placeholder={t("currentPasswordPlaceholder")}
+                    onChange={(event) => setCurrentPassword(event.target.value)}
+                  />
+                  <Label htmlFor="account-change-new-password">{t("changeNewPasswordLabel")}</Label>
+                  <Input
+                    id="account-change-new-password"
+                    type="password"
+                    value={changeNewPassword}
+                    autoComplete="new-password"
+                    placeholder={t("changeNewPasswordPlaceholder")}
+                    onChange={(event) => setChangeNewPassword(event.target.value)}
+                  />
+                  <PasswordStrengthMeter password={changeNewPassword} />
+                  <Label htmlFor="account-confirm-new-password">
+                    {t("confirmNewPasswordLabel")}
+                  </Label>
+                  <Input
+                    id="account-confirm-new-password"
+                    type="password"
+                    value={confirmNewPassword}
+                    autoComplete="new-password"
+                    placeholder={t("confirmNewPasswordPlaceholder")}
+                    onChange={(event) => setConfirmNewPassword(event.target.value)}
+                  />
+                  {passwordChanged && (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      {t("passwordChanged")}
+                    </p>
+                  )}
+                  <Button type="submit" size="sm" variant="outline" disabled={submitting}>
+                    {t("changePassword")}
+                  </Button>
+                </form>
                 <Separator />
                 <div className="flex items-center justify-between gap-2">
                   <Button
