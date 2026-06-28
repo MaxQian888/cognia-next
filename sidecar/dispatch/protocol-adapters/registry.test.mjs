@@ -2,9 +2,11 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { BUILTIN_PROTOCOLS, isBuiltinProtocol, resolveAdapter } from "./registry.mjs"
 
-test("the builtin protocol set matches the five @ai-sdk families", () => {
+test("the builtin protocol set matches the @ai-sdk families (incl. azure/bedrock)", () => {
   assert.deepEqual([...BUILTIN_PROTOCOLS].sort(), [
     "anthropic",
+    "azure",
+    "bedrock",
     "cohere",
     "google",
     "mistral",

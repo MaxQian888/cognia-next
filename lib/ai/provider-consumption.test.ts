@@ -1,3 +1,5 @@
+import { createAnthropic } from "@ai-sdk/anthropic"
+
 import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
@@ -6,6 +8,18 @@ import {
   type ProviderSettingsSnapshot,
   type ResolvedProvider,
 } from "./provider-consumption"
+
+// Mock only the Anthropic factory so we can assert what settings (fetch /
+// headers) reach the AI SDK client. The other create*() factories stay real,
+// so the "builds a client for each protocol family" suite is unaffected.
+jest.mock("@ai-sdk/anthropic", () => ({
+  createAnthropic: jest.fn((settings: unknown) => {
+    const make = (id: string) => ({ __provider: "anthropic", id, settings })
+    const fn = (id: string) => make(id)
+    ;(fn as { chat?: unknown }).chat = (id: string) => make(id)
+    return fn
+  }),
+}))
 
 describe("createProviderSettingsSnapshot", () => {
   it("defaults missing inputs to empty collections", () => {
@@ -83,6 +97,58 @@ describe("resolveFeatureProvider — explicit provider", () => {
     expect(resolved.apiKey).toBe("sk-openai")
     expect(resolved.model).toBe("gpt-4o-mini")
     expect(resolved.isCustomProvider).toBe(false)
+  })
+
+  it("forwards a built-in provider's apiFlavor onto the resolution", () => {
+    const flavored: ProviderSettingsSnapshot = {
+      defaultProvider: "openai",
+      providers: {
+        openai: { enabled: true, apiKey: "sk", defaultModel: "gpt-5", apiFlavor: "responses" },
+      },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "openai",
+        fallbackMode: "none",
+      },
+      flavored
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.apiFlavor).toBe("responses")
+  })
+
+  it("forwards a custom provider's apiFlavor onto the resolution", () => {
+    const flavored: ProviderSettingsSnapshot = {
+      defaultProvider: "az",
+      providers: {},
+      customProviders: [
+        {
+          id: "az",
+          name: "Azure-ish",
+          protocol: "openai",
+          apiFlavor: "responses",
+          baseURL: "https://x.openai.azure.com",
+          apiKey: "k",
+          defaultModel: "gpt-5",
+        },
+      ],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "az",
+        fallbackMode: "none",
+      },
+      flavored
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.apiFlavor).toBe("responses")
   })
 
   it("resolves a custom provider and marks isCustomProvider", () => {
@@ -280,10 +346,21 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
   }
 
   it("builds a client for each protocol family", () => {
-    for (const protocol of ["openai", "anthropic", "google", "mistral", "cohere"] as const) {
+    for (const protocol of [
+      "openai",
+      "anthropic",
+      "google",
+      "mistral",
+      "cohere",
+      "azure",
+    ] as const) {
       const client = createFeatureProviderClient({ ...base, protocol })
       expect(client).toBeDefined()
     }
+  })
+
+  it("rejects bedrock in the in-renderer feature client (chat/sidecar path only)", () => {
+    expect(() => createFeatureProviderClient({ ...base, protocol: "bedrock" })).toThrow(/bedrock/i)
   })
 
   it("builds a model handle from a resolved provider, backfilling a default model", () => {
@@ -313,5 +390,60 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
       useProxy: false,
     }
     expect(createFeatureProviderModel(resolved)).toBeDefined()
+  })
+})
+
+describe("provider client fetch/headers seam (standalone BYOK)", () => {
+  beforeEach(() => (createAnthropic as jest.Mock).mockClear())
+
+  const anthropicBase = {
+    providerId: "anthropic",
+    apiKey: "k",
+    baseURL: undefined,
+    protocol: "anthropic" as const,
+    isCustomProvider: false,
+    useProxy: false,
+  }
+  const lastSettings = () =>
+    (createAnthropic as jest.Mock).mock.calls.at(-1)?.[0] as
+      | { fetch?: unknown; headers?: unknown }
+      | undefined
+
+  it("threads custom fetch + headers into the AI SDK provider settings", () => {
+    const customFetch = (() => undefined) as unknown as typeof globalThis.fetch
+    createFeatureProviderClient({
+      ...anthropicBase,
+      fetch: customFetch,
+      headers: { "anthropic-dangerous-direct-browser-access": "true" },
+    })
+    expect(lastSettings()?.fetch).toBe(customFetch)
+    expect(lastSettings()?.headers).toEqual({
+      "anthropic-dangerous-direct-browser-access": "true",
+    })
+  })
+
+  it("omits fetch/headers by default (back-compat — global fetch)", () => {
+    createFeatureProviderClient(anthropicBase)
+    expect(lastSettings()?.fetch).toBeUndefined()
+    expect(lastSettings()?.headers).toBeUndefined()
+  })
+
+  it("createFeatureProviderModel forwards transport fetch/headers", () => {
+    const customFetch = (() => undefined) as unknown as typeof globalThis.fetch
+    createFeatureProviderModel(
+      {
+        kind: "resolved",
+        providerId: "anthropic",
+        protocol: "anthropic",
+        apiKey: "k",
+        baseURL: undefined,
+        model: "claude-sonnet-4-6",
+        isCustomProvider: false,
+        useProxy: false,
+      },
+      { fetch: customFetch, headers: { "x-test": "1" } }
+    )
+    expect(lastSettings()?.fetch).toBe(customFetch)
+    expect(lastSettings()?.headers).toEqual({ "x-test": "1" })
   })
 })

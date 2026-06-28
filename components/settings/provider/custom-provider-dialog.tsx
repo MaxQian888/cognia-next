@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { ApiProtocol, ProviderModelDiscoveryEntry } from "@cognia/provider-types"
+import type { ApiFlavor, ApiProtocol, ProviderModelDiscoveryEntry } from "@cognia/provider-types"
 import type { CustomModelMetadata, CustomProviderSettings } from "@/stores/settings/settings-store"
 import {
   Dialog,
@@ -99,6 +99,9 @@ export function CustomProviderDialog({
   const [newModel, setNewModel] = useState("")
   const [defaultModel, setDefaultModel] = useState("")
   const [apiProtocol, setApiProtocol] = useState<ApiProtocol>("openai")
+  // OpenAI endpoint family override. "auto" keeps the host heuristic; "responses"
+  // forces the Responses API (unlocks it on Azure / gateways / custom URLs).
+  const [apiFlavor, setApiFlavor] = useState<ApiFlavor>("auto")
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<"success" | "error" | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -135,6 +138,7 @@ export function CustomProviderDialog({
         setBaseURL(provider.baseURL || "")
         setApiKey(provider.apiKey || "")
         setApiProtocol(provider.apiProtocol || "openai")
+        setApiFlavor(provider.apiFlavor || "auto")
         setModels(provider.customModels || [])
         setDefaultModel(provider.defaultModel || "")
         setModelMetadata(provider.customModelMetadata || {})
@@ -146,6 +150,7 @@ export function CustomProviderDialog({
         setBaseURL("")
         setApiKey("")
         setApiProtocol("openai")
+        setApiFlavor("auto")
         setModels([])
         setNewModel("")
         setDefaultModel("")
@@ -270,6 +275,9 @@ export function CustomProviderDialog({
       baseURL: baseURL.trim(),
       apiKey: apiKey.trim(),
       apiProtocol,
+      // Only the OpenAI family has a Responses/Chat split; force "auto" for the
+      // others so a stale override can't ride along after a protocol switch.
+      apiFlavor: apiProtocol === "openai" ? apiFlavor : "auto",
       customModels: models,
       customModelMetadata: modelMetadata,
       discoveredModels,
@@ -374,6 +382,45 @@ export function CustomProviderDialog({
             </Select>
             <p className="text-xs text-muted-foreground">{t("apiProtocolHint")}</p>
           </div>
+
+          {/* API Flavor (OpenAI family only): Responses vs Chat Completions */}
+          {apiProtocol === "openai" && (
+            <div className="space-y-2">
+              <Label htmlFor="api-flavor">{t("apiFlavor")}</Label>
+              <Select value={apiFlavor} onValueChange={(v) => setApiFlavor(v as ApiFlavor)}>
+                <SelectTrigger id="api-flavor">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorAuto")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorAutoDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="responses">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorResponses")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorResponsesDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="chat">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorChat")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorChatDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{t("apiFlavorHint")}</p>
+            </div>
+          )}
 
           {/* Base URL */}
           <div className="space-y-2">

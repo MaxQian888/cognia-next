@@ -19,8 +19,17 @@
 import { z } from "zod"
 import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@/lib/claude/types"
 
-/** AI SDK protocol families the sidecar's dispatch table understands. */
-export const RESOLVER_PROTOCOLS = ["openai", "anthropic", "google", "mistral", "cohere"] as const
+/** AI SDK protocol families the sidecar's dispatch table understands. Mirrors
+ *  BUILTIN_PROTOCOL_NAMES in sidecar/dispatch/protocol-adapters/provider-protocol.mjs. */
+export const RESOLVER_PROTOCOLS = [
+  "openai",
+  "anthropic",
+  "google",
+  "mistral",
+  "cohere",
+  "azure",
+  "bedrock",
+] as const
 
 /** SDK permission modes, mirrored from `SendOptions["permissionMode"]`. */
 export const PERMISSION_MODES = [

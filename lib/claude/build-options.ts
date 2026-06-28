@@ -840,6 +840,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           // (xai / togetherai / fireworks). The Anthropic path selects by id,
           // so forwarding "anthropic" is inert there.
           protocol: resolution.protocol,
+          // Explicit OpenAI endpoint family (responses/chat/auto). Lets the user
+          // opt a gateway / Azure / custom URL into the Responses API; the
+          // sidecar's decideOpenAiEndpointFlavor honors it.
+          ...(resolution.apiFlavor ? { apiFlavor: resolution.apiFlavor } : {}),
         }
         // Plugin-contributed protocol: ride the execution spec along. A
         // declarative variant spec is forwarded verbatim (the sidecar serves
@@ -2202,7 +2206,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             resolved.summary = {
               model: summaryModel ?? r.model,
               protocol: r.protocol,
-              credentials: { apiKey: r.apiKey, baseURL: r.baseURL },
+              credentials: {
+                apiKey: r.apiKey,
+                baseURL: r.baseURL,
+                ...(r.apiFlavor ? { apiFlavor: r.apiFlavor } : {}),
+              },
               ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
             }
           }

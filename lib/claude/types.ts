@@ -77,7 +77,12 @@ export interface ResolvedCompaction {
   summary?: {
     model?: string
     protocol?: string
-    credentials?: { apiKey?: string; baseURL?: string; headers?: Record<string, string> }
+    credentials?: {
+      apiKey?: string
+      baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
+    }
     protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   }
   /**
@@ -491,7 +496,14 @@ export interface SendOptions {
      * adapters carry their namespaced id (`${pluginId}:${id}`) and ride a
      * `protocolAdapterSpec` alongside.
      */
-    protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere" | (string & {})
+    protocol?: import("@cognia/provider-types/provider").ResolverProtocol
+    /**
+     * Explicit OpenAI endpoint family (responses/chat/auto). Overrides the host
+     * heuristic so the Responses API can be used on Azure OpenAI, on compatible
+     * gateways that proxy `/responses`, and on custom base URLs. Consumed by the
+     * sidecar's `decideOpenAiEndpointFlavor`. Omitted = "auto".
+     */
+    apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
     /**
      * Extra default headers forwarded into the provider client. Used by the
      * Codex ChatGPT-login path (`ChatGPT-Account-Id`, `OpenAI-Beta`,
@@ -1594,6 +1606,16 @@ export interface AppSettings {
     /** Auto-check for updates on launch. Default true. */
     autoCheck: boolean
   }
+  /**
+   * Mobile runtime mode (ADR: standalone BYOK mobile). Decides whether the
+   * Capacitor shell drives a paired desktop ("paired") or runs chat / search /
+   * documents standalone in-webview against the user's own provider keys
+   * ("standalone"). `undefined` ≡ not yet chosen → the mobile onboarding shows
+   * the mode chooser. Device-local: deliberately excluded from the
+   * `CROSS_PLATFORM_SETTING_KEYS` sync allowlist (a phone's mode is its own).
+   * No-op off the Capacitor shell. See `lib/runtime/standalone-mode.ts`.
+   */
+  mobileRuntimeMode?: "paired" | "standalone"
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
@@ -2716,6 +2738,15 @@ export interface AppSettings {
    * action's caller passes `fallthroughWhenUnavailable: false`.
    */
   biometricRequiredFor?: BiometricGuardPolicy
+
+  /**
+   * Auto-lock the active local account after this many minutes of inactivity
+   * (Tauri-only — local accounts don't exist off desktop). `0` or `undefined`
+   * disables auto-lock; the account stays unlocked until a manual lock or app
+   * exit. Drives `use-auto-lock-on-idle`, which calls the account store's
+   * `lock()` on timeout.
+   */
+  accountAutoLockMinutes?: number
 
   /**
    * Master switch for mobile-initiated Computer Use sessions (ADR-0020

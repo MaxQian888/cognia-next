@@ -111,6 +111,13 @@ pub struct ProviderCredentials {
     /// built-in providers the sidecar derives the protocol from the id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
+    /// Explicit OpenAI endpoint family: `"auto"` | `"responses"` | `"chat"`.
+    /// Overrides the sidecar's host heuristic so the Responses API can be used
+    /// on Azure OpenAI, on compatible gateways that proxy `/responses`, and on
+    /// custom base URLs. Like `headers`, it MUST round-trip this strictly-typed
+    /// boundary or the sidecar's `decideOpenAiEndpointFlavor` never sees it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_flavor: Option<String>,
     /// Extra default headers forwarded to the provider client. Used by the
     /// Codex ChatGPT-login path (`ChatGPT-Account-Id`, `OpenAI-Beta`,
     /// `originator`, `OAI-Product-Sku`). Must round-trip the boundary so the
@@ -161,9 +168,14 @@ impl SendOptions {
             if let Some(proto) = creds.protocol.as_ref() {
                 if !matches!(
                     proto.as_str(),
-                    "openai" | "anthropic" | "google" | "mistral" | "cohere"
+                    "openai" | "anthropic" | "google" | "mistral" | "cohere" | "azure" | "bedrock"
                 ) {
                     return Err(format!("invalid providerCredentials.protocol: {proto}"));
+                }
+            }
+            if let Some(flavor) = creds.api_flavor.as_ref() {
+                if !matches!(flavor.as_str(), "auto" | "responses" | "chat") {
+                    return Err(format!("invalid providerCredentials.apiFlavor: {flavor}"));
                 }
             }
         }
@@ -773,6 +785,45 @@ mod tests {
             json["providerCredentials"]["headers"]["OAI-Product-Sku"],
             "codex"
         );
+    }
+
+    #[test]
+    fn provider_credentials_api_flavor_round_trips() {
+        // apiFlavor must survive deserialize → re-serialize across the
+        // renderer→Rust→sidecar boundary, or the sidecar's
+        // decideOpenAiEndpointFlavor never sees the user's Responses/Chat choice
+        // (the same drop trap as `headers`). It also unlocks the Responses API
+        // on Azure / compatible gateways / custom base URLs.
+        let opts = parse(
+            r#"{
+                "provider": "azure",
+                "model": "gpt-5",
+                "providerCredentials": {
+                    "apiKey": "az-key",
+                    "baseURL": "https://x.openai.azure.com",
+                    "protocol": "azure",
+                    "apiFlavor": "responses"
+                }
+            }"#,
+        );
+        assert!(opts.validate().is_ok());
+        let creds = opts.provider_credentials.as_ref().expect("creds present");
+        assert_eq!(creds.api_flavor.as_deref(), Some("responses"));
+        let json = serde_json::to_value(&opts).expect("serialise");
+        assert_eq!(json["providerCredentials"]["apiFlavor"], "responses");
+    }
+
+    #[test]
+    fn provider_credentials_rejects_bad_api_flavor() {
+        let opts = parse(
+            r#"{
+                "provider": "openai",
+                "model": "gpt-5",
+                "providerCredentials": { "apiFlavor": "streaming" }
+            }"#,
+        );
+        let err = opts.validate().expect_err("bad apiFlavor should fail");
+        assert!(err.contains("apiFlavor"));
     }
 
     #[test]

@@ -169,6 +169,40 @@ describe("CustomProviderDialog", () => {
     expect(screen.getByText("test")).toBeInTheDocument()
   })
 
+  it("shows the OpenAI endpoint-family (apiFlavor) picker for the openai protocol", () => {
+    // Default protocol is openai → the Responses/Chat override is offered.
+    render(<CustomProviderDialog {...defaultProps} />)
+    expect(screen.getByText("apiFlavor")).toBeInTheDocument()
+    expect(screen.getByText("apiFlavorResponses")).toBeInTheDocument()
+    expect(screen.getByText("apiFlavorChat")).toBeInTheDocument()
+  })
+
+  it("loads a saved apiFlavor when editing an openai custom provider", async () => {
+    mockCustomProviders.push({
+      id: "custom-resp",
+      providerId: "custom-resp",
+      customName: "Azure Custom",
+      name: "Azure Custom",
+      isCustom: true,
+      baseURL: "https://x.openai.azure.com",
+      apiKey: "az-key",
+      apiProtocol: "openai",
+      apiFlavor: "responses",
+      customModels: ["gpt-5"],
+      defaultModel: "gpt-5",
+      enabled: true,
+    })
+
+    render(<CustomProviderDialog {...defaultProps} editingProviderId="custom-resp" />)
+
+    // Source seeds via setTimeout(0); the flavor Select wrapper carries the
+    // loaded value once hydrated (both protocol + flavor share the mock testid).
+    await waitFor(() => {
+      const selects = screen.getAllByTestId("api-protocol-select")
+      expect(selects.some((el) => el.getAttribute("data-value") === "responses")).toBe(true)
+    })
+  })
+
   it("loads discovered models for remote-only custom providers when editing", async () => {
     mockCustomProviders.push({
       id: "custom-discovered",

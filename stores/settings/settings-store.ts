@@ -285,6 +285,7 @@ interface SettingsState {
     baseURL: string
     apiKey: string
     apiProtocol: import("@cognia/provider-types/provider").ApiProtocol
+    apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
     customModels: string[]
     defaultModel?: string
     enabled?: boolean
@@ -1182,6 +1183,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         enabled: provider.enabled ?? true,
         apiKey: provider.apiKey,
         baseURL: provider.baseURL,
+        ...(provider.apiFlavor ? { apiFlavor: provider.apiFlavor } : {}),
         // CustomProviderSettings extension
         id,
         isCustom: true,

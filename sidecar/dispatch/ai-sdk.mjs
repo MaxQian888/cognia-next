@@ -20,6 +20,10 @@ import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
+import {
+  resolveProviderProtocol,
+  normalizeProtocol,
+} from "./protocol-adapters/provider-protocol.mjs"
 import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
 import { planStrategy } from "./compaction-strategies.mjs"
 import { capToolResults } from "./tool-result-cap.mjs"
@@ -51,45 +55,12 @@ const TOOL_RESULT_REVIEW_TIMEOUT_MS = 30_000
 // Map a provider id (or explicit `protocol` field) to the AI SDK family the
 // renderer uses to construct a model instance. Custom provider ids must
 // supply `providerCredentials.protocol` because the id alone tells us nothing.
+// The id→protocol table is the single source of truth in `provider-protocol.mjs`;
+// the renderer's resolver forwards `providerCredentials.protocol` for every turn,
+// so this id-based path is the fallback for callers that don't (CLI, older code).
 function resolveProtocol(provider, credentials) {
-  if (credentials?.protocol) return credentials.protocol
-  switch (provider) {
-    case "openai":
-    case "openrouter": // openrouter speaks the openai protocol with a custom baseURL
-    case "opencode": // OpenCode Zen — OpenAI-compatible gateway (verified live)
-    case "opencode-go": // OpenCode Go — same gateway, /go segment
-    case "codex": // Codex (OpenAI) — Responses API; ChatGPT-login carries headers
-
-    case "deepseek":
-    case "groq":
-    case "mistral-openai-compat":
-    // Local inference engines all expose an OpenAI-compatible /v1 surface, so
-    // they dispatch through the openai client with a custom baseURL. Built-in
-    // ids must be recognised here because they reach the sidecar without an
-    // explicit `providerCredentials.protocol` (only custom ids carry one).
-    case "ollama":
-    case "lmstudio":
-    case "llamacpp":
-    case "llamafile":
-    case "vllm":
-    case "localai":
-    case "jan":
-    case "textgenwebui":
-    case "koboldcpp":
-    case "tabbyapi":
-      return "openai"
-    case "google":
-    case "gemini":
-      return "google"
-    case "mistral":
-      return "mistral"
-    case "cohere":
-      return "cohere"
-    case "anthropic":
-      return "anthropic"
-    default:
-      return null
-  }
+  if (credentials?.protocol) return normalizeProtocol(credentials.protocol)
+  return resolveProviderProtocol(provider)
 }
 
 // `buildModel` moved to `protocol-adapters/ai-sdk-adapter.mjs` (the built-in

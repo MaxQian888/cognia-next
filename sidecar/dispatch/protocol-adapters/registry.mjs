@@ -7,9 +7,17 @@
 import { makeAiSdkAdapter } from "./ai-sdk-adapter.mjs"
 import { makeCodeAdapter } from "./code-adapter.mjs"
 import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.mjs"
+import { BUILTIN_PROTOCOL_NAMES } from "./provider-protocol.mjs"
 
-/** The renderer's BUILTIN_API_PROTOCOLS maps onto this set (gemini → google). */
-export const BUILTIN_PROTOCOLS = new Set(["openai", "anthropic", "google", "mistral", "cohere"])
+/**
+ * Protocols the built-in `@ai-sdk/*` adapter handles, derived from the single
+ * source of truth so this can't drift from `buildRawModel`'s switch. The
+ * renderer's BUILTIN_API_PROTOCOLS maps onto this set (gemini → google); this
+ * set holds the EXECUTION names, so `isBuiltinProtocol` deliberately does NOT
+ * normalize — a raw `gemini` is rejected because it has no `buildRawModel` case
+ * (it only reaches the registry already normalized to `google`).
+ */
+export const BUILTIN_PROTOCOLS = new Set(BUILTIN_PROTOCOL_NAMES)
 
 /** @param {string|null|undefined} protocol */
 export function isBuiltinProtocol(protocol) {

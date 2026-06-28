@@ -1,4 +1,9 @@
-import type { CustomProviderSettings, UserProviderSettings } from "@cognia/provider-types"
+import type {
+  ApiFlavor,
+  CustomProviderSettings,
+  ResolverProtocol,
+  UserProviderSettings,
+} from "@cognia/provider-types"
 import {
   buildDefaultBuiltInProviderSettings,
   isBuiltInProviderId,
@@ -14,17 +19,15 @@ export interface ProviderSettingsEntry {
   enabled?: boolean
   apiKey?: string
   baseURL?: string
+  /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
+  apiFlavor?: ApiFlavor
   defaultModel?: string
   options?: Record<string, unknown>
 }
 
-export type ResolverProtocol =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "mistral"
-  | "cohere"
-  | (string & {})
+// Single definition lives in `@cognia/provider-types`; re-exported here so
+// existing importers of this module keep working.
+export type { ResolverProtocol }
 
 export interface CustomProviderDefinition {
   id: string

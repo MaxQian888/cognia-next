@@ -62,6 +62,55 @@ test("isResponsesOnlyEndpoint detects the Codex ChatGPT backend", () => {
   assert.equal(isResponsesOnlyEndpoint("not a url"), false)
 })
 
+test("buildModel(openai) honors an explicit apiFlavor over the host heuristic", async () => {
+  // A gateway base URL would heuristically be Chat; apiFlavor:"responses" forces
+  // the Responses API (the mechanism that unlocks it on gateways/custom URLs).
+  const r = await buildModel({
+    protocol: "openai",
+    model: "gpt-4o-mini",
+    apiKey: "sk",
+    baseURL: "https://gateway.example/v1",
+    apiFlavor: "responses",
+  })
+  assert.equal(r.provider, "openai.responses")
+  // And apiFlavor:"chat" forces Chat even on genuine OpenAI.
+  const c = await buildModel({
+    protocol: "openai",
+    model: "gpt-4o-mini",
+    apiKey: "sk",
+    baseURL: "https://api.openai.com/v1",
+    apiFlavor: "chat",
+  })
+  assert.equal(c.provider, "openai.chat")
+})
+
+test("buildModel(azure): auto → chat, apiFlavor:responses → responses", async () => {
+  const auto = await buildModel({
+    protocol: "azure",
+    model: "gpt-5",
+    apiKey: "az",
+    baseURL: "https://x.openai.azure.com",
+  })
+  assert.equal(auto.provider, "azure.chat", "Azure defaults to chat (conservative)")
+  const resp = await buildModel({
+    protocol: "azure",
+    model: "gpt-5",
+    apiKey: "az",
+    baseURL: "https://x.openai.azure.com",
+    apiFlavor: "responses",
+  })
+  assert.equal(resp.provider, "azure.responses", "apiFlavor opts Azure into Responses")
+})
+
+test("buildModel(bedrock) builds an amazon-bedrock model from a direct API key", async () => {
+  const m = await buildModel({
+    protocol: "bedrock",
+    model: "anthropic.claude-3-haiku-20240307-v1:0",
+    apiKey: "bedrock-bearer",
+  })
+  assert.equal(m.provider, "amazon-bedrock")
+})
+
 test("buildModel(openai) routes the Codex ChatGPT backend to the Responses API", async () => {
   // chatgpt.com is not *.openai.com, so without the responses-only override this
   // would wrongly build via .chat() — which the Codex backend rejects.

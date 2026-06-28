@@ -15,6 +15,7 @@
  */
 
 import { createAnthropic } from "@ai-sdk/anthropic"
+import { createAzure } from "@ai-sdk/azure"
 import { createCohere } from "@ai-sdk/cohere"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
@@ -25,6 +26,14 @@ import {
   getOpenAICompatibleURL,
   type LocalProviderName,
 } from "@cognia/provider-types/local-provider"
+import type { ApiFlavor, ResolverProtocol } from "@cognia/provider-types"
+// Single source of truth for provider→protocol (shared with the sidecar; the
+// sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
+// it — see sidecar/dispatch/protocol-adapters/provider-protocol.mjs).
+import {
+  resolveProviderProtocol,
+  normalizeProtocol,
+} from "../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
 
 // =============================================================================
 // Types
@@ -39,6 +48,8 @@ export interface ProviderSettingsEntry {
   enabled?: boolean
   apiKey?: string
   baseURL?: string
+  /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
+  apiFlavor?: ApiFlavor
   defaultModel?: string
   /** Free-form per-provider config consumed by the AI SDK constructors. */
   options?: Record<string, unknown>
@@ -56,18 +67,16 @@ export interface ProviderSettingsEntry {
  * openai-compatible client for unknown ids. `(string & {})` keeps literal
  * autocompletion.
  */
-export type ResolverProtocol =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "mistral"
-  | "cohere"
-  | (string & {})
+// Single definition lives in `@cognia/provider-types` (imported at the top);
+// re-exported here so existing importers of this module keep working.
+export type { ResolverProtocol }
 
 export interface CustomProviderDefinition {
   id: string
   name: string
   protocol?: ResolverProtocol
+  /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
+  apiFlavor?: ApiFlavor
   baseURL?: string
   apiKey?: string
   defaultModel?: string
@@ -82,15 +91,17 @@ export interface ProviderSettingsSnapshot {
 
 /** Convert a rich custom-provider row to the resolver-facing shape. */
 function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefinition {
-  // `apiProtocol` uses 'gemini' but the resolver wants 'google'.
+  // `apiProtocol` uses the renderer name 'gemini'; the resolver wants 'google'.
+  // normalizeProtocol is the single gemini→google bridge (provider-protocol.mjs).
   let protocol: CustomProviderDefinition["protocol"] | undefined = rich.protocol
   if (!protocol && rich.apiProtocol) {
-    protocol = rich.apiProtocol === "gemini" ? "google" : rich.apiProtocol
+    protocol = normalizeProtocol(rich.apiProtocol) as CustomProviderDefinition["protocol"]
   }
   return {
     id: rich.id,
     name: (rich as { name?: string }).name ?? rich.id,
     protocol,
+    apiFlavor: rich.apiFlavor,
     baseURL: rich.baseURL,
     apiKey: rich.apiKey,
     defaultModel: rich.defaultModel,
@@ -109,6 +120,8 @@ export interface RichCustomProviderEntry {
   /** Either form of the protocol field — converted in `resolveOne`. */
   protocol?: ResolverProtocol
   apiProtocol?: "openai" | "anthropic" | "gemini" | (string & {})
+  /** OpenAI endpoint family override (responses/chat/auto). */
+  apiFlavor?: ApiFlavor
   baseURL?: string
   apiKey?: string
   defaultModel?: string
@@ -152,6 +165,12 @@ export interface ResolvedProvider {
   kind: "resolved"
   providerId: string
   protocol: ResolverProtocol
+  /**
+   * OpenAI endpoint family override (responses/chat/auto). Forwarded to the
+   * sidecar via `providerCredentials.apiFlavor`; consumed by
+   * `decideOpenAiEndpointFlavor`. Omitted = "auto".
+   */
+  apiFlavor?: ApiFlavor
   apiKey: string | undefined
   baseURL: string | undefined
   model: string | undefined
@@ -202,6 +221,18 @@ export interface FeatureClientConfig {
   protocol: ResolvedProvider["protocol"]
   isCustomProvider: boolean
   useProxy: boolean
+  /**
+   * Optional custom `fetch` threaded into the AI SDK provider client. The
+   * standalone (BYOK) mobile chat path injects a streaming-capable native
+   * WebView fetch here so token streaming survives Capacitor (whose patched
+   * global `fetch` buffers the whole response — see lib/runtime/streaming-fetch).
+   */
+  fetch?: typeof globalThis.fetch
+  /**
+   * Optional extra request headers (e.g. the Anthropic browser-direct opt-in
+   * `anthropic-dangerous-direct-browser-access`) merged by the provider client.
+   */
+  headers?: Record<string, string>
 }
 
 // =============================================================================
@@ -221,22 +252,6 @@ export function createProviderSettingsSnapshot(
 // =============================================================================
 // Resolution
 // =============================================================================
-
-const BUILTIN_PROTOCOLS: Record<string, ResolvedProvider["protocol"]> = {
-  openai: "openai",
-  xai: "openai",
-  togetherai: "openai",
-  fireworks: "openai",
-  // OpenCode managed plans — OpenAI-compatible gateway (verified live).
-  opencode: "openai",
-  "opencode-go": "openai",
-  deepinfra: "openai",
-  groq: "openai",
-  anthropic: "anthropic",
-  google: "google",
-  cohere: "cohere",
-  mistral: "mistral",
-}
 
 function resolveOne(
   providerId: string,
@@ -263,12 +278,16 @@ function resolveOne(
     }
   }
 
-  const protocol: ResolvedProvider["protocol"] =
-    (custom?.protocol as ResolvedProvider["protocol"]) ?? BUILTIN_PROTOCOLS[providerId] ?? "openai"
+  const protocol: ResolvedProvider["protocol"] = normalizeProtocol(
+    custom?.protocol ?? resolveProviderProtocol(providerId) ?? "openai"
+  ) as ResolvedProvider["protocol"]
 
   const apiKey = builtin?.apiKey ?? custom?.apiKey
   let baseURL = builtin?.baseURL ?? custom?.baseURL
   const model = builtin?.defaultModel ?? custom?.defaultModel
+  // Explicit Responses/Chat override (built-in or custom), forwarded to the
+  // sidecar so the user can opt a gateway / Azure / custom URL into /responses.
+  const apiFlavor = builtin?.apiFlavor ?? custom?.apiFlavor
 
   // Local inference engines (Ollama, LM Studio, llama.cpp, vLLM, …) listen on
   // a well-known localhost port and need no API key. When the user enabled a
@@ -292,6 +311,7 @@ function resolveOne(
     kind: "resolved",
     providerId,
     protocol,
+    apiFlavor,
     apiKey,
     baseURL,
     model,
@@ -359,10 +379,20 @@ export function resolveFeatureProvider(
 // =============================================================================
 
 export function createFeatureProviderClient(config: FeatureClientConfig) {
-  const { protocol, apiKey, baseURL } = config
-  const settings: { apiKey?: string; baseURL?: string } = {}
+  const { protocol, apiKey, baseURL, fetch: fetchImpl, headers } = config
+  const settings: {
+    apiKey?: string
+    baseURL?: string
+    fetch?: typeof globalThis.fetch
+    headers?: Record<string, string>
+  } = {}
   if (apiKey) settings.apiKey = apiKey
   if (baseURL) settings.baseURL = baseURL
+  // `fetch` + `headers` are standard AI SDK `ProviderSettings` fields accepted
+  // by every create*() factory below; they default to undefined (global fetch)
+  // so non-standalone callers are unaffected.
+  if (fetchImpl) settings.fetch = fetchImpl
+  if (headers) settings.headers = headers
 
   switch (protocol) {
     case "anthropic":
@@ -373,6 +403,16 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
       return createCohere(settings)
     case "mistral":
       return createMistral(settings)
+    case "azure":
+      return createAzure(settings)
+    case "bedrock":
+      // Bedrock's AI SDK provider pulls AWS SigV4 deps that must not enter the
+      // renderer/mobile bundle, so the in-renderer feature path doesn't carry
+      // it. The chat path (sidecar/dispatch/ai-sdk-adapter.mjs) supports Bedrock
+      // natively — route Bedrock features through a chat turn instead.
+      throw new Error(
+        "bedrock is only supported via the chat/sidecar path, not the in-renderer feature client"
+      )
     case "openai":
     default:
       return createOpenAI(settings)
@@ -382,9 +422,14 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
 /**
  * Build a model handle ready for `streamText` / `generateText`. The
  * resolution must come back from `resolveFeatureProvider` — pass it
- * straight in.
+ * straight in. `transport` optionally injects a custom `fetch` + extra
+ * `headers` (used by the standalone BYOK chat path for streaming + the
+ * browser-direct CORS opt-in); omit it for the default global-fetch behavior.
  */
-export function createFeatureProviderModel(resolved: ResolvedProvider) {
+export function createFeatureProviderModel(
+  resolved: ResolvedProvider,
+  transport?: { fetch?: typeof globalThis.fetch; headers?: Record<string, string> }
+) {
   const client = createFeatureProviderClient({
     providerId: resolved.providerId,
     apiKey: resolved.apiKey,
@@ -392,6 +437,8 @@ export function createFeatureProviderModel(resolved: ResolvedProvider) {
     protocol: resolved.protocol,
     isCustomProvider: resolved.isCustomProvider,
     useProxy: resolved.useProxy,
+    fetch: transport?.fetch,
+    headers: transport?.headers,
   })
 
   const modelId = resolved.model ?? defaultModelForProtocol(resolved.protocol)
@@ -417,6 +464,8 @@ function defaultModelForProtocol(protocol: ResolvedProvider["protocol"]): string
       return "command-r"
     case "mistral":
       return "mistral-small-latest"
+    case "azure":
+      return "gpt-5"
     case "openai":
     default:
       return "gpt-4o-mini"
