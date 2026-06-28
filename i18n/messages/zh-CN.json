@@ -2171,6 +2171,13 @@
         "removeFallback": "移除附件",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。"
       },
+      "camera": {
+        "captureAria": "拍照或添加照片",
+        "captureFailed": "添加照片失败，请重试。",
+        "captureTooltip": "拍照或添加照片",
+        "permissionDenied": "需要相机或照片访问权限才能添加照片。",
+        "unsupported": "此设备不支持拍照。"
+      },
       "commands": {
         "failed": "命令执行失败",
         "unavailable": "/{name} 暂不可用。"
@@ -2916,6 +2923,7 @@
       "ranSlashCommand": "执行了斜杠命令"
     },
     "sourcesPart": {
+      "citationsLabel": "{count, plural, other {# 个网页来源}}",
       "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
       "originLabel": {
         "anthropic": "网络",
@@ -4616,6 +4624,7 @@
       "permissionAcceptEdits": "接受编辑（自动批准文件改动）",
       "permissionBypass": "绕过（跳过所有权限校验）",
       "permissionDefault": "默认（每次操作询问）",
+      "permissionDontAsk": "不询问（未预先批准则拒绝）",
       "permissionPlan": "计划模式（不执行）",
       "presetGalleryEmpty": "暂无可用预设。",
       "protocol": "协议",
@@ -6611,12 +6620,15 @@
           "adapterInstances": "连接器",
           "characters": "角色",
           "conversationOverrides": "会话覆盖",
+          "goals": "目标",
+          "memories": "记忆",
           "messages": "消息",
           "plugins": "插件",
           "sessions": "会话",
           "settings": "应用设置",
           "skills": "技能",
           "twinProfile": "数字孪生",
+          "workflowRuns": "工作流运行",
           "workflows": "工作流"
         },
         "title": "同步状态",
@@ -6833,6 +6845,16 @@
       "title": "会话设置",
       "to": "结束"
     },
+    "conversation": {
+      "autoTitle": "自动生成标题",
+      "autoTitleHelp": "用后台模型根据首轮对话为每个会话命名。",
+      "backAria": "返回个人",
+      "sectionDescription": "影响会话呈现方式的后台辅助功能。",
+      "sectionTitle": "会话",
+      "timeline": "时间线缩略图",
+      "timelineHelp": "在右侧显示缩略图，便于在长对话中快速跳转。",
+      "title": "会话"
+    },
     "draftApproval": {
       "approve": "通过",
       "empty": "没有待审批的草稿。",
@@ -6938,14 +6960,44 @@
       },
       "computerUseRow": "Computer Use",
       "connectorsRow": "平台连接器",
+      "conversationRow": "会话",
       "device": {
         "aboutBody": "Cognia 仅读取壳层暴露的信息——不会有任何遥测离开本机。",
         "aboutTitle": "关于此页面",
+        "actions": {
+          "enable": "开启",
+          "enabling": "请求中…",
+          "openSettings": "设置",
+          "test": "测试",
+          "testing": "验证中…"
+        },
         "appVersion": "应用版本",
+        "battery": "电量",
+        "batteryCharging": "{level}% · 充电中",
+        "biometricEnrollHint": "请在系统设置中录入 Face ID / 指纹后使用。",
         "biometricLabel": "生物识别（Face ID / 指纹）",
+        "biometricStatus": {
+          "available": "就绪",
+          "unavailable": "未录入",
+          "unsupported": "不支持"
+        },
+        "biometricTestReason": "验证身份以测试生物识别解锁",
+        "cpuCores": "CPU 核心",
+        "deviceKind": "设备类型",
+        "emulator": "模拟器",
         "hardwareTitle": "应用与设备",
+        "language": "语言",
         "localLabel": "本机通知",
+        "manufacturer": "制造商",
+        "memoryUsed": "已用内存",
+        "model": "型号",
+        "network": "网络",
+        "offline": "离线",
+        "online": "在线",
+        "os": "操作系统",
         "permissionsTitle": "权限",
+        "platform": "平台",
+        "screen": "屏幕",
         "status": {
           "denied": "已拒绝",
           "granted": "已授权",
@@ -6953,8 +7005,12 @@
           "unknown": "未知",
           "unsupported": "不支持"
         },
+        "storageFree": "可用存储",
+        "toastTestFailed": "生物识别验证失败",
+        "toastTestSuccess": "生物识别验证成功",
         "uaUnknown": "（未知）",
-        "userAgent": "User Agent"
+        "userAgent": "User Agent",
+        "webview": "WebView"
       },
       "deviceInfoRow": "设备信息",
       "devicesRow": "已配对设备",
@@ -6984,6 +7040,7 @@
         "resourcesTitle": "资源"
       },
       "helpRow": "帮助与文档",
+      "memoryRow": "记忆",
       "notificationsRow": "通知",
       "ocrRow": "OCR 提供方",
       "pairing": "配对状态",
@@ -7046,15 +7103,45 @@
         "pending": "正在退出…",
         "successToast": "已退出，配对已清除。"
       },
+      "speechRow": "语音",
       "storage": {
         "backupsDescription": "{count} 个文件 · {total}",
         "backupsEmpty": "尚无成功的备份。",
         "backupsTitle": "加密备份",
+        "breakdownDescription": "查看本地存储的占用分布。",
+        "breakdownEmpty": "暂无存储数据。",
+        "breakdownTitle": "存储明细",
+        "cleanupCta": "清理存储",
+        "cleanupDeepDescription": "同时删除 7 天前的消息和备份。",
+        "cleanupDeepTitle": "深度清理",
+        "cleanupDescription": "删除缓存与旧数据以释放空间。",
+        "cleanupFreedToast": "已释放 {freed}。",
+        "cleanupQuickDescription": "清除缓存和临时数据。安全——保留你的对话。",
+        "cleanupQuickTitle": "快速清理",
+        "cleanupTitle": "清理存储",
+        "clearCategory": "清除{category}",
+        "clearConfirmAction": "清除",
+        "clearConfirmBody": "这会永久删除本设备上的全部「{category}」数据，且无法撤销。",
+        "clearConfirmCancel": "取消",
+        "clearConfirmTitle": "清除该类别？",
+        "clearedToast": "{count, plural, =0 {无可清除} =1 {已清除 1 行} other {已清除 # 行}}。",
+        "health": {
+          "critical": "接近占满",
+          "criticalHint": "已使用 {percent}%——请清理空间以免数据丢失。",
+          "healthy": "健康",
+          "healthyHint": "已使用配额的 {percent}%。",
+          "warning": "空间偏紧",
+          "warningHint": "已使用 {percent}%——建议清理空间。"
+        },
         "persistedLabel": "持久化存储",
         "persistedNo": "未授予——空间紧张时数据可能被清除",
         "persistedYes": "已授予——免于被清除",
         "pressureWarning": "存储已占用 {percent}%——请清理空间以免丢失数据。",
         "refresh": "刷新",
+        "requestPersistence": "申请持久化存储",
+        "requestPersistenceDenied": "浏览器暂未授予。多使用一段时间后再试。",
+        "requestPersistenceGranted": "已获得持久化存储。",
+        "requestPersistenceUnsupported": "此设备不支持持久化存储。",
         "totalDescription": "已用 {used} / {quota}",
         "totalTitle": "浏览器存储",
         "totalUnsupported": "当前壳层未暴露存储用量。",
@@ -7088,7 +7175,14 @@
         "usageTokens": "Token"
       },
       "unpinned": "已从常用移除",
-      "versionLabel": "版本"
+      "versionLabel": "版本",
+      "webSearchRow": "网络搜索"
+    },
+    "memory": {
+      "empty": "暂无记忆",
+      "searchAria": "搜索记忆",
+      "searchPlaceholder": "搜索记忆…",
+      "title": "记忆"
     },
     "mentionPopover": {
       "count": "{count} 个匹配",
@@ -7233,6 +7327,8 @@
         "generic": "配对失败（HTTP {status}）。"
       },
       "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+      "loadingManualCta": "手动配对",
+      "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
       "loadingTitle": "正在检查既有配对…",
       "manualDivider": "或手动粘贴",
       "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
@@ -7358,12 +7454,17 @@
       "fontScaleMd": "中",
       "fontScaleSm": "小",
       "language": "语言",
+      "privacyTitle": "无障碍与隐私",
       "queueLabel": "已排队——桌面上线后会自动同步。",
       "reconnectButton": "重连 WebRTC",
       "reconnectFailed": "重连失败（{reason}）。",
       "reconnectInactive": "WebRTC 通道当前未启用。",
       "reconnectSuccess": "已发起重连。",
       "reconnectThrottled": "操作过于频繁，请稍等几秒再试。",
+      "reduceMotion": "减弱动效",
+      "reduceMotionHelp": "在整个应用中减少动画与过渡效果。",
+      "telemetry": "共享使用遥测",
+      "telemetryHelp": "发送匿名诊断数据以帮助改进应用。",
       "theme": "主题",
       "themeDark": "深色",
       "themeLight": "浅色",
@@ -7427,6 +7528,37 @@
       "tabResources": "资源",
       "tabValidation": "验证",
       "toggleEnabled": "启用技能"
+    },
+    "speech": {
+      "autoPlay": "自动朗读回复",
+      "autoPlayHelp": "助手消息到达时自动朗读出来。",
+      "backAria": "返回个人",
+      "pitch": "音调",
+      "provider": "语音提供商",
+      "providerHelp": "云提供商的 API 密钥仍在桌面端配置。",
+      "providers": {
+        "cartesia": "Cartesia",
+        "deepgram": "Deepgram",
+        "edge": "Edge",
+        "elevenlabs": "ElevenLabs",
+        "gemini": "Gemini",
+        "hume": "Hume",
+        "lmnt": "LMNT",
+        "openai": "OpenAI",
+        "system": "系统语音",
+        "xiaomi": "小米"
+      },
+      "rate": "语速",
+      "sttAuto": "自动识别",
+      "sttLanguage": "识别语言",
+      "sttLanguageHelp": "语音转文字时的语言提示。",
+      "sttTitle": "语音转文字",
+      "title": "语音",
+      "ttsDescription": "用合成语音朗读助手回复。",
+      "ttsEnabled": "文字转语音",
+      "ttsEnabledHelp": "启用助手消息的语音播放。",
+      "ttsTitle": "文字转语音",
+      "volume": "音量"
     },
     "splash": {
       "label": "正在启动 cognia"
@@ -7542,6 +7674,17 @@
       "statusReady": "就绪",
       "title": "孪生数据源"
     },
+    "webSearch": {
+      "backAria": "返回个人",
+      "enabled": "启用网络搜索",
+      "enabledHelp": "允许助手从网络获取最新结果。",
+      "maxResults": "每次搜索结果数",
+      "maxResultsHelp": "每次搜索调用拉取的结果数量。",
+      "resultsCount": "{count, plural, other {# 条结果}}",
+      "sectionDescription": "提供商 API 密钥在桌面端配置。",
+      "sectionTitle": "网络搜索",
+      "title": "网络搜索"
+    },
     "workflow": {
       "activeBadge": "活跃",
       "all": "全部",
@@ -7592,6 +7735,7 @@
       "runQueued": "已加入队列，桌面联线后将触发。",
       "runsBackAria": "返回工作流",
       "runsHeader": "最近运行",
+      "sending": "发送中",
       "statusCancelled": "已取消",
       "statusFailed": "失败",
       "statusRunning": "运行中",
@@ -10381,6 +10525,14 @@
     "allModels": "所有模型",
     "anthropic": "Anthropic",
     "anthropicDescription": "Claude 4 Sonnet、Claude 4 Opus",
+    "apiFlavor": "OpenAI 端点",
+    "apiFlavorAuto": "自动",
+    "apiFlavorAutoDesc": "根据基础 URL 判断（OpenAI 用 Responses，网关用 Chat）",
+    "apiFlavorChat": "Chat Completions",
+    "apiFlavorChatDesc": "始终使用 /chat/completions",
+    "apiFlavorHint": "在 Azure OpenAI、代理了 Responses 的网关或自定义 URL 上强制使用 Responses API。除非确知端点需要特定类型，否则保持「自动」。",
+    "apiFlavorResponses": "Responses API",
+    "apiFlavorResponsesDesc": "始终使用 /responses（OpenAI、Azure、代理了它的网关）",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "输入您的 API 密钥",
     "apiKeyRotation": "API 密钥轮换",
@@ -11108,6 +11260,8 @@
         "adaptive": "自适应",
         "balanced": "均衡",
         "cost": "成本优先",
+        "difficulty": "按难度",
+        "least-busy": "最闲优先",
         "quality": "质量优先",
         "speed": "速度优先"
       },
@@ -11116,6 +11270,8 @@
         "adaptive": "侧重成功率，并对近期出错的服务商施加惩罚。",
         "balanced": "加权评分：成功率 40%、延迟 30%、成本 30%。",
         "cost": "按目录价格（美元/百万 token）选最便宜的候选。",
+        "difficulty": "对提示词打分，难的走强模型、易的走弱模型。请在下方配置强/弱模型对。",
+        "least-busy": "选当前并发进行中轮次最少的候选。",
         "quality": "按你的优先级顺序选第一个，可预测、完全由你控制。",
         "speed": "基于实时健康指标，选最近 P50 延迟最低的候选。"
       },
@@ -13801,8 +13957,9 @@
         },
         "pickColor": "选择颜色 {color}",
         "platforms": {
-          "browser": "Web / 移动端",
-          "description": "将该角色限定到特定平台。两者都不选则在所有平台显示。",
+          "browser": "Web",
+          "description": "将该角色限定到特定平台。全部不选则在所有平台显示。",
+          "mobile": "移动端",
           "tauri": "桌面端",
           "title": "可用平台"
         },

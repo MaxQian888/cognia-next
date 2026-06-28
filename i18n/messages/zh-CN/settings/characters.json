@@ -134,8 +134,9 @@
     },
     "pickColor": "选择颜色 {color}",
     "platforms": {
-      "browser": "Web / 移动端",
-      "description": "将该角色限定到特定平台。两者都不选则在所有平台显示。",
+      "browser": "Web",
+      "description": "将该角色限定到特定平台。全部不选则在所有平台显示。",
+      "mobile": "移动端",
       "tauri": "桌面端",
       "title": "可用平台"
     },

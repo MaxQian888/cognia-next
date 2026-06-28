@@ -2171,6 +2171,13 @@
         "removeFallback": "Remove attachment",
         "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type)."
       },
+      "camera": {
+        "captureAria": "Take or attach a photo",
+        "captureFailed": "Couldn't attach the photo. Please try again.",
+        "captureTooltip": "Take or attach a photo",
+        "permissionDenied": "Camera or photo access is required to attach a photo.",
+        "unsupported": "Photo capture isn't available on this device."
+      },
       "commands": {
         "failed": "Command failed",
         "unavailable": "/{name} is not available yet."
@@ -2916,6 +2923,7 @@
       "ranSlashCommand": "ran slash command"
     },
     "sourcesPart": {
+      "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
       "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
       "originLabel": {
         "anthropic": "Web",
@@ -4616,6 +4624,7 @@
       "permissionAcceptEdits": "Accept Edits (Auto-approve file changes)",
       "permissionBypass": "Bypass (Skip all permission checks)",
       "permissionDefault": "Default (Ask for each action)",
+      "permissionDontAsk": "Don't Ask (Deny unless pre-approved)",
       "permissionPlan": "Plan Mode (No execution)",
       "presetGalleryEmpty": "No presets available.",
       "protocol": "Protocol",
@@ -6611,12 +6620,15 @@
           "adapterInstances": "Connectors",
           "characters": "Characters",
           "conversationOverrides": "Conversation overrides",
+          "goals": "Goals",
+          "memories": "Memories",
           "messages": "Messages",
           "plugins": "Plugins",
           "sessions": "Sessions",
           "settings": "App settings",
           "skills": "Skills",
           "twinProfile": "Twin profile",
+          "workflowRuns": "Workflow runs",
           "workflows": "Workflows"
         },
         "title": "Sync status",
@@ -6833,6 +6845,16 @@
       "title": "Conversation settings",
       "to": "To"
     },
+    "conversation": {
+      "autoTitle": "Auto-generate titles",
+      "autoTitleHelp": "Name each chat from its first turn using a background model.",
+      "backAria": "Back to Me",
+      "sectionDescription": "Background helpers that shape how conversations are presented.",
+      "sectionTitle": "Conversation",
+      "timeline": "Timeline minimap",
+      "timelineHelp": "Show the right-edge minimap for jumping across a long chat.",
+      "title": "Conversation"
+    },
     "draftApproval": {
       "approve": "Approve",
       "empty": "No drafts pending approval.",
@@ -6938,14 +6960,44 @@
       },
       "computerUseRow": "Computer Use",
       "connectorsRow": "Platform connectors",
+      "conversationRow": "Conversation",
       "device": {
         "aboutBody": "Cognia reads only what your shell exposes — no telemetry leaves the device.",
         "aboutTitle": "About this readout",
+        "actions": {
+          "enable": "Enable",
+          "enabling": "Requesting…",
+          "openSettings": "Settings",
+          "test": "Test",
+          "testing": "Verifying…"
+        },
         "appVersion": "App version",
+        "battery": "Battery",
+        "batteryCharging": "{level}% · charging",
+        "biometricEnrollHint": "Enroll Face ID / fingerprint in system settings to use it.",
         "biometricLabel": "Biometric (Face ID / fingerprint)",
+        "biometricStatus": {
+          "available": "Ready",
+          "unavailable": "Not enrolled",
+          "unsupported": "Unsupported"
+        },
+        "biometricTestReason": "Verify your identity to test biometric unlock",
+        "cpuCores": "CPU cores",
+        "deviceKind": "Device type",
+        "emulator": "Emulator",
         "hardwareTitle": "App & device",
+        "language": "Language",
         "localLabel": "Local notifications",
+        "manufacturer": "Manufacturer",
+        "memoryUsed": "Memory in use",
+        "model": "Model",
+        "network": "Network",
+        "offline": "Offline",
+        "online": "Online",
+        "os": "Operating system",
         "permissionsTitle": "Permissions",
+        "platform": "Platform",
+        "screen": "Screen",
         "status": {
           "denied": "Denied",
           "granted": "Granted",
@@ -6953,8 +7005,12 @@
           "unknown": "Unknown",
           "unsupported": "Unsupported"
         },
+        "storageFree": "Free storage",
+        "toastTestFailed": "Biometric verification failed",
+        "toastTestSuccess": "Biometric verification succeeded",
         "uaUnknown": "(unknown)",
-        "userAgent": "User agent"
+        "userAgent": "User agent",
+        "webview": "WebView"
       },
       "deviceInfoRow": "Device info",
       "devicesRow": "Paired devices",
@@ -6984,6 +7040,7 @@
         "resourcesTitle": "Resources"
       },
       "helpRow": "Help & docs",
+      "memoryRow": "Memory",
       "notificationsRow": "Notifications",
       "ocrRow": "OCR providers",
       "pairing": "Pairing status",
@@ -7046,15 +7103,45 @@
         "pending": "Signing out…",
         "successToast": "Signed out — pairing cleared."
       },
+      "speechRow": "Speech & voice",
       "storage": {
         "backupsDescription": "{count} files · {total}",
         "backupsEmpty": "No successful backups yet.",
         "backupsTitle": "Encrypted backups",
+        "breakdownDescription": "What's using your on-device storage.",
+        "breakdownEmpty": "Nothing stored yet.",
+        "breakdownTitle": "Storage breakdown",
+        "cleanupCta": "Clean up storage",
+        "cleanupDeepDescription": "Also removes messages and backups older than 7 days.",
+        "cleanupDeepTitle": "Deep clean",
+        "cleanupDescription": "Free up space by removing cached and old data.",
+        "cleanupFreedToast": "Freed {freed}.",
+        "cleanupQuickDescription": "Clear caches and temporary data. Safe — keeps your chats.",
+        "cleanupQuickTitle": "Quick clean",
+        "cleanupTitle": "Clean up storage",
+        "clearCategory": "Clear {category}",
+        "clearConfirmAction": "Clear",
+        "clearConfirmBody": "This permanently deletes all {category} data on this device. This can't be undone.",
+        "clearConfirmCancel": "Cancel",
+        "clearConfirmTitle": "Clear this category?",
+        "clearedToast": "{count, plural, =0 {Nothing to clear} =1 {1 row cleared} other {# rows cleared}}.",
+        "health": {
+          "critical": "Almost full",
+          "criticalHint": "{percent}% used — clear space to avoid losing data.",
+          "healthy": "Healthy",
+          "healthyHint": "{percent}% of your quota used.",
+          "warning": "Filling up",
+          "warningHint": "{percent}% used — consider clearing space."
+        },
         "persistedLabel": "Persistent storage",
         "persistedNo": "Not granted — data may be evicted under pressure",
         "persistedYes": "Granted — protected from eviction",
         "pressureWarning": "Storage is {percent}% full — clear space to avoid losing data.",
         "refresh": "Refresh",
+        "requestPersistence": "Request persistent storage",
+        "requestPersistenceDenied": "The browser declined. Try again after using the app more.",
+        "requestPersistenceGranted": "Persistent storage granted.",
+        "requestPersistenceUnsupported": "Persistent storage isn't available on this device.",
         "totalDescription": "{used} of {quota} used",
         "totalTitle": "Browser storage",
         "totalUnsupported": "This shell does not expose storage estimates.",
@@ -7088,7 +7175,14 @@
         "usageTokens": "Tokens"
       },
       "unpinned": "Removed from favorites",
-      "versionLabel": "Version"
+      "versionLabel": "Version",
+      "webSearchRow": "Web search"
+    },
+    "memory": {
+      "empty": "No memories yet",
+      "searchAria": "Search memories",
+      "searchPlaceholder": "Search memories…",
+      "title": "Memory"
     },
     "mentionPopover": {
       "count": "{count} {count, plural, one {match} other {matches}}",
@@ -7233,6 +7327,8 @@
         "generic": "Pairing failed (HTTP {status})."
       },
       "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+      "loadingManualCta": "Set up manually",
+      "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
       "loadingTitle": "Checking for an existing pairing…",
       "manualDivider": "or paste manually",
       "offlineSubtitle": "Couldn't reach the desktop — verify the desktop is awake and on the same network.",
@@ -7358,12 +7454,17 @@
       "fontScaleMd": "M",
       "fontScaleSm": "S",
       "language": "Language",
+      "privacyTitle": "Accessibility & privacy",
       "queueLabel": "Queued — desktop will apply this when online.",
       "reconnectButton": "Reconnect WebRTC",
       "reconnectFailed": "Reconnect failed ({reason}).",
       "reconnectInactive": "WebRTC tier isn't active right now.",
       "reconnectSuccess": "Reconnect requested.",
       "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
+      "reduceMotion": "Reduce motion",
+      "reduceMotionHelp": "Minimize animations and transitions across the app.",
+      "telemetry": "Share usage telemetry",
+      "telemetryHelp": "Send anonymous diagnostics to help improve the app.",
       "theme": "Theme",
       "themeDark": "Dark",
       "themeLight": "Light",
@@ -7427,6 +7528,37 @@
       "tabResources": "Resources",
       "tabValidation": "Validation",
       "toggleEnabled": "Enable skill"
+    },
+    "speech": {
+      "autoPlay": "Auto-play replies",
+      "autoPlayHelp": "Speak assistant messages aloud as they arrive.",
+      "backAria": "Back to Me",
+      "pitch": "Pitch",
+      "provider": "Voice provider",
+      "providerHelp": "Cloud-provider API keys stay configured on the desktop.",
+      "providers": {
+        "cartesia": "Cartesia",
+        "deepgram": "Deepgram",
+        "edge": "Edge",
+        "elevenlabs": "ElevenLabs",
+        "gemini": "Gemini",
+        "hume": "Hume",
+        "lmnt": "LMNT",
+        "openai": "OpenAI",
+        "system": "System voice",
+        "xiaomi": "Xiaomi"
+      },
+      "rate": "Speed",
+      "sttAuto": "Auto-detect",
+      "sttLanguage": "Recognition language",
+      "sttLanguageHelp": "Language hint for voice-to-text dictation.",
+      "sttTitle": "Speech-to-text",
+      "title": "Speech & voice",
+      "ttsDescription": "Read assistant replies aloud with a synthesized voice.",
+      "ttsEnabled": "Text-to-speech",
+      "ttsEnabledHelp": "Enable spoken playback of assistant messages.",
+      "ttsTitle": "Text-to-speech",
+      "volume": "Volume"
     },
     "splash": {
       "label": "Starting cognia"
@@ -7542,6 +7674,17 @@
       "statusReady": "Ready",
       "title": "Twin sources"
     },
+    "webSearch": {
+      "backAria": "Back to Me",
+      "enabled": "Enable web search",
+      "enabledHelp": "Lets the assistant fetch fresh results from the web.",
+      "maxResults": "Results per search",
+      "maxResultsHelp": "How many results to pull into each search call.",
+      "resultsCount": "{count, plural, one {# result} other {# results}}",
+      "sectionDescription": "Provider API keys are configured on the desktop.",
+      "sectionTitle": "Web search",
+      "title": "Web search"
+    },
     "workflow": {
       "activeBadge": "Active",
       "all": "All",
@@ -7592,6 +7735,7 @@
       "runQueued": "Queued — fires when the desktop is online again.",
       "runsBackAria": "Back to workflow",
       "runsHeader": "Recent runs",
+      "sending": "Sending",
       "statusCancelled": "Cancelled",
       "statusFailed": "Failed",
       "statusRunning": "Running",
@@ -10381,6 +10525,14 @@
     "allModels": "All Models",
     "anthropic": "Anthropic",
     "anthropicDescription": "Claude 4 Sonnet, Claude 4 Opus",
+    "apiFlavor": "OpenAI Endpoint",
+    "apiFlavorAuto": "Auto",
+    "apiFlavorAutoDesc": "Detect from the base URL (Responses for OpenAI, Chat for gateways)",
+    "apiFlavorChat": "Chat Completions",
+    "apiFlavorChatDesc": "Always use /chat/completions",
+    "apiFlavorHint": "Force the Responses API on Azure OpenAI, gateways that proxy it, or a custom URL. Leave on Auto unless you know your endpoint needs a specific one.",
+    "apiFlavorResponses": "Responses API",
+    "apiFlavorResponsesDesc": "Always use /responses (OpenAI, Azure, gateways that proxy it)",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter your API key",
     "apiKeyRotation": "API Key Rotation",
@@ -11108,6 +11260,8 @@
         "adaptive": "Adaptive",
         "balanced": "Balanced",
         "cost": "Cost",
+        "difficulty": "Difficulty",
+        "least-busy": "Least busy",
         "quality": "Quality",
         "speed": "Speed"
       },
@@ -11116,6 +11270,8 @@
         "adaptive": "Success-heavy score with a penalty for providers that errored recently.",
         "balanced": "Weighted score: 40% success rate, 30% latency, 30% cost.",
         "cost": "Cheapest candidate by catalog price (USD per 1M tokens) wins.",
+        "difficulty": "Scores the prompt and routes hard prompts to your strong model, easy ones to the weak model. Configure the model pair below.",
+        "least-busy": "Routes to the candidate with the fewest concurrent in-flight turns right now.",
         "quality": "First entry in your priority order wins. Predictable and user-controlled.",
         "speed": "Lowest recent P50 latency wins, based on live health metrics."
       },
@@ -13801,8 +13957,9 @@
         },
         "pickColor": "Pick color {color}",
         "platforms": {
-          "browser": "Web / Mobile",
-          "description": "Restrict this character to specific platforms. Leave both off to show it everywhere.",
+          "browser": "Web",
+          "description": "Restrict this character to specific platforms. Leave all off to show it everywhere.",
+          "mobile": "Mobile",
           "tauri": "Desktop",
           "title": "Available on"
         },

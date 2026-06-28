@@ -1,0 +1,10 @@
+{
+  "autoTitle": "Auto-generate titles",
+  "autoTitleHelp": "Name each chat from its first turn using a background model.",
+  "backAria": "Back to Me",
+  "sectionDescription": "Background helpers that shape how conversations are presented.",
+  "sectionTitle": "Conversation",
+  "timeline": "Timeline minimap",
+  "timelineHelp": "Show the right-edge minimap for jumping across a long chat.",
+  "title": "Conversation"
+}

@@ -84,6 +84,8 @@
     "generic": "配对失败（HTTP {status}）。"
   },
   "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+  "loadingManualCta": "手动配对",
+  "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
   "loadingTitle": "正在检查既有配对…",
   "manualDivider": "或手动粘贴",
   "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",

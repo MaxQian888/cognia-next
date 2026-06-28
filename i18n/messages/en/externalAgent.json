@@ -228,6 +228,7 @@
     "permissionAcceptEdits": "Accept Edits (Auto-approve file changes)",
     "permissionBypass": "Bypass (Skip all permission checks)",
     "permissionDefault": "Default (Ask for each action)",
+    "permissionDontAsk": "Don't Ask (Deny unless pre-approved)",
     "permissionPlan": "Plan Mode (No execution)",
     "presetGalleryEmpty": "No presets available.",
     "protocol": "Protocol",

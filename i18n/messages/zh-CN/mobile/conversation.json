@@ -1,0 +1,10 @@
+{
+  "autoTitle": "自动生成标题",
+  "autoTitleHelp": "用后台模型根据首轮对话为每个会话命名。",
+  "backAria": "返回个人",
+  "sectionDescription": "影响会话呈现方式的后台辅助功能。",
+  "sectionTitle": "会话",
+  "timeline": "时间线缩略图",
+  "timelineHelp": "在右侧显示缩略图，便于在长对话中快速跳转。",
+  "title": "会话"
+}

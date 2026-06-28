@@ -48,6 +48,7 @@
   "runQueued": "已加入队列，桌面联线后将触发。",
   "runsBackAria": "返回工作流",
   "runsHeader": "最近运行",
+  "sending": "发送中",
   "statusCancelled": "已取消",
   "statusFailed": "失败",
   "statusRunning": "运行中",

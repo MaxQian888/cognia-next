@@ -1,0 +1,31 @@
+{
+  "autoPlay": "Auto-play replies",
+  "autoPlayHelp": "Speak assistant messages aloud as they arrive.",
+  "backAria": "Back to Me",
+  "pitch": "Pitch",
+  "provider": "Voice provider",
+  "providerHelp": "Cloud-provider API keys stay configured on the desktop.",
+  "providers": {
+    "cartesia": "Cartesia",
+    "deepgram": "Deepgram",
+    "edge": "Edge",
+    "elevenlabs": "ElevenLabs",
+    "gemini": "Gemini",
+    "hume": "Hume",
+    "lmnt": "LMNT",
+    "openai": "OpenAI",
+    "system": "System voice",
+    "xiaomi": "Xiaomi"
+  },
+  "rate": "Speed",
+  "sttAuto": "Auto-detect",
+  "sttLanguage": "Recognition language",
+  "sttLanguageHelp": "Language hint for voice-to-text dictation.",
+  "sttTitle": "Speech-to-text",
+  "title": "Speech & voice",
+  "ttsDescription": "Read assistant replies aloud with a synthesized voice.",
+  "ttsEnabled": "Text-to-speech",
+  "ttsEnabledHelp": "Enable spoken playback of assistant messages.",
+  "ttsTitle": "Text-to-speech",
+  "volume": "Volume"
+}

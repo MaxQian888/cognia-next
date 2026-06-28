@@ -48,6 +48,7 @@
   "runQueued": "Queued — fires when the desktop is online again.",
   "runsBackAria": "Back to workflow",
   "runsHeader": "Recent runs",
+  "sending": "Sending",
   "statusCancelled": "Cancelled",
   "statusFailed": "Failed",
   "statusRunning": "Running",

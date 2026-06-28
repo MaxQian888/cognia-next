@@ -84,6 +84,8 @@
     "generic": "Pairing failed (HTTP {status})."
   },
   "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+  "loadingManualCta": "Set up manually",
+  "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
   "loadingTitle": "Checking for an existing pairing…",
   "manualDivider": "or paste manually",
   "offlineSubtitle": "Couldn't reach the desktop — verify the desktop is awake and on the same network.",

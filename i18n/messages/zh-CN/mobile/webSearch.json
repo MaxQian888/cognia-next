@@ -1,0 +1,11 @@
+{
+  "backAria": "返回个人",
+  "enabled": "启用网络搜索",
+  "enabledHelp": "允许助手从网络获取最新结果。",
+  "maxResults": "每次搜索结果数",
+  "maxResultsHelp": "每次搜索调用拉取的结果数量。",
+  "resultsCount": "{count, plural, other {# 条结果}}",
+  "sectionDescription": "提供商 API 密钥在桌面端配置。",
+  "sectionTitle": "网络搜索",
+  "title": "网络搜索"
+}

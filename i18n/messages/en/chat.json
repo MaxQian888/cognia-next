@@ -140,6 +140,13 @@
       "removeFallback": "Remove attachment",
       "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type)."
     },
+    "camera": {
+      "captureAria": "Take or attach a photo",
+      "captureFailed": "Couldn't attach the photo. Please try again.",
+      "captureTooltip": "Take or attach a photo",
+      "permissionDenied": "Camera or photo access is required to attach a photo.",
+      "unsupported": "Photo capture isn't available on this device."
+    },
     "commands": {
       "failed": "Command failed",
       "unavailable": "/{name} is not available yet."
@@ -857,6 +864,7 @@
     "ranSlashCommand": "ran slash command"
   },
   "sourcesPart": {
+    "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
     "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
     "originLabel": {
       "anthropic": "Web",

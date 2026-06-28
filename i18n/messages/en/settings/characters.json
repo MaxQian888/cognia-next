@@ -134,8 +134,9 @@
     },
     "pickColor": "Pick color {color}",
     "platforms": {
-      "browser": "Web / Mobile",
-      "description": "Restrict this character to specific platforms. Leave both off to show it everywhere.",
+      "browser": "Web",
+      "description": "Restrict this character to specific platforms. Leave all off to show it everywhere.",
+      "mobile": "Mobile",
       "tauri": "Desktop",
       "title": "Available on"
     },
