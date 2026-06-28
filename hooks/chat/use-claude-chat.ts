@@ -119,6 +119,8 @@ import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { resolveMemoryConfig } from "@/types/memory/memory"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { runStandaloneTurn } from "@/lib/ai/chat/standalone-engine"
 import type {
   ApprovalDecision,
   ChatSession,
@@ -602,6 +604,11 @@ export function useClaudeChat() {
    */
   const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
+  // Per-session AbortControllers for in-flight standalone (BYOK) turns, so Stop
+  // can cancel the renderer streamText loop (the sidecar path uses
+  // `interruptSession` instead).
+  const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
+
   /**
    * Per-session streaming coalescers. Each open session gets its own
    * rAF-throttled React commit (≤1/frame) + debounced Dexie write so multiple
@@ -640,16 +647,13 @@ export function useClaudeChat() {
     }
   }, [registry])
 
-  // Subscribe to sidecar events once.
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: UnlistenFn | null = null
-    let cancelled = false
-
-    onClaudeMessage((evt) => {
-      // Key by session so same-session events serialize; events without a
-      // session id (ready/log/sidecar_exited) share one chain — they're cheap
-      // no-ops in handleEvent but still kept in arrival order.
+  // Route one ClaudeEvent into the per-session serialized queue → `handleEvent`.
+  // Keyed by session so same-session events serialize; events without a session
+  // id (ready/log/sidecar_exited) share one chain. Shared by the Tauri transport
+  // subscription AND the standalone (BYOK) engine, so both producers drive the
+  // identical store/coalescing/persistence path.
+  const enqueueClaudeEvent = useCallback(
+    (evt: ClaudeEvent) => {
       const key =
         typeof (evt as { sessionId?: unknown }).sessionId === "string"
           ? (evt as { sessionId: string }).sessionId
@@ -672,7 +676,17 @@ export function useClaudeChat() {
       void tail.finally(() => {
         if (queues.get(key) === tail) queues.delete(key)
       })
-    })
+    },
+    [registry]
+  )
+
+  // Subscribe to sidecar events once.
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: UnlistenFn | null = null
+    let cancelled = false
+
+    onClaudeMessage((evt) => enqueueClaudeEvent(evt as ClaudeEvent))
       .then((u) => {
         if (cancelled) u()
         else unlisten = u
@@ -685,7 +699,7 @@ export function useClaudeChat() {
       cancelled = true
       unlisten?.()
     }
-  }, [registry])
+  }, [enqueueClaudeEvent])
 
   /**
    * Send a user prompt to the active session.
@@ -1146,7 +1160,26 @@ export function useClaudeChat() {
           })
           sendOptions = { ...sendOptions, traceId: handle.traceId, spanId: handle.spanId }
         }
-        await sendPrompt(sessionId, effectiveContent, sendOptions)
+        if (isStandaloneChatMode()) {
+          // Standalone (BYOK): run the turn in-renderer against the user's own
+          // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
+          // store via the same event queue; the engine emits `session_ended`.
+          const controller = new AbortController()
+          standaloneAbortRef.current.set(sessionId, controller)
+          void runStandaloneTurn({
+            sessionId,
+            messages: next,
+            sendOptions,
+            emit: enqueueClaudeEvent,
+            signal: controller.signal,
+          }).finally(() => {
+            if (standaloneAbortRef.current.get(sessionId) === controller) {
+              standaloneAbortRef.current.delete(sessionId)
+            }
+          })
+        } else {
+          await sendPrompt(sessionId, effectiveContent, sendOptions)
+        }
         // Conversation-branching: consume the one-shot context seed now that
         // `resolveSendOptions` has injected it into this send's
         // `appendSystemPrompt`. Provider-agnostic once-only consumption — the
@@ -1190,7 +1223,7 @@ export function useClaudeChat() {
         }
       }
     },
-    [store, tRouting, registry]
+    [store, tRouting, registry, enqueueClaudeEvent]
   )
 
   // Keep the module-scope `handleEvent` pointed at the latest `send` so it can
@@ -1226,9 +1259,19 @@ export function useClaudeChat() {
       useChatStore.getState().clearSteerQueue(sessionId)
       steerArmed.delete(sessionId)
       try {
-        await interruptSession(sessionId)
+        // Standalone (BYOK) turns are cancelled by aborting the renderer
+        // streamText loop; the engine then emits its own `session_ended`. The
+        // sidecar path interrupts the host instead. Both fall through to the
+        // same local seal below (idempotent with the follow-up session_ended).
+        const standaloneController = standaloneAbortRef.current.get(sessionId)
+        if (standaloneController) {
+          standaloneController.abort()
+          standaloneAbortRef.current.delete(sessionId)
+        } else {
+          await interruptSession(sessionId)
+        }
         // Commit + persist whatever partial we have, then drop this session's
-        // coalescing + mirror; the sidecar's follow-up session_ended is also
+        // coalescing + mirror; the follow-up session_ended is also
         // flush-safe (idempotent).
         const coalesce = registry.get(sessionId)
         coalesce?.commit.flush()

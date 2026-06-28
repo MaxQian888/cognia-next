@@ -65,6 +65,21 @@ describe("useCanvasActions", () => {
     expect(result.current.output).toBe("improved")
   })
 
+  it("uses the configured BYOK provider (not the legacy Anthropic path) when a key is set", async () => {
+    settingsRef.current = {
+      defaultProvider: "anthropic",
+      providerSettings: { anthropic: { enabled: true, apiKey: "sk-ant" } },
+    } as never
+    generateTextMock.mockResolvedValueOnce({ text: "ok" })
+    const { result } = renderHook(() => useCanvasActions())
+    await act(async () => {
+      await result.current.run({ actionType: "improve" as never, content: "x" })
+    })
+    // Resolved via provider-consumption — the legacy single-key path is skipped.
+    expect(getProviderModelMock).not.toHaveBeenCalled()
+    expect(generateTextMock).toHaveBeenCalled()
+  })
+
   it("run() falls back to ACTION_PROMPTS.custom for unknown action types", async () => {
     generateTextMock.mockResolvedValueOnce({ text: "custom-out" })
     const { result } = renderHook(() => useCanvasActions())

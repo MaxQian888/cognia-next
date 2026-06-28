@@ -226,7 +226,10 @@ function structuredInstruction(outputFormat: PluginAgentOutputFormat | undefined
 }
 
 /** Join a base system prompt with optional append + structured instruction. */
-function composeSystem(base: string | undefined, ...extra: Array<string | undefined>): string {
+export function composeSystem(
+  base: string | undefined,
+  ...extra: Array<string | undefined>
+): string {
   return [base, ...extra].filter((s): s is string => Boolean(s && s.trim())).join("\n\n")
 }
 

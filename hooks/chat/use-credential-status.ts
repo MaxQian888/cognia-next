@@ -27,7 +27,10 @@ import { isTauri } from "@/lib/tauri"
 import { hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
 import { getAccount, getActiveAccount } from "@/lib/subscription/core/transport"
 import { subscribeSubscriptionChanged } from "@/lib/subscription/core/subscription-events"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { useAccountStore } from "@/stores/account/account-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { loggers } from "@/lib/logging"
 
 export interface CredentialStatus {
@@ -64,7 +67,17 @@ export function useCredentialStatus(): CredentialStatus {
   // (which pushes the bearer) only runs after unlock.
   const unlockedAccountId = useAccountStore((s) => s.unlockedAccountId)
 
+  // Re-probe after any settings write (BYOK key entry bumps `updatedAt`), so the
+  // standalone "No API key" badge clears the moment the user saves a key.
+  const settingsRev = useSettingsStore((s) => s.settings?.updatedAt)
+
   const probe = useCallback(async (): Promise<{ keyOk: boolean | null; plan: string | null }> => {
+    // Standalone (BYOK) mobile: the key lives in local settings, not the desktop
+    // keyring — resolve it directly. No subscription tier in standalone mode.
+    if (isStandaloneChatMode()) {
+      const resolution = resolveStandaloneProvider(useSettingsStore.getState().settings)
+      return { keyOk: resolution.kind === "resolved", plan: null }
+    }
     if (!isTauri()) return { keyOk: null, plan: null }
     const [key, bearer] = await Promise.all([
       hasApiKey().catch((err) => {
@@ -100,8 +113,9 @@ export function useCredentialStatus(): CredentialStatus {
       cancelled = true
       unsubscribe()
     }
-    // `unlockedAccountId` in the deps re-runs the probe after a profile unlock.
-  }, [probe, unlockedAccountId])
+    // `unlockedAccountId` re-runs the probe after a profile unlock; `settingsRev`
+    // re-runs it after a BYOK key is saved in standalone mode.
+  }, [probe, unlockedAccountId, settingsRev])
 
   return { keyOk, plan }
 }

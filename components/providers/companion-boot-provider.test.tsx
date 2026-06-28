@@ -21,6 +21,11 @@ jest.mock("@/lib/tauri/transport-companion", () => ({
   hydrateCompanionConfig: () => hydrateMock(),
 }))
 
+const getSettingsMock = jest.fn(async () => ({}) as Record<string, unknown>)
+jest.mock("@/lib/db/settings", () => ({
+  getSettings: () => getSettingsMock(),
+}))
+
 const runSyncDownMock = jest.fn()
 const installForegroundSyncMock = jest.fn()
 const installEventDrivenSyncMock = jest.fn()
@@ -101,6 +106,7 @@ beforeEach(() => {
   pushMock.mockReset()
   pathnameMock.mockReset().mockReturnValue("/")
   hydrateMock.mockReset()
+  getSettingsMock.mockReset().mockResolvedValue({})
   runSyncDownMock.mockReset().mockResolvedValue([])
   installForegroundSyncMock.mockReset().mockReturnValue(() => {})
   installEventDrivenSyncMock.mockReset().mockReturnValue(() => {})
@@ -152,9 +158,29 @@ describe("<CompanionBootProvider /> — platform gates", () => {
 })
 
 describe("<CompanionBootProvider /> — unpaired", () => {
-  it("redirects to /pair when storage is empty", async () => {
+  it("redirects to /welcome when unpaired and no mode chosen", async () => {
     setMobile()
     hydrateMock.mockResolvedValueOnce(null)
+    getSettingsMock.mockResolvedValueOnce({}) // no mobileRuntimeMode yet
+
+    render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/welcome"))
+    // Native plugin proxies are registered on every mobile boot, even unpaired.
+    expect(registerNativePluginsMock).toHaveBeenCalled()
+    // Sync + push should NOT run when there's no pairing.
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+    expect(registerPushMock).not.toHaveBeenCalled()
+  })
+
+  it("redirects to /pair when the user chose pairing but isn't paired yet", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(null)
+    getSettingsMock.mockResolvedValueOnce({ mobileRuntimeMode: "paired" })
 
     render(
       <CompanionBootProvider>
@@ -163,16 +189,28 @@ describe("<CompanionBootProvider /> — unpaired", () => {
     )
 
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/pair"))
-    // Native plugin proxies are registered on every mobile boot, even unpaired.
-    expect(registerNativePluginsMock).toHaveBeenCalled()
-    // Sync + push should NOT run when there's no pairing.
+  })
+
+  it("skips companion sync/push entirely in standalone (BYOK) mode", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(null)
+    getSettingsMock.mockResolvedValueOnce({ mobileRuntimeMode: "standalone" })
+
+    render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() => expect(getSettingsMock).toHaveBeenCalled())
+    expect(replaceMock).not.toHaveBeenCalled()
     expect(runSyncDownMock).not.toHaveBeenCalled()
     expect(registerPushMock).not.toHaveBeenCalled()
   })
 
-  it("does not redirect when already on /pair", async () => {
+  it("does not redirect when already on an onboarding route (/welcome)", async () => {
     setMobile()
-    pathnameMock.mockReturnValue("/pair")
+    pathnameMock.mockReturnValue("/welcome")
     hydrateMock.mockResolvedValueOnce(null)
 
     render(

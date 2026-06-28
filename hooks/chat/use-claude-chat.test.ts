@@ -36,6 +36,18 @@ jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
 }))
 
+// Standalone (BYOK) chat — off by default so the sidecar-path suite is
+// unaffected; individual tests flip the flag.
+const standaloneFlag = { value: false }
+const runStandaloneTurnMock = jest.fn(async (_args?: unknown): Promise<void> => undefined)
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: () => standaloneFlag.value,
+}))
+jest.mock("@/lib/ai/chat/standalone-engine", () => ({
+  runStandaloneTurn: (args: { emit: (e: unknown) => void; signal: AbortSignal }) =>
+    runStandaloneTurnMock(args),
+}))
+
 jest.mock("@/lib/claude/adapter", () => ({
   applySdkEvent: jest.fn(() => ({ messages: [], turnComplete: false })),
   contentPreview: (c: unknown) => (typeof c === "string" ? c : "preview"),
@@ -402,6 +414,8 @@ beforeEach(() => {
   onClaudeUnsub.mockClear()
   sendPromptMock.mockReset().mockResolvedValue(undefined)
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
+  standaloneFlag.value = false
+  runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   approveToolMock.mockReset().mockResolvedValue(undefined)
   persistMessagesMock.mockReset().mockResolvedValue(undefined)
@@ -513,6 +527,39 @@ describe("useClaudeChat — actions", () => {
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
+  })
+
+  it("send() routes through the standalone engine (not the sidecar) in BYOK mode", async () => {
+    standaloneFlag.value = true
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(runStandaloneTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess-1", emit: expect.any(Function) })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("stop() aborts the standalone turn instead of interrupting the sidecar", async () => {
+    standaloneFlag.value = true
+    let captured: { signal: AbortSignal } | null = null
+    runStandaloneTurnMock.mockImplementation(async (args?: unknown) => {
+      captured = args as { signal: AbortSignal }
+      await new Promise(() => {}) // never resolves — stays "in flight"
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      void result.current.send("hello")
+    })
+    await act(async () => {
+      await result.current.stop("sess-1")
+    })
+    expect(captured).not.toBeNull()
+    expect(captured!.signal.aborted).toBe(true)
+    expect(interruptSessionMock).not.toHaveBeenCalled()
   })
 
   it("external-agent writes stream into the sender's own slice across a mid-run focus switch (D1)", async () => {
