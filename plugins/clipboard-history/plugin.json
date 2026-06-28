@@ -22,6 +22,11 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Clipboard read is restricted in the mobile WebView; automatic polling capture is unavailable."
     }
   },
   "configSchema": {

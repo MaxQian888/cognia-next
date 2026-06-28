@@ -24,6 +24,11 @@
     "browser": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "PR review, Issue→PR loops, and Dexie persistence work over fetch + IndexedDB; the terminal-based exporter needs a desktop shell."
     }
   },
   "dexie": {

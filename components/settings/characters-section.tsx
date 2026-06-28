@@ -148,7 +148,7 @@ const VOICE_CATALOG: Partial<Record<TTSProvider, ReadonlyArray<{ id: string; nam
   xiaomi: XIAOMI_TTS_VOICES,
 }
 
-const PLATFORM_OPTIONS: PluginRuntimeProfile[] = ["tauri", "browser"]
+const PLATFORM_OPTIONS: PluginRuntimeProfile[] = ["tauri", "browser", "mobile"]
 
 /** Labelled 0.05-step slider for the voice rate / pitch / volume controls. */
 function VoiceSlider({

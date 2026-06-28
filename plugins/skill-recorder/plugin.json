@@ -21,6 +21,10 @@
       "availability": "supported",
       "entrypoint": "src/index.ts",
       "reason": "Drives the Rust recorder in src-tauri/src/automation/record/ via the record_* Tauri commands."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Needs a native global input hook + screen capture — unavailable on mobile."
     }
   }
 }

@@ -21,6 +21,10 @@
       "availability": "supported",
       "entrypoint": "src/index.ts",
       "reason": "Run-control tools delegate to the same `runWorkflow` orchestrator the toolbar's Run button uses; everything else mutates the renderer-side store."
+    },
+    "mobile": {
+      "availability": "supported",
+      "reason": "All tools target the per-editor Zustand store; no native deps."
     }
   }
 }

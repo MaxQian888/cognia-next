@@ -2487,6 +2487,272 @@ describe("PluginManager", () => {
       __resetRegistryForTesting()
       __resetResilienceTelemetryForTesting()
     })
+
+    it("does not lazy-activate a plugin the browser runtime profile blocks", async () => {
+      // The Capacitor mobile shell (and dev web) boots the plugin manager in
+      // the `browser` profile. A desktop-native builtin (browser.availability
+      // === "blocked") must NOT auto-activate on startup — doing so throws in
+      // loadPlugin and spams an activation-failure toast per plugin.
+      const nativeOnly: Plugin = {
+        manifest: {
+          ...createManifest("cognia-native-only"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native desktop APIs" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-native-only",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "cognia-native-only": nativeOnly } })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("still activates a browser-blocked plugin on the tauri profile (desktop unaffected)", async () => {
+      // Runtime-profile gating is browser-only; on desktop the same builtin
+      // must continue to auto-activate exactly as before.
+      const nativeOnly: Plugin = {
+        manifest: {
+          ...createManifest("cognia-native-only"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native desktop APIs" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-native-only",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "cognia-native-only": nativeOnly } })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).toHaveBeenCalledWith("cognia-native-only", "activation:startup")
+    })
+  })
+
+  describe("restorePluginStates runtime-profile gating", () => {
+    it("auto-enables runtime-compatible builtins but skips browser-blocked ones", async () => {
+      // Reproduces the mobile/web boot flood: a mix of startup builtins where
+      // only the browser-supported one should be auto-enabled. The blocked one
+      // stays discovered (visible in /plugins) but is never auto-enabled.
+      const supported: Plugin = {
+        manifest: {
+          ...createManifest("cognia-web-tools"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: { browser: { availability: "supported" } },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-web-tools",
+        config: {},
+      }
+      const blocked: Plugin = {
+        manifest: {
+          ...createManifest("cognia-computer-use"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native desktop APIs" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-computer-use",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "cognia-web-tools": supported, "cognia-computer-use": blocked },
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+
+      expect(enableSpy).toHaveBeenCalledWith("cognia-web-tools")
+      expect(enableSpy).not.toHaveBeenCalledWith("cognia-computer-use")
+    })
+  })
+
+  describe("mobile runtime-profile gating", () => {
+    it("auto-enables a mobile-supported builtin but skips a mobile-blocked one", async () => {
+      const supported: Plugin = {
+        manifest: {
+          ...createManifest("cognia-web-tools"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "supported" },
+            mobile: { availability: "supported" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-web-tools",
+        config: {},
+      }
+      const mobileBlocked: Plugin = {
+        manifest: {
+          ...createManifest("cognia-screenshot"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            // Works (degraded) on desktop web but has no WebView screen-capture
+            // API, so it is explicitly blocked on mobile.
+            browser: { availability: "degraded" },
+            mobile: { availability: "blocked", reason: "No screen capture in WebView" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-screenshot",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "cognia-web-tools": supported, "cognia-screenshot": mobileBlocked },
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).toHaveBeenCalledWith("cognia-web-tools", "activation:startup")
+      expect(enableSpy).not.toHaveBeenCalledWith("cognia-screenshot", expect.any(String))
+    })
+
+    it("falls back to the browser key for a third-party plugin with no mobile key", async () => {
+      // A plugin authored before the mobile surface existed: browser:blocked
+      // and no mobile key must inherit blocked (not silently load) on mobile.
+      const legacyBlocked: Plugin = {
+        manifest: {
+          ...createManifest("third-party.native"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native bridge" },
+          },
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/third-party-native",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "third-party.native": legacyBlocked } })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("auto-enables a browser-supported third-party plugin on mobile via fallback", async () => {
+      // Optimistic fallback: no mobile key + browser:supported → enabled on mobile.
+      const legacySupported: Plugin = {
+        manifest: {
+          ...createManifest("third-party.web"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: { browser: { availability: "supported" } },
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/third-party-web",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "third-party.web": legacySupported } })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).toHaveBeenCalledWith("third-party.web", "activation:startup")
+    })
+
+    it("emits surface-templated diagnostics for the mobile profile", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const collect = (manifest: PluginManifest) =>
+        (
+          manager as unknown as {
+            collectRuntimeProfileDiagnostics(m: PluginManifest): Array<{
+              code: string
+              severity: string
+              message: string
+              hint?: string
+            }>
+          }
+        ).collectRuntimeProfileDiagnostics(manifest)
+
+      // Missing declaration → error that names the mobile surface.
+      const missing = collect({ ...createManifest("m.missing") })
+      expect(missing).toHaveLength(1)
+      expect(missing[0]).toMatchObject({ code: "runtime.mobile.unsupported", severity: "error" })
+      expect(missing[0].message).toContain("does not declare mobile")
+
+      // Degraded with entrypoint → warning + entrypoint hint.
+      const degraded = collect({
+        ...createManifest("m.degraded"),
+        runtimeCompatibility: {
+          mobile: { availability: "degraded", entrypoint: "src/index.ts" },
+        },
+      })
+      expect(degraded[0]).toMatchObject({ code: "runtime.mobile.degraded", severity: "warning" })
+      expect(degraded[0].hint).toBe("mobile bundle entrypoint: src/index.ts")
+
+      // Degraded without an entrypoint → reason-based message, no hint.
+      const degradedNoEntry = collect({
+        ...createManifest("m.degraded2"),
+        runtimeCompatibility: {
+          mobile: { availability: "degraded", reason: "Partial WebView support" },
+        },
+      })
+      expect(degradedNoEntry[0]).toMatchObject({
+        code: "runtime.mobile.degraded",
+        message: "Partial WebView support",
+        hint: undefined,
+      })
+
+      // Blocked with entrypoint → error + declared-entrypoint hint.
+      const blocked = collect({
+        ...createManifest("m.blocked"),
+        runtimeCompatibility: {
+          mobile: { availability: "blocked", entrypoint: "src/native.ts" },
+        },
+      })
+      expect(blocked[0]).toMatchObject({ code: "runtime.mobile.unsupported", severity: "error" })
+      expect(blocked[0].hint).toBe("Declared mobile entrypoint: src/native.ts")
+
+      // Fallback to the browser key annotates the message.
+      const fellBack = collect({
+        ...createManifest("m.fellback"),
+        runtimeCompatibility: { browser: { availability: "blocked" } },
+      })
+      expect(fellBack[0].message).toContain("inherited from browser compatibility")
+    })
+
+    it("returns no diagnostics on the tauri profile (desktop trusts every builtin)", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins", runtimeProfile: "tauri" })
+      const diagnostics = (
+        manager as unknown as {
+          collectRuntimeProfileDiagnostics(m: PluginManifest): unknown[]
+        }
+      ).collectRuntimeProfileDiagnostics({
+        ...createManifest("t.blocked"),
+        runtimeCompatibility: { browser: { availability: "blocked" } },
+      })
+      expect(diagnostics).toEqual([])
+    })
   })
 
   describe("cliTools contributions", () => {

@@ -560,18 +560,31 @@ export class PluginManager {
   private collectRuntimeProfileDiagnostics(
     manifest: PluginManifest
   ): ExtensionCompatibilityDiagnostic[] {
-    if (this.runtimeProfile !== "browser") {
+    // The Tauri (desktop) profile trusts every built-in; runtime-surface gating
+    // applies only to the browser-class profiles — web `browser` and the
+    // Capacitor `mobile` WebView. `surface` is whichever of those is active.
+    if (this.runtimeProfile === "tauri") {
       return []
     }
+    const surface = this.runtimeProfile
 
-    const compatibility = manifest.runtimeCompatibility?.browser
+    // Mobile is a browser-class runtime: when a plugin omits an explicit
+    // `mobile` target we fall back to its `browser` availability. Every built-in
+    // declares `mobile` (enforced by builtin-manifest-shape.test.ts), so this
+    // fallback only catches third-party plugins authored before the mobile
+    // surface existed.
+    const compat = manifest.runtimeCompatibility
+    const fellBackToBrowser = surface === "mobile" && !compat?.mobile
+    const compatibility = fellBackToBrowser ? compat?.browser : compat?.[surface]
+    const fallbackNote = fellBackToBrowser ? " (inherited from browser compatibility)" : ""
+
     if (!compatibility) {
       return [
         {
-          code: "runtime.browser.unsupported",
+          code: `runtime.${surface}.unsupported`,
           severity: "error",
-          message: `Plugin ${manifest.id} does not declare browser runtime compatibility.`,
-          hint: "Add browser runtime compatibility metadata before enabling this plugin in browser mode.",
+          message: `Plugin ${manifest.id} does not declare ${surface} runtime compatibility.`,
+          hint: `Add ${surface} runtime compatibility metadata before enabling this plugin in ${surface} mode.`,
         },
       ]
     }
@@ -583,13 +596,13 @@ export class PluginManager {
     if (compatibility.availability === "degraded") {
       return [
         {
-          code: "runtime.browser.degraded",
+          code: `runtime.${surface}.degraded`,
           severity: "warning",
           message:
             compatibility.reason ||
-            `Plugin ${manifest.id} is only partially supported in browser runtime.`,
+            `Plugin ${manifest.id} is only partially supported in ${surface} runtime${fallbackNote}.`,
           hint: compatibility.entrypoint
-            ? `Browser bundle entrypoint: ${compatibility.entrypoint}`
+            ? `${surface} bundle entrypoint: ${compatibility.entrypoint}`
             : undefined,
         },
       ]
@@ -597,14 +610,37 @@ export class PluginManager {
 
     return [
       {
-        code: "runtime.browser.unsupported",
+        code: `runtime.${surface}.unsupported`,
         severity: "error",
-        message: compatibility.reason || `Plugin ${manifest.id} is blocked in browser runtime.`,
+        message:
+          compatibility.reason ||
+          `Plugin ${manifest.id} is blocked in ${surface} runtime${fallbackNote}.`,
         hint: compatibility.entrypoint
-          ? `Declared browser entrypoint: ${compatibility.entrypoint}`
+          ? `Declared ${surface} entrypoint: ${compatibility.entrypoint}`
           : undefined,
       },
     ]
+  }
+
+  /**
+   * True when the active runtime profile *blocks* this plugin (an
+   * error-severity runtime diagnostic), e.g. a desktop-native built-in
+   * (`computer-use`, `playwright-mcp`, …) under the `browser` profile — which
+   * is also what the Capacitor mobile shell boots as (it is non-Tauri).
+   *
+   * Such a plugin stays discovered and visible in `/plugins` (flagged
+   * incompatible), but MUST be excluded from automatic startup enable /
+   * activation: auto-enabling it would throw in `loadPlugin` and fire one
+   * failure toast per plugin, which on mobile/web manifested as a flood of
+   * toasts at boot. A manual, user-initiated `enablePlugin` is unaffected and
+   * still surfaces the diagnostic on demand. Returns `false` on the `tauri`
+   * profile (`collectRuntimeProfileDiagnostics` is browser-only), so desktop
+   * auto-enable behaviour is untouched.
+   */
+  private isBlockedByRuntimeProfile(manifest: PluginManifest): boolean {
+    return this.collectRuntimeProfileDiagnostics(manifest).some(
+      (diagnostic) => diagnostic.severity === "error"
+    )
   }
 
   private recordPluginVerification(
@@ -992,7 +1028,11 @@ export class PluginManager {
         .filter(
           (plugin) =>
             plugin.status === "installed" &&
-            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest))
+            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest)) &&
+            // Don't auto-enable plugins the active runtime profile blocks
+            // (e.g. desktop-native built-ins on the browser/mobile shell) —
+            // each would throw in loadPlugin and fire a failure toast at boot.
+            !this.isBlockedByRuntimeProfile(plugin.manifest)
         )
         .map((plugin) => plugin.manifest.id)
     )
@@ -1052,7 +1092,9 @@ export class PluginManager {
   // ===========================================================================
 
   async scanPlugins(): Promise<DiscoveredPlugin[]> {
-    if (this.runtimeProfile === "browser") {
+    // Browser AND mobile discover built-ins from the static registry; only the
+    // Tauri shell additionally scans the on-disk plugin directory below.
+    if (this.runtimeProfile !== "tauri") {
       return this.scanBrowserBuiltins()
     }
 
@@ -2836,6 +2878,14 @@ export class PluginManager {
         continue
       }
 
+      // Skip plugins the active runtime profile blocks (e.g. desktop-native
+      // built-ins under the browser/mobile shell). Lazy-activating them would
+      // throw in loadPlugin and spam an activation-failure toast on every
+      // matching event. They remain enable-able manually from `/plugins`.
+      if (this.isBlockedByRuntimeProfile(plugin.manifest)) {
+        continue
+      }
+
       if (this.activationInFlight.has(plugin.manifest.id)) {
         continue
       }
@@ -2904,7 +2954,9 @@ export class PluginManager {
   async syncRuntimeState(): Promise<void> {
     const store = usePluginStore.getState()
 
-    if (this.runtimeProfile === "browser" || !canUseTauriInvoke()) {
+    // Only the Tauri shell has a backend status ledger to sync from; browser
+    // and mobile have no native invoke bridge.
+    if (this.runtimeProfile !== "tauri" || !canUseTauriInvoke()) {
       return
     }
 

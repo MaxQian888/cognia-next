@@ -1,22 +1,28 @@
 import { currentRuntimeProfile, isAvailableOnProfile } from "./platform-availability"
 
-const isTauriMock = jest.fn()
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+const detectPlatformMock = jest.fn()
+jest.mock("@/lib/platform/detect", () => ({
+  detectPlatform: () => detectPlatformMock(),
 }))
 
 beforeEach(() => {
-  isTauriMock.mockReset()
+  detectPlatformMock.mockReset()
+  detectPlatformMock.mockReturnValue("web")
 })
 
 describe("currentRuntimeProfile", () => {
   it("returns tauri inside the desktop shell", () => {
-    isTauriMock.mockReturnValue(true)
+    detectPlatformMock.mockReturnValue("tauri")
     expect(currentRuntimeProfile()).toBe("tauri")
   })
 
-  it("returns browser outside Tauri (web / Capacitor)", () => {
-    isTauriMock.mockReturnValue(false)
+  it("returns mobile inside the Capacitor shell", () => {
+    detectPlatformMock.mockReturnValue("mobile")
+    expect(currentRuntimeProfile()).toBe("mobile")
+  })
+
+  it("returns browser on the web (platform detector reports 'web')", () => {
+    detectPlatformMock.mockReturnValue("web")
     expect(currentRuntimeProfile()).toBe("browser")
   })
 })
@@ -25,6 +31,7 @@ describe("isAvailableOnProfile", () => {
   it("is available when no restriction is set", () => {
     expect(isAvailableOnProfile(undefined, "browser")).toBe(true)
     expect(isAvailableOnProfile([], "tauri")).toBe(true)
+    expect(isAvailableOnProfile([], "mobile")).toBe(true)
   })
 
   it("respects the restriction list against the given profile", () => {
@@ -33,10 +40,27 @@ describe("isAvailableOnProfile", () => {
     expect(isAvailableOnProfile(["browser", "tauri"], "browser")).toBe(true)
   })
 
+  it("treats mobile as browser-class: a browser-targeted pack also shows on mobile", () => {
+    expect(isAvailableOnProfile(["browser"], "mobile")).toBe(true)
+    expect(isAvailableOnProfile(["browser", "tauri"], "mobile")).toBe(true)
+    expect(isAvailableOnProfile(["mobile"], "mobile")).toBe(true)
+  })
+
+  it("keeps a desktop-only pack hidden on mobile", () => {
+    expect(isAvailableOnProfile(["tauri"], "mobile")).toBe(false)
+  })
+
+  it("keeps a mobile-only pack hidden on the desktop / web", () => {
+    expect(isAvailableOnProfile(["mobile"], "tauri")).toBe(false)
+    expect(isAvailableOnProfile(["mobile"], "browser")).toBe(false)
+  })
+
   it("defaults to the current runtime profile", () => {
-    isTauriMock.mockReturnValue(false)
+    detectPlatformMock.mockReturnValue("web")
     expect(isAvailableOnProfile(["tauri"])).toBe(false)
-    isTauriMock.mockReturnValue(true)
+    detectPlatformMock.mockReturnValue("tauri")
     expect(isAvailableOnProfile(["tauri"])).toBe(true)
+    detectPlatformMock.mockReturnValue("mobile")
+    expect(isAvailableOnProfile(["browser"])).toBe(true)
   })
 })

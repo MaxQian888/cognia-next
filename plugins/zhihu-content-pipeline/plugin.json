@@ -31,6 +31,11 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Characters and skills load on mobile; spawning the MCP servers (zget / browser) needs the desktop sidecar."
     }
   }
 }

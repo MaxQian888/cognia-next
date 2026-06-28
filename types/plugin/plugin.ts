@@ -171,7 +171,7 @@ export type PluginSource =
   | "git" // Cloned from git repository
   | "dev" // Development mode (hot reload enabled)
 
-export type PluginRuntimeProfile = "browser" | "tauri"
+export type PluginRuntimeProfile = "browser" | "tauri" | "mobile"
 
 export type PluginRuntimeAvailability = "supported" | "degraded" | "blocked"
 
@@ -184,6 +184,13 @@ export interface PluginRuntimeCompatibilityTarget {
 export interface PluginRuntimeCompatibilityMap {
   browser?: PluginRuntimeCompatibilityTarget
   tauri?: PluginRuntimeCompatibilityTarget
+  /**
+   * Capacitor mobile (WebView) shell. A browser-class runtime that lacks the
+   * Tauri invoke bridge, Node sidecar, desktop automation, and several WebView
+   * APIs (screen capture, native clipboard, unrestricted filesystem). When a
+   * plugin omits this key the host falls back to {@link browser} availability.
+   */
+  mobile?: PluginRuntimeCompatibilityTarget
 }
 
 export interface PluginReview {

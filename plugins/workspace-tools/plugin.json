@@ -16,6 +16,11 @@
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Capacitor filesystem is restricted to app-scoped paths on mobile; arbitrary workspace paths are unavailable."
+    }
   }
 }

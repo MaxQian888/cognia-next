@@ -22,6 +22,10 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "OS sandbox backends (bwrap / sandbox-exec) run in the desktop shell — unavailable on mobile."
     }
   }
 }

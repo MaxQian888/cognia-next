@@ -17,6 +17,10 @@
       "availability": "blocked",
       "reason": "Drives the Tauri embedded webview via browser_embed_* commands — desktop only."
     },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Drives the Tauri embedded webview via browser_embed_* commands — unavailable in the mobile WebView."
+    }
   }
 }

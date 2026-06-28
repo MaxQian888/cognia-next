@@ -54,5 +54,16 @@
   },
   "engines": {
     "cognia": ">=0.4.0"
+  },
+  "runtimeCompatibility": {
+    "tauri": { "availability": "supported" },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Invokes rustfmt via the process:spawn capability — desktop only."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Invokes rustfmt via the process:spawn capability — unavailable on mobile."
+    }
   }
 }

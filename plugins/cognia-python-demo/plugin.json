@@ -38,6 +38,10 @@
     "browser": {
       "availability": "blocked",
       "reason": "Python plugins run in the desktop subprocess host."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host — unavailable on mobile."
     }
   }
 }
