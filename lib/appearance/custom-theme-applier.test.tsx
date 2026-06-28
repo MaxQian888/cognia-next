@@ -97,6 +97,27 @@ describe("CustomThemeApplier", () => {
     }
   })
 
+  it("clears the boot-script shell snapshot for the default theme (no cross-switch bleed)", async () => {
+    const html = document.documentElement
+    // Simulate the pre-hydration boot script having painted the dark shell
+    // snapshot inline. For the default preset these must be dropped so the
+    // globals.css :root/.dark rules govern and a theme switch is pure-CSS —
+    // otherwise the stale dark background bleeds into light mode.
+    html.style.setProperty("--background", "#0b1220")
+    html.style.setProperty("--foreground", "#f1f5f9")
+    html.style.setProperty("--primary", "#60a5fa")
+    html.style.setProperty("--accent", "#60a5fa")
+    await act(async () => {
+      render(<CustomThemeApplier />)
+    })
+    await waitFor(() => {
+      expect(html.style.getPropertyValue("--background")).toBe("")
+    })
+    expect(html.style.getPropertyValue("--foreground")).toBe("")
+    expect(html.style.getPropertyValue("--primary")).toBe("")
+    expect(html.style.getPropertyValue("--accent")).toBe("")
+  })
+
   it("writes 27 CSS variables on <html> with matching values when a custom theme is active", async () => {
     const theme = makeCustomTheme()
     useSettingsStore.setState({

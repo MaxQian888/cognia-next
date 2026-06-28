@@ -6,6 +6,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveActiveThemeColors } from "@/lib/themes"
 import type { ThemeColors } from "@/types/plugin/plugin-extended"
 import { themeKeyToCssVar, CSS_VAR_KEYS, applyCssVars, removeCssVars } from "./css-var"
+import { BOOT_MIRROR_KEYS } from "./boot-script"
 import { ensureForegroundContrast } from "./ensure-contrast"
 import { highContrastOverride } from "./high-contrast-presets"
 import {
@@ -81,6 +82,21 @@ export function CustomThemeApplier(): null {
       if (lastApplied.current) {
         for (const cssVar of CSS_VAR_KEYS) root.style.removeProperty(cssVar)
         lastApplied.current = false
+      }
+      // The pre-hydration boot script (lib/appearance/boot-script.ts) paints a
+      // 4-var shell snapshot (--background/--foreground/--primary/--accent)
+      // inline on <html> to avoid a cold-boot flash. That snapshot reflects the
+      // boot-time variant and is never refreshed on a runtime theme switch, so
+      // for the default preset — already governed by the globals.css :root/.dark
+      // rules — we must drop it. Otherwise the stale inline values keep
+      // overriding the stylesheet after a switch (e.g. the dark shell background
+      // bleeding into light mode); and because an inline var beats a class
+      // toggle, the theme only "catches up" a frame later via this effect — the
+      // flicker users report. React never wrote these (the boot script did), so
+      // the `lastApplied` guard above doesn't cover them. Clearing them lets the
+      // class toggle alone repaint the default theme synchronously, flicker-free.
+      for (const key of BOOT_MIRROR_KEYS) {
+        if (root.style.getPropertyValue(key)) root.style.removeProperty(key)
       }
       // Also clear any prior categorical vars (e.g. user just turned cb off).
       if (lastExtraVars.current.length > 0) {

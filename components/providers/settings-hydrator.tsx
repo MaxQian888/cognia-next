@@ -3,7 +3,11 @@
 import { useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useSettingsStore } from "@/stores/settings"
-import { writeBootMirror, type BootMirrorPayload } from "@/lib/appearance/boot-script"
+import {
+  clearBootMirror,
+  writeBootMirror,
+  type BootMirrorPayload,
+} from "@/lib/appearance/boot-script"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { resolveActiveThemeColors } from "@/lib/themes"
 
@@ -39,6 +43,20 @@ export function SettingsHydrator(): null {
   useEffect(() => {
     if (typeof window === "undefined") return
     if (!resolvedTheme) return
+
+    // The boot mirror exists to pre-paint a *custom / preset* theme's shell
+    // colors before hydration. The default preset is fully described by the
+    // globals.css :root/.dark rules, so mirroring it would (a) paint the
+    // lib/themes "default" shell palette over the canonical stylesheet and
+    // (b) — since the inline boot vars never refresh on a runtime switch —
+    // leave a stale dark tint bleeding into light mode. Skip and clear the
+    // mirror for the default base so cold boot paints nothing; CustomThemeApplier
+    // likewise drops any inline vars, making the switch a pure-CSS, flicker-free
+    // class toggle.
+    if (colorTheme === "default" && !activeCustomThemeId) {
+      clearBootMirror()
+      return
+    }
 
     const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
     const shellColors = getShellColors({ colorTheme, activeCustomThemeId, customThemes }, variant)
