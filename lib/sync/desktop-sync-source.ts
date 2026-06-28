@@ -16,6 +16,7 @@
  */
 
 import type { Skill, StoredMessage, ChatSession, Character } from "@/lib/claude/types"
+import type { WorkflowRunRow } from "@/types/workflow/visual"
 import { getDb } from "@/lib/db/schema"
 import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
@@ -125,6 +126,8 @@ export async function readDexieDelta(
       return readMessagesDelta(since)
     case "workflows":
       return readWorkflowsDelta(since)
+    case "workflowRuns":
+      return readWorkflowRunsDelta(since)
     case "twinProfile":
       return readTwinProfileDelta(since)
     case "plugins":
@@ -182,6 +185,47 @@ async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage
 async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().workflows.where("updatedAt").above(since).toArray()
   return finalizeDelta("workflows", rows as UpdatedAtRow[], since)
+}
+
+/**
+ * Workflow RUN history. Unlike the other tables, run rows carry no
+ * `updatedAt` — a run is written at creation (`startedAt`) and again at
+ * completion (`completedAt`), and the mobile run surfaces only care about the
+ * status flip across those two moments. So the cursor rides
+ * `max(startedAt, completedAt)`: a run crosses the wire once when it starts
+ * (status "running") and once when it finishes (final status), which is
+ * exactly what the library badges / runs feed need.
+ *
+ * Both `startedAt` and `completedAt` are indexed (schema v22), so we union the
+ * two range queries instead of scanning the whole table. The first sync
+ * (`since === 0`) is bounded to the last 30 days, and the result is paged
+ * (oldest-activity first) so a heavy run history streams across several pulls
+ * rather than one multi-MB payload — each run embeds its `workflowSnapshot`.
+ */
+const RUN_FIRST_SYNC_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const RUN_PAGE_SIZE = 200
+
+function runActivityAt(run: WorkflowRunRow): number {
+  return Math.max(run.startedAt ?? 0, run.completedAt ?? 0)
+}
+
+async function readWorkflowRunsDelta(since: number): Promise<SyncDelta<WorkflowRunRow>> {
+  const db = getDb()
+  // Floor the first full sync to a recent window so a years-deep run history
+  // doesn't hydrate in one shot; incremental pulls use the real cursor.
+  const floor = since === 0 ? Math.max(0, Date.now() - RUN_FIRST_SYNC_WINDOW_MS) : since
+  const [started, completed] = await Promise.all([
+    db.workflowRuns.where("startedAt").above(floor).toArray(),
+    db.workflowRuns.where("completedAt").above(floor).toArray(),
+  ])
+  const byId = new Map<string, WorkflowRunRow>()
+  for (const run of [...started, ...completed]) {
+    if (runActivityAt(run) > since) byId.set(run.id, run)
+  }
+  const ordered = [...byId.values()].sort((a, b) => runActivityAt(a) - runActivityAt(b))
+  const page = ordered.slice(0, RUN_PAGE_SIZE)
+  const hasMore = ordered.length > RUN_PAGE_SIZE
+  return finalizeDelta("workflowRuns", page, since, hasMore, runActivityAt)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {
@@ -258,7 +302,13 @@ async function finalizeDelta<T extends UpdatedAtRow>(
   table: SyncableTable,
   rows: T[],
   since: number,
-  hasMore = false
+  hasMore = false,
+  /**
+   * How to read a row's cursor watermark. Defaults to `updatedAt ?? createdAt`
+   * — the shape every other table carries. `workflowRuns` has neither, so it
+   * passes `max(startedAt, completedAt)` instead (see readWorkflowRunsDelta).
+   */
+  cursorOf: (row: T) => number = (row) => Number(row.updatedAt ?? row.createdAt ?? 0)
 ): Promise<SyncDelta<T>> {
   // Fold in tombstones recorded since the cursor (v61). The phone applies
   // `deleted_ids` via `bulkDelete`, so a desktop deletion finally reaches
@@ -268,7 +318,7 @@ async function finalizeDelta<T extends UpdatedAtRow>(
 
   let highestCursor = since
   for (const row of rows) {
-    const candidate = Number(row.updatedAt ?? row.createdAt ?? 0)
+    const candidate = cursorOf(row)
     if (candidate > highestCursor) highestCursor = candidate
   }
   if (maxDeletedAt > highestCursor) highestCursor = maxDeletedAt

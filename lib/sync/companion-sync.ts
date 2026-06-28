@@ -42,6 +42,7 @@ import { syncSessions } from "./handlers/sessions"
 import { syncSkills } from "./handlers/skills"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
+import { syncWorkflowRuns } from "./handlers/workflow-runs"
 import type { SyncCursor, SyncOutcome, SyncableTable } from "./types"
 
 export type SyncFn = (transport: Transport, cursor: SyncCursor) => Promise<SyncOutcome>
@@ -74,6 +75,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // from Dexie offline; both are authored on the desktop.
   { table: "goals", run: syncGoals },
   { table: "memories", run: syncMemories },
+  // Workflow run history — mirrors execution state so the mobile library
+  // badges, runs feed, and active-runs card reflect runs (incl. phone-
+  // triggered ones). Definitions sync via `workflows` above; this is runs.
+  { table: "workflowRuns", run: syncWorkflowRuns },
 ]
 
 /**

@@ -16,12 +16,16 @@ import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WorkflowEditorCanvas } from "@/components/workflow/editor/canvas"
 import { MobileWorkflowEditor } from "@/components/mobile/workflow/editor/mobile-workflow-editor"
-import { usePlatform } from "@/hooks/use-platform"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { getWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
 function WorkflowEditorInner() {
-  const platform = usePlatform()
+  // Branch on `useIsMobile()` (native Capacitor OR viewport < 768px), not the
+  // static `usePlatform() === "mobile"` pin: a phone-width browser / narrow
+  // desktop window otherwise fell through to the desktop 3-pane resizable
+  // canvas, which is unusable below ~700px.
+  const isMobile = useIsMobile()
   const id = useSearchParams().get("id")
   const [workflow, setWorkflow] = useState<WorkflowRow | null | undefined>(undefined)
 
@@ -57,9 +61,14 @@ function WorkflowEditorInner() {
     notFound()
   }
 
-  if (platform === "mobile") {
+  if (isMobile) {
+    // `flex-1 min-h-0` (not `h-full`) so the editor fills the height the
+    // mobile shell hands it — on the Capacitor shell that's the flex-column
+    // `MobileShellWrapper` (below the offline banner); on a narrow desktop
+    // browser it's the desktop shell's flex content area. Both give a definite
+    // height the ReactFlow canvas needs; `h-full` collapsed to 0 on mobile.
     return (
-      <div className="h-full w-full overflow-hidden">
+      <div className="min-h-0 w-full flex-1 overflow-hidden">
         <MobileWorkflowEditor workflow={workflow} />
       </div>
     )

@@ -12,15 +12,17 @@ import { Suspense } from "react"
 import { notFound, useSearchParams } from "next/navigation"
 import { RunList } from "@/components/workflow/runs/run-list"
 import { MobileRunsList } from "@/components/mobile/workflow/mobile-runs-list"
-import { usePlatform } from "@/hooks/use-platform"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 
 function WorkflowRunsInner() {
-  const platform = usePlatform()
+  // `useIsMobile()` (Capacitor pin OR < 768px viewport) so a phone-width
+  // browser gets the touch run list instead of the wide desktop table.
+  const isMobile = useIsMobile()
   const id = useSearchParams().get("id")
   if (!id) {
     notFound()
   }
-  if (platform === "mobile") {
+  if (isMobile) {
     return <MobileRunsList workflowId={id} />
   }
   return (

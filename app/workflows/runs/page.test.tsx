@@ -6,12 +6,12 @@ const mockGet = jest.fn()
 const mockNotFound = jest.fn(() => {
   throw new Error("NEXT_NOT_FOUND")
 })
-let platform = "desktop"
+let isMobile = false
 jest.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: mockGet }),
   notFound: () => mockNotFound(),
 }))
-jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => platform }))
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => isMobile }))
 jest.mock("@/components/workflow/runs/run-list", () => ({
   RunList: ({ workflowId }: { workflowId: string }) => (
     <div data-testid="run-list">{workflowId}</div>
@@ -35,7 +35,7 @@ class Boundary extends Component<{ children: ReactNode }, { errored: boolean }> 
 
 beforeEach(() => {
   jest.clearAllMocks()
-  platform = "desktop"
+  isMobile = false
 })
 
 test("passes ?id= through to the desktop runs list", () => {
@@ -45,7 +45,7 @@ test("passes ?id= through to the desktop runs list", () => {
 })
 
 test("renders the mobile runs list on mobile", () => {
-  platform = "mobile"
+  isMobile = true
   mockGet.mockReturnValue("wf-9")
   render(<WorkflowRunsPage />)
   expect(screen.getByTestId("mobile-runs-list")).toHaveTextContent("wf-9")

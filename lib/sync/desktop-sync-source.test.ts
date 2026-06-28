@@ -39,6 +39,7 @@ describe("readDexieDelta", () => {
     await db.adapterInstances.clear()
     await db.conversationOverrides.clear()
     await db.settings.clear()
+    await db.workflowRuns.clear()
     await db.syncTombstones.clear()
     ;(tauriListen as jest.Mock).mockReset()
     ;(tauriInvoke as jest.Mock).mockReset()
@@ -217,6 +218,58 @@ describe("readDexieDelta", () => {
     await expect(readDexieDelta("adapterInstances", 10)).resolves.toEqual(
       expect.objectContaining({ rows: [expect.objectContaining({ id: "adapter-new" })] })
     )
+  })
+
+  it("returns workflow runs whose start OR completion is past the cursor, cursored on max(startedAt, completedAt)", async () => {
+    const db = getDb()
+    await db.workflowRuns.bulkPut([
+      // Started + completed before the cursor — excluded.
+      {
+        id: "r-old",
+        workflowId: "wf-1",
+        status: "succeeded",
+        startedAt: 5,
+        completedAt: 8,
+      } as never,
+      // Started before the cursor but COMPLETED after it — must re-sync so the
+      // phone learns the final status (the core run-status flip case).
+      {
+        id: "r-finishing",
+        workflowId: "wf-1",
+        status: "succeeded",
+        startedAt: 9,
+        completedAt: 40,
+      } as never,
+      // Started after the cursor, still running — included as "running".
+      { id: "r-running", workflowId: "wf-2", status: "running", startedAt: 30 } as never,
+    ])
+
+    const delta = await readDexieDelta("workflowRuns", 10)
+    expect(delta.rows.map((r) => (r as { id: string }).id).sort()).toEqual([
+      "r-finishing",
+      "r-running",
+    ])
+    // next_since rides the highest max(startedAt, completedAt) = 40.
+    expect(delta.next_since).toBe(40)
+  })
+
+  it("pages workflow runs (oldest activity first) and sets has_more past the page size", async () => {
+    const db = getDb()
+    const rows = Array.from({ length: 205 }, (_, i) => ({
+      id: `run-${i}`,
+      workflowId: "wf-1",
+      status: "succeeded",
+      startedAt: 100 + i,
+      completedAt: 100 + i,
+    }))
+    await db.workflowRuns.bulkPut(rows as never)
+    // Use a real cursor (not 0) so the 30-day first-sync window — which floors
+    // on Date.now() — doesn't exclude these synthetic low timestamps.
+    const delta = await readDexieDelta("workflowRuns", 50)
+    expect(delta.rows).toHaveLength(200)
+    expect(delta.has_more).toBe(true)
+    // Oldest-activity-first paging: the first page starts at the earliest run.
+    expect((delta.rows[0] as { id: string }).id).toBe("run-0")
   })
 
   it("emits settings with Date.now cursor when the singleton has no updatedAt", async () => {

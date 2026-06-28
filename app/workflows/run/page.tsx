@@ -19,8 +19,12 @@ function WorkflowRunInner() {
   if (!id || !runId) {
     notFound()
   }
+  // `flex-1 min-h-0` (not `h-full`) so the run detail fills the height handed
+  // by whichever shell wraps it — the Capacitor flex-column MobileShellWrapper
+  // (below the offline banner) or the desktop shell's flex content area. A bare
+  // `h-full` collapsed under the mobile shell's `min-h-[100dvh]` container.
   return (
-    <div className="h-full w-full overflow-hidden">
+    <div className="flex min-h-0 w-full flex-1 overflow-hidden">
       <RunDetail workflowId={id} runId={runId} />
     </div>
   )

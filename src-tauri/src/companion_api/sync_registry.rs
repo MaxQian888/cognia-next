@@ -92,6 +92,13 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: true,
         },
         SyncTableDescriptor {
+            name: "workflowRuns".to_string(),
+            description: "Workflow run history (read-only; cursors on max(startedAt, completedAt) so the mobile library badges + runs feed reflect desktop-executed runs)".to_string(),
+            // Runs are append-mostly; deletions are not tombstoned (the mobile
+            // runs viewer accumulates and ages them out of the recent feed).
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
             name: "twinProfile".to_string(),
             description: "Distilled twin profiles for the mobile twin switcher".to_string(),
             has_tombstones: false,
@@ -120,6 +127,21 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Per-conversation Inbox overrides (pinned, archived, lastReadAt, allowComputerUse, allowGoalDriving, mode)".to_string(),
             has_tombstones: false,
         },
+        // Companion read-mostly views. Both have desktop sync readers
+        // (`readGoalsDelta` / `readMemoriesDelta`) and TS handlers, but were
+        // never added to this allowlist — so `sync_pull` rejected them with
+        // "not exposed to mobile sync" and the mobile Goals console / memory
+        // viewer stayed empty. Same omission class as the workflowRuns gap.
+        SyncTableDescriptor {
+            name: "goals".to_string(),
+            description: "Goal console rows (read-only mirror; goals are authored on the desktop)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "memories".to_string(),
+            description: "Long-term memory rows (read-only mirror for the mobile memory viewer)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -132,6 +154,9 @@ mod tests {
         let r = SyncTableRegistry::with_defaults();
         assert!(r.contains("characters"));
         assert!(r.contains("workflows"));
+        assert!(r.contains("workflowRuns"));
+        assert!(r.contains("goals"));
+        assert!(r.contains("memories"));
         assert!(r.contains("settings"));
         assert!(!r.contains("ohai"));
     }

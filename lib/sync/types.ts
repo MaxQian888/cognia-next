@@ -37,6 +37,13 @@ export type SyncableTable =
   // a viewer.
   | "goals"
   | "memories"
+  // Workflow RUN history. Workflow *definitions* (`workflows`) already sync,
+  // but their runs never did — so every mobile run surface (the library's
+  // "active"/"sending" badges, RecentRunsFeed, MobileRunsList, the home
+  // active-runs card) sat permanently empty, and a workflow triggered from
+  // the phone vanished the moment its outbound job was sent. The phone is a
+  // read-only viewer; runs are authored on the desktop that executes them.
+  | "workflowRuns"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

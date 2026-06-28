@@ -11,11 +11,13 @@
 
 import { WorkflowLibrary } from "@/components/workflow/library/workflow-library"
 import { WorkflowList } from "@/components/mobile/workflow/workflow-list"
-import { usePlatform } from "@/hooks/use-platform"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 
 export default function WorkflowsLibraryPage() {
-  const platform = usePlatform()
-  if (platform === "mobile") {
+  // `useIsMobile()` (Capacitor pin OR < 768px viewport) so a phone-width
+  // browser gets the compact list instead of the desktop library grid.
+  const isMobile = useIsMobile()
+  if (isMobile) {
     return <WorkflowList />
   }
   return (
