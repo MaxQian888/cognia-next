@@ -28,6 +28,7 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { mobileTransition } from "@/lib/ui/motion"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
@@ -72,6 +73,11 @@ const EMPTY_SELECTION: Selection = {
   autoScan: false,
 }
 
+/** Reveal the manual-entry escape on the loading screen after this long. */
+const SLOW_HINT_MS = 2500
+/** Hard ceiling: stop waiting on hydration and show the discover step. */
+const CEILING_MS = 8000
+
 export function PairOnboardingClient() {
   const router = useRouter()
   const t = useTranslations("mobile.pair")
@@ -79,6 +85,13 @@ export function PairOnboardingClient() {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" })
   const [step, setStep] = useState<PairStepName>("discover")
   const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION)
+  // `true` once hydration has been slow enough to warrant a manual escape on
+  // the loading screen. The full-page spinner used to be a dead end: if the
+  // SecureStorage round-trip stalled on device (observed after sign-out),
+  // there was no way out and the user was stuck on "checking for an existing
+  // pairing" forever. We now reveal a "set up manually" affordance early and
+  // hard-fall-through to the discover step as a backstop.
+  const [hydrateSlow, setHydrateSlow] = useState(false)
   const reduce = useReducedMotion()
   // Recently-paired servers (localStorage) — surfaced as the Discover step's
   // "Recent" group so the user can one-tap reconnect even after sign-out.
@@ -89,11 +102,39 @@ export function PairOnboardingClient() {
 
   // Hydrate cache from storage on mount; if a config exists, jump to the
   // paired step and let the user verify before continuing to chat.
+  //
+  // The hydrate is wrapped in two timers so the loading screen can never
+  // become a dead end:
+  //   • SLOW_HINT_MS — surface a manual-entry button + reassurance copy.
+  //   • CEILING_MS   — give up waiting and drop the user on the discover
+  //     step. Re-pairing from there still works even if the storage read
+  //     never settled (a fresh pair overwrites whatever was stuck).
   useEffect(() => {
     let cancelled = false
+    let settled = false
+
+    const fallThrough = () => {
+      if (cancelled || settled) return
+      settled = true
+      setPhase({ kind: "unpaired" })
+      setStep("discover")
+    }
+
+    const slowTimer = setTimeout(() => {
+      if (!cancelled && !settled) setHydrateSlow(true)
+    }, SLOW_HINT_MS)
+    const ceilingTimer = setTimeout(fallThrough, CEILING_MS)
+
+    const finish = () => {
+      clearTimeout(slowTimer)
+      clearTimeout(ceilingTimer)
+    }
+
     void hydrateCompanionConfig()
       .then((cfg) => {
-        if (cancelled) return
+        if (cancelled || settled) return
+        settled = true
+        finish()
         if (cfg) {
           setPhase({
             kind: "paired",
@@ -108,13 +149,23 @@ export function PairOnboardingClient() {
         }
       })
       .catch(() => {
-        if (cancelled) return
+        if (cancelled || settled) return
+        settled = true
+        finish()
         setPhase({ kind: "unpaired" })
         setStep("discover")
       })
+
     return () => {
       cancelled = true
+      finish()
     }
+  }, [])
+
+  const onSkipLoading = useCallback(() => {
+    setPhase({ kind: "unpaired" })
+    setSelection(EMPTY_SELECTION)
+    setStep("discover")
   }, [])
 
   const onSelectServer = useCallback((server: DiscoveredServer) => {
@@ -170,10 +221,27 @@ export function PairOnboardingClient() {
       <main
         className="mx-auto flex min-h-[100dvh] max-w-md items-center justify-center safe-area-py safe-area-px"
         data-testid="pair-onboarding"
+        data-step="loading"
       >
         <div className="flex flex-col items-center gap-3" role="status" aria-live="polite">
           <Spinner className="size-6" />
           <p className="text-sm text-muted-foreground">{t("loadingTitle")}</p>
+          {hydrateSlow ? (
+            <div className="flex flex-col items-center gap-2 pt-1">
+              <p className="max-w-xs text-center text-xs text-muted-foreground">
+                {t("loadingSlow")}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onSkipLoading}
+                data-testid="pair-loading-skip"
+              >
+                {t("loadingManualCta")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </main>
     )

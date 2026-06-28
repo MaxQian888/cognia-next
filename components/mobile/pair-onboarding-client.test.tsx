@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import {
@@ -29,6 +29,25 @@ jest.mock("@/lib/tauri", () => ({
 // Stub the QR scanner; keep the legacy mock path so any transitive callers keep working.
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
 jest.mock("@/lib/qr/barcode-scanner", () => ({ scanQrCode: jest.fn() }))
+
+// Control hydration timing so the loading-screen escape paths are testable.
+// Defaults mirror the real LocalStorage backend (read/clear the config key)
+// so the existing hydrate/sign-out cases behave exactly as before.
+const COMPANION_KEY = "cognia.companion.config.v1"
+let hydrateImpl: () => Promise<unknown> = async () => {
+  const raw = window.localStorage.getItem(COMPANION_KEY)
+  return raw ? JSON.parse(raw) : null
+}
+let clearImpl: () => Promise<void> = async () => {
+  window.localStorage.removeItem(COMPANION_KEY)
+}
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  hydrateCompanionConfig: () => hydrateImpl(),
+  clearCompanionConfig: () => clearImpl(),
+  saveCompanionConfig: async (config: unknown) => {
+    window.localStorage.setItem(COMPANION_KEY, JSON.stringify(config))
+  },
+}))
 
 // Stub the LAN scanner — the coordinator imports DiscoverStep, which imports
 // scanLan. Per-step tests cover the scan internals directly.
@@ -153,6 +172,14 @@ beforeEach(() => {
   mockScanLan.mockReset()
   // Default scan stub: settles fast with no hits.
   mockScanLan.mockImplementation(async () => [])
+  // Reset hydrate/clear to the localStorage-backed defaults.
+  hydrateImpl = async () => {
+    const raw = window.localStorage.getItem(COMPANION_KEY)
+    return raw ? JSON.parse(raw) : null
+  }
+  clearImpl = async () => {
+    window.localStorage.removeItem(COMPANION_KEY)
+  }
 })
 
 afterEach(() => {
@@ -181,6 +208,53 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(await screen.findByTestId("pair-paired-step")).toBeInTheDocument()
     expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired")
     expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-existing")
+  })
+
+  it("reveals a manual escape when hydration stalls, and tapping it shows discover", async () => {
+    jest.useFakeTimers()
+    try {
+      // Hydration that never settles — the device-stall scenario that used to
+      // trap the user on the spinner forever.
+      hydrateImpl = () => new Promise(() => {})
+      render(<PairOnboardingClient />)
+      expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "loading")
+      // No escape yet — under the slow-hint threshold.
+      expect(screen.queryByTestId("pair-loading-skip")).not.toBeInTheDocument()
+
+      act(() => {
+        jest.advanceTimersByTime(2500)
+      })
+      const skip = screen.getByTestId("pair-loading-skip")
+      act(() => {
+        fireEvent.click(skip)
+      })
+      expect(screen.getByTestId("pair-discover-step")).toBeInTheDocument()
+      // Flush the discover step's async LAN scan so its trailing setState
+      // doesn't fire outside act after the test ends.
+      await act(async () => {
+        await Promise.resolve()
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("auto-falls through to discover after the ceiling when hydration never settles", async () => {
+    jest.useFakeTimers()
+    try {
+      hydrateImpl = () => new Promise(() => {})
+      render(<PairOnboardingClient />)
+      expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "loading")
+      act(() => {
+        jest.advanceTimersByTime(8000)
+      })
+      expect(screen.getByTestId("pair-discover-step")).toBeInTheDocument()
+      await act(async () => {
+        await Promise.resolve()
+      })
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("Skip from discover advances to the pair step with an empty form", async () => {

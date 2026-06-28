@@ -171,7 +171,7 @@ function WorkspaceContent() {
 export function A2UIWorkspace({ surfaceId, className }: A2UIWorkspaceProps) {
   return (
     <A2UIWorkspaceProvider surfaceId={surfaceId}>
-      <div className={cn("h-full", className)}>
+      <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
         <WorkspaceContent />
       </div>
     </A2UIWorkspaceProvider>

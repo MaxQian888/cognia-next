@@ -7,6 +7,7 @@ const useActiveCharacterId = jest.fn<string | undefined, []>()
 const petWidgetProps = jest.fn()
 const getPetWindowRole = jest.fn<"main" | "overlay" | "popup" | "web", []>()
 const isTauri = jest.fn<boolean, []>()
+const usePlatform = jest.fn<"tauri" | "mobile" | "web", []>()
 const startMainPetBridge = jest.fn<() => void, []>()
 const mainBridgeDispose = jest.fn()
 
@@ -20,6 +21,7 @@ jest.mock("@/lib/pet/bones/account-id", () => ({ ensurePetAccountId: () => ensur
 jest.mock("@/lib/pet/runtime/init-pet", () => ({ ensurePetProfile: () => ensurePetProfile() }))
 jest.mock("@/lib/pet/window-role", () => ({ getPetWindowRole: () => getPetWindowRole() }))
 jest.mock("@/lib/platform/detect", () => ({ isTauri: () => isTauri() }))
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => usePlatform() }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
   startMainPetBridge: () => startMainPetBridge(),
 }))
@@ -49,6 +51,8 @@ beforeEach(() => {
   getPetWindowRole.mockReturnValue("main")
   isTauri.mockReset()
   isTauri.mockReturnValue(false)
+  usePlatform.mockReset()
+  usePlatform.mockReturnValue("web")
   startMainPetBridge.mockReset()
   mainBridgeDispose.mockReset()
   startMainPetBridge.mockReturnValue(mainBridgeDispose)
@@ -158,6 +162,19 @@ describe("PetMount", () => {
     expect(startMainPetBridge).toHaveBeenCalledTimes(1)
     unmount()
     expect(mainBridgeDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders nothing and disables the controller on the Capacitor mobile shell", () => {
+    settingsValue = ENABLED_SETTINGS
+    getPetWindowRole.mockReturnValue("main")
+    usePlatform.mockReturnValue("mobile")
+    const { container } = render(<PetMount />)
+    // The floating widget would cover bottom-right action buttons on mobile, so
+    // the whole subsystem is excluded there (mirrors the Perf HUD).
+    expect(container.firstChild).toBeNull()
+    expect(usePetEventBus).toHaveBeenCalledWith(false)
+    expect(ensurePetAccountId).not.toHaveBeenCalled()
+    expect(startMainPetBridge).not.toHaveBeenCalled()
   })
 
   it("does not start the bridge when pet is disabled", () => {

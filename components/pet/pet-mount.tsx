@@ -16,6 +16,7 @@ import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 import { isTauri } from "@/lib/platform/detect"
+import { usePlatform } from "@/hooks/use-platform"
 import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import { PetWidget } from "./pet-widget"
 
@@ -35,15 +36,23 @@ export function PetMount() {
   const role = useMemo(() => getPetWindowRole(), [])
   const secondary = role === "overlay" || role === "popup"
 
-  usePetEventBus(enabled && !secondary)
+  // The floating in-app widget is a desktop / web affordance only. On the
+  // Capacitor mobile shell it would dock to a viewport corner with a 96px hit
+  // area that sits on top of page content — most visibly covering bottom-right
+  // action buttons (e.g. the preset editor's Save / Create), which is then
+  // untappable. Exclude the whole subsystem on mobile, mirroring the Perf HUD.
+  const isMobile = usePlatform() === "mobile"
+  const widgetEnabled = enabled && !secondary && !isMobile
+
+  usePetEventBus(widgetEnabled)
   // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
   // pings the overlay's wander gate over the bridge (throttled).
-  useActivityTracker(enabled && !secondary)
+  useActivityTracker(widgetEnabled)
   // Gentle care notification when the pet first becomes unwell (main window only).
-  usePetCareAlert(enabled && !secondary)
+  usePetCareAlert(widgetEnabled)
 
   useEffect(() => {
-    if (!enabled || secondary) return
+    if (!widgetEnabled) return
     let cancelled = false
     void (async () => {
       const accountId = await ensurePetAccountId(settings, save)
@@ -53,17 +62,17 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
-  }, [enabled, secondary, settings, save])
+  }, [widgetEnabled, settings, save])
 
   // Main window owns the cross-window bridge: it broadcasts the controller's
   // visual-state/bubble/one-shots and replays overlay interactions. Pointless
   // on the web (single browsing context), so gate on Tauri.
   useEffect(() => {
-    if (!enabled || secondary || !isTauri()) return
+    if (!widgetEnabled || !isTauri()) return
     const dispose = startMainPetBridge()
     return dispose
-  }, [enabled, secondary])
+  }, [widgetEnabled])
 
-  if (!enabled || secondary) return null
+  if (!widgetEnabled) return null
   return <PetWidget settings={pet} activeCharacterId={activeCharacterId} />
 }

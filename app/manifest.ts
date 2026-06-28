@@ -5,7 +5,7 @@ import type { MetadataRoute } from "next"
  *
  * Next.js's metadata-based manifest API generates `manifest.webmanifest`
  * at build time. Pairs with the Serwist SW (see `app/sw.ts`) so the
- * browser can offer "Install cognia" on web and the desktop Tauri shell
+ * browser can offer "Install Cognia" on web and the desktop Tauri shell
  * gets a manifest for completeness.
  *
  * Icons live under `public/icons/` (192/512 standard + 512 maskable),
@@ -20,8 +20,8 @@ export const dynamic = "force-static"
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "cognia",
-    short_name: "cognia",
+    name: "Cognia",
+    short_name: "Cognia",
     description: "Local-first AI companion — chat, workflows, twin, and connectors.",
     start_url: "/",
     display: "standalone",

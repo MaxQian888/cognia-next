@@ -77,29 +77,31 @@ export function A2UIToolbar() {
         shortcut="Ctrl+Y"
       />
 
-      <Separator orientation="vertical" className="h-6 mx-1" />
-
-      {/* Mode buttons */}
-      <ToolbarButton
-        icon={<Pencil className="h-4 w-4" />}
-        label={t("editMode")}
-        onClick={() => setWorkspaceMode("edit")}
-        active={workspaceMode === "edit"}
-      />
-      <ToolbarButton
-        icon={<Eye className="h-4 w-4" />}
-        label={t("previewMode")}
-        onClick={() => setWorkspaceMode("preview")}
-        active={workspaceMode === "preview"}
-      />
-      <ToolbarButton
-        icon={<Database className="h-4 w-4" />}
-        label={t("dataMode")}
-        onClick={() => setWorkspaceMode("data")}
-        active={workspaceMode === "data"}
-      />
-
-      <Separator orientation="vertical" className="h-6 mx-1" />
+      {/* Mode buttons drive the desktop three-panel layout only — on mobile
+          the bottom tab-bar owns panel navigation, so this group is hidden to
+          keep the touch toolbar to undo/redo + save/export/share. */}
+      <div className="hidden items-center gap-1 sm:flex">
+        <Separator orientation="vertical" className="h-6 mx-1" />
+        <ToolbarButton
+          icon={<Pencil className="h-4 w-4" />}
+          label={t("editMode")}
+          onClick={() => setWorkspaceMode("edit")}
+          active={workspaceMode === "edit"}
+        />
+        <ToolbarButton
+          icon={<Eye className="h-4 w-4" />}
+          label={t("previewMode")}
+          onClick={() => setWorkspaceMode("preview")}
+          active={workspaceMode === "preview"}
+        />
+        <ToolbarButton
+          icon={<Database className="h-4 w-4" />}
+          label={t("dataMode")}
+          onClick={() => setWorkspaceMode("data")}
+          active={workspaceMode === "data"}
+        />
+        <Separator orientation="vertical" className="h-6 mx-1" />
+      </div>
 
       {/* AI Generate */}
       <ToolbarButton

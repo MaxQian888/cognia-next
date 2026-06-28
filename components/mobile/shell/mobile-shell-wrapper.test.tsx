@@ -270,6 +270,51 @@ describe("<MobileShellWrapper />", () => {
     expect(replaceMock).not.toHaveBeenCalled()
   })
 
+  it("gives workflow detail sub-routes a definite full-viewport height", () => {
+    pathnameMock.mockReturnValue("/workflows/editor")
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>editor</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute("data-full-viewport", "true")
+    // The inner body container is the definite-height flex column the ReactFlow
+    // canvas needs — a bare min-h-[100dvh] collapses the canvas to 0.
+    const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
+    expect(inner?.className).toContain("h-[100dvh]")
+    expect(inner?.className).not.toContain("min-h-[100dvh]")
+  })
+
+  it("gives the A2UI mini-apps route a definite full-viewport height while keeping the tab bar", () => {
+    pathnameMock.mockReturnValue("/a2ui")
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>a2ui hub</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute("data-full-viewport", "true")
+    // The hub wraps its body in a ScrollArea h-full + the workspace stacks a
+    // flex-1 region — both need the definite-height column, not min-h-[100dvh].
+    const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
+    expect(inner?.className).toContain("h-[100dvh]")
+    expect(inner?.className).not.toContain("min-h-[100dvh]")
+    // Unlike the workflow editor, the A2UI hub is a top-level destination, so
+    // the tab bar stays mounted (content is padded above it).
+    expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
+  })
+
+  it("keeps the document-scroll min-height on the /workflows list (not full-viewport)", () => {
+    pathnameMock.mockReturnValue("/workflows")
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>list</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute("data-full-viewport", "false")
+    const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
+    expect(inner?.className).toContain("min-h-[100dvh]")
+  })
+
   it("sets data-tab-bar-visible attribute correctly", () => {
     pathnameMock.mockReturnValue("/")
     const { rerender } = render(

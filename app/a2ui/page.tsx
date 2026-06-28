@@ -331,9 +331,9 @@ function A2UIPageContent() {
   }
 
   return (
-    <div className="flex h-full flex-col" data-bg-target="chat">
+    <div className="flex min-h-0 flex-1 flex-col" data-bg-target="chat">
       <header className="shrink-0 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-start gap-3 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-start gap-3 px-4 py-3 sm:px-6 sm:py-4">
           <Link href="/" className="shrink-0">
             <Button variant="ghost" size="icon" className="h-9 w-9">
               <ArrowLeft className="h-4 w-4" />
@@ -356,21 +356,29 @@ function A2UIPageContent() {
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("hubSummary")}</p>
           </div>
 
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-            <Button variant="outline" className="gap-1.5" onClick={handleImportClick}>
+          <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
+              onClick={handleImportClick}
+              aria-label={t("importApp")}
+            >
               <Upload className="h-4 w-4" />
-              {t("importApp")}
+              <span className="hidden sm:inline">{t("importApp")}</span>
             </Button>
             <Button
               variant="outline"
-              className="gap-1.5"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
               onClick={handleExportAll}
               disabled={allApps.length === 0}
+              aria-label={t("exportAllApps")}
             >
               <Download className="h-4 w-4" />
-              {t("exportAllApps")}
+              <span className="hidden sm:inline">{t("exportAllApps")}</span>
             </Button>
-            <Button className="gap-1.5" onClick={focusCreatePrompt}>
+            <Button className="shrink-0 gap-1.5" onClick={focusCreatePrompt}>
               <Sparkles className="h-4 w-4" />
               {t("newApp")}
             </Button>

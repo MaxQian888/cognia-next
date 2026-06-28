@@ -497,7 +497,13 @@ export function AppShellMobile() {
 
       {/* ── Chat pane (single column) ─────────────────────────────────── */}
       <main
-        className="relative flex min-w-0 flex-1 flex-col overflow-hidden safe-area-pb"
+        // Reserve the fixed <MobileTabBar /> footprint (h-14 + its own
+        // safe-area inset) so the composer's bottom toolbar row isn't hidden
+        // behind it. The shell root is `h-[100dvh]`, which overrides the
+        // MobileShellWrapper's `pb` reservation, so we re-assert it here. This
+        // calc already includes env(safe-area-inset-bottom), superseding the
+        // bare `safe-area-pb` that only cleared the home indicator.
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]"
         data-bg-target="chat"
       >
         {!mounted ? null : (

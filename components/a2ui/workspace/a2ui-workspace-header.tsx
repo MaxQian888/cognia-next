@@ -39,10 +39,13 @@ export function WorkspaceHeader() {
         </Badge>
       </div>
 
+      {/* Mode tabs drive the desktop three-panel layout. On mobile the
+          bottom tab-bar is the single navigator, so these are hidden to avoid
+          a no-op control that would just confuse touch users. */}
       <Tabs
         value={workspaceMode}
         onValueChange={(v) => setWorkspaceMode(v as WorkspaceMode)}
-        className="shrink-0"
+        className="hidden shrink-0 sm:block"
       >
         <TabsList className="h-8">
           <TabsTrigger value="edit" className="h-7 text-xs gap-1 px-2">

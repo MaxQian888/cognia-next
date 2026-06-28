@@ -282,6 +282,16 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("app-shell-mobile")).toHaveClass("safe-area-px")
   })
 
+  it("reserves the fixed tab-bar footprint so the composer isn't hidden behind it", () => {
+    // The shell root is h-[100dvh], which overrides the MobileShellWrapper's
+    // bottom-padding reservation; the chat <main> must re-assert the tab-bar
+    // height (h-14 + safe-area inset) or the composer's toolbar row clips
+    // behind the fixed <MobileTabBar />.
+    const { container } = render(<AppShellMobile />)
+    const main = container.querySelector("main")
+    expect(main?.className).toContain("pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]")
+  })
+
   it("opens the navigation drawer when hamburger is pressed", async () => {
     const user = userEvent.setup()
     render(<AppShellMobile />)
