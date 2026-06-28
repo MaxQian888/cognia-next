@@ -51,7 +51,7 @@ export type MessagesScenario =
   | { kind: "overloaded" }
   | { kind: "auth-error" }
   | { kind: "server-error"; status: number; message: string }
-  | { kind: "stream-text"; chunks: string[] }
+  | { kind: "stream-text"; chunks: string[]; delayMs?: number }
 
 export type OauthScenario =
   | {
@@ -104,8 +104,20 @@ export interface MockAnthropicServer {
  * `stream: true` (the Claude Agent SDK / claude-code CLI the chat sidecar
  * spawns always streams), so the real chat path can consume this same mock.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function writeMessagesSse(res: any, chunks: string[], model: string): void {
+async function writeMessagesSse(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  res: any,
+  chunks: string[],
+  model: string,
+  delayMs = 0
+): Promise<void> {
+  // Track a client-side disconnect so an aborted stream (the interrupt path
+  // tears down the sidecar's HTTP request mid-flight) stops writing instead of
+  // throwing `ERR_STREAM_WRITE_AFTER_END` on the dead socket.
+  let aborted = false
+  res.on?.("close", () => {
+    aborted = true
+  })
   res.set("content-type", "text/event-stream")
   res.set("cache-control", "no-cache")
   res.set("connection", "keep-alive")
@@ -120,11 +132,16 @@ function writeMessagesSse(res: any, chunks: string[], model: string): void {
     `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`
   )
   for (const chunk of chunks) {
+    // A per-chunk delay keeps the turn streaming long enough for the interrupt
+    // spec to catch the live "streaming" state and click Stop.
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    if (aborted || res.writableEnded) return
     res.write(`event: content_block_delta\n`)
     res.write(
       `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: chunk } })}\n\n`
     )
   }
+  if (aborted || res.writableEnded) return
   res.write(`event: content_block_stop\n`)
   res.write(`data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`)
   res.write(`event: message_delta\n`)
@@ -187,7 +204,7 @@ export function createMockAnthropicServer(): MockAnthropicServer {
 
   // ── POST /v1/messages ────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  app.post("/v1/messages", (req: any, res: any) => {
+  app.post("/v1/messages", async (req: any, res: any) => {
     const body = req.body as MessagesRequestPayload
     messagesCalls.push(body)
     for (const r of messagesResolvers.slice()) {
@@ -230,12 +247,12 @@ export function createMockAnthropicServer(): MockAnthropicServer {
     // both the chat path and the workflow path.
     const wantsStream = body.stream === true
     if (scenario.kind === "stream-text") {
-      writeMessagesSse(res, scenario.chunks, body.model)
+      await writeMessagesSse(res, scenario.chunks, body.model, scenario.delayMs ?? 0)
       return
     }
     const text = renderText(body)
     if (wantsStream) {
-      writeMessagesSse(res, [text], body.model)
+      await writeMessagesSse(res, [text], body.model)
       return
     }
     const out: MessagesResponse = {
@@ -334,6 +351,33 @@ export function createMockAnthropicServer(): MockAnthropicServer {
     res.json(out)
   })
 
+  const doReset = (): void => {
+    scenario = { kind: "echo" }
+    oauthScenario = { kind: "granted" }
+    embeddingVector = Array.from({ length: 16 }, (_, i) => (i + 1) / 16)
+    messagesCalls.length = 0
+    embeddingsCalls.length = 0
+    oauthCalls.length = 0
+    messagesResolvers.length = 0
+  }
+
+  // ── Control plane (E2E-only) ─────────────────────────────────────────────
+  // The shared instance booted in global-setup is pointed at by the Tauri
+  // sidecar via ANTHROPIC_BASE_URL, but its in-process handle is NOT exported
+  // to specs. These endpoints let a spec (running in the Playwright node
+  // process) mutate the SAME instance over HTTP — drive an error/slow-stream
+  // scenario for the real chat path, then reset it so the next test sees echo.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.post("/__control/messages-scenario", (req: any, res: any) => {
+    scenario = req.body as MessagesScenario
+    res.json({ ok: true })
+  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.post("/__control/reset", (_req: any, res: any) => {
+    doReset()
+    res.json({ ok: true })
+  })
+
   return {
     async start(port = 0): Promise<void> {
       await new Promise<void>((resolve) => {
@@ -393,13 +437,7 @@ export function createMockAnthropicServer(): MockAnthropicServer {
       return embeddingsCalls
     },
     reset() {
-      scenario = { kind: "echo" }
-      oauthScenario = { kind: "granted" }
-      embeddingVector = Array.from({ length: 16 }, (_, i) => (i + 1) / 16)
-      messagesCalls.length = 0
-      embeddingsCalls.length = 0
-      oauthCalls.length = 0
-      messagesResolvers.length = 0
+      doReset()
     },
   }
 }
