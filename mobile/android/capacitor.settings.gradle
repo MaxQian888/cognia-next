@@ -17,6 +17,12 @@ project(':capacitor-browser').projectDir = new File('../../node_modules/.pnpm/@c
 include ':capacitor-camera'
 project(':capacitor-camera').projectDir = new File('../../node_modules/.pnpm/@capacitor+camera@8.2.0_@capacitor+core@8.3.4/node_modules/@capacitor/camera/android')
 
+include ':capacitor-clipboard'
+project(':capacitor-clipboard').projectDir = new File('../../node_modules/.pnpm/@capacitor+clipboard@8.0.1_@capacitor+core@8.3.4/node_modules/@capacitor/clipboard/android')
+
+include ':capacitor-device'
+project(':capacitor-device').projectDir = new File('../../node_modules/.pnpm/@capacitor+device@8.0.2_@capacitor+core@8.3.4/node_modules/@capacitor/device/android')
+
 include ':capacitor-dialog'
 project(':capacitor-dialog').projectDir = new File('../../node_modules/.pnpm/@capacitor+dialog@8.0.1_@capacitor+core@8.3.4/node_modules/@capacitor/dialog/android')
 

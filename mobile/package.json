@@ -18,6 +18,8 @@
     "@capacitor/app": "^8.1.0",
     "@capacitor/browser": "^8.0.3",
     "@capacitor/camera": "^8.2.0",
+    "@capacitor/clipboard": "^8.0.1",
+    "@capacitor/device": "^8.0.1",
     "@capacitor/dialog": "^8.0.1",
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/geolocation": "^8.2.0",

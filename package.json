@@ -95,10 +95,14 @@
     "docs:start": "pnpm -F docs start",
     "mobile:sync": "cross-env NEXT_PUBLIC_PLATFORM=mobile pnpm build && pnpm -F mobile sync",
     "mobile:open:ios": "pnpm -F mobile open:ios",
-    "mobile:open:android": "pnpm -F mobile open:android"
+    "mobile:open:android": "pnpm -F mobile open:android",
+    "mobile:deploy": "pwsh -NoProfile -File mobile/scripts/deploy-android.ps1",
+    "mobile:deploy:fast": "pwsh -NoProfile -File mobile/scripts/deploy-android.ps1 -SkipWeb"
   },
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "4.0.123",
     "@ai-sdk/anthropic": "3.0.85",
+    "@ai-sdk/azure": "3.0.79",
     "@ai-sdk/cohere": "3.0.39",
     "@ai-sdk/google": "3.0.83",
     "@ai-sdk/mistral": "3.0.40",
@@ -186,6 +190,7 @@
     "date-fns": "^4.4.0",
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",
+    "docx": "^9.7.1",
     "dompurify": "^3.4.11",
     "elkjs": "^0.11.1",
     "embla-carousel-react": "^8.6.0",
@@ -196,6 +201,7 @@
     "input-otp": "^1.4.2",
     "js-tiktoken": "^1.0.21",
     "js-yaml": "^4.2.0",
+    "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "katex": "^0.16.47",
     "lucide-react": "^1.21.0",
