@@ -120,6 +120,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     toggleFullscreen,
     handleCopy,
     handleDownload,
+    handleDownloadAs,
     handleOpenInNewTab,
     handleRevealInExplorer,
   } = useArtifactPanelState()
@@ -267,6 +268,22 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
               {getOverflowActionLabel(action)}
             </DropdownMenuItem>
           ))}
+          {activeArtifact ? (
+            <>
+              <DropdownMenuItem
+                data-testid="artifact-download-docx"
+                onClick={() => void handleDownloadAs("docx")}
+              >
+                {t("downloadAsWord")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="artifact-download-pdf"
+                onClick={() => void handleDownloadAs("pdf")}
+              >
+                {t("downloadAsPdf")}
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
     )

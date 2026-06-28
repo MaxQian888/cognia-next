@@ -17,6 +17,37 @@ jest.mock("@/lib/tauri/opener", () => ({
   openPath: jest.fn(),
 }))
 
+const saveExportMock = jest.fn(
+  async (_opts?: unknown): Promise<{ kind: string; [k: string]: unknown }> => ({
+    kind: "saved",
+    platform: "web",
+    location: "downloads",
+    filename: "Page.html",
+  })
+)
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (opts: unknown) => saveExportMock(opts),
+}))
+
+const clipboardWriteTextMock = jest.fn(
+  async (_v?: string): Promise<{ kind: string }> => ({ kind: "unsupported" })
+)
+jest.mock("@/lib/capacitor/clipboard", () => ({
+  writeText: (v: string) => clipboardWriteTextMock(v),
+}))
+
+const saveGeneratedDocumentMock = jest.fn(
+  async (_o?: unknown): Promise<{ kind: string; [k: string]: unknown }> => ({
+    kind: "saved",
+    platform: "mobile",
+    location: "file://doc",
+    filename: "Page.docx",
+  })
+)
+jest.mock("@/lib/files/document-writer", () => ({
+  saveGeneratedDocument: (o: unknown) => saveGeneratedDocumentMock(o),
+}))
+
 import { useArtifactPanelState } from "./use-artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 
@@ -111,7 +142,8 @@ describe("useArtifactPanelState", () => {
     expect(result.current.isFullscreen).toBe(true)
   })
 
-  it("handleCopy writes to navigator.clipboard", async () => {
+  it("handleCopy falls back to navigator.clipboard when the native plugin is unsupported", async () => {
+    clipboardWriteTextMock.mockResolvedValueOnce({ kind: "unsupported" })
     const writeText = jest.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
     const a = makeArtifact()
@@ -120,6 +152,19 @@ describe("useArtifactPanelState", () => {
       await result.current.handleCopy()
     })
     expect(writeText).toHaveBeenCalledWith(a.content)
+  })
+
+  it("handleCopy uses the native clipboard when available (no navigator fallback)", async () => {
+    clipboardWriteTextMock.mockResolvedValueOnce({ kind: "ok" })
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    const a = makeArtifact()
+    const { result } = renderHook(() => useArtifactPanelState())
+    await act(async () => {
+      await result.current.handleCopy()
+    })
+    expect(clipboardWriteTextMock).toHaveBeenCalledWith(a.content)
+    expect(writeText).not.toHaveBeenCalled()
   })
 
   it("handleOpenInCanvas creates a canvas document", () => {
@@ -169,23 +214,29 @@ describe("useArtifactPanelState", () => {
     expect(result.current.viewMode).toBe("edit")
   })
 
-  it("handleDownload triggers a blob download", () => {
-    // jsdom omits URL.createObjectURL/revokeObjectURL.
-    const createObjectURL = jest.fn(() => "blob:mock")
-    const revokeObjectURL = jest.fn()
-    Object.assign(URL, { createObjectURL, revokeObjectURL })
+  it("handleDownload saves via the cross-platform saveExport (works on mobile WebView)", async () => {
     const a = makeArtifact()
-    const created: HTMLAnchorElement[] = []
-    const orig = document.createElement.bind(document)
-    const spy = jest.spyOn(document, "createElement").mockImplementation((tag: string) => {
-      const el = orig(tag) as HTMLElement
-      if (tag === "a") created.push(el as HTMLAnchorElement)
-      return el
-    })
     const { result } = renderHook(() => useArtifactPanelState())
-    act(() => result.current.handleDownload())
-    expect(created.some((el) => el.download.startsWith(a.title))).toBe(true)
-    expect(createObjectURL).toHaveBeenCalled()
-    spy.mockRestore()
+    await act(async () => {
+      await result.current.handleDownload()
+    })
+    expect(saveExportMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: `${a.title}.html`,
+        data: a.content,
+        mimeType: "text/html",
+      })
+    )
+  })
+
+  it("handleDownloadAs generates a Word/PDF document via the document writer", async () => {
+    const a = makeArtifact()
+    const { result } = renderHook(() => useArtifactPanelState())
+    await act(async () => {
+      await result.current.handleDownloadAs("docx")
+    })
+    expect(saveGeneratedDocumentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ title: a.title, markdown: a.content, format: "docx" })
+    )
   })
 })
