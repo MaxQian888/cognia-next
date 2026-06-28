@@ -2,8 +2,23 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { StorageUsageCard } from "./storage-usage-card"
+
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...a: unknown[]) => toastSuccess(...a),
+    error: (...a: unknown[]) => toastError(...a),
+  },
+}))
+
+beforeEach(() => {
+  toastSuccess.mockClear()
+  toastError.mockClear()
+})
 
 describe("<StorageUsageCard />", () => {
   it("renders the supported variant with progress + backup list", async () => {
@@ -87,6 +102,56 @@ describe("<StorageUsageCard />", () => {
     )
     await waitFor(() => expect(screen.getByTestId("storage-persisted")).toBeInTheDocument())
     expect(screen.getByText(/may be evicted/i)).toBeInTheDocument()
+  })
+
+  it("offers a persistence request only when not persisted, and grants it", async () => {
+    const requester = jest.fn(async () => "persisted" as const)
+    render(
+      <StorageUsageCard
+        fetcher={async () => ({ totalBytes: 1, quotaBytes: 10, backupBytes: 0, backups: [] })}
+        persistedChecker={async () => false}
+        requester={requester}
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("storage-request-persistence")).toBeInTheDocument()
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId("storage-request-persistence"))
+    await waitFor(() => expect(requester).toHaveBeenCalled())
+    expect(toastSuccess).toHaveBeenCalled()
+    // Status flips to granted, so the button disappears.
+    await waitFor(() =>
+      expect(screen.queryByTestId("storage-request-persistence")).toBeNull()
+    )
+  })
+
+  it("hides the persistence request when already persisted", async () => {
+    render(
+      <StorageUsageCard
+        fetcher={async () => ({ totalBytes: 1, quotaBytes: 10, backupBytes: 0, backups: [] })}
+        persistedChecker={async () => true}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("storage-persisted")).toBeInTheDocument())
+    expect(screen.queryByTestId("storage-request-persistence")).toBeNull()
+  })
+
+  it("toasts an error when the persistence request is denied", async () => {
+    const requester = jest.fn(async () => "denied" as const)
+    render(
+      <StorageUsageCard
+        fetcher={async () => ({ totalBytes: 1, quotaBytes: 10, backupBytes: 0, backups: [] })}
+        persistedChecker={async () => false}
+        requester={requester}
+      />
+    )
+    const user = userEvent.setup()
+    await waitFor(() =>
+      expect(screen.getByTestId("storage-request-persistence")).toBeInTheDocument()
+    )
+    await user.click(screen.getByTestId("storage-request-persistence"))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 
   it("re-runs the fetcher when refresh is pressed", async () => {

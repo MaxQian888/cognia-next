@@ -11,12 +11,18 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { HardDriveIcon, RefreshCwIcon, SaveIcon } from "lucide-react"
 
+import { toast } from "sonner"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatBytes, getStorageUsage, type StorageUsage } from "@/lib/storage/usage"
-import { isStoragePersisted } from "@/lib/storage/persistence-request"
+import {
+  isStoragePersisted,
+  requestPersistentStorage,
+  type PersistenceStatus,
+} from "@/lib/storage/persistence-request"
 import { formatRelative } from "@/lib/time/relative"
 
 export interface StorageUsageCardProps {
@@ -24,13 +30,37 @@ export interface StorageUsageCardProps {
   fetcher?: () => Promise<StorageUsage>
   /** Override the persisted-state probe (tests). */
   persistedChecker?: () => Promise<boolean>
+  /** Override the persistence request (tests). */
+  requester?: () => Promise<PersistenceStatus>
 }
 
-export function StorageUsageCard({ fetcher, persistedChecker }: StorageUsageCardProps = {}) {
+export function StorageUsageCard({
+  fetcher,
+  persistedChecker,
+  requester,
+}: StorageUsageCardProps = {}) {
   const t = useTranslations("mobile.me.storage")
   const [usage, setUsage] = useState<StorageUsage | null>(null)
   const [persisted, setPersisted] = useState<boolean | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [requesting, setRequesting] = useState(false)
+
+  const requestPersistence = async () => {
+    setRequesting(true)
+    try {
+      const status = await (requester ?? requestPersistentStorage)()
+      if (status === "persisted") {
+        setPersisted(true)
+        toast.success(t("requestPersistenceGranted"))
+      } else if (status === "denied") {
+        toast.error(t("requestPersistenceDenied"))
+      } else {
+        toast.error(t("requestPersistenceUnsupported"))
+      }
+    } finally {
+      setRequesting(false)
+    }
+  }
 
   const load = async () => {
     setRefreshing(true)
@@ -105,6 +135,18 @@ export function StorageUsageCard({ fetcher, persistedChecker }: StorageUsageCard
               <span className="font-medium">{t("persistedLabel")}:</span>{" "}
               {persisted ? t("persistedYes") : t("persistedNo")}
             </p>
+          ) : null}
+          {persisted === false ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={requesting}
+              onClick={() => void requestPersistence()}
+              data-testid="storage-request-persistence"
+            >
+              {t("requestPersistence")}
+            </Button>
           ) : null}
           <Button
             type="button"
