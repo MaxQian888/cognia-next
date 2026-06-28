@@ -10,7 +10,11 @@
  * skipped AND released so the session re-pins to whatever serves it next.
  */
 
-import { deploymentKeyOfEntry } from "@cognia/provider-types/deployment"
+import {
+  DEPLOYMENT_MODEL_WILDCARD,
+  deploymentKeyOfEntry,
+  parseDeploymentKey,
+} from "@cognia/provider-types/deployment"
 import type { DeploymentFilter, FilterOutcome } from "@cognia/provider-types/deployment-filter"
 
 export const affinityFilter: DeploymentFilter = {
@@ -21,7 +25,17 @@ export const affinityFilter: DeploymentFilter = {
     if (!req.sessionId || !ctx.getSessionDeployment) return passthrough
     const pinned = ctx.getSessionDeployment(req.sessionId)
     if (!pinned) return passthrough
-    const idx = candidates.findIndex((e) => deploymentKeyOfEntry(e) === pinned)
+    let idx = candidates.findIndex((e) => deploymentKeyOfEntry(e) === pinned)
+    if (idx < 0) {
+      // A provider-only pin (`providerId::*`, recorded when the served turn's
+      // modelId was unknown) matches any candidate of that provider — without
+      // this, such a pin would never `===`-match a concrete entry and
+      // stickiness would silently no-op.
+      const parsed = parseDeploymentKey(pinned)
+      if (parsed?.modelId === DEPLOYMENT_MODEL_WILDCARD) {
+        idx = candidates.findIndex((e) => e.providerId === parsed.providerId)
+      }
+    }
     // Pin targets a deployment outside this alias's pool — leave it alone
     // (the session may interleave aliases; the pin stays for the right one).
     if (idx < 0) return passthrough

@@ -63,6 +63,34 @@ describe("affinityFilter", () => {
     expect(out.notes?.affinityPinned).toBe("a::m1")
   })
 
+  it("matches a provider-only wildcard pin against any model of that provider", () => {
+    const out = affinityFilter.filter(
+      entries,
+      reqFor("s1"),
+      ctx({ getSessionDeployment: () => "b::*" })
+    )
+    expect(out.candidates.map((e) => e.providerId)).toEqual(["b", "a", "c"])
+    expect(out.notes?.affinityPinned).toBe("b::*")
+  })
+
+  it("ignores a wildcard pin whose provider is not in the pool", () => {
+    const out = affinityFilter.filter(
+      entries,
+      reqFor("s1"),
+      ctx({ getSessionDeployment: () => "zzz::*" })
+    )
+    expect(out.notes).toBeUndefined()
+  })
+
+  it("ignores an unparseable pin key", () => {
+    const out = affinityFilter.filter(
+      entries,
+      reqFor("s1"),
+      ctx({ getSessionDeployment: () => "nocolon" })
+    )
+    expect(out.notes).toBeUndefined()
+  })
+
   it("ignores a pin outside the candidate pool (pin kept)", () => {
     const released: string[] = []
     const out = affinityFilter.filter(

@@ -34,6 +34,27 @@ describe("RoutingStrategyPicker", () => {
     expect(setRoutingConfig).toHaveBeenCalledWith({ strategy: "cost" })
   })
 
+  it("supports the difficulty and least-busy strategies", () => {
+    const saved = stateRef.current
+    try {
+      stateRef.current = {
+        settings: { routingConfig: { ...DEFAULT_ROUTING_CONFIG, strategy: "difficulty" } },
+        setRoutingConfig,
+      }
+      const { rerender } = render(<RoutingStrategyPicker />)
+      expect(screen.getAllByText(/strong model/i).length).toBeGreaterThan(0)
+
+      stateRef.current = {
+        settings: { routingConfig: { ...DEFAULT_ROUTING_CONFIG, strategy: "least-busy" } },
+        setRoutingConfig,
+      }
+      rerender(<RoutingStrategyPicker />)
+      expect(screen.getAllByText(/in-flight turns/i).length).toBeGreaterThan(0)
+    } finally {
+      stateRef.current = saved
+    }
+  })
+
   it("persists timeout and max-fallback edits, rejecting invalid values", () => {
     render(<RoutingStrategyPicker />)
 

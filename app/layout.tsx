@@ -32,6 +32,7 @@ import { ProjectStoreInitializer } from "@/components/providers/initializers/pro
 import { ModelsDevCatalogInitializer } from "@/components/providers/initializers/models-dev-catalog-initializer"
 import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-runtime-initializer"
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
+import { RoutingRuntimeInitializer } from "@/components/providers/initializers/routing-runtime-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
@@ -184,6 +185,13 @@ export default async function RootLayout({
                        * no-op; the inbound cache still seeds). */}
                       <WorkflowRuntimeProvider />
                       <TwinWorkerInitializer />
+                      {/* Reconnects the isolated provider-routing engine to the
+                       * live telemetry/settings stores (health, breaker, spend,
+                       * rate, in-flight, session affinity, difficulty + semantic
+                       * routers). Without this, all reliability/strategy routing
+                       * silently degrades to priority order. Must mount before
+                       * GatewayProvider, which builds routing engines. */}
+                      <RoutingRuntimeInitializer />
                       <ProviderCostMirrorInitializer />
                       <ContextKeysInitializer />
                       <WindowTitleInitializer />
