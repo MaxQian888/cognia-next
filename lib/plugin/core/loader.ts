@@ -5,7 +5,7 @@
 import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
 import type { Plugin, PluginDefinition, PluginManifest, PluginPermission } from "@/types/plugin"
-import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
+import { TimeoutError, withTimeout } from "@cognia/primitives"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import { loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"

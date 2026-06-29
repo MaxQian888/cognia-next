@@ -30,7 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { SYNC_HANDLER_TABLES, runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 import { cn } from "@/lib/utils"
 import type { SyncableTable } from "@/lib/sync/types"
 

@@ -34,7 +34,7 @@ import type {
   PluginTool,
   PluginToolContext,
 } from "@/types/plugin"
-import { TimeoutError } from "@/lib/utils/with-timeout"
+import { TimeoutError } from "@cognia/primitives"
 
 import { breakerKey, getOrCreateBreaker } from "@/lib/plugin/resilience/breaker-registry"
 import { resolveResilienceConfig } from "@/lib/plugin/resilience/config"

@@ -22,7 +22,7 @@
  */
 
 import type { PlatformAdapter } from "@/types/connectors"
-import { createMutex } from "@/lib/utils/async-mutex"
+import { createMutex } from "@cognia/primitives"
 import {
   listDueNow,
   peekNextWakeAt,

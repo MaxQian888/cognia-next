@@ -772,6 +772,21 @@ importers:
 
   packages/error-parsers: {}
 
+  packages/latex:
+    dependencies:
+      katex:
+        specifier: '*'
+        version: 0.16.47
+
+  packages/mermaid:
+    dependencies:
+      '@cognia/primitives':
+        specifier: workspace:*
+        version: link:../primitives
+      mermaid:
+        specifier: '*'
+        version: 11.15.0
+
   packages/plugin-sdk:
     dependencies:
       react:
@@ -780,6 +795,8 @@ importers:
       typescript:
         specifier: '>=5.0.0'
         version: 6.0.3
+
+  packages/primitives: {}
 
   packages/provider-core:
     dependencies:
@@ -855,6 +872,8 @@ importers:
       zod:
         specifier: '*'
         version: 4.4.3
+
+  packages/time: {}
 
   packages/vector:
     dependencies:

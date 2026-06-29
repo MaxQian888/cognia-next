@@ -34,7 +34,7 @@ import {
   setRemoteControlAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 import { isTauri, transport } from "@/lib/tauri"
 
 async function revokeDeviceRustSide(deviceId: string): Promise<void> {

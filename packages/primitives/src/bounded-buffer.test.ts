@@ -1,4 +1,4 @@
-import { createBoundedBuffer } from "@/lib/utils/bounded-buffer"
+import { createBoundedBuffer } from "./bounded-buffer"
 
 describe("createBoundedBuffer", () => {
   it("rejects a non-positive or non-integer capacity", () => {

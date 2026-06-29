@@ -23,7 +23,7 @@ import {
   requestPersistentStorage,
   type PersistenceStatus,
 } from "@/lib/storage/persistence-request"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 
 export interface StorageUsageCardProps {
   /** Override the fetcher (tests). */

@@ -2,7 +2,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
-import { pushRecent, toggleInList } from "@/lib/utils/recency-list"
+import { pushRecent, toggleInList } from "@cognia/primitives"
 
 /**
  * Per-user memory for the composer's slash-command picker: which commands were

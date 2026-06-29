@@ -1,9 +1,9 @@
 import { render, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { MermaidBlock } from "./mermaid-block"
-import { getCachedMermaid, renderMermaidCached } from "@/lib/mermaid/render-cache"
+import { getCachedMermaid, renderMermaidCached } from "@cognia/mermaid"
 
-jest.mock("@/lib/mermaid/render-cache", () => ({
+jest.mock("@cognia/mermaid", () => ({
   getCachedMermaid: jest.fn(),
   renderMermaidCached: jest.fn(),
 }))

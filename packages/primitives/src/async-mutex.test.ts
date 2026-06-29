@@ -1,4 +1,4 @@
-import { createMutex } from "@/lib/utils/async-mutex"
+import { createMutex } from "./async-mutex"
 
 /** A manually-resolvable promise for deterministic ordering assertions. */
 function deferred<T>(): {

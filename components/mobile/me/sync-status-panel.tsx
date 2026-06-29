@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/item"
 import { TransportTierIndicator } from "./transport-tier-indicator"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 
 type Snapshot = ReturnType<typeof snapshotSyncStates>
 
