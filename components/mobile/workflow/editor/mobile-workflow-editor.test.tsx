@@ -19,12 +19,19 @@ jest.mock("./mobile-canvas", () => ({
   MobileCanvas: (props: ChildProps) => {
     capturedStore = props.store as EditorStore
     const onNodeTap = props.onNodeTap as (id: string) => void
+    const onEdgeTap = props.onEdgeTap as (id: string) => void
     const onPaneTap = props.onPaneTap as () => void
     const onInit = props.onInit as (rf: unknown) => void
     return (
       <div data-testid="canvas" data-mode={String(props.mode)} data-connect={String(props.connectActive)}>
         <button data-testid="tap-n1" onClick={() => onNodeTap("n1")}>n1</button>
         <button data-testid="tap-n2" onClick={() => onNodeTap("n2")}>n2</button>
+        <button
+          data-testid="tap-edge"
+          onClick={() => onEdgeTap(capturedStore?.getState().edges[0]?.id ?? "missing")}
+        >
+          edge
+        </button>
         <button data-testid="tap-pane" onClick={() => onPaneTap()}>pane</button>
         <button
           data-testid="do-init"
@@ -181,5 +188,41 @@ describe("<MobileWorkflowEditor />", () => {
     fireEvent.click(screen.getByTestId("tap-pane"))
     expect(screen.queryByTestId("drawer")).toBeNull()
     expect(capturedStore?.getState().selectedNodeIds).toEqual([])
+  })
+
+  it("arms the shared renderer's tap-to-connect only in edit mode", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    // Read mode (default) leaves the handle-tap entry disabled.
+    expect(capturedStore?.getState().touchConnect).toBe(false)
+    fireEvent.click(screen.getByTestId("toggle-mode")) // → edit
+    expect(capturedStore?.getState().touchConnect).toBe(true)
+    fireEvent.click(screen.getByTestId("toggle-mode")) // → read
+    expect(capturedStore?.getState().touchConnect).toBe(false)
+  })
+
+  it("selects an edge on tap and deletes it via the floating bar", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    fireEvent.click(screen.getByTestId("toggle-mode")) // edit
+    // Build an edge to act on.
+    fireEvent.click(screen.getByTestId("tap-n1"))
+    fireEvent.click(screen.getByTestId("start-connect"))
+    fireEvent.click(screen.getByTestId("tap-n2"))
+    expect(capturedStore?.getState().edges).toHaveLength(1)
+    const edgeId = capturedStore!.getState().edges[0].id
+    // No delete bar until an edge is selected.
+    expect(screen.queryByTestId("mobile-edge-delete")).toBeNull()
+    fireEvent.click(screen.getByTestId("tap-edge"))
+    expect(capturedStore?.getState().selectedEdgeIds).toEqual([edgeId])
+    fireEvent.click(screen.getByTestId("mobile-edge-delete"))
+    expect(capturedStore?.getState().edges).toHaveLength(0)
+  })
+
+  it("does not select edges in read mode", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    // Seed an edge directly, then tap it in read mode.
+    capturedStore!.getState().connect({ source: "n1", target: "n2" })
+    fireEvent.click(screen.getByTestId("tap-edge"))
+    expect(capturedStore?.getState().selectedEdgeIds).toEqual([])
+    expect(screen.queryByTestId("mobile-edge-delete")).toBeNull()
   })
 })

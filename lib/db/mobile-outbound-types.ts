@@ -40,6 +40,8 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "plugin_set_enabled",
   "adapter_update_policy",
   "app_settings_update",
+  // External agents (ADR-0056, Wave 4) — enable/disable + permission-mode edit.
+  "external_agent_update",
 ] as const
 
 export type MobileOutboundCommand = (typeof MOBILE_OUTBOUND_COMMANDS)[number]

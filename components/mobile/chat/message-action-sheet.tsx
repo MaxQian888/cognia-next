@@ -14,7 +14,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CopyIcon, GitBranchIcon, Share2Icon } from "lucide-react"
+import { CopyIcon, GitBranchIcon, QuoteIcon, Share2Icon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
@@ -28,9 +28,11 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { share } from "@/lib/capacitor/share"
+import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { BranchDialog } from "@/components/chat/branch-dialog"
+import { COMPOSER_APPEND_EVENT } from "@/components/chat/composer"
 
 export interface MessageActionSheetProps {
   message: UIMessage | null
@@ -74,6 +76,22 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
     }
   }
 
+  const onQuote = () => {
+    if (!text) return
+    // Build a markdown blockquote from the message body and drop it into the
+    // composer draft via the existing append bridge (composer.tsx). No new IPC
+    // needed — the user then types their reply under the quote and sends.
+    const quoted = text
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n")
+    window.dispatchEvent(
+      new CustomEvent(COMPOSER_APPEND_EVENT, { detail: { text: `${quoted}\n\n` } })
+    )
+    void selectionFeedback()
+    onOpenChange(false)
+  }
+
   const onShare = async () => {
     if (!text) return
     setBusy(true)
@@ -107,6 +125,13 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
             onClick={onCopy}
             disabled={busy || !text}
             testid="message-action-copy"
+          />
+          <Row
+            icon={<QuoteIcon className="size-4" />}
+            label={t("quote")}
+            onClick={onQuote}
+            disabled={busy || !text}
+            testid="message-action-quote"
           />
           <Row
             icon={<Share2Icon className="size-4" />}

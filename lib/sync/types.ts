@@ -44,6 +44,11 @@ export type SyncableTable =
   // the phone vanished the moment its outbound job was sent. The phone is a
   // read-only viewer; runs are authored on the desktop that executes them.
   | "workflowRuns"
+  // ADR-0056 (Wave 4) — configured MCP servers. The standalone webview engine
+  // runs no MCP, and the phone has no `mcp_set_enabled` push RPC, so the mobile
+  // `/me/mcp` page is a paired-only read-only viewer of the desktop's servers.
+  // Mirroring this table is what lets it list the desktop's MCP config offline.
+  | "mcpServers"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

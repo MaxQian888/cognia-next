@@ -185,6 +185,32 @@ describe("MobileSpeechPage", () => {
     expect(screen.getByTestId("speech-stt-language")).toHaveValue("auto")
   })
 
+  it("renders the per-provider voice picker", () => {
+    render(<Page />)
+    expect(screen.getByTestId("speech-tts-voice")).toBeInTheDocument()
+  })
+
+  it("changing the voice persists the active provider's voice key", async () => {
+    settingsRef.current = { ttsEnabled: true, ttsProvider: "openai" }
+    render(<Page />)
+    fireEvent.change(screen.getByTestId("speech-tts-voice"), { target: { value: "nova" } })
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({ openaiVoice: "nova" })
+  })
+
+  it("maps the voice key to the selected provider (gemini)", async () => {
+    settingsRef.current = { ttsEnabled: true, ttsProvider: "gemini" }
+    render(<Page />)
+    fireEvent.change(screen.getByTestId("speech-tts-voice"), { target: { value: "Puck" } })
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({ geminiVoice: "Puck" })
+  })
+
+  it("disables the voice picker until TTS is enabled", () => {
+    render(<Page />)
+    expect(screen.getByTestId("speech-tts-voice")).toBeDisabled()
+  })
+
   it("selecting an STT language persists it; 'auto' clears the override", async () => {
     render(<Page />)
     fireEvent.change(screen.getByTestId("speech-stt-language"), { target: { value: "zh-CN" } })

@@ -89,6 +89,13 @@ describe("<MobileTabBar />", () => {
     expect(screen.getByTestId("mobile-tab-badge-chat")).toHaveTextContent("99+")
   })
 
+  it("truncates tab labels so long-locale text can't overflow the cell", () => {
+    render(<MobileTabBar />)
+    const label = screen.getByTestId("mobile-tab-chat").querySelector(".truncate")
+    expect(label).toBeTruthy()
+    expect(label).toHaveClass("max-w-full")
+  })
+
   it("triggers haptic selectionFeedback on tap", async () => {
     const user = userEvent.setup()
     render(<MobileTabBar />)

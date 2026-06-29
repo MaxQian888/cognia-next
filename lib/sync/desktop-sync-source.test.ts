@@ -37,6 +37,7 @@ describe("readDexieDelta", () => {
     await db.twinProfile.clear()
     await db.plugins.clear()
     await db.adapterInstances.clear()
+    await db.mcpServers.clear()
     await db.conversationOverrides.clear()
     await db.settings.clear()
     await db.workflowRuns.clear()
@@ -205,7 +206,15 @@ describe("readDexieDelta", () => {
       { id: "adapter-old", updatedAt: 4 } as never,
       { id: "adapter-new", updatedAt: 50 } as never,
     ])
+    await db.mcpServers.bulkPut([
+      { id: "mcp-missing" } as never,
+      { id: "mcp-old", updatedAt: 6 } as never,
+      { id: "mcp-new", updatedAt: 60 } as never,
+    ])
 
+    await expect(readDexieDelta("mcpServers", 10)).resolves.toEqual(
+      expect.objectContaining({ rows: [expect.objectContaining({ id: "mcp-new" })] })
+    )
     await expect(readDexieDelta("workflows", 10)).resolves.toEqual(
       expect.objectContaining({ rows: [expect.objectContaining({ id: "wf-new" })] })
     )

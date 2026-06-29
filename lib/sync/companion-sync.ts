@@ -35,6 +35,7 @@ import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
 import { syncGoals } from "./handlers/goals"
+import { syncMcpServers } from "./handlers/mcp-servers"
 import { syncMemories } from "./handlers/memory"
 import { syncMessages } from "./handlers/messages"
 import { syncPlugins } from "./handlers/plugins"
@@ -79,6 +80,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // badges, runs feed, and active-runs card reflect runs (incl. phone-
   // triggered ones). Definitions sync via `workflows` above; this is runs.
   { table: "workflowRuns", run: syncWorkflowRuns },
+  // ADR-0056 (Wave 4) — configured MCP servers. Read-only mirror so the
+  // mobile `/me/mcp` page can list the desktop's servers (the phone has no
+  // MCP push RPC and the standalone engine runs no MCP).
+  { table: "mcpServers", run: syncMcpServers },
 ]
 
 /**

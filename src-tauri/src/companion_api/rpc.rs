@@ -200,6 +200,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     "app_settings_update",
     // Wave 2 read-only projection routed through desktop_writes_bridge.
     "twin_profile_get",
+    // ADR-0056 Wave 4 — external-agent config (Zustand/localStorage on the
+    // desktop, not Dexie). `external_agent_list` is a read-only projection;
+    // `external_agent_update` (enable/disable + permission mode) round-trips
+    // through the mobile outbound queue. Both via desktop_writes_bridge.
+    "external_agent_list",
+    "external_agent_update",
     // Mobile outbound-queue RPCs — round-trip through desktop_writes_bridge.
     // Mirror `MOBILE_OUTBOUND_COMMANDS` in `lib/db/mobile-outbound-types.ts`.
     // Spec-parity test (`spec_parity.rs`) asserts these stay in lockstep
@@ -370,6 +376,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "message_get_by_session",
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
+    // ADR-0056 Wave 4 — read-only external-agent list projection.
+    "external_agent_list",
     // Read-only remote-control capability probe (drives the mobile
     // computer-use consent sheet). Pure read of the process-global allow list.
     "companion_can_control",
@@ -587,6 +595,73 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "ttsPitch",
     "ttsVolume",
     "ttsAutoPlay",
+    // ADR-0056 (mobile settings parity) — the remaining "portable" appearance
+    // keys that already sync desktop→phone (`CROSS_PLATFORM_SETTING_KEYS`) but
+    // were not yet writable back, so the embedded `<AppearanceSection/>` on
+    // `/me/appearance` silently 400'd on those tabs. All are non-credential
+    // presentation prefs.
+    "autoMode",
+    "density",
+    "radius",
+    "motion",
+    "typographyExt",
+    "a11y",
+    // ADR-0056 — agent-default preferences. Editable from the phone's
+    // `/me/agent` page only in PAIRED mode (the standalone engine has no agent
+    // loop). `permissionMode` escalations are additionally biometric-gated on
+    // the client (decision D4); the server still only checks allowlist
+    // membership here. None are credentials or transport config.
+    "permissionMode",
+    "defaultSystemPrompt",
+    "defaultMaxThinkingTokens",
+    "bareMode",
+    "debugMode",
+    "briefMode",
+    // ADR-0056 (Wave 2) — conversation completeness. `composerBehavior` and
+    // `streamPartialMessages` are phone-composer / render prefs; `compaction`
+    // is agent-execution config edited from `/me/agent` (paired). None are
+    // credentials or transport config.
+    "composerBehavior",
+    "streamPartialMessages",
+    "compaction",
+    // ADR-0056 (Wave 3) — project instruction loading config (CLAUDE.md /
+    // AGENTS.md discovery on the paired desktop). Remote-edited from
+    // `/me/instructions`. The globalPath / extraPaths it carries are desktop
+    // filesystem paths, but the value is config, not a credential.
+    "instructions",
+    // ADR-0056 (Wave 3) — master toggle for built-in surface-skill auto-
+    // injection (flows into `resolveSendOptions`). Edited from `/me/agent`.
+    "surfaceSkillsEnabled",
+    // ADR-0056 — visual workflow editor performance tier. Edited from
+    // `/me/workflows-settings` (both modes). A per-device motion/computation
+    // knob, not a credential or transport field; it is intentionally NOT
+    // mirrored desktop→phone (kept device-local) but is writable up so a
+    // paired desktop's tier can be set from the phone.
+    "workflowEditorPerformanceTier",
+    // ADR-0056 (Wave 2) — per-provider TTS voice selection. The phone's
+    // `/me/speech` page writes the active provider's flat voice-id key
+    // (matching the desktop `provider-config.tsx` field names). All are
+    // non-credential preference strings; API keys are NOT here.
+    "systemVoice",
+    "openaiVoice",
+    "geminiVoice",
+    "edgeVoice",
+    "elevenlabsVoice",
+    "lmntVoice",
+    "humeVoice",
+    "cartesiaVoice",
+    "deepgramVoice",
+    "xiaomiVoice",
+    // ADR-0056 (Wave 2) — web-search completeness. Preferred provider +
+    // cloud→system fallback edited from `/me/web-search`. Provider API keys
+    // stay device-local (`searchProviders` is deliberately NOT allowlisted).
+    "defaultSearchProvider",
+    "searchFallbackEnabled",
+    // ADR-0056 (Wave 2) — Notification Center preferences (one JSON object).
+    // The phone's `/me/notifications` page edits channels / level gates / quiet
+    // hours / behaviour / per-source mute / retention. The OS push permission
+    // itself stays a native, device-local grant (not part of this value).
+    "notificationPreferences",
 ];
 
 /// Public read-only accessor for the mobile-side `app_settings_update`
@@ -1227,7 +1302,12 @@ pub(super) async fn dispatch(
         | "goal_status"
         | "conversation_overrides_update"
         | "backup_export"
-        | "backup_import" => {
+        | "backup_import"
+        // ADR-0056 Wave 4 — external-agent list (read) + update (enable/disable
+        // + permission mode). TS-side dispatch arms in
+        // `lib/companion/desktop-write-source.ts`.
+        | "external_agent_list"
+        | "external_agent_update" => {
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             bridge
                 .dispatch(
@@ -2716,10 +2796,109 @@ mod tests {
             "customCss",
             "customCssEnabled",
             "importedVscodeThemes",
+            // ADR-0056 — portable appearance keys (sync down ⇄ write up).
+            "autoMode",
+            "density",
+            "radius",
+            "motion",
+            "typographyExt",
+            "a11y",
         ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "appearance key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_agent_default_keys() {
+        // ADR-0056 — the phone's `/me/agent` page (paired mode) writes these
+        // agent-default prefs through `app_settings_update`. They already sync
+        // desktop→phone; this closes the write-back gap. Missing any → 400.
+        for key in [
+            "permissionMode",
+            "defaultSystemPrompt",
+            "defaultMaxThinkingTokens",
+            "bareMode",
+            "debugMode",
+            "briefMode",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "agent-default key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_conversation_keys() {
+        // ADR-0056 (Wave 2) — the phone's conversation page + `/me/agent`
+        // compaction toggle write these. Missing any → 400 on save.
+        for key in ["composerBehavior", "streamPartialMessages", "compaction"] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "conversation key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+        // ADR-0056 (Wave 3) — instructions + surface-skills toggle.
+        for key in ["instructions", "surfaceSkillsEnabled"] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "Wave-3 key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+        // ADR-0056 — workflow editor performance tier, written from
+        // `/me/workflows-settings`. Missing → 400 on save.
+        assert!(
+            APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&"workflowEditorPerformanceTier"),
+            "workflowEditorPerformanceTier missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+        );
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_speech_voice_keys() {
+        // ADR-0056 (Wave 2) — the phone's `/me/speech` page writes the active
+        // provider's flat voice key. Missing any → 400 on save.
+        for key in [
+            "systemVoice",
+            "openaiVoice",
+            "geminiVoice",
+            "edgeVoice",
+            "elevenlabsVoice",
+            "lmntVoice",
+            "humeVoice",
+            "cartesiaVoice",
+            "deepgramVoice",
+            "xiaomiVoice",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "speech voice key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_web_search_and_notification_keys() {
+        // ADR-0056 (Wave 2) — `/me/web-search` preferred provider + fallback,
+        // and `/me/notifications` preference object. Provider API keys
+        // (`searchProviders`) must stay OUT (credentials). Missing any → 400.
+        for key in [
+            "defaultSearchProvider",
+            "searchFallbackEnabled",
+            "notificationPreferences",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "Wave-2 key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+        // Credential / non-portable search keys must NOT be writable.
+        for forbidden in ["searchProviders", "customSearchSources"] {
+            assert!(
+                !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&forbidden),
+                "credential key '{forbidden}' must NOT be in APP_SETTINGS_MOBILE_ALLOWED_KEYS"
             );
         }
     }

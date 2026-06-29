@@ -15,7 +15,7 @@
  * primitives carries the answer all the way back.
  */
 
-import type { Skill, StoredMessage, ChatSession, Character } from "@/lib/claude/types"
+import type { Skill, StoredMessage, ChatSession, Character, McpServer } from "@/lib/claude/types"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import { getDb } from "@/lib/db/schema"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -134,6 +134,8 @@ export async function readDexieDelta(
       return readPluginsDelta(since)
     case "adapterInstances":
       return readAdapterInstancesDelta(since)
+    case "mcpServers":
+      return readMcpServersDelta(since)
     case "settings":
       return readSettingsDelta(since)
     case "conversationOverrides":
@@ -245,6 +247,16 @@ async function readPluginsDelta(since: number): Promise<SyncDelta<unknown>> {
 async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().adapterInstances.where("updatedAt").above(since).toArray()
   return finalizeDelta("adapterInstances", rows as UpdatedAtRow[], since)
+}
+
+async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServer>> {
+  // mcpServers carries `updatedAt` (set on every create/update) but the index
+  // is `id, name, enabled` — no `updatedAt` index — so we read all and filter,
+  // mirroring readPluginsDelta. The configured-server set is small. The mobile
+  // `/me/mcp` page is a read-only viewer, so deltas only ever flow desktop→phone.
+  const all = await getDb().mcpServers.toArray()
+  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+  return finalizeDelta("mcpServers", rows, since)
 }
 
 async function readConversationOverridesDelta(since: number): Promise<SyncDelta<unknown>> {

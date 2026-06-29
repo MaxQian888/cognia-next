@@ -45,6 +45,8 @@
     "0052-cli-tui-fixed-region-layout",
     "0053-cli-tui-rendering-and-tool-invocation",
     "0054-local-multi-account-isolation",
-    "0055-agent-browser-loop"
+    "0055-agent-browser-loop",
+    "0056-mobile-settings-parity",
+    "0057-chat-rendering-completeness"
   ]
 }

@@ -17,27 +17,17 @@ import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { AutomationSection } from "@/components/settings/automation/automation-section"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { AppSettings } from "@/lib/claude/types"
+import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { useSettingsStore } from "@/stores/settings"
 
 export default function MobileComputerUsePage() {
   const t = useTranslations("mobile.me")
   const tCu = useTranslations("mobile.me.computerUse")
-  const tPanel = useTranslations("mobile.settingsPanel")
 
   const enabled = useSettingsStore((s) => s.settings?.mobileComputerUseEnabled ?? false)
-  const save = useSettingsStore((s) => s.save)
+  const update = useSettingsPatch()
 
-  const toggle = async (next: boolean) => {
-    const patch: Partial<AppSettings> = { mobileComputerUseEnabled: next }
-    await save(patch as never)
-    await enqueue({
-      command: "app_settings_update",
-      payload: { patch },
-      label: tPanel("queueLabel", { keys: "mobileComputerUseEnabled" }),
-    })
-  }
+  const toggle = (next: boolean) => update({ mobileComputerUseEnabled: next })
 
   return (
     <SubPageShell

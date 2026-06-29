@@ -142,6 +142,15 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Long-term memory rows (read-only mirror for the mobile memory viewer)".to_string(),
             has_tombstones: false,
         },
+        // ADR-0056 (Wave 4) — configured MCP servers. Read-only mirror so the
+        // mobile `/me/mcp` page lists the desktop's servers; the phone has no
+        // MCP push RPC and the standalone engine runs no MCP, so it never
+        // writes back.
+        SyncTableDescriptor {
+            name: "mcpServers".to_string(),
+            description: "Configured MCP servers (read-only mirror for the mobile /me/mcp viewer)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -157,6 +166,7 @@ mod tests {
         assert!(r.contains("workflowRuns"));
         assert!(r.contains("goals"));
         assert!(r.contains("memories"));
+        assert!(r.contains("mcpServers"));
         assert!(r.contains("settings"));
         assert!(!r.contains("ohai"));
     }

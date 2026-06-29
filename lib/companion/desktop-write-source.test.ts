@@ -50,6 +50,24 @@ jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   },
 }))
 
+// Stub the external-agent Zustand store so the external_agent_* arms exercise
+// the projection + clamping wiring without loading the real persist store.
+const mockExternalAgents: Record<string, Record<string, unknown>> = {}
+const mockUpdateAgent = jest.fn((id: string, updates: Record<string, unknown>) => {
+  if (mockExternalAgents[id]) {
+    mockExternalAgents[id] = { ...mockExternalAgents[id], ...updates }
+  }
+})
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: {
+    getState: () => ({
+      getAllAgents: () => Object.values(mockExternalAgents),
+      getAgent: (id: string) => mockExternalAgents[id],
+      updateAgent: mockUpdateAgent,
+    }),
+  },
+}))
+
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -354,6 +372,90 @@ describe("dispatchCommand: goal_pause / goal_resume / goal_stop", () => {
   it("rejects when goalId is missing", async () => {
     await expect(dispatchCommand("goal_pause", {})).rejects.toThrow(/goal_pause.goalId is required/)
     await expect(dispatchCommand("goal_stop", {})).rejects.toThrow(/goal_stop.goalId is required/)
+  })
+})
+
+describe("dispatchCommand: external_agent_list / external_agent_update", () => {
+  beforeEach(() => {
+    for (const k of Object.keys(mockExternalAgents)) delete mockExternalAgents[k]
+    mockExternalAgents.a1 = {
+      id: "a1",
+      name: "Claude Code",
+      protocol: "acp",
+      transport: "stdio",
+      enabled: true,
+      defaultPermissionMode: "default",
+    }
+    mockExternalAgents.a2 = {
+      id: "a2",
+      name: "Codex",
+      protocol: "codex-app-server",
+      transport: "stdio",
+      enabled: false,
+      defaultPermissionMode: "plan",
+    }
+  })
+
+  it("external_agent_list projects a compact summary of every agent", async () => {
+    const res = (await dispatchCommand("external_agent_list", {})) as {
+      agents: Array<{ id: string; defaultPermissionMode: string }>
+    }
+    expect(res.agents).toHaveLength(2)
+    expect(res.agents.map((a) => a.id).sort()).toEqual(["a1", "a2"])
+    // Falls back to "default" when unset.
+    const noMode = { id: "a3", name: "x", protocol: "acp", transport: "stdio", enabled: true }
+    mockExternalAgents.a3 = noMode
+    const res2 = (await dispatchCommand("external_agent_list", {})) as {
+      agents: Array<{ id: string; defaultPermissionMode: string }>
+    }
+    expect(res2.agents.find((a) => a.id === "a3")?.defaultPermissionMode).toBe("default")
+  })
+
+  it("external_agent_update toggles enabled", async () => {
+    await dispatchCommand("external_agent_update", { id: "a1", patch: { enabled: false } })
+    expect(mockUpdateAgent).toHaveBeenCalledWith("a1", { enabled: false })
+    expect(mockExternalAgents.a1.enabled).toBe(false)
+  })
+
+  it("external_agent_update clamps an unsupported permission mode per protocol", async () => {
+    // Codex (codex-app-server) cannot enforce `dontAsk` → clamps to a supported
+    // mode (never `dontAsk`).
+    await dispatchCommand("external_agent_update", {
+      id: "a2",
+      patch: { defaultPermissionMode: "dontAsk" },
+    })
+    const applied = mockUpdateAgent.mock.calls.at(-1)?.[1] as { defaultPermissionMode: string }
+    expect(applied.defaultPermissionMode).not.toBe("dontAsk")
+  })
+
+  it("external_agent_update passes a supported mode through unchanged", async () => {
+    await dispatchCommand("external_agent_update", {
+      id: "a1",
+      patch: { defaultPermissionMode: "acceptEdits" },
+    })
+    expect(mockUpdateAgent).toHaveBeenCalledWith("a1", { defaultPermissionMode: "acceptEdits" })
+  })
+
+  it("rejects a missing id, missing patch, invalid mode, or empty patch", async () => {
+    await expect(dispatchCommand("external_agent_update", {})).rejects.toThrow(/id is required/)
+    await expect(dispatchCommand("external_agent_update", { id: "a1" })).rejects.toThrow(
+      /patch is required/
+    )
+    await expect(
+      dispatchCommand("external_agent_update", { id: "missing", patch: { enabled: true } })
+    ).rejects.toThrow(/agent not found/)
+    await expect(
+      dispatchCommand("external_agent_update", { id: "a1", patch: { enabled: "yes" } })
+    ).rejects.toThrow(/enabled must be boolean/)
+    await expect(
+      dispatchCommand("external_agent_update", {
+        id: "a1",
+        patch: { defaultPermissionMode: "nope" },
+      })
+    ).rejects.toThrow(/defaultPermissionMode is invalid/)
+    await expect(dispatchCommand("external_agent_update", { id: "a1", patch: {} })).rejects.toThrow(
+      /no editable fields/
+    )
   })
 })
 

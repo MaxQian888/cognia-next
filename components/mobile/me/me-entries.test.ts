@@ -51,6 +51,39 @@ describe("me-entries registry", () => {
     const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
     expect(byId("search")).toMatchObject({ href: "/search", section: "connection" })
   })
+
+  it("surfaces the ADR-0056 plugins, subagents, and workflow-settings entries", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("plugins")).toMatchObject({ href: "/me/plugins", section: "connection" })
+    expect(byId("subagents")).toMatchObject({ href: "/me/subagents", section: "connection" })
+    expect(byId("workflows-settings")).toMatchObject({
+      href: "/me/workflows-settings",
+      section: "automation",
+    })
+  })
+
+  it("surfaces the ADR-0056 Wave 4 MCP and GitHub Delivery entries", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("mcp")).toMatchObject({ href: "/me/mcp", section: "connection" })
+    expect(byId("github-delivery")).toMatchObject({
+      href: "/me/github-delivery",
+      section: "connection",
+    })
+  })
+
+  it("surfaces the ADR-0056 Wave 4 read-only desktop-bound sections", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("slash-commands")).toMatchObject({
+      href: "/me/slash-commands",
+      section: "connection",
+    })
+    expect(byId("network")).toMatchObject({ href: "/me/network", section: "connection" })
+    expect(byId("hooks")).toMatchObject({ href: "/me/hooks", section: "connection" })
+    expect(byId("agent-teams-settings")).toMatchObject({
+      href: "/me/agent-teams-settings",
+      section: "connection",
+    })
+  })
 })
 
 describe("matchMeEntry", () => {

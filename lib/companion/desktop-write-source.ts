@@ -84,6 +84,12 @@ import type {
   ImportOptions,
   ImportMergeStrategy,
 } from "@/lib/data/types"
+import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import type {
+  AcpPermissionMode,
+  ExternalAgentProtocol,
+  UpdateExternalAgentInput,
+} from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -256,6 +262,16 @@ export async function dispatchCommand(
       return goalUpdate(payload)
     case "goal_status":
       return goalStatus(payload)
+    // External agents (ADR-0056, Wave 4). The desktop's external-agent config
+    // lives in the `cognia-external-agents` Zustand/localStorage store (NOT a
+    // Dexie table, so no sync mirror) — these arms project + mutate it for the
+    // phone's `/me/external-agents` page.
+    //   - external_agent_list   → read-only projection (mirrors twin_profile_get)
+    //   - external_agent_update → enable/disable + permission-mode edit
+    case "external_agent_list":
+      return externalAgentList()
+    case "external_agent_update":
+      return externalAgentUpdate(payload)
     // Settings — per-conversation overrides (pin/archive/title).
     case "conversation_overrides_update":
       return conversationOverridesUpdate(payload)
@@ -944,6 +960,115 @@ async function twinJobAction(
       break
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// External agents (ADR-0056, Wave 4)
+// ---------------------------------------------------------------------------
+
+/** Compact, wire-safe projection of one external agent for the phone list. */
+interface ExternalAgentSummary {
+  id: string
+  name: string
+  protocol: ExternalAgentProtocol
+  transport: string
+  enabled: boolean
+  defaultPermissionMode: AcpPermissionMode
+}
+
+/** Lazily reach the desktop Zustand store. Dynamic so the heavy
+ *  persist-backed store (and `localStorage`) is only touched on the desktop
+ *  dispatch path, never at module import time (keeps the headless/test paths
+ *  and the SSR bundle clean). */
+async function getExternalAgentStoreState() {
+  const { useExternalAgentStore } = await import("@/stores/agent/external-agent-store")
+  return useExternalAgentStore.getState()
+}
+
+/** Read-only projection of the desktop's configured external agents. Mirrors
+ *  the `twin_profile_get` read arm — invoked directly via `transport.call`,
+ *  not through the outbound queue. */
+async function externalAgentList(): Promise<{ agents: ExternalAgentSummary[] }> {
+  const store = await getExternalAgentStoreState()
+  const agents: ExternalAgentSummary[] = store.getAllAgents().map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    protocol: agent.protocol,
+    transport: agent.transport,
+    enabled: agent.enabled,
+    defaultPermissionMode: agent.defaultPermissionMode ?? "default",
+  }))
+  return { agents }
+}
+
+/**
+ * Enable/disable an external agent and/or change its default permission mode
+ * from the phone. The permission mode is clamped through
+ * {@link adaptPermissionMode} against the agent's own protocol, so the phone
+ * can never persist a mode the backend can't enforce (e.g. `dontAsk` on
+ * Codex) — the desktop store is the authority, so the clamp lives here.
+ */
+async function externalAgentUpdate(
+  payload: Record<string, unknown>
+): Promise<{ agent: ExternalAgentSummary | null }> {
+  const id = payload.id as string | undefined
+  if (!id) throw new Error("external_agent_update.id is required")
+  const patch = payload.patch as { enabled?: unknown; defaultPermissionMode?: unknown } | undefined
+  if (!patch || typeof patch !== "object") {
+    throw new Error("external_agent_update.patch is required")
+  }
+
+  const store = await getExternalAgentStoreState()
+  const agent = store.getAgent(id)
+  if (!agent) throw new Error(`external_agent_update: agent not found: ${id}`)
+
+  const updates: UpdateExternalAgentInput = {}
+  if (Object.prototype.hasOwnProperty.call(patch, "enabled")) {
+    if (typeof patch.enabled !== "boolean") {
+      throw new Error("external_agent_update.patch.enabled must be boolean")
+    }
+    updates.enabled = patch.enabled
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "defaultPermissionMode")) {
+    const requested = patch.defaultPermissionMode
+    if (!isAcpPermissionMode(requested)) {
+      throw new Error("external_agent_update.patch.defaultPermissionMode is invalid")
+    }
+    // Clamp toward restriction for the agent's protocol — never escalate past
+    // what the backend can enforce.
+    updates.defaultPermissionMode = adaptPermissionMode(requested, agent.protocol).mode
+  }
+  if (Object.keys(updates).length === 0) {
+    throw new Error("external_agent_update.patch has no editable fields")
+  }
+
+  store.updateAgent(id, updates)
+
+  const next = store.getAgent(id)
+  return {
+    agent: next
+      ? {
+          id: next.id,
+          name: next.name,
+          protocol: next.protocol,
+          transport: next.transport,
+          enabled: next.enabled,
+          defaultPermissionMode: next.defaultPermissionMode ?? "default",
+        }
+      : null,
+  }
+}
+
+const ACP_PERMISSION_MODES: readonly AcpPermissionMode[] = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "dontAsk",
+]
+
+function isAcpPermissionMode(value: unknown): value is AcpPermissionMode {
+  return typeof value === "string" && ACP_PERMISSION_MODES.includes(value as AcpPermissionMode)
 }
 
 // ---------------------------------------------------------------------------

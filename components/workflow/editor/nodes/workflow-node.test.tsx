@@ -394,6 +394,49 @@ describe("WorkflowNodeComponent", () => {
     expect(screen.queryByTestId("wf-node-handle-out-n_b-true")).toBeNull()
   })
 
+  // ── mobile tap-to-connect (handle-tap entry, gated on store.touchConnect) ──
+  describe("mobile handle-tap to connect", () => {
+    it("does nothing on a source-handle tap when touchConnect is off (desktop)", () => {
+      const { store } = withStore()
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-source-n_a"))
+      expect(store.getState().connectionState).toBeNull()
+    })
+
+    it("arms a connection from the tapped source handle when touchConnect is on", () => {
+      const { store } = withStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-source-n_a"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_a",
+        sourceHandle: null,
+      })
+    })
+
+    it("carries the specific decision handle id (branch true output)", () => {
+      const { store } = withStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 2 })
+      fireEvent.click(screen.getByTestId("wf-node-handle-out-n_b-true"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_b",
+        sourceHandle: "true",
+      })
+    })
+
+    it("arms the error path from the error handle (branch policy)", () => {
+      const store = branchStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-error-n_a"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_a",
+        sourceHandle: "error",
+      })
+    })
+  })
+
   describe("diagnostics badge (A4)", () => {
     function storeWith(
       nodes: VisualWorkflow["nodes"],

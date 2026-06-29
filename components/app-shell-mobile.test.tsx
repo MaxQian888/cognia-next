@@ -59,6 +59,7 @@ const select = jest.fn()
 const create = jest.fn()
 const remove = jest.fn().mockResolvedValue(undefined)
 const rename = jest.fn()
+const directSend = jest.fn().mockResolvedValue(undefined)
 let activeSessionId: string | null = null
 jest.mock("@/hooks/chat", () => ({
   useSessions: () => ({
@@ -70,7 +71,7 @@ jest.mock("@/hooks/chat", () => ({
     rename,
   }),
   useClaudeChat: () => ({
-    send: jest.fn(),
+    send: directSend,
     stop: jest.fn(),
     regenerate: jest.fn(),
     editAndResend: jest.fn(),
@@ -156,8 +157,35 @@ jest.mock("@/hooks/data", () => ({
 // Stub heavy children — the shell test verifies structural wiring, not
 // child internals.
 jest.mock("@/components/chat/chat-view", () => ({
-  ChatPane: ({ showHeader }: { showHeader?: boolean }) => (
-    <div data-testid="chat-pane" data-show-header={showHeader === false ? "false" : "true"} />
+  ChatPane: ({
+    showHeader,
+    onSend,
+  }: {
+    showHeader?: boolean
+    onSend?: (content: unknown) => Promise<void>
+  }) => (
+    <div data-testid="chat-pane" data-show-header={showHeader === false ? "false" : "true"}>
+      <button
+        data-testid="chat-send-stub"
+        onClick={() => {
+          void onSend?.("hi").catch(() => {})
+        }}
+      />
+    </div>
+  ),
+}))
+
+const hapterImpact = jest.fn()
+const hapterNotify = jest.fn()
+jest.mock("@/lib/capacitor/haptics", () => ({
+  impact: (...a: unknown[]) => hapterImpact(...a),
+  notify: (...a: unknown[]) => hapterNotify(...a),
+}))
+// gap11 — stub the artifact dock (its real import chain pulls the editor/LSP
+// modules). Render children inside a marker so we can assert it wraps the chat.
+jest.mock("@/components/artifacts/artifact-workspace-dock", () => ({
+  ArtifactWorkspaceDock: ({ children }: { children?: import("react").ReactNode }) => (
+    <div data-testid="artifact-workspace-dock">{children}</div>
   ),
 }))
 jest.mock("@/components/chat/character-picker", () => ({
@@ -251,6 +279,9 @@ beforeEach(() => {
   create.mockReset()
   remove.mockReset().mockResolvedValue(undefined)
   rename.mockReset()
+  directSend.mockReset().mockResolvedValue(undefined)
+  hapterImpact.mockReset()
+  hapterNotify.mockReset()
   setSelectedGuild.mockReset().mockImplementation((g: SelectedGuild) => {
     selectedGuild = g
   })
@@ -273,6 +304,14 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("mobile-nav-trigger")).toBeInTheDocument()
     expect(screen.getByTestId("chat-pane")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-actions-trigger")).toBeInTheDocument()
+  })
+
+  it("wraps the chat pane in the artifact workspace dock (gap11)", () => {
+    render(<AppShellMobile />)
+    const dock = screen.getByTestId("artifact-workspace-dock")
+    expect(dock).toBeInTheDocument()
+    // the dock must CONTAIN the chat pane (so an artifact has a panel to open)
+    expect(dock).toContainElement(screen.getByTestId("chat-pane"))
   })
 
   it("applies left/right safe-area insets so a landscape notch never covers content", () => {
@@ -536,6 +575,44 @@ describe("<AppShellMobile />", () => {
       screen.getByTestId("guild-open-settings").click()
     })
     await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings"))
+  })
+
+  it("fires a light haptic after a successful send", async () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "x",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("chat-send-stub"))
+    await waitFor(() => expect(directSend).toHaveBeenCalledWith("hi"))
+    await waitFor(() => expect(hapterImpact).toHaveBeenCalledWith("light"))
+    expect(hapterNotify).not.toHaveBeenCalled()
+  })
+
+  it("fires an error haptic when a send throws", async () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "x",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    directSend.mockReset().mockRejectedValueOnce(new Error("boom"))
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("chat-send-stub"))
+    await waitFor(() => expect(hapterNotify).toHaveBeenCalledWith("error"))
+    expect(hapterImpact).not.toHaveBeenCalled()
   })
 
   it("auto-selects the most-recent matching session on first render", async () => {

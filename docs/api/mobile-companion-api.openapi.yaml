@@ -1985,8 +1985,10 @@ paths:
       summary: Patch user-facing AppSettings. Keys are allowlisted server-side.
       description: |
         Only the mobile-editable subset of AppSettings keys is accepted (theme,
-        fontScale, language, appearance, WebRTC config, etc.). A non-allowlisted
-        key or a non-object patch returns `400 validation_failed`.
+        fontScale, language, appearance, WebRTC config, agent defaults such as
+        permissionMode / defaultSystemPrompt / bareMode, etc.). A non-allowlisted
+        key (credentials, transport, sidecar config) or a non-object patch
+        returns `400 validation_failed`.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2058,6 +2060,99 @@ paths:
         "400":
           {
             description: missing twinId,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/external_agent_list:
+    post:
+      operationId: rpcExternalAgentList
+      tags: [rpc-data]
+      summary: List the desktop's configured external agents.
+      description: |
+        Read-only projection of the desktop's external-agent config (which
+        lives in a Zustand/localStorage store, not Dexie, so there is no sync
+        mirror). Skips the idempotency cache. Routed through
+        desktop_writes_bridge. Powers the mobile `/me/external-agents` page.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: The configured external agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, protocol, transport, enabled, defaultPermissionMode]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        protocol: { type: string }
+                        transport: { type: string }
+                        enabled: { type: boolean }
+                        defaultPermissionMode: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/external_agent_update:
+    post:
+      operationId: rpcExternalAgentUpdate
+      tags: [rpc-data]
+      summary: Enable/disable an external agent or change its permission mode.
+      description: |
+        Patches the desktop external-agent config. `enabled` toggles the agent
+        on/off; `defaultPermissionMode` is clamped on the desktop to what the
+        agent's protocol can enforce (never escalated past it). At least one
+        editable field must be present. Routed through desktop_writes_bridge.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, patch]
+              properties:
+                id: { type: string }
+                patch:
+                  type: object
+                  properties:
+                    enabled: { type: boolean }
+                    defaultPermissionMode:
+                      type: string
+                      enum: [default, acceptEdits, bypassPermissions, plan, dontAsk]
+      responses:
+        "200":
+          description: The updated agent projection, or null when missing.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent: { type: [object, "null"], additionalProperties: true }
+        "400":
+          {
+            description: missing id/patch or no editable fields,
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
         "401": { $ref: "#/components/responses/JwtRejected" }

@@ -129,6 +129,35 @@ describe("MobileWebSearchPage", () => {
     expect(saveMock).toHaveBeenCalledWith({ searchMaxResults: 20 })
   })
 
+  it("renders the preferred-provider picker and fallback toggle", () => {
+    render(<Page />)
+    expect(screen.getByTestId("web-search-provider")).toBeInTheDocument()
+    expect(screen.getByTestId("web-search-fallback")).toBeInTheDocument()
+  })
+
+  it("changing the preferred provider persists defaultSearchProvider", async () => {
+    settingsRef.current = { searchEnabled: true, searchMaxResults: 10 }
+    render(<Page />)
+    fireEvent.change(screen.getByTestId("web-search-provider"), { target: { value: "exa" } })
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({ defaultSearchProvider: "exa" })
+  })
+
+  it("toggling the fallback persists searchFallbackEnabled", async () => {
+    settingsRef.current = { searchEnabled: true, searchFallbackEnabled: true }
+    render(<Page />)
+    fireEvent.click(screen.getByTestId("web-search-fallback"))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({ searchFallbackEnabled: false })
+  })
+
+  it("disables the provider + fallback until search is enabled", () => {
+    render(<Page />)
+    expect(screen.getByTestId("web-search-provider")).toBeDisabled()
+    expect(screen.getByTestId("web-search-fallback")).toBeDisabled()
+  })
+
   it("falls back to disabled + default count when settings are absent", () => {
     settingsRef.current = undefined
     render(<Page />)

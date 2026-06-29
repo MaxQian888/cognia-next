@@ -127,4 +127,35 @@ describe("useTapConnect", () => {
     expect(outcome.valid).toBe(false)
     expect(store.getState().edges).toHaveLength(0)
   })
+
+  it("routes the new edge through the source handle passed to start (branch output)", () => {
+    const { store, result } = setup()
+    act(() => result.current.start("trigger", "true"))
+    expect(store.getState().connectionState?.sourceHandle).toBe("true")
+    act(() => {
+      result.current.completeTo("ai_a")
+    })
+    expect(store.getState().edges[0]).toMatchObject({
+      source: "trigger",
+      target: "ai_a",
+      sourceHandle: "true",
+    })
+  })
+
+  it("reflects a connection armed directly on the store (handle-tap entry)", () => {
+    const { store, result } = setup()
+    // Simulate the shared node renderer's `armConnectFromHandle` — it sets
+    // connectionState on the store, not via the hook.
+    act(() => store.getState().beginConnection({ sourceId: "trigger", sourceHandle: "error" }))
+    expect(result.current.active).toBe(true)
+    expect(result.current.sourceId).toBe("trigger")
+    act(() => {
+      result.current.completeTo("ai_a")
+    })
+    expect(store.getState().edges[0]).toMatchObject({
+      source: "trigger",
+      target: "ai_a",
+      sourceHandle: "error",
+    })
+  })
 })

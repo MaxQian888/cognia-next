@@ -586,6 +586,15 @@ describe("editor store — connectionState (drag silk)", () => {
     useStore.getState().endConnection()
     expect(useStore.temporal.getState().pastStates.length).toBe(before)
   })
+
+  it("setTouchConnect toggles the mobile handle-tap entry flag (default off)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().touchConnect).toBe(false)
+    useStore.getState().setTouchConnect(true)
+    expect(useStore.getState().touchConnect).toBe(true)
+    useStore.getState().setTouchConnect(false)
+    expect(useStore.getState().touchConnect).toBe(false)
+  })
 })
 
 describe("editor store — requestedContextMenu signal", () => {

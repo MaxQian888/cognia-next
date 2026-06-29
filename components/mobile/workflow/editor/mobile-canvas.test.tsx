@@ -23,6 +23,7 @@ jest.mock("@xyflow/react", () => {
     children,
     onInit,
     onNodeClick,
+    onEdgeClick,
     onPaneClick,
     nodesDraggable,
     elementsSelectable,
@@ -51,6 +52,14 @@ jest.mock("@xyflow/react", () => {
           }
         >
           node
+        </button>
+        <button
+          data-testid="rf-edge"
+          onClick={(e) =>
+            (onEdgeClick as (e: unknown, ed: { id: string }) => void)?.(e, { id: "e1" })
+          }
+        >
+          edge
         </button>
         <button data-testid="rf-pane" onClick={() => (onPaneClick as () => void)?.()}>
           pane
@@ -119,6 +128,7 @@ function buildWorkflow(): VisualWorkflow {
 function renderCanvas(mode: "read" | "edit", connectActive = false) {
   const store = createEditorStore(buildWorkflow())
   const onNodeTap = jest.fn()
+  const onEdgeTap = jest.fn()
   const onPaneTap = jest.fn()
   const onInit = jest.fn()
   render(
@@ -127,11 +137,12 @@ function renderCanvas(mode: "read" | "edit", connectActive = false) {
       mode={mode}
       connectActive={connectActive}
       onNodeTap={onNodeTap}
+      onEdgeTap={onEdgeTap}
       onPaneTap={onPaneTap}
       onInit={onInit}
     />
   )
-  return { store, onNodeTap, onPaneTap, onInit }
+  return { store, onNodeTap, onEdgeTap, onPaneTap, onInit }
 }
 
 function getMockRf() {
@@ -159,6 +170,7 @@ describe("<MobileCanvas />", () => {
         mode="read"
         connectActive={false}
         onNodeTap={jest.fn()}
+        onEdgeTap={jest.fn()}
         onPaneTap={jest.fn()}
         onInit={jest.fn()}
       />
@@ -200,6 +212,79 @@ describe("<MobileCanvas />", () => {
     const { onPaneTap } = renderCanvas("read")
     fireEvent.click(screen.getByTestId("rf-pane"))
     expect(onPaneTap).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes an edge tap to onEdgeTap", () => {
+    const { onEdgeTap } = renderCanvas("edit")
+    fireEvent.click(screen.getByTestId("rf-edge"))
+    expect(onEdgeTap).toHaveBeenCalledWith("e1")
+  })
+
+  it("scopes the touch handle-enlarge CSS via the wf-touch-canvas class", () => {
+    renderCanvas("edit")
+    expect(screen.getByTestId("mobile-canvas")).toHaveClass("wf-touch-canvas")
+  })
+
+  it("names the rooted output in the connect banner (error path)", () => {
+    const store = createEditorStore(buildWorkflow())
+    store.getState().beginConnection({ sourceId: "n1", sourceHandle: "error" })
+    render(
+      <MobileCanvas
+        store={store}
+        mode="edit"
+        connectActive
+        onNodeTap={jest.fn()}
+        onEdgeTap={jest.fn()}
+        onPaneTap={jest.fn()}
+        onInit={jest.fn()}
+      />
+    )
+    // The mock t() echoes the key, so the named-source branch shows "connectFrom"
+    // while the generic prompt would show "connectTarget".
+    expect(screen.getByTestId("mobile-connect-banner")).toHaveTextContent("connectFrom")
+  })
+
+  it("resolves a decision output label for the connect banner", () => {
+    const wf = buildWorkflow()
+    wf.nodes.push({
+      id: "b1",
+      type: "flow.branch",
+      typeVersion: 2,
+      position: { x: 300, y: 0 },
+      data: { label: "Branch", params: {} },
+    })
+    const store = createEditorStore(wf)
+    store.getState().beginConnection({ sourceId: "b1", sourceHandle: "true" })
+    render(
+      <MobileCanvas
+        store={store}
+        mode="edit"
+        connectActive
+        onNodeTap={jest.fn()}
+        onEdgeTap={jest.fn()}
+        onPaneTap={jest.fn()}
+        onInit={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("mobile-connect-banner")).toHaveTextContent("connectFrom")
+  })
+
+  it("falls back to the generic prompt for an unresolved source handle", () => {
+    const store = createEditorStore(buildWorkflow())
+    // n1 is a single-output node — no decision handle named "ghost".
+    store.getState().beginConnection({ sourceId: "n1", sourceHandle: "ghost" })
+    render(
+      <MobileCanvas
+        store={store}
+        mode="edit"
+        connectActive
+        onNodeTap={jest.fn()}
+        onEdgeTap={jest.fn()}
+        onPaneTap={jest.fn()}
+        onInit={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("mobile-connect-banner")).toHaveTextContent("connectTarget")
   })
 
   it("shows the connect-target banner while connecting", () => {

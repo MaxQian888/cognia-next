@@ -192,6 +192,15 @@ export interface EditorState extends EditorStateSnapshot {
   ) => void
   endConnection: () => void
   /**
+   * Mobile-only switch: when true, the shared node renderer arms tap-to-connect
+   * from a source handle on click (touch can't reliably drag a 12px handle).
+   * Desktop never sets it, so the handle-tap path is a no-op there and the
+   * native drag-to-connect interaction is untouched. Set by the mobile editor
+   * when entering edit mode; cleared on read mode / unmount.
+   */
+  touchConnect: boolean
+  setTouchConnect: (v: boolean) => void
+  /**
    * Pending "create node from a dragged handle" (C2). Set when a connection is
    * released on the empty pane: the canvas opens the palette, and on pick
    * routes through `addNodeConnected` to create the node at `dropPos` and wire
@@ -550,6 +559,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         palettePrefillPosition: null,
         spotlightedNodeId: null,
         connectionState: null,
+        touchConnect: false,
         pendingConnectFrom: null,
         requestedContextMenu: null,
         requestedRunFromStepId: null,
@@ -613,6 +623,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           })
         },
         endConnection: () => set({ connectionState: null }),
+        setTouchConnect: (v) => set({ touchConnect: v }),
         setPendingConnectFrom: (v) => set({ pendingConnectFrom: v }),
         requestContextMenu: (target, screenAnchor) =>
           set({ requestedContextMenu: { target, screenAnchor } }),

@@ -28,9 +28,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { AppSettings, BiometricGuardPolicy } from "@/lib/claude/types"
+import type { BiometricGuardPolicy } from "@/lib/claude/types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { useSettingsStore } from "@/stores/settings"
 
 export default function MobilePreferencesPage() {
@@ -39,23 +39,13 @@ export default function MobilePreferencesPage() {
   const tSec = useTranslations("mobile.security")
 
   const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
+  const update = useSettingsPatch()
 
   const fontScale = settings?.fontScale ?? "md"
   const defaultModel = settings?.defaultModel ?? ""
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
   const reduceMotion = settings?.reduceMotion ?? false
   const telemetryEnabled = settings?.telemetryEnabled ?? false
-
-  const update = async (patch: Partial<AppSettings>) => {
-    await save(patch as never)
-    const keys = Object.keys(patch ?? {}).join(", ")
-    await enqueue({
-      command: "app_settings_update",
-      payload: { patch },
-      label: tPanel("queueLabel", { keys }),
-    })
-  }
 
   const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>
     update({ biometricRequiredFor: { ...policy, ...patch } })

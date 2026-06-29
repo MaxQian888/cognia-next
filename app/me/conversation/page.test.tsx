@@ -83,4 +83,30 @@ describe("MobileConversationPage", () => {
     expect(screen.getByTestId("conversation-auto-title")).not.toBeChecked()
     expect(screen.getByTestId("conversation-timeline")).not.toBeChecked()
   })
+
+  it("renders the composer + stream toggles defaulting to on", () => {
+    render(<Page />)
+    expect(screen.getByTestId("composer-send-on-enter")).toBeChecked()
+    expect(screen.getByTestId("composer-persist-drafts")).toBeChecked()
+    expect(screen.getByTestId("conversation-stream-partial")).toBeChecked()
+  })
+
+  it("merge-updates composerBehavior, preserving sibling keys", async () => {
+    settingsRef.current = { composerBehavior: { clearAfterSend: false } }
+    render(<Page />)
+    fireEvent.click(screen.getByTestId("composer-send-on-enter"))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({
+      composerBehavior: { clearAfterSend: false, sendOnEnter: false },
+    })
+  })
+
+  it("writes streamPartialMessages directly", async () => {
+    render(<Page />)
+    fireEvent.click(screen.getByTestId("conversation-stream-partial"))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({ streamPartialMessages: false })
+  })
 })

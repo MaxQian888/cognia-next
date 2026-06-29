@@ -260,6 +260,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       spotlightedNodeId: s.spotlightedNodeId,
       hoveredEdgeId: s.hoveredEdgeId,
       connectionState: s.connectionState,
+      touchConnect: s.touchConnect,
       requestContextMenu: s.requestContextMenu,
       requestRunFromStep: s.requestRunFromStep,
       errorPolicy: s.baseWorkflow.settings.errorPolicy,
@@ -308,6 +309,23 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
     // `validateConnection` when the actual drop happens.
     const wouldCycle = hasEdgeBetween(store.getState().edges, id, cs.sourceId)
     connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
+  }
+
+  // Mobile tap-to-connect entry: tapping a source handle arms a connection
+  // rooted at that handle (carrying the handle id so branch/switch outputs
+  // route to the right edge). `stopPropagation` keeps the tap from bubbling to
+  // the node click (which would select + open the inspector). Gated on the
+  // store's `touchConnect` flag — only the mobile editor sets it, so desktop
+  // drag-to-connect is completely untouched (a stationary tap never moves the
+  // node thanks to `nodeDragThreshold`, and on desktop this handler returns
+  // immediately).
+  const armConnectFromHandle = (
+    e: { stopPropagation: () => void },
+    sourceHandle: string | null
+  ) => {
+    if (!storeBits?.touchConnect || !store) return
+    e.stopPropagation()
+    store.getState().beginConnection({ sourceId: id, sourceHandle })
   }
 
   // Error-branch handle: per-node `errorHandling.onError === "errorBranch"`
@@ -500,6 +518,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
                     id={h.id}
                     position={Position.Right}
                     style={{ top }}
+                    onClick={(e) => armConnectFromHandle(e, h.id)}
                     className={cn(
                       "!h-3 !w-3 !rounded-full !border-2 !bg-background",
                       h.kind === "true" && "!border-emerald-500",
@@ -526,6 +545,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
                 style={{
                   top: `${Math.round(((decisionHandles.length + 1) / (decisionHandles.length + 2)) * 100)}%`,
                 }}
+                onClick={(e) => armConnectFromHandle(e, "error")}
                 className="!h-3 !w-3 !rounded-full !border-2 !border-rose-500 !bg-background"
                 data-testid={`wf-node-handle-error-${id}`}
               />
@@ -541,6 +561,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
               type="source"
               position={Position.Right}
               style={{ top: "38%" }}
+              onClick={(e) => armConnectFromHandle(e, null)}
               className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
               data-testid={`wf-node-handle-source-${id}`}
             />
@@ -549,6 +570,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
               id="error"
               position={Position.Right}
               style={{ top: "68%" }}
+              onClick={(e) => armConnectFromHandle(e, "error")}
               className="!h-3 !w-3 !rounded-full !border-2 !border-rose-500 !bg-background"
               data-testid={`wf-node-handle-error-${id}`}
             />
@@ -557,7 +579,9 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           <Handle
             type="source"
             position={Position.Right}
+            onClick={(e) => armConnectFromHandle(e, null)}
             className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
+            data-testid={`wf-node-handle-source-${id}`}
           />
         )
       ) : null}
