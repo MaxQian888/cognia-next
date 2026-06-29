@@ -16,7 +16,6 @@ import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import {
   SettingsCard,
   SettingsEmptyState,
@@ -133,8 +132,17 @@ export function SubagentRuntimeTab() {
                 ) : null
               }
             >
-              {/* Progress */}
-              <Progress value={sa.progress} className="h-1.5" />
+              {/* Honest tool-use count (gap9) — replaces the old pseudo-percentage
+                  bar, which implied a completion ratio a subagent run doesn't have.
+                  Matches the chat transcript card. */}
+              {(sa.toolUses ?? 0) > 0 ? (
+                <p
+                  className="text-[11px] tabular-nums text-muted-foreground"
+                  data-testid={`subagent-runtime-tools-${sa.id}`}
+                >
+                  {t("toolsRunCount", { n: sa.toolUses ?? 0 })}
+                </p>
+              ) : null}
 
               {/* Metadata */}
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">

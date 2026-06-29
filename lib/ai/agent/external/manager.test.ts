@@ -507,6 +507,23 @@ describe("execute / cancel", () => {
     expect(m.getAgent("agent-1")?.stats.successfulExecutions).toBe(1)
   })
 
+  it("adapts the requested permission mode to what the backend can enforce", async () => {
+    const m = freshManager()
+    protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+    await m.addAgent(buildBaseConfig({ protocol: "codex-app-server" }))
+    // Codex has no `dontAsk`; the manager clamps it down to `plan` before
+    // forwarding to the adapter so the session runs under an enforceable mode.
+    await m.execute("agent-1", "hi", { permissionMode: "dontAsk" })
+    expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "plan")
+  })
+
+  it("passes a backend-supported permission mode through unchanged", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ protocol: "acp" }))
+    await m.execute("agent-1", "hi", { permissionMode: "bypassPermissions" })
+    expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "bypassPermissions")
+  })
+
   it("execute records failure and last error when result.success is false", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())

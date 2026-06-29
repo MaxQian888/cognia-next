@@ -88,7 +88,7 @@ export function SecuritySection() {
                 id={`biometric-${row.key}`}
                 label={t(`rows.${row.key}.label`)}
                 description={t(`rows.${row.key}.help`)}
-                checked={policy[row.key]}
+                checked={policy[row.key] ?? false}
                 onCheckedChange={(v) => update({ [row.key]: v })}
               />
             </motion.div>
