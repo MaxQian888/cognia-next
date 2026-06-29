@@ -1,13 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, type ComponentProps } from "react"
-import {
-  BriefcaseBusinessIcon,
-  DownloadIcon,
-  HistoryIcon,
-  Trash2Icon,
-  XCircleIcon,
-} from "lucide-react"
+import { BriefcaseBusinessIcon, HistoryIcon, Trash2Icon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -24,6 +18,7 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { ExecutionMonitorPanel } from "@/components/execution/execution-monitor-panel"
 import { useExecutionMonitor } from "@/components/execution/use-execution-monitor"
 import { StatusBadge } from "@/components/status-badge"
+import { BackgroundedRunControls } from "@/components/chat/message-parts/backgrounded-run-controls"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -276,34 +271,20 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
           </div>
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{record.prompt}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => void collect()}
-            disabled={collecting}
-            data-testid={`job-collect-${record.runId}`}
-            aria-label={t("actions.collectAria", { runId: record.runId })}
-          >
-            <DownloadIcon data-icon="inline-start" />
-            {t("actions.collect")}
-          </Button>
-          {isRunning ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void cancel()}
-              disabled={cancelling}
-              data-testid={`job-cancel-${record.runId}`}
-              aria-label={t("actions.cancelAria", { runId: record.runId })}
-            >
-              <XCircleIcon data-icon="inline-start" />
-              {t("actions.cancel")}
-            </Button>
-          ) : null}
-        </div>
+        <BackgroundedRunControls
+          variant="labeled"
+          isRunning={isRunning}
+          onCollect={() => void collect()}
+          onAbort={() => void cancel()}
+          collecting={collecting}
+          aborting={cancelling}
+          collectLabel={t("actions.collect")}
+          collectAria={t("actions.collectAria", { runId: record.runId })}
+          abortLabel={t("actions.cancel")}
+          abortAria={t("actions.cancelAria", { runId: record.runId })}
+          collectTestId={`job-collect-${record.runId}`}
+          abortTestId={`job-cancel-${record.runId}`}
+        />
       </div>
 
       <div className="grid gap-1 text-[11px] text-muted-foreground sm:grid-cols-2">

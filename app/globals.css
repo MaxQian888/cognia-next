@@ -1374,6 +1374,22 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
       border-radius: 9999px;
     }
   }
+  /* Workflow editor — mobile/touch canvas. The mobile editor roots the React
+     Flow surface in `.wf-touch-canvas`; there, source handles drive
+     tap-to-connect, so they must receive pointer events (React Flow sets
+     `pointer-events: none` on non-connectable handles) and need a finger-sized
+     hit area. The visible 12px dot is unchanged — a transparent `::after`
+     pads the tap target to ~40px. Scoped to the class so desktop drag-connect
+     stays exactly as it was. */
+  .wf-touch-canvas .react-flow__handle {
+    pointer-events: all;
+  }
+  .wf-touch-canvas .react-flow__handle::after {
+    content: "";
+    position: absolute;
+    inset: -14px;
+    border-radius: 9999px;
+  }
   /* Line numbers for Shiki-highlighted code blocks. Shiki wraps every source
      line in `<span class="line">`, so a CSS counter lets syntax colour and
      line numbers co-exist — the finalized `CodeBlock` (which defaults to
