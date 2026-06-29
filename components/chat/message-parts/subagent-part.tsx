@@ -37,7 +37,6 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
@@ -46,6 +45,7 @@ import type { SubAgentToolCall, SubAgentTokenUsage } from "@/types/agent/sub-age
 import type { AgentFlowMode } from "@/types/appearance"
 import { ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { BackgroundedRunControls } from "@/components/chat/message-parts/backgrounded-run-controls"
 import { ToolActivityGroup } from "@/components/chat/message-parts/tool-activity-group"
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import { toToolActivityEntries } from "@/lib/claude/subagent-tool-parts"
@@ -75,8 +75,19 @@ interface Props {
   onToggle?: () => void
 }
 
-/** Minimal structural shape of a runtime log entry (level + message). */
-type SubagentLogEntry = { level: string; message: string }
+/** Minimal structural shape of a runtime log entry (level + message + data). */
+type SubagentLogEntry = { level: string; message: string; data?: unknown }
+
+/**
+ * A coalesced sub-agent stream-text log — the child's narrated reasoning
+ * stream (gap8). The runtime store folds consecutive stream text into one
+ * trailing entry tagged `data.stream === "text"`. Only surfaced in `detailed`
+ * mode so a verbose child doesn't flood simplified/standard transcripts.
+ */
+function isStreamTextLog(log: { data?: unknown }): boolean {
+  const d = log.data
+  return typeof d === "object" && d !== null && (d as { stream?: unknown }).stream === "text"
+}
 
 /**
  * Shared progress-detail body — summary paragraph, the tail of the log stream,
@@ -207,18 +218,22 @@ export const SubagentPart = memo(function SubagentPart({
   const status = live?.status ?? part.status
   // Honest live tool-call count (Claude Code / Codex style) — replaces the old
   // pseudo-percentage progress bar, which implied a completion ratio a subagent
-  // run doesn't actually have.
-  const toolUses = live?.toolUses ?? 0
+  // run doesn't actually have. gap7: falls back to the persisted snapshot when
+  // the ephemeral runtime store no longer has the run (post-reload).
+  const toolUses = live?.toolUses ?? part.toolUses ?? 0
   const cfg = SUB_AGENT_STATUS_CONFIG[status]
-  const logs = live?.logs ?? []
+  // gap8: the narrated reasoning stream (coalesced stream-text logs) is only
+  // surfaced in `detailed`; simplified/standard show tools + final response.
+  const allLogs: SubagentLogEntry[] = live?.logs ?? part.logs ?? []
+  const logs = mode === "detailed" ? allLogs : allLogs.filter((l) => !isStreamTextLog(l))
   const lastLog = logs[logs.length - 1]
   const rejection = live?.rejection ?? part.rejection
   const backgrounded = (live?.backgrounded ?? part.backgrounded) === true && status === "running"
   const depth = live?.depth ?? part.depth
   const tokenUsage = live?.result?.tokenUsage ?? part.tokenUsage
   const tokenTotal = tokenUsage?.totalTokens
-  const toolCalls = live?.toolCalls ?? []
-  const finalResponse = live?.result?.finalResponse
+  const toolCalls = live?.toolCalls ?? part.toolCalls ?? []
+  const finalResponse = live?.result?.finalResponse ?? part.finalResponse
   const isRunning = part.completedAt == null && status === "running"
   const canAbort = status === "running"
   const handleAbort = (e: MouseEvent) => {
@@ -321,19 +336,14 @@ export const SubagentPart = memo(function SubagentPart({
             </MotionStatusSwap>
             <span className="sr-only">{statusLabel}</span>
           </button>
-          {canAbort ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="mr-1 size-6 shrink-0 text-muted-foreground hover:text-destructive"
-              aria-label={t("abort")}
-              data-testid={`subagent-abort-${part.subagentId}`}
-              onClick={handleAbort}
-            >
-              <BanIcon className="size-3.5" />
-            </Button>
-          ) : null}
+          <BackgroundedRunControls
+            variant="icon"
+            isRunning={canAbort}
+            onAbort={handleAbort}
+            abortAria={t("abort")}
+            abortTestId={`subagent-abort-${part.subagentId}`}
+            className="mr-1"
+          />
         </div>
         {rejectionBanner}
         <MotionCollapse open={isOpen}>
@@ -417,19 +427,13 @@ export const SubagentPart = memo(function SubagentPart({
               {t("durationMs", { ms: durationMs })}
             </span>
           </CollapsibleTrigger>
-          {canAbort ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
-              aria-label={t("abort")}
-              data-testid={`subagent-abort-${part.subagentId}`}
-              onClick={handleAbort}
-            >
-              <BanIcon className="size-3.5" />
-            </Button>
-          ) : null}
+          <BackgroundedRunControls
+            variant="icon"
+            isRunning={canAbort}
+            onAbort={handleAbort}
+            abortAria={t("abort")}
+            abortTestId={`subagent-abort-${part.subagentId}`}
+          />
         </div>
         {rejectionBanner}
         <CollapsibleContent className="mt-2 space-y-2">

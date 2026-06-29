@@ -62,7 +62,7 @@ describe("applySdkSubagentBridge — lifecycle", () => {
     expect(Object.keys(useSubagentRuntimeStore.getState().subAgents)).toEqual(["T1"])
   })
 
-  it("logs the last tool and advances progress on task_progress", () => {
+  it("logs the last tool and bumps tool-use count on task_progress (gap9)", () => {
     applySdkSubagentBridge(started(), SID)
     applySdkSubagentBridge(
       {
@@ -80,8 +80,8 @@ describe("applySdkSubagentBridge — lifecycle", () => {
     )
     const n = node("T1")!
     expect(n.logs.some((l) => l.message.includes("Read"))).toBe(true)
-    expect(n.progress).toBe(30) // 3 tool_uses * 10 (derived pseudo-percentage)
     expect(n.toolUses).toBe(3) // honest raw count
+    expect(n.progress).toBe(0) // gap9: pseudo-percentage no longer set (seed only)
   })
 
   it("completes the subagent on task_updated status completed", () => {

@@ -16,7 +16,7 @@
 
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgent, SubAgentStatus } from "@/types/agent/sub-agent"
-import { createSubAgentNode, indeterminateSubagentProgress } from "@/lib/claude/subagent-projection"
+import { createSubAgentNode } from "@/lib/claude/subagent-projection"
 import type {
   SDKMessage,
   SDKTaskStartedMessage,
@@ -26,13 +26,6 @@ import type {
   SDKUserMessage,
   BetaContentBlock,
 } from "@/lib/claude/types"
-
-/**
- * Indeterminate progress from the tool-call count — shared with the
- * `dispatch_agent` engine via {@link indeterminateSubagentProgress} so both
- * surfaces feel identical.
- */
-const progressForToolUses = indeterminateSubagentProgress
 
 /** tool_use_id (the spawning Task tool_use) → task_id (our node key). */
 const toolUseToTask = new Map<string, string>()
@@ -87,9 +80,9 @@ function onTaskProgress(m: SDKTaskProgressMessage): void {
     })
   }
   if (m.usage) {
-    store.setProgress(m.task_id, progressForToolUses(m.usage.tool_uses))
-    // Honest raw count for the chat SubagentPart "N tools" counter, alongside
-    // the derived pseudo-percentage kept for other surfaces.
+    // gap9: surface the honest raw tool-use count only. The old derived
+    // pseudo-percentage (`setProgress`) is gone — no surface renders a
+    // completion bar for a subagent run anymore.
     store.setToolUses(m.task_id, m.usage.tool_uses)
   }
 }

@@ -304,6 +304,73 @@ describe("SubagentPart", () => {
     })
   })
 
+  describe("gap7 — persisted snapshot fallback (store empty after reload)", () => {
+    it("renders tool list + result + logs from the part snapshot when the store has no live run", () => {
+      // store is empty (beforeEach) — simulate a cold reload.
+      const snapshotPart: SubagentPartType = {
+        ...basePart,
+        status: "completed",
+        completedAt: basePart.startedAt + 1000,
+        toolCalls: [
+          { id: "t1", name: "read", state: "done" },
+          { id: "t2", name: "grep", state: "done" },
+        ],
+        logs: [{ level: "info", message: "persisted log" }],
+        finalResponse: "# Frozen result",
+        toolUses: 2,
+      }
+      render(<SubagentPart part={snapshotPart} mode="detailed" />)
+      expect(screen.getByTestId("tool-activity-group").getAttribute("data-count")).toBe("2")
+      expect(screen.getByTestId("subagent-result")).toBeInTheDocument()
+      expect(screen.getByTestId("subagent-md").textContent).toBe("# Frozen result")
+      expect(screen.getByText(/persisted log/)).toBeInTheDocument()
+    })
+
+    it("prefers the live store value over the part snapshot when both exist", () => {
+      useSubagentRuntimeStore.getState().upsert(
+        makeSubAgent({
+          status: "running",
+          logs: [{ timestamp: new Date(), level: "info", message: "LIVE log" }],
+        })
+      )
+      const snapshotPart: SubagentPartType = {
+        ...basePart,
+        logs: [{ level: "info", message: "STALE log" }],
+      }
+      render(<SubagentPart part={snapshotPart} mode="detailed" />)
+      expect(screen.getByText(/LIVE log/)).toBeInTheDocument()
+      expect(screen.queryByText(/STALE log/)).toBeNull()
+    })
+  })
+
+  describe("gap8 — stream-text logs gated to detailed mode", () => {
+    const streamLogPart = (): SubagentPartType => ({
+      ...basePart,
+      status: "completed",
+      completedAt: basePart.startedAt + 1,
+      logs: [
+        { level: "info", message: "ran a tool" },
+        { level: "info", message: "narrated reasoning", data: { stream: "text" } },
+      ],
+    })
+
+    it("hides stream-text logs in standard mode", () => {
+      render(<SubagentPart part={streamLogPart()} mode="standard" />)
+      expect(screen.getByText(/ran a tool/)).toBeInTheDocument()
+      expect(screen.queryByText(/narrated reasoning/)).toBeNull()
+    })
+
+    it("hides stream-text logs in simplified mode (incl. the row preview)", () => {
+      render(<SubagentPart part={streamLogPart()} mode="simplified" open onToggle={() => {}} />)
+      expect(screen.queryByText(/narrated reasoning/)).toBeNull()
+    })
+
+    it("shows stream-text logs in detailed mode", () => {
+      render(<SubagentPart part={streamLogPart()} mode="detailed" />)
+      expect(screen.getByText(/narrated reasoning/)).toBeInTheDocument()
+    })
+  })
+
   describe("mode + controlled open", () => {
     it("detailed mode opens the card by default (data-open on Collapsible)", () => {
       const { container } = render(<SubagentPart part={basePart} mode="detailed" />)

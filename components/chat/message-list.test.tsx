@@ -96,6 +96,10 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
     ),
 }))
 
+jest.mock("@/lib/capacitor/haptics", () => ({
+  selectionFeedback: jest.fn(),
+}))
+
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
@@ -105,6 +109,7 @@ import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { usePlatform } from "@/hooks/use-platform"
+import { selectionFeedback } from "@/lib/capacitor/haptics"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {
@@ -224,6 +229,27 @@ describe("MessageList", () => {
     )
     expect(document.querySelector("[data-test='long-press']")).toBeTruthy()
     expect(document.querySelector("[data-test='action-sheet']")).toBeTruthy()
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("fires a selection haptic and opens the action sheet on long-press", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-message",
+      "closed"
+    )
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    expect(selectionFeedback).toHaveBeenCalledTimes(1)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-message",
+      "open"
+    )
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
   })
 

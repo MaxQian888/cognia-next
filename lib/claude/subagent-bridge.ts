@@ -21,11 +21,43 @@ import { isSubagentPart } from "./parts-extensions"
  * Idempotent: replaying the same `SubAgent` snapshot after the part was
  * already inserted just patches the existing entry in place.
  */
+const TERMINAL_STATUSES: ReadonlySet<SubAgent["status"]> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "timeout",
+  "rejected",
+])
+
 export function applySubagentUpdate(
   messages: UIMessage[],
   subAgent: SubAgent,
   opts?: { parentMessageId?: string }
 ): UIMessage[] {
+  // gap7: freeze the live tool list / logs / final response onto the part ONLY
+  // on a terminal transition. The runtime store is ephemeral, so without this
+  // snapshot a completed run's expanded tree vanishes on reload. We must NOT
+  // write these on every running tick — `subagentSignature` already changes on
+  // the terminal transition, so this piggybacks on one already-occurring
+  // message-array rewrite instead of churning on each tool event.
+  const isTerminal = TERMINAL_STATUSES.has(subAgent.status)
+  const terminalSnapshot = isTerminal
+    ? {
+        ...(subAgent.toolCalls?.length ? { toolCalls: subAgent.toolCalls } : {}),
+        ...(subAgent.logs?.length
+          ? {
+              logs: subAgent.logs.map((l) => ({
+                level: l.level,
+                message: l.message,
+                ...(l.data !== undefined ? { data: l.data } : {}),
+              })),
+            }
+          : {}),
+        ...(subAgent.result?.finalResponse ? { finalResponse: subAgent.result.finalResponse } : {}),
+        ...(typeof subAgent.toolUses === "number" ? { toolUses: subAgent.toolUses } : {}),
+      }
+    : {}
+
   const part: SubagentPart = {
     type: "subagent",
     subagentId: subAgent.id,
@@ -48,6 +80,7 @@ export function applySubagentUpdate(
       ? { rejection: { reason: subAgent.rejection.reason, message: subAgent.rejection.message } }
       : {}),
     ...(subAgent.backgrounded ? { backgrounded: true } : {}),
+    ...terminalSnapshot,
   }
 
   const targetIdx = pickTargetMessageIndex(messages, opts?.parentMessageId, subAgent.parentAgentId)

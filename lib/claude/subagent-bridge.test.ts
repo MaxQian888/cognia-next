@@ -113,6 +113,59 @@ describe("applySubagentUpdate", () => {
     const out = applySubagentUpdate(msgs, makeSubAgent({ parentAgentId: "wanted" }))
     expect((out[1].parts ?? []).filter(isSubagentPart)).toHaveLength(1)
   })
+
+  // gap7 — terminal snapshot freezing.
+  it("does NOT freeze toolCalls/logs onto the part while the run is still running", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    const sa = makeSubAgent({
+      status: "running",
+      toolCalls: [{ id: "c1", name: "read", state: "running" }],
+      logs: [{ timestamp: new Date(2026, 4, 1), level: "info", message: "working" }],
+      toolUses: 1,
+    })
+    const out = applySubagentUpdate(msgs, sa)
+    const part = ((out[0].parts ?? []) as unknown[]).filter(isSubagentPart)[0] as SubagentPart
+    expect(part.toolCalls).toBeUndefined()
+    expect(part.logs).toBeUndefined()
+    expect(part.toolUses).toBeUndefined()
+  })
+
+  it("freezes toolCalls/logs/finalResponse/toolUses onto the part on a terminal status", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    const sa = makeSubAgent({
+      status: "completed",
+      completedAt: new Date(2026, 4, 1, 12, 5, 0),
+      toolCalls: [{ id: "c1", name: "read", input: { path: "/x" }, output: "ok", state: "done" }],
+      logs: [{ timestamp: new Date(2026, 4, 1), level: "info", message: "done", data: { a: 1 } }],
+      toolUses: 3,
+      result: { finalResponse: "all set", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    const out = applySubagentUpdate(msgs, sa)
+    const part = ((out[0].parts ?? []) as unknown[]).filter(isSubagentPart)[0] as SubagentPart
+    expect(part.toolCalls).toHaveLength(1)
+    expect(part.toolCalls?.[0]?.name).toBe("read")
+    expect(part.finalResponse).toBe("all set")
+    expect(part.toolUses).toBe(3)
+    // logs stripped of the non-serializable Date timestamp
+    expect(part.logs).toEqual([{ level: "info", message: "done", data: { a: 1 } }])
+    expect((part.logs?.[0] as { timestamp?: unknown }).timestamp).toBeUndefined()
+  })
+
+  it("terminal snapshot does NOT change subagentSignature (no per-tick churn)", () => {
+    const terminal = makeSubAgent({
+      id: "s1",
+      status: "completed",
+      toolCalls: [{ id: "c1", name: "read", state: "done" }],
+      logs: [{ timestamp: new Date(), level: "info", message: "x" }],
+      result: { finalResponse: "done", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    const withoutSnapshot = makeSubAgent({
+      id: "s1",
+      status: "completed",
+      result: { finalResponse: "done", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    expect(subagentSignature([terminal])).toBe(subagentSignature([withoutSnapshot]))
+  })
 })
 
 function withSession(sa: SubAgent, sessionId: string): SubAgent {

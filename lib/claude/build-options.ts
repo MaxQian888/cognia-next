@@ -2527,6 +2527,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // Task tool — previously subagents were dormant outside workflow-editor /
     // team sessions. Empty-guarded: an empty map would otherwise advertise a
     // no-op agent surface on every turn.
+    //
+    // gap8: forward subagent text/thinking frames so the inline card can show
+    // the child's narrated reasoning stream. The renderer only surfaces it in
+    // `detailed` display mode, so simplified/standard stay uncluttered. NOT set
+    // on the `dispatchContext` branch above — nested children run via the host
+    // `dispatch_agent` tool, not SDK-native Task, so no such frames fire there.
+    opts.forwardSubagentText = true
     try {
       const { resolveAllSubagents, workflowEditorSubagents } =
         await import("@/lib/claude/agents/subagents")

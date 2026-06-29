@@ -122,6 +122,7 @@ import { runSegments } from "@/lib/slash-commands/run-segments"
 import { useComposerCommandStore } from "@/stores/chat/composer-command-store"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
 import { ComposerGhostText } from "./composer/composer-ghost-text"
+import { MobileGhostAccept } from "./composer/mobile-ghost-accept"
 import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
@@ -764,6 +765,25 @@ function ComposerInner(props: InnerProps) {
     noteCommandUsed,
   ])
 
+  // Accept the inline ghost-text suggestion: write the completed value back
+  // into the textarea and park the caret at the end. Shared by the keyboard
+  // (Tab) path below and the mobile tap affordance (`MobileGhostAccept`), since
+  // touch devices have no Tab key. Returns false when there was nothing to
+  // accept so the Tab keystroke can fall through to its default behavior.
+  const acceptGhost = useCallback((): boolean => {
+    const next = ghost.accept()
+    if (next === null) return false
+    controller.textInput.setInput(next)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.setSelectionRange(next.length, next.length)
+        ta.focus()
+      }
+    })
+    return true
+  }, [ghost, controller.textInput])
+
   // --- Textarea key handling --------------------------------------------
   // Local handles so the key handler depends on the specific props it reads,
   // not the whole `props` object (react-hooks/exhaustive-deps).
@@ -865,17 +885,8 @@ function ComposerInner(props: InnerProps) {
       // to existing behavior when there is no ghost to act on.
       if (!trigger && ghost.ghost) {
         if (e.key === "Tab" && !e.shiftKey) {
-          const next = ghost.accept()
-          if (next !== null) {
+          if (acceptGhost()) {
             e.preventDefault()
-            controller.textInput.setInput(next)
-            requestAnimationFrame(() => {
-              const ta = textareaRef.current
-              if (ta) {
-                ta.setSelectionRange(next.length, next.length)
-                ta.focus()
-              }
-            })
             return
           }
         }
@@ -938,6 +949,7 @@ function ComposerInner(props: InnerProps) {
       controller.textInput,
       overlaySegments,
       ghost,
+      acceptGhost,
       inputHistoryRecall,
       sendOnEnter,
       turnStatus,
@@ -1372,6 +1384,7 @@ function ComposerInner(props: InnerProps) {
           ) : null}
 
           <VoiceTranscriptionBridge disabled={props.disabled} />
+          <ComposerAppendBridge />
         </div>
 
         <div
@@ -1390,7 +1403,9 @@ function ComposerInner(props: InnerProps) {
             ref={ghostOverlayRef}
             value={controller.textInput.value}
             ghost={ghost.ghost}
-            acceptHint={t("ghostAcceptHint")}
+            // The "Tab" hint is meaningless on touch — mobile gets the tappable
+            // accept/dismiss control below instead.
+            acceptHint={isMobile ? undefined : t("ghostAcceptHint")}
           />
           <Textarea
             aria-label={t("ariaMessage")}
@@ -1425,6 +1440,11 @@ function ComposerInner(props: InnerProps) {
             value={controller.textInput.value}
           />
           <CharCounter />
+          <MobileGhostAccept
+            visible={isMobile && !!ghost.ghost}
+            onAccept={acceptGhost}
+            onDismiss={ghost.dismiss}
+          />
         </div>
 
         <div
@@ -1586,6 +1606,30 @@ function VoiceTranscriptionBridge({ disabled }: { disabled?: boolean }) {
     [controller.textInput]
   )
   return <VoiceControls disabled={disabled} onTranscription={onTranscription} />
+}
+
+/** Window-event name a chat-message card dispatches to append text to the composer. */
+export const COMPOSER_APPEND_EVENT = "cognia:composer-append"
+
+/**
+ * Lets components outside the PromptInput controller context (e.g. the OCR
+ * result card in the message list, gap4) append text to the composer by
+ * dispatching `COMPOSER_APPEND_EVENT` on window with `{ detail: { text } }`.
+ */
+function ComposerAppendBridge() {
+  const controller = usePromptInputController()
+  useEffect(() => {
+    const onAppend = (e: Event) => {
+      const text = (e as CustomEvent<{ text?: string }>).detail?.text
+      if (!text || !text.trim()) return
+      const cur = controller.textInput.value
+      const sep = cur && !cur.endsWith(" ") ? " " : ""
+      controller.textInput.setInput(`${cur}${sep}${text}`)
+    }
+    window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
+    return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
+  }, [controller.textInput])
+  return null
 }
 
 // --- Outer component ------------------------------------------------------

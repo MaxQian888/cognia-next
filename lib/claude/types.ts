@@ -2878,6 +2878,14 @@ export interface BiometricGuardPolicy {
    * user trusts.
    */
   signOut: boolean
+  /**
+   * ADR-0056 (decision D4) — re-prompt biometric before a remote write that
+   * ESCALATES the paired desktop's `permissionMode` toward a more autonomous
+   * mode (acceptEdits / bypassPermissions / dontAsk / auto) from the phone's
+   * `/me/agent` page. Optional for back-compat; treated as `true` (gated) when
+   * absent, since escalation is the security-sensitive direction.
+   */
+  escalatePermissionMode?: boolean
 }
 
 export const DEFAULT_BIOMETRIC_GUARD: BiometricGuardPolicy = {
@@ -2885,6 +2893,7 @@ export const DEFAULT_BIOMETRIC_GUARD: BiometricGuardPolicy = {
   exportBackup: false,
   revealSecrets: false,
   signOut: true,
+  escalatePermissionMode: true,
 }
 
 export interface BackupAutoSchedule {

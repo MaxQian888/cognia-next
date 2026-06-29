@@ -141,12 +141,8 @@ jest.mock("@/lib/ui/avatar", () => ({
   avatarGlyph: () => "A",
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: {
-    chat: { error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
-  },
-  // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
-  createLogger: () => ({
+jest.mock("@/lib/logging", () => {
+  const childLogger = {
     trace: jest.fn(),
     debug: jest.fn(),
     info: jest.fn(),
@@ -159,8 +155,13 @@ jest.mock("@/lib/logging", () => ({
     withContext: function () {
       return this
     },
-  }),
-}))
+  }
+  // The transitive import graph (artifact-store → lib/plugin → many *-api
+  // modules) reads `loggers.<namespace>.child(...)` at module-eval time for a
+  // wide set of namespaces. A Proxy hands every namespace the same stub logger.
+  const loggers = new Proxy({}, { get: () => childLogger })
+  return { loggers, createLogger: () => childLogger }
+})
 
 // Agent-flow display mode + grouping (covered in depth by their own suites;
 // here we only assert MessageRenderer's dispatch wiring).
@@ -170,6 +171,9 @@ jest.mock("@/hooks/chat/use-agent-flow-mode", () => ({
 }))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   MotionReveal: ({ children }: { children: ReactForMocks.ReactNode }) => children,
+  MotionCollapse: ({ children }: { children: ReactForMocks.ReactNode }) => children,
+  MotionStatusSwap: ({ children }: { children: ReactForMocks.ReactNode }) => children,
+  useFlowMotion: () => ({ reduce: true }),
 }))
 jest.mock("@/components/chat/message-parts/tool-activity-group", () => ({
   ToolActivityGroup: ({ entries, mode }: { entries: unknown[]; mode: string }) =>

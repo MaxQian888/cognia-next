@@ -15,7 +15,13 @@ import type {
   SendContent,
   SendContentBlock,
 } from "./types"
-import type { A2UIPart, ArtifactPart, SourcesPart, SourcesPartItem } from "./parts-extensions"
+import type {
+  A2UIPart,
+  ArtifactPart,
+  McpResultBlock,
+  SourcesPart,
+  SourcesPartItem,
+} from "./parts-extensions"
 import { registerUndoSnapshot } from "./compaction-undo"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
 import {
@@ -229,6 +235,24 @@ function flattenToolResultContent(content: BetaToolResultBlock["content"]): stri
       .join("")
   }
   return JSON.stringify(content)
+}
+
+/**
+ * Preserve the structured MCP content blocks off a tool-result, but ONLY when
+ * at least one block is not plain text (image / resource / audio). Pure-text
+ * results stay on the flattened-string path — no behavior change, no
+ * persistence bloat. Returns undefined when there's nothing richer than text.
+ * (gap3 — see `parts-extensions.ts:McpResultBlock`.)
+ */
+function extractMcpContentBlocks(
+  content: BetaToolResultBlock["content"]
+): McpResultBlock[] | undefined {
+  if (!Array.isArray(content)) return undefined
+  const blocks = content.filter(
+    (c) => typeof c === "object" && c !== null && typeof (c as { type?: unknown }).type === "string"
+  ) as McpResultBlock[]
+  if (blocks.length === 0) return undefined
+  return blocks.some((b) => b.type !== "text") ? blocks : undefined
 }
 
 /**
@@ -665,10 +689,12 @@ function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessa
       input?: unknown
     }
     const outputText = flattenToolResultContent(tr.content)
+    const mcpContent = tr.is_error ? undefined : extractMcpContentBlocks(tr.content)
     const newPart = {
       ...oldPart,
       state: tr.is_error ? "output-error" : "output-available",
       ...(tr.is_error ? { errorText: outputText } : { output: outputText }),
+      ...(mcpContent ? { mcpContent } : {}),
     } as unknown as Part
 
     const newParts = msg.parts.slice()

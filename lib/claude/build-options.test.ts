@@ -3208,12 +3208,12 @@ describe("resolveSendOptions — forwardSubagentText (SDK-subagent bridge)", () 
     expect(wf.forwardSubagentText).toBe(true)
   })
 
-  it("leaves forwardSubagentText off for a direct chat session", async () => {
+  it("enables forwardSubagentText for a direct chat session (gap8 — detailed-gated render)", async () => {
     const direct = await resolveSendOptions({
       session: makeSession({ id: "s-direct", kind: "direct" }),
       character: makeChar({ id: "c1" }),
     })
-    expect(direct.forwardSubagentText).toBeUndefined()
+    expect(direct.forwardSubagentText).toBe(true)
   })
 })
 

@@ -121,18 +121,20 @@ export function recordDispatchFailed(id: string, error: string): void {
 }
 
 /**
- * Indeterminate progress from the tool-call count — re-exported from the shared
- * {@link indeterminateSubagentProgress} so both subagent engines stay identical.
- * Kept as a named export for the existing callers/tests.
+ * Indeterminate progress from the tool-call count.
+ *
+ * @deprecated gap9 — no surface renders a subagent completion bar anymore; the
+ * honest tool-use count replaced it. Kept only as a named export for legacy
+ * callers/tests and is no longer used to drive the runtime store.
  */
 export const dispatchProgressForToolCount = indeterminateSubagentProgress
 
 /**
  * Build a {@link CaptureStreamEvent} sink for a single dispatched run. It folds
  * the child's live tool activity into the runtime store: each `tool-call` logs
- * the tool and advances the indeterminate progress bar; each `tool-result`
- * logs completion (a warning on error). Other event types (text/thinking/usage)
- * are ignored. Best-effort — a store error never propagates back into capture.
+ * the tool and bumps the honest tool-use count; each `tool-result` logs
+ * completion (a warning on error). Other event types (text/thinking/usage) are
+ * ignored. Best-effort — a store error never propagates back into capture.
  */
 export function createDispatchEventSink(id: string): (event: CaptureStreamEvent) => void {
   let toolCalls = 0
@@ -146,11 +148,11 @@ export function createDispatchEventSink(id: string): (event: CaptureStreamEvent)
       toolCalls += 1
       const callId = event.id ?? `tc-${id}-${(synthSeq += 1)}`
       lastIdByName.set(event.toolName, callId)
-      // One batched store write (log + progress + toolUses + toolStart) per
-      // tool-call — a single map spread + subscriber notification.
+      // One batched store write (log + toolUses + toolStart) per tool-call —
+      // a single map spread + subscriber notification. gap9: no `progress`
+      // (the pseudo-percentage) — the honest `toolUses` count drives the UI.
       store.applyRunEvent(id, {
         log: { timestamp: new Date(), level: "info", message: `Running ${event.toolName}` },
-        progress: dispatchProgressForToolCount(toolCalls),
         toolUses: toolCalls,
         toolStart: { id: callId, name: event.toolName, input: event.input },
       })

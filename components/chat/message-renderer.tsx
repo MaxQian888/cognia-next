@@ -8,7 +8,7 @@ import {
 } from "@/components/ai-elements/message"
 import { Image } from "@/components/ai-elements/image"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
-import { Tool, ToolBody, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
+import { Tool, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
 import { ErrorParsedView } from "@/components/chat/error-parsed-view"
 import { normalizeErrorText } from "@cognia/error-parsers"
@@ -22,8 +22,14 @@ import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-tea
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
-import { MCPToolCard, isStructuredMcpToolType } from "@/components/chat/message-parts/mcp-tool-card"
+import {
+  MCPToolCard,
+  McpToolBodyOrContent,
+  isStructuredMcpToolType,
+} from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
+import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
+import { UnknownPartCard } from "@/components/chat/message-parts/unknown-part-card"
 import {
   HookNoticeRow,
   type HookNoticePartData,
@@ -772,7 +778,7 @@ function renderToolPart(
       <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
         <ToolHeader type={tp.type} state={tp.state} />
         <ToolContent>
-          <ToolBody part={tp} />
+          <McpToolBodyOrContent part={tp} />
         </ToolContent>
       </Tool>
     )
@@ -785,6 +791,9 @@ function renderToolPart(
     </React.Fragment>
   )
 }
+
+/** AI SDK structural/control part types that intentionally render nothing. */
+const SILENT_CONTROL_PART_TYPES = new Set(["step-start", "step-finish"])
 
 function renderPart(
   part: UIMessage["parts"][number],
@@ -914,21 +923,8 @@ function renderPart(
 
     if (!url) return null
 
-    // Non-image file: render as a downloadable link
-    const displayName = filename ?? url
-    return (
-      <a
-        key={key}
-        href={url}
-        download={displayName}
-        className="inline-flex items-center gap-1.5 rounded border px-2 py-1 text-sm hover:bg-muted"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <span aria-hidden>📎</span>
-        {displayName}
-      </a>
-    )
+    // Non-image file: inline preview for text/code/pdf, download link otherwise.
+    return <FilePartPreview key={key} url={url} mediaType={mediaType} filename={filename} />
   }
 
   // Special-case Claude's TodoWrite tool: render as a structured task list.
@@ -974,5 +970,11 @@ function renderPart(
     return renderToolPart(tp, key, mode, undefined, messageId, sessionId, t)
   }
 
-  return null
+  // AI SDK structural/control parts carry no visible content — render nothing
+  // (don't fall through to the unknown-part card and spam a box per step).
+  if (typeof type === "string" && SILENT_CONTROL_PART_TYPES.has(type)) return null
+
+  // gap1 — unknown non-tool part: surface a debuggable fallback card instead
+  // of silently dropping it (mirrors the always-visible unknown-`tool-` card).
+  return <UnknownPartCard key={key} part={part} />
 }

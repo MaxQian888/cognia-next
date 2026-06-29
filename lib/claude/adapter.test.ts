@@ -457,6 +457,104 @@ describe("applySdkEvent — user (tool results)", () => {
     expect(part.output).toBe('{"foo":"bar"}')
   })
 
+  it("preserves structured mcpContent when the result carries a non-text block (gap3)", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__some-server__capture",
+          toolCallId: "t-mcp",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-mcp",
+          content: [
+            { type: "text", text: "here is the screenshot" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as {
+      output?: string
+      mcpContent?: Array<{ type: string }>
+    }
+    // flattened string still present for back-compat
+    expect(part.output).toContain("here is the screenshot")
+    // structured blocks preserved verbatim
+    expect(part.mcpContent).toHaveLength(2)
+    expect(part.mcpContent?.[1]?.type).toBe("image")
+  })
+
+  it("does NOT attach mcpContent for a pure-text array result (no behavior change)", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Read",
+          toolCallId: "t-txt",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-txt",
+          content: [
+            { type: "text", text: "alpha" },
+            { type: "text", text: "beta" },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { mcpContent?: unknown }
+    expect(part.mcpContent).toBeUndefined()
+  })
+
+  it("does NOT attach mcpContent for an error result", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__x__y",
+          toolCallId: "t-err",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-err",
+          content: [{ type: "image", source: { data: "AAAA" } }],
+          is_error: true,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { mcpContent?: unknown; state: string }
+    expect(part.state).toBe("output-error")
+    expect(part.mcpContent).toBeUndefined()
+  })
+
   it("returns the original list unchanged when the tool_use_id matches nothing", () => {
     const messages: UIMessage[] = [
       {

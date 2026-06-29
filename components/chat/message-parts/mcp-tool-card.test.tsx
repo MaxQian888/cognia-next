@@ -133,6 +133,17 @@ describe("MCPToolCard — fallback semantics", () => {
     expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
   })
 
+  it("renders structured MCP content blocks (gap3) instead of ToolBody when present", () => {
+    const p = {
+      ...part("tool-mcp__some-server__capture", "stringified output"),
+      mcpContent: [{ type: "text", text: "rich body" }],
+    } as unknown as ToolUIPart
+    render(<MCPToolCard part={p} />)
+    expect(screen.getByTestId("mcp-content-blocks")).toBeInTheDocument()
+    expect(screen.getByTestId("md").textContent).toBe("rich body")
+    expect(screen.queryByTestId("generic-tool-body")).toBeNull()
+  })
+
   it("falls back to ToolBody when the type isn't a tool", () => {
     render(<MCPToolCard part={part("text", "raw")} />)
     expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
