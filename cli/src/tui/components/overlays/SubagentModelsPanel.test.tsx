@@ -5,7 +5,11 @@ import { __fireInput, __resetInk } from "ink"
 import { SubagentModelsPanel } from "./SubagentModelsPanel"
 import { ThemeProvider } from "../../theme/context"
 import { BUILTIN_THEMES } from "../../theme/builtins"
+import { absoluteTopLeft } from "../../input/element-position"
 import type { SubagentModelRow } from "../../runtime/subagent-models-model"
+
+jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+const mockPos = absoluteTopLeft as jest.Mock
 
 function key(input: string, k?: Record<string, boolean>) {
   act(() => __fireInput(input, k))
@@ -52,7 +56,33 @@ function wrap(props: Partial<React.ComponentProps<typeof SubagentModelsPanel>> =
 }
 
 describe("SubagentModelsPanel", () => {
-  beforeEach(() => __resetInk())
+  beforeEach(() => {
+    __resetInk()
+    mockPos.mockReturnValue(null)
+  })
+
+  it("focuses a clicked row, skipping the focused row's description line", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onMove } = wrap()
+    // border(1)+header(1) → planner at SGR row 3, its description at row 4,
+    // reviewer at row 5. Clicking row 5 should focus reviewer (index 1).
+    key("[<0;5;5M")
+    expect(onMove).toHaveBeenCalledWith(1)
+  })
+
+  it("ignores a click on the focused row's description line", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onMove } = wrap()
+    key("[<0;5;4M") // the description row
+    expect(onMove).not.toHaveBeenCalled()
+  })
+
+  it("nudges the focus on the mouse wheel", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onMove } = wrap()
+    key("[<65;5;5M") // wheel down
+    expect(onMove).toHaveBeenCalledWith(1)
+  })
 
   it("renders the header, each agent's provider/model and source badge", () => {
     const { container } = wrap()

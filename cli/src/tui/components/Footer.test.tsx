@@ -5,6 +5,7 @@ import { render } from "@testing-library/react"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import { Footer } from "./Footer"
+import type { StatusSegmentView } from "../format/status-bar"
 
 const config: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
@@ -40,6 +41,13 @@ describe("Footer", () => {
     // Transient working indicator no longer lives in the Footer.
     expect(text).not.toContain("esc to interrupt")
     expect(text).not.toContain("Working")
+  })
+
+  it("populates segmentsRef with the rendered segments for click hit-testing", () => {
+    const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["model", "mode"] } }
+    const segmentsRef: React.MutableRefObject<StatusSegmentView[] | null> = { current: null }
+    render(<Footer config={cfg} turnStatus="idle" columns={200} segmentsRef={segmentsRef} />)
+    expect(segmentsRef.current?.map((s) => s.id)).toEqual(["model", "mode"])
   })
 
   it("honors a custom segment list + order and drops the rest", () => {

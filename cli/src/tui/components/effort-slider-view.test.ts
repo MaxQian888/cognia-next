@@ -1,11 +1,14 @@
 import {
+  EFFORT_GAUGE_PREFIX,
   EFFORT_LEVEL_DESCRIPTIONS,
   EFFORT_WIDE_MIN_WIDTH,
+  effortCellToIndex,
   effortGaugeCells,
   effortGaugeWidth,
   effortKeyToIndex,
   effortLayout,
   effortPositionLabel,
+  effortSliderClick,
 } from "./effort-slider-view"
 import { EFFORT_SLIDER_LEVELS } from "../../config/schema"
 
@@ -106,5 +109,69 @@ describe("EFFORT_LEVEL_DESCRIPTIONS", () => {
     for (const lvl of EFFORT_SLIDER_LEVELS) {
       expect(EFFORT_LEVEL_DESCRIPTIONS[lvl]).toBeTruthy()
     }
+  })
+})
+
+describe("effortCellToIndex", () => {
+  it("is the inverse of effortGaugeCells at the endpoints", () => {
+    const cells = 20
+    const last = 5
+    expect(effortCellToIndex(0, cells, last)).toBe(0)
+    expect(effortCellToIndex(cells - 1, cells, last)).toBe(last)
+  })
+
+  it("maps the midpoint cell to a middle tier", () => {
+    expect(effortCellToIndex(10, 21, 6)).toBe(3)
+  })
+
+  it("clamps out-of-range cells and degenerate inputs", () => {
+    expect(effortCellToIndex(-5, 20, 5)).toBe(0)
+    expect(effortCellToIndex(999, 20, 5)).toBe(5)
+    expect(effortCellToIndex(3, 1, 5)).toBe(0)
+    expect(effortCellToIndex(3, 20, 0)).toBe(0)
+  })
+})
+
+describe("effortSliderClick", () => {
+  const base = { boxTop: 0, boxLeft: 0, gaugeWidth: 20, last: 5 }
+
+  it("returns off for a click on the checkbox row (boxTop+2)", () => {
+    expect(effortSliderClick({ ...base, clickRow: 2, clickCol: 5 })).toEqual({ kind: "off" })
+  })
+
+  it("returns a tier for a click on the gauge track (boxTop+3)", () => {
+    // track starts at col border(1)+padding(1)+prefix(9) = 11.
+    expect(effortSliderClick({ ...base, clickRow: 3, clickCol: 11 })).toEqual({
+      kind: "tier",
+      index: 0,
+    })
+    expect(effortSliderClick({ ...base, clickRow: 3, clickCol: 11 + 19 })).toEqual({
+      kind: "tier",
+      index: 5,
+    })
+  })
+
+  it("returns null for clicks before/after the track on the gauge row", () => {
+    expect(effortSliderClick({ ...base, clickRow: 3, clickCol: 10 })).toBeNull()
+    expect(effortSliderClick({ ...base, clickRow: 3, clickCol: 11 + 20 })).toBeNull()
+  })
+
+  it("returns null for clicks on other rows (title / border / scale)", () => {
+    expect(effortSliderClick({ ...base, clickRow: 0, clickCol: 11 })).toBeNull()
+    expect(effortSliderClick({ ...base, clickRow: 1, clickCol: 11 })).toBeNull()
+    expect(effortSliderClick({ ...base, clickRow: 4, clickCol: 11 })).toBeNull()
+  })
+
+  it("honours a non-zero box origin", () => {
+    expect(effortSliderClick({ ...base, boxTop: 5, boxLeft: 3, clickRow: 7, clickCol: 5 })).toEqual(
+      { kind: "off" }
+    )
+    expect(
+      effortSliderClick({ ...base, boxTop: 5, boxLeft: 3, clickRow: 8, clickCol: 3 + 11 })
+    ).toEqual({ kind: "tier", index: 0 })
+  })
+
+  it("exposes the gauge prefix constant", () => {
+    expect(EFFORT_GAUGE_PREFIX).toBe(9)
   })
 })

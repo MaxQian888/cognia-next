@@ -144,6 +144,19 @@ export function looksLikePlan(raw: string): boolean {
   return text.length >= 280
 }
 
+/**
+ * A cheap structural summary of a plan body for the plan-cell header and the
+ * approval overlay: `steps` = the count of markdown list / numbered items (the
+ * same signal {@link looksLikePlan} keys on), `lines` = non-blank trimmed lines.
+ * Used to frame the plan ("4 steps · 31 lines") without parsing the markdown.
+ */
+export function planStats(raw: string): { steps: number; lines: number } {
+  const steps = (raw.match(/^\s*(?:[-*+]|\d+[.)])\s+/gm) ?? []).length
+  let lines = 0
+  for (const line of raw.split("\n")) if (line.trim()) lines++
+  return { steps, lines }
+}
+
 /** A short, single-line title for a plan — its first heading or first non-empty
  * line, stripped of markdown markers and truncated. */
 export function planTitle(raw: string, max = 64): string {

@@ -185,4 +185,4 @@ export function cycleSubagentProvider(row: SubagentModelRow, delta: number): Sub
 }
 
 /** Footer hint for the panel. */
-export const SUBAGENT_MODELS_FOOTER = "↑/↓ move · ←/→ model · p provider · r reset · esc close"
+export const SUBAGENT_MODELS_FOOTER = "↑/↓ / click · ←/→ model · p provider · r reset · esc close"

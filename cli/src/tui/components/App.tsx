@@ -33,6 +33,7 @@ import {
   type TitleStream,
   type TitleEnv,
 } from "../terminal-title"
+import { emitCompletionBell, shouldNotifyOnDone } from "../notify"
 import { parseMouseEvent } from "../input/mouse"
 import { ThemeProvider } from "../theme/context"
 import { RenderPrefsProvider } from "../render/context"
@@ -65,6 +66,7 @@ import { DoctorPanel } from "./overlays/DoctorPanel"
 import { DocumentViewer } from "./overlays/DocumentViewer"
 import { InspectOverlay } from "./overlays/InspectOverlay"
 import { AgentsPanel } from "./overlays/AgentsPanel"
+import { QuickActionsPanel } from "./overlays/QuickActionsPanel"
 import { AgentRunPage } from "./overlays/AgentRunPage"
 import { SubagentModelsPanel } from "./overlays/SubagentModelsPanel"
 import {
@@ -116,6 +118,7 @@ import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { buildAgents, discoverAgentFiles } from "../../agent/discover-agents"
 import { cyclePermissionMode } from "../input/mode-cycle"
 import { parseBang, formatBashResult } from "../commands/bash-shellout"
+import { parseHashMemory } from "../input/hash-memory"
 import {
   runShell as defaultRunShell,
   type ShellResult,
@@ -139,6 +142,9 @@ import { tuiReducer } from "../state/reducer"
 import { isBusy, lastAssistantText } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
 import { runningSubagents } from "../format/subagent"
+import { segmentAtColumn } from "../format/status-bar-hit"
+import { footerSegmentCommand } from "../format/footer-action"
+import type { StatusSegmentView } from "../format/status-bar"
 import {
   countInterruptedCliBackgroundRuns,
   countRunningCliBackgroundRuns,
@@ -173,7 +179,10 @@ import {
   setRenderConfig,
   setKeybindings,
   setSubagentModel,
+  setEditorConfig,
 } from "../../config/mutate"
+import { detectEditor, editorInfo, openInEditor } from "../runtime/editor"
+import { buildGitDiffDoc } from "../runtime/git-diff"
 import { resolveKeybindings, matchAction } from "../input/keybindings"
 import { collectInspectables } from "../runtime/inspect"
 import { formatToolResultBody } from "../commands/expand-command"
@@ -206,10 +215,12 @@ import type {
   ResolvedConfig,
   StatusBarConfig,
   MascotConfig,
+  EditorConfig,
   OutputStyle,
   StatusTheme,
   MascotStyle,
 } from "../../config/schema"
+import nodePath from "node:path"
 
 const DOUBLE_CTRL_C_MS = 1000
 
@@ -333,6 +344,11 @@ export interface AppProps {
   persistStatusBar?: (home: string, patch: StatusBarConfig) => void
   /** Persist a `/mascot` change to config.json; defaults to the real writer. */
   persistMascot?: (home: string, patch: MascotConfig) => void
+  /** Persist a `/editor <command>` change to config.json; defaults to the real writer. */
+  persistEditor?: (home: string, patch: EditorConfig) => void
+  /** Spawn the editor for `/open`; defaults to the real `openInEditor` (injected
+   * in tests so they never launch a real editor). */
+  openInEditorFn?: typeof openInEditor
   /** Persist the `pluginTools` gate (toggled by the effort slider's `ultracode`
    * tier) to config.json; defaults to the real writer. Injected as a no-op by
    * tests so they never touch the real `~/.cognia/config.json`. */
@@ -425,6 +441,8 @@ export function App({
   listDirs,
   persistStatusBar = setStatusBarConfig,
   persistMascot = setMascotConfig,
+  persistEditor = setEditorConfig,
+  openInEditorFn = openInEditor,
   persistPluginTools = setPluginToolsConfig,
   initialHistory = [],
   persistHistory = (entry) => {
@@ -508,6 +526,14 @@ export function App({
   // The run-state chip row in the BottomStatus, so a click on the subagent chip
   // opens the `/agents` panel (parity with Ctrl+B).
   const subagentChipRef = useRef<DOMElement | null>(null)
+  // The persistent status footer row + its rendered segments, so a click on the
+  // model/mode/thinking segment opens the matching picker (Claude Code parity).
+  const footerRowRef = useRef<DOMElement | null>(null)
+  const footerSegmentsRef = useRef<StatusSegmentView[] | null>(null)
+  // The fullscreen scroll viewport's content box (its `marginTop={-offset}`
+  // encodes the scroll position), so a transcript click can be mapped to the
+  // cell under it when the click-to-expand pref is on.
+  const scrollContentRef = useRef<DOMElement | null>(null)
   // Stable callbacks for the memoized <Input>: an inline arrow / default-param
   // arrow would be a fresh reference each render and defeat React.memo, making
   // the composer re-render (and re-run slash/mention matching) on every delta.
@@ -728,6 +754,24 @@ export function App({
     return () => resetTerminalTitle(titleSink, titleEnv)
   }, [titleEnabled, titleSink, titleEnv])
 
+  // Completion bell (opt-in via `config.notify`): ring the terminal bell when a
+  // turn finishes so you can tab away during a long run and be alerted. Gated on
+  // the turn's elapsed time so a quick reply doesn't beep. The `now` clock is
+  // injected, so the busy→idle transition + duration gate are deterministic.
+  const notifyEnabled = state.config.notify === true
+  const turnStartRef = useRef<number | null>(null)
+  const prevBusyRef = useRef(false)
+  useEffect(() => {
+    if (busy && !prevBusyRef.current) {
+      turnStartRef.current = now()
+    } else if (!busy && prevBusyRef.current) {
+      const elapsed = turnStartRef.current !== null ? now() - turnStartRef.current : 0
+      turnStartRef.current = null
+      if (shouldNotifyOnDone(notifyEnabled, elapsed)) emitCompletionBell(titleSink, titleEnv)
+    }
+    prevBusyRef.current = busy
+  }, [busy, notifyEnabled, now, titleSink, titleEnv])
+
   // Scroll controller for the fullscreen viewport (no-op in scrollback mode,
   // where the terminal's native scrollback handles it).
   const scroll = useScroll()
@@ -736,7 +780,7 @@ export function App({
   const scrollReset = scroll.reset
   // Find-in-viewport cursor (fullscreen only). Drives the FindBar, the focused
   // cell's highlight, per-cell copy, and the jump-to-match scroll below.
-  const cursor = useTranscriptCursor(state.cells)
+  const cursor = useTranscriptCursor(state.cells, fullscreen && renderPrefs.clickToExpand)
   // Jump the viewport so the focused match lands ~1/3 down, re-running as the
   // gated per-cell measurements settle (cursor.targetRow folds in their version).
   const cursorTargetRow = cursor.targetRow
@@ -1198,6 +1242,75 @@ export function App({
             dispatch({ type: "NOTICE", message: "Mascot updated (couldn't save to config)." })
           }
           break
+        case "openFile": {
+          // Resolve the editor from config/env and spawn it; report the outcome.
+          const { editor } = detectEditor(process.env, { config: state.config.editor })
+          const abs = nodePath.isAbsolute(effect.file)
+            ? effect.file
+            : nodePath.resolve(state.config.cwd, effect.file)
+          void openInEditorFn(abs, { line: effect.line, col: effect.col, editor }).then((ok) =>
+            dispatch({
+              type: "NOTICE",
+              message: ok
+                ? `Opened ${effect.file} in ${editor.displayName}`
+                : `Couldn't open ${editor.displayName} — file: ${abs}`,
+            })
+          )
+          break
+        }
+        case "editorInfo": {
+          const info = editorInfo(process.env, { config: state.config.editor })
+          const lines = [
+            `Editor: ${info.editor.displayName} (${info.editor.command}) · source: ${info.source}`,
+            `Terminal: ${info.terminalProgram ?? "unknown"}${info.launchedFromEditor ? " · launched from editor" : ""}`,
+            `Clickable paths (OSC-8 hyperlinks): ${info.hyperlinks ? "yes" : "no"}`,
+          ]
+          dispatch({ type: "NOTICE", message: lines.join("\n") })
+          break
+        }
+        case "setEditor":
+          dispatch({ type: "SET_EDITOR", editor: { command: effect.command } })
+          try {
+            persistEditor(home, { command: effect.command })
+            dispatch({ type: "NOTICE", message: `Editor: ${effect.command}` })
+          } catch {
+            dispatch({ type: "NOTICE", message: "Editor updated (couldn't save to config)." })
+          }
+          break
+        case "gitDiff": {
+          // Shell `git diff` (+ staged) and render the result in the pager with
+          // diff syntax-highlighting. A non-repo / git-missing surfaces as stderr.
+          void Promise.all([
+            runShell("git --no-pager diff", { cwd: state.config.cwd }),
+            runShell("git --no-pager diff --staged", { cwd: state.config.cwd }),
+          ])
+            .then(([unstaged, staged]) => {
+              if (unstaged.code !== 0 && staged.code !== 0) {
+                const msg = (unstaged.stderr || staged.stderr).trim()
+                dispatch({
+                  type: "NOTICE",
+                  message: msg || "Couldn't run git diff (not a git repository?).",
+                })
+                return
+              }
+              const doc = buildGitDiffDoc(unstaged.stdout, staged.stdout)
+              if (!doc) {
+                dispatch({ type: "NOTICE", message: "Working tree clean — no changes to show." })
+                return
+              }
+              dispatch({
+                type: "OVERLAY_OPEN",
+                overlay: { kind: "document", title: doc.title, body: doc.body, format: "markdown" },
+              })
+            })
+            .catch((err: unknown) =>
+              dispatch({
+                type: "NOTICE",
+                message: `git diff failed: ${err instanceof Error ? err.message : String(err)}`,
+              })
+            )
+          break
+        }
         case "theme":
           // Live-apply the colour theme (the reducer re-resolves the palette so
           // the whole UI recolours in place), then persist the scalar key. The
@@ -1445,9 +1558,12 @@ export function App({
       persistDb,
       persistStatusBar,
       persistMascot,
+      persistEditor,
+      openInEditorFn,
       pushHandoff,
       resumeMostRecent,
       runBash,
+      runShell,
       startGoalRun,
       startLoopRun,
       takeSteer,
@@ -1599,6 +1715,13 @@ export function App({
           return
         }
         dispatch({ type: "EDIT_CLEAR" })
+      }
+      // `# fact` quick-captures a memory (Claude Code parity) instead of sending
+      // to the model — reuses /remember (→ memory add). Checked before bang/slash.
+      const memo = parseHashMemory(text)
+      if (memo !== null) {
+        runCommandLine(`/remember ${memo}`)
+        return
       }
       const bang = parseBang(text)
       if (bang !== null) {
@@ -2069,6 +2192,53 @@ export function App({
               if (clickRow >= pos.top && clickRow < pos.top + height) runCommandLine("/agents")
             }
           }
+          // A click on a footer segment opens its picker: model/provider → model
+          // overlay, mode → cycle permission mode, thinking → effort slider.
+          if (footerRowRef.current && footerSegmentsRef.current) {
+            const pos = absoluteTopLeft(footerRowRef.current)
+            if (pos && mouse.row - 1 === pos.top) {
+              const id = segmentAtColumn(footerSegmentsRef.current, mouse.col - 1 - pos.left)
+              if (id === "model" || id === "provider") {
+                const options = collectModelOptions(state.config)
+                if (options.length === 0) {
+                  dispatch({ type: "NOTICE", message: "No models configured." })
+                } else {
+                  dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "model", options, index: 0 } })
+                }
+              } else if (id === "mode") {
+                const next = cyclePermissionMode(state.config.permissionMode)
+                persist("permissionMode", next)
+                void agent.switchMode(next)
+                dispatch({ type: "NOTICE", message: `Permission mode: ${next}` })
+              } else if (id === "thinking") {
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: {
+                    kind: "effortSlider",
+                    ...deriveEffortSliderState(state.config.thinkingLevel),
+                  },
+                })
+              } else if (id) {
+                // The remaining segments (cwd/ctx/git/tokens/cost/cache/ratelimit)
+                // are a click-shortcut to the matching report command.
+                const cmd = footerSegmentCommand(id)
+                if (cmd) runCommandLine(cmd)
+              }
+            }
+          }
+          // A click on a collapsed tool/thinking card toggles just that cell
+          // (the global Ctrl+T toggles all). Opt-in + fullscreen only: the row
+          // map needs per-cell heights, which are only measured when the
+          // click-to-expand pref keeps `cursor` measuring. The content box's
+          // `marginTop={-offset}` already encodes the scroll position, so the
+          // click row maps straight onto a content row.
+          if (fullscreen && renderPrefs.clickToExpand && scrollContentRef.current) {
+            const contentPos = absoluteTopLeft(scrollContentRef.current)
+            if (contentPos) {
+              const cellId = cursor.cellIdAtContentRow(mouse.row - 1 - contentPos.top)
+              if (cellId) dispatch({ type: "TOGGLE_COLLAPSE", id: cellId })
+            }
+          }
         }
         return
       }
@@ -2340,7 +2510,11 @@ export function App({
               />
               {/* Scrollable middle: history + the live turn, clipped to the
                   space between the banner and the composer. */}
-              <ScrollView offset={scroll.offset} onMeasure={scroll.measure}>
+              <ScrollView
+                offset={scroll.offset}
+                onMeasure={scroll.measure}
+                contentRef={scrollContentRef}
+              >
                 <Transcript
                   cells={state.cells}
                   verbose={state.verbose}
@@ -2821,6 +2995,22 @@ export function App({
               onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
             />
           )}
+          {state.overlay.kind === "quickActions" && (
+            <QuickActionsPanel
+              rows={state.overlay.rows}
+              width={columns}
+              maxRows={overlayRows}
+              onRun={(command) => {
+                // Close the command center first, then run the picked command —
+                // most targets open their own overlay (which would replace this
+                // one anyway), but a notice/runtime target must not leave the
+                // menu hanging behind it.
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine(command)
+              }}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
           {state.overlay.kind === "agentRun" && (
             <AgentRunPage
               liveId={state.overlay.liveId}
@@ -3080,6 +3270,8 @@ export function App({
             turnStatus={state.turnStatus}
             planTitle={footerPlanTitle}
             columns={columns}
+            rowRef={footerRowRef}
+            segmentsRef={footerSegmentsRef}
           />
         </Box>
       </RenderPrefsProvider>

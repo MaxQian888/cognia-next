@@ -31,6 +31,8 @@ import { outputStyleCommand } from "./output-style-command"
 import { agentModeCommand } from "./agent-mode-command"
 import { layoutCommand } from "./layout-command"
 import { mouseCommand } from "./mouse-command"
+import { menuCommand } from "./menu-command"
+import { editorCommands } from "./editor-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
 /** Back-compat alias for consumers that referenced the old shape. */
@@ -129,6 +131,8 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   agentModeCommand,
   layoutCommand,
   mouseCommand,
+  menuCommand,
+  ...editorCommands,
   {
     name: "retry",
     aliases: ["resend"],

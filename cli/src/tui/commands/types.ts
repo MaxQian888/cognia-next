@@ -143,6 +143,16 @@ export type CommandEffect =
   | { kind: "rewindList" }
   /** Restore a checkpoint by seq — files and/or conversation. */
   | { kind: "rewind"; seq: number; scope: "conversation" | "files" | "both" }
+  /** Open a file in the external editor (`/open`). App resolves the editor and
+   * spawns it, reporting success/failure as a notice. */
+  | { kind: "openFile"; file: string; line?: number; col?: number }
+  /** Report the detected editor context (`/editor`). App reads `process.env`. */
+  | { kind: "editorInfo" }
+  /** Persist + live-apply the preferred external editor (`/editor <command>`). */
+  | { kind: "setEditor"; command: string }
+  /** Show the working-tree git diff (`/diff`) in the scrollable document pager.
+   * App shells `git diff` (+ `--staged`) and renders the result. */
+  | { kind: "gitDiff" }
   | { kind: "exit" }
 
 /** What `openForm` carries — enough for the App to mount a {@link FormOverlay}. */

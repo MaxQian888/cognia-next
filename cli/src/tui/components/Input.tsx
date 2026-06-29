@@ -21,7 +21,10 @@ import { historyDown, historyUp } from "../input/history"
 import { interpretKey, type KeyFlags } from "../input/keymap"
 import { parseMouseEvent } from "../input/mouse"
 import { clickToCursor } from "../input/mouse-cursor"
+import { composerPopupRowAtClick } from "../input/composer-popup-click"
 import { absoluteTopLeft } from "../input/element-position"
+import { windowList } from "./list-window"
+import { buildMentionView } from "./mention-view"
 import {
   collapsePaste,
   expandPastes,
@@ -190,6 +193,10 @@ function InputImpl({
   // Wraps the rendered buffer lines so a mouse click can be mapped to a cursor
   // position via the Yoga layout (see the click branch in the input handler).
   const linesRef = useRef<DOMElement | null>(null)
+  // Wraps the `/`-palette / `@`-mention popup so a click on a row maps to the
+  // candidate it lands on (select + accept), instead of falling through to the
+  // buffer cursor logic below.
+  const popupBoxRef = useRef<DOMElement | null>(null)
 
   // Derive the active popup from the buffer.
   const sQuery = slashQuery(text)
@@ -322,6 +329,9 @@ function InputImpl({
   const commandHint = popupOpen || disabled ? null : buildCommandHint(text)
   const popupLen = popupKind === "slash" ? slashMatches.length : mentionCandidates.length
   const safeIndex = popupLen > 0 ? popupIndex % popupLen : 0
+  // Visible-row cap for the popups — mirrors the components' own default so the
+  // click hit-test windows the candidate list exactly as the render does.
+  const POPUP_MAX_ROWS = popupRows ?? 8
 
   // Inline ghost-text autosuggest: a dim completion shown after the cursor when
   // the single-line draft is a prefix of a prior history entry (or slash name).
@@ -363,9 +373,10 @@ function InputImpl({
     onSubmit(expanded)
   }
 
-  const acceptPopup = () => {
+  const acceptPopup = (idx: number = safeIndex) => {
     if (popupKind === "slash") {
-      const cmd = slashMatches[safeIndex]
+      const cmd = slashMatches[idx]
+      if (!cmd) return
       const line = `/${cmd.name}`
       dispatch({ type: "INPUT_PUSH_HISTORY", entry: line })
       onHistoryPush?.(line)
@@ -374,7 +385,7 @@ function InputImpl({
       return
     }
     if (popupKind === "mention" && detected) {
-      const candidate = mentionCandidates[safeIndex]
+      const candidate = mentionCandidates[idx]
       if (candidate) setBuffer(acceptMention(buffer, detected, candidate))
     }
   }
@@ -438,6 +449,43 @@ function InputImpl({
         // a popup owns input — see `onPopupOpenChange`). Up = previous row.
         setPopupIndex(moveIndex(safeIndex, mouse.dir === "up" ? -1 : 1, popupLen))
       } else if (mouse.kind === "click") {
+        // A click on an open popup row selects + accepts it (parity with the
+        // bordered overlay panels). Hit-test the popup first; only fall through
+        // to buffer-cursor positioning when the click misses every row.
+        if (popupOpen) {
+          const popupPos = absoluteTopLeft(popupBoxRef.current)
+          if (popupPos) {
+            const picked =
+              popupKind === "slash"
+                ? (() => {
+                    const win = windowList(slashMatches.length, safeIndex, POPUP_MAX_ROWS)
+                    return composerPopupRowAtClick({
+                      clickRow: mouse.row - 1,
+                      popupTop: popupPos.top,
+                      headerRows: 0,
+                      hasAboveMore: win.above > 0,
+                      hiddenAbove: win.start,
+                      visibleCount: win.end - win.start,
+                    })
+                  })()
+                : (() => {
+                    const view = buildMentionView(mentionCandidates, safeIndex, POPUP_MAX_ROWS)
+                    return composerPopupRowAtClick({
+                      clickRow: mouse.row - 1,
+                      popupTop: popupPos.top,
+                      headerRows: 1,
+                      hasAboveMore: false,
+                      hiddenAbove: view.above,
+                      visibleCount: view.rows.length,
+                    })
+                  })()
+            if (picked !== null) {
+              setPopupIndex(picked)
+              acceptPopup(picked)
+              return
+            }
+          }
+        }
         const pos = absoluteTopLeft(linesRef.current)
         if (pos) {
           const target = clickToCursor({
@@ -594,19 +642,26 @@ function InputImpl({
 
   return (
     <Box flexDirection="column" width={width} flexShrink={0}>
-      {popupOpen && popupKind === "slash" && (
-        <SlashPalette matches={slashMatches} index={safeIndex} maxRows={popupRows} width={width} />
-      )}
-      {popupOpen && popupKind === "mention" && (
-        <MentionPalette
-          candidates={mentionCandidates}
-          index={safeIndex}
-          maxRows={popupRows}
-          width={width}
-          loading={mentionLoading}
-          loadingLabel={loadingLabel}
-        />
-      )}
+      <Box flexDirection="column" ref={popupBoxRef}>
+        {popupOpen && popupKind === "slash" && (
+          <SlashPalette
+            matches={slashMatches}
+            index={safeIndex}
+            maxRows={popupRows}
+            width={width}
+          />
+        )}
+        {popupOpen && popupKind === "mention" && (
+          <MentionPalette
+            candidates={mentionCandidates}
+            index={safeIndex}
+            maxRows={popupRows}
+            width={width}
+            loading={mentionLoading}
+            loadingLabel={loadingLabel}
+          />
+        )}
+      </Box>
       <Box
         flexDirection="column"
         borderStyle="round"

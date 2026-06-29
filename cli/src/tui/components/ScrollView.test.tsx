@@ -36,6 +36,16 @@ describe("ScrollView", () => {
     expect(onMeasure).toHaveBeenCalledWith(24, 24)
   })
 
+  it("forwards the content box node to an external contentRef", () => {
+    const contentRef = React.createRef<DOMElement>() as React.MutableRefObject<DOMElement | null>
+    render(
+      <ScrollView offset={0} onMeasure={() => {}} contentRef={contentRef}>
+        <span>body</span>
+      </ScrollView>
+    )
+    expect(contentRef.current).not.toBeNull()
+  })
+
   it("re-measures on re-render", () => {
     const onMeasure = jest.fn()
     const { rerender } = render(

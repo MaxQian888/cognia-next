@@ -1154,6 +1154,102 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("file-a"))
   })
 
+  it("/diff shells git diff and opens the changes in the pager", async () => {
+    const { create } = fakeSession()
+    const runShell = jest.fn().mockResolvedValue({
+      stdout: "diff --git a/x.ts b/x.ts\n@@ -1 +1 @@\n-old\n+new",
+      stderr: "",
+      code: 0,
+    })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+    )
+    type("/diff")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(runShell).toHaveBeenCalledWith("git --no-pager diff", { cwd: "/work" })
+    await waitFor(() => expect(container.textContent).toContain("Working tree changes"))
+  })
+
+  it("/diff reports a clean tree when there are no changes", async () => {
+    const { create } = fakeSession()
+    const runShell = jest.fn().mockResolvedValue({ stdout: "", stderr: "", code: 0 })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+    )
+    type("/diff")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Working tree clean"))
+  })
+
+  it("rings the terminal bell when a long turn finishes (notify on)", async () => {
+    // A deferred session so busy commits `true` before the turn completes —
+    // otherwise the synchronous fakeSession toggles busy within one commit and
+    // the busy→idle transition (which the bell hooks) is never observed.
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const create: CreateSession = () => ({
+      sessionId: "ses-gate",
+      async send(_prompt, opts) {
+        opts.onEvent?.({ type: "text-delta", delta: "hi" })
+        await gate
+        return result("hi")
+      },
+      close: jest.fn(),
+    })
+    const titleOut = { isTTY: true, write: jest.fn() }
+    let t = 0
+    render(
+      <App
+        config={{ ...config, notify: true, terminalTitle: false }}
+        sessionId="s1"
+        createSession={create}
+        titleOut={titleOut}
+        now={jest.fn(() => (t += 100000))}
+      />
+    )
+    type("hello")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // The turn is in flight (busy === true committed). Complete it.
+    await act(async () => {
+      release()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(titleOut.write).toHaveBeenCalledWith("\x07"))
+  })
+
+  it("does not ring the bell when notify is off", async () => {
+    const { create } = fakeSession()
+    const titleOut = { isTTY: true, write: jest.fn() }
+    let t = 0
+    render(
+      <App
+        config={{ ...config, notify: false, terminalTitle: false }}
+        sessionId="s1"
+        createSession={create}
+        titleOut={titleOut}
+        now={() => (t += 100000)}
+      />
+    )
+    type("hello")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(titleOut.write).not.toHaveBeenCalledWith("\x07")
+  })
+
   it("lists the Cognia runtime commands in /help", () => {
     const { create } = fakeSession()
     const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
@@ -1209,6 +1305,76 @@ describe("App", () => {
     type("/statusbar")
     submit()
     expect(container.textContent).toContain("Status-bar theme")
+  })
+
+  it("captures a `# fact` line to memory instead of sending it to the model", async () => {
+    const { create, prompts } = fakeSession()
+    render(<App config={config} sessionId="s1" createSession={create} home="/home/u/.cognia" />)
+    type("# always use pnpm")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // The fact never reached the model (it routed to /remember).
+    expect(prompts).not.toContain("always use pnpm")
+    expect(prompts.some((p) => p.includes("always use pnpm"))).toBe(false)
+  })
+
+  it("opens a file in the editor on /open <path>", async () => {
+    const { create } = fakeSession()
+    const openInEditorFn = jest.fn().mockResolvedValue(true)
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home/u/.cognia"
+        openInEditorFn={openInEditorFn}
+      />
+    )
+    type("/open src/a.ts:12")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(openInEditorFn).toHaveBeenCalledWith(
+      expect.stringContaining("a.ts"),
+      expect.objectContaining({ line: 12 })
+    )
+    expect(container.textContent).toContain("Opened src/a.ts")
+  })
+
+  it("persists the preferred editor on /editor <command>", async () => {
+    const { create } = fakeSession()
+    const persistEditor = jest.fn()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home/u/.cognia"
+        persistEditor={persistEditor}
+      />
+    )
+    type("/editor cursor")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(persistEditor).toHaveBeenCalledWith("/home/u/.cognia", { command: "cursor" })
+    expect(container.textContent).toContain("Editor: cursor")
+  })
+
+  it("reports editor context on a bare /editor", async () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/editor")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(container.textContent).toContain("Editor:")
+    expect(container.textContent).toContain("Clickable paths")
   })
 
   it("switches + persists the colour theme on /theme", async () => {
@@ -1397,8 +1563,8 @@ describe("App", () => {
         await Promise.resolve()
       })
       await waitFor(() => expect(persistPlan).toHaveBeenCalled())
-      expect(container.textContent).toContain("Proposed plan")
-      expect(container.textContent).toContain("Plan ready for review")
+      expect(container.textContent).toContain("Plan ready for review") // the plan cell header
+      expect(container.textContent).toContain("Ready to code?") // the approval overlay
       expect(container.textContent).toContain("/home/.cognia/plans/s1-plan-2.md")
       // The latest plan stays visible as a footer chip (open it with /plan).
       expect(container.textContent).toContain("📋")

@@ -12,9 +12,7 @@ import { Box, Text, useInput, type DOMElement } from "ink"
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
 import { OverlayFooter } from "../OverlayFooter"
-import { parseMouseEvent } from "../../input/mouse"
-import { absoluteTopLeft } from "../../input/element-position"
-import { rowAtClick } from "../../input/panel-click"
+import { usePanelClick } from "../../input/use-panel-click"
 import {
   agentRowBadge,
   agentRowHint,
@@ -68,8 +66,30 @@ export function AgentsPanel({
   const win = windowList(rows.length, safeIndex, maxRows)
   const visible = rows.slice(win.start, win.end)
 
+  // Mouse (only reported in `scroll` mouse mode): wheel moves the selection; a
+  // left-click on a row selects AND opens it (single click, like Claude Code).
+  // The header line (`Agents · …`) is 1 row above the items.
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: 1,
+    hasAboveMore: win.above > 0,
+    visibleCount: visible.length,
+    onPick: (offset) => {
+      const target = rows[win.start + offset]
+      if (target) {
+        setIndex(() => win.start + offset)
+        onView(target)
+      }
+    },
+    onWheel: (dir) =>
+      setIndex(() =>
+        dir === "up" ? Math.max(0, safeIndex - 1) : Math.min(rows.length - 1, safeIndex + 1)
+      ),
+  })
+
   useInput(
     (input, key) => {
+      if (handleMouse(input)) return
       if (key.escape) return onCancel()
       if (key.upArrow) {
         setIndex(() => Math.max(0, safeIndex - 1))
@@ -82,35 +102,6 @@ export function AgentsPanel({
       if (key.return) {
         if (current) onView(current)
         return
-      }
-      // Mouse (only reported in `scroll` mouse mode): wheel moves the selection;
-      // a left-click on a row selects AND opens it (single click, like Claude
-      // Code). The header line above (`Agents · …`) is 1 row; the round border
-      // adds 1; `rowAtClick` accounts for both plus the "↑ N more" indicator.
-      const mouse = parseMouseEvent(input)
-      if (!mouse) return
-      if (mouse.kind === "wheel") {
-        setIndex(() =>
-          mouse.dir === "up" ? Math.max(0, safeIndex - 1) : Math.min(rows.length - 1, safeIndex + 1)
-        )
-        return
-      }
-      if (mouse.kind === "click") {
-        const pos = absoluteTopLeft(boxRef.current)
-        if (!pos) return
-        const offset = rowAtClick({
-          clickRow: mouse.row - 1,
-          panelTop: pos.top,
-          headerRows: 1,
-          hasAboveMore: win.above > 0,
-          visibleCount: visible.length,
-        })
-        if (offset === null) return
-        const target = rows[win.start + offset]
-        if (target) {
-          setIndex(() => win.start + offset)
-          onView(target)
-        }
       }
     },
     { isActive }

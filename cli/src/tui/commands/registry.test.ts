@@ -45,6 +45,11 @@ describe("command registry", () => {
     expect(names.indexOf("model")).toBeLessThan(names.indexOf("mode"))
   })
 
+  it("registers the /open and /editor commands in the system category", () => {
+    expect(getCommand("open")?.category).toBe("system")
+    expect(getCommand("editor")?.category).toBe("system")
+  })
+
   it("resolves a command by name or alias", () => {
     expect(getCommand("clear")?.name).toBe("clear")
     expect(getCommand("new")?.name).toBe("clear")

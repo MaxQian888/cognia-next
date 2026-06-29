@@ -959,6 +959,14 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         },
         overlay: { kind: "none" },
       }
+    case "SET_EDITOR":
+      return {
+        ...state,
+        config: {
+          ...state.config,
+          editor: { ...state.config.editor, ...action.editor },
+        },
+      }
     case "SET_THEME":
       return {
         ...state,

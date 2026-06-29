@@ -6,11 +6,12 @@
  * server panel. The toggle state is owned here (seeded from props) so the row
  * flips instantly; the parent callback only persists.
  */
-import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import React, { useRef, useState } from "react"
+import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
+import { usePanelClick } from "../input/use-panel-click"
 import { windowList } from "./list-window"
 import { OverlayFooter } from "./OverlayFooter"
 import { filterMcpTools, MCP_TOOLS_FOOTER, type McpPanelTool } from "../runtime/mcp-panel-model"
@@ -41,13 +42,47 @@ export function McpToolsPanel({
   const [tools, setTools] = useState(initialTools)
   const [query, setQuery] = useState("")
   const [index, setIndex] = useState(0)
+  const boxRef = useRef<DOMElement | null>(null)
 
   const filtered = filterMcpTools(tools, query)
   const safeIndex = filtered.length > 0 ? Math.min(index, filtered.length - 1) : 0
   const enabledCount = tools.filter((t) => t.enabled).length
 
+  /** Flip one tool's enabled state (shared by Space/Enter and a click). */
+  const toggleTool = (t: McpPanelTool) => {
+    const next = !t.enabled
+    setTools((list) => list.map((x) => (x.name === t.name ? { ...x, enabled: next } : x)))
+    onToggle(t.name, next)
+  }
+
+  const win = windowList(filtered.length, safeIndex, maxRows)
+  const visible = filtered.slice(win.start, win.end)
+
+  // Mouse (fullscreen `scroll` only): header = title + filter line (2 rows); a
+  // click toggles the row (same as Space/Enter).
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: 2,
+    hasAboveMore: win.above > 0,
+    visibleCount: visible.length,
+    onPick: (offset) => {
+      const target = filtered[win.start + offset]
+      if (target) {
+        setIndex(win.start + offset)
+        toggleTool(target)
+      }
+    },
+    onWheel: (dir) =>
+      setIndex((i) =>
+        dir === "up"
+          ? Math.max(0, Math.min(i, filtered.length - 1) - 1)
+          : Math.min(filtered.length - 1, i + 1)
+      ),
+  })
+
   useInput(
     (input, key) => {
+      if (handleMouse(input)) return
       if (key.escape) {
         if (query) {
           setQuery("")
@@ -65,10 +100,7 @@ export function McpToolsPanel({
       }
       if (input === " " || key.return) {
         const t = filtered[safeIndex]
-        if (!t) return
-        const next = !t.enabled
-        setTools((list) => list.map((x) => (x.name === t.name ? { ...x, enabled: next } : x)))
-        onToggle(t.name, next)
+        if (t) toggleTool(t)
         return
       }
       if (key.backspace || key.delete) {
@@ -84,11 +116,9 @@ export function McpToolsPanel({
     { isActive }
   )
 
-  const win = windowList(filtered.length, safeIndex, maxRows)
-  const visible = filtered.slice(win.start, win.end)
-
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}

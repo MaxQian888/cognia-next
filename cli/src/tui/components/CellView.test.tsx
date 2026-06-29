@@ -360,10 +360,68 @@ describe("CellView", () => {
     expect(renderCell({ id: "1", kind: "notice", message: "fyi" })).toContain("fyi")
   })
 
-  it("renders a plan cell as a labelled card with markdown body", () => {
-    const text = renderCell({ id: "1", kind: "plan", raw: "# Approach\n- step" })
-    expect(text).toContain("Proposed plan")
+  describe("clickable file paths (OSC-8)", () => {
+    const ORIG = { ...process.env }
+    afterEach(() => {
+      process.env = { ...ORIG }
+    })
+
+    it("wraps a read tool's path in a vscode://file link inside a VS Code terminal", () => {
+      process.env.FORCE_HYPERLINK = "1"
+      process.env.TERM_PROGRAM = "vscode"
+      const text = renderCell({
+        id: "1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { file_path: "/repo/a.ts", offset: 12 },
+        status: "done",
+        collapsed: true,
+      } as Cell)
+      expect(text).toContain("vscode://file/repo/a.ts:12")
+      expect(text).toContain("/repo/a.ts") // visible label unchanged
+    })
+
+    it("uses a file:// link outside a VS Code terminal", () => {
+      process.env.FORCE_HYPERLINK = "1"
+      delete process.env.TERM_PROGRAM
+      const text = renderCell({
+        id: "1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { file_path: "/repo/a.ts" },
+        status: "done",
+        collapsed: true,
+      } as Cell)
+      // The exact file:// form is platform-dependent (drive-resolved on Windows);
+      // assert it is an OSC-8 file link wrapping the visible path.
+      expect(text).toContain("]8;;file://")
+      expect(text).toContain("a.ts")
+    })
+
+    it("leaves the path plain when the terminal lacks hyperlink support", () => {
+      process.env.FORCE_HYPERLINK = "0"
+      const text = renderCell({
+        id: "1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { file_path: "/repo/a.ts" },
+        status: "done",
+        collapsed: true,
+      } as Cell)
+      expect(text).toContain("/repo/a.ts")
+      expect(text).not.toContain("file://")
+      expect(text).not.toContain("]8;;")
+    })
+  })
+
+  it("renders a plan cell as a labelled card with a step count and markdown body", () => {
+    const text = renderCell({ id: "1", kind: "plan", raw: "# Approach\n- step one\n- step two" })
+    expect(text).toContain("Plan ready for review")
+    expect(text).toContain("2 steps")
     expect(text).toContain("Approach")
-    expect(text).toContain("step")
+    expect(text).toContain("step one")
   })
 })

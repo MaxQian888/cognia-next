@@ -104,6 +104,28 @@ describe("cliConfigFileSchema.devPlugins", () => {
   })
 })
 
+describe("cliConfigFileSchema.editor", () => {
+  it("accepts the string sugar and the object form", () => {
+    expect(cliConfigFileSchema.safeParse({ editor: "code" }).success).toBe(true)
+    expect(
+      cliConfigFileSchema.safeParse({ editor: { command: "subl", args: ["-n"] } }).success
+    ).toBe(true)
+    expect(
+      cliConfigFileSchema.safeParse({ editor: { command: "myedit", gotoFormat: "vim" } }).success
+    ).toBe(true)
+  })
+
+  it("rejects an empty string, unknown keys, and a bad gotoFormat", () => {
+    expect(cliConfigFileSchema.safeParse({ editor: "" }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ editor: { bogus: 1 } }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ editor: { gotoFormat: "emacs" } }).success).toBe(false)
+  })
+
+  it("is absent by default in the resolved config", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.editor).toBeUndefined()
+  })
+})
+
 describe("cliConfigFileSchema.toolExecutionTimeoutMs", () => {
   it("defaults to 120_000 in the resolved config", () => {
     expect(DEFAULT_RESOLVED_CONFIG.toolExecutionTimeoutMs).toBe(120_000)

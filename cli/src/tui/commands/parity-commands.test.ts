@@ -41,6 +41,11 @@ describe("PARITY_COMMANDS", () => {
     })
   })
 
+  it("/diff emits a gitDiff effect (App shells git diff)", () => {
+    expect(find("diff").handler!(ctx())).toEqual({ kind: "gitDiff" })
+    expect(find("diff").aliases).toContain("changes")
+  })
+
   it("/export emits a run runtime request carrying the format arg", () => {
     expect(find("export").handler!(ctx("jsonl"))).toEqual({
       kind: "runtime",

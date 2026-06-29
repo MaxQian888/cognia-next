@@ -91,4 +91,4 @@ export function skillSummary(rows: SkillPanelRow[]): {
 }
 
 export const SKILL_PANEL_FOOTER =
-  "filter · ↑/↓ move · space toggle · ^A all on · ^D all off · ^T mode · enter detail · ^N new · ^X delete · esc"
+  "filter · ↑/↓ / click · space toggle · ^A all on · ^D all off · ^T mode · enter detail · ^N new · ^X delete · esc"

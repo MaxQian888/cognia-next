@@ -3,6 +3,7 @@
  * than a one-liner (usage/context math) lives in `format/usage.ts`.
  */
 import type { TuiState } from "./types"
+import { toolFileLine, toolFilePath } from "../format/tools"
 
 /** A turn is in progress (streaming or aborting). */
 export function isBusy(state: TuiState): boolean {
@@ -84,6 +85,21 @@ export function lastToolResultText(state: TuiState): string | null {
     if (c.kind !== "tool") continue
     if (c.result === undefined || c.result === null) continue
     return toolResultToText(c.result)
+  }
+  return null
+}
+
+/**
+ * The file path (with an optional line) referenced by the most recent file tool
+ * in the transcript, or null when none. Powers a bare `/open` (open the last
+ * file the agent read/edited in the editor). Skips command tools (bash/shell).
+ */
+export function lastToolFilePath(state: TuiState): { path: string; line?: number } | null {
+  for (let i = state.cells.length - 1; i >= 0; i--) {
+    const c = state.cells[i]
+    if (c.kind !== "tool") continue
+    const path = toolFilePath(c.toolName, c.input)
+    if (path) return { path, line: toolFileLine(c.toolName, c.input) }
   }
   return null
 }

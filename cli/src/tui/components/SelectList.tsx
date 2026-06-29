@@ -4,12 +4,13 @@
  * `onMove` / `onSelect` / `onCancel`, so the same primitive backs both
  * reducer-driven overlays and input-local popups.
  */
-import React from "react"
-import { Box, Text, useInput } from "ink"
+import React, { useRef } from "react"
+import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
 import { windowList } from "./list-window"
 import { OverlayFooter } from "./OverlayFooter"
+import { usePanelClick } from "../input/use-panel-click"
 
 export interface SelectItem {
   label: string
@@ -45,8 +46,30 @@ export function SelectList({
   footerHint?: string | false
 }) {
   const theme = useTheme()
+  const boxRef = useRef<DOMElement | null>(null)
+
+  const win = windowList(items.length, index, maxRows ?? items.length)
+  const visible = items.slice(win.start, win.end)
+
+  // Mouse (fullscreen `scroll` mode only): a click on a row both highlights and
+  // selects it (Claude-Code parity); the wheel moves the highlight. Header rows
+  // above the items = the optional title line.
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: title ? 1 : 0,
+    hasAboveMore: win.above > 0,
+    visibleCount: visible.length,
+    onPick: (offset) => {
+      const target = win.start + offset
+      onMove(target - index)
+      onSelect(target)
+    },
+    onWheel: (dir) => onMove(dir === "up" ? -1 : 1),
+  })
+
   useInput(
     (input, key) => {
+      if (handleMouse(input)) return
       if (key.upArrow) onMove(-1)
       else if (key.downArrow) onMove(1)
       else if (key.return) onSelect(index)
@@ -55,11 +78,9 @@ export function SelectList({
     { isActive }
   )
 
-  const win = windowList(items.length, index, maxRows ?? items.length)
-  const visible = items.slice(win.start, win.end)
-
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}

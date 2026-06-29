@@ -91,6 +91,38 @@ function firstString(input: Record<string, unknown>, keys: string[], max = 80): 
   return undefined
 }
 
+/** First non-empty string field among the candidates, UNtruncated (paths must
+ * stay verbatim so they can be opened / hyperlinked). */
+function firstStringRaw(input: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const v = input[key]
+    if (typeof v === "string" && v.length > 0) return v
+  }
+  return undefined
+}
+
+/** Candidate input keys that name the file a tool acts on, in precedence order. */
+const FILE_PATH_KEYS = ["file_path", "filePath", "path", "notebook_path"]
+
+/**
+ * The (verbatim, untruncated) file path a tool's input refers to — the single
+ * source of "which file does this card point at", shared by the OSC-8 clickable
+ * path in the tool card and the `/open` last-file selector. Returns undefined for
+ * tools that don't act on a file (bash/shell carry a command, not a path).
+ */
+export function toolFilePath(toolName: string, input: Record<string, unknown>): string | undefined {
+  const name = bareToolName(toolName).toLowerCase()
+  if (name === "bash" || name === "shell") return undefined
+  return firstStringRaw(input, FILE_PATH_KEYS)
+}
+
+/** The 1-based line a `read` tool starts at (its `offset`), or undefined. Used to
+ * build a `file:line` editor target / OSC-8 link. */
+export function toolFileLine(toolName: string, input: Record<string, unknown>): number | undefined {
+  if (bareToolName(toolName).toLowerCase() !== "read") return undefined
+  return typeof input.offset === "number" && input.offset > 0 ? input.offset : undefined
+}
+
 /**
  * A compact, human-readable summary of a tool call for the collapsed tool card
  * header — e.g. the file path for an edit, the command for bash, the pattern

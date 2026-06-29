@@ -210,4 +210,4 @@ export function agentSummary(rows: AgentPanelRow[]): {
   return { total: rows.length, running, settled: rows.length - running }
 }
 
-export const AGENTS_PANEL_FOOTER = "↑/↓ move · enter view output · esc close"
+export const AGENTS_PANEL_FOOTER = "↑/↓ / click · enter view output · esc close"

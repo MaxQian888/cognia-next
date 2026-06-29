@@ -8,6 +8,7 @@ import {
   setBuiltinTools,
   setConfigValue,
   setCustomTheme,
+  setEditorConfig,
   setKeybindings,
   setMascotConfig,
   setPluginToolsConfig,
@@ -218,6 +219,36 @@ describe("setMascotConfig", () => {
 
   it("validates the patch against the schema (bad style)", () => {
     expect(() => setMascotConfig(HOME, { style: "dragon" as never }, memFs().fsx)).toThrow()
+  })
+})
+
+describe("setEditorConfig", () => {
+  it("writes an editor object into a fresh config", () => {
+    const m = memFs()
+    setEditorConfig(HOME, { command: "code" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ editor: { command: "code" } })
+  })
+
+  it("normalizes a stored string editor before merging the patch", () => {
+    const m = memFs({ [userConfigPath(HOME)]: JSON.stringify({ editor: "vim" }) })
+    setEditorConfig(HOME, { command: "cursor" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      editor: { command: "cursor" },
+    })
+  })
+
+  it("merges into an existing editor object, preserving other keys", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ editor: { command: "code", args: ["--wait"] } }),
+    })
+    setEditorConfig(HOME, { command: "cursor" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      editor: { command: "cursor", args: ["--wait"] },
+    })
+  })
+
+  it("validates the patch against the schema (bad gotoFormat)", () => {
+    expect(() => setEditorConfig(HOME, { gotoFormat: "emacs" as never }, memFs().fsx)).toThrow()
   })
 })
 

@@ -42,6 +42,13 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     handler: buildCompactEffect,
   },
   {
+    name: "diff",
+    aliases: ["changes"],
+    description: "view uncommitted git changes in the scrollable pager",
+    category: "system",
+    handler: () => ({ kind: "gitDiff" }),
+  },
+  {
     name: "export",
     description: "export this session to a file",
     category: "session",

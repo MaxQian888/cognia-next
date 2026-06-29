@@ -5,6 +5,10 @@ import { __fireInput, __resetInk } from "ink"
 import { EffortSlider } from "./EffortSlider"
 import { ThemeProvider } from "../theme/context"
 import { BUILTIN_THEMES } from "../theme/builtins"
+import { absoluteTopLeft } from "../input/element-position"
+
+jest.mock("../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+const mockPos = absoluteTopLeft as jest.Mock
 
 const wrap = (el: React.ReactElement) =>
   render(<ThemeProvider palette={BUILTIN_THEMES.ansi}>{el}</ThemeProvider>)
@@ -27,7 +31,38 @@ function props(over: Partial<React.ComponentProps<typeof EffortSlider>> = {}) {
 }
 
 describe("EffortSlider", () => {
-  beforeEach(() => __resetInk())
+  beforeEach(() => {
+    __resetInk()
+    mockPos.mockReturnValue(null)
+  })
+
+  it("clicking the gauge track jumps to that tier (mouse scroll mode)", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const onConfirm = jest.fn()
+    wrap(<EffortSlider {...props({ onConfirm })} />)
+    // gauge row = 0-based 3 (SGR row 4); track starts at 0-based col 11 (SGR 12).
+    press("[<0;12;4M") // first track cell → tier index 0
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 0 })
+  })
+
+  it("clicking the off-checkbox row selects the model default", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const onConfirm = jest.fn()
+    wrap(<EffortSlider {...props({ onConfirm })} />)
+    press("[<0;5;3M") // off row = 0-based row 2 (SGR row 3)
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: true, index: 2 })
+  })
+
+  it("the mouse wheel nudges the tier", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const onConfirm = jest.fn()
+    wrap(<EffortSlider {...props({ index: 2, onConfirm })} />)
+    press("[<64;1;1M") // wheel up → index 1
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 1 })
+  })
 
   it("renders the title, off row, slider labels and the focused-tier description", () => {
     const { container } = wrap(<EffortSlider {...props()} />)

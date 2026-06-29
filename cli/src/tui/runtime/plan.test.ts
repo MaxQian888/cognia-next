@@ -14,6 +14,7 @@ import {
   planDiffText,
   planFileName,
   planIdFromFile,
+  planStats,
   planTitle,
 } from "./plan"
 
@@ -101,6 +102,21 @@ describe("looksLikeQuestion", () => {
 
   it("rejects empty input", () => {
     expect(looksLikeQuestion("   ")).toBe(false)
+  })
+})
+
+describe("planStats", () => {
+  it("counts list and numbered items as steps and non-blank lines", () => {
+    const raw = "# Plan\n\n- step one\n- step two\n1. step three\n\nsome prose"
+    expect(planStats(raw)).toEqual({ steps: 3, lines: 5 })
+  })
+
+  it("reports zero steps for unstructured prose", () => {
+    expect(planStats("just a paragraph\nof prose")).toEqual({ steps: 0, lines: 2 })
+  })
+
+  it("handles an empty body", () => {
+    expect(planStats("")).toEqual({ steps: 0, lines: 0 })
   })
 })
 

@@ -23,11 +23,13 @@
  * re-applies on a reasoning-capable model) but shows an inline warning so the
  * user isn't surprised by a no-op.
  */
-import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import React, { useRef, useState } from "react"
+import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
 import { EFFORT_SLIDER_LEVELS } from "../../config/schema"
+import { parseMouseEvent } from "../input/mouse"
+import { absoluteTopLeft } from "../input/element-position"
 import {
   EFFORT_LEVEL_DESCRIPTIONS,
   effortGaugeCells,
@@ -35,6 +37,7 @@ import {
   effortKeyToIndex,
   effortLayout,
   effortPositionLabel,
+  effortSliderClick,
 } from "./effort-slider-view"
 
 /** The result reported to the parent on confirm. */
@@ -76,6 +79,7 @@ export function EffortSlider({
   const [off, setOff] = useState(seedOff)
   const [index, setIndex] = useState(() => Math.min(Math.max(seedIndex, 0), LAST))
   const [focus, setFocus] = useState<Focus>(seedOff ? "off" : "slider")
+  const boxRef = useRef<DOMElement | null>(null)
 
   /** Jump to a specific tier and engage the slider (clears off, focuses track). */
   const jump = (to: number) => {
@@ -85,8 +89,36 @@ export function EffortSlider({
   }
   const move = (delta: number) => jump(index + delta)
 
+  const gaugeWidth = effortGaugeWidth(typeof width === "number" ? width : undefined)
+
   useInput(
     (input, key) => {
+      // Mouse (fullscreen `scroll` only): wheel nudges the tier; a click on the
+      // off-checkbox row toggles it, a click on the gauge track jumps to a tier.
+      const mouse = parseMouseEvent(input)
+      if (mouse) {
+        if (mouse.kind === "wheel") move(mouse.dir === "up" ? -1 : 1)
+        else if (mouse.kind === "click") {
+          const pos = absoluteTopLeft(boxRef.current)
+          if (pos) {
+            const act = effortSliderClick({
+              clickRow: mouse.row - 1,
+              clickCol: mouse.col - 1,
+              boxTop: pos.top,
+              boxLeft: pos.left,
+              gaugeWidth,
+              last: LAST,
+            })
+            if (act?.kind === "off") {
+              setOff(true)
+              setFocus("off")
+            } else if (act?.kind === "tier") {
+              jump(act.index)
+            }
+          }
+        }
+        return
+      }
       if (key.tab) {
         setFocus((f) => (f === "off" ? "slider" : "off"))
         return
@@ -118,11 +150,11 @@ export function EffortSlider({
 
   const activeLevel = LEVELS[index]
   const layout = effortLayout(typeof width === "number" ? width : undefined)
-  const gaugeWidth = effortGaugeWidth(typeof width === "number" ? width : undefined)
   const cells = effortGaugeCells(index, LAST, gaugeWidth)
 
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}
@@ -200,7 +232,7 @@ export function EffortSlider({
       ) : null}
 
       <Text color={theme.muted} dimColor>
-        ←/→ adjust · 1-{LEVELS.length} jump · 0 off · Tab focus · Enter confirm · Esc cancel
+        ←/→ or click · 1-{LEVELS.length} jump · 0 off · Tab focus · Enter confirm · Esc cancel
       </Text>
     </Box>
   )

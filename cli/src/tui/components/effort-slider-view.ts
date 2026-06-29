@@ -79,3 +79,57 @@ export function effortPositionLabel(index: number, off: boolean): string {
   const i = Math.min(Math.max(index, 0), total - 1)
   return `${i + 1}/${total} · ${EFFORT_SLIDER_LEVELS[i]}`
 }
+
+/**
+ * Columns the gauge row reserves before the track starts: the 2-cell focus
+ * cursor (`❯ ` / `  `) plus the `"Faster "` label (7 cells). Mirrors the layout
+ * in {@link EffortSlider}; the track's first cell sits at
+ * `boxLeft + borderRows + paddingX + EFFORT_GAUGE_PREFIX`.
+ */
+export const EFFORT_GAUGE_PREFIX = 9
+
+/**
+ * Inverse of {@link effortGaugeCells}: map a clicked track cell (0-based) to the
+ * tier index it represents, clamped to `[0, last]`. `last <= 0` (single tier) or
+ * `cells <= 1` collapses to index 0.
+ */
+export function effortCellToIndex(cell: number, cells: number, last: number): number {
+  if (last <= 0 || cells <= 1) return 0
+  const clampedCell = Math.min(Math.max(cell, 0), cells - 1)
+  const idx = Math.round((clampedCell / (cells - 1)) * last)
+  return Math.min(Math.max(idx, 0), last)
+}
+
+/** A decoded click inside the effort-slider box, or null when it missed both the
+ * off-checkbox row and the gauge track. */
+export type EffortClick = { kind: "off" } | { kind: "tier"; index: number } | null
+
+/**
+ * Decode a click (absolute 0-based row/col) inside the effort-slider overlay.
+ * The box layout (round border + `paddingX=1`): title at `boxTop+1`, the
+ * off-checkbox at `boxTop+2`, the gauge track at `boxTop+3`. A click on the
+ * checkbox row returns `{kind:"off"}`; a click within the gauge track returns
+ * `{kind:"tier", index}` via {@link effortCellToIndex}; anything else is null.
+ */
+export function effortSliderClick(a: {
+  clickRow: number
+  clickCol: number
+  boxTop: number
+  boxLeft: number
+  gaugeWidth: number
+  last: number
+  borderRows?: number
+}): EffortClick {
+  const border = a.borderRows ?? 1
+  const offRow = a.boxTop + border + 1 // border + title
+  const gaugeRow = offRow + 1
+  if (a.clickRow === offRow) return { kind: "off" }
+  if (a.clickRow === gaugeRow) {
+    const trackStart = a.boxLeft + border + 1 + EFFORT_GAUGE_PREFIX // +1 for paddingX
+    const cell = a.clickCol - trackStart
+    if (cell >= 0 && cell < a.gaugeWidth) {
+      return { kind: "tier", index: effortCellToIndex(cell, a.gaugeWidth, a.last) }
+    }
+  }
+  return null
+}

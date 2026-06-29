@@ -24,6 +24,7 @@ import {
   DEFAULT_RESOLVED_CONFIG,
   type CliConfigFile,
   type CredentialsFile,
+  type EditorConfig,
   type ProviderConfig,
   type ResolvedConfig,
 } from "./schema"
@@ -129,6 +130,17 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   return out
 }
 
+/** Normalize the `editor` field (string sugar → `{ command }`) and merge it onto
+ * the accumulated value. Absent in this layer ⇒ keep the previous value. */
+function normalizeEditor(
+  layer: CliConfigFile["editor"],
+  prev: EditorConfig | undefined
+): EditorConfig | undefined {
+  if (layer === undefined) return prev
+  const next: EditorConfig = typeof layer === "string" ? { command: layer } : layer
+  return { ...prev, ...stripUndefined(next) }
+}
+
 /** Apply a config layer (file/flags) onto an accumulator. */
 function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): ResolvedConfig {
   if (!layer) return acc
@@ -175,9 +187,11 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     keybindings: layer.keybindings ? { ...acc.keybindings, ...layer.keybindings } : acc.keybindings,
     layout: layer.layout ?? acc.layout,
     mouse: layer.mouse ?? acc.mouse,
+    notify: layer.notify ?? acc.notify,
     clipboard: layer.clipboard
       ? { ...acc.clipboard, ...stripUndefined(layer.clipboard) }
       : acc.clipboard,
+    editor: normalizeEditor(layer.editor, acc.editor),
     notices: layer.notices ? { ...acc.notices, ...stripUndefined(layer.notices) } : acc.notices,
     streamIdleTimeoutMs: layer.streamIdleTimeoutMs ?? acc.streamIdleTimeoutMs,
     aiSdkMaxSteps: layer.aiSdkMaxSteps ?? acc.aiSdkMaxSteps,
@@ -248,6 +262,10 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
   // Fullscreen mouse model override (`select` / `scroll`). Same lenient parse.
   const mouse = env.COGNIA_MOUSE?.trim().toLowerCase()
   if (mouse === "select" || mouse === "scroll") layer.mouse = mouse
+
+  // Preferred external editor override (bare command, e.g. `code` / `cursor`).
+  const editor = env.COGNIA_EDITOR?.trim()
+  if (editor) layer.editor = editor
 
   // COGNIA_API_KEY / COGNIA_BASE_URL apply to the active provider (resolved
   // against an explicit COGNIA_PROVIDER or the default).

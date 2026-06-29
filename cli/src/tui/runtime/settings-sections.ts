@@ -282,6 +282,16 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         },
       },
       {
+        id: "notify",
+        label: "Ring the bell when a turn finishes",
+        value: onOff(config.notify === true),
+        control: {
+          type: "boolean",
+          current: config.notify === true,
+          apply: { kind: "flag", key: "notify" },
+        },
+      },
+      {
         id: "maxLines",
         label: "Inline result line cap",
         value: String(render.toolResultMaxLines),

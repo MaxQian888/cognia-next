@@ -177,6 +177,30 @@ export const clipboardSchema = z
   .strict()
 export type ClipboardConfig = z.infer<typeof clipboardSchema>
 
+/** How the `command` jumps to a line/col when opening a file. Drives the arg
+ * shape in `tui/runtime/editor.describeEditor` for an editor not in its table. */
+export const EDITOR_GOTO_FORMATS = ["vscode", "sublime", "vim", "jetbrains", "none"] as const
+export type EditorGotoFormat = (typeof EDITOR_GOTO_FORMATS)[number]
+
+/**
+ * Preferred external editor for `/open` and the clickable file paths in tool
+ * cards. Absent ⇒ auto-detected at use time (`$VISUAL` / `$EDITOR` /
+ * `TERM_PROGRAM` / a PATH probe). A bare string in `config.json` is sugar for
+ * `{ command: <string> }`; the object form additionally allows extra flags and
+ * an explicit goto format for an editor the detector doesn't know.
+ */
+export const editorConfigSchema = z
+  .object({
+    /** The editor launcher command (e.g. `code`, `cursor`, `subl`, `nvim`). */
+    command: z.string().min(1).optional(),
+    /** Extra flags inserted before the file argument. */
+    args: z.array(z.string()).optional(),
+    /** Override how a line/col is passed for an unknown `command`. */
+    gotoFormat: z.enum(EDITOR_GOTO_FORMATS).optional(),
+  })
+  .strict()
+export type EditorConfig = z.infer<typeof editorConfigSchema>
+
 /**
  * Overridable user-facing notice strings for the clipboard / copy commands.
  * The CLI's Ink TUI has no next-intl wiring, so these live in config: every key
@@ -282,6 +306,11 @@ export const renderConfigSchema = z
      * (smooths bursty model output). Only active on an interactive TTY; ignored
      * in CI / non-interactive output. */
     streamReveal: z.boolean().optional(),
+    /** Fullscreen only: let a mouse click on a collapsed tool/thinking cell
+     * toggle just that cell (instead of the global Ctrl+T). Enabling it keeps
+     * every cell individually measured, which turns off context-burst folding —
+     * hence opt-in (default off). */
+    clickToExpand: z.boolean().optional(),
   })
   .strict()
 
@@ -299,6 +328,7 @@ export const RENDER_DEFAULTS: ResolvedRenderConfig = {
   fileLineNumbers: true,
   verboseByDefault: false,
   streamReveal: true,
+  clickToExpand: false,
 }
 
 /** Fill missing render-pref fields with {@link RENDER_DEFAULTS}. */
@@ -570,9 +600,16 @@ export const cliConfigFileSchema = z
      * session state (working / needs input / background activity / idle). Absent
      * ⇒ enabled; set `false` to leave the terminal title untouched. */
     terminalTitle: z.boolean().optional(),
+    /** Whether to ring the terminal bell when a turn finishes (so you can tab
+     * away during a long run and be alerted). Absent ⇒ off; only fires for turns
+     * that ran long enough to be worth a notification. */
+    notify: z.boolean().optional(),
     /** Clipboard OSC 52 strategy for `/copy` & the copy keybinding. Absent ⇒
      * `"auto"` (native helper locally, OSC 52 over SSH). */
     clipboard: clipboardSchema.optional(),
+    /** Preferred external editor for `/open` and clickable tool-card paths. A
+     * bare string is sugar for `{ command }`. Absent ⇒ auto-detected. */
+    editor: z.union([z.string().min(1), editorConfigSchema]).optional(),
     /** Overridable copy/clipboard notice strings. Absent keys ⇒
      * {@link NOTICE_DEFAULTS}. */
     notices: noticesSchema.optional(),
@@ -731,9 +768,14 @@ export interface ResolvedConfig {
   /** Whether the TUI updates the terminal window/tab title with live session
    * state. Absent ⇒ enabled; `false` leaves the terminal title untouched. */
   terminalTitle?: boolean
+  /** Ring the terminal bell when a turn finishes. Absent ⇒ off. */
+  notify?: boolean
   /** Clipboard OSC 52 strategy (`auto` / `always` / `never`). Absent ⇒ `auto`
    * (native helper locally, OSC 52 escape over SSH). */
   clipboard?: ClipboardConfig
+  /** Preferred external editor (normalized to the object form). Absent ⇒
+   * auto-detected at use time by `tui/runtime/editor.detectEditor`. */
+  editor?: EditorConfig
   /** Overridable copy/clipboard notice strings. Absent ⇒ {@link NOTICE_DEFAULTS};
    * resolved per-use via {@link resolveNotices}. */
   notices?: NoticesConfig

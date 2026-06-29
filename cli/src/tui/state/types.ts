@@ -25,6 +25,7 @@ import type {
   PERMISSION_MODES,
   StatusBarConfig,
   MascotConfig,
+  EditorConfig,
   OutputStyle,
   ThinkingLevel,
   LayoutMode,
@@ -435,6 +436,23 @@ export type Overlay =
   // submission resolves the blocked tool call. `request` is the parsed prompt
   // (question + options + flags); the dialog owns its draft (selection + text).
   | { kind: "askUser"; request: AskUserRequest }
+  // `/menu` command center — a curated, clickable index of the most common
+  // actions (mode/model/thinking pickers, settings, mcp, skills, agents, usage,
+  // diff, context…). Each row carries the slash command it runs when picked; the
+  // panel owns its own highlight (no reducer cursor). See `build-quick-actions`.
+  | { kind: "quickActions"; rows: QuickActionRow[] }
+
+/** One row of the `/menu` command center. Picking it runs {@link command}. */
+export interface QuickActionRow {
+  /** Stable id (also the row key). */
+  id: string
+  /** Display label, with a leading glyph. */
+  label: string
+  /** Muted right-hand hint — current value or a one-line description. */
+  hint?: string
+  /** The slash command line this row runs when chosen (e.g. `/model`). */
+  command: string
+}
 
 /** How a {@link Overlay} `document` body should be rendered. */
 export type DocumentFormat = "markdown" | "text"
@@ -677,6 +695,7 @@ export type TuiAction =
   | { type: "SET_PROVIDER"; provider: string }
   | { type: "SET_STATUS_BAR"; statusBar: StatusBarConfig }
   | { type: "SET_MASCOT"; mascot: MascotConfig }
+  | { type: "SET_EDITOR"; editor: EditorConfig }
   | { type: "SET_THEME"; theme: string }
   | { type: "SET_OUTPUT_STYLE"; style: OutputStyle }
   | { type: "SET_AGENT_MODE"; modeId: string }

@@ -10,6 +10,7 @@ import path from "node:path"
 import {
   cliConfigFileSchema,
   type CliConfigFile,
+  type EditorConfig,
   type MascotConfig,
   type RenderConfig,
   type StatusBarConfig,
@@ -147,6 +148,28 @@ export function setMascotConfig(
 }
 
 /**
+ * Merge an editor patch into `config.json`'s `editor` object. The stored value
+ * may be the string sugar (`"code"`) — normalize it to the object form before
+ * merging so a partial patch (e.g. just `{ command }` from `/editor code`) never
+ * clobbers existing `args`/`gotoFormat`. Validates before writing.
+ */
+export function setEditorConfig(
+  home: string,
+  patch: EditorConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const prior: EditorConfig =
+    typeof current.editor === "string" ? { command: current.editor } : (current.editor ?? {})
+  const editor = { ...prior, ...patch }
+  const merged = cliConfigFileSchema.parse({ ...current, editor })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * Merge a render-prefs patch into `config.json`'s `render` object (same object
  * shape as {@link setStatusBarConfig}). Validates the merged file before
  * writing. Returns the absolute path written.
@@ -261,6 +284,7 @@ export const BOOLEAN_FLAG_KEYS = [
   "slashCommandTool",
   "externalSkills",
   "pluginTools",
+  "notify",
 ] as const
 export type BooleanFlagKey = (typeof BOOLEAN_FLAG_KEYS)[number]
 

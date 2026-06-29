@@ -10,7 +10,12 @@ import { Box, Text } from "ink"
 
 import { SelectList } from "../SelectList"
 import { useTheme } from "../../theme/context"
-import { PLAN_APPROVAL_CHOICES, planDiffStat, type PlanDecision } from "../../runtime/plan"
+import {
+  PLAN_APPROVAL_CHOICES,
+  planDiffStat,
+  planStats,
+  type PlanDecision,
+} from "../../runtime/plan"
 
 export function PlanApprovalOverlay({
   index,
@@ -35,12 +40,19 @@ export function PlanApprovalOverlay({
   const theme = useTheme()
   // When this plan revises an earlier one, show how many lines changed.
   const revision = prevPlan != null && raw != null ? planDiffStat(prevPlan, raw) : null
+  const stats = raw != null ? planStats(raw) : null
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" paddingX={1}>
         <Text color={theme.accent} bold>
-          Plan ready for review
+          Ready to code?
         </Text>
+        {stats ? (
+          <Text color={theme.muted} dimColor>
+            {stats.steps > 0 ? `${stats.steps} step${stats.steps === 1 ? "" : "s"}` : "plan"} ·{" "}
+            {stats.lines} lines
+          </Text>
+        ) : null}
         {revision ? (
           <Text color={theme.warning}>
             Revised plan · +{revision.added} −{revision.removed} lines vs the previous version
@@ -62,6 +74,7 @@ export function PlanApprovalOverlay({
         onMove={onMove}
         onSelect={(i) => onSelect(PLAN_APPROVAL_CHOICES[i].id)}
         onCancel={onCancel}
+        footerHint="↑/↓ or click a choice · Enter approve · Esc keep planning"
       />
     </Box>
   )

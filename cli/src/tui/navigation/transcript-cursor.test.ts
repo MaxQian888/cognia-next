@@ -1,5 +1,6 @@
 import {
   INITIAL_CURSOR,
+  cellAtRow,
   cellTopRow,
   clearFocus,
   closeFind,
@@ -147,6 +148,48 @@ describe("transcript-cursor", () => {
     })
     it("honours a custom gap", () => {
       expect(cellTopRow(["a", "b"], heights, "b", 0)).toBe(2)
+    })
+  })
+
+  describe("cellAtRow", () => {
+    const ids = ["a", "b", "c"]
+    // a: rows 0-1 (h2), gap 2; b: rows 3-5 (h3), gap 6; c: row 7 (h1).
+    const heights = new Map([
+      ["a", 2],
+      ["b", 3],
+      ["c", 1],
+    ])
+    it("maps a row inside a cell's band to that cell", () => {
+      expect(cellAtRow(ids, heights, 0)).toBe("a")
+      expect(cellAtRow(ids, heights, 1)).toBe("a")
+      expect(cellAtRow(ids, heights, 3)).toBe("b")
+      expect(cellAtRow(ids, heights, 5)).toBe("b")
+      expect(cellAtRow(ids, heights, 7)).toBe("c")
+    })
+    it("returns null on the inter-cell gap row", () => {
+      expect(cellAtRow(ids, heights, 2)).toBeNull() // gap after a
+      expect(cellAtRow(ids, heights, 6)).toBeNull() // gap after b
+    })
+    it("returns null below the last cell and for negative rows", () => {
+      expect(cellAtRow(ids, heights, 8)).toBeNull()
+      expect(cellAtRow(ids, heights, -1)).toBeNull()
+    })
+    it("skips unmeasured (zero-height) cells", () => {
+      // b unmeasured → its band collapses; row 3 falls on b's gap → null.
+      const partial = new Map([
+        ["a", 2],
+        ["c", 1],
+      ])
+      expect(cellAtRow(ids, partial, 0)).toBe("a")
+      expect(cellAtRow(ids, partial, 3)).toBeNull()
+      // a(0-1) gap(2) b(0,gap 3) c at row 4.
+      expect(cellAtRow(ids, partial, 4)).toBe("c")
+    })
+    it("round-trips with cellTopRow for measured cells", () => {
+      for (const id of ids) {
+        const top = cellTopRow(ids, heights, id)!
+        expect(cellAtRow(ids, heights, top)).toBe(id)
+      }
     })
   })
 })

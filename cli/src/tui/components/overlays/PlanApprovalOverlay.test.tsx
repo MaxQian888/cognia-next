@@ -4,18 +4,48 @@ import { __fireInput, __resetInk } from "ink"
 
 import { PlanApprovalOverlay } from "./PlanApprovalOverlay"
 
+// jsdom has no Yoga, so stub the position reader for the click test.
+jest.mock("../../input/element-position", () => ({
+  absoluteTopLeft: () => ({ top: 0, left: 0 }),
+}))
+
 describe("PlanApprovalOverlay", () => {
   beforeEach(() => __resetInk())
 
-  it("shows the three choices and the review prompt", () => {
+  it("shows the three choices, the Claude-Code framing, and a clickable footer hint", () => {
     const { container } = render(
       <PlanApprovalOverlay index={0} onMove={() => {}} onSelect={() => {}} onCancel={() => {}} />
     )
     const text = container.textContent ?? ""
-    expect(text).toContain("Plan ready for review")
+    expect(text).toContain("Ready to code?")
     expect(text).toContain("Approve & build (auto-edits)")
     expect(text).toContain("Approve — confirm each edit")
     expect(text).toContain("Keep planning")
+    expect(text).toContain("click a choice")
+  })
+
+  it("shows a step/line stat line when the plan body is provided", () => {
+    const { container } = render(
+      <PlanApprovalOverlay
+        index={0}
+        raw={"# Plan\n- a\n- b\n- c"}
+        onMove={() => {}}
+        onSelect={() => {}}
+        onCancel={() => {}}
+      />
+    )
+    expect(container.textContent ?? "").toContain("3 steps")
+  })
+
+  it("selects the clicked choice in mouse scroll mode", () => {
+    const onSelect = jest.fn()
+    render(
+      <PlanApprovalOverlay index={0} onMove={() => {}} onSelect={onSelect} onCancel={() => {}} />
+    )
+    // No title row on the SelectList → border(1) → first choice at SGR row 2;
+    // row 3 → second choice (approve-confirm).
+    __fireInput("[<0;3;3M", {})
+    expect(onSelect).toHaveBeenCalledWith("approve-confirm")
   })
 
   it("shows a +A −R revision badge when this plan supersedes a previous one", () => {

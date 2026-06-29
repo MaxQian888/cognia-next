@@ -132,6 +132,6 @@ export function patchServerStatus(
 }
 
 export const MCP_PANEL_FOOTER =
-  "type filter · ↑/↓ move · enter act · space toggle · ^N new · ^X remove · esc close"
+  "type filter · ↑/↓ / click · enter act · space toggle · ^N new · ^X remove · esc close"
 
-export const MCP_TOOLS_FOOTER = "type filter · ↑/↓ move · space toggle · esc back"
+export const MCP_TOOLS_FOOTER = "type filter · ↑/↓ / click · space toggle · esc back"

@@ -3,7 +3,11 @@ import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { McpPanel } from "./McpPanel"
+import { absoluteTopLeft } from "../input/element-position"
 import type { McpPanelServer } from "../runtime/mcp-panel-model"
+
+jest.mock("../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+const mockPos = absoluteTopLeft as jest.Mock
 
 function key(input: string, k?: Record<string, boolean>) {
   act(() => __fireInput(input, k))
@@ -31,7 +35,26 @@ function wrap(props: Partial<React.ComponentProps<typeof McpPanel>> = {}) {
 }
 
 describe("McpPanel", () => {
-  beforeEach(() => __resetInk())
+  beforeEach(() => {
+    __resetInk()
+    mockPos.mockReturnValue(null)
+  })
+
+  it("activates the clicked server row (header is 2 rows)", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onTools } = wrap()
+    // border(1)+title(1)+filter(1) → first item at 0-based row 3 (SGR row 4) = github.
+    key("[<0;5;4M")
+    expect(onTools).toHaveBeenCalledWith("github")
+  })
+
+  it("moves the selection on the mouse wheel", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onAuth } = wrap()
+    key("[<65;5;5M") // wheel down → row 1 (brave, needs auth)
+    key("", { return: true })
+    expect(onAuth).toHaveBeenCalledWith("brave")
+  })
 
   it("lists every server with its status hint", () => {
     const text = wrap().container.textContent ?? ""

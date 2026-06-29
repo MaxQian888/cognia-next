@@ -9,12 +9,13 @@
  * provider · `r` reset it to inherit · Esc close. Each non-move key fires a
  * callback the App turns into a {@link setSubagentModel} write.
  */
-import React from "react"
-import { Box, Text, useInput } from "ink"
+import React, { useRef } from "react"
+import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
 import { OverlayFooter } from "../OverlayFooter"
+import { usePanelClick } from "../../input/use-panel-click"
 import { SUBAGENT_MODELS_FOOTER, type SubagentModelRow } from "../../runtime/subagent-models-model"
 
 const DEFAULT_MAX_ROWS = 10
@@ -60,11 +61,38 @@ export function SubagentModelsPanel({
   width,
 }: SubagentModelsPanelProps): React.ReactElement {
   const theme = useTheme()
+  const boxRef = useRef<DOMElement | null>(null)
   const safeIndex = rows.length > 0 ? Math.min(index, rows.length - 1) : 0
   const current = rows[safeIndex]
 
+  const overrides = rows.filter((r) => r.source === "override").length
+  const win = windowList(rows.length, safeIndex, maxRows)
+  const visible = rows.slice(win.start, win.end)
+  const labelWidth = Math.min(24, Math.max(0, ...rows.map((r) => r.name.length)))
+
+  // The focused row renders an extra description line below it, so the rendered
+  // rows aren't 1:1 with items. Account for that one inserted line when mapping a
+  // click back to an item: a click focuses the row (then ←/→ cycles its model).
+  const descShown = Boolean(current?.description)
+  const focusOffset = safeIndex - win.start
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: 1,
+    hasAboveMore: win.above > 0,
+    visibleCount: visible.length + (descShown ? 1 : 0),
+    onPick: (rendered) => {
+      // The description sits at rendered row focusOffset+1; rows after it shift +1.
+      if (descShown && rendered === focusOffset + 1) return // clicked the description
+      const itemOffset = descShown && rendered > focusOffset + 1 ? rendered - 1 : rendered
+      const at = win.start + itemOffset
+      if (rows[at]) onMove(at - safeIndex)
+    },
+    onWheel: (dir) => onMove(dir === "up" ? -1 : 1),
+  })
+
   useInput(
     (input, key) => {
+      if (handleMouse(input)) return
       if (key.escape) return onClose()
       if (key.upArrow) return onMove(-1)
       if (key.downArrow) return onMove(1)
@@ -77,13 +105,9 @@ export function SubagentModelsPanel({
     { isActive }
   )
 
-  const overrides = rows.filter((r) => r.source === "override").length
-  const win = windowList(rows.length, safeIndex, maxRows)
-  const visible = rows.slice(win.start, win.end)
-  const labelWidth = Math.min(24, Math.max(0, ...rows.map((r) => r.name.length)))
-
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}

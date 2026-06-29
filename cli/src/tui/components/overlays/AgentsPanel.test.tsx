@@ -3,7 +3,11 @@ import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { AgentsPanel } from "./AgentsPanel"
+import { absoluteTopLeft } from "../../input/element-position"
 import type { AgentPanelRow } from "../../runtime/agents-panel-model"
+
+jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+const mockPos = absoluteTopLeft as jest.Mock
 
 function key(input: string, k?: Record<string, boolean>) {
   act(() => __fireInput(input, k))
@@ -47,7 +51,10 @@ function wrap(props: Partial<React.ComponentProps<typeof AgentsPanel>> = {}) {
 }
 
 describe("AgentsPanel", () => {
-  beforeEach(() => __resetInk())
+  beforeEach(() => {
+    __resetInk()
+    mockPos.mockReturnValue(null)
+  })
 
   it("summarizes counts and lists every row with name + elapsed", () => {
     const text = wrap().container.textContent ?? ""
@@ -99,6 +106,14 @@ describe("AgentsPanel", () => {
     const { onView } = wrap()
     key("[<0;5;5M") // left-click press; absoluteTopLeft → null in the mock → ignored
     expect(onView).not.toHaveBeenCalled()
+  })
+
+  it("opens the clicked row when the layout is measured", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onView } = wrap()
+    // border(1)+header(1) → first item at 0-based row 2 (SGR row 3); row 4 → offset 1.
+    key("[<0;5;4M")
+    expect(onView).toHaveBeenCalledWith(expect.objectContaining({ id: "bg:r1" }))
   })
 
   it("renders an in-turn row that has no task without a trailing separator", () => {
