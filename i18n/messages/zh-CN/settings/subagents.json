@@ -68,7 +68,8 @@
     "emptyTitle": "当前没有运行中的子代理。",
     "parent": "父代理：{id}",
     "title": "运行时",
-    "toolsCount": "{count, plural, other {# 个工具}}"
+    "toolsCount": "{count, plural, other {# 个工具}}",
+    "toolsRunCount": "{n, plural, other {已运行 # 个工具}}"
   },
   "tabs": {
     "runtime": "运行时",

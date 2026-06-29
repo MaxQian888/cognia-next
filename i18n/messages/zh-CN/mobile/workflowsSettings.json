@@ -1,0 +1,12 @@
+{
+  "backAria": "返回我的",
+  "sectionDescription": "调整可视化工作流编辑器使用的动效与实时计算程度。",
+  "sectionTitle": "编辑器性能",
+  "tierAuto": "自动",
+  "tierBalanced": "均衡",
+  "tierHelp": "“自动”会根据你的减弱动效设置和工作流规模选择档位。较低档位会牺牲视觉效果，以换取在大型图上更流畅的编辑体验。",
+  "tierHigh": "高",
+  "tierLabel": "性能档位",
+  "tierReduced": "精简",
+  "title": "工作流设置"
+}

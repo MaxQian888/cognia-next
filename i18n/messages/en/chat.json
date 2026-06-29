@@ -211,7 +211,9 @@
       "dismiss": "Dismiss suggestions",
       "label": "Follow-up suggestions"
     },
+    "ghostAccept": "Accept",
     "ghostAcceptHint": "Tab",
+    "ghostDismiss": "Dismiss suggestion",
     "helperHints": {
       "dropImages": "Drop / paste images",
       "send": "⏎ Send · ⇧⏎ New line",
@@ -582,8 +584,29 @@
       "truncated": "Preview truncated — full content is written to disk."
     }
   },
+  "filePreview": {
+    "loading": "Loading {name}…",
+    "pdfFallback": "PDF preview is unavailable."
+  },
+  "mcpContent": {
+    "embeddedResource": "Embedded resource: {uri}"
+  },
+  "ocrResult": {
+    "title": "Text recognized",
+    "provider": "Provider: {id}",
+    "languages": "Languages: {langs}",
+    "confidence": "Confidence: {pct}%",
+    "cached": "Cached",
+    "duration": "{ms} ms",
+    "copy": "Copy text",
+    "copied": "Copied",
+    "askAbout": "Ask about this",
+    "noText": "No text recognized.",
+    "thumbnailAlt": "Source image"
+  },
   "message": {
     "attachmentAlt": "attachment",
+    "unknownPart": "Unknown content ({type})",
     "bookmarkLabel": "Toggle bookmark",
     "bookmarkRemoveTooltip": "Remove bookmark",
     "bookmarkTooltip": "Bookmark",

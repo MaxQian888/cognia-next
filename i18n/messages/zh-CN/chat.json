@@ -211,7 +211,9 @@
       "dismiss": "关闭建议",
       "label": "追问建议"
     },
+    "ghostAccept": "接受",
     "ghostAcceptHint": "Tab",
+    "ghostDismiss": "忽略建议",
     "helperHints": {
       "dropImages": "拖拽 / 粘贴图片",
       "send": "⏎ 发送 · ⇧⏎ 换行",
@@ -582,8 +584,29 @@
       "truncated": "预览已截断 — 完整内容已写入磁盘。"
     }
   },
+  "filePreview": {
+    "loading": "正在加载 {name}…",
+    "pdfFallback": "无法预览此 PDF。"
+  },
+  "mcpContent": {
+    "embeddedResource": "嵌入资源：{uri}"
+  },
+  "ocrResult": {
+    "title": "已识别文本",
+    "provider": "识别引擎：{id}",
+    "languages": "语言：{langs}",
+    "confidence": "置信度：{pct}%",
+    "cached": "缓存命中",
+    "duration": "{ms} 毫秒",
+    "copy": "复制文本",
+    "copied": "已复制",
+    "askAbout": "追问此内容",
+    "noText": "未识别到文本。",
+    "thumbnailAlt": "源图像"
+  },
   "message": {
     "attachmentAlt": "附件",
+    "unknownPart": "未知内容（{type}）",
     "bookmarkLabel": "切换收藏",
     "bookmarkRemoveTooltip": "取消收藏",
     "bookmarkTooltip": "收藏",

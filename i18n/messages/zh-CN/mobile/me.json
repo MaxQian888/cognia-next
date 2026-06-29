@@ -1,5 +1,11 @@
 {
   "aboutRow": "关于",
+  "agentRow": "Agent 默认设置",
+  "agentTeamsSettingsRow": "智能体团队",
+  "hooksRow": "钩子",
+  "networkRow": "网络",
+  "slashCommandsRow": "斜杠命令",
+  "instructionsRow": "项目指令",
   "account": {
     "fiveHourLabel": "5 小时额度",
     "notSignedIn": "未登录 Anthropic 账户。点击此处登录。",
@@ -85,6 +91,7 @@
   "deviceInfoRow": "设备信息",
   "devicesRow": "已配对设备",
   "dexieMaintenance": "Dexie 维护",
+  "externalAgentsRow": "外部 Agent",
   "feedback": {
     "copyDescription": "应用版本、User Agent 和当前同步快照。",
     "copyError": "当前壳层无法访问剪贴板。",
@@ -99,6 +106,7 @@
     "reportTitle": "反馈问题"
   },
   "feedbackRow": "反馈与诊断",
+  "githubDeliveryRow": "GitHub 投递",
   "help": {
     "docsDescription": "在系统浏览器中打开 cognia 文档。",
     "docsLabel": "文档站",
@@ -110,6 +118,7 @@
     "resourcesTitle": "资源"
   },
   "helpRow": "帮助与文档",
+  "mcpRow": "MCP 服务器",
   "memoryRow": "记忆",
   "notificationsRow": "通知",
   "ocrRow": "OCR 提供方",
@@ -117,6 +126,7 @@
   "pairingPaired": "已与桌面配对（{deviceId}）",
   "pairingUnpaired": "尚未与桌面配对",
   "pinned": "已置顶到常用",
+  "pluginsRow": "插件",
   "preferencesRow": "字号与默认模型",
   "presetsBackAria": "返回我的",
   "presetsRow": "系统提示词预设",
@@ -218,6 +228,7 @@
     "unnamedFile": "（无文件名）"
   },
   "storageRow": "存储用量",
+  "subagentsRow": "子代理",
   "subscriptionRow": "订阅与账号",
   "sync": {
     "description": "桌面与本机的逐表同步快照。每行在前台恢复或手动重试时拉取增量。",
@@ -246,5 +257,6 @@
   },
   "unpinned": "已从常用移除",
   "versionLabel": "版本",
-  "webSearchRow": "网络搜索"
+  "webSearchRow": "网络搜索",
+  "workflowsSettingsRow": "工作流设置"
 }

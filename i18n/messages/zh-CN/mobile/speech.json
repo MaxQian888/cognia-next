@@ -27,5 +27,8 @@
   "ttsEnabled": "文字转语音",
   "ttsEnabledHelp": "启用助手消息的语音播放。",
   "ttsTitle": "文字转语音",
+  "voice": "音色",
+  "voiceAuto": "自动（默认）",
+  "voiceHelp": "选择此提供商使用的音色。",
   "volume": "音量"
 }

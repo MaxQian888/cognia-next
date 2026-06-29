@@ -27,5 +27,8 @@
   "ttsEnabled": "Text-to-speech",
   "ttsEnabledHelp": "Enable spoken playback of assistant messages.",
   "ttsTitle": "Text-to-speech",
+  "voice": "Voice",
+  "voiceAuto": "Auto (default)",
+  "voiceHelp": "Pick which voice this provider speaks with.",
   "volume": "Volume"
 }

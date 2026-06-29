@@ -1,0 +1,24 @@
+{
+  "backAria": "Back to Me",
+  "connectionType": {
+    "cellular": "Cellular",
+    "none": "No connection",
+    "unknown": "Unknown",
+    "wifi": "Wi-Fi"
+  },
+  "connectivity": {
+    "description": "Live network status reported by this device.",
+    "offline": "Offline",
+    "online": "Online",
+    "statusLabel": "Connection",
+    "title": "Connectivity",
+    "typeLabel": "Connection type"
+  },
+  "intro": "This device's current connectivity. Proxy and connection settings are configured on the paired desktop.",
+  "manageOnDesktop": "Proxy mode, host/port, authentication and bypass rules live on the paired desktop. Configure and test them there.",
+  "proxy": {
+    "description": "The HTTP/SOCKS proxy used for outbound requests is managed on the desktop.",
+    "title": "Proxy"
+  },
+  "title": "Network"
+}

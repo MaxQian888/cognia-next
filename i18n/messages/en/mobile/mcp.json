@@ -1,0 +1,11 @@
+{
+  "backAria": "Back to settings",
+  "disabled": "Off",
+  "empty": "No MCP servers are configured on the paired desktop yet.",
+  "enabled": "On",
+  "intro": "Browse the MCP servers configured on your paired desktop. Adding, editing and authenticating servers is done on the desktop.",
+  "manageOnDesktop": "MCP servers are managed on the desktop. Open Settings → MCP there to add, edit, enable or authenticate a server.",
+  "remoteAuthNote": "authenticate on desktop",
+  "sectionTitle": "Configured servers",
+  "title": "MCP servers"
+}

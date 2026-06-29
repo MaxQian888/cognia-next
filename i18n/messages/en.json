@@ -2242,7 +2242,9 @@
         "dismiss": "Dismiss suggestions",
         "label": "Follow-up suggestions"
       },
+      "ghostAccept": "Accept",
       "ghostAcceptHint": "Tab",
+      "ghostDismiss": "Dismiss suggestion",
       "helperHints": {
         "dropImages": "Drop / paste images",
         "send": "⏎ Send · ⇧⏎ New line",
@@ -2460,6 +2462,10 @@
       "subtitle": "Ask anything, jump into a capability, or pick up where you left off.",
       "title": "What do you want to get done?"
     },
+    "filePreview": {
+      "loading": "Loading {name}…",
+      "pdfFallback": "PDF preview is unavailable."
+    },
     "header": {
       "accountSwitcher": {
         "active": "active",
@@ -2641,6 +2647,9 @@
         "truncated": "Preview truncated — full content is written to disk."
       }
     },
+    "mcpContent": {
+      "embeddedResource": "Embedded resource: {uri}"
+    },
     "message": {
       "attachmentAlt": "attachment",
       "bookmarkLabel": "Toggle bookmark",
@@ -2717,12 +2726,26 @@
       "stopReading": "Stop reading",
       "todoPlanTitle": "Plan · {done}/{total} done",
       "toolCallFailed": "Tool call failed",
+      "unknownPart": "Unknown content ({type})",
       "usageCacheHit": "Cache hit: {n}",
       "usageCacheWrite": "Cache write: {n}",
       "usageCost": "Cost: ${cost}",
       "usageInput": "Input: {n}",
       "usageOutput": "Output: {n}",
       "usageReasoning": "Reasoning: {n}"
+    },
+    "ocrResult": {
+      "askAbout": "Ask about this",
+      "cached": "Cached",
+      "confidence": "Confidence: {pct}%",
+      "copied": "Copied",
+      "copy": "Copy text",
+      "duration": "{ms} ms",
+      "languages": "Languages: {langs}",
+      "noText": "No text recognized.",
+      "provider": "Provider: {id}",
+      "thumbnailAlt": "Source image",
+      "title": "Text recognized"
     },
     "permissionMode": {
       "acceptEdits": {
@@ -6390,6 +6413,68 @@
     }
   },
   "mobile": {
+    "agent": {
+      "backAria": "Back to settings",
+      "bareMode": "Bare mode",
+      "bareModeHelp": "Strip the agent's preamble and meta-commentary; reply with just the result.",
+      "behaviorSection": "Behavior",
+      "briefMode": "Brief mode",
+      "briefModeHelp": "Prefer short, to-the-point answers.",
+      "compactionEnabled": "Auto-compaction",
+      "compactionEnabledHelp": "Automatically summarize older turns when the context window fills up.",
+      "compactionHelp": "How the paired desktop manages a long conversation's context window.",
+      "compactionSection": "Context compaction",
+      "debugMode": "Debug mode",
+      "debugModeHelp": "Surface extra diagnostics in agent output.",
+      "escalateGate": "Require biometric to raise autonomy",
+      "escalateGateHelp": "Re-prompt Face ID / fingerprint before raising the desktop's permission mode from this phone.",
+      "escalateReason": "Confirm raising the agent's permission mode",
+      "escalateTitle": "Raise permission mode",
+      "permAcceptEdits": "Accept edits",
+      "permAuto": "Auto",
+      "permBypass": "Bypass permissions",
+      "permDefault": "Default (ask)",
+      "permDontAsk": "Don't ask",
+      "permPlan": "Plan only",
+      "permissionDesc": "How autonomously the paired desktop's agent acts before asking you.",
+      "permissionMode": "Permission mode",
+      "permissionSection": "Permissions",
+      "promptHelp": "Appended to every agent turn on the paired desktop.",
+      "promptPlaceholder": "e.g. Always answer in British English.",
+      "promptSection": "Default system prompt",
+      "surfaceSkills": "Built-in surface skills",
+      "surfaceSkillsHelp": "Auto-inject built-in guidance skills (IM auto-reply, workflow authoring, twin grounding, …) on their matching surface.",
+      "systemPrompt": "System prompt",
+      "thinkingActiveHint": "Thinking budget: {budget} tokens.",
+      "thinkingDisabledHint": "Thinking budget off — the model uses its default.",
+      "thinkingHelp": "Max tokens the agent may spend on internal reasoning.",
+      "thinkingNumberLabel": "Thinking budget (tokens)",
+      "thinkingReset": "Reset",
+      "thinkingSection": "Thinking budget",
+      "title": "Agent defaults"
+    },
+    "agentTeamsSettings": {
+      "backAria": "Back to Me",
+      "categories": {
+        "analysis": "Analysis",
+        "debugging": "Debugging",
+        "development": "Development",
+        "documentation": "Documentation",
+        "general": "General",
+        "research": "Research",
+        "review": "Review",
+        "security": "Security"
+      },
+      "empty": "No agent team templates available.",
+      "intro": "Browse the agent team templates the paired desktop can launch. Live team collaboration runs on the desktop.",
+      "manageOnDesktop": "Agent teams are created, configured and run on the paired desktop. Manage templates and live collaboration there.",
+      "section": {
+        "description": "Reusable team compositions your paired desktop can launch.",
+        "title": "Team templates"
+      },
+      "teammates": "{count, plural, =1 {1 teammate} other {# teammates}}",
+      "title": "Agent teams"
+    },
     "automation": {
       "consent": {
         "biometricBlocked": "Approval not completed ({reason}).",
@@ -6846,11 +6931,27 @@
       "to": "To"
     },
     "conversation": {
+      "autoScroll": "Auto-scroll while streaming",
+      "autoScrollHelp": "Stick to the bottom as a reply streams in (when already at the bottom).",
       "autoTitle": "Auto-generate titles",
       "autoTitleHelp": "Name each chat from its first turn using a background model.",
       "backAria": "Back to Me",
+      "clearAfterSend": "Clear after send",
+      "clearAfterSendHelp": "Empty the composer (text + attachments) after a successful send.",
+      "composerSection": "Composer",
+      "composerSectionHelp": "How the message box on this phone behaves.",
+      "inputHistory": "Recall input history",
+      "inputHistoryHelp": "Press ↑ / ↓ in an empty composer to recall previously sent messages.",
+      "persistDrafts": "Keep drafts",
+      "persistDraftsHelp": "Restore an unsent draft when you reopen a chat.",
       "sectionDescription": "Background helpers that shape how conversations are presented.",
       "sectionTitle": "Conversation",
+      "sendOnEnter": "Send on Enter",
+      "sendOnEnterHelp": "Plain Enter sends; off makes Enter insert a newline and ⌘/Ctrl+Enter send.",
+      "streamPartial": "Stream partial replies",
+      "streamPartialHelp": "Show replies token-by-token as they arrive instead of all at once.",
+      "streamSection": "Message stream",
+      "streamSectionHelp": "How replies appear as they arrive.",
       "timeline": "Timeline minimap",
       "timelineHelp": "Show the right-edge minimap for jumping across a long chat.",
       "title": "Conversation"
@@ -6861,6 +6962,47 @@
       "queueLabelApprove": "Approve connector draft",
       "queueLabelReject": "Reject connector draft",
       "reject": "Reject"
+    },
+    "externalAgents": {
+      "backAria": "Back to settings",
+      "disabled": "Off",
+      "empty": "No external agents are configured on the paired desktop yet.",
+      "enabled": "On",
+      "enabledAria": "Enable {name}",
+      "intro": "Manage the external agents configured on your paired desktop. Toggle each one on or off and pick the permission mode the desktop runs it under.",
+      "loadFailed": "Could not load external agents: {message}",
+      "loading": "Loading external agents…",
+      "manageOnDesktop": "Adding, removing and editing external agents (command, endpoint, retries) is done on the desktop. Open Settings → External Agents there.",
+      "permissionAcceptEdits": "Accept edits",
+      "permissionBypass": "Bypass permissions",
+      "permissionDefault": "Default",
+      "permissionDontAsk": "Don't ask",
+      "permissionLabel": "Permission mode",
+      "permissionModeAria": "Permission mode for {name}",
+      "permissionPlan": "Plan",
+      "sectionTitle": "Configured agents",
+      "title": "External agents",
+      "toggleFailed": "Could not queue the change: {message}",
+      "updateQueued": "Change queued for the desktop."
+    },
+    "githubDelivery": {
+      "backAria": "Back to settings",
+      "intro": "Review the GitHub Delivery bot's default merge policy. Repos, credentials, audit log and usage live on the paired desktop.",
+      "manageOnDesktop": "GitHub Delivery is managed on the desktop. Connect repositories, set up App credentials, adjust policies and review the audit log there.",
+      "policy": {
+        "allowedAuthors": "Allowed authors",
+        "description": "The policy a repository inherits until you override it on the desktop.",
+        "maxDailyMerges": "Max merges per day",
+        "off": "Off",
+        "perDay": "{count} / day",
+        "protectedBranches": "Protected branches",
+        "requireGreenCi": "Require green CI",
+        "requireHumanApproval": "Require human approval",
+        "required": "Required",
+        "title": "Default policy"
+      },
+      "runtimeNote": "The delivery bot runs on the paired desktop. Audit decisions and rate-limit usage are visible there in real time.",
+      "title": "GitHub Delivery"
     },
     "home": {
       "actions": {
@@ -6920,6 +7062,18 @@
       "viewActive": "Show active chats",
       "viewArchived": "Show archived chats"
     },
+    "hooks": {
+      "backAria": "Back to Me",
+      "builtin": {
+        "description": "Product-bundled lifecycle hooks merged under your own hooks.",
+        "title": "Built-in hooks"
+      },
+      "defaultOff": "Off by default",
+      "defaultOn": "On by default",
+      "intro": "Review the product's built-in lifecycle hooks. Your own per-event hooks live in .claude/settings.json on the paired desktop.",
+      "manageOnDesktop": "User, project and local hooks are stored in .claude/settings.json on the paired desktop. Add, edit and toggle them there.",
+      "title": "Hooks"
+    },
     "inbox": {
       "tabs": {
         "drafts": "Drafts",
@@ -6927,6 +7081,22 @@
       },
       "tabsAria": "Inbox sections",
       "title": "Inbox"
+    },
+    "instructions": {
+      "backAria": "Back to settings",
+      "save": "Save",
+      "title": "Project instructions"
+    },
+    "mcp": {
+      "backAria": "Back to settings",
+      "disabled": "Off",
+      "empty": "No MCP servers are configured on the paired desktop yet.",
+      "enabled": "On",
+      "intro": "Browse the MCP servers configured on your paired desktop. Adding, editing and authenticating servers is done on the desktop.",
+      "manageOnDesktop": "MCP servers are managed on the desktop. Open Settings → MCP there to add, edit, enable or authenticate a server.",
+      "remoteAuthNote": "authenticate on desktop",
+      "sectionTitle": "Configured servers",
+      "title": "MCP servers"
     },
     "me": {
       "aboutRow": "About",
@@ -6937,6 +7107,8 @@
         "sevenDayLabel": "7-day quota"
       },
       "actionPair": "Pair now",
+      "agentRow": "Agent defaults",
+      "agentTeamsSettingsRow": "Agent teams",
       "appSecurity": "App security",
       "appearanceBackAria": "Back to Me",
       "appearanceLink": "Theme & wallpaper",
@@ -7015,6 +7187,7 @@
       "deviceInfoRow": "Device info",
       "devicesRow": "Paired devices",
       "dexieMaintenance": "Dexie maintenance",
+      "externalAgentsRow": "External agents",
       "feedback": {
         "copyDescription": "App version, user agent, and current sync snapshot.",
         "copyError": "Clipboard unavailable in this shell.",
@@ -7029,6 +7202,7 @@
         "reportTitle": "Report a problem"
       },
       "feedbackRow": "Feedback & diagnostics",
+      "githubDeliveryRow": "GitHub Delivery",
       "help": {
         "docsDescription": "Open the cognia docs site in the system browser.",
         "docsLabel": "Documentation",
@@ -7040,13 +7214,18 @@
         "resourcesTitle": "Resources"
       },
       "helpRow": "Help & docs",
+      "hooksRow": "Hooks",
+      "instructionsRow": "Project instructions",
+      "mcpRow": "MCP servers",
       "memoryRow": "Memory",
+      "networkRow": "Network",
       "notificationsRow": "Notifications",
       "ocrRow": "OCR providers",
       "pairing": "Pairing status",
       "pairingPaired": "Paired with desktop ({deviceId})",
       "pairingUnpaired": "Not paired with desktop yet",
       "pinned": "Pinned to favorites",
+      "pluginsRow": "Plugins",
       "preferencesRow": "Font size & default model",
       "presetsBackAria": "Back to Me",
       "presetsRow": "System prompt presets",
@@ -7103,6 +7282,7 @@
         "pending": "Signing out…",
         "successToast": "Signed out — pairing cleared."
       },
+      "slashCommandsRow": "Slash commands",
       "speechRow": "Speech & voice",
       "storage": {
         "backupsDescription": "{count} files · {total}",
@@ -7148,6 +7328,7 @@
         "unnamedFile": "(no filename)"
       },
       "storageRow": "Storage usage",
+      "subagentsRow": "Subagents",
       "subscriptionRow": "Subscription & account",
       "sync": {
         "description": "Per-table snapshot from the desktop. Each row pulls deltas on the next foreground or after a manual retry.",
@@ -7176,7 +7357,8 @@
       },
       "unpinned": "Removed from favorites",
       "versionLabel": "Version",
-      "webSearchRow": "Web search"
+      "webSearchRow": "Web search",
+      "workflowsSettingsRow": "Workflow settings"
     },
     "memory": {
       "empty": "No memories yet",
@@ -7198,11 +7380,36 @@
       "copySuccess": "Copied to clipboard.",
       "description": "Pick an action.",
       "longPressHint": "Long-press a message for actions",
+      "quote": "Quote",
       "share": "Share…",
       "shareDialogTitle": "Share via",
       "shareFailed": "Share failed: {message}",
       "shareUnsupported": "Sharing isn't supported on this device.",
       "title": "Message"
+    },
+    "network": {
+      "backAria": "Back to Me",
+      "connectionType": {
+        "cellular": "Cellular",
+        "none": "No connection",
+        "unknown": "Unknown",
+        "wifi": "Wi-Fi"
+      },
+      "connectivity": {
+        "description": "Live network status reported by this device.",
+        "offline": "Offline",
+        "online": "Online",
+        "statusLabel": "Connection",
+        "title": "Connectivity",
+        "typeLabel": "Connection type"
+      },
+      "intro": "This device's current connectivity. Proxy and connection settings are configured on the paired desktop.",
+      "manageOnDesktop": "Proxy mode, host/port, authentication and bypass rules live on the paired desktop. Configure and test them there.",
+      "proxy": {
+        "description": "The HTTP/SOCKS proxy used for outbound requests is managed on the desktop.",
+        "title": "Proxy"
+      },
+      "title": "Network"
     },
     "notifications": {
       "permissionCta": {
@@ -7212,6 +7419,64 @@
         "enableInProgress": "Requesting…",
         "settingsButton": "Open Settings",
         "title": "Enable background reminders"
+      },
+      "preferences": {
+        "badge": "Unread badge",
+        "badgeHelp": "Show a count badge on the app icon and tab.",
+        "behaviourTitle": "Behaviour",
+        "channel": {
+          "os": "System notifications",
+          "push": "Push notifications",
+          "toast": "In-app toasts"
+        },
+        "channelHelp": {
+          "os": "Show native OS notifications.",
+          "push": "Deliver to this device when the app is closed.",
+          "toast": "Briefly pop messages inside the app."
+        },
+        "channelsHelp": "Where new notifications appear by default.",
+        "channelsTitle": "Default channels",
+        "days": "{count, plural, one {# day} other {# days}}",
+        "focusAware": "Focus-aware",
+        "focusAwareHelp": "Suppress OS alerts while you're viewing the related conversation.",
+        "gatesTitle": "Severity gates",
+        "level": {
+          "critical": "Critical",
+          "error": "Error",
+          "info": "Info",
+          "success": "Success",
+          "warning": "Warning"
+        },
+        "minOsLevel": "Minimum OS level",
+        "minOsLevelHelp": "Only fire system notifications at or above this severity.",
+        "minPushLevel": "Minimum push level",
+        "minPushLevelHelp": "Only send push notifications at or above this severity.",
+        "perSourceHelp": "Mute notifications from a specific subsystem.",
+        "perSourceTitle": "By source",
+        "quietHoursEnabled": "Quiet hours",
+        "quietHoursEnabledHelp": "Silence non-critical notifications during a daily window.",
+        "quietHoursEnd": "End time",
+        "quietHoursHelp": "Pause alerts overnight; critical notifications still come through.",
+        "quietHoursStart": "Start time",
+        "quietHoursTitle": "Do not disturb",
+        "resetDefaults": "Reset to defaults",
+        "retentionDays": "Keep for",
+        "retentionItems": "Max stored",
+        "retentionTitle": "Retention",
+        "snoozeAutoWake": "Wake on activity",
+        "snoozeAutoWakeHelp": "Re-surface a snoozed notification when related activity resumes.",
+        "sound": "Sound",
+        "soundHelp": "Play a sound for new notifications.",
+        "source": {
+          "agent-team": "Agent teams",
+          "connector": "Connectors",
+          "plugin": "Plugins",
+          "scheduler": "Scheduler",
+          "session": "Sessions",
+          "system": "System",
+          "workflow": "Workflows"
+        },
+        "sourceHelp": "Allow notifications from this source."
       },
       "queue": {
         "cancel": "Cancel",
@@ -7372,11 +7637,19 @@
       "tokenLabel": "Pair token",
       "transportLabel": "Transport"
     },
+    "pairedOnly": {
+      "description": "Connect a desktop to edit these settings",
+      "hint": "Agent settings run on your paired desktop. Pair a desktop from the Account section to edit them here.",
+      "title": "Desktop required"
+    },
     "plugins": {
+      "backAria": "Back to Me",
       "disabled": "Disabled",
       "empty": "No plugins installed.",
       "enabled": "Enabled",
+      "intro": "Enable or disable installed plugins. Changes sync to your paired desktop when it next comes online.",
       "queueLabel": "Queued — desktop will apply when online.",
+      "title": "Plugins",
       "toggleAria": "Toggle plugin",
       "toggleFailed": "Toggle failed: {message}"
     },
@@ -7529,6 +7802,21 @@
       "tabValidation": "Validation",
       "toggleEnabled": "Enable skill"
     },
+    "slashCommands": {
+      "backAria": "Back to Me",
+      "builtin": {
+        "description": "Commands you can run from the chat composer with a leading slash.",
+        "title": "Built-in commands"
+      },
+      "intro": "Browse the slash commands the paired desktop can run. Custom commands are authored on the desktop.",
+      "manageOnDesktop": "Custom slash commands are stored as .claude/commands/*.md files on the paired desktop. Create, edit and delete them there.",
+      "plugin": {
+        "description": "Commands contributed by enabled plugins.",
+        "empty": "No plugin commands registered.",
+        "title": "Plugin commands"
+      },
+      "title": "Slash commands"
+    },
     "speech": {
       "autoPlay": "Auto-play replies",
       "autoPlayHelp": "Speak assistant messages aloud as they arrive.",
@@ -7558,10 +7846,21 @@
       "ttsEnabled": "Text-to-speech",
       "ttsEnabledHelp": "Enable spoken playback of assistant messages.",
       "ttsTitle": "Text-to-speech",
+      "voice": "Voice",
+      "voiceAuto": "Auto (default)",
+      "voiceHelp": "Pick which voice this provider speaks with.",
       "volume": "Volume"
     },
     "splash": {
       "label": "Starting cognia"
+    },
+    "subagents": {
+      "backAria": "Back to Me",
+      "empty": "No subagent templates available.",
+      "manageHint": "Subagent templates run on your paired desktop. Create and edit them in the desktop app under Settings → Subagents.",
+      "sectionDescription": "Reusable subagent configurations your paired desktop can dispatch.",
+      "sectionTitle": "Available templates",
+      "title": "Subagents"
     },
     "tabBar": {
       "customize": {
@@ -7678,8 +7977,12 @@
       "backAria": "Back to Me",
       "enabled": "Enable web search",
       "enabledHelp": "Lets the assistant fetch fresh results from the web.",
+      "fallback": "Fall back to free search",
+      "fallbackHelp": "If the preferred provider fails, retry with the built-in free provider.",
       "maxResults": "Results per search",
       "maxResultsHelp": "How many results to pull into each search call.",
+      "provider": "Preferred provider",
+      "providerHelp": "Which search engine to use first.",
       "resultsCount": "{count, plural, one {# result} other {# results}}",
       "sectionDescription": "Provider API keys are configured on the desktop.",
       "sectionTitle": "Web search",
@@ -7699,8 +8002,11 @@
         "back": "Back to workflows",
         "cancelConnect": "Cancel",
         "connect": "Connect",
+        "connectFrom": "Connecting from {label} — tap a target",
         "connectTarget": "Tap a node to connect",
+        "deleteConnection": "Delete connection",
         "dirty": "Unsaved",
+        "errorOutput": "Error",
         "export": "Export JSON",
         "exported": "Workflow exported.",
         "fitView": "Fit to screen",
@@ -7779,6 +8085,18 @@
         "runQueued": "Triggered {name} — queued for desktop.",
         "unfavorite": "Unpin"
       }
+    },
+    "workflowsSettings": {
+      "backAria": "Back to Me",
+      "sectionDescription": "Tune how much motion and live computation the visual workflow editor uses.",
+      "sectionTitle": "Editor performance",
+      "tierAuto": "Auto",
+      "tierBalanced": "Balanced",
+      "tierHelp": "Auto chooses a tier from your reduce-motion setting and the workflow size. Lower tiers trade visual polish for smoother editing on large graphs.",
+      "tierHigh": "High",
+      "tierLabel": "Performance tier",
+      "tierReduced": "Reduced",
+      "title": "Workflow settings"
     },
     "workspace": {
       "activeLabel": "Workspace: {name}"
@@ -17725,7 +18043,8 @@
         "emptyTitle": "No sub-agents are running.",
         "parent": "parent: {id}",
         "title": "Runtime",
-        "toolsCount": "{count, plural, one {# tool} other {# tools}}"
+        "toolsCount": "{count, plural, one {# tool} other {# tools}}",
+        "toolsRunCount": "{n, plural, one {# tool run} other {# tools run}}"
       },
       "tabs": {
         "runtime": "Runtime",

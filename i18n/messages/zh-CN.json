@@ -2242,7 +2242,9 @@
         "dismiss": "关闭建议",
         "label": "追问建议"
       },
+      "ghostAccept": "接受",
       "ghostAcceptHint": "Tab",
+      "ghostDismiss": "忽略建议",
       "helperHints": {
         "dropImages": "拖拽 / 粘贴图片",
         "send": "⏎ 发送 · ⇧⏎ 换行",
@@ -2460,6 +2462,10 @@
       "subtitle": "随便问、直接进入某个能力，或接着上次继续。",
       "title": "今天想完成点什么？"
     },
+    "filePreview": {
+      "loading": "正在加载 {name}…",
+      "pdfFallback": "无法预览此 PDF。"
+    },
     "header": {
       "accountSwitcher": {
         "active": "当前",
@@ -2641,6 +2647,9 @@
         "truncated": "预览已截断 — 完整内容已写入磁盘。"
       }
     },
+    "mcpContent": {
+      "embeddedResource": "嵌入资源：{uri}"
+    },
     "message": {
       "attachmentAlt": "附件",
       "bookmarkLabel": "切换收藏",
@@ -2717,12 +2726,26 @@
       "stopReading": "停止朗读",
       "todoPlanTitle": "计划 · {done}/{total} 已完成",
       "toolCallFailed": "工具调用失败",
+      "unknownPart": "未知内容（{type}）",
       "usageCacheHit": "缓存命中：{n}",
       "usageCacheWrite": "缓存写入：{n}",
       "usageCost": "费用：${cost}",
       "usageInput": "输入：{n}",
       "usageOutput": "输出：{n}",
       "usageReasoning": "推理：{n}"
+    },
+    "ocrResult": {
+      "askAbout": "追问此内容",
+      "cached": "缓存命中",
+      "confidence": "置信度：{pct}%",
+      "copied": "已复制",
+      "copy": "复制文本",
+      "duration": "{ms} 毫秒",
+      "languages": "语言：{langs}",
+      "noText": "未识别到文本。",
+      "provider": "识别引擎：{id}",
+      "thumbnailAlt": "源图像",
+      "title": "已识别文本"
     },
     "permissionMode": {
       "acceptEdits": {
@@ -6390,6 +6413,68 @@
     }
   },
   "mobile": {
+    "agent": {
+      "backAria": "返回设置",
+      "bareMode": "精简模式",
+      "bareModeHelp": "去掉前言和元叙述，只回结果。",
+      "behaviorSection": "行为",
+      "briefMode": "简洁模式",
+      "briefModeHelp": "优先给出简短、直接的回答。",
+      "compactionEnabled": "自动压缩",
+      "compactionEnabledHelp": "上下文窗口快满时，自动总结较早的对话轮次。",
+      "compactionHelp": "已配对桌面端如何管理长对话的上下文窗口。",
+      "compactionSection": "上下文压缩",
+      "debugMode": "调试模式",
+      "debugModeHelp": "在 agent 输出中显示额外诊断信息。",
+      "escalateGate": "提升自主权时需生物识别",
+      "escalateGateHelp": "在本机提升桌面端权限模式前，重新校验 Face ID / 指纹。",
+      "escalateReason": "确认提升 agent 的权限模式",
+      "escalateTitle": "提升权限模式",
+      "permAcceptEdits": "自动接受编辑",
+      "permAuto": "自动",
+      "permBypass": "绕过权限",
+      "permDefault": "默认（询问）",
+      "permDontAsk": "不询问",
+      "permPlan": "仅计划",
+      "permissionDesc": "已配对桌面端的 agent 在询问你之前可以多自主地行动。",
+      "permissionMode": "权限模式",
+      "permissionSection": "权限",
+      "promptHelp": "追加到已配对桌面端的每一轮 agent。",
+      "promptPlaceholder": "例如：始终用中文回答。",
+      "promptSection": "默认系统提示词",
+      "surfaceSkills": "内置场景技能",
+      "surfaceSkillsHelp": "在匹配的场景上自动注入内置引导技能（IM 自动回复、工作流编写、数字分身接地等）。",
+      "systemPrompt": "系统提示词",
+      "thinkingActiveHint": "思考预算：{budget} tokens。",
+      "thinkingDisabledHint": "思考预算关闭——模型使用默认值。",
+      "thinkingHelp": "agent 用于内部推理的最大 token 数。",
+      "thinkingNumberLabel": "思考预算（tokens）",
+      "thinkingReset": "重置",
+      "thinkingSection": "思考预算",
+      "title": "Agent 默认设置"
+    },
+    "agentTeamsSettings": {
+      "backAria": "返回我的",
+      "categories": {
+        "analysis": "分析",
+        "debugging": "调试",
+        "development": "开发",
+        "documentation": "文档",
+        "general": "通用",
+        "research": "研究",
+        "review": "评审",
+        "security": "安全"
+      },
+      "empty": "暂无智能体团队模板。",
+      "intro": "浏览已配对桌面端可启动的智能体团队模板。实时团队协作在桌面端运行。",
+      "manageOnDesktop": "智能体团队在已配对的桌面端创建、配置和运行。请在桌面端管理模板和实时协作。",
+      "section": {
+        "description": "已配对桌面端可启动的可复用团队组合。",
+        "title": "团队模板"
+      },
+      "teammates": "{count, plural, =1 {1 个成员} other {# 个成员}}",
+      "title": "智能体团队"
+    },
     "automation": {
       "consent": {
         "biometricBlocked": "批准未完成（{reason}）。",
@@ -6846,11 +6931,27 @@
       "to": "结束"
     },
     "conversation": {
+      "autoScroll": "流式时自动滚动",
+      "autoScrollHelp": "回复流式输出时保持贴底（仅当已在底部）。",
       "autoTitle": "自动生成标题",
       "autoTitleHelp": "用后台模型根据首轮对话为每个会话命名。",
       "backAria": "返回个人",
+      "clearAfterSend": "发送后清空",
+      "clearAfterSendHelp": "成功发送后清空输入框（文字与附件）。",
+      "composerSection": "输入框",
+      "composerSectionHelp": "本机消息输入框的行为。",
+      "inputHistory": "调取输入历史",
+      "inputHistoryHelp": "在空输入框按 ↑ / ↓ 调取之前发送过的消息。",
+      "persistDrafts": "保留草稿",
+      "persistDraftsHelp": "重新打开会话时恢复未发送的草稿。",
       "sectionDescription": "影响会话呈现方式的后台辅助功能。",
       "sectionTitle": "会话",
+      "sendOnEnter": "回车发送",
+      "sendOnEnterHelp": "回车直接发送；关闭后回车换行、⌘/Ctrl+回车 发送。",
+      "streamPartial": "流式显示回复",
+      "streamPartialHelp": "回复逐字到达时即时显示，而非一次性显示。",
+      "streamSection": "消息流",
+      "streamSectionHelp": "回复到达时的呈现方式。",
       "timeline": "时间线缩略图",
       "timelineHelp": "在右侧显示缩略图，便于在长对话中快速跳转。",
       "title": "会话"
@@ -6861,6 +6962,47 @@
       "queueLabelApprove": "通过连接器草稿",
       "queueLabelReject": "拒绝连接器草稿",
       "reject": "拒绝"
+    },
+    "externalAgents": {
+      "backAria": "返回设置",
+      "disabled": "关闭",
+      "empty": "已配对的桌面端尚未配置任何外部 Agent。",
+      "enabled": "开启",
+      "enabledAria": "启用 {name}",
+      "intro": "管理已配对桌面端上配置的外部 Agent。可逐个开启或关闭，并选择桌面端运行时所用的权限模式。",
+      "loadFailed": "无法加载外部 Agent：{message}",
+      "loading": "正在加载外部 Agent……",
+      "manageOnDesktop": "新增、删除以及编辑外部 Agent（命令、端点、重试）需在桌面端完成。请在桌面端打开 设置 → 外部 Agent。",
+      "permissionAcceptEdits": "自动接受编辑",
+      "permissionBypass": "跳过权限检查",
+      "permissionDefault": "默认",
+      "permissionDontAsk": "不再询问",
+      "permissionLabel": "权限模式",
+      "permissionModeAria": "{name} 的权限模式",
+      "permissionPlan": "计划模式",
+      "sectionTitle": "已配置的 Agent",
+      "title": "外部 Agent",
+      "toggleFailed": "无法将更改加入队列：{message}",
+      "updateQueued": "更改已加入桌面端队列。"
+    },
+    "githubDelivery": {
+      "backAria": "返回设置",
+      "intro": "查看 GitHub Delivery 机器人的默认合并策略。仓库、凭据、审计日志和用量均在已配对的桌面端。",
+      "manageOnDesktop": "GitHub Delivery 在桌面端管理。请在桌面端连接仓库、配置 App 凭据、调整策略并查看审计日志。",
+      "policy": {
+        "allowedAuthors": "允许的作者",
+        "description": "仓库在桌面端被覆盖前继承的默认策略。",
+        "maxDailyMerges": "每日最大合并数",
+        "off": "关闭",
+        "perDay": "每天 {count} 次",
+        "protectedBranches": "受保护分支",
+        "requireGreenCi": "要求 CI 通过",
+        "requireHumanApproval": "要求人工审批",
+        "required": "必需",
+        "title": "默认策略"
+      },
+      "runtimeNote": "投递机器人在已配对的桌面端运行。审计决策和速率限制用量可在桌面端实时查看。",
+      "title": "GitHub Delivery"
     },
     "home": {
       "actions": {
@@ -6920,6 +7062,18 @@
       "viewActive": "显示活跃聊天",
       "viewArchived": "显示已归档聊天"
     },
+    "hooks": {
+      "backAria": "返回我的",
+      "builtin": {
+        "description": "随产品内置的生命周期钩子，会合并在你自己的钩子之下。",
+        "title": "内置钩子"
+      },
+      "defaultOff": "默认关闭",
+      "defaultOn": "默认开启",
+      "intro": "查看产品内置的生命周期钩子。你自己的按事件钩子存储在已配对桌面端的 .claude/settings.json 中。",
+      "manageOnDesktop": "用户、项目和本地钩子存储在已配对桌面端的 .claude/settings.json 中。请在桌面端添加、编辑和切换。",
+      "title": "钩子"
+    },
     "inbox": {
       "tabs": {
         "drafts": "草稿",
@@ -6927,6 +7081,22 @@
       },
       "tabsAria": "收件箱分区",
       "title": "收件箱"
+    },
+    "instructions": {
+      "backAria": "返回设置",
+      "save": "保存",
+      "title": "项目指令"
+    },
+    "mcp": {
+      "backAria": "返回设置",
+      "disabled": "已关闭",
+      "empty": "已配对的桌面端尚未配置任何 MCP 服务器。",
+      "enabled": "已启用",
+      "intro": "查看已配对桌面端配置的 MCP 服务器。添加、编辑和认证服务器需在桌面端完成。",
+      "manageOnDesktop": "MCP 服务器在桌面端管理。请在桌面端打开「设置 → MCP」添加、编辑、启用或认证服务器。",
+      "remoteAuthNote": "在桌面端认证",
+      "sectionTitle": "已配置的服务器",
+      "title": "MCP 服务器"
     },
     "me": {
       "aboutRow": "关于",
@@ -6937,6 +7107,8 @@
         "sevenDayLabel": "7 日额度"
       },
       "actionPair": "去配对",
+      "agentRow": "Agent 默认设置",
+      "agentTeamsSettingsRow": "智能体团队",
       "appSecurity": "应用安全",
       "appearanceBackAria": "返回个人",
       "appearanceLink": "主题与壁纸",
@@ -7015,6 +7187,7 @@
       "deviceInfoRow": "设备信息",
       "devicesRow": "已配对设备",
       "dexieMaintenance": "Dexie 维护",
+      "externalAgentsRow": "外部 Agent",
       "feedback": {
         "copyDescription": "应用版本、User Agent 和当前同步快照。",
         "copyError": "当前壳层无法访问剪贴板。",
@@ -7029,6 +7202,7 @@
         "reportTitle": "反馈问题"
       },
       "feedbackRow": "反馈与诊断",
+      "githubDeliveryRow": "GitHub 投递",
       "help": {
         "docsDescription": "在系统浏览器中打开 cognia 文档。",
         "docsLabel": "文档站",
@@ -7040,13 +7214,18 @@
         "resourcesTitle": "资源"
       },
       "helpRow": "帮助与文档",
+      "hooksRow": "钩子",
+      "instructionsRow": "项目指令",
+      "mcpRow": "MCP 服务器",
       "memoryRow": "记忆",
+      "networkRow": "网络",
       "notificationsRow": "通知",
       "ocrRow": "OCR 提供方",
       "pairing": "配对状态",
       "pairingPaired": "已与桌面配对（{deviceId}）",
       "pairingUnpaired": "尚未与桌面配对",
       "pinned": "已置顶到常用",
+      "pluginsRow": "插件",
       "preferencesRow": "字号与默认模型",
       "presetsBackAria": "返回我的",
       "presetsRow": "系统提示词预设",
@@ -7103,6 +7282,7 @@
         "pending": "正在退出…",
         "successToast": "已退出，配对已清除。"
       },
+      "slashCommandsRow": "斜杠命令",
       "speechRow": "语音",
       "storage": {
         "backupsDescription": "{count} 个文件 · {total}",
@@ -7148,6 +7328,7 @@
         "unnamedFile": "（无文件名）"
       },
       "storageRow": "存储用量",
+      "subagentsRow": "子代理",
       "subscriptionRow": "订阅与账号",
       "sync": {
         "description": "桌面与本机的逐表同步快照。每行在前台恢复或手动重试时拉取增量。",
@@ -7176,7 +7357,8 @@
       },
       "unpinned": "已从常用移除",
       "versionLabel": "版本",
-      "webSearchRow": "网络搜索"
+      "webSearchRow": "网络搜索",
+      "workflowsSettingsRow": "工作流设置"
     },
     "memory": {
       "empty": "暂无记忆",
@@ -7198,11 +7380,36 @@
       "copySuccess": "已复制到剪贴板。",
       "description": "选择一项操作。",
       "longPressHint": "长按消息查看操作",
+      "quote": "引用",
       "share": "分享…",
       "shareDialogTitle": "分享至",
       "shareFailed": "分享失败：{message}",
       "shareUnsupported": "此设备不支持分享。",
       "title": "消息"
+    },
+    "network": {
+      "backAria": "返回我的",
+      "connectionType": {
+        "cellular": "蜂窝网络",
+        "none": "无连接",
+        "unknown": "未知",
+        "wifi": "Wi-Fi"
+      },
+      "connectivity": {
+        "description": "本设备上报的实时网络状态。",
+        "offline": "离线",
+        "online": "在线",
+        "statusLabel": "连接",
+        "title": "连接状态",
+        "typeLabel": "连接类型"
+      },
+      "intro": "本设备当前的连接状态。代理和连接设置在已配对的桌面端配置。",
+      "manageOnDesktop": "代理模式、主机/端口、认证和绕过规则均在已配对的桌面端。请在桌面端配置和测试。",
+      "proxy": {
+        "description": "用于出站请求的 HTTP/SOCKS 代理在桌面端管理。",
+        "title": "代理"
+      },
+      "title": "网络"
     },
     "notifications": {
       "permissionCta": {
@@ -7212,6 +7419,64 @@
         "enableInProgress": "请求中…",
         "settingsButton": "前往设置",
         "title": "启用后台提醒"
+      },
+      "preferences": {
+        "badge": "未读角标",
+        "badgeHelp": "在应用图标和标签上显示未读计数。",
+        "behaviourTitle": "行为",
+        "channel": {
+          "os": "系统通知",
+          "push": "推送通知",
+          "toast": "应用内提示"
+        },
+        "channelHelp": {
+          "os": "显示系统原生通知。",
+          "push": "应用关闭时仍推送到本设备。",
+          "toast": "在应用内短暂弹出消息。"
+        },
+        "channelsHelp": "新通知默认出现的位置。",
+        "channelsTitle": "默认渠道",
+        "days": "{count, plural, other {# 天}}",
+        "focusAware": "聚焦感知",
+        "focusAwareHelp": "查看相关会话时，抑制系统通知。",
+        "gatesTitle": "级别门槛",
+        "level": {
+          "critical": "严重",
+          "error": "错误",
+          "info": "信息",
+          "success": "成功",
+          "warning": "警告"
+        },
+        "minOsLevel": "系统通知最低级别",
+        "minOsLevelHelp": "仅在不低于该级别时触发系统通知。",
+        "minPushLevel": "推送最低级别",
+        "minPushLevelHelp": "仅在不低于该级别时发送推送通知。",
+        "perSourceHelp": "屏蔽来自特定子系统的通知。",
+        "perSourceTitle": "按来源",
+        "quietHoursEnabled": "勿扰时段",
+        "quietHoursEnabledHelp": "在每日时段内静音非严重通知。",
+        "quietHoursEnd": "结束时间",
+        "quietHoursHelp": "夜间暂停提醒；严重通知仍会送达。",
+        "quietHoursStart": "开始时间",
+        "quietHoursTitle": "勿扰",
+        "resetDefaults": "恢复默认",
+        "retentionDays": "保留时长",
+        "retentionItems": "最多保存",
+        "retentionTitle": "保留",
+        "snoozeAutoWake": "活动时唤醒",
+        "snoozeAutoWakeHelp": "相关活动恢复时，重新显示已暂停的通知。",
+        "sound": "声音",
+        "soundHelp": "新通知时播放提示音。",
+        "source": {
+          "agent-team": "智能体团队",
+          "connector": "连接器",
+          "plugin": "插件",
+          "scheduler": "计划任务",
+          "session": "会话",
+          "system": "系统",
+          "workflow": "工作流"
+        },
+        "sourceHelp": "允许来自该来源的通知。"
       },
       "queue": {
         "cancel": "取消",
@@ -7372,11 +7637,19 @@
       "tokenLabel": "配对令牌",
       "transportLabel": "传输层"
     },
+    "pairedOnly": {
+      "description": "连接桌面端后可编辑这些设置",
+      "hint": "Agent 设置在已配对的桌面端运行。请先在“账户”中配对桌面端，再在此编辑。",
+      "title": "需要桌面端"
+    },
     "plugins": {
+      "backAria": "返回我的",
       "disabled": "已禁用",
       "empty": "尚未安装任何插件。",
       "enabled": "已启用",
+      "intro": "启用或禁用已安装的插件。更改会在配对的桌面端下次上线时同步。",
       "queueLabel": "已排队——桌面上线后会同步。",
+      "title": "插件",
       "toggleAria": "切换插件状态",
       "toggleFailed": "切换失败：{message}"
     },
@@ -7529,6 +7802,21 @@
       "tabValidation": "验证",
       "toggleEnabled": "启用技能"
     },
+    "slashCommands": {
+      "backAria": "返回我的",
+      "builtin": {
+        "description": "可在聊天输入框中以斜杠开头运行的命令。",
+        "title": "内置命令"
+      },
+      "intro": "浏览已配对桌面端可运行的斜杠命令。自定义命令在桌面端创建。",
+      "manageOnDesktop": "自定义斜杠命令以 .claude/commands/*.md 文件形式存储在已配对的桌面端。请在桌面端创建、编辑和删除。",
+      "plugin": {
+        "description": "由已启用插件贡献的命令。",
+        "empty": "暂无插件命令。",
+        "title": "插件命令"
+      },
+      "title": "斜杠命令"
+    },
     "speech": {
       "autoPlay": "自动朗读回复",
       "autoPlayHelp": "助手消息到达时自动朗读出来。",
@@ -7558,10 +7846,21 @@
       "ttsEnabled": "文字转语音",
       "ttsEnabledHelp": "启用助手消息的语音播放。",
       "ttsTitle": "文字转语音",
+      "voice": "音色",
+      "voiceAuto": "自动（默认）",
+      "voiceHelp": "选择此提供商使用的音色。",
       "volume": "音量"
     },
     "splash": {
       "label": "正在启动 cognia"
+    },
+    "subagents": {
+      "backAria": "返回我的",
+      "empty": "暂无可用的子代理模板。",
+      "manageHint": "子代理模板在配对的桌面端运行。请在桌面应用的“设置 → 子代理”中创建和编辑。",
+      "sectionDescription": "配对的桌面端可调度的可复用子代理配置。",
+      "sectionTitle": "可用模板",
+      "title": "子代理"
     },
     "tabBar": {
       "customize": {
@@ -7678,8 +7977,12 @@
       "backAria": "返回个人",
       "enabled": "启用网络搜索",
       "enabledHelp": "允许助手从网络获取最新结果。",
+      "fallback": "回退到免费搜索",
+      "fallbackHelp": "首选提供商失败时，改用内置的免费提供商重试。",
       "maxResults": "每次搜索结果数",
       "maxResultsHelp": "每次搜索调用拉取的结果数量。",
+      "provider": "首选提供商",
+      "providerHelp": "优先使用哪个搜索引擎。",
       "resultsCount": "{count, plural, other {# 条结果}}",
       "sectionDescription": "提供商 API 密钥在桌面端配置。",
       "sectionTitle": "网络搜索",
@@ -7699,8 +8002,11 @@
         "back": "返回工作流",
         "cancelConnect": "取消",
         "connect": "连线",
+        "connectFrom": "从 {label} 连出 — 点按目标节点",
         "connectTarget": "点按一个节点完成连线",
+        "deleteConnection": "删除连接",
         "dirty": "未保存",
+        "errorOutput": "错误",
         "export": "导出 JSON",
         "exported": "工作流已导出。",
         "fitView": "适配屏幕",
@@ -7779,6 +8085,18 @@
         "runQueued": "已触发 {name} — 已加入桌面端队列。",
         "unfavorite": "取消置顶"
       }
+    },
+    "workflowsSettings": {
+      "backAria": "返回我的",
+      "sectionDescription": "调整可视化工作流编辑器使用的动效与实时计算程度。",
+      "sectionTitle": "编辑器性能",
+      "tierAuto": "自动",
+      "tierBalanced": "均衡",
+      "tierHelp": "“自动”会根据你的减弱动效设置和工作流规模选择档位。较低档位会牺牲视觉效果，以换取在大型图上更流畅的编辑体验。",
+      "tierHigh": "高",
+      "tierLabel": "性能档位",
+      "tierReduced": "精简",
+      "title": "工作流设置"
     },
     "workspace": {
       "activeLabel": "工作区：{name}"
@@ -17725,7 +18043,8 @@
         "emptyTitle": "当前没有运行中的子代理。",
         "parent": "父代理：{id}",
         "title": "运行时",
-        "toolsCount": "{count, plural, other {# 个工具}}"
+        "toolsCount": "{count, plural, other {# 个工具}}",
+        "toolsRunCount": "{n, plural, other {已运行 # 个工具}}"
       },
       "tabs": {
         "runtime": "运行时",

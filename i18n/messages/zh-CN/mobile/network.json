@@ -1,0 +1,24 @@
+{
+  "backAria": "返回我的",
+  "connectionType": {
+    "cellular": "蜂窝网络",
+    "none": "无连接",
+    "unknown": "未知",
+    "wifi": "Wi-Fi"
+  },
+  "connectivity": {
+    "description": "本设备上报的实时网络状态。",
+    "offline": "离线",
+    "online": "在线",
+    "statusLabel": "连接",
+    "title": "连接状态",
+    "typeLabel": "连接类型"
+  },
+  "intro": "本设备当前的连接状态。代理和连接设置在已配对的桌面端配置。",
+  "manageOnDesktop": "代理模式、主机/端口、认证和绕过规则均在已配对的桌面端。请在桌面端配置和测试。",
+  "proxy": {
+    "description": "用于出站请求的 HTTP/SOCKS 代理在桌面端管理。",
+    "title": "代理"
+  },
+  "title": "网络"
+}

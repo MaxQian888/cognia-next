@@ -68,7 +68,8 @@
     "emptyTitle": "No sub-agents are running.",
     "parent": "parent: {id}",
     "title": "Runtime",
-    "toolsCount": "{count, plural, one {# tool} other {# tools}}"
+    "toolsCount": "{count, plural, one {# tool} other {# tools}}",
+    "toolsRunCount": "{n, plural, one {# tool run} other {# tools run}}"
   },
   "tabs": {
     "runtime": "Runtime",

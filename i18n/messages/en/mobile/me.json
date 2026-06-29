@@ -1,5 +1,11 @@
 {
   "aboutRow": "About",
+  "agentRow": "Agent defaults",
+  "agentTeamsSettingsRow": "Agent teams",
+  "hooksRow": "Hooks",
+  "networkRow": "Network",
+  "slashCommandsRow": "Slash commands",
+  "instructionsRow": "Project instructions",
   "account": {
     "fiveHourLabel": "5-hour quota",
     "notSignedIn": "No Anthropic account active. Tap to sign in.",
@@ -85,6 +91,7 @@
   "deviceInfoRow": "Device info",
   "devicesRow": "Paired devices",
   "dexieMaintenance": "Dexie maintenance",
+  "externalAgentsRow": "External agents",
   "feedback": {
     "copyDescription": "App version, user agent, and current sync snapshot.",
     "copyError": "Clipboard unavailable in this shell.",
@@ -99,6 +106,7 @@
     "reportTitle": "Report a problem"
   },
   "feedbackRow": "Feedback & diagnostics",
+  "githubDeliveryRow": "GitHub Delivery",
   "help": {
     "docsDescription": "Open the cognia docs site in the system browser.",
     "docsLabel": "Documentation",
@@ -110,6 +118,7 @@
     "resourcesTitle": "Resources"
   },
   "helpRow": "Help & docs",
+  "mcpRow": "MCP servers",
   "memoryRow": "Memory",
   "notificationsRow": "Notifications",
   "ocrRow": "OCR providers",
@@ -117,6 +126,7 @@
   "pairingPaired": "Paired with desktop ({deviceId})",
   "pairingUnpaired": "Not paired with desktop yet",
   "pinned": "Pinned to favorites",
+  "pluginsRow": "Plugins",
   "preferencesRow": "Font size & default model",
   "presetsBackAria": "Back to Me",
   "presetsRow": "System prompt presets",
@@ -218,6 +228,7 @@
     "unnamedFile": "(no filename)"
   },
   "storageRow": "Storage usage",
+  "subagentsRow": "Subagents",
   "subscriptionRow": "Subscription & account",
   "sync": {
     "description": "Per-table snapshot from the desktop. Each row pulls deltas on the next foreground or after a manual retry.",
@@ -246,5 +257,6 @@
   },
   "unpinned": "Removed from favorites",
   "versionLabel": "Version",
-  "webSearchRow": "Web search"
+  "webSearchRow": "Web search",
+  "workflowsSettingsRow": "Workflow settings"
 }
