@@ -125,6 +125,9 @@ const config: Config = {
     // Storybook stories are dev-preview artifacts, not production source — they
     // would otherwise count as uncovered code and sink the ≥90% gate.
     "!**/*.stories.{js,jsx,ts,tsx}",
+    // Storybook-only test infra (store/DB seeding + fixture builders). Same
+    // dev-preview rationale as stories — never imported by production code.
+    "!lib/storybook/**",
     "!**/*.d.ts",
     "!**/node_modules/**",
     "!**/.next/**",

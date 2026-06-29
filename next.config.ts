@@ -121,6 +121,14 @@ const NODE_ONLY_MODULES = [
 // (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
   output: isProd ? "export" : undefined,
+  // Build-time type checking uses a stories-free program. Storybook
+  // `*.stories.tsx` and their `lib/storybook/**` fixtures are dev-only preview
+  // artifacts that never enter the static export, so a broken story must not
+  // fail the production build. `pnpm typecheck` still uses the root tsconfig and
+  // type-checks stories. See `tsconfig.build.json`.
+  typescript: {
+    tsconfigPath: "tsconfig.build.json",
+  },
   // Barrel-import optimization. These packages re-export hundreds of symbols
   // from a single entry; without this, both Turbopack (dev) and webpack
   // (build) pull the whole barrel into every importer's module graph. Given

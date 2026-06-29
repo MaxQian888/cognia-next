@@ -1,0 +1,33 @@
+{
+  // Production-build TypeScript program (consumed by `next build` via
+  // `next.config.ts` → `typescript.tsconfigPath`). Identical to `tsconfig.json`
+  // except it drops Storybook stories and their fixtures: those are dev-only
+  // preview artifacts that are never part of the static export Tauri/Capacitor
+  // ship, yet the single root tsconfig globs `**/*.tsx`, so a broken story would
+  // otherwise fail the production build. `pnpm typecheck` still uses the root
+  // tsconfig and keeps type-checking stories.
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": [
+    "node_modules",
+    "docs",
+    "mobile",
+    "sidecar",
+    "services/share-server",
+    "out",
+    ".next",
+    "tests/e2e",
+    "playwright.config.ts",
+    "packages/*/tsup.config.ts",
+    "**/*.stories.tsx",
+    "**/*.stories.ts",
+    "lib/storybook/**"
+  ]
+}
