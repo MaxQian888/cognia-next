@@ -7,6 +7,8 @@ import {
   listCommandsByPlugin,
   dispatchSlashCommand,
   seedBuiltinSlashCommands,
+  subscribeSlashCommands,
+  getSlashCommandsVersion,
   __resetSlashCommandsForTesting,
 } from "./registry"
 import * as canonical from "./registry"
@@ -19,6 +21,44 @@ import {
 afterEach(() => {
   __resetSlashCommandsForTesting()
   __resetDiagnosticsStoreForTesting()
+})
+
+describe("subscribeSlashCommands", () => {
+  it("notifies subscribers and bumps the version on register / unregister", () => {
+    const cb = jest.fn()
+    const unsub = subscribeSlashCommands(cb)
+    const before = getSlashCommandsVersion()
+    registerSlashCommand({ id: "p.one", name: "One", handler: () => ({}), source: "plugin" })
+    expect(cb).toHaveBeenCalledTimes(1)
+    expect(getSlashCommandsVersion()).toBeGreaterThan(before)
+    unregisterSlashCommand("p.one")
+    expect(cb).toHaveBeenCalledTimes(2)
+    unsub()
+    registerSlashCommand({ id: "p.two", name: "Two", handler: () => ({}), source: "plugin" })
+    // No further calls after unsubscribe.
+    expect(cb).toHaveBeenCalledTimes(2)
+  })
+
+  it("bumps the version once for a bulk plugin unregister", () => {
+    registerSlashCommand({
+      id: "px.a",
+      name: "A",
+      handler: () => ({}),
+      source: "plugin",
+      pluginId: "px",
+    })
+    registerSlashCommand({
+      id: "px.b",
+      name: "B",
+      handler: () => ({}),
+      source: "plugin",
+      pluginId: "px",
+    })
+    const cb = jest.fn()
+    subscribeSlashCommands(cb)
+    unregisterCommandsByPlugin("px")
+    expect(cb).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("slash-command registry (lib/slash-commands/registry)", () => {

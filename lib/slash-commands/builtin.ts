@@ -31,6 +31,7 @@ import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
 import { handleRunWorkflow } from "./actions/run-saved-workflow"
+import { handleCouncil } from "./actions/council"
 
 /**
  * Names of the sections in the Settings page (URL `?section=` values).
@@ -67,7 +68,7 @@ export interface SlashContext {
   pushSystemMessage: (payload: string | SystemMessageBlock | SlashCommandResultBlock) => void
 }
 
-export type SlashScope = "builtin" | "project" | "user"
+export type SlashScope = "builtin" | "project" | "user" | "plugin"
 
 /** A single parameter the command's guided form collects. */
 export interface SlashParamSpec {
@@ -148,6 +149,7 @@ function buildHelpText(commands: SlashCommand[]): string {
     builtin: [],
     project: [],
     user: [],
+    plugin: [],
   }
   for (const c of commands) groups[c.scope].push(c)
   const sections: string[] = [HELP_BODY_HEADER]
@@ -466,6 +468,15 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     category: "system",
     argumentHint: "<name | id>",
     handler: handleRunWorkflow,
+  },
+  {
+    name: "council",
+    description:
+      "Ask several models the same question and synthesize a consensus answer with a confidence rating.",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "<question> [--models a,b,c] [--synth alias]",
+    handler: handleCouncil,
   },
   // Workflow Copilot commands — only active inside workflow-editor sessions.
   // Each handler self-gates on activeSessionId so the picker never lists
