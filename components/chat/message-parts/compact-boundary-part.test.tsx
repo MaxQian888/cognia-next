@@ -98,6 +98,30 @@ describe("CompactBoundaryMarker", () => {
     expect(screen.getByText(/auto/)).toBeInTheDocument()
   })
 
+  it("shows the phase + reclaimed-percent labels when derivable from the transcript", () => {
+    const msg = boundary({ preTokens: 1000, postTokens: 250 }, "b1")
+    const assistant = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+      metadata: { usage: { inputTokens: 1000, outputTokens: 0 } },
+    } as unknown as UIMessage
+    mockStoreState.messages = [assistant, msg]
+    render(<CompactBoundaryMarker message={msg} />)
+    // turnLabel = 1 assistant turn before the boundary; reclaimed 75%.
+    expect(screen.getByTestId("compact-phase")).toHaveTextContent('phase:{"turn":1}')
+    expect(screen.getByTestId("compact-effectiveness")).toHaveTextContent(
+      'effectiveness:{"pct":75}'
+    )
+  })
+
+  it("omits the effectiveness label when nothing was reclaimed", () => {
+    const msg = boundary({ preTokens: 100, postTokens: 100 }, "b1")
+    mockStoreState.messages = [msg]
+    render(<CompactBoundaryMarker message={msg} />)
+    expect(screen.queryByTestId("compact-effectiveness")).not.toBeInTheDocument()
+  })
+
   it("does not show an undo button without a live snapshot", () => {
     render(<CompactBoundaryMarker message={boundary({ undoToken: "compact-1" })} />)
     expect(screen.queryByTestId("compact-undo")).not.toBeInTheDocument()

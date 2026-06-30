@@ -29,13 +29,17 @@ import {
   PinIcon,
   PinOffIcon,
   SlashIcon,
+  SparklesIcon,
   TerminalIcon,
+  WandSparklesIcon,
 } from "lucide-react"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
-import { fuzzyFilterSortRanked } from "@/lib/chat/completion/fuzzy-match"
+import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SkillMentionTarget } from "@/hooks/chat/use-mentionable-skills"
+import { fuzzyFilterSort, fuzzyFilterSortRanked } from "@/lib/chat/completion/fuzzy-match"
 import { MatchHighlight } from "@/components/chat/completion/match-highlight"
 import {
   orderedCommandsForEmptyQuery,
@@ -68,6 +72,8 @@ export type PopoverItem =
   | { kind: "memory"; scope: "project" | "user"; preview: string }
   | { kind: "agent"; target: MentionTarget }
   | { kind: "subagent"; target: SubagentMentionTarget }
+  | { kind: "skill"; skill: SkillMentionTarget }
+  | { kind: "preset"; preset: SystemPromptPreset }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -97,6 +103,18 @@ interface Props {
    * team (`mentionMode="agents"`) composers.
    */
   chatAgents?: readonly SubagentMentionTarget[]
+  /**
+   * Enabled skills surfaced by the `@skill:` namespaced mention. Picking one
+   * ENABLES it for the session (no text inserted) — see `composer.tsx`'s
+   * `onPickPopoverItem`. Empty / undefined outside the general chat composer.
+   */
+  chatSkills?: readonly SkillMentionTarget[]
+  /**
+   * Prompt presets surfaced by the `@preset:` namespaced mention. Picking one
+   * APPLIES it to the active session (system prompt + model + … ; no text
+   * inserted). Empty / undefined outside the general chat composer.
+   */
+  chatPresets?: readonly SystemPromptPreset[]
   /** Recently-used command names (newest first) for the empty-query view. */
   recentCommands?: readonly string[]
   /** Pinned command names (pin order) for the empty-query view + pin toggles. */
@@ -124,6 +142,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     anchor,
     mentionables,
     chatAgents,
+    chatSkills,
+    chatPresets,
     recentCommands,
     pinnedCommands,
     onTogglePin,
@@ -270,6 +290,32 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
               }),
       }
     }
+    if (trigger.kind === "skill") {
+      const list = chatSkills ?? []
+      const filtered = fuzzyFilterSort(list, trigger.query, (s) => s.name, {
+        secondaryText: (s) => s.description ?? "",
+      })
+      return {
+        items: filtered.map((skill) => ({ kind: "skill" as const, skill })),
+        loading: false,
+        error: null,
+        emptyMessage:
+          list.length === 0 ? t("noSkills") : t("noSkillMatches", { query: trigger.query }),
+      }
+    }
+    if (trigger.kind === "preset") {
+      const list = chatPresets ?? []
+      const filtered = fuzzyFilterSort(list, trigger.query, (p) => p.name, {
+        secondaryText: (p) => p.description ?? "",
+      })
+      return {
+        items: filtered.map((preset) => ({ kind: "preset" as const, preset })),
+        loading: false,
+        error: null,
+        emptyMessage:
+          list.length === 0 ? t("noPresets") : t("noPresetMatches", { query: trigger.query }),
+      }
+    }
     // file (and combined @ mode: subagents on top, then workspace files)
     const base = fileList ?? {
       items: [] as PopoverItem[],
@@ -303,6 +349,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     tAgent,
     mentionables,
     chatAgents,
+    chatSkills,
+    chatPresets,
     recentCommands,
     pinnedCommands,
   ])
@@ -453,6 +501,10 @@ function triggerTitle(
       }
     case "bash":
       return { icon: <TerminalIcon className="size-3.5" />, label: t("bashTitle") }
+    case "skill":
+      return { icon: <SparklesIcon className="size-3.5" />, label: t("skillTitle") }
+    case "preset":
+      return { icon: <WandSparklesIcon className="size-3.5" />, label: t("presetTitle") }
     case "agent":
       return {
         icon: <AtSignIcon className="size-3.5" />,
@@ -509,6 +561,8 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "memory") return `memory-${item.scope}`
   if (item.kind === "agent") return `agent-${item.target.id}`
   if (item.kind === "subagent") return `subagent-${item.target.id}`
+  if (item.kind === "skill") return `skill-${item.skill.id}`
+  if (item.kind === "preset") return `preset-${item.preset.id}`
   return `idx-${idx}`
 }
 
@@ -601,6 +655,33 @@ const ItemRow = memo(function ItemRow({
   }
   if (item.kind === "subagent") {
     return <SubagentMentionRow target={item.target} />
+  }
+  if (item.kind === "skill") {
+    return (
+      <>
+        <SparklesIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{item.skill.name}</span>
+        {item.skill.description ? (
+          <span className="ml-auto truncate text-xs text-muted-foreground">
+            {item.skill.description}
+          </span>
+        ) : null}
+      </>
+    )
+  }
+  if (item.kind === "preset") {
+    const p = item.preset
+    return (
+      <>
+        <span aria-hidden className="shrink-0 text-sm">
+          {p.icon ? p.icon : <WandSparklesIcon className="size-4 text-muted-foreground" />}
+        </span>
+        <span className="truncate font-medium">{p.name}</span>
+        {p.description ? (
+          <span className="ml-auto truncate text-xs text-muted-foreground">{p.description}</span>
+        ) : null}
+      </>
+    )
   }
   return null
 })

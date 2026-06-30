@@ -238,6 +238,80 @@ describe("ComposerPopover — combined @ panel (subagents + files)", () => {
   })
 })
 
+describe("ComposerPopover — @skill: / @preset: namespaced pickers", () => {
+  const chatSkills = [
+    { id: "sk_a", name: "Concise", description: "Short answers" },
+    { id: "sk_b", name: "Cite sources", description: "Cite everything" },
+  ]
+  const chatPresets = [
+    { id: "p1", name: "Coding", description: "Engineering preset" },
+    { id: "p2", name: "Writing", description: "Prose preset" },
+  ] as unknown as React.ComponentProps<typeof ComposerPopover>["chatPresets"]
+
+  function setupNamespaced(kind: "skill" | "preset", query: string, onPick = jest.fn()) {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const ref = createRef<ComposerPopoverHandle>()
+    render(
+      <ComposerPopover
+        ref={ref}
+        trigger={{ kind, tokenStart: 0, tokenEnd: query.length + 1, query }}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        chatSkills={chatSkills}
+        chatPresets={chatPresets}
+        onPick={onPick}
+        onDismiss={jest.fn()}
+      />
+    )
+    return { ref, onPick }
+  }
+
+  it("lists enabled skills and fuzzy-filters by name", () => {
+    setupNamespaced("skill", "")
+    expect(rowTexts().some((t) => t.includes("Concise"))).toBe(true)
+    expect(rowTexts().some((t) => t.includes("Cite sources"))).toBe(true)
+  })
+
+  it("confirm() picks a skill item (enable on pick, no text)", () => {
+    const { ref, onPick } = setupNamespaced("skill", "cite")
+    act(() => ref.current!.confirm())
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "skill",
+      skill: expect.objectContaining({ id: "sk_b", name: "Cite sources" }),
+    })
+  })
+
+  it("lists presets and confirm() picks one", () => {
+    const { ref, onPick } = setupNamespaced("preset", "writ")
+    expect(rowTexts().some((t) => t.includes("Writing"))).toBe(true)
+    act(() => ref.current!.confirm())
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "preset",
+      preset: expect.objectContaining({ id: "p2", name: "Writing" }),
+    })
+  })
+
+  it("shows the empty message when no skills are available", () => {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    render(
+      <ComposerPopover
+        ref={createRef<ComposerPopoverHandle>()}
+        trigger={{ kind: "skill", tokenStart: 0, tokenEnd: 1, query: "" }}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        chatSkills={[]}
+        onPick={jest.fn()}
+        onDismiss={jest.fn()}
+      />
+    )
+    expect(screen.getByText("noSkills")).toBeInTheDocument()
+  })
+})
+
 describe("ComposerPopover — highlight, grouping & pinning", () => {
   function setupSlash(
     trigger: ComposerTrigger | null,

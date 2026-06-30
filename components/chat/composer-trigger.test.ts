@@ -97,6 +97,46 @@ describe("detectTrigger — @agent mode", () => {
   })
 })
 
+describe("detectTrigger — @skill: / @preset: namespaced prefixes", () => {
+  it("flips to skill kind once `@skill:` is typed (combined mode)", () => {
+    const tg = detectTrigger("use @skill:rev", 14, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("skill")
+    expect(tg?.query).toBe("rev")
+    expect(tg?.tokenStart).toBe(4)
+  })
+
+  it("yields an empty query right after `@skill:`", () => {
+    const tg = detectTrigger("@skill:", 7, { mentionMode: "files" })
+    expect(tg?.kind).toBe("skill")
+    expect(tg?.query).toBe("")
+  })
+
+  it("flips to preset kind for `@preset:`", () => {
+    const tg = detectTrigger("@preset:cod", 11, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("preset")
+    expect(tg?.query).toBe("cod")
+  })
+
+  it("stays a file token until the colon is typed", () => {
+    const tg = detectTrigger("@skill", 6, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.query).toBe("skill")
+  })
+
+  it("does NOT flip in agents mode (team workspace `@` means members)", () => {
+    const tg = detectTrigger("@skill:rev", 10, { mentionMode: "agents" })
+    expect(tg?.kind).toBe("agent")
+    expect(tg?.query).toBe("skill:rev")
+  })
+
+  it("keeps a dotted/colon token as a single token (boundary at whitespace)", () => {
+    const tg = detectTrigger("@skill:my.cool-skill ", 20, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("skill")
+    expect(tg?.query).toBe("my.cool-skill")
+    expect(tg?.tokenEnd).toBe(20)
+  })
+})
+
 describe("spliceToken", () => {
   it("inserts the replacement and adds a trailing space", () => {
     const result = spliceToken("hi @c", 3, 5, "@codex")

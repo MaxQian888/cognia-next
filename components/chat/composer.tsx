@@ -83,6 +83,11 @@ import {
 } from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
+import { useMarkdownChatAgents } from "@/hooks/chat/use-markdown-chat-agents"
+import { useMentionableSkills } from "@/hooks/chat/use-mentionable-skills"
+import { useMentionablePresets } from "@/hooks/chat/use-mentionable-presets"
+import { usePluginSlashCommands } from "@/hooks/chat/use-plugin-slash-commands"
+import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
 import { FolderPickerButton } from "./composer/folder-picker-button"
@@ -260,6 +265,7 @@ function ComposerInner(props: InnerProps) {
   const tAttach = useTranslations("chat.composer.attachments")
   const tCommands = useTranslations("chat.composer.commands")
   const tMemory = useTranslations("chat.composer.memory")
+  const tSkill = useTranslations("chat.composer.skills")
   const platform = usePlatform()
   const isDesktop = platform === "tauri"
   // Capacitor native shell. Mobile gets a Claude-style vertical layout
@@ -375,9 +381,24 @@ function ComposerInner(props: InnerProps) {
   // each call site opting in; non-direct composers keep the file picker.
   const resolvedMentionMode: MentionMode =
     props.mentionMode ?? (props.session?.kind === "direct" ? "combined" : "files")
-  // Reactive subagent list for the combined panel (no-op cost otherwise).
+  const isCombinedMention = resolvedMentionMode === "combined"
+  // Reactive subagent list for the combined panel (no-op cost otherwise). The
+  // built-in/plugin/template subagents union with on-disk markdown agents
+  // (`.cognia/agents/*.md`) so both surface in the `@` "Agents" section.
   const mentionableSubagents = useMentionableSubagents()
-  const chatAgents = resolvedMentionMode === "combined" ? mentionableSubagents : undefined
+  const markdownAgents = useMarkdownChatAgents(cwd, isCombinedMention)
+  const chatAgents = useMemo(() => {
+    if (!isCombinedMention) return undefined
+    if (markdownAgents.length === 0) return mentionableSubagents
+    // Dedupe by id; the reactive (built-in/plugin/template) list wins so a
+    // markdown file can't shadow a registered subagent's display metadata.
+    const seen = new Set(mentionableSubagents.map((t) => t.id))
+    return [...mentionableSubagents, ...markdownAgents.filter((t) => !seen.has(t.id))]
+  }, [isCombinedMention, mentionableSubagents, markdownAgents])
+  // `@skill:` / `@preset:` namespaced mention sources (general chat only).
+  const chatSkills = useMentionableSkills(isCombinedMention)
+  const chatPresets = useMentionablePresets(isCombinedMention)
+  const applyPreset = useApplyPreset()
 
   // --- Per-cwd custom slash commands ------------------------------------
   useEffect(() => {
@@ -439,17 +460,28 @@ function ComposerInner(props: InnerProps) {
     })
   }, [permissionMode, props.session, updateSession])
 
+  // Plugin-contributed slash commands (registered in the unified registry but
+  // historically never surfaced in the chat `/` picker). Reactive: a plugin
+  // enabling/disabling adds/removes its commands live.
+  const pluginCommands = usePluginSlashCommands()
+
   const slashCommands = useMemo(
-    () => [...BUILTIN_SLASH_COMMANDS, ...customCommands].filter((c) => !c.hiddenFromPicker),
-    [customCommands]
+    () =>
+      [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].filter(
+        (c) => !c.hiddenFromPicker
+      ),
+    [customCommands, pluginCommands]
   )
 
   // Name → command map for submit-time multi-command dispatch. Built from the
   // UNFILTERED list (includes `hiddenFromPicker` commands) so a typed command
   // still resolves even when it's not shown in the picker.
   const commandMap = useMemo(
-    () => new Map([...BUILTIN_SLASH_COMMANDS, ...customCommands].map((c) => [c.name, c])),
-    [customCommands]
+    () =>
+      new Map(
+        [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].map((c) => [c.name, c])
+      ),
+    [customCommands, pluginCommands]
   )
 
   // Segment the live input for the submit-time command pipeline (`runSegments`)
@@ -529,6 +561,26 @@ function ComposerInner(props: InnerProps) {
     [trigger, controller.textInput, dismissPopover]
   )
 
+  // Delete the active trigger token outright (no replacement, no trailing
+  // space) — used by the `@skill:` / `@preset:` picks, which act on the
+  // session config rather than inserting text.
+  const removeTriggerToken = useCallback(() => {
+    if (!trigger) return
+    const cur = controller.textInput.value
+    const before = cur.slice(0, trigger.tokenStart)
+    const after = cur.slice(trigger.tokenEnd)
+    const next = before + after
+    controller.textInput.setInput(next)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.setSelectionRange(before.length, before.length)
+        ta.focus()
+      }
+    })
+    dismissPopover()
+  }, [trigger, controller.textInput, dismissPopover])
+
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
@@ -584,6 +636,18 @@ function ComposerInner(props: InnerProps) {
         // Insert the unique, no-whitespace handle so the send-time resolver can
         // match it back to the agent id 1:1.
         insertReplacement(`@${item.target.handle}`)
+      } else if (item.kind === "skill") {
+        // Picking a skill ENABLES it for the session (renders as a chip); no
+        // text is inserted. Drop the `@skill:…` token cleanly and close.
+        useChatStore.getState().toggleEphemeralSkill(item.skill.id)
+        removeTriggerToken()
+        toast.success(tSkill("enabled", { name: item.skill.name }))
+      } else if (item.kind === "preset") {
+        // Picking a preset APPLIES it to the session (system prompt + model + …)
+        // and removes the `@preset:…` token; no text inserted. `applyPreset`
+        // toasts its own success / "start a chat first" guard.
+        removeTriggerToken()
+        await applyPreset(item.preset, props.session)
       }
     },
     [
@@ -591,11 +655,14 @@ function ComposerInner(props: InnerProps) {
       controller.textInput,
       addReferencedPath,
       insertReplacement,
+      removeTriggerToken,
+      applyPreset,
       props,
       dismissPopover,
       noteCommandUsed,
       tCommands,
       tMemory,
+      tSkill,
     ]
   )
 
@@ -1567,6 +1634,8 @@ function ComposerInner(props: InnerProps) {
         anchor={containerEl}
         mentionables={props.mentionables}
         chatAgents={chatAgents}
+        chatSkills={chatSkills}
+        chatPresets={chatPresets}
         recentCommands={recentCommands}
         pinnedCommands={pinnedCommands}
         onTogglePin={togglePinnedCommand}

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { KeyRoundIcon, Settings2Icon } from "lucide-react"
+import { ChartLineIcon, KeyRoundIcon, Settings2Icon } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,7 @@ import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
+import { SessionInsightsSheet } from "@/components/chat/session-insights/session-insights-sheet"
 import type { ChatSession } from "@/lib/claude/types"
 
 interface Props {
@@ -37,6 +38,7 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
   // lands after boot.
   const { keyOk } = useCredentialStatus()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [insightsOpen, setInsightsOpen] = useState(false)
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
@@ -89,6 +91,15 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
       <Button
         variant="ghost"
         size="icon"
+        aria-label={t("insights")}
+        onClick={() => setInsightsOpen(true)}
+      >
+        <ChartLineIcon className="size-4" />
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="icon"
         aria-label={t("ariaSettings")}
         onClick={() => setSettingsOpen(true)}
       >
@@ -96,6 +107,7 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
       </Button>
 
       <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SessionInsightsSheet session={session} open={insightsOpen} onOpenChange={setInsightsOpen} />
     </header>
   )
 }

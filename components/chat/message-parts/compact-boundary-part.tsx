@@ -10,7 +10,7 @@
 // When the generic-path compaction captured an undo snapshot, an "Undo" action
 // is offered while the snapshot is still live (in-memory, this session only).
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ScissorsIcon, Undo2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -19,6 +19,11 @@ import type { UIMessage } from "ai"
 import { useChatStore } from "@/stores/chat"
 import { restoreSession } from "@/lib/claude/ipc"
 import { getUndoSnapshot, hasUndoSnapshot, clearUndoSnapshot } from "@/lib/claude/compaction-undo"
+import {
+  computeCompactionTokenDeltas,
+  deriveContextPhases,
+  indexDeltasByBoundary,
+} from "@/lib/usage/compaction-metrics"
 
 const compactNum = new Intl.NumberFormat("en-US", { notation: "compact" })
 
@@ -47,7 +52,16 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
   const part = message.parts[0] as unknown as CompactBoundaryPartData
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const replaceMessages = useChatStore((s) => s.replaceMessages)
+  const messages = useChatStore((s) => s.messages)
   const [undoing, setUndoing] = useState(false)
+
+  // Turn label + effectiveness for THIS boundary, derived from the transcript.
+  const metric = useMemo(() => {
+    const delta = indexDeltasByBoundary(computeCompactionTokenDeltas(messages)).get(message.id)
+    const phase = deriveContextPhases(messages).find((p) => p.boundaryId === message.id)
+    if (!delta && !phase) return undefined
+    return { turnLabel: phase?.turnLabel ?? 0, effectiveness: delta?.effectiveness ?? 0 }
+  }, [messages, message.id])
 
   const detail =
     part.preTokens !== undefined && part.postTokens !== undefined
@@ -58,6 +72,13 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
       : part.trigger === "manual"
         ? t("manual")
         : t("auto")
+
+  // "context reset at turn N" + "reclaimed X%" when we could derive the metric.
+  const phaseLabel = metric ? t("phase", { turn: metric.turnLabel }) : null
+  const effectivenessLabel =
+    metric && metric.effectiveness > 0
+      ? t("effectiveness", { pct: Math.round(metric.effectiveness * 100) })
+      : null
 
   const canUndo = !!part.undoToken && hasUndoSnapshot(part.undoToken) && !!activeSessionId
 
@@ -91,6 +112,16 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
       <ScissorsIcon className="size-3 shrink-0" aria-hidden />
       <span className="shrink-0">{t("label")}</span>
       <span className="shrink-0 text-muted-foreground/70">· {detail}</span>
+      {phaseLabel && (
+        <span className="shrink-0 text-muted-foreground/70" data-testid="compact-phase">
+          · {phaseLabel}
+        </span>
+      )}
+      {effectivenessLabel && (
+        <span className="shrink-0 text-muted-foreground/70" data-testid="compact-effectiveness">
+          · {effectivenessLabel}
+        </span>
+      )}
       {canUndo && (
         <button
           type="button"

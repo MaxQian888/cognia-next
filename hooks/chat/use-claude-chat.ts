@@ -99,11 +99,14 @@ import {
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import {
   buildChatMentionTargets,
   resolveTargetAgentId,
 } from "@/lib/claude/agents/chat-mention-targets"
+import { discoverMarkdownAgentTargets } from "@/lib/claude/agents/markdown-mention-targets"
 import { useProjectStore } from "@/stores/project/project-store"
+import { allRootPaths } from "@/lib/workspace/roots"
 import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
 import {
   dispatchChatError as dispatchPluginChatError,
@@ -1535,10 +1538,24 @@ async function buildSendOptions(
   // `@agent` single-turn routing: resolve the first @-mentioned subagent in the
   // message to its dispatcher id. `resolveSendOptions` only honours it when the
   // id is actually registered in this turn's agent map (membership guard), so a
-  // stale / unknown mention is harmless here.
-  const targetAgentId = userMessage
-    ? (resolveTargetAgentId(userMessage, buildChatMentionTargets()) ?? undefined)
-    : undefined
+  // stale / unknown mention is harmless here. The target list unions the
+  // reactive subagents with on-disk markdown agents (`.cognia/agents/*.md`) —
+  // the SAME projection the composer `@` picker shows — so a picked markdown
+  // handle (handle === id === the `opts.agents` key) actually routes. Discovery
+  // is cached (3s) and returns `[]` off-Tauri, so this stays cheap.
+  let targetAgentId: string | undefined
+  if (userMessage) {
+    const ps = useProjectStore.getState()
+    const activeProjectForAgents = ps.activeProjectId
+      ? (ps.projects.find((p) => p.id === ps.activeProjectId) ?? null)
+      : null
+    const markdownTargets = await discoverMarkdownAgentTargets({
+      cwd: session?.workingDir ?? undefined,
+      roots: activeProjectForAgents ? allRootPaths(activeProjectForAgents) : [],
+    })
+    const mentionTargets = [...buildChatMentionTargets(), ...markdownTargets]
+    targetAgentId = resolveTargetAgentId(userMessage, mentionTargets) ?? undefined
+  }
 
   // Active workspace (project). Its `rootDir` joins the cwd resolution chain
   // and its `additionalDirs` are unioned into `additionalDirectories` for this
@@ -1595,7 +1612,21 @@ async function buildSendOptions(
     activeLoop = false
   }
 
+  // One-shot post-compaction recovery: if a compaction boundary just landed and
+  // no assistant turn has followed it yet, this upcoming turn is the first of a
+  // new context phase — re-inject the recovery preamble. Stateless (derived from
+  // the transcript), so it fires exactly once per boundary.
+  const chatState = useChatStore.getState()
+  const sessionMessages = session?.id
+    ? chatState.activeSessionId === session.id
+      ? chatState.messages
+      : (chatState.sessions[session.id]?.messages ?? [])
+    : chatState.messages
+  const recoveryPhase = pendingRecoveryPhase(sessionMessages)
+  const postCompaction = recoveryPhase !== null ? { phaseNumber: recoveryPhase } : undefined
+
   return resolveSendOptions({
+    postCompaction,
     session,
     appSettings,
     activeProject,

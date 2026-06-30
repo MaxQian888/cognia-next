@@ -15,7 +15,7 @@
 
 import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
 
-export type TriggerKind = "slash" | "file" | "bash" | "memory" | "agent"
+export type TriggerKind = "slash" | "file" | "bash" | "memory" | "agent" | "skill" | "preset"
 
 export type MentionMode = "files" | "agents" | "combined"
 
@@ -50,6 +50,16 @@ const FILE_TRIGGER: TriggerKind = "file"
 const BASH_TRIGGER: TriggerKind = "bash"
 const MEMORY_TRIGGER: TriggerKind = "memory"
 const AGENT_TRIGGER: TriggerKind = "agent"
+const SKILL_TRIGGER: TriggerKind = "skill"
+const PRESET_TRIGGER: TriggerKind = "preset"
+
+// Namespaced `@` prefixes that flip the mention into a typed picker (skills /
+// prompt presets) instead of the file/agent panel. Mirrors the CLI's
+// `@skill:` / `@agent:` mention vocabulary (cli/src/tui/mention/detector.ts).
+const NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
+  { prefix: "skill:", kind: SKILL_TRIGGER },
+  { prefix: "preset:", kind: PRESET_TRIGGER },
+]
 
 /**
  * Detect whether the caret in `value` is inside an autocomplete trigger token.
@@ -118,11 +128,27 @@ export function detectTrigger(
       // we still highlight the popover only when the caret is inside the
       // token range.
       if (caret > queryEnd) return null
+      const beforeCaret = value.slice(i + 1, caret)
+      // A typed namespace prefix (`@skill:` / `@preset:`) flips the panel into a
+      // dedicated picker — but only in the general chat composer, never in the
+      // team workspace (`mentionMode === "agents"`), whose `@` means members.
+      if (opts?.mentionMode !== "agents") {
+        for (const { prefix, kind } of NAMESPACE_PREFIXES) {
+          if (beforeCaret.startsWith(prefix)) {
+            return {
+              kind,
+              tokenStart: i,
+              tokenEnd: queryEnd,
+              query: beforeCaret.slice(prefix.length),
+            }
+          }
+        }
+      }
       return {
         kind: atKind,
         tokenStart: i,
         tokenEnd: queryEnd,
-        query: value.slice(i + 1, caret),
+        query: beforeCaret,
       }
     }
     if (/\s/.test(ch)) break

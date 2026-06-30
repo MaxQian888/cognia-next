@@ -20,6 +20,7 @@ import {
 import { detectPlatform } from "@/hooks/use-platform"
 import { getDb } from "@/lib/db/schema"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
@@ -758,6 +759,11 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
   // builds twin deps + the shared query embedding exactly once per turn; reusing
   // that for memory recall (without a second `tryBuildTwinDeps`) needs a small
   // deps-reuse refactor, deferred to keep the per-turn embed invariant intact.
+  // One-shot post-compaction recovery: when a compaction boundary just landed in
+  // the team transcript with no assistant turn after it, re-inject the recovery
+  // preamble so the member treats the new summary as authoritative and keeps
+  // team-coordination directives in force across the boundary. Stateless.
+  const teamRecoveryPhase = pendingRecoveryPhase(useChatStore.getState().messages)
   const baseOpts = await resolveSendOptions({
     session: session as never,
     character,
@@ -768,6 +774,7 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     twinUserMessage: turnUserMessage,
     precomputedQueryEmbedding: turnEmbedding,
     twinInjectSource: "team",
+    postCompaction: teamRecoveryPhase !== null ? { phaseNumber: teamRecoveryPhase } : undefined,
   })
   const transcript = await buildTranscript(sessionId, character.id, members, session.scratchpad)
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]
