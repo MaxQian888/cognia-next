@@ -100,6 +100,7 @@ import type { UnattendedExecAuditRow } from "./terminal-audit"
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
 // import-site stability. See `lib/db/CONVENTIONS.md`.
 import type { ModelsDevCatalogRow } from "./models-dev-catalog"
+import type { OpenRouterCatalogRow } from "./openrouter-catalog"
 import type { SessionStateRow } from "./session-state"
 import type { TrustedPublisherRow } from "./trusted-publishers"
 import type { TtsProviderKeyRow } from "@/types/media/tts"
@@ -2147,6 +2148,16 @@ export class CogniaDB extends Dexie {
     this.version(92).stores({
       remoteControlRunStatus: "&runId, target, status, startedAt, updatedAt",
     })
+
+    // v93 — OpenRouter live-models catalog cache (singleton). The OpenRouter
+    // analogue of `modelsDevCatalog` (v60): a single "singleton" row holding the
+    // full real-time `/models` list + fetch timestamp. Both the GUI and the CLI
+    // (which shares this Dexie via its snapshot) read it so the OpenRouter model
+    // picker syncs in real time across shells. Pure additive — no upgrade hook.
+    // See `lib/db/openrouter-catalog.ts` + `lib/ai/providers/openrouter-catalog-sync.ts`.
+    this.version(93).stores({
+      openrouterCatalog: "&id, fetchedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2169,6 +2180,8 @@ export class CogniaDB extends Dexie {
   pluginMarketplaceSources!: Table<PluginMarketplaceSourceRow, string>
   // v60 — models.dev catalog cache (singleton). See `lib/db/models-dev-catalog.ts`.
   modelsDevCatalog!: Table<ModelsDevCatalogRow, string>
+  // v93 — OpenRouter live-models catalog cache (singleton). See `lib/db/openrouter-catalog.ts`.
+  openrouterCatalog!: Table<OpenRouterCatalogRow, string>
   // v67 — Pet subsystem. See `lib/db/pet.ts` and `@/types/pet`.
   petProfile!: Table<PetProfile, "global">
   petCharacterBindings!: Table<PetCharacterBinding, string>
@@ -2196,6 +2209,7 @@ export class CogniaDB extends Dexie {
 // `*-types.ts` file) per `lib/db/CONVENTIONS.md`. They are re-exported here so
 // `@/lib/db/schema` remains the stable import surface for existing call sites.
 export type { ModelsDevCatalogRow } from "./models-dev-catalog"
+export type { OpenRouterCatalogRow } from "./openrouter-catalog"
 export type { SessionStateRow } from "./session-state"
 export type { TrustedPublisherRow } from "./trusted-publishers"
 export type { TtsProviderKeyRow } from "@/types/media/tts"
