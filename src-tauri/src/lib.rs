@@ -513,6 +513,7 @@ pub fn run() {
             terminal::headless::terminal_headless_kill,
             terminal::commands::terminal_list_for_project,
             terminal::commands::terminal_list_all,
+            terminal::commands::terminal_kill_port,
             tts::keyring::tts_keyring_get,
             tts::keyring::tts_keyring_set,
             tts::keyring::tts_keyring_delete,
