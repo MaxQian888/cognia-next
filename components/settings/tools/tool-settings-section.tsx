@@ -47,6 +47,9 @@ const CATEGORY_ICONS: Record<BuiltinToolCategoryId, React.ReactNode> = {
   shellAdvanced: <TerminalIcon className="h-4 w-4" />,
   terminalRepl: <TerminalIcon className="h-4 w-4" />,
   lsp: <CodeIcon className="h-4 w-4" />,
+  codeGraph: <CodeIcon className="h-4 w-4" />,
+  astGrep: <FileSearchIcon className="h-4 w-4" />,
+  dependencyResearch: <BoxIcon className="h-4 w-4" />,
 }
 
 function riskLabelKey(level: BuiltinToolRiskLevel): string {

@@ -20,6 +20,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
+import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings } from "@cognia/provider-types/provider"
@@ -353,6 +354,28 @@ export function ProviderSettings() {
     })
   }, [selectedBuiltIn, selectedId, selectedSettings, modelsDevRow])
 
+  // Default-model options for the Config tab. Static `PROVIDERS[id].models` is a
+  // hand-curated subset; aggregators that refresh their list at runtime
+  // (OpenRouter's synced live catalog, or any provider's per-account
+  // `discoveredModels`) carry far more. Fold those dynamic sources in — deduped
+  // by id, static first — so the Default Model dropdown actually lists the models
+  // a dynamic provider can serve instead of an empty/stale set.
+  const { row: openRouterCatalogRow } = useOpenRouterCatalog()
+  const configModelOptions = useMemo<Array<{ id: string; name: string }>>(() => {
+    if (!selectedBuiltIn || !selectedId) return []
+    const byId = new Map<string, string>()
+    for (const m of selectedBuiltIn.models) byId.set(m.id, m.name)
+    for (const m of selectedSettings?.discoveredModels ?? []) {
+      byId.set(m.id, m.name ?? m.id)
+    }
+    if (selectedId === "openrouter") {
+      for (const m of openRouterCatalogRow?.models ?? []) {
+        byId.set(m.id, m.name ?? m.id)
+      }
+    }
+    return Array.from(byId, ([id, name]) => ({ id, name }))
+  }, [selectedBuiltIn, selectedId, selectedSettings?.discoveredModels, openRouterCatalogRow])
+
   // Model refresh handler
   const handleTestConnection = useCallback(async () => {
     if (!selectedId) return
@@ -530,10 +553,7 @@ export function ProviderSettings() {
                         defaultModel: selectedBuiltIn.defaultModel,
                       }
                     }
-                    providerModels={selectedBuiltIn.models.map((m) => ({
-                      id: m.id,
-                      name: m.name,
-                    }))}
+                    providerModels={configModelOptions}
                     providerDashboardUrl={selectedBuiltIn.dashboardUrl}
                     providerDocsUrl={selectedBuiltIn.docsUrl}
                     onApiKeyChange={(key) => void setProviderConfig(selectedId, { apiKey: key })}

@@ -66,6 +66,9 @@ const DEFAULT_VALUES: TerminalSettings = {
   },
   allowUnattendedExecution: false,
   unattendedAskPolicy: "fail",
+  quickFixes: true,
+  commandActions: true,
+  stickyScroll: true,
 }
 
 const ASK_POLICIES: ReadonlyArray<"fail" | "consent" | "run"> = ["fail", "consent", "run"]
@@ -362,6 +365,51 @@ export function TerminalCard() {
           onCheckedChange={(checked) => update({ fontLigatures: checked })}
           aria-label={t("settings.terminal.ligatures.label")}
           data-testid="terminal-card-ligatures"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded border p-3">
+        <div className="space-y-0.5">
+          <Label className="text-xs">{t("settings.terminal.quickFixes.label")}</Label>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.quickFixes.helper")}
+          </p>
+        </div>
+        <Switch
+          checked={terminal.quickFixes ?? true}
+          onCheckedChange={(checked) => update({ quickFixes: checked })}
+          aria-label={t("settings.terminal.quickFixes.label")}
+          data-testid="terminal-card-quick-fixes"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded border p-3">
+        <div className="space-y-0.5">
+          <Label className="text-xs">{t("settings.terminal.commandActions.label")}</Label>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.commandActions.helper")}
+          </p>
+        </div>
+        <Switch
+          checked={terminal.commandActions ?? true}
+          onCheckedChange={(checked) => update({ commandActions: checked })}
+          aria-label={t("settings.terminal.commandActions.label")}
+          data-testid="terminal-card-command-actions"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded border p-3">
+        <div className="space-y-0.5">
+          <Label className="text-xs">{t("settings.terminal.stickyScroll.label")}</Label>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.stickyScroll.helper")}
+          </p>
+        </div>
+        <Switch
+          checked={terminal.stickyScroll ?? true}
+          onCheckedChange={(checked) => update({ stickyScroll: checked })}
+          aria-label={t("settings.terminal.stickyScroll.label")}
+          data-testid="terminal-card-sticky-scroll"
         />
       </div>
 

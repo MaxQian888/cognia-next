@@ -282,6 +282,32 @@ describe("HooksSection — no-trigger event annotations", () => {
   })
 })
 
+describe("HooksSection — category grouping + event description", () => {
+  it("renders a section per lifecycle category", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    render(<HooksSection />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    for (const cat of ["tools", "session", "permissions", "tasks", "lifecycle"]) {
+      expect(screen.getByTestId(`event-category-${cat}`)).toBeInTheDocument()
+    }
+    // Every event still gets its own tab inside the right section.
+    expect(screen.getByTestId("event-tab-PreToolUse")).toBeInTheDocument()
+    expect(screen.getByTestId("event-tab-WorktreeCreate")).toBeInTheDocument()
+  })
+
+  it("shows the active event's localized label + description", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    render(<HooksSection />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    // The local next-intl mock echoes the key, proving the catalog-derived
+    // i18n path (not a raw event id) drives both the heading and the subtitle.
+    expect(screen.getByTestId("hooks-active-event").textContent).toBe("events.PreToolUse.label")
+    expect(screen.getByTestId("hooks-active-event-desc").textContent).toBe("events.PreToolUse.desc")
+  })
+})
+
 describe("HooksSection — URL-driven event tab", () => {
   it("respects ?hookTab=PostToolUse on initial render", async () => {
     searchString = "hookTab=PostToolUse"

@@ -18,6 +18,9 @@ export type BuiltinToolCategoryId =
   | "shellAdvanced"
   | "terminalRepl"
   | "lsp"
+  | "codeGraph"
+  | "astGrep"
+  | "dependencyResearch"
 
 export type BuiltinToolRiskLevel = "low" | "medium" | "high"
 

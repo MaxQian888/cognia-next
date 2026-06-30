@@ -180,6 +180,21 @@ describe("TerminalCard", () => {
     })
   })
 
+  it.each([
+    ["terminal-card-quick-fixes", "quickFixes"],
+    ["terminal-card-command-actions", "commandActions"],
+    ["terminal-card-sticky-scroll", "stickyScroll"],
+  ] as const)("turns %s off (VS Code parity feature, defaults on)", async (testId, key) => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId(testId)
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ [key]: false }),
+    })
+  })
+
   it("renders the color-scheme and renderer selectors", () => {
     render(<TerminalCard />)
     expect(screen.getByTestId("terminal-card-color-scheme")).toBeInTheDocument()

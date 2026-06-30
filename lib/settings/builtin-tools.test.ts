@@ -21,7 +21,10 @@ describe("builtin-tools metadata", () => {
     const ids = BUILTIN_TOOL_CATEGORIES.map((c) => c.id)
     expect(ids.sort()).toEqual(
       [
+        "astGrep",
+        "codeGraph",
         "coreFiles",
+        "dependencyResearch",
         "environment",
         "fileExtras",
         "git",
