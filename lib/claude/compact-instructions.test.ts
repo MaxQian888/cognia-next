@@ -4,7 +4,9 @@ import {
   COMPACT_HANDOFF_SNIPPET,
   DEFAULT_KEEP_RECENT,
   DEFAULT_MAX_SUMMARY_TOKENS,
+  POST_COMPACTION_RECOVERY_SNIPPET,
   buildCompactionSummaryPrompt,
+  buildPostCompactionRecovery,
   resolveCompactInstructions,
   resolveCompaction,
 } from "./compact-instructions"
@@ -46,6 +48,26 @@ describe("compact-instructions", () => {
   it("snippet mentions interruption awareness", () => {
     expect(COMPACT_HANDOFF_SNIPPET.toLowerCase()).toContain("assume")
     expect(COMPACT_HANDOFF_SNIPPET.toLowerCase()).toContain("compaction")
+  })
+
+  describe("buildPostCompactionRecovery", () => {
+    it("returns the recovery snippet with no durable instructions", () => {
+      expect(buildPostCompactionRecovery()).toBe(POST_COMPACTION_RECOVERY_SNIPPET)
+      expect(buildPostCompactionRecovery({ durableInstructions: "  " })).toBe(
+        POST_COMPACTION_RECOVERY_SNIPPET
+      )
+    })
+
+    it("appends durable instructions when provided", () => {
+      const out = buildPostCompactionRecovery({ durableInstructions: "Keep the kanban in sync" })
+      expect(out.startsWith(POST_COMPACTION_RECOVERY_SNIPPET)).toBe(true)
+      expect(out).toContain("Instructions still in effect:\nKeep the kanban in sync")
+    })
+
+    it("re-asserts summary authority", () => {
+      expect(POST_COMPACTION_RECOVERY_SNIPPET.toLowerCase()).toContain("authoritative")
+      expect(POST_COMPACTION_RECOVERY_SNIPPET.toLowerCase()).toContain("compaction")
+    })
   })
 
   describe("resolveCompaction", () => {

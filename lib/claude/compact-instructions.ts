@@ -81,6 +81,34 @@ export function resolveCompactInstructions(focus?: string): string {
   return `${COMPACT_HANDOFF_SNIPPET}\n\nWhen compacting, focus on: ${trimmed}`
 }
 
+/**
+ * Appended to the live agent's system prompt for exactly ONE turn right after a
+ * compaction boundary. Where {@link COMPACT_HANDOFF_SNIPPET} prepares the model
+ * *before* a compaction, this re-orients it *after* one: the summary it now sees
+ * is authoritative, and any durable operational directives that lived in the
+ * (now-compacted) conversation should be treated as still in force. Model-facing
+ * prompt text — not a UI string, so no i18n (mirrors `COMPACT_HANDOFF_SNIPPET`).
+ */
+export const POST_COMPACTION_RECOVERY_SNIPPET =
+  "Post-compaction recovery: the conversation above this point was just " +
+  "summarized to free context. Treat that summary as the authoritative record " +
+  "of everything before it — do not ask the user to repeat earlier context or " +
+  "re-derive completed work. Re-read the goal, key decisions, file paths, and " +
+  "open threads from the summary before continuing, and carry forward any " +
+  "operational instructions you were following (they remain in effect across " +
+  "the compaction boundary)."
+
+/**
+ * Compose the one-shot post-compaction recovery fragment: the recovery snippet
+ * plus any caller-supplied durable instructions to re-assert (e.g. team /
+ * kanban coordination rules). Returns the snippet unchanged when none are given.
+ */
+export function buildPostCompactionRecovery(opts?: { durableInstructions?: string }): string {
+  const trimmed = opts?.durableInstructions?.trim()
+  if (!trimmed) return POST_COMPACTION_RECOVERY_SNIPPET
+  return `${POST_COMPACTION_RECOVERY_SNIPPET}\n\nInstructions still in effect:\n${trimmed}`
+}
+
 /** Inputs to {@link resolveCompaction}; all optional / partial. */
 export interface ResolveCompactionInput {
   /** App-wide compaction settings (partial — stored keys only). */

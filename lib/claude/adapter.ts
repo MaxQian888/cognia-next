@@ -22,6 +22,7 @@ import type {
   SourcesPart,
   SourcesPartItem,
 } from "./parts-extensions"
+import type { HookNoticePartData } from "./hooks"
 import { registerUndoSnapshot } from "./compaction-undo"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
 import {
@@ -434,23 +435,6 @@ function appendSessionNotice(
     }
   }
   return [...messages, marker]
-}
-
-/** Structured payload for the synthetic `hook-notice` system message. */
-export interface HookNoticePartData {
-  type: "hook-notice"
-  /** Lifecycle event name, e.g. "PreToolUse" / "UserPromptSubmit". */
-  event: string
-  /** Tool the hook gated, when the event is tool-scoped. */
-  toolName?: string
-  /** Derived status, by precedence block > context > warning. */
-  outcome: "blocked" | "context" | "warning"
-  /** Reason a hook blocked the action. */
-  block?: string
-  /** Context a hook injected into the turn. */
-  additionalContext?: string
-  /** Non-blocking diagnostics (timeouts, crashes). */
-  warnings: string[]
 }
 
 /**

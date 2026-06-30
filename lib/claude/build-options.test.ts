@@ -536,6 +536,31 @@ describe("resolveSendOptions — compaction config", () => {
     })
     expect(opts.compaction?.contextWindow).toBeUndefined()
   })
+
+  it("appends the post-compaction recovery snippet only when ctx.postCompaction is set", async () => {
+    const base = {
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: true } } as unknown as AppSettings,
+    }
+    const without = await resolveSendOptions(base)
+    expect(without.appendSystemPrompt ?? "").not.toContain("Post-compaction recovery")
+
+    const withRecovery = await resolveSendOptions({
+      ...base,
+      postCompaction: { phaseNumber: 1, durableInstructions: "Keep the kanban in sync" },
+    })
+    expect(withRecovery.appendSystemPrompt).toContain("Post-compaction recovery")
+    expect(withRecovery.appendSystemPrompt).toContain("Keep the kanban in sync")
+  })
+
+  it("does not append recovery when compaction is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: false } } as unknown as AppSettings,
+      postCompaction: { phaseNumber: 1 },
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("Post-compaction recovery")
+  })
 })
 
 describe("resolveSendOptions — opencode vault auto-fallback", () => {

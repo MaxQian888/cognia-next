@@ -160,6 +160,24 @@ export interface BuiltinToolsConfig {
    * (desktop only; reuses the vscode-ext-host LSP host). See `sidecar/lsp/*`.
    */
   lsp?: boolean
+  /**
+   * Tree-sitter code-graph tools (codegraph_search / node / callers / callees /
+   * impact / context / explore / files / status). Read-only; desktop only;
+   * per-session index built lazily. See `sidecar/builtin-tools/code/`.
+   */
+  codeGraph?: boolean
+  /**
+   * AST-aware structural code search/replace (ast_grep_search /
+   * ast_grep_replace) across 25 languages, backed by the `ast-grep` CLI.
+   * Desktop only; the binary is probed lazily. Off by default.
+   */
+  astGrep?: boolean
+  /**
+   * Dependency-source research (clone_dep_source / list_cloned_deps): clone a
+   * dependency's source repo into an ignored `.cognia/clonedeps/` workspace so
+   * the agent can read library internals. Desktop only; off by default.
+   */
+  dependencyResearch?: boolean
 }
 
 /** Default values when the user hasn't customised the toggles. Mirrors `lib/db/settings.ts`. */
@@ -172,6 +190,9 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   shellAdvanced: false,
   terminalRepl: false,
   lsp: false,
+  codeGraph: false,
+  astGrep: false,
+  dependencyResearch: false,
 }
 
 export interface SendOptions {
@@ -2068,6 +2089,24 @@ export interface AppSettings {
      *  - `"run"` — run anyway (explicit trust-my-workflow opt-in).
      */
     unattendedAskPolicy?: "fail" | "consent" | "run"
+    /**
+     * Terminal quick fixes (VS Code parity). When a finished command matches a
+     * built-in matcher (`lib/terminal/quick-fix/`), a lightbulb at the command's
+     * gutter offers a fix — `git push --set-upstream`, "did you mean", create-PR
+     * link, free a busy port, pwsh command-not-found, … Default true.
+     */
+    quickFixes?: boolean
+    /**
+     * Make the per-command gutter decorations interactive: hovering/clicking a
+     * command dot opens a menu (Rerun, Copy command, Copy output, Copy command +
+     * output) with the exit code + duration. Default true.
+     */
+    commandActions?: boolean
+    /**
+     * Sticky scroll — pin the currently-scrolled-past command's prompt line at
+     * the top of the viewport while reading its output. Default true.
+     */
+    stickyScroll?: boolean
   }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string
@@ -3444,6 +3483,15 @@ export interface Skill {
   lastSyncedAt?: number
   /** Most recent sync failure, cleared on successful sync. */
   lastSyncError?: string | null
+  /**
+   * Skill body kind (D5). "markdown" (default) is a prose playbook appended to
+   * the system prompt. "workflow" is a graph-bodied skill: only its
+   * name+description are injected (progressive disclosure) and a tool is
+   * registered that runs the referenced workflow, returning typed output.
+   */
+  kind?: "markdown" | "workflow"
+  /** For kind:"workflow" — the published workflow this skill runs. */
+  workflowId?: string
   createdAt: number
   updatedAt: number
 }

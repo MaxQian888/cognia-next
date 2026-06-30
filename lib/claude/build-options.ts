@@ -43,7 +43,11 @@ import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/conne
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
 import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
-import { resolveCompaction, resolveCompactInstructions } from "@/lib/claude/compact-instructions"
+import {
+  buildPostCompactionRecovery,
+  resolveCompaction,
+  resolveCompactInstructions,
+} from "@/lib/claude/compact-instructions"
 import { getCompactionStrategy } from "@/lib/plugin/registries/compaction-strategy-registry"
 import { loggers } from "@/lib/logging"
 import { startRootTrace } from "@/lib/agent-trace/trace-context"
@@ -403,6 +407,21 @@ export interface BuildOptionsContext {
    * leaks. The minted ids land on `SendOptions.{traceId,spanId}`.
    */
   emitTrace?: boolean
+  /**
+   * One-shot post-compaction recovery (ADR — compaction). Set by a send hook for
+   * exactly the FIRST turn after a compaction boundary appeared in the transcript
+   * (the hook derives this from `deriveContextPhases` and de-dupes per boundary).
+   * When present AND compaction is enabled, the resolver appends
+   * `buildPostCompactionRecovery(...)` to `appendSystemPrompt` so the model
+   * re-orients on the authoritative summary and carries durable operational
+   * instructions across the boundary. Absent on every other turn.
+   */
+  postCompaction?: {
+    /** Phase number the recovery turn opens (for diagnostics / labels). */
+    phaseNumber: number
+    /** Durable operational instructions to re-assert (e.g. team coordination). */
+    durableInstructions?: string
+  }
 }
 
 /**
@@ -1854,8 +1873,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // delegate during its turn (the cognia analogue of Claude Code SendMessage).
   if (session?.kind === "team" && appSettings?.selfInvokeTools?.teamCollaboration === true) {
     try {
-      const { buildTeamCollabManifestEntries } = await import("@/lib/claude/team-builtin-tools")
+      const { buildTeamCollabManifestEntries, TEAM_MESSAGING_PROTOCOL } =
+        await import("@/lib/claude/team-builtin-tools")
       opts.pluginTools = [...(opts.pluginTools ?? []), ...buildTeamCollabManifestEntries()]
+      const existingTeamPrompt = opts.appendSystemPrompt?.trim() ?? ""
+      opts.appendSystemPrompt = existingTeamPrompt
+        ? `${existingTeamPrompt}\n\n${TEAM_MESSAGING_PROTOCOL}`
+        : TEAM_MESSAGING_PROTOCOL
     } catch (err) {
       loggers.app.warn("failed to append team-collaboration built-in tools", {
         error: String(err),
@@ -2242,6 +2266,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const snippet = resolveCompactInstructions(resolved.focus)
       const existing = opts.appendSystemPrompt?.trim() ?? ""
       opts.appendSystemPrompt = existing ? `${existing}\n\n${snippet}` : snippet
+
+      // One-shot post-compaction recovery: re-inject durable instructions on the
+      // FIRST turn after a boundary so the model treats the new summary as
+      // authoritative and keeps operational directives in force.
+      if (ctx.postCompaction) {
+        const recovery = buildPostCompactionRecovery({
+          durableInstructions: ctx.postCompaction.durableInstructions,
+        })
+        const base = opts.appendSystemPrompt?.trim() ?? ""
+        opts.appendSystemPrompt = base ? `${base}\n\n${recovery}` : recovery
+      }
     }
   }
 

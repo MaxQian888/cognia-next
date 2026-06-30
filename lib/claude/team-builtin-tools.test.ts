@@ -72,6 +72,23 @@ function makeDeps(over: Partial<TeamToolDeps> = {}): {
       return { id: "del-1", status: "active" }
     }) as TeamToolDeps["delegate"],
     listMembers: (() => [{ id: "tm-a", name: "Ada", role: "lead" }]) as TeamToolDeps["listMembers"],
+    recentMessages: (() => []) as TeamToolDeps["recentMessages"],
+    addTaskComment: ((input) => {
+      rec("addTaskComment")(input)
+      return { id: "cmt-1" }
+    }) as TeamToolDeps["addTaskComment"],
+    getTask: ((taskId) => {
+      rec("getTask")(taskId)
+      return {
+        id: taskId,
+        title: "T",
+        status: "in_progress",
+        description: "d",
+        comments: [
+          { authorName: "Ada", text: "first finding", createdAt: "2026-06-29T00:00:00.000Z" },
+        ],
+      }
+    }) as TeamToolDeps["getTask"],
     ...over,
   }
   return { deps, calls }
@@ -125,6 +142,39 @@ describe("runTeamBuiltinTool", () => {
     expect(
       await runTeamBuiltinTool(TEAM_TOOL_NAMES.sendMessage, { content: "  " }, caller, deps)
     ).toMatch(/requires non-empty/)
+  })
+
+  it("team_send_message suppresses idle/ack-only chatter without writing", async () => {
+    const { deps, calls } = makeDeps()
+    const out = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.sendMessage,
+      { content: "understood" },
+      caller,
+      deps
+    )
+    expect(out).toMatch(/Suppressed: idle\/ack/)
+    expect(calls.addMessage).toBeUndefined()
+  })
+
+  it("team_send_message suppresses a duplicate of a recent message", async () => {
+    const recent = [
+      {
+        senderId: caller.teammateId,
+        content: "Deploy is green and stable.",
+        createdAt: Date.now(),
+      },
+    ]
+    const { deps, calls } = makeDeps({
+      recentMessages: (() => recent) as TeamToolDeps["recentMessages"],
+    })
+    const out = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.sendMessage,
+      { content: "  deploy is GREEN and stable. " },
+      caller,
+      deps
+    )
+    expect(out).toMatch(/Suppressed: duplicate/)
+    expect(calls.addMessage).toBeUndefined()
   })
 
   it("team_publish_memory writes with the caller as writer and surfaces PII errors", async () => {
@@ -304,6 +354,76 @@ describe("runTeamBuiltinTool", () => {
     expect(Array.isArray(r)).toBe(true)
   })
 
+  it("task_add_comment records a comment authored by the caller", async () => {
+    const { deps, calls } = makeDeps()
+    const out = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.addTaskComment,
+      {
+        taskId: "task-9",
+        content: "Root cause: stale cache key.",
+        attachments: [
+          { name: "patch.diff", kind: "file", ref: "fix/patch.diff" },
+          { name: "bad", ref: "" }, // dropped: no ref
+        ],
+      },
+      caller,
+      deps
+    )
+    expect(out).toMatch(/Comment added to task-9/)
+    const arg = (calls.addTaskComment[0] as [Record<string, unknown>])[0]
+    expect(arg).toMatchObject({ taskId: "task-9", authorId: caller.teammateId })
+    expect((arg.attachments as unknown[]).length).toBe(1)
+  })
+
+  it("task_add_comment validates taskId and content", async () => {
+    const { deps } = makeDeps()
+    expect(
+      await runTeamBuiltinTool(TEAM_TOOL_NAMES.addTaskComment, { content: "x" }, caller, deps)
+    ).toMatch(/requires a `taskId`/)
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.addTaskComment,
+        { taskId: "t", content: "   " },
+        caller,
+        deps
+      )
+    ).toMatch(/requires non-empty/)
+  })
+
+  it("task_add_comment reports a missing task", async () => {
+    const { deps } = makeDeps({ addTaskComment: (() => null) as TeamToolDeps["addTaskComment"] })
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.addTaskComment,
+        { taskId: "ghost", content: "hi" },
+        caller,
+        deps
+      )
+    ).toMatch(/not found/)
+  })
+
+  it("task_get returns the task with its comment thread", async () => {
+    const { deps } = makeDeps()
+    const out = (await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.getTask,
+      { taskId: "task-9" },
+      caller,
+      deps
+    )) as { comments: unknown[] }
+    expect(out.comments).toHaveLength(1)
+  })
+
+  it("task_get validates taskId and reports a missing task", async () => {
+    const { deps } = makeDeps()
+    expect(await runTeamBuiltinTool(TEAM_TOOL_NAMES.getTask, {}, caller, deps)).toMatch(
+      /requires a `taskId`/
+    )
+    const { deps: nullDeps } = makeDeps({ getTask: (() => null) as TeamToolDeps["getTask"] })
+    expect(
+      await runTeamBuiltinTool(TEAM_TOOL_NAMES.getTask, { taskId: "ghost" }, caller, nullDeps)
+    ).toMatch(/not found/)
+  })
+
   it("never throws — a dep that throws becomes an Error string", async () => {
     const boom = makeDeps({
       listMembers: () => {
@@ -396,5 +516,28 @@ describe("defaultTeamToolDeps (real store-backed orchestrators)", () => {
     )
     const members = deps.listMembers("team-1")
     expect(members.some((m) => m.id === "tm-a")).toBe(true)
+
+    // task comment round-trip through the store
+    const team = useAgentTeamStore.getState().createTeam({ name: "RT", task: "t" })
+    const task = useAgentTeamStore
+      .getState()
+      .createTask({ teamId: team.id, title: "Task", description: "" })
+
+    // recentMessages reflects a broadcast on a real team (getTeamMessages needs the team)
+    deps.addMessage({ teamId: team.id, senderId: "tm-a", type: "broadcast", content: "hello team" })
+    const recent = deps.recentMessages(team.id)
+    expect(recent.some((m) => m.content === "hello team")).toBe(true)
+    const added = deps.addTaskComment({
+      taskId: task.id,
+      authorId: "tm-a",
+      text: "found the bug",
+      attachments: [{ name: "log", kind: "file", ref: "logs/a.txt" }],
+    })
+    expect(added?.id).toBeTruthy()
+    const fetched = deps.getTask(task.id)
+    expect(fetched?.comments).toHaveLength(1)
+    expect(fetched?.comments[0].text).toBe("found the bug")
+    expect(deps.addTaskComment({ taskId: "ghost", authorId: "tm-a", text: "x" })).toBeNull()
+    expect(deps.getTask("ghost")).toBeNull()
   })
 })
