@@ -45,7 +45,18 @@ const sidecarOutDir = path.join(binDir, "sidecar")
 // Deps the sidecar bundle keeps external (resolved from the copied node_modules
 // at runtime): claude-agent-sdk does dynamic requires / spawns the `claude`
 // binary, node-pty is a native addon, pdfjs-dist ships legacy/worker builds.
-const SIDECAR_EXTERNALS = ["@anthropic-ai/claude-agent-sdk", "node-pty", "pdfjs-dist"]
+const SIDECAR_EXTERNALS = [
+  "@anthropic-ai/claude-agent-sdk",
+  "node-pty",
+  "pdfjs-dist",
+  // better-sqlite3 is a native addon; web-tree-sitter + tree-sitter-wasms load
+  // `.wasm` data files via dynamic require that esbuild can't inline. Keep them
+  // external so they're copied next to the binary; the code-graph subsystem
+  // degrades gracefully if any are absent.
+  "better-sqlite3",
+  "web-tree-sitter",
+  "tree-sitter-wasms",
+]
 
 // The TUI rendering stack MUST stay external. Inlining Ink + react-reconciler +
 // scheduler into one bundle breaks React's renderer (the TUI mounts but paints
