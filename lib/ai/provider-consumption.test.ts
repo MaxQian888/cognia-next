@@ -260,6 +260,54 @@ describe("resolveFeatureProvider — local provider base URL defaults", () => {
   })
 })
 
+describe("resolveFeatureProvider — built-in cloud aggregator base URL defaults", () => {
+  it("supplies the catalog default base URL for an OpenRouter key with no base URL", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: { openrouter: { enabled: true, apiKey: "sk-or-v1-xxx", defaultModel: "free" } },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "openrouter",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    const resolved = r as ResolvedProvider
+    expect(resolved.kind).toBe("resolved")
+    expect(resolved.protocol).toBe("openai")
+    // Without the fallback the openai client defaults to api.openai.com and the
+    // OpenRouter key is rejected by OpenAI — the bug this guards against.
+    expect(resolved.baseURL).toBe("https://openrouter.ai/api/v1")
+    expect(resolved.apiKey).toBe("sk-or-v1-xxx")
+  })
+
+  it("does not override an explicit user-set base URL for a built-in cloud provider", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: {
+        openrouter: { enabled: true, apiKey: "sk-or-v1-xxx", baseURL: "https://proxy.test/v1" },
+      },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "openrouter",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect((r as ResolvedProvider).baseURL).toBe("https://proxy.test/v1")
+  })
+})
+
 describe("resolveFeatureProvider — selection + fallback modes", () => {
   const snap: ProviderSettingsSnapshot = {
     defaultProvider: "google",

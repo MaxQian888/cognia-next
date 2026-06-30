@@ -26,6 +26,7 @@ import {
   getOpenAICompatibleURL,
   type LocalProviderName,
 } from "@cognia/provider-types/local-provider"
+import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 import type { ApiFlavor, ResolverProtocol } from "@cognia/provider-types"
 // Single source of truth for provider→protocol (shared with the sidecar; the
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
@@ -296,6 +297,17 @@ function resolveOne(
   // AI SDK's openai client expects — so the turn can actually dispatch.
   if (!baseURL && !custom && providerId in LOCAL_PROVIDER_URLS) {
     baseURL = getOpenAICompatibleURL(LOCAL_PROVIDER_URLS[providerId as LocalProviderName])
+  }
+
+  // Built-in cloud aggregators (OpenRouter, DeepSeek, Groq, xAI, TogetherAI, …)
+  // map to the "openai" protocol but live on their OWN host. Their catalog entry
+  // has `baseURLRequired: false`, so `buildDefaultBuiltInProviderSettings` never
+  // stores a base URL — the user only pastes a key. Without a fallback the
+  // openai client silently defaults to api.openai.com, so e.g. an OpenRouter key
+  // (sk-or-…) gets sent to OpenAI and rejected. Fall back to the catalog default
+  // base URL so the request reaches the provider the user actually selected.
+  if (!baseURL && !custom) {
+    baseURL = getBuiltInProviderDefaultBaseURL(providerId)
   }
 
   if (!apiKey && !baseURL) {

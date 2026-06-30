@@ -38,6 +38,11 @@ import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
 import { createDeadlockHandler } from "./team/deadlock-gate"
 import { runTeamWaves } from "./team/team-wave-runner"
 import { createLedgerCheckpoint } from "./team/progress-ledger-checkpoint"
+import {
+  RateLimitResumeController,
+  createRealResumeDeps,
+  NUDGE_CONTINUE_PROMPT,
+} from "./team/rate-limit-resume"
 import { isUltracodeActive, type UltracodeOverride } from "./team/ultracode-trigger"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 
@@ -265,6 +270,47 @@ export async function runTeamLifecycle(
       modelCtrl: modelPref,
     })
 
+    // ── Guarded rate-limit resume controller ──
+    // On a teammate rate-limit failure, dispatch-teammate reports the cooldown
+    // here; once it elapses (and the run is still alive) we post a single
+    // guarded "continue" nudge into the team mailbox so the lead/member resumes
+    // instead of stalling. Disposed in `finally`. Gated by config (default on).
+    const nudgeCfg = team.config.nudges ?? {}
+    const rateLimitResume =
+      nudgeCfg.enabled !== false
+        ? new RateLimitResumeController(
+            createRealResumeDeps(
+              ({ memberId, generation }) => {
+                const member = workers.find((w) => w.id === memberId)
+                notifier.notify({
+                  level: "info",
+                  title: `Resuming after rate-limit cooldown`,
+                  body: `${member?.name ?? memberId} is being nudged to continue.`,
+                  runId,
+                  teamId,
+                  dedupeKey: `nudge:${runId}:${memberId}:${generation}`,
+                })
+                deps.storeWriter.addMessage({
+                  teamId,
+                  senderId: "system",
+                  recipientId: team.leadId || memberId,
+                  type: "system",
+                  content: NUDGE_CONTINUE_PROMPT,
+                  structuredPayload: {
+                    type: "nudge",
+                    nudgeType: "rate_limit_resume",
+                    generation,
+                  },
+                })
+              },
+              {
+                maxPerHour: nudgeCfg.maxPerMemberPerHour,
+                busyWindowMs: nudgeCfg.busySignalWindowMs,
+              }
+            )
+          )
+        : undefined
+
     // ── Wire HITL gate subscriptions ──
     const subs: Array<() => void> = []
 
@@ -389,6 +435,7 @@ export async function runTeamLifecycle(
       concurrency,
       modelPref,
       storeWriter: deps.storeWriter,
+      ...(rateLimitResume ? { rateLimitResume } : {}),
       // Lazily populated by dispatchTeammate on first claim — see
       // `lib/ai/agent/team/dispatch-teammate.ts`.
       resolvedCapabilities: new Map(),
@@ -544,6 +591,8 @@ export async function runTeamLifecycle(
           /* listener already gone */
         }
       }
+      // Cancel any pending resume timer so it can't fire after the run ends.
+      rateLimitResume?.dispose()
       unregisterTeamRunContext(runId)
       // Release any pending approval-bus waiters keyed to this run.
       approveBus({ scope: "agent-team-deadlock", id: runId })

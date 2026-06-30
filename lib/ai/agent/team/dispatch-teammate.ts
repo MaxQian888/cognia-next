@@ -29,6 +29,7 @@ import { teammateToCharacter } from "./teammate-character"
 import type { TeamRunContext } from "./team-run-context"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
+import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
   "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
@@ -470,6 +471,18 @@ export async function dispatchTeammate(
       )
     }
     const error = err instanceof Error ? err : new Error(String(err))
+    // Rate-limit auto-resume: when the failure is a provider rate limit with a
+    // known cooldown, schedule a single guarded "continue" nudge (additive — the
+    // wave's existing error handling still runs). No-op when nudges are disabled
+    // (controller absent) or the error isn't a rate limit.
+    const cooldown = parseRateLimitCooldown(error.message)
+    if (cooldown && teamCtx.rateLimitResume) {
+      teamCtx.rateLimitResume.onRateLimit({
+        memberId: teammate.id,
+        fingerprint: agendaFingerprint([{ id: args.taskId, status: "failed" }]),
+        retryAfterMs: cooldown.retryAfterMs,
+      })
+    }
     release("failure", error)
     throw error
   }

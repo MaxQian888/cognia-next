@@ -7,6 +7,12 @@ import {
 } from "./model-options"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
+import {
+  primeOpenRouterCatalogCache,
+  __resetOpenRouterCatalogCacheForTesting,
+} from "@cognia/provider-core/providers/openrouter-catalog-sync"
+
+afterEach(() => __resetOpenRouterCatalogCacheForTesting())
 
 describe("catalogModelIds", () => {
   it("returns an empty list for an unknown provider", () => {
@@ -68,6 +74,34 @@ describe("collectModelOptions", () => {
       undefined
     )
     expect(out).toContainEqual(expect.objectContaining({ modelId: "deepseek-reasoner" }))
+  })
+
+  it("folds the synced OpenRouter catalog into the openrouter model list", () => {
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1000,
+      source: "remote",
+      models: [
+        {
+          id: "anthropic/claude-sonnet-4.5",
+          name: "Claude Sonnet 4.5",
+          contextLength: 200000,
+          supportsVision: true,
+        },
+      ],
+    })
+    const out = collectModelOptions(
+      { openrouter: { providerId: "openrouter", enabled: true } as never },
+      undefined
+    )
+    const row = out.find(
+      (o) => o.providerId === "openrouter" && o.modelId === "anthropic/claude-sonnet-4.5"
+    )
+    expect(row).toBeDefined()
+    // Catalog metadata enriches the row (name + context window).
+    expect(row?.modelName).toBe("Claude Sonnet 4.5")
+    expect(row?.contextLength).toBe(200000)
+    expect(row?.supportsVision).toBe(true)
   })
 
   it("populates the human-readable provider name + model name for built-ins", () => {

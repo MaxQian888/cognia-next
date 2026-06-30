@@ -89,6 +89,13 @@ export interface TeamRunContext {
    * See `lib/ai/agent/team/resolve-external-backing.ts`.
    */
   readonly externalAgentInstances: Map<string, string>
+  /**
+   * Guarded rate-limit resume controller (ADR — compaction/nudge). Owns the
+   * per-run nudge ledger + scheduled cooldown timers; `dispatchTeammate` reports
+   * a caught rate-limit failure to it, and the lifecycle disposes it in
+   * `finally` so no timer outlives the run. Absent when nudges are disabled.
+   */
+  readonly rateLimitResume?: import("./rate-limit-resume").RateLimitResumeController
 }
 
 const registry = new Map<string, TeamRunContext>()

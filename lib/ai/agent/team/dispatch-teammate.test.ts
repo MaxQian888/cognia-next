@@ -386,6 +386,29 @@ describe("dispatchTeammate — failures + validation", () => {
     )
   })
 
+  it("schedules a guarded resume on a rate-limit failure when the controller is present", async () => {
+    executeAgentMock.mockRejectedValue(new Error("429 rate limit exceeded, retry after 30s"))
+    const { ctx } = makeCtx(makeTeammate())
+    const onRateLimit = jest.fn()
+    ;(ctx as unknown as { rateLimitResume: unknown }).rateLimitResume = { onRateLimit }
+
+    await expect(dispatchTeammate(ctx, { taskId: "t9", prompt: "x" })).rejects.toThrow(/rate limit/)
+
+    expect(onRateLimit).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "tm1", retryAfterMs: 30_000 })
+    )
+  })
+
+  it("does not schedule a resume for a non-rate-limit failure", async () => {
+    executeAgentMock.mockRejectedValue(new Error("boom"))
+    const { ctx } = makeCtx(makeTeammate())
+    const onRateLimit = jest.fn()
+    ;(ctx as unknown as { rateLimitResume: unknown }).rateLimitResume = { onRateLimit }
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })).rejects.toThrow("boom")
+    expect(onRateLimit).not.toHaveBeenCalled()
+  })
+
   it("rejects empty output as EMPTY_OUTPUT and records failure", async () => {
     executeAgentMock.mockResolvedValue({ text: "   " })
     const { ctx, pool } = makeCtx(makeTeammate())
