@@ -1086,6 +1086,10 @@
     "timeoutMs": {
       "hint": "0 = 无限等待；否则到时中止汇聚。",
       "label": "超时（毫秒，可选）"
+    },
+    "aggregate": {
+      "label": "聚合汇聚结果",
+      "hint": "把汇聚的分支输出一步归约。"
     }
   },
   "loop": {
@@ -1179,7 +1183,11 @@
     }
   },
   "manualTrigger": {
-    "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。"
+    "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。",
+    "inputSchema": {
+      "label": "输入结构（可选）",
+      "hint": "声明运行载荷（$trigger.payload），用于把该工作流发布为可调用单元。"
+    }
   },
   "mcpInvokeTool": {
     "argsJson": {
@@ -2300,6 +2308,154 @@
       "hint": "可选。默认为工作流运行 ID。",
       "label": "响应正文模板",
       "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+    }
+  },
+  "outputSchema": {
+    "sectionTitle": "类型化输出",
+    "hint": "声明回复必须满足的 JSON 结构。留空则为自由文本。",
+    "editRaw": "按 JSON 编辑",
+    "editFields": "按字段编辑",
+    "rawLabel": "JSON Schema",
+    "empty": "暂无字段——添加一个以强制类型化输出。",
+    "fieldName": "字段名",
+    "fieldNamePlaceholder": "例如 verdict",
+    "fieldDescription": "描述",
+    "fieldDescriptionPlaceholder": "该字段的含义（有助于模型理解）",
+    "fieldType": "类型",
+    "required": "必填",
+    "removeField": "移除字段",
+    "addField": "添加字段",
+    "onSchemaViolation": {
+      "label": "校验失败时",
+      "hint": "一次自动修复重试后输出仍不符合结构时的处理方式。",
+      "fail": "让步骤失败",
+      "soft": "保留未校验输出"
+    }
+  },
+  "aggregate": {
+    "operation": {
+      "label": "操作",
+      "hint": "如何把输入列表归约为单个值。",
+      "options": {
+        "collect": "收集（成列表）",
+        "concat": "拼接（展开一层）",
+        "mergeObjects": "合并对象",
+        "groupBy": "按键分组",
+        "dedupe": "去重",
+        "numeric": "数值（求和 / 平均 / …）",
+        "custom": "自定义归约"
+      }
+    },
+    "keyExpression": {
+      "label": "键表达式",
+      "hint": "逐项取键。$item 为当前项，例如 $item.category"
+    },
+    "numericOp": {
+      "label": "函数",
+      "options": {
+        "sum": "求和",
+        "avg": "平均",
+        "min": "最小",
+        "max": "最大",
+        "count": "计数"
+      }
+    },
+    "numericField": {
+      "label": "取值表达式",
+      "hint": "逐项取数值。留空表示项本身。"
+    },
+    "reducerExpression": {
+      "label": "归约表达式 (JS)",
+      "hint": "返回新累加器的 JS 表达式。作用域内有 acc、item、index。",
+      "placeholder": "acc + item.value"
+    }
+  },
+  "ensemble": {
+    "targetKind": {
+      "label": "目标",
+      "hint": "要运行 N 次的对象。",
+      "options": {
+        "agentTurn": "Agent 轮次（内联）",
+        "subworkflow": "子工作流"
+      }
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "targetModel": {
+      "label": "模型（可选）",
+      "hint": "每个 agent 样本使用的模型。"
+    },
+    "outputSchema": {
+      "label": "样本输出结构",
+      "hint": "类型化输出可启用按字段投票。"
+    },
+    "workflowId": {
+      "label": "子工作流",
+      "hint": "每个样本运行的工作流。"
+    },
+    "n": {
+      "label": "样本数 (N)",
+      "hint": "目标运行的次数。"
+    },
+    "iterationConcurrency": {
+      "label": "并发",
+      "hint": "同时运行的最大样本数。"
+    },
+    "lens": {
+      "label": "视角（可选）",
+      "hint": "每行一个引导提示，按样本循环（例如对抗校验）。",
+      "placeholder": "支持该论点\n反驳该论点"
+    },
+    "aggregation": {
+      "label": "聚合",
+      "hint": "如何把 N 个样本归约为单个结果。",
+      "options": {
+        "majority": "按字段多数投票",
+        "threshold": "阈值计数",
+        "bestOf": "最优（按分数）",
+        "synthesize": "综合（终审 agent）"
+      }
+    },
+    "aggField": {
+      "label": "字段",
+      "hint": "用于投票/计数的对象字段。留空表示整个结果。"
+    },
+    "threshold": {
+      "label": "阈值",
+      "hint": "通过所需的最少匹配样本数。"
+    },
+    "scoreField": {
+      "label": "分数字段",
+      "hint": "要最大化的数值字段。"
+    },
+    "synthesizerAlias": {
+      "label": "综合器别名",
+      "hint": "终审合并模型的路由别名。",
+      "placeholder": "例如 quality"
+    },
+    "piiGate": {
+      "label": "PII 闸",
+      "hint": "在提示词外发到每个样本前运行。",
+      "off": "关闭",
+      "block": "拦截（让步骤失败）",
+      "redact": "脱敏"
+    }
+  },
+  "output": {
+    "value": {
+      "label": "输出值",
+      "hint": "终端输出的表达式。留空则使用上游值。"
+    },
+    "outputSchema": {
+      "label": "输出结构",
+      "hint": "发布接口的输出契约。"
+    },
+    "onSchemaViolation": {
+      "label": "校验失败时",
+      "hint": "输出值不符合结构时的处理方式。",
+      "fail": "让运行失败",
+      "soft": "带警告透传"
     }
   }
 }

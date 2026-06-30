@@ -199,6 +199,14 @@
       "removeAria": "Remove variable",
       "title": "Variables",
       "valuePlaceholder": "value"
+    },
+    "publish": {
+      "title": "Publish",
+      "hint": "Publish this workflow as a typed callable unit — an agent tool, a typed sub-workflow target, and a skill. Save the workflow first. Declare its interface with the Manual trigger's input schema and an Output node.",
+      "publish": "Publish",
+      "republish": "Re-publish",
+      "unpublish": "Unpublish",
+      "publishedAs": "Published as tool"
     }
   },
   "templates": {

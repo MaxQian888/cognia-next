@@ -161,6 +161,19 @@
     "source": "Source (branch, tag, or commit)",
     "title": "Restore file"
   },
+  "review": {
+    "accept": "Accept hunk",
+    "acceptedCount": "{accepted}/{total} accepted",
+    "addComment": "Add comment",
+    "applyAccepted": "Apply {count} accepted",
+    "comment": "Hunk comment",
+    "commentPlaceholder": "Leave a note on this hunk…",
+    "hunkLabel": "Hunk @ line {line}",
+    "reject": "Reject hunk",
+    "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
+    "title": "Review hunks",
+    "viewChanges": "View changes"
+  },
   "roots": {
     "primary": "primary",
     "select": "Select root",

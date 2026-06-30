@@ -821,13 +821,18 @@
   "sidebar": {
     "addButton": "Add",
     "modelCompare": "Model Compare",
+    "reasonConnected": "Connection verified",
+    "reasonError": "Last connection test failed — open to review the error",
+    "reasonUnconfigured": "Add an API key to start using this provider",
+    "reasonWarning": "Configured but not verified — open to test the connection",
     "searchPlaceholder": "Search providers...",
     "stats": "{total} providers · {active} connected",
     "statusAll": "All",
     "statusConnected": "Connected",
     "statusError": "Error",
     "statusLabel": "Filter by status",
-    "statusUnconfigured": "Unconfigured"
+    "statusUnconfigured": "Unconfigured",
+    "statusWarning": "Warning"
   },
   "skip": "Skip",
   "skipDesc": "Keep existing settings and skip conflicting imports",

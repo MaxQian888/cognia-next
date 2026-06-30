@@ -821,13 +821,18 @@
   "sidebar": {
     "addButton": "添加",
     "modelCompare": "模型对比",
+    "reasonConnected": "连接已验证",
+    "reasonError": "上次连接测试失败 — 打开查看错误详情",
+    "reasonUnconfigured": "添加 API 密钥以开始使用该提供商",
+    "reasonWarning": "已配置但未验证 — 打开以测试连接",
     "searchPlaceholder": "搜索提供商...",
     "stats": "{total} 个提供商 · {active} 已连接",
     "statusAll": "全部",
     "statusConnected": "已连接",
     "statusError": "错误",
     "statusLabel": "按状态筛选",
-    "statusUnconfigured": "未配置"
+    "statusUnconfigured": "未配置",
+    "statusWarning": "警告"
   },
   "skip": "跳过",
   "skipDesc": "保留现有设置并跳过冲突项",

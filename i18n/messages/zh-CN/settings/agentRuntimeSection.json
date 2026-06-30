@@ -234,6 +234,7 @@
     "title": "延迟加载工具",
     "toolsHelp": "这些裸工具名将常驻、永不延迟加载。",
     "toolsLabel": "始终加载的工具",
-    "toolsPlaceholder": "工具名称，例如 read_file"
+    "toolsPlaceholder": "工具名称，例如 read_file",
+    "unknownHint": "未在当前工具目录中找到——在匹配的服务器或工具存在之前，此固定项不会生效。"
   }
 }

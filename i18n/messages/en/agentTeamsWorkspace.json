@@ -362,13 +362,6 @@
         "heading": "Adaptive re-planning",
         "requireApproval": "Require approval before applying a re-plan"
       },
-      "progressLedger": {
-        "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
-        "allowAutonomousDelegation": "Allow autonomously delegating work on stall",
-        "description": "After a wave stalls (no new completed tasks or output), a judge diagnoses the run and can re-plan, open a consensus, or delegate to break the stall.",
-        "enabled": "Enable progress ledger",
-        "heading": "Autonomous progress ledger"
-      },
       "approval": {
         "heading": "Approvals",
         "requireDelegationApproval": "Require approval before delegating to an external agent",
@@ -392,6 +385,13 @@
         "notify": "Notify only",
         "pause_for_review": "Pause for review",
         "reduce_concurrency": "Reduce concurrency to 1"
+      },
+      "progressLedger": {
+        "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
+        "allowAutonomousDelegation": "Allow autonomously delegating work on stall",
+        "description": "After a wave stalls (no new completed tasks or output), a judge diagnoses the run and can re-plan, open a consensus, or delegate to break the stall.",
+        "enabled": "Enable progress ledger",
+        "heading": "Autonomous progress ledger"
       },
       "refusal": {
         "detect": "Detect refusal patterns in teammate output",
@@ -524,6 +524,14 @@
     "addTask": "Add task",
     "assignee": "Assignee",
     "cancel": "Cancel",
+    "comments": {
+      "add": "Add comment",
+      "added": "Comment added",
+      "count": "{count, plural, =0 {No comments} =1 {# comment} other {# comments}}",
+      "empty": "No comments yet. Findings, decisions, and results posted here are visible on the board.",
+      "placeholder": "Add a finding, decision, or result… (⌘/Ctrl+Enter to send)",
+      "refCopied": "Reference copied to clipboard"
+    },
     "createTask": "Create task",
     "delete": "Delete",
     "deleteBody": "This task will be permanently removed. This cannot be undone.",

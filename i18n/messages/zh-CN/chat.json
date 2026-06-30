@@ -108,8 +108,10 @@
   "compactBoundary": {
     "auto": "自动",
     "detail": "{from} → {to} tokens",
+    "effectiveness": "已回收 {pct}%",
     "label": "上下文已压缩",
-    "manual": "手动"
+    "manual": "手动",
+    "phase": "已在第 {turn} 轮重置上下文"
   },
   "compaction": {
     "notification": "上下文已压缩",
@@ -262,6 +264,7 @@
         "goal": "目标",
         "help": "帮助",
         "other": "其他",
+        "plugins": "插件",
         "system": "系统",
         "template": "提示词"
       },
@@ -272,15 +275,28 @@
       "noCommandMatches": "没有匹配「/{query}」的命令。",
       "noCommands": "暂无可用命令。",
       "noFiles": "没有匹配「{query}」的文件。",
+      "noPresetMatches": "没有匹配「{query}」的预设。",
+      "noPresets": "暂无可用预设。",
+      "noSkillMatches": "没有匹配「{query}」的技能。",
+      "noSkills": "暂无可用技能。",
       "pinAction": "置顶 /{name}",
       "pinnedSection": "置顶",
+      "presetTitle": "套用提示词预设",
       "recentSection": "最近使用",
       "searching": "搜索中…",
       "searchingShort": "搜索中…",
+      "skillTitle": "启用技能",
       "slashTitle": "斜杠命令",
       "unpinAction": "取消置顶 /{name}",
       "workspaceEmpty": "工作区为空。",
       "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
+    },
+    "presets": {
+      "applied": "已套用预设「{name}」。",
+      "needsSession": "请先开始一个对话再套用预设。"
+    },
+    "skills": {
+      "enabled": "已启用技能「{name}」。"
     },
     "references": {
       "removeAria": "移除引用 {path}"
@@ -311,12 +327,19 @@
     "stopTooltip": "停止",
     "toolbar": {
       "breakdownAgents": "子智能体",
+      "breakdownClaudeMd": "CLAUDE.md / 系统提示词",
       "breakdownCommands": "斜杠命令",
       "breakdownMcp": "MCP 工具",
       "breakdownMemory": "记忆文件",
+      "breakdownMentionedFiles": "引用的文件",
+      "breakdownSourceTitle": "按来源划分的上下文",
       "breakdownSystemPrompt": "系统提示词",
+      "breakdownTaskCoordination": "任务协调",
+      "breakdownThinking": "思考",
       "breakdownTitle": "上下文构成",
+      "breakdownToolOutputs": "工具输出",
       "breakdownTools": "内置工具",
+      "breakdownUserMessages": "用户消息",
       "compactNow": "立即压缩",
       "compactThreshold": "{pct} 时自动压缩",
       "contextUsageAria": "上下文窗口已用 {pct}",
@@ -418,6 +441,7 @@
     "cwdReset": "重置",
     "debugMode": "调试模式",
     "description": "为本会话覆盖默认值，留空则继承全局设置。",
+    "insights": "会话洞察",
     "flowDisplay": {
       "aria": "Agent 流程展示模式",
       "detailed": "详细",
@@ -499,21 +523,6 @@
     "retry": "重试"
   },
   "hookNotice": {
-    "event": {
-      "Notification": "通知",
-      "PermissionDenied": "权限被拒绝",
-      "PermissionRequest": "权限请求",
-      "PostCompact": "压缩后",
-      "PostToolUse": "工具调用后",
-      "PostToolUseFailure": "工具失败后",
-      "PreToolUse": "工具调用前",
-      "SessionEnd": "会话结束",
-      "SessionStart": "会话开始",
-      "Stop": "停止",
-      "StopFailure": "停止（失败）",
-      "SubagentStop": "子代理停止",
-      "UserPromptSubmit": "提交提示词"
-    },
     "outcome": {
       "blocked": "已拦截",
       "context": "已注入上下文",

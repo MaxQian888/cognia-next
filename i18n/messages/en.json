@@ -1111,6 +1111,14 @@
       "addTask": "Add task",
       "assignee": "Assignee",
       "cancel": "Cancel",
+      "comments": {
+        "add": "Add comment",
+        "added": "Comment added",
+        "count": "{count, plural, =0 {No comments} =1 {# comment} other {# comments}}",
+        "empty": "No comments yet. Findings, decisions, and results posted here are visible on the board.",
+        "placeholder": "Add a finding, decision, or result… (⌘/Ctrl+Enter to send)",
+        "refCopied": "Reference copied to clipboard"
+      },
       "createTask": "Create task",
       "delete": "Delete",
       "deleteBody": "This task will be permanently removed. This cannot be undone.",
@@ -2139,8 +2147,10 @@
     "compactBoundary": {
       "auto": "automatic",
       "detail": "{from} → {to} tokens",
+      "effectiveness": "reclaimed {pct}%",
       "label": "Context compacted",
-      "manual": "manual"
+      "manual": "manual",
+      "phase": "context reset at turn {turn}"
     },
     "compaction": {
       "notification": "Context compacted",
@@ -2295,6 +2305,7 @@
           "goal": "Goal",
           "help": "Help",
           "other": "Other",
+          "plugins": "Plugins",
           "system": "System",
           "template": "Prompts"
         },
@@ -2305,15 +2316,25 @@
         "noCommandMatches": "No commands match \"/{query}\".",
         "noCommands": "No commands available.",
         "noFiles": "No files match \"{query}\".",
+        "noPresetMatches": "No presets match \"{query}\".",
+        "noPresets": "No presets available.",
+        "noSkillMatches": "No skills match \"{query}\".",
+        "noSkills": "No skills available.",
         "pinAction": "Pin /{name}",
         "pinnedSection": "Pinned",
+        "presetTitle": "Apply a prompt preset",
         "recentSection": "Recent",
         "searching": "Searching…",
         "searchingShort": "searching…",
+        "skillTitle": "Enable a skill",
         "slashTitle": "Slash command",
         "unpinAction": "Unpin /{name}",
         "workspaceEmpty": "Workspace is empty.",
         "workspaceMissing": "Set a working directory in session settings to use @-references."
+      },
+      "presets": {
+        "applied": "Applied preset \"{name}\".",
+        "needsSession": "Start a chat first to apply a preset."
       },
       "references": {
         "removeAria": "Remove reference to {path}"
@@ -2342,15 +2363,25 @@
         "needsCwd": "Set a working directory before running shell commands.",
         "runningHint": "Running `$ {cmd}` in `{cwd}`…"
       },
+      "skills": {
+        "enabled": "Enabled skill \"{name}\"."
+      },
       "stopTooltip": "Stop",
       "toolbar": {
         "breakdownAgents": "Subagents",
+        "breakdownClaudeMd": "CLAUDE.md / system prompt",
         "breakdownCommands": "Slash commands",
         "breakdownMcp": "MCP tools",
         "breakdownMemory": "Memory files",
+        "breakdownMentionedFiles": "Mentioned files",
+        "breakdownSourceTitle": "Context by source",
         "breakdownSystemPrompt": "System prompt",
+        "breakdownTaskCoordination": "Task coordination",
+        "breakdownThinking": "Thinking",
         "breakdownTitle": "Context breakdown",
+        "breakdownToolOutputs": "Tool outputs",
         "breakdownTools": "Built-in tools",
+        "breakdownUserMessages": "User messages",
         "compactNow": "Compact now",
         "compactThreshold": "Auto-compact at {pct}",
         "contextUsageAria": "Context window {pct} used",
@@ -2496,6 +2527,7 @@
         "favorites": "Favorites",
         "other": "Other"
       },
+      "insights": "Session insights",
       "noApiKey": "No API key",
       "permissionModeAppDefault": "Use app default",
       "permissionModeLabel": "Permission mode",
@@ -2562,21 +2594,6 @@
       "retry": "Retry"
     },
     "hookNotice": {
-      "event": {
-        "Notification": "Notification",
-        "PermissionDenied": "Permission denied",
-        "PermissionRequest": "Permission request",
-        "PostCompact": "After compaction",
-        "PostToolUse": "After tool",
-        "PostToolUseFailure": "After tool failure",
-        "PreToolUse": "Before tool",
-        "SessionEnd": "Session end",
-        "SessionStart": "Session start",
-        "Stop": "Stop",
-        "StopFailure": "Stop (failed)",
-        "SubagentStop": "Subagent stop",
-        "UserPromptSubmit": "Prompt submitted"
-      },
       "outcome": {
         "blocked": "blocked",
         "context": "context injected",
@@ -4957,6 +4974,125 @@
       "missing": "The Goal Tracker character is missing — reseed built-ins to restore it.",
       "permissionMode": "Permission mode: {mode}",
       "systemPrompt": "System prompt"
+    }
+  },
+  "hooks": {
+    "categories": {
+      "lifecycle": "Lifecycle",
+      "permissions": "Permissions",
+      "session": "Session",
+      "tasks": "Tasks",
+      "tools": "Tools"
+    },
+    "events": {
+      "ConfigChange": {
+        "desc": "Fires when settings.json changes.",
+        "label": "Config changed"
+      },
+      "CwdChanged": {
+        "desc": "Fires when the working directory changes.",
+        "label": "Directory changed"
+      },
+      "Elicitation": {
+        "desc": "Fires when the agent prompts you for structured input.",
+        "label": "Elicitation"
+      },
+      "ElicitationResult": {
+        "desc": "Fires once you answer an elicitation prompt.",
+        "label": "Elicitation result"
+      },
+      "FileChanged": {
+        "desc": "Fires when a watched file changes on disk.",
+        "label": "File changed"
+      },
+      "InstructionsLoaded": {
+        "desc": "Fires when CLAUDE.md / instructions are loaded.",
+        "label": "Instructions loaded"
+      },
+      "Notification": {
+        "desc": "Fires on a runtime notification (idle, awaiting input).",
+        "label": "Notification"
+      },
+      "PermissionDenied": {
+        "desc": "Fires when a permission request is denied.",
+        "label": "Permission denied"
+      },
+      "PermissionRequest": {
+        "desc": "Fires when a tool asks for permission; can auto-decide.",
+        "label": "Permission request"
+      },
+      "PostCompact": {
+        "desc": "Fires after the context window is compacted.",
+        "label": "After compaction"
+      },
+      "PostToolBatch": {
+        "desc": "Fires once after a batch of parallel tool calls completes.",
+        "label": "After tool batch"
+      },
+      "PostToolUse": {
+        "desc": "Fires after a tool returns; inspect or annotate the result.",
+        "label": "After tool"
+      },
+      "PostToolUseFailure": {
+        "desc": "Fires when a tool call errors out.",
+        "label": "After tool failure"
+      },
+      "PreCompact": {
+        "desc": "Fires before the context window is compacted.",
+        "label": "Before compaction"
+      },
+      "PreToolUse": {
+        "desc": "Fires before a tool runs; a hook can block or rewrite the call.",
+        "label": "Before tool"
+      },
+      "SessionEnd": {
+        "desc": "Fires when a session ends; run cleanup or logging.",
+        "label": "Session end"
+      },
+      "SessionStart": {
+        "desc": "Fires when a session begins; good for injecting standing context.",
+        "label": "Session start"
+      },
+      "Stop": {
+        "desc": "Fires when the assistant finishes its turn.",
+        "label": "Stop"
+      },
+      "StopFailure": {
+        "desc": "Fires when a turn ends because of an error.",
+        "label": "Stop (failed)"
+      },
+      "SubagentStop": {
+        "desc": "Fires when a subagent finishes its run.",
+        "label": "Subagent stop"
+      },
+      "TaskCompleted": {
+        "desc": "Fires when an agent task completes.",
+        "label": "Task completed"
+      },
+      "TaskCreated": {
+        "desc": "Fires when an agent task is created.",
+        "label": "Task created"
+      },
+      "TeammateIdle": {
+        "desc": "Fires when an agent-team member goes idle.",
+        "label": "Teammate idle"
+      },
+      "UserPromptExpansion": {
+        "desc": "Fires while a prompt's macros are expanded.",
+        "label": "Prompt expansion"
+      },
+      "UserPromptSubmit": {
+        "desc": "Fires when you send a prompt; can inject context or block it.",
+        "label": "Prompt submitted"
+      },
+      "WorktreeCreate": {
+        "desc": "Fires when a git worktree is created.",
+        "label": "Worktree created"
+      },
+      "WorktreeRemove": {
+        "desc": "Fires when a git worktree is removed.",
+        "label": "Worktree removed"
+      }
     }
   },
   "import": {
@@ -11649,13 +11785,18 @@
     "sidebar": {
       "addButton": "Add",
       "modelCompare": "Model Compare",
+      "reasonConnected": "Connection verified",
+      "reasonError": "Last connection test failed — open to review the error",
+      "reasonUnconfigured": "Add an API key to start using this provider",
+      "reasonWarning": "Configured but not verified — open to test the connection",
       "searchPlaceholder": "Search providers...",
       "stats": "{total} providers · {active} connected",
       "statusAll": "All",
       "statusConnected": "Connected",
       "statusError": "Error",
       "statusLabel": "Filter by status",
-      "statusUnconfigured": "Unconfigured"
+      "statusUnconfigured": "Unconfigured",
+      "statusWarning": "Warning"
     },
     "skip": "Skip",
     "skipDesc": "Keep existing settings and skip conflicting imports",
@@ -12871,6 +13012,94 @@
     "title": "Usage statistics",
     "totalSearches": "Total"
   },
+  "sessionInsights": {
+    "assessments": {
+      "label": {
+        "cacheEfficiency": "Cache efficiency",
+        "context": "Context pressure",
+        "costPerCommit": "Cost per commit",
+        "overhead": "Overhead",
+        "redundancy": "Redundancy",
+        "thrashing": "Thrashing",
+        "toolHealth": "Tool health"
+      },
+      "level": {
+        "critical": "Critical",
+        "healthy": "Healthy",
+        "info": "Info",
+        "warning": "Warning"
+      },
+      "reasoning": {
+        "cacheEfficiency": {
+          "healthy": "Strong cache reuse ({ratio}× read/write).",
+          "info": "No prompt cache in use yet.",
+          "warning": "Low cache reuse ({ratio}× read/write) — context is being rebuilt often."
+        },
+        "context": {
+          "critical": "Peak context fill {pct}% — at the auto-compact threshold.",
+          "healthy": "Peak context fill {pct}% of the window.",
+          "warning": "Peak context fill {pct}% — compaction is approaching."
+        },
+        "costPerCommit": {
+          "healthy": "${cost} per commit across {commits} commit(s).",
+          "info": "No commits this session.",
+          "warning": "${cost} per commit across {commits} commit(s) — expensive iterations."
+        },
+        "overhead": {
+          "healthy": "Got to work quickly ({turns} setup turn(s)).",
+          "info": "{turns} setup turns before the first real action.",
+          "warning": "{turns} setup turns before the first real action — high startup overhead."
+        },
+        "redundancy": {
+          "healthy": "No redundant tool calls.",
+          "info": "{duplicates} duplicate tool call(s).",
+          "warning": "{duplicates} duplicate tool call(s) — work is being repeated."
+        },
+        "thrashing": {
+          "healthy": "No repeated command/edit thrashing.",
+          "info": "{events} repeated command/edit events.",
+          "warning": "{events} thrash events — the same commands/files are being redone."
+        },
+        "toolHealth": {
+          "critical": "{pct}% of tool calls errored ({errors}) — tools are failing often.",
+          "healthy": "{pct}% of tool calls errored ({errors}).",
+          "info": "No tool calls yet.",
+          "warning": "{pct}% of tool calls errored ({errors}) — watch for flaky steps."
+        }
+      },
+      "title": "Health assessments"
+    },
+    "degradedTree": "Conversation shown as a linear timeline (branch data isn't stored).",
+    "empty": "Not enough activity to analyze yet.",
+    "idle": {
+      "headline": "{count} idle gap(s) over {seconds}s between turns"
+    },
+    "kpi": {
+      "cost": "Cost",
+      "denials": "Denials",
+      "errors": "Errors",
+      "idleGaps": "Idle gaps",
+      "modelSwitches": "Model switches",
+      "tokens": "Tokens",
+      "tools": "Tool calls",
+      "turns": "Turns"
+    },
+    "loading": "Analyzing session…",
+    "models": {
+      "title": "Per-model usage",
+      "turns": "{count} turns"
+    },
+    "open": "Insights",
+    "signals": {
+      "empty": "No friction or thrashing detected.",
+      "friction": "{count} friction signal(s) in your messages",
+      "tests": "{passed} passed, {failed} failed",
+      "thinking": "{count} thinking block(s)",
+      "thrashing": "Repeated command/edit thrashing detected",
+      "title": "Friction & thrashing"
+    },
+    "title": "Session insights"
+  },
   "settings": {
     "a2ui": {
       "debugger": {
@@ -13373,7 +13602,8 @@
         "title": "Deferred tool loading",
         "toolsHelp": "These bare tool names stay resident and are never deferred.",
         "toolsLabel": "Always-loaded tools",
-        "toolsPlaceholder": "Tool name, e.g. read_file"
+        "toolsPlaceholder": "Tool name, e.g. read_file",
+        "unknownHint": "Not found in the current tool catalog — this pin won't take effect until a matching server or tool exists."
       }
     },
     "agentTeams": {
@@ -18292,6 +18522,10 @@
         "auto": "Auto (follow app theme)",
         "label": "Color scheme"
       },
+      "commandActions": {
+        "helper": "Make the per-command gutter dots interactive: click one to rerun the command or copy the command and its output, with the exit code and duration.",
+        "label": "Command actions"
+      },
       "copyOnSelect": {
         "helper": "When on, every text selection in a terminal is auto-copied to the clipboard. Off by default so accidental selection doesn't overwrite your clipboard.",
         "label": "Copy on selection"
@@ -18351,6 +18585,10 @@
         "shellPlaceholder": "/usr/local/bin/fish",
         "title": "Per-project override"
       },
+      "quickFixes": {
+        "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more.",
+        "label": "Quick fixes"
+      },
       "renderer": {
         "auto": "Auto",
         "canvas": "Canvas",
@@ -18386,6 +18624,10 @@
       "shellIntegration": {
         "helper": "Injects OSC 633 prompt markers (bash / zsh / pwsh) so the dock can show command status and cwd badges. Disable for shells that mis-parse the sequences.",
         "label": "Enable shell integration"
+      },
+      "stickyScroll": {
+        "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
+        "label": "Sticky scroll"
       },
       "subheading": "Default shell, font and scrollback for the bottom dock. Per-project overrides take precedence over these defaults.",
       "unattended": {
@@ -19235,6 +19477,19 @@
       "source": "Source (branch, tag, or commit)",
       "title": "Restore file"
     },
+    "review": {
+      "accept": "Accept hunk",
+      "acceptedCount": "{accepted}/{total} accepted",
+      "addComment": "Add comment",
+      "applyAccepted": "Apply {count} accepted",
+      "comment": "Hunk comment",
+      "commentPlaceholder": "Leave a note on this hunk…",
+      "hunkLabel": "Hunk @ line {line}",
+      "reject": "Reject hunk",
+      "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
+      "title": "Review hunks",
+      "viewChanges": "View changes"
+    },
     "roots": {
       "primary": "primary",
       "select": "Select root",
@@ -19917,6 +20172,18 @@
     "buttonLabel": "Call Rust greet()"
   },
   "terminal": {
+    "commandMenu": {
+      "copyCommand": "Copy command",
+      "copyCommandAndOutput": "Copy command and output",
+      "copyOutput": "Copy output",
+      "durationMs": "{value} ms",
+      "durationSec": "{value} s",
+      "failed": "Exit {code}",
+      "rerun": "Rerun command",
+      "running": "Running…",
+      "succeeded": "Succeeded",
+      "trigger": "Command actions"
+    },
     "dock": {
       "closePane": "Close pane",
       "closePanel": "Close panel",
@@ -19977,6 +20244,13 @@
         "spec": "CLI"
       }
     },
+    "quickFix": {
+      "createPr": "Create pull request",
+      "freePort": "Free port {port}",
+      "runCommand": "Run: {command}",
+      "title": "Quick fixes",
+      "trigger": "Show quick fixes"
+    },
     "search": {
       "caseSensitive": "Match case",
       "close": "Close find",
@@ -19996,6 +20270,9 @@
       "pwsh": "PowerShell 7",
       "sh": "sh",
       "zsh": "zsh"
+    },
+    "stickyScroll": {
+      "label": "Sticky command header"
     },
     "tab": {
       "close": "Close terminal",
@@ -20060,8 +20337,12 @@
     "alwaysAllowEmpty": "No tools have been added to the always-allow list yet.",
     "alwaysAllowRemove": "Remove {tool} from the always-allow list",
     "alwaysAllowTitle": "Always-allow tools",
+    "astGrep": "Structural code search",
+    "astGrepDesc": "AST-aware code search and refactoring (ast_grep_search / ast_grep_replace) across 25 languages, backed by the ast-grep CLI. Matches code structure with meta-variables ($VAR, $$$), not plain text. Desktop only; the binary is probed lazily.",
     "coreFiles": "Core file tools",
     "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite — the unified file-tool suite that gives non-Anthropic models full codebase access. Read-only tools run freely; mutating tools require per-call approval.",
+    "dependencyResearch": "Dependency source",
+    "dependencyResearchDesc": "Clone a dependency's source repository into an ignored .cognia/clonedeps/ workspace (clone_dep_source / list_cloned_deps) so the agent can read library internals. HTTPS only, idempotent, no build scripts run. Desktop only.",
     "description": "Per-category toggles for the in-process cognia-tools MCP server. Each category exposes a different set of tools to the agent.",
     "desktopRequired": "Desktop only",
     "desktopRequiredDesc": "These tools run inside the local sidecar process. They are unavailable in the web build.",
@@ -20098,7 +20379,10 @@
     "title": "Built-in tools",
     "toggleAriaLabel": "Toggle {name} category",
     "tools": {
+      "astGrepReplace": "Refactor code by AST-aware structural rewrite across 25 languages. Dry-run by default; set dry_run:false to write.",
+      "astGrepSearch": "Search code by AST structure (meta-variables $VAR / $$$) across 25 languages. Read-only; more precise than text grep.",
       "checkProgramAllowed": "Test whether a program would be allowed to start_process.",
+      "cloneDepSource": "Clone a dependency's HTTPS source repo into .cognia/clonedeps/ (idempotent) so you can read its internals.",
       "contentSearch": "Search file contents (substring or regex) with line numbers.",
       "coreApplyPatch": "Apply a unified diff across one or more files atomically (create / modify / delete).",
       "coreBash": "Execute a free-form shell command (approval-gated; output keeps the tail).",
@@ -20141,6 +20425,7 @@
       "gitStage": "Stage files for commit (git add). Requires approval.",
       "gitStatus": "Show working-tree status (porcelain v2).",
       "gitTag": "List tags, optionally filtered by glob.",
+      "listClonedDeps": "List the dependency source repos already cloned into .cognia/clonedeps/ (reads the manifest).",
       "listEnv": "List process env vars. Secrets are redacted unless revealed.",
       "listProcesses": "List running processes (read-only).",
       "lspDiagnostics": "Get current compiler / linter diagnostics for a file.",
@@ -20801,6 +21086,14 @@
         "title": "Plugins & capabilities",
         "useTemplate": "Use"
       },
+      "publish": {
+        "hint": "Publish this workflow as a typed callable unit — an agent tool, a typed sub-workflow target, and a skill. Save the workflow first. Declare its interface with the Manual trigger's input schema and an Output node.",
+        "publish": "Publish",
+        "publishedAs": "Published as tool",
+        "republish": "Re-publish",
+        "title": "Publish",
+        "unpublish": "Unpublish"
+      },
       "retry": {
         "attempts": "Attempts",
         "backoff": "Backoff",
@@ -21268,6 +21561,44 @@
         "toolsEnabled": {
           "hint": "Use the desktop sidecar's tool pipeline. Off = plain completion.",
           "label": "Enable tools"
+        }
+      },
+      "aggregate": {
+        "keyExpression": {
+          "hint": "Per-item key. $item is the current item, e.g. $item.category",
+          "label": "Key expression"
+        },
+        "numericField": {
+          "hint": "Per-item number. Empty = the item itself.",
+          "label": "Value expression"
+        },
+        "numericOp": {
+          "label": "Function",
+          "options": {
+            "avg": "Average",
+            "count": "Count",
+            "max": "Max",
+            "min": "Min",
+            "sum": "Sum"
+          }
+        },
+        "operation": {
+          "hint": "How to reduce the input list into a single value.",
+          "label": "Operation",
+          "options": {
+            "collect": "Collect (into a list)",
+            "concat": "Concat (flatten one level)",
+            "custom": "Custom reducer",
+            "dedupe": "Deduplicate",
+            "groupBy": "Group by key",
+            "mergeObjects": "Merge objects",
+            "numeric": "Numeric (sum / avg / …)"
+          }
+        },
+        "reducerExpression": {
+          "hint": "JS expression returning the next accumulator. acc, item, index in scope.",
+          "label": "Reducer expression (JS)",
+          "placeholder": "acc + item.value"
         }
       },
       "aiClassify": {
@@ -21776,6 +22107,78 @@
         },
         "width": {
           "label": "Width (px)"
+        }
+      },
+      "ensemble": {
+        "aggField": {
+          "hint": "Object field to vote / count on. Empty = the whole result.",
+          "label": "Field"
+        },
+        "aggregation": {
+          "hint": "How to reduce the N samples into one result.",
+          "label": "Aggregation",
+          "options": {
+            "bestOf": "Best of (by score)",
+            "majority": "Majority vote on a field",
+            "synthesize": "Synthesize (final agent)",
+            "threshold": "Threshold count"
+          }
+        },
+        "iterationConcurrency": {
+          "hint": "Max samples running at once.",
+          "label": "Concurrency"
+        },
+        "lens": {
+          "hint": "One steering prompt per line; cycled across samples (e.g. adversarial verify).",
+          "label": "Lenses (optional)",
+          "placeholder": "Argue FOR the claim\nArgue AGAINST the claim"
+        },
+        "n": {
+          "hint": "How many times to run the target.",
+          "label": "Samples (N)"
+        },
+        "outputSchema": {
+          "hint": "Typed output enables field-based voting.",
+          "label": "Sample output schema"
+        },
+        "piiGate": {
+          "block": "Block (fail the step)",
+          "hint": "Runs before the prompt egresses to every sample.",
+          "label": "PII gate",
+          "off": "Off",
+          "redact": "Redact"
+        },
+        "prompt": {
+          "label": "Prompt"
+        },
+        "scoreField": {
+          "hint": "Numeric field to maximize.",
+          "label": "Score field"
+        },
+        "synthesizerAlias": {
+          "hint": "Routing alias for the final merge model.",
+          "label": "Synthesizer alias",
+          "placeholder": "e.g. quality"
+        },
+        "targetKind": {
+          "hint": "What to run N times.",
+          "label": "Target",
+          "options": {
+            "agentTurn": "Agent turn (inline)",
+            "subworkflow": "Sub-workflow"
+          }
+        },
+        "targetModel": {
+          "hint": "Model for each agent sample.",
+          "label": "Model (optional)"
+        },
+        "threshold": {
+          "hint": "Minimum matching samples to pass.",
+          "label": "Threshold"
+        },
+        "workflowId": {
+          "hint": "The workflow to run for each sample.",
+          "label": "Sub-workflow"
         }
       },
       "eval": {
@@ -22308,6 +22711,10 @@
         }
       },
       "join": {
+        "aggregate": {
+          "hint": "Reduce the joined branch outputs in one step.",
+          "label": "Aggregate gathered results"
+        },
         "joinPolicy": {
           "label": "Join policy",
           "options": {
@@ -22412,6 +22819,10 @@
         }
       },
       "manualTrigger": {
+        "inputSchema": {
+          "hint": "Declares the run payload ($trigger.payload) for publishing this workflow as a callable unit.",
+          "label": "Input schema (optional)"
+        },
         "intro": "Fires when you click the Run button in the editor. No additional configuration."
       },
       "mcpInvokeTool": {
@@ -22530,6 +22941,44 @@
           "label": "Image / PDF URL",
           "placeholder": "https://example.com/scan.pdf"
         }
+      },
+      "output": {
+        "onSchemaViolation": {
+          "fail": "Fail the run",
+          "hint": "What to do if the output value fails the schema.",
+          "label": "On schema violation",
+          "soft": "Pass through with a warning"
+        },
+        "outputSchema": {
+          "hint": "The published interface's output contract.",
+          "label": "Output schema"
+        },
+        "value": {
+          "hint": "Expression for the terminal output. Empty = the upstream value.",
+          "label": "Output value"
+        }
+      },
+      "outputSchema": {
+        "addField": "Add field",
+        "editFields": "Edit as fields",
+        "editRaw": "Edit as JSON",
+        "empty": "No fields yet — add one to enforce typed output.",
+        "fieldDescription": "Description",
+        "fieldDescriptionPlaceholder": "What this field means (helps the model)",
+        "fieldName": "Field name",
+        "fieldNamePlaceholder": "e.g. verdict",
+        "fieldType": "Type",
+        "hint": "Declare a JSON schema the reply must satisfy. Leave empty for free-form text.",
+        "onSchemaViolation": {
+          "fail": "Fail the step",
+          "hint": "What to do if the output still fails the schema after one auto-fix retry.",
+          "label": "On schema violation",
+          "soft": "Keep unvalidated output"
+        },
+        "rawLabel": "JSON Schema",
+        "removeField": "Remove field",
+        "required": "Required",
+        "sectionTitle": "Typed output"
       },
       "pickers": {
         "character": "Select a character",
@@ -24217,9 +24666,17 @@
           "description": "LLM-based classification into one of N labels.",
           "label": "Classify"
         },
+        "council": {
+          "description": "Fan the prompt out to several models, then synthesize a consensus answer.",
+          "label": "Council"
+        },
         "embed": {
           "description": "Generate an embedding vector for semantic similarity.",
           "label": "Embed text"
+        },
+        "ensemble": {
+          "description": "Run a target N times, then vote / threshold / best-of / synthesize the samples.",
+          "label": "Ensemble"
         },
         "extract": {
           "description": "Structured extraction (JSON schema) from free-form text.",
@@ -24241,6 +24698,10 @@
         }
       },
       "data": {
+        "aggregate": {
+          "description": "Reduce a list: collect / concat / merge / group-by / dedupe / numeric / custom.",
+          "label": "Aggregate"
+        },
         "code": {
           "description": "Custom JS expression with a 5s timeout.",
           "label": "Code"
@@ -24314,6 +24775,10 @@
         "http": {
           "description": "Call an external HTTP API with retries and timeout.",
           "label": "HTTP request"
+        },
+        "output": {
+          "description": "Declare the workflow's typed terminal output (the published interface).",
+          "label": "Output"
         },
         "webhook": {
           "respond": {

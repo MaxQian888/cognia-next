@@ -482,6 +482,10 @@
       "description": "基于 LLM 把输入分到 N 个标签之一。",
       "label": "分类"
     },
+    "council": {
+      "description": "把同一 prompt 并行发给多个模型，再合成出共识答案。",
+      "label": "合议"
+    },
     "embed": {
       "description": "为语义相似度计算生成嵌入向量。",
       "label": "生成嵌入向量"
@@ -493,6 +497,10 @@
     "prompt": {
       "description": "直接调用 LLM，使用已配置的提供方路由。",
       "label": "AI 提示"
+    },
+    "ensemble": {
+      "label": "集成",
+      "description": "运行目标 N 次，然后对样本投票 / 阈值 / 取最优 / 综合。"
     }
   },
   "annotation": {
@@ -517,6 +525,10 @@
     "transform": {
       "description": "对输入数组或对象执行 map / filter / reduce / sort。",
       "label": "数据转换"
+    },
+    "aggregate": {
+      "label": "聚合",
+      "description": "归约列表：收集 / 拼接 / 合并 / 分组 / 去重 / 数值 / 自定义。"
     }
   },
   "eval": {
@@ -585,6 +597,10 @@
         "description": "向触发本次执行的入站 Webhook 返回响应负载。",
         "label": "Webhook 响应"
       }
+    },
+    "output": {
+      "label": "输出",
+      "description": "声明工作流的类型化终端输出（发布接口）。"
     }
   },
   "ocr": {

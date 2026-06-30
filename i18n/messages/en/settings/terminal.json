@@ -140,5 +140,17 @@
     },
     "helper": "Let workflow terminal steps run shell commands headlessly — no visible terminal tab, no consent prompt. Every command is screened by the safety classifier first; clearly dangerous commands are always blocked.",
     "label": "Allow unattended execution"
+  },
+  "quickFixes": {
+    "label": "Quick fixes",
+    "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more."
+  },
+  "commandActions": {
+    "label": "Command actions",
+    "helper": "Make the per-command gutter dots interactive: click one to rerun the command or copy the command and its output, with the exit code and duration."
+  },
+  "stickyScroll": {
+    "label": "Sticky scroll",
+    "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output."
   }
 }

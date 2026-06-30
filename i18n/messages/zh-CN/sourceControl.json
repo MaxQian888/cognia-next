@@ -161,6 +161,19 @@
     "source": "来源（分支、标签或提交）",
     "title": "恢复文件"
   },
+  "review": {
+    "accept": "接受此块",
+    "acceptedCount": "已接受 {accepted}/{total}",
+    "addComment": "添加评论",
+    "applyAccepted": "应用 {count} 个已接受",
+    "comment": "块评论",
+    "commentPlaceholder": "对此块留个备注…",
+    "hunkLabel": "块 @ 第 {line} 行",
+    "reject": "拒绝此块",
+    "remapNotice": "{count} 条早先的决策与当前 diff 不再匹配，已跳过。",
+    "title": "审阅代码块",
+    "viewChanges": "查看更改"
+  },
   "roots": {
     "primary": "主",
     "select": "选择根目录",

@@ -234,6 +234,7 @@
     "title": "Deferred tool loading",
     "toolsHelp": "These bare tool names stay resident and are never deferred.",
     "toolsLabel": "Always-loaded tools",
-    "toolsPlaceholder": "Tool name, e.g. read_file"
+    "toolsPlaceholder": "Tool name, e.g. read_file",
+    "unknownHint": "Not found in the current tool catalog — this pin won't take effect until a matching server or tool exists."
   }
 }

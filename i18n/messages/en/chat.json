@@ -108,8 +108,10 @@
   "compactBoundary": {
     "auto": "automatic",
     "detail": "{from} → {to} tokens",
+    "effectiveness": "reclaimed {pct}%",
     "label": "Context compacted",
-    "manual": "manual"
+    "manual": "manual",
+    "phase": "context reset at turn {turn}"
   },
   "compaction": {
     "notification": "Context compacted",
@@ -262,6 +264,7 @@
         "goal": "Goal",
         "help": "Help",
         "other": "Other",
+        "plugins": "Plugins",
         "system": "System",
         "template": "Prompts"
       },
@@ -272,15 +275,28 @@
       "noCommandMatches": "No commands match \"/{query}\".",
       "noCommands": "No commands available.",
       "noFiles": "No files match \"{query}\".",
+      "noPresetMatches": "No presets match \"{query}\".",
+      "noPresets": "No presets available.",
+      "noSkillMatches": "No skills match \"{query}\".",
+      "noSkills": "No skills available.",
       "pinAction": "Pin /{name}",
       "pinnedSection": "Pinned",
+      "presetTitle": "Apply a prompt preset",
       "recentSection": "Recent",
       "searching": "Searching…",
       "searchingShort": "searching…",
+      "skillTitle": "Enable a skill",
       "slashTitle": "Slash command",
       "unpinAction": "Unpin /{name}",
       "workspaceEmpty": "Workspace is empty.",
       "workspaceMissing": "Set a working directory in session settings to use @-references."
+    },
+    "presets": {
+      "applied": "Applied preset \"{name}\".",
+      "needsSession": "Start a chat first to apply a preset."
+    },
+    "skills": {
+      "enabled": "Enabled skill \"{name}\"."
     },
     "references": {
       "removeAria": "Remove reference to {path}"
@@ -311,12 +327,19 @@
     "stopTooltip": "Stop",
     "toolbar": {
       "breakdownAgents": "Subagents",
+      "breakdownClaudeMd": "CLAUDE.md / system prompt",
       "breakdownCommands": "Slash commands",
       "breakdownMcp": "MCP tools",
       "breakdownMemory": "Memory files",
+      "breakdownMentionedFiles": "Mentioned files",
+      "breakdownSourceTitle": "Context by source",
       "breakdownSystemPrompt": "System prompt",
+      "breakdownTaskCoordination": "Task coordination",
+      "breakdownThinking": "Thinking",
       "breakdownTitle": "Context breakdown",
+      "breakdownToolOutputs": "Tool outputs",
       "breakdownTools": "Built-in tools",
+      "breakdownUserMessages": "User messages",
       "compactNow": "Compact now",
       "compactThreshold": "Auto-compact at {pct}",
       "contextUsageAria": "Context window {pct} used",
@@ -417,6 +440,7 @@
     "cwdFallbackHint": "Character default: {path}",
     "cwdReset": "Reset",
     "debugMode": "Debug mode",
+    "insights": "Session insights",
     "description": "Override defaults for this chat. Empty = use global.",
     "flowDisplay": {
       "aria": "Agent flow display mode",
@@ -499,21 +523,6 @@
     "retry": "Retry"
   },
   "hookNotice": {
-    "event": {
-      "Notification": "Notification",
-      "PermissionDenied": "Permission denied",
-      "PermissionRequest": "Permission request",
-      "PostCompact": "After compaction",
-      "PostToolUse": "After tool",
-      "PostToolUseFailure": "After tool failure",
-      "PreToolUse": "Before tool",
-      "SessionEnd": "Session end",
-      "SessionStart": "Session start",
-      "Stop": "Stop",
-      "StopFailure": "Stop (failed)",
-      "SubagentStop": "Subagent stop",
-      "UserPromptSubmit": "Prompt submitted"
-    },
     "outcome": {
       "blocked": "blocked",
       "context": "context injected",

@@ -105,5 +105,27 @@
       "idle": "Idle",
       "running": "Running"
     }
+  },
+  "quickFix": {
+    "title": "Quick fixes",
+    "trigger": "Show quick fixes",
+    "runCommand": "Run: {command}",
+    "freePort": "Free port {port}",
+    "createPr": "Create pull request"
+  },
+  "commandMenu": {
+    "trigger": "Command actions",
+    "rerun": "Rerun command",
+    "copyCommand": "Copy command",
+    "copyOutput": "Copy output",
+    "copyCommandAndOutput": "Copy command and output",
+    "succeeded": "Succeeded",
+    "failed": "Exit {code}",
+    "running": "Running…",
+    "durationMs": "{value} ms",
+    "durationSec": "{value} s"
+  },
+  "stickyScroll": {
+    "label": "Sticky command header"
   }
 }

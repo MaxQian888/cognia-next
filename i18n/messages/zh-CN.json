@@ -1111,6 +1111,14 @@
       "addTask": "新建任务",
       "assignee": "负责人",
       "cancel": "取消",
+      "comments": {
+        "add": "添加评论",
+        "added": "评论已添加",
+        "count": "{count, plural, =0 {暂无评论} other {# 条评论}}",
+        "empty": "暂无评论。在此记录的发现、决策与结果会显示在看板上。",
+        "placeholder": "记录一条发现、决策或结果……（⌘/Ctrl+Enter 发送）",
+        "refCopied": "引用已复制到剪贴板"
+      },
       "createTask": "创建任务",
       "delete": "删除",
       "deleteBody": "该任务将被永久删除，且无法撤销。",
@@ -2139,8 +2147,10 @@
     "compactBoundary": {
       "auto": "自动",
       "detail": "{from} → {to} tokens",
+      "effectiveness": "已回收 {pct}%",
       "label": "上下文已压缩",
-      "manual": "手动"
+      "manual": "手动",
+      "phase": "已在第 {turn} 轮重置上下文"
     },
     "compaction": {
       "notification": "上下文已压缩",
@@ -2295,6 +2305,7 @@
           "goal": "目标",
           "help": "帮助",
           "other": "其他",
+          "plugins": "插件",
           "system": "系统",
           "template": "提示词"
         },
@@ -2305,15 +2316,25 @@
         "noCommandMatches": "没有匹配「/{query}」的命令。",
         "noCommands": "暂无可用命令。",
         "noFiles": "没有匹配「{query}」的文件。",
+        "noPresetMatches": "没有匹配「{query}」的预设。",
+        "noPresets": "暂无可用预设。",
+        "noSkillMatches": "没有匹配「{query}」的技能。",
+        "noSkills": "暂无可用技能。",
         "pinAction": "置顶 /{name}",
         "pinnedSection": "置顶",
+        "presetTitle": "套用提示词预设",
         "recentSection": "最近使用",
         "searching": "搜索中…",
         "searchingShort": "搜索中…",
+        "skillTitle": "启用技能",
         "slashTitle": "斜杠命令",
         "unpinAction": "取消置顶 /{name}",
         "workspaceEmpty": "工作区为空。",
         "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
+      },
+      "presets": {
+        "applied": "已套用预设「{name}」。",
+        "needsSession": "请先开始一个对话再套用预设。"
       },
       "references": {
         "removeAria": "移除引用 {path}"
@@ -2342,15 +2363,25 @@
         "needsCwd": "运行 shell 命令前请先设置工作目录。",
         "runningHint": "在 `{cwd}` 中执行 `$ {cmd}`…"
       },
+      "skills": {
+        "enabled": "已启用技能「{name}」。"
+      },
       "stopTooltip": "停止",
       "toolbar": {
         "breakdownAgents": "子智能体",
+        "breakdownClaudeMd": "CLAUDE.md / 系统提示词",
         "breakdownCommands": "斜杠命令",
         "breakdownMcp": "MCP 工具",
         "breakdownMemory": "记忆文件",
+        "breakdownMentionedFiles": "引用的文件",
+        "breakdownSourceTitle": "按来源划分的上下文",
         "breakdownSystemPrompt": "系统提示词",
+        "breakdownTaskCoordination": "任务协调",
+        "breakdownThinking": "思考",
         "breakdownTitle": "上下文构成",
+        "breakdownToolOutputs": "工具输出",
         "breakdownTools": "内置工具",
+        "breakdownUserMessages": "用户消息",
         "compactNow": "立即压缩",
         "compactThreshold": "{pct} 时自动压缩",
         "contextUsageAria": "上下文窗口已用 {pct}",
@@ -2496,6 +2527,7 @@
         "favorites": "收藏",
         "other": "其他"
       },
+      "insights": "会话洞察",
       "noApiKey": "未配置 API Key",
       "permissionModeAppDefault": "使用应用默认",
       "permissionModeLabel": "权限模式",
@@ -2562,21 +2594,6 @@
       "retry": "重试"
     },
     "hookNotice": {
-      "event": {
-        "Notification": "通知",
-        "PermissionDenied": "权限被拒绝",
-        "PermissionRequest": "权限请求",
-        "PostCompact": "压缩后",
-        "PostToolUse": "工具调用后",
-        "PostToolUseFailure": "工具失败后",
-        "PreToolUse": "工具调用前",
-        "SessionEnd": "会话结束",
-        "SessionStart": "会话开始",
-        "Stop": "停止",
-        "StopFailure": "停止（失败）",
-        "SubagentStop": "子代理停止",
-        "UserPromptSubmit": "提交提示词"
-      },
       "outcome": {
         "blocked": "已拦截",
         "context": "已注入上下文",
@@ -4957,6 +4974,125 @@
       "missing": "Goal Tracker 角色缺失——重新播种内置项以恢复。",
       "permissionMode": "权限模式：{mode}",
       "systemPrompt": "系统提示"
+    }
+  },
+  "hooks": {
+    "categories": {
+      "lifecycle": "生命周期",
+      "permissions": "权限",
+      "session": "会话",
+      "tasks": "任务",
+      "tools": "工具"
+    },
+    "events": {
+      "ConfigChange": {
+        "desc": "settings.json 变更时触发。",
+        "label": "配置变更"
+      },
+      "CwdChanged": {
+        "desc": "工作目录变更时触发。",
+        "label": "工作目录变更"
+      },
+      "Elicitation": {
+        "desc": "智能体向你征询结构化输入时触发。",
+        "label": "信息征询"
+      },
+      "ElicitationResult": {
+        "desc": "你回答征询后触发。",
+        "label": "征询结果"
+      },
+      "FileChanged": {
+        "desc": "被监视的文件在磁盘上变更时触发。",
+        "label": "文件变更"
+      },
+      "InstructionsLoaded": {
+        "desc": "加载 CLAUDE.md / 指令时触发。",
+        "label": "指令加载"
+      },
+      "Notification": {
+        "desc": "运行时通知（空闲、等待输入）时触发。",
+        "label": "通知"
+      },
+      "PermissionDenied": {
+        "desc": "权限请求被拒绝时触发。",
+        "label": "权限被拒绝"
+      },
+      "PermissionRequest": {
+        "desc": "工具请求权限时触发；可自动决策。",
+        "label": "权限请求"
+      },
+      "PostCompact": {
+        "desc": "上下文窗口压缩后触发。",
+        "label": "压缩后"
+      },
+      "PostToolBatch": {
+        "desc": "一批并行工具调用全部完成后触发一次。",
+        "label": "工具批处理后"
+      },
+      "PostToolUse": {
+        "desc": "工具返回后触发；可检查或标注结果。",
+        "label": "工具调用后"
+      },
+      "PostToolUseFailure": {
+        "desc": "工具调用出错时触发。",
+        "label": "工具失败后"
+      },
+      "PreCompact": {
+        "desc": "上下文窗口压缩前触发。",
+        "label": "压缩前"
+      },
+      "PreToolUse": {
+        "desc": "工具运行前触发；hook 可拦截或改写该调用。",
+        "label": "工具调用前"
+      },
+      "SessionEnd": {
+        "desc": "会话结束时触发；可做清理或日志记录。",
+        "label": "会话结束"
+      },
+      "SessionStart": {
+        "desc": "会话开始时触发；适合注入常驻上下文。",
+        "label": "会话开始"
+      },
+      "Stop": {
+        "desc": "助手完成本轮回复时触发。",
+        "label": "停止"
+      },
+      "StopFailure": {
+        "desc": "本轮因错误结束时触发。",
+        "label": "停止（失败）"
+      },
+      "SubagentStop": {
+        "desc": "子代理结束运行时触发。",
+        "label": "子代理停止"
+      },
+      "TaskCompleted": {
+        "desc": "智能体任务完成时触发。",
+        "label": "任务完成"
+      },
+      "TaskCreated": {
+        "desc": "创建智能体任务时触发。",
+        "label": "任务创建"
+      },
+      "TeammateIdle": {
+        "desc": "智能体团队成员进入空闲时触发。",
+        "label": "队友空闲"
+      },
+      "UserPromptExpansion": {
+        "desc": "提示词中的宏被展开时触发。",
+        "label": "提示词展开"
+      },
+      "UserPromptSubmit": {
+        "desc": "发送提示词时触发；可注入上下文或拦截。",
+        "label": "提交提示词"
+      },
+      "WorktreeCreate": {
+        "desc": "创建 git 工作树时触发。",
+        "label": "工作树创建"
+      },
+      "WorktreeRemove": {
+        "desc": "移除 git 工作树时触发。",
+        "label": "工作树移除"
+      }
     }
   },
   "import": {
@@ -11649,13 +11785,18 @@
     "sidebar": {
       "addButton": "添加",
       "modelCompare": "模型对比",
+      "reasonConnected": "连接已验证",
+      "reasonError": "上次连接测试失败 — 打开查看错误详情",
+      "reasonUnconfigured": "添加 API 密钥以开始使用该提供商",
+      "reasonWarning": "已配置但未验证 — 打开以测试连接",
       "searchPlaceholder": "搜索提供商...",
       "stats": "{total} 个提供商 · {active} 已连接",
       "statusAll": "全部",
       "statusConnected": "已连接",
       "statusError": "错误",
       "statusLabel": "按状态筛选",
-      "statusUnconfigured": "未配置"
+      "statusUnconfigured": "未配置",
+      "statusWarning": "警告"
     },
     "skip": "跳过",
     "skipDesc": "保留现有设置并跳过冲突项",
@@ -12871,6 +13012,94 @@
     "title": "使用统计",
     "totalSearches": "总搜索数"
   },
+  "sessionInsights": {
+    "assessments": {
+      "label": {
+        "cacheEfficiency": "缓存效率",
+        "context": "上下文压力",
+        "costPerCommit": "每次提交成本",
+        "overhead": "开销",
+        "redundancy": "冗余",
+        "thrashing": "反复操作",
+        "toolHealth": "工具健康度"
+      },
+      "level": {
+        "critical": "严重",
+        "healthy": "健康",
+        "info": "提示",
+        "warning": "警告"
+      },
+      "reasoning": {
+        "cacheEfficiency": {
+          "healthy": "缓存复用良好（读/写 {ratio}×）。",
+          "info": "尚未使用提示缓存。",
+          "warning": "缓存复用率偏低（读/写 {ratio}×）——上下文被频繁重建。"
+        },
+        "context": {
+          "critical": "上下文峰值占 {pct}%——已达自动压缩阈值。",
+          "healthy": "上下文峰值占窗口 {pct}%。",
+          "warning": "上下文峰值占 {pct}%——接近压缩阈值。"
+        },
+        "costPerCommit": {
+          "healthy": "{commits} 次提交，每次 ${cost}。",
+          "info": "本次会话没有提交。",
+          "warning": "{commits} 次提交，每次 ${cost}——迭代成本偏高。"
+        },
+        "overhead": {
+          "healthy": "很快进入工作（{turns} 个准备轮次）。",
+          "info": "首次实际操作前有 {turns} 个准备轮次。",
+          "warning": "首次实际操作前有 {turns} 个准备轮次——启动开销偏高。"
+        },
+        "redundancy": {
+          "healthy": "没有冗余的工具调用。",
+          "info": "{duplicates} 次重复的工具调用。",
+          "warning": "{duplicates} 次重复的工具调用——存在重复劳动。"
+        },
+        "thrashing": {
+          "healthy": "没有重复的命令/编辑反复操作。",
+          "info": "{events} 次重复的命令/编辑。",
+          "warning": "{events} 次反复操作——相同的命令/文件被反复重做。"
+        },
+        "toolHealth": {
+          "critical": "{pct}% 的工具调用出错（{errors}）——工具频繁失败。",
+          "healthy": "{pct}% 的工具调用出错（{errors}）。",
+          "info": "尚无工具调用。",
+          "warning": "{pct}% 的工具调用出错（{errors}）——注意不稳定的步骤。"
+        }
+      },
+      "title": "健康评估"
+    },
+    "degradedTree": "对话以线性时间线展示（未存储分支数据）。",
+    "empty": "活动还不足以分析。",
+    "idle": {
+      "headline": "轮次之间出现 {count} 处超过 {seconds}s 的空闲间隙"
+    },
+    "kpi": {
+      "cost": "成本",
+      "denials": "拒绝",
+      "errors": "错误",
+      "idleGaps": "空闲间隙",
+      "modelSwitches": "模型切换",
+      "tokens": "Token",
+      "tools": "工具调用",
+      "turns": "轮次"
+    },
+    "loading": "正在分析会话…",
+    "models": {
+      "title": "各模型用量",
+      "turns": "{count} 轮"
+    },
+    "open": "洞察",
+    "signals": {
+      "empty": "未检测到摩擦或反复操作。",
+      "friction": "你的消息中有 {count} 处摩擦信号",
+      "tests": "{passed} 通过，{failed} 失败",
+      "thinking": "{count} 个思考块",
+      "thrashing": "检测到重复的命令/编辑反复操作",
+      "title": "摩擦与反复操作"
+    },
+    "title": "会话洞察"
+  },
   "settings": {
     "a2ui": {
       "debugger": {
@@ -13373,7 +13602,8 @@
         "title": "延迟加载工具",
         "toolsHelp": "这些裸工具名将常驻、永不延迟加载。",
         "toolsLabel": "始终加载的工具",
-        "toolsPlaceholder": "工具名称，例如 read_file"
+        "toolsPlaceholder": "工具名称，例如 read_file",
+        "unknownHint": "未在当前工具目录中找到——在匹配的服务器或工具存在之前，此固定项不会生效。"
       }
     },
     "agentTeams": {
@@ -18292,6 +18522,10 @@
         "auto": "自动（跟随应用主题）",
         "label": "配色方案"
       },
+      "commandActions": {
+        "helper": "让每条命令左侧的状态点可交互：点击即可重跑命令或复制命令与输出，并显示退出码与耗时。",
+        "label": "命令操作"
+      },
       "copyOnSelect": {
         "helper": "开启后，终端中的任何文本选区都会自动复制到剪贴板。默认关闭，避免误选覆盖剪贴板。",
         "label": "选中即复制"
@@ -18351,6 +18585,10 @@
         "shellPlaceholder": "/usr/local/bin/fish",
         "title": "按项目覆盖"
       },
+      "quickFixes": {
+        "helper": "命令失败时在该命令处显示灯泡，提供修复建议：git push --set-upstream、“是否想输入”、创建 PR 链接、释放被占端口、pwsh 未找到命令等。",
+        "label": "快速修复"
+      },
       "renderer": {
         "auto": "自动",
         "canvas": "Canvas",
@@ -18386,6 +18624,10 @@
       "shellIntegration": {
         "helper": "向 bash / zsh / pwsh 注入 OSC 633 提示符标记，让面板能展示命令状态和 cwd 徽章。若 shell 会解析错误，请关闭。",
         "label": "启用 shell 集成"
+      },
+      "stickyScroll": {
+        "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。",
+        "label": "粘性滚动"
       },
       "subheading": "底部终端面板的默认 shell、字体和回滚行数。按项目覆盖优先于全局默认。",
       "unattended": {
@@ -19235,6 +19477,19 @@
       "source": "来源（分支、标签或提交）",
       "title": "恢复文件"
     },
+    "review": {
+      "accept": "接受此块",
+      "acceptedCount": "已接受 {accepted}/{total}",
+      "addComment": "添加评论",
+      "applyAccepted": "应用 {count} 个已接受",
+      "comment": "块评论",
+      "commentPlaceholder": "对此块留个备注…",
+      "hunkLabel": "块 @ 第 {line} 行",
+      "reject": "拒绝此块",
+      "remapNotice": "{count} 条早先的决策与当前 diff 不再匹配，已跳过。",
+      "title": "审阅代码块",
+      "viewChanges": "查看更改"
+    },
     "roots": {
       "primary": "主",
       "select": "选择根目录",
@@ -19917,6 +20172,18 @@
     "buttonLabel": "调用 Rust greet()"
   },
   "terminal": {
+    "commandMenu": {
+      "copyCommand": "复制命令",
+      "copyCommandAndOutput": "复制命令与输出",
+      "copyOutput": "复制输出",
+      "durationMs": "{value} 毫秒",
+      "durationSec": "{value} 秒",
+      "failed": "退出码 {code}",
+      "rerun": "重新运行命令",
+      "running": "运行中…",
+      "succeeded": "成功",
+      "trigger": "命令操作"
+    },
     "dock": {
       "closePane": "关闭分屏",
       "closePanel": "关闭面板",
@@ -19977,6 +20244,13 @@
         "spec": "CLI"
       }
     },
+    "quickFix": {
+      "createPr": "创建 Pull Request",
+      "freePort": "释放端口 {port}",
+      "runCommand": "运行：{command}",
+      "title": "快速修复",
+      "trigger": "显示快速修复"
+    },
     "search": {
       "caseSensitive": "区分大小写",
       "close": "关闭查找",
@@ -19996,6 +20270,9 @@
       "pwsh": "PowerShell 7",
       "sh": "sh",
       "zsh": "zsh"
+    },
+    "stickyScroll": {
+      "label": "固定的命令标题"
     },
     "tab": {
       "close": "关闭终端",
@@ -20060,8 +20337,12 @@
     "alwaysAllowEmpty": "暂无工具被加入「始终允许」列表。",
     "alwaysAllowRemove": "从「始终允许」列表中移除 {tool}",
     "alwaysAllowTitle": "始终允许的工具",
+    "astGrep": "结构化代码搜索",
+    "astGrepDesc": "基于 ast-grep CLI 的 AST 感知代码搜索与重构（ast_grep_search / ast_grep_replace），覆盖 25 种语言。用元变量（$VAR、$$$）匹配代码结构而非纯文本。仅桌面端；二进制按需探测。",
     "coreFiles": "核心文件工具",
     "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite —— 让非 Anthropic 模型获得完整代码库访问能力的统一文件工具套件。只读工具自由运行；写入类工具需逐次审批。",
+    "dependencyResearch": "依赖源码",
+    "dependencyResearchDesc": "将依赖的源码仓库克隆到被忽略的 .cognia/clonedeps/ 工作区（clone_dep_source / list_cloned_deps），让 Agent 直接阅读库的内部实现。仅 HTTPS、幂等、不运行任何构建脚本。仅桌面端。",
     "description": "分类切换 sidecar 内的 cognia-tools MCP 服务器。每个分类向 Agent 暴露一组不同的工具。",
     "desktopRequired": "仅桌面端",
     "desktopRequiredDesc": "这些工具运行在本地 sidecar 进程内，Web 构建中不可用。",
@@ -20098,7 +20379,10 @@
     "title": "内置工具",
     "toggleAriaLabel": "切换 {name} 分类",
     "tools": {
+      "astGrepReplace": "基于 AST 的结构化重写，跨 25 种语言重构代码。默认仅预览；设 dry_run:false 才写入磁盘。",
+      "astGrepSearch": "按 AST 结构搜索代码（元变量 $VAR / $$$），覆盖 25 种语言。只读，比纯文本 grep 更精确。",
       "checkProgramAllowed": "测试某程序是否会被 start_process 接受。",
+      "cloneDepSource": "将依赖的 HTTPS 源码仓库克隆到 .cognia/clonedeps/（幂等），以便阅读其内部实现。",
       "contentSearch": "在文件内容中按子串或正则查找，返回行号。",
       "coreApplyPatch": "原子地对一个或多个文件应用统一 diff（创建 / 修改 / 删除）。",
       "coreBash": "执行任意 shell 命令（需审批；超长输出保留尾部）。",
@@ -20141,6 +20425,7 @@
       "gitStage": "为提交暂存文件（git add）。需要审批。",
       "gitStatus": "显示工作区状态（porcelain v2）。",
       "gitTag": "列出标签，可选 glob 过滤。",
+      "listClonedDeps": "列出已克隆到 .cognia/clonedeps/ 的依赖源码仓库（读取清单）。",
       "listEnv": "列出进程环境变量，密钥默认会被脱敏。",
       "listProcesses": "列出运行中的进程（只读）。",
       "lspDiagnostics": "获取文件当前的编译器 / 检查器诊断。",
@@ -20801,6 +21086,14 @@
         "title": "插件与能力",
         "useTemplate": "使用"
       },
+      "publish": {
+        "hint": "把该工作流发布为类型化可调用单元——agent 工具、类型化子工作流目标、技能。请先保存工作流。用「手动触发」的输入结构与「输出」节点声明其接口。",
+        "publish": "发布",
+        "publishedAs": "已发布为工具",
+        "republish": "重新发布",
+        "title": "发布",
+        "unpublish": "取消发布"
+      },
       "retry": {
         "attempts": "次数",
         "backoff": "退避",
@@ -21268,6 +21561,44 @@
         "toolsEnabled": {
           "hint": "使用桌面 sidecar 的工具管线。关闭 = 纯文本补全。",
           "label": "启用工具"
+        }
+      },
+      "aggregate": {
+        "keyExpression": {
+          "hint": "逐项取键。$item 为当前项，例如 $item.category",
+          "label": "键表达式"
+        },
+        "numericField": {
+          "hint": "逐项取数值。留空表示项本身。",
+          "label": "取值表达式"
+        },
+        "numericOp": {
+          "label": "函数",
+          "options": {
+            "avg": "平均",
+            "count": "计数",
+            "max": "最大",
+            "min": "最小",
+            "sum": "求和"
+          }
+        },
+        "operation": {
+          "hint": "如何把输入列表归约为单个值。",
+          "label": "操作",
+          "options": {
+            "collect": "收集（成列表）",
+            "concat": "拼接（展开一层）",
+            "custom": "自定义归约",
+            "dedupe": "去重",
+            "groupBy": "按键分组",
+            "mergeObjects": "合并对象",
+            "numeric": "数值（求和 / 平均 / …）"
+          }
+        },
+        "reducerExpression": {
+          "hint": "返回新累加器的 JS 表达式。作用域内有 acc、item、index。",
+          "label": "归约表达式 (JS)",
+          "placeholder": "acc + item.value"
         }
       },
       "aiClassify": {
@@ -21776,6 +22107,78 @@
         },
         "width": {
           "label": "宽度（像素）"
+        }
+      },
+      "ensemble": {
+        "aggField": {
+          "hint": "用于投票/计数的对象字段。留空表示整个结果。",
+          "label": "字段"
+        },
+        "aggregation": {
+          "hint": "如何把 N 个样本归约为单个结果。",
+          "label": "聚合",
+          "options": {
+            "bestOf": "最优（按分数）",
+            "majority": "按字段多数投票",
+            "synthesize": "综合（终审 agent）",
+            "threshold": "阈值计数"
+          }
+        },
+        "iterationConcurrency": {
+          "hint": "同时运行的最大样本数。",
+          "label": "并发"
+        },
+        "lens": {
+          "hint": "每行一个引导提示，按样本循环（例如对抗校验）。",
+          "label": "视角（可选）",
+          "placeholder": "支持该论点\n反驳该论点"
+        },
+        "n": {
+          "hint": "目标运行的次数。",
+          "label": "样本数 (N)"
+        },
+        "outputSchema": {
+          "hint": "类型化输出可启用按字段投票。",
+          "label": "样本输出结构"
+        },
+        "piiGate": {
+          "block": "拦截（让步骤失败）",
+          "hint": "在提示词外发到每个样本前运行。",
+          "label": "PII 闸",
+          "off": "关闭",
+          "redact": "脱敏"
+        },
+        "prompt": {
+          "label": "提示词"
+        },
+        "scoreField": {
+          "hint": "要最大化的数值字段。",
+          "label": "分数字段"
+        },
+        "synthesizerAlias": {
+          "hint": "终审合并模型的路由别名。",
+          "label": "综合器别名",
+          "placeholder": "例如 quality"
+        },
+        "targetKind": {
+          "hint": "要运行 N 次的对象。",
+          "label": "目标",
+          "options": {
+            "agentTurn": "Agent 轮次（内联）",
+            "subworkflow": "子工作流"
+          }
+        },
+        "targetModel": {
+          "hint": "每个 agent 样本使用的模型。",
+          "label": "模型（可选）"
+        },
+        "threshold": {
+          "hint": "通过所需的最少匹配样本数。",
+          "label": "阈值"
+        },
+        "workflowId": {
+          "hint": "每个样本运行的工作流。",
+          "label": "子工作流"
         }
       },
       "eval": {
@@ -22308,6 +22711,10 @@
         }
       },
       "join": {
+        "aggregate": {
+          "hint": "把汇聚的分支输出一步归约。",
+          "label": "聚合汇聚结果"
+        },
         "joinPolicy": {
           "label": "汇聚策略",
           "options": {
@@ -22412,6 +22819,10 @@
         }
       },
       "manualTrigger": {
+        "inputSchema": {
+          "hint": "声明运行载荷（$trigger.payload），用于把该工作流发布为可调用单元。",
+          "label": "输入结构（可选）"
+        },
         "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。"
       },
       "mcpInvokeTool": {
@@ -22530,6 +22941,44 @@
           "label": "图片 / PDF URL",
           "placeholder": "https://example.com/scan.pdf"
         }
+      },
+      "output": {
+        "onSchemaViolation": {
+          "fail": "让运行失败",
+          "hint": "输出值不符合结构时的处理方式。",
+          "label": "校验失败时",
+          "soft": "带警告透传"
+        },
+        "outputSchema": {
+          "hint": "发布接口的输出契约。",
+          "label": "输出结构"
+        },
+        "value": {
+          "hint": "终端输出的表达式。留空则使用上游值。",
+          "label": "输出值"
+        }
+      },
+      "outputSchema": {
+        "addField": "添加字段",
+        "editFields": "按字段编辑",
+        "editRaw": "按 JSON 编辑",
+        "empty": "暂无字段——添加一个以强制类型化输出。",
+        "fieldDescription": "描述",
+        "fieldDescriptionPlaceholder": "该字段的含义（有助于模型理解）",
+        "fieldName": "字段名",
+        "fieldNamePlaceholder": "例如 verdict",
+        "fieldType": "类型",
+        "hint": "声明回复必须满足的 JSON 结构。留空则为自由文本。",
+        "onSchemaViolation": {
+          "fail": "让步骤失败",
+          "hint": "一次自动修复重试后输出仍不符合结构时的处理方式。",
+          "label": "校验失败时",
+          "soft": "保留未校验输出"
+        },
+        "rawLabel": "JSON Schema",
+        "removeField": "移除字段",
+        "required": "必填",
+        "sectionTitle": "类型化输出"
       },
       "pickers": {
         "character": "选择角色",
@@ -24217,9 +24666,17 @@
           "description": "基于 LLM 把输入分到 N 个标签之一。",
           "label": "分类"
         },
+        "council": {
+          "description": "把同一 prompt 并行发给多个模型，再合成出共识答案。",
+          "label": "合议"
+        },
         "embed": {
           "description": "为语义相似度计算生成嵌入向量。",
           "label": "生成嵌入向量"
+        },
+        "ensemble": {
+          "description": "运行目标 N 次，然后对样本投票 / 阈值 / 取最优 / 综合。",
+          "label": "集成"
         },
         "extract": {
           "description": "按 JSON Schema 从自由文本抽取结构化数据。",
@@ -24241,6 +24698,10 @@
         }
       },
       "data": {
+        "aggregate": {
+          "description": "归约列表：收集 / 拼接 / 合并 / 分组 / 去重 / 数值 / 自定义。",
+          "label": "聚合"
+        },
         "code": {
           "description": "自定义 JS 表达式，超时 5 秒。",
           "label": "自定义代码"
@@ -24314,6 +24775,10 @@
         "http": {
           "description": "调用外部 HTTP API，支持重试和超时。",
           "label": "HTTP 请求"
+        },
+        "output": {
+          "description": "声明工作流的类型化终端输出（发布接口）。",
+          "label": "输出"
         },
         "webhook": {
           "respond": {

@@ -1086,6 +1086,10 @@
     "timeoutMs": {
       "hint": "0 = wait forever. Otherwise abort the join after this long.",
       "label": "Timeout (ms, optional)"
+    },
+    "aggregate": {
+      "label": "Aggregate gathered results",
+      "hint": "Reduce the joined branch outputs in one step."
     }
   },
   "loop": {
@@ -1179,7 +1183,11 @@
     }
   },
   "manualTrigger": {
-    "intro": "Fires when you click the Run button in the editor. No additional configuration."
+    "intro": "Fires when you click the Run button in the editor. No additional configuration.",
+    "inputSchema": {
+      "label": "Input schema (optional)",
+      "hint": "Declares the run payload ($trigger.payload) for publishing this workflow as a callable unit."
+    }
   },
   "mcpInvokeTool": {
     "argsJson": {
@@ -2300,6 +2308,154 @@
       "hint": "Optional. Defaults to the workflow run id.",
       "label": "Response body template",
       "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+    }
+  },
+  "outputSchema": {
+    "sectionTitle": "Typed output",
+    "hint": "Declare a JSON schema the reply must satisfy. Leave empty for free-form text.",
+    "editRaw": "Edit as JSON",
+    "editFields": "Edit as fields",
+    "rawLabel": "JSON Schema",
+    "empty": "No fields yet — add one to enforce typed output.",
+    "fieldName": "Field name",
+    "fieldNamePlaceholder": "e.g. verdict",
+    "fieldDescription": "Description",
+    "fieldDescriptionPlaceholder": "What this field means (helps the model)",
+    "fieldType": "Type",
+    "required": "Required",
+    "removeField": "Remove field",
+    "addField": "Add field",
+    "onSchemaViolation": {
+      "label": "On schema violation",
+      "hint": "What to do if the output still fails the schema after one auto-fix retry.",
+      "fail": "Fail the step",
+      "soft": "Keep unvalidated output"
+    }
+  },
+  "aggregate": {
+    "operation": {
+      "label": "Operation",
+      "hint": "How to reduce the input list into a single value.",
+      "options": {
+        "collect": "Collect (into a list)",
+        "concat": "Concat (flatten one level)",
+        "mergeObjects": "Merge objects",
+        "groupBy": "Group by key",
+        "dedupe": "Deduplicate",
+        "numeric": "Numeric (sum / avg / …)",
+        "custom": "Custom reducer"
+      }
+    },
+    "keyExpression": {
+      "label": "Key expression",
+      "hint": "Per-item key. $item is the current item, e.g. $item.category"
+    },
+    "numericOp": {
+      "label": "Function",
+      "options": {
+        "sum": "Sum",
+        "avg": "Average",
+        "min": "Min",
+        "max": "Max",
+        "count": "Count"
+      }
+    },
+    "numericField": {
+      "label": "Value expression",
+      "hint": "Per-item number. Empty = the item itself."
+    },
+    "reducerExpression": {
+      "label": "Reducer expression (JS)",
+      "hint": "JS expression returning the next accumulator. acc, item, index in scope.",
+      "placeholder": "acc + item.value"
+    }
+  },
+  "ensemble": {
+    "targetKind": {
+      "label": "Target",
+      "hint": "What to run N times.",
+      "options": {
+        "agentTurn": "Agent turn (inline)",
+        "subworkflow": "Sub-workflow"
+      }
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "targetModel": {
+      "label": "Model (optional)",
+      "hint": "Model for each agent sample."
+    },
+    "outputSchema": {
+      "label": "Sample output schema",
+      "hint": "Typed output enables field-based voting."
+    },
+    "workflowId": {
+      "label": "Sub-workflow",
+      "hint": "The workflow to run for each sample."
+    },
+    "n": {
+      "label": "Samples (N)",
+      "hint": "How many times to run the target."
+    },
+    "iterationConcurrency": {
+      "label": "Concurrency",
+      "hint": "Max samples running at once."
+    },
+    "lens": {
+      "label": "Lenses (optional)",
+      "hint": "One steering prompt per line; cycled across samples (e.g. adversarial verify).",
+      "placeholder": "Argue FOR the claim\nArgue AGAINST the claim"
+    },
+    "aggregation": {
+      "label": "Aggregation",
+      "hint": "How to reduce the N samples into one result.",
+      "options": {
+        "majority": "Majority vote on a field",
+        "threshold": "Threshold count",
+        "bestOf": "Best of (by score)",
+        "synthesize": "Synthesize (final agent)"
+      }
+    },
+    "aggField": {
+      "label": "Field",
+      "hint": "Object field to vote / count on. Empty = the whole result."
+    },
+    "threshold": {
+      "label": "Threshold",
+      "hint": "Minimum matching samples to pass."
+    },
+    "scoreField": {
+      "label": "Score field",
+      "hint": "Numeric field to maximize."
+    },
+    "synthesizerAlias": {
+      "label": "Synthesizer alias",
+      "hint": "Routing alias for the final merge model.",
+      "placeholder": "e.g. quality"
+    },
+    "piiGate": {
+      "label": "PII gate",
+      "hint": "Runs before the prompt egresses to every sample.",
+      "off": "Off",
+      "block": "Block (fail the step)",
+      "redact": "Redact"
+    }
+  },
+  "output": {
+    "value": {
+      "label": "Output value",
+      "hint": "Expression for the terminal output. Empty = the upstream value."
+    },
+    "outputSchema": {
+      "label": "Output schema",
+      "hint": "The published interface's output contract."
+    },
+    "onSchemaViolation": {
+      "label": "On schema violation",
+      "hint": "What to do if the output value fails the schema.",
+      "fail": "Fail the run",
+      "soft": "Pass through with a warning"
     }
   }
 }
