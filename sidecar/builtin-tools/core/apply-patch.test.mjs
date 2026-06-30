@@ -187,3 +187,64 @@ test("surfaces LSP diagnostics after a successful patch", async () => {
     await fsp.rm(dir, { recursive: true, force: true })
   }
 })
+
+test("fuzzy-rescues a hunk whose context drifted past strict apply", async () => {
+  const dir = await tmp()
+  const tracker = createReadTracker()
+  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  try {
+    const abs = path.join(dir, "f.txt")
+    // Disk has a 4-space-indented context line; the patch was authored against a
+    // 2-space version — strict applyPatch rejects the drift, the rescue accepts it.
+    await fsp.writeFile(abs, "alpha\n    beta\ngamma\n")
+    tracker.record(abs, await fsp.stat(abs))
+    const patch = createPatch("f.txt", "alpha\n  beta\ngamma\n", "alpha\n  beta\nGAMMA\n")
+    const res = await tool.handler({ patch }, {})
+    assert.match(textOf(res), /Applied patch to 1 file/)
+    const out = await fsp.readFile(abs, "utf-8")
+    assert.match(out, /GAMMA/)
+    assert.doesNotMatch(out, /gamma/)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("refuses to rescue when the hunk context is nowhere in the file (nothing written)", async () => {
+  const dir = await tmp()
+  const tracker = createReadTracker()
+  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  try {
+    const abs = path.join(dir, "f.txt")
+    await fsp.writeFile(abs, "alpha\nbeta\n")
+    tracker.record(abs, await fsp.stat(abs))
+    // Removes a line that does not exist on disk — neither strict nor fuzzy can match.
+    const patch = ["--- f.txt", "+++ f.txt", "@@ -1,1 +1,1 @@", "-zeta", "+ZETA", ""].join("\n")
+    const res = await tool.handler({ patch }, {})
+    assert.equal(res.isError, true)
+    assert.match(textOf(res), /does not apply cleanly/)
+    assert.equal(await fsp.readFile(abs, "utf-8"), "alpha\nbeta\n")
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("preserves CRLF + BOM through a fuzzy-rescued hunk", async () => {
+  const dir = await tmp()
+  const tracker = createReadTracker()
+  const tool = createApplyPatchTool({ cwd: dir, readTracker: tracker })
+  try {
+    const abs = path.join(dir, "f.txt")
+    // CRLF + BOM on disk, with a trailing-space drift on the context line.
+    await fsp.writeFile(abs, `${BOM}a\r\nbeta \r\nc\r\n`)
+    tracker.record(abs, await fsp.stat(abs))
+    const patch = createPatch("f.txt", "a\nbeta\nc\n", "a\nbeta\nC\n")
+    const res = await tool.handler({ patch }, {})
+    assert.match(textOf(res), /Applied patch to 1 file/)
+    const out = await fsp.readFile(abs, "utf-8")
+    assert.equal(out[0], BOM)
+    assert.match(out, /\r\n/)
+    assert.match(out, /C\r\n/)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})

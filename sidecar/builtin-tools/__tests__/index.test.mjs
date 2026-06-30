@@ -18,7 +18,10 @@ test("server name + version match the shared JSON", () => {
 test("TOOL_NAMES_BY_CATEGORY exposes every category bucket", () => {
   const ids = Object.keys(TOOL_NAMES_BY_CATEGORY).sort()
   assert.deepEqual(ids, [
+    "astGrep",
+    "codeGraph",
     "coreFiles",
+    "dependencyResearch",
     "environment",
     "fileExtras",
     "git",
@@ -98,6 +101,9 @@ test("namesForDisabledCategories returns nothing when everything is enabled", ()
     shellAdvanced: true,
     terminalRepl: true,
     lsp: true,
+    codeGraph: true,
+    astGrep: true,
+    dependencyResearch: true,
   })
   assert.deepEqual(out, [])
 })
