@@ -23,6 +23,7 @@ import { ToolCallList } from "./tool-call-card"
 import { TokenUsageLine } from "./token-usage-line"
 import { MessageActionsMenu } from "./message-actions-menu"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { stripAgentBlocks } from "@/lib/agent-team/agent-blocks"
 import type { RuntimeAvailabilityMap } from "@/lib/agent-team/use-runtime-availability"
 import type { ComposerHandle } from "@/components/chat/composer"
 import { TEAM_USER_SENDER_ID } from "@/types/agent/agent-team"
@@ -102,18 +103,15 @@ function isErrored(msg: AgentTeamMessage): boolean {
  */
 function renderMessageBody(msg: AgentTeamMessage, streaming: boolean) {
   const isFromUser = msg.senderId === TEAM_USER_SENDER_ID
-  if (isFromUser || streaming || !msg.content) {
-    return <p className="whitespace-pre-wrap text-xs leading-relaxed">{msg.content}</p>
+  // Hide teammate-to-teammate operational instructions wrapped in <info_for_agent>;
+  // the full text stays in the store for the recipient's context.
+  const visible = stripAgentBlocks(msg.content)
+  if (isFromUser || streaming || !visible) {
+    return <p className="whitespace-pre-wrap text-xs leading-relaxed">{visible}</p>
   }
   return (
     <div className="text-xs leading-relaxed">
-      <MarkdownRenderer
-        content={msg.content}
-        messageId={msg.id}
-        enableMermaid
-        enableMath
-        enableDiff
-      />
+      <MarkdownRenderer content={visible} messageId={msg.id} enableMermaid enableMath enableDiff />
     </div>
   )
 }

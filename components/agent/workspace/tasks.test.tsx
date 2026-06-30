@@ -58,6 +58,11 @@ jest.mock("@/lib/logging", () => ({
   createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
 }))
 
+// ── task-comments mock (avoids pulling the markdown ESM stack into this test) ─
+jest.mock("./task-comments", () => ({
+  TaskComments: ({ taskId }: { taskId: string }) => <div data-testid={`mock-comments-${taskId}`} />,
+}))
+
 // ── StatusBadge mock (avoids complex badge internals) ────────────────────────
 jest.mock("@/components/status-badge", () => ({
   StatusBadge: ({ value, ...props }: { value: string; [key: string]: unknown }) => (
@@ -343,8 +348,10 @@ describe("AgentTeamTasks", () => {
       />
     )
     const taskCard = screen.getByTestId("task-del1")
-    // The only button inside the task card is the trash/delete trigger
-    const trashBtn = within(taskCard).getByRole("button")
+    // The card now has a comments toggle too — pick the trash/delete trigger.
+    const trashBtn = within(taskCard)
+      .getAllByRole("button")
+      .find((b) => b.getAttribute("data-slot") === "alert-dialog-trigger") as HTMLElement
     await userEvent.click(trashBtn)
 
     // AlertDialog renders the action button; t("delete") → "delete"
@@ -360,7 +367,10 @@ describe("AgentTeamTasks", () => {
       <AgentTeamTasks teamId="t1" tasks={[makeTask("del2", { title: "Keep me" })]} teammates={[]} />
     )
     const taskCard = screen.getByTestId("task-del2")
-    await userEvent.click(within(taskCard).getByRole("button"))
+    const trashBtn = within(taskCard)
+      .getAllByRole("button")
+      .find((b) => b.getAttribute("data-slot") === "alert-dialog-trigger") as HTMLElement
+    await userEvent.click(trashBtn)
 
     const cancelBtn = await screen.findByRole("button", { name: /^cancel$/i })
     await userEvent.click(cancelBtn)
@@ -385,5 +395,15 @@ describe("AgentTeamTasks", () => {
     expect(screen.getByTestId("task-am1")).toBeInTheDocument()
     expect(screen.getByTestId("task-am2")).toBeInTheDocument()
     expect(screen.getByTestId("task-am3")).toBeInTheDocument()
+  })
+
+  it("toggles the comment thread open and closed", async () => {
+    const user = userEvent.setup()
+    render(<AgentTeamTasks teamId="t1" tasks={[makeTask("ct1")]} teammates={[]} />)
+    expect(screen.queryByTestId("mock-comments-ct1")).toBeNull()
+    await user.click(screen.getByTestId("task-ct1-comments-toggle"))
+    expect(screen.getByTestId("mock-comments-ct1")).toBeInTheDocument()
+    await user.click(screen.getByTestId("task-ct1-comments-toggle"))
+    expect(screen.queryByTestId("mock-comments-ct1")).toBeNull()
   })
 })
