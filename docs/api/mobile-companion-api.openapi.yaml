@@ -809,6 +809,147 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/goal_create:
+    post:
+      operationId: rpcGoalCreate
+      tags: [rpc-remote-control]
+      summary: Start a new self-driving /goal loop for a session.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, rawObjective]
+              properties:
+                sessionId: { type: string }
+                rawObjective: { type: string }
+                characterId: { type: string }
+                config: { type: object, additionalProperties: true }
+                startPaused: { type: boolean }
+      responses:
+        "200":
+          description: The created goal.
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      properties: { goal: { type: object, additionalProperties: true } },
+                    },
+                },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/goal_update:
+    post:
+      operationId: rpcGoalUpdate
+      tags: [rpc-remote-control]
+      summary: Re-aim (rawObjective) or reconfigure (config) an open /goal loop.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goalId]
+              properties:
+                goalId: { type: string }
+                rawObjective: { type: string }
+                config: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: The updated goal plus an optional model-facing update prompt.
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      properties:
+                        {
+                          goal:
+                            {
+                              oneOf:
+                                [{ type: object, additionalProperties: true }, { type: "null" }],
+                            },
+                          updatePrompt: { type: string },
+                        },
+                    },
+                },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/goal_status:
+    post:
+      operationId: rpcGoalStatus
+      tags: [rpc-remote-control]
+      summary: Read goal status — pass goalId for one goal, or sessionId for the session's active goal + list. (One of the two is required.)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                goalId: { type: string }
+                sessionId: { type: string }
+      responses:
+        "200":
+          description: With goalId, the goal (or null); with sessionId, the active goal and full list.
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      properties:
+                        {
+                          goal:
+                            {
+                              oneOf:
+                                [{ type: object, additionalProperties: true }, { type: "null" }],
+                            },
+                          activeGoal:
+                            {
+                              oneOf:
+                                [{ type: object, additionalProperties: true }, { type: "null" }],
+                            },
+                          goals:
+                            { type: array, items: { type: object, additionalProperties: true } },
+                        },
+                    },
+                },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/automation_consent_respond:
     post:
       operationId: rpcAutomationConsentRespond
@@ -4853,6 +4994,180 @@ paths:
               },
           }
         "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_create:
+    post:
+      operationId: rpcTwinCreate
+      tags: [rpc-twin]
+      summary: Create a new twin (closes the remote create gap next to twin_delete).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [twin],
+                    properties:
+                      {
+                        twin:
+                          {
+                            type: object,
+                            required: [name],
+                            additionalProperties: true,
+                            properties: { name: { type: string } },
+                          },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Created twin.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { twin: { type: object, additionalProperties: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_source_create:
+    post:
+      operationId: rpcTwinSourceCreate
+      tags: [rpc-twin]
+      summary: Create a twin source row (the add-path twin_ingest_source never provided).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [source],
+                    properties:
+                      {
+                        source:
+                          {
+                            type: object,
+                            required: [twinId],
+                            additionalProperties: true,
+                            properties: { twinId: { type: string } },
+                          },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Created source.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { source: { type: object, additionalProperties: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_profile_update:
+    post:
+      operationId: rpcTwinProfileUpdate
+      tags: [rpc-twin]
+      summary: Unified discriminated twin-profile mutation (persona rewrite — remote-control gated).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [twinId, op],
+                    additionalProperties: true,
+                    properties:
+                      {
+                        twinId: { type: string },
+                        op:
+                          {
+                            type: string,
+                            enum:
+                              [
+                                setVoiceSummary,
+                                reset,
+                                addEntity,
+                                updateEntity,
+                                removeEntity,
+                                setEntityPinned,
+                                addPlaybook,
+                                updatePlaybook,
+                                removePlaybook,
+                                setPlaybookPinned,
+                                addStyleSample,
+                                updateStyleSample,
+                                removeStyleSample,
+                                setStyleSamplePinned,
+                              ],
+                          },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Updated profile.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties:
+                          { profile: { type: object, additionalProperties: true, nullable: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
           {
             description: error,
