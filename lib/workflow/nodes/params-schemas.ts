@@ -56,7 +56,10 @@ function isHttpUrlOrExpression(value: string): boolean {
 
 // ── Triggers ────────────────────────────────────────────────────────────────
 
-const ManualTriggerParams = z.object({})
+const ManualTriggerParams = z.object({
+  // Declared input schema for the published interface (D5).
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+})
 
 const CronParams = z.object({
   cron: requiredString("required").regex(cronExprRegex, "cronExpr"),
@@ -126,6 +129,9 @@ const AgentTurnParams = z.object({
   toolsEnabled: z.boolean().optional(),
   requireTools: z.boolean().optional(),
   cwd: optionalString,
+  // Typed output (D3): JSON object schema the reply must satisfy.
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
 // ── Actions: goals ─────────────────────────────────────────────────────────
@@ -943,6 +949,9 @@ const AiPromptParams = z.object({
   // Structured output (B1): "json" parses the completion into output.structured.
   responseFormat: z.enum(["text", "json"]).optional(),
   jsonSchema: optionalString,
+  // Typed output (D3): validated JSON object schema + auto-fix retry.
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
 const AiClassifyParams = z.object({
@@ -979,6 +988,61 @@ const AiEmbedParams = z.object({
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
+})
+
+// ai.council — multi-model consensus. Councillors + synthesizer are addressed
+// by routing alias; the prompt fans out, then one synthesizer merges them.
+const CouncillorSpecSchema = z.object({
+  name: requiredString("required"),
+  modelAlias: requiredString("required"),
+  systemPrompt: optionalString,
+})
+
+const AiCouncilParams = z.object({
+  prompt: requiredString("required"),
+  councillors: z.array(CouncillorSpecSchema).min(1),
+  synthesizerAlias: requiredString("required"),
+  synthesisInstructions: optionalString,
+  timeoutMs: numberRange(1000, 600000).optional(),
+  executionMode: z.enum(["parallel", "serial"]).optional(),
+  maxConcurrency: numberRange(1, 16).optional(),
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
+})
+
+const AiEnsembleAggregationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("majority-vote-on-field"), field: optionalString }),
+  z.object({
+    kind: z.literal("threshold-count"),
+    field: optionalString,
+    equals: z.unknown().optional(),
+    threshold: numberRange(1),
+  }),
+  z.object({ kind: z.literal("best-of-by-score"), scoreField: requiredString("required") }),
+  z.object({ kind: z.literal("synthesize-by-final-agent"), instructions: optionalString }),
+])
+
+const AiEnsembleParams = z.object({
+  prompt: optionalString,
+  target: z
+    .object({
+      kind: z.enum(["agent.turn", "subworkflow"]).optional(),
+      systemPrompt: optionalString,
+      model: optionalString,
+      characterId: optionalString,
+      allowedTools: z.array(z.string()).optional(),
+      toolsEnabled: z.boolean().optional(),
+      outputSchema: z.record(z.string(), z.unknown()).optional(),
+      workflowId: optionalString,
+    })
+    .optional(),
+  n: numberRange(1, 50).optional(),
+  iterationConcurrency: numberRange(1, 16).optional(),
+  lens: z.array(z.string()).optional(),
+  aggregation: AiEnsembleAggregationSchema.optional(),
+  synthesizerAlias: optionalString,
+  synthesisInstructions: optionalString,
+  timeoutMs: numberRange(1000, 600000).optional(),
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
 })
 
 // ── Flow ────────────────────────────────────────────────────────────────────
@@ -1061,6 +1125,19 @@ const SplitParams = z.object({
 const JoinParams = z.object({
   joinPolicy: z.enum(["all", "any", "race"]).optional(),
   timeoutMs: numberRange(0).optional(),
+  // Optional gather→reduce in one step (D6③); mirrors AggregateParams.
+  aggregate: z
+    .object({
+      operation: z
+        .enum(["collect", "concat", "merge-objects", "group-by", "dedupe", "numeric", "custom"])
+        .optional(),
+      keyExpression: optionalString,
+      numericField: optionalString,
+      numericOp: z.enum(["sum", "avg", "min", "max", "count"]).optional(),
+      reducerExpression: optionalString,
+      initialValue: z.unknown().optional(),
+    })
+    .optional(),
 })
 
 // Legacy (typeVersion 1) flat array-transform loop.
@@ -1237,6 +1314,17 @@ const TransformParams = z.object({
   expression: requiredString("required"),
 })
 
+const AggregateParams = z.object({
+  operation: z
+    .enum(["collect", "concat", "merge-objects", "group-by", "dedupe", "numeric", "custom"])
+    .optional(),
+  keyExpression: optionalString,
+  numericField: optionalString,
+  numericOp: z.enum(["sum", "avg", "min", "max", "count"]).optional(),
+  reducerExpression: optionalString,
+  initialValue: z.unknown().optional(),
+})
+
 const CodeParams = z.object({
   code: requiredString("required"),
 })
@@ -1259,6 +1347,13 @@ const WebhookRespondParams = z.object({
   headersJson: optionalString,
   headers: z.record(z.string(), z.unknown()).optional(),
   body: optionalString,
+})
+
+const OutputParams = z.object({
+  // The terminal value (expression or literal); falls back to the first upstream.
+  value: z.unknown().optional(),
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
 const CatchParams = z.object({
@@ -1417,6 +1512,8 @@ export const PARAMS_SCHEMAS = {
   "ai.classify": AiClassifyParams,
   "ai.extract": AiExtractParams,
   "ai.embed": AiEmbedParams,
+  "ai.council": AiCouncilParams,
+  "ai.ensemble": AiEnsembleParams,
   // Flow
   "flow.branch": BranchParams,
   "flow.switch": SwitchParams,
@@ -1433,11 +1530,13 @@ export const PARAMS_SCHEMAS = {
   "flow.continue": z.object({}).passthrough(),
   // Data
   "data.transform": TransformParams,
+  "data.aggregate": AggregateParams,
   "data.code": CodeParams,
   "data.template": TemplateParams,
   // IO
   "io.http": HttpRequestParams,
   "io.webhook.respond": WebhookRespondParams,
+  "io.output": OutputParams,
   // Annotation
   "annotation.note": NoteParams,
   "annotation.group": GroupAnnotationParams,

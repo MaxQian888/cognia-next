@@ -96,6 +96,87 @@ describe("B1 — ai.prompt structured output", () => {
     expect(out.structured).toBeNull()
     expect(typeof out.parseError).toBe("string")
   })
+
+  const outputSchema = {
+    type: "object",
+    properties: { title: { type: "string" }, score: { type: "number" } },
+    required: ["title", "score"],
+  }
+
+  it("typed output: real call validates the structured result", async () => {
+    completeMock.mockResolvedValueOnce('{"title":"hi","score":5}')
+    const out = await run("ai.prompt", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      userPrompt: "x",
+      responseFormat: "json",
+      outputSchema,
+    })
+    expect(out.structured).toEqual({ title: "hi", score: 5 })
+    expect(out.schemaValid).toBe(true)
+  })
+
+  it("typed output: auto-fixes once then succeeds", async () => {
+    completeMock
+      .mockResolvedValueOnce('{"title":"hi"}') // missing score
+      .mockResolvedValueOnce('{"title":"hi","score":7}')
+    const out = await run("ai.prompt", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      userPrompt: "x",
+      responseFormat: "json",
+      outputSchema,
+    })
+    expect(out.schemaValid).toBe(true)
+    expect(completeMock).toHaveBeenCalledTimes(2)
+    expect(completeMock.mock.calls[1][0]).toMatch(/score/)
+  })
+
+  it("typed output: throws after the retry when unmet (fail default)", async () => {
+    completeMock.mockResolvedValue('{"title":"hi"}')
+    const reg = getExecutor("ai.prompt" as never, 1)!
+    await expect(
+      reg.execute(
+        makeCtx({
+          provider: "openai",
+          model: "gpt",
+          apiKey: "k",
+          userPrompt: "x",
+          responseFormat: "json",
+          outputSchema,
+        })
+      )
+    ).rejects.toThrow(/did not satisfy/)
+    expect(completeMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("typed output: soft mode keeps the unvalidated value", async () => {
+    completeMock.mockResolvedValue('{"title":"hi"}')
+    const out = await run("ai.prompt", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      userPrompt: "x",
+      responseFormat: "json",
+      outputSchema,
+      onSchemaViolation: "soft",
+    })
+    expect(out.schemaValid).toBe(false)
+    expect(out.structured).toEqual({ title: "hi" })
+  })
+
+  it("typed output: stub path stays soft so pre-credential runs survive", async () => {
+    const out = await run("ai.prompt", {
+      userPrompt: "hi",
+      responseFormat: "json",
+      outputSchema,
+    })
+    // Stub returns {} which violates the schema, but must NOT throw.
+    expect(out.structured).toEqual({})
+    expect(out.schemaValid).toBe(false)
+  })
 })
 
 describe("B2 — ai.classify routing", () => {

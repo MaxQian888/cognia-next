@@ -123,6 +123,8 @@ import "./git"
 // parseStructured / buildJsonInstruction moved to ./ai/structured so the
 // ai.prompt v2 module can share them without a circular import.
 import { buildJsonInstruction, parseStructured } from "./ai/structured"
+import { runStructuredTurn } from "./ai/structured-turn"
+import { validateAgainstJsonSchema } from "./ai/schema-validate"
 
 /** Coerce an extracted value to a declared type hint (best-effort). */
 function coerceToType(value: unknown, typeHint: string): unknown {
@@ -294,17 +296,35 @@ registerNodeExecutor({
       case "flatten":
         return { output: arr.flat() }
       case "reduce":
-        // Phase 4 ships a sum-by-default reduce; Phase 6 wires a real
-        // reducer expression.
+        // Back-compat sum: delegates to the shared aggregator (numeric/sum over
+        // the item expression). For richer folds (collect / group-by / dedupe /
+        // merge / custom reducer) use the dedicated `data.aggregate` node.
         return {
-          output: arr.reduce((acc, item) => {
-            const v = evalItemExpression(expr, item, ctx)
-            return typeof v === "number" ? acc + v : acc
-          }, 0),
+          output: aggregateArray(
+            arr,
+            { operation: "numeric", numericOp: "sum", numericField: expr || undefined },
+            ctx
+          ),
         }
       default:
         throw new Error(`Unsupported transform operation: ${operation}`)
     }
+  },
+})
+
+// ── data.aggregate ─────────────────────────────────────────────────────────
+// Real reduce/aggregate (D6③): collect / concat / merge-objects / group-by /
+// dedupe / numeric (sum·avg·min·max·count) / custom (reducer expression with
+// $acc·$item·$index). Input is a single array upstream, a single scalar
+// (wrapped), or — on a fan-in — the set of all upstream outputs. The Dify
+// Variable Aggregator / n8n Aggregate+Merge analogue, but expression-driven.
+registerNodeExecutor({
+  kind: "data.aggregate",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as AggregateParams
+    const arr = resolveAggregateInput(ctx)
+    return { output: aggregateArray(arr, params, ctx) }
   },
 })
 
@@ -330,6 +350,14 @@ registerNodeExecutor({
       responseFormat?: "text" | "json"
       /** Optional shape hint injected into the JSON-mode system prompt. */
       jsonSchema?: string
+      /**
+       * Optional JSON object schema the JSON-mode output must satisfy (D3).
+       * When set on a real (non-stub) call, the completion is validated and
+       * auto-fixed once; `schemaValid` / `schemaErrors` ride the output.
+       */
+      outputSchema?: Record<string, unknown>
+      /** `fail` (default) throws on violation; `soft` keeps the unvalidated value. */
+      onSchemaViolation?: "fail" | "soft"
     }
     const apiKey =
       params.apiKey ??
@@ -340,13 +368,19 @@ registerNodeExecutor({
       ))
     const userPrompt = params.userPrompt ?? ""
     const jsonMode = params.responseFormat === "json"
+    const outputSchema = params.outputSchema
+    const enforceSchema = jsonMode && !!outputSchema && Object.keys(outputSchema).length > 0
+    // When an output schema is declared it doubles as the JSON shape hint.
+    const schemaHint = enforceSchema ? JSON.stringify(outputSchema, null, 2) : params.jsonSchema
     // In JSON mode, append an instruction (and optional shape) so the model
     // returns parseable JSON regardless of the authored system prompt.
     const systemPrompt = jsonMode
-      ? [params.systemPrompt, buildJsonInstruction(params.jsonSchema)].filter(Boolean).join("\n\n")
+      ? [params.systemPrompt, buildJsonInstruction(schemaHint)].filter(Boolean).join("\n\n")
       : params.systemPrompt
 
     // Shared tail: attach `structured` / `parseError` when JSON mode is on.
+    // A declared schema is validated softly here (no retry, never throws) so
+    // the stub / pre-credential path still runs end-to-end.
     const finalize = (out: {
       provider?: string
       model?: string
@@ -356,11 +390,21 @@ registerNodeExecutor({
     }) => {
       if (!jsonMode) return { output: out }
       const parsed = parseStructured(out.completion)
+      const schemaFields =
+        enforceSchema && !parsed.error
+          ? (() => {
+              const v = validateAgainstJsonSchema(outputSchema, parsed.value)
+              return v.ok ? { schemaValid: true } : { schemaValid: false, schemaErrors: v.errors }
+            })()
+          : enforceSchema
+            ? { schemaValid: false }
+            : {}
       return {
         output: {
           ...out,
           structured: parsed.value,
           ...(parsed.error ? { parseError: parsed.error } : {}),
+          ...schemaFields,
         },
       }
     }
@@ -401,23 +445,36 @@ registerNodeExecutor({
       ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
       ...(params.model ? { requestModel: params.model } : {}),
     })
-    let completion: string
+    let completion = ""
+    let usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
     try {
-      completion = await client.complete(userPrompt, {
-        system: systemPrompt,
-        temperature: params.temperature,
-      })
+      // One model call; `fix` carries the corrective re-prompt on the auto-fix
+      // retry (only reached when an output schema is enforced).
+      const runOnce = async (fix?: string) => {
+        const up = fix ? `${userPrompt}\n\n${fix}` : userPrompt
+        completion = await client.complete(up, {
+          system: systemPrompt,
+          temperature: params.temperature,
+        })
+        const parsed = parseStructured(completion)
+        return { object: parsed.value, parseError: parsed.error }
+      }
+      if (enforceSchema) {
+        await runStructuredTurn({
+          outputSchema,
+          onSchemaViolation: params.onSchemaViolation,
+          runOnce,
+        })
+      } else {
+        await runOnce()
+      }
+      usage = client.getUsageSnapshot?.() ?? usage
     } catch (err) {
       endSpan(span.spanId, {
         errorType: err instanceof Error ? err.name : "Error",
         errorMessage: err instanceof Error ? err.message : String(err),
       })
       throw err
-    }
-    const usage = client.getUsageSnapshot?.() ?? {
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
     }
     endSpan(span.spanId, {
       usage: {
@@ -448,6 +505,30 @@ registerNodeExecutor({
   kind: "ai.prompt",
   typeVersion: 2,
   execute: async (ctx) => (await import("./ai/ai-prompt-v2")).executeAiPromptV2(ctx),
+})
+
+// ── ai.council ────────────────────────────────────────────────────────────
+// Multi-model consensus: fan the prompt out to several councillor models (by
+// routing alias) in parallel, then a synthesizer model merges them into one
+// answer with a confidence rating. Not retryable (it already runs N provider
+// calls; a blanket retry would multiply cost). Logic in ./ai/ai-council.
+registerNodeExecutor({
+  kind: "ai.council",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./ai/ai-council")).executeAiCouncil(ctx),
+})
+
+// ── ai.ensemble ────────────────────────────────────────────────────────────
+// Run one target (inline agent.turn OR a sub-workflow) N times with optional
+// per-sample lenses, then apply a bundled aggregation policy (majority-vote /
+// threshold / best-of / synthesize). The signature N-vote / adversarial-verify
+// harness. Not retryable (it already runs N calls). Logic in ./ai/ai-ensemble.
+registerNodeExecutor({
+  kind: "ai.ensemble",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./ai/ai-ensemble")).executeAiEnsemble(ctx),
 })
 
 // ── flow.switch ───────────────────────────────────────────────────────────
@@ -540,16 +621,24 @@ registerNodeExecutor({
   kind: "flow.join",
   typeVersion: 1,
   execute: async (ctx) => {
-    const params = ctx.params as { joinPolicy?: "all" | "any" | "race" }
+    const params = ctx.params as {
+      joinPolicy?: "all" | "any" | "race"
+      /** Optional gather→reduce in one step (D6③). Omit to just gather. */
+      aggregate?: AggregateParams
+    }
     const joinPolicy = params.joinPolicy ?? "all"
     const upstreamCount = Object.keys(ctx.upstream).length
-    return {
-      output: {
-        joinPolicy,
-        gathered: ctx.upstream,
-        upstreamCount,
-      },
+    const base = {
+      joinPolicy,
+      gathered: ctx.upstream,
+      upstreamCount,
     }
+    if (params.aggregate?.operation) {
+      // Reduce the gathered upstream outputs (the set of branch results).
+      const aggregated = aggregateArray(Object.values(ctx.upstream), params.aggregate, ctx)
+      return { output: { ...base, aggregated } }
+    }
+    return { output: base }
   },
 })
 
@@ -2387,6 +2476,17 @@ registerNodeExecutor({
     if (!workflow) {
       throw nonRetryable(`flow.subworkflow: workflow ${workflowId} not found`)
     }
+    // Typed-interface validation (D5): when the target declares an input
+    // schema, the call payload must satisfy it BEFORE the run starts.
+    const inputSchema = workflow.interface?.inputSchema
+    if (inputSchema && Object.keys(inputSchema).length > 0) {
+      const v = validateAgainstJsonSchema(inputSchema, params.input ?? null)
+      if (!v.ok) {
+        throw nonRetryable(
+          `flow.subworkflow: input violates the target's schema — ${v.errors.join("; ")}`
+        )
+      }
+    }
     const result = await runWorkflow({
       workflow,
       trigger: {
@@ -2405,6 +2505,16 @@ registerNodeExecutor({
     if (result.status !== "succeeded") {
       const message = result.error?.message ?? "subworkflow run failed"
       throw nonRetryable(`flow.subworkflow: ${message}`)
+    }
+    // Validate the terminal output against the declared output schema.
+    const outputSchema = workflow.interface?.outputSchema
+    if (outputSchema && Object.keys(outputSchema).length > 0) {
+      const v = validateAgainstJsonSchema(outputSchema, result.output)
+      if (!v.ok) {
+        throw nonRetryable(
+          `flow.subworkflow: output violates the target's schema — ${v.errors.join("; ")}`
+        )
+      }
     }
     return {
       output: {
@@ -2457,6 +2567,45 @@ registerNodeExecutor({
         deliveryDeferred: true,
       },
     }
+  },
+})
+
+// ── io.output ──────────────────────────────────────────────────────────────
+// Declares a workflow's terminal output (D5). The resolved `value` (or the
+// first upstream when omitted) is validated against the node's `outputSchema`
+// — the published interface's output contract — then returned as the run's
+// terminal output. `onSchemaViolation: "fail"` (default) rejects a contract
+// breach; "soft" passes the value through with a warning.
+registerNodeExecutor({
+  kind: "io.output",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      value?: unknown
+      outputSchema?: Record<string, unknown>
+      onSchemaViolation?: "fail" | "soft"
+    }
+    // `value` rides resolveDeep ({{ }} already resolved); fall back to upstream.
+    const value =
+      "value" in params && params.value !== undefined ? params.value : firstUpstream(ctx)
+    const schema = params.outputSchema
+    if (schema && Object.keys(schema).length > 0) {
+      const result = validateAgainstJsonSchema(schema, value)
+      if (!result.ok) {
+        if ((params.onSchemaViolation ?? "fail") === "soft") {
+          ctx.log(
+            "warn",
+            `io.output: value violates the output schema — ${result.errors.join("; ")}`
+          )
+          return { output: { value, schemaValid: false, schemaErrors: result.errors } }
+        }
+        throw nonRetryable(
+          `io.output: value violates the output schema — ${result.errors.join("; ")}`
+        )
+      }
+      return { output: { value, schemaValid: true } }
+    }
+    return { output: { value } }
   },
 })
 
@@ -3963,6 +4112,180 @@ function evalItemExpression(expression: string, item: unknown, ctx: StepExecutio
     staticData: {},
     params: ctx.params as Record<string, unknown>,
   })
+}
+
+/**
+ * Compile a custom reducer for `data.aggregate`'s custom op. The body is a JS
+ * *expression* returning the next accumulator, with `acc` / `item` / `index`
+ * (and read-only `upstream` / `trigger`) in scope — same sandbox shape as
+ * `data.code`. Compiled once per run, applied per item.
+ */
+function compileReducer(
+  expression: string
+): (acc: unknown, item: unknown, index: number, upstream: unknown, trigger: unknown) => unknown {
+  return new Function(
+    "acc",
+    "item",
+    "index",
+    "upstream",
+    "trigger",
+    `"use strict"; return (${expression});`
+  ) as (acc: unknown, item: unknown, index: number, upstream: unknown, trigger: unknown) => unknown
+}
+
+/** Stable key for value-equality (order-insensitive object keys). */
+function stableKey(value: unknown): string {
+  const seen = new WeakSet<object>()
+  const norm = (v: unknown): unknown => {
+    if (v === null || typeof v !== "object") return v
+    if (seen.has(v as object)) return "[circular]"
+    seen.add(v as object)
+    if (Array.isArray(v)) return v.map(norm)
+    const obj = v as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const k of Object.keys(obj).sort()) out[k] = norm(obj[k])
+    return out
+  }
+  try {
+    return JSON.stringify(norm(value)) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+export type AggregateOperation =
+  | "collect"
+  | "concat"
+  | "merge-objects"
+  | "group-by"
+  | "dedupe"
+  | "numeric"
+  | "custom"
+
+export interface AggregateParams {
+  operation?: AggregateOperation
+  /** group-by / dedupe: per-item key expression (without `{{ }}`). */
+  keyExpression?: string
+  /** numeric: per-item value expression; empty ⇒ the item itself. */
+  numericField?: string
+  numericOp?: "sum" | "avg" | "min" | "max" | "count"
+  /** custom: reducer expression with `$acc`/`$item`/`$index` in scope. */
+  reducerExpression?: string
+  /** custom: seed accumulator. */
+  initialValue?: unknown
+}
+
+/**
+ * Core reduce/aggregate over a value array. Shared by `data.aggregate`, the
+ * `data.transform` reduce delegation, and `flow.join`'s gather→reduce option.
+ */
+function aggregateArray(
+  arr: unknown[],
+  params: AggregateParams,
+  ctx: StepExecutionContext
+): unknown {
+  const operation = params.operation ?? "collect"
+  switch (operation) {
+    case "collect":
+      return [...arr]
+    case "concat":
+      return arr.flatMap((x) => (Array.isArray(x) ? x : [x]))
+    case "merge-objects":
+      return arr.reduce<Record<string, unknown>>((acc, x) => {
+        if (x && typeof x === "object" && !Array.isArray(x)) {
+          return { ...acc, ...(x as Record<string, unknown>) }
+        }
+        return acc
+      }, {})
+    case "group-by": {
+      const expr = params.keyExpression?.trim() ?? ""
+      const out: Record<string, unknown[]> = {}
+      for (const item of arr) {
+        const key = String(evalItemExpression(expr, item, ctx) ?? "")
+        ;(out[key] ??= []).push(item)
+      }
+      return out
+    }
+    case "dedupe": {
+      const expr = params.keyExpression?.trim() ?? ""
+      const seen = new Set<string>()
+      const out: unknown[] = []
+      for (const item of arr) {
+        const key = stableKey(expr ? evalItemExpression(expr, item, ctx) : item)
+        if (!seen.has(key)) {
+          seen.add(key)
+          out.push(item)
+        }
+      }
+      return out
+    }
+    case "numeric": {
+      const op = params.numericOp ?? "sum"
+      if (op === "count") return arr.length
+      const field = params.numericField?.trim() ?? ""
+      const nums = arr
+        .map((item) => (field ? evalItemExpression(field, item, ctx) : item))
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+      switch (op) {
+        case "sum":
+          return nums.reduce((a, b) => a + b, 0)
+        case "avg":
+          return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null
+        case "min":
+          return nums.length > 0 ? Math.min(...nums) : null
+        case "max":
+          return nums.length > 0 ? Math.max(...nums) : null
+        default:
+          return null
+      }
+    }
+    case "custom": {
+      const expr = params.reducerExpression?.trim() ?? ""
+      if (!expr) return params.initialValue
+      let fn: ReturnType<typeof compileReducer>
+      try {
+        fn = compileReducer(expr)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const wrapped = new Error(
+          `data.aggregate custom reducer is not a valid expression: ${message}`
+        ) as Error & { retryable?: boolean }
+        wrapped.retryable = false
+        throw wrapped
+      }
+      let acc = params.initialValue
+      arr.forEach((item, index) => {
+        try {
+          acc = fn(acc, item, index, ctx.upstream, ctx.trigger)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          const wrapped = new Error(`data.aggregate custom reducer failed: ${message}`) as Error & {
+            retryable?: boolean
+          }
+          wrapped.retryable = false
+          throw wrapped
+        }
+      })
+      return acc
+    }
+    default:
+      throw new Error(`Unsupported aggregate operation: ${operation}`)
+  }
+}
+
+/**
+ * Resolve the array `data.aggregate` operates on: a single array upstream is
+ * used as-is; a single scalar upstream is wrapped; multiple upstreams (a
+ * fan-in) are aggregated as the set of their outputs.
+ */
+function resolveAggregateInput(ctx: StepExecutionContext): unknown[] {
+  const values = Object.values(ctx.upstream)
+  if (values.length === 0) return []
+  if (values.length === 1) {
+    const v = values[0]
+    return Array.isArray(v) ? v : [v]
+  }
+  return values
 }
 
 /**

@@ -58,6 +58,7 @@ import {
   AiEmbedConfig,
   AiExtractConfig,
   AiPromptConfig,
+  EnsembleConfig,
   BranchConfig,
   CatchConfig,
   CharacterCreateConfig,
@@ -140,11 +141,13 @@ import {
   TeamUpdateConfig,
   TemplateConfig,
   TransformConfig,
+  AggregateConfig,
   TwinIngestConfig,
   TwinRagConfig,
   WaitConfig,
   WebhookRespondConfig,
   WebhookTriggerConfig,
+  OutputConfig,
 } from "./forms"
 
 export type NodeConfigComponent = ComponentType<{
@@ -281,6 +284,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "ai.classify": AiClassifyConfig,
   "ai.extract": AiExtractConfig,
   "ai.embed": AiEmbedConfig,
+  "ai.ensemble": EnsembleConfig,
   // Flow
   "flow.branch": BranchConfig,
   "flow.switch": SwitchConfig,
@@ -295,11 +299,13 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "flow.catch": CatchConfig,
   // Data
   "data.transform": TransformConfig,
+  "data.aggregate": AggregateConfig,
   "data.code": CodeConfig,
   "data.template": TemplateConfig,
   // I/O
   "io.http": HttpRequestConfig,
   "io.webhook.respond": WebhookRespondConfig,
+  "io.output": OutputConfig,
   // Annotations
   "annotation.note": NoteConfig,
   "annotation.group": GroupAnnotationConfig,

@@ -47,6 +47,7 @@ import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { PluginCapabilities } from "@/lib/plugin/api/plugin-capability-registry"
 import { CronBuilder } from "./shared/cron-builder"
 import { DurationField } from "./shared/duration-field"
+import { TypedOutputFields, OutputSchemaField } from "./output-schema-field"
 
 type Params = Record<string, unknown>
 type ChangeFn = (next: Params) => void
@@ -89,9 +90,26 @@ function clampNumberInput(raw: string, min: number, max: number, fallback: numbe
 }
 
 // ── trigger.manual ────────────────────────────────────────────────────────
-export function ManualTriggerConfig() {
+export function ManualTriggerConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.manualTrigger")
-  return <p className="text-xs text-muted-foreground">{t("intro")}</p>
+  return (
+    <FieldGroup>
+      <p className="text-xs text-muted-foreground">{t("intro")}</p>
+      {/* Declared input schema (D5): the published interface's run payload,
+          surfaced to nodes as $trigger.payload. */}
+      <Field label={t("inputSchema.label")} hint={t("inputSchema.hint")} name="inputSchema">
+        <OutputSchemaField
+          value={
+            params.inputSchema && typeof params.inputSchema === "object"
+              ? (params.inputSchema as Record<string, unknown>)
+              : undefined
+          }
+          onChange={(next) => onChange(patchParam(params, "inputSchema", next))}
+          idPrefix="mt"
+        />
+      </Field>
+    </FieldGroup>
+  )
 }
 
 // ── trigger.cron ──────────────────────────────────────────────────────────
@@ -2533,6 +2551,7 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
+      <TypedOutputFields params={params} onChange={onChange} idPrefix="at" />
     </FieldGroup>
   )
 }
@@ -2822,6 +2841,264 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
           />
         </Field>
       ) : null}
+      {responseFormat === "json" ? (
+        <TypedOutputFields params={params} onChange={onChange} idPrefix="ai" />
+      ) : null}
+    </FieldGroup>
+  )
+}
+
+// ── ai.ensemble ───────────────────────────────────────────────────────────
+const ENSEMBLE_AGG_DEFAULTS: Record<string, Record<string, unknown>> = {
+  "majority-vote-on-field": { kind: "majority-vote-on-field", field: "" },
+  "threshold-count": { kind: "threshold-count", field: "", threshold: 2 },
+  "best-of-by-score": { kind: "best-of-by-score", scoreField: "" },
+  "synthesize-by-final-agent": { kind: "synthesize-by-final-agent" },
+}
+
+export function EnsembleConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.ensemble")
+  const target =
+    params.target && typeof params.target === "object"
+      ? (params.target as Record<string, unknown>)
+      : {}
+  const targetKind = (typeof target.kind === "string" ? target.kind : "agent.turn") as
+    | "agent.turn"
+    | "subworkflow"
+  const setTarget = (key: string, value: unknown) =>
+    onChange(patchParam(params, "target", { ...target, [key]: value }))
+  const agg =
+    params.aggregation && typeof params.aggregation === "object"
+      ? (params.aggregation as Record<string, unknown>)
+      : {}
+  const aggKind = typeof agg.kind === "string" ? agg.kind : "majority-vote-on-field"
+  const setAgg = (next: Record<string, unknown>) =>
+    onChange(patchParam(params, "aggregation", next))
+  const prompt = readString(params, "prompt")
+  const n = readNumber(params, "n", 3)
+  const iterationConcurrency = readNumber(params, "iterationConcurrency", 4)
+  const lensText = Array.isArray(params.lens) ? (params.lens as string[]).join("\n") : ""
+  const piiGate = readString(params, "piiGate") || "off"
+  const synthesizerAlias = readString(params, "synthesizerAlias")
+
+  return (
+    <FieldGroup>
+      <Field
+        label={t("targetKind.label")}
+        htmlFor="en-tk"
+        hint={t("targetKind.hint")}
+        name="targetKind"
+      >
+        <Select value={targetKind} onValueChange={(v) => setTarget("kind", v)}>
+          <SelectTrigger id="en-tk">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="agent.turn">{t("targetKind.options.agentTurn")}</SelectItem>
+            <SelectItem value="subworkflow">{t("targetKind.options.subworkflow")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {targetKind === "agent.turn" ? (
+        <>
+          <Field label={t("prompt.label")} htmlFor="en-prompt" name="prompt" required>
+            <ExpressionField
+              id="en-prompt"
+              value={prompt}
+              onChange={(v) => onChange(patchParam(params, "prompt", v))}
+              multiline
+              rows={4}
+            />
+          </Field>
+          <Field
+            label={t("targetModel.label")}
+            htmlFor="en-model"
+            hint={t("targetModel.hint")}
+            name="targetModel"
+          >
+            <Input
+              id="en-model"
+              value={typeof target.model === "string" ? target.model : ""}
+              onChange={(e) => setTarget("model", e.target.value)}
+            />
+          </Field>
+          <Field label={t("outputSchema.label")} hint={t("outputSchema.hint")} name="outputSchema">
+            <OutputSchemaField
+              value={
+                target.outputSchema && typeof target.outputSchema === "object"
+                  ? (target.outputSchema as Record<string, unknown>)
+                  : undefined
+              }
+              onChange={(next) => setTarget("outputSchema", next)}
+              idPrefix="en"
+            />
+          </Field>
+        </>
+      ) : (
+        <Field
+          label={t("workflowId.label")}
+          htmlFor="en-wf"
+          hint={t("workflowId.hint")}
+          name="workflowId"
+          required
+        >
+          <SubworkflowPicker
+            id="en-wf"
+            value={typeof target.workflowId === "string" ? target.workflowId : ""}
+            onChange={(v) => setTarget("workflowId", v)}
+          />
+        </Field>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("n.label")} htmlFor="en-n" hint={t("n.hint")} name="n">
+          <Input
+            id="en-n"
+            type="number"
+            min={1}
+            max={50}
+            value={n}
+            onChange={(e) => onChange(patchParam(params, "n", Number(e.target.value) || 1))}
+          />
+        </Field>
+        <Field
+          label={t("iterationConcurrency.label")}
+          htmlFor="en-conc"
+          hint={t("iterationConcurrency.hint")}
+          name="iterationConcurrency"
+        >
+          <Input
+            id="en-conc"
+            type="number"
+            min={1}
+            max={16}
+            value={iterationConcurrency}
+            onChange={(e) =>
+              onChange(patchParam(params, "iterationConcurrency", Number(e.target.value) || 1))
+            }
+          />
+        </Field>
+      </div>
+
+      <Field label={t("lens.label")} htmlFor="en-lens" hint={t("lens.hint")} name="lens">
+        <Textarea
+          id="en-lens"
+          value={lensText}
+          rows={3}
+          placeholder={t("lens.placeholder")}
+          onChange={(e) => {
+            const list = e.target.value
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean)
+            onChange(patchParam(params, "lens", list.length > 0 ? list : undefined))
+          }}
+        />
+      </Field>
+
+      <Field
+        label={t("aggregation.label")}
+        htmlFor="en-agg"
+        hint={t("aggregation.hint")}
+        name="aggregation"
+      >
+        <Select
+          value={aggKind}
+          onValueChange={(v) => setAgg(ENSEMBLE_AGG_DEFAULTS[v] ?? { kind: v })}
+        >
+          <SelectTrigger id="en-agg">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="majority-vote-on-field">
+              {t("aggregation.options.majority")}
+            </SelectItem>
+            <SelectItem value="threshold-count">{t("aggregation.options.threshold")}</SelectItem>
+            <SelectItem value="best-of-by-score">{t("aggregation.options.bestOf")}</SelectItem>
+            <SelectItem value="synthesize-by-final-agent">
+              {t("aggregation.options.synthesize")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {aggKind === "majority-vote-on-field" || aggKind === "threshold-count" ? (
+        <Field
+          label={t("aggField.label")}
+          htmlFor="en-field"
+          hint={t("aggField.hint")}
+          name="aggField"
+        >
+          <Input
+            id="en-field"
+            value={typeof agg.field === "string" ? agg.field : ""}
+            onChange={(e) => setAgg({ ...agg, kind: aggKind, field: e.target.value })}
+          />
+        </Field>
+      ) : null}
+      {aggKind === "threshold-count" ? (
+        <Field
+          label={t("threshold.label")}
+          htmlFor="en-thresh"
+          hint={t("threshold.hint")}
+          name="threshold"
+        >
+          <Input
+            id="en-thresh"
+            type="number"
+            min={1}
+            value={typeof agg.threshold === "number" ? agg.threshold : 2}
+            onChange={(e) =>
+              setAgg({ ...agg, kind: aggKind, threshold: Number(e.target.value) || 1 })
+            }
+          />
+        </Field>
+      ) : null}
+      {aggKind === "best-of-by-score" ? (
+        <Field
+          label={t("scoreField.label")}
+          htmlFor="en-score"
+          hint={t("scoreField.hint")}
+          name="scoreField"
+          required
+        >
+          <Input
+            id="en-score"
+            value={typeof agg.scoreField === "string" ? agg.scoreField : ""}
+            onChange={(e) => setAgg({ ...agg, kind: aggKind, scoreField: e.target.value })}
+          />
+        </Field>
+      ) : null}
+      {aggKind === "synthesize-by-final-agent" ? (
+        <Field
+          label={t("synthesizerAlias.label")}
+          htmlFor="en-synth"
+          hint={t("synthesizerAlias.hint")}
+          name="synthesizerAlias"
+          required
+        >
+          <Input
+            id="en-synth"
+            value={synthesizerAlias}
+            onChange={(e) => onChange(patchParam(params, "synthesizerAlias", e.target.value))}
+            placeholder={t("synthesizerAlias.placeholder")}
+          />
+        </Field>
+      ) : null}
+
+      <Field label={t("piiGate.label")} htmlFor="en-pii" hint={t("piiGate.hint")} name="piiGate">
+        <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
+          <SelectTrigger id="en-pii">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="off">{t("piiGate.off")}</SelectItem>
+            <SelectItem value="block">{t("piiGate.block")}</SelectItem>
+            <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
     </FieldGroup>
   )
 }
@@ -3122,6 +3399,110 @@ export function TransformConfig({ params, onChange }: ConfigProps) {
           rows={3}
         />
       </Field>
+    </FieldGroup>
+  )
+}
+
+// ── data.aggregate ────────────────────────────────────────────────────────
+export function AggregateConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.aggregate")
+  const op = readString(params, "operation", "collect")
+  const keyExpression = readString(params, "keyExpression")
+  const numericField = readString(params, "numericField")
+  const numericOp = readString(params, "numericOp", "sum")
+  const reducerExpression = readString(params, "reducerExpression")
+  const needsKey = op === "group-by" || op === "dedupe"
+  return (
+    <FieldGroup>
+      <Field
+        label={t("operation.label")}
+        htmlFor="agg-op"
+        hint={t("operation.hint")}
+        name="operation"
+      >
+        <Select value={op} onValueChange={(v) => onChange(patchParam(params, "operation", v))}>
+          <SelectTrigger id="agg-op">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="collect">{t("operation.options.collect")}</SelectItem>
+            <SelectItem value="concat">{t("operation.options.concat")}</SelectItem>
+            <SelectItem value="merge-objects">{t("operation.options.mergeObjects")}</SelectItem>
+            <SelectItem value="group-by">{t("operation.options.groupBy")}</SelectItem>
+            <SelectItem value="dedupe">{t("operation.options.dedupe")}</SelectItem>
+            <SelectItem value="numeric">{t("operation.options.numeric")}</SelectItem>
+            <SelectItem value="custom">{t("operation.options.custom")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {needsKey ? (
+        <Field
+          label={t("keyExpression.label")}
+          htmlFor="agg-key"
+          hint={t("keyExpression.hint")}
+          name="keyExpression"
+        >
+          <ExpressionField
+            id="agg-key"
+            value={keyExpression}
+            onChange={(v) => onChange(patchParam(params, "keyExpression", v))}
+            multiline
+            rows={2}
+          />
+        </Field>
+      ) : null}
+      {op === "numeric" ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t("numericOp.label")} htmlFor="agg-nop" name="numericOp">
+            <Select
+              value={numericOp}
+              onValueChange={(v) => onChange(patchParam(params, "numericOp", v))}
+            >
+              <SelectTrigger id="agg-nop">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sum">{t("numericOp.options.sum")}</SelectItem>
+                <SelectItem value="avg">{t("numericOp.options.avg")}</SelectItem>
+                <SelectItem value="min">{t("numericOp.options.min")}</SelectItem>
+                <SelectItem value="max">{t("numericOp.options.max")}</SelectItem>
+                <SelectItem value="count">{t("numericOp.options.count")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field
+            label={t("numericField.label")}
+            htmlFor="agg-nfield"
+            hint={t("numericField.hint")}
+            name="numericField"
+          >
+            <ExpressionField
+              id="agg-nfield"
+              value={numericField}
+              onChange={(v) => onChange(patchParam(params, "numericField", v))}
+              multiline
+              rows={2}
+            />
+          </Field>
+        </div>
+      ) : null}
+      {op === "custom" ? (
+        <Field
+          label={t("reducerExpression.label")}
+          htmlFor="agg-reducer"
+          hint={t("reducerExpression.hint")}
+          name="reducerExpression"
+        >
+          <Textarea
+            id="agg-reducer"
+            value={reducerExpression}
+            onChange={(e) => onChange(patchParam(params, "reducerExpression", e.target.value))}
+            rows={3}
+            className="font-mono text-xs"
+            placeholder={t("reducerExpression.placeholder")}
+          />
+        </Field>
+      ) : null}
     </FieldGroup>
   )
 }
@@ -4673,6 +5054,11 @@ export function JoinConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.join")
   const joinPolicy = readString(params, "joinPolicy", "all")
   const timeoutMs = readNumber(params, "timeoutMs", 0)
+  const aggregate =
+    params.aggregate && typeof params.aggregate === "object"
+      ? (params.aggregate as Record<string, unknown>)
+      : undefined
+  const aggregateOn = !!aggregate?.operation
   return (
     <FieldGroup>
       <Field label={t("joinPolicy.label")} htmlFor="jn-policy" name="joinPolicy">
@@ -4704,6 +5090,29 @@ export function JoinConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "timeoutMs", Number(e.target.value) || 0))}
         />
       </Field>
+      {/* Optional gather→reduce (D6③): reuse the aggregate form on a nested param. */}
+      <Field
+        label={t("aggregate.label")}
+        htmlFor="jn-agg-on"
+        hint={t("aggregate.hint")}
+        name="aggregate"
+      >
+        <Switch
+          id="jn-agg-on"
+          checked={aggregateOn}
+          onCheckedChange={(on) =>
+            onChange(patchParam(params, "aggregate", on ? { operation: "collect" } : undefined))
+          }
+        />
+      </Field>
+      {aggregateOn ? (
+        <div className="rounded-md border p-3">
+          <AggregateConfig
+            params={aggregate ?? {}}
+            onChange={(next) => onChange(patchParam(params, "aggregate", next))}
+          />
+        </div>
+      ) : null}
     </FieldGroup>
   )
 }
@@ -5140,6 +5549,56 @@ export function WebhookRespondConfig({ params, onChange }: ConfigProps) {
           rows={5}
           className="font-mono text-xs"
         />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── io.output ─────────────────────────────────────────────────────────────
+export function OutputConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.output")
+  const value = readString(params, "value")
+  const mode = params.onSchemaViolation === "soft" ? "soft" : "fail"
+  return (
+    <FieldGroup>
+      <Field label={t("value.label")} htmlFor="out-value" hint={t("value.hint")} name="value">
+        <ExpressionField
+          id="out-value"
+          value={value}
+          onChange={(v) => onChange(patchParam(params, "value", v))}
+          multiline
+          rows={3}
+        />
+      </Field>
+      <Field label={t("outputSchema.label")} hint={t("outputSchema.hint")} name="outputSchema">
+        <OutputSchemaField
+          value={
+            params.outputSchema && typeof params.outputSchema === "object"
+              ? (params.outputSchema as Record<string, unknown>)
+              : undefined
+          }
+          onChange={(next) => onChange(patchParam(params, "outputSchema", next))}
+          idPrefix="out"
+        />
+      </Field>
+      <Field
+        label={t("onSchemaViolation.label")}
+        htmlFor="out-osv"
+        hint={t("onSchemaViolation.hint")}
+        name="onSchemaViolation"
+      >
+        <Select
+          value={mode}
+          onValueChange={(v) => onChange(patchParam(params, "onSchemaViolation", v))}
+        >
+          <SelectTrigger id="out-osv">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fail">{t("onSchemaViolation.fail")}</SelectItem>
+            <SelectItem value="soft">{t("onSchemaViolation.soft")}</SelectItem>
+          </SelectContent>
+        </Select>
       </Field>
     </FieldGroup>
   )

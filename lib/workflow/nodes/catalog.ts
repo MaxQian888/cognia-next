@@ -802,6 +802,28 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Bot",
     keywords: ["classify", "label", "category"],
   },
+  "ai.council": {
+    label: "Council",
+    description: "Fan the prompt out to several models, then synthesize a consensus answer.",
+    iconName: "Users",
+    keywords: ["council", "consensus", "multi-model", "ensemble", "vote", "synthesize", "panel"],
+  },
+  "ai.ensemble": {
+    label: "Ensemble",
+    description: "Run a target N times, then vote / threshold / best-of / synthesize the samples.",
+    iconName: "Vote",
+    keywords: [
+      "ensemble",
+      "n-vote",
+      "vote",
+      "majority",
+      "adversarial",
+      "verify",
+      "best-of",
+      "sample",
+      "self-consistency",
+    ],
+  },
   "ai.extract": {
     label: "Extract data",
     description: "Structured extraction (JSON schema) from free-form text.",
@@ -889,6 +911,12 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "ArrowRightLeft",
     keywords: ["map", "filter", "reduce", "sort", "transform"],
   },
+  "data.aggregate": {
+    label: "Aggregate",
+    description: "Reduce a list: collect / concat / merge / group-by / dedupe / numeric / custom.",
+    iconName: "Sigma",
+    keywords: ["aggregate", "reduce", "group", "dedupe", "merge", "sum", "collect", "concat"],
+  },
   "data.code": {
     label: "Code",
     description: "Custom JS expression with a 5s timeout.",
@@ -934,6 +962,12 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Webhook",
     keywords: ["webhook", "respond", "reply"],
     desktopOnly: true,
+  },
+  "io.output": {
+    label: "Output",
+    description: "Declare the workflow's typed terminal output (the published interface).",
+    iconName: "FileOutput",
+    keywords: ["output", "result", "return", "interface", "publish", "end"],
   },
   // ── Annotation ────────────────────────────────────────────────────────────
   "annotation.note": {
