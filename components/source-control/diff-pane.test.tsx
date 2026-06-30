@@ -86,6 +86,17 @@ describe("DiffPane", () => {
     expect(actions.unstage).toHaveBeenCalledWith([], "PATCH")
   })
 
+  it("mounts the per-hunk review list for a working (unstaged) diff", async () => {
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    expect(await screen.findByTestId("hunk-review-list")).toBeInTheDocument()
+  })
+
+  it("does not show the review list for a staged diff", async () => {
+    render(<DiffPane rootDir="/r" path="a.ts" staged actions={makeActions()} />)
+    await screen.findByTestId("diff-viewer-stub")
+    expect(screen.queryByTestId("hunk-review-list")).not.toBeInTheDocument()
+  })
+
   it("serves a cached diff without re-fetching", async () => {
     const key = "w:a.ts"
     act(() =>

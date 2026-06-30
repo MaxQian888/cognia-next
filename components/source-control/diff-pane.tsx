@@ -8,10 +8,11 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { gitDiffFile } from "@/lib/git/commands"
-import { fileDiffKey, type GitDiff, type GitHunk } from "@/types/git"
+import { fileDiffKey, type GitDiff, type GitFileChange, type GitHunk } from "@/types/git"
 import { useGitStore } from "@/stores/git/git-store"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer, type HunkAction } from "./diff-viewer"
+import { HunkReviewList } from "./hunk-review-list"
 
 interface DiffPaneProps {
   rootDir: string
@@ -28,6 +29,13 @@ export function DiffPane({ rootDir, path, staged, actions }: DiffPaneProps) {
   const invalidateDiff = useGitStore((s) => s.invalidateDiff)
   // Re-fetch the diff whenever the status changes (e.g. after a hunk op).
   const statusStamp = useGitStore((s) => s.status)
+
+  // The working-tree change row backs the rename-aware review key. Fall back to
+  // a plain modified change when the status row isn't found (e.g. mid-refresh).
+  const change: GitFileChange =
+    statusStamp?.changes.find((c) => c.path === path) ??
+    statusStamp?.merge.find((c) => c.path === path) ??
+    ({ path, origPath: null, status: "modified", staged: false, group: "changes" } as GitFileChange)
 
   // The cached diff is read during render; the effect only performs the async
   // fetch on a cache miss (avoids setState directly inside an effect body).
@@ -77,5 +85,23 @@ export function DiffPane({ rootDir, path, staged, actions }: DiffPaneProps) {
         },
       ]
 
-  return <DiffViewer diff={cachedDiff ?? fetched} staged={staged} hunkActions={hunkActions} />
+  const diff = cachedDiff ?? fetched
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1">
+        <DiffViewer diff={diff} staged={staged} hunkActions={hunkActions} />
+      </div>
+      {/* Per-hunk review (accept/reject/comment) — working-tree files only. */}
+      {!staged && diff && !diff.isBinary && diff.hunks.length > 0 && (
+        <HunkReviewList
+          rootDir={rootDir}
+          change={change}
+          diff={diff}
+          onStagePatch={(patch) => actions.stage([], patch)}
+          onInvalidate={() => invalidateDiff(fileDiffKey(path, staged))}
+        />
+      )}
+    </div>
+  )
 }
