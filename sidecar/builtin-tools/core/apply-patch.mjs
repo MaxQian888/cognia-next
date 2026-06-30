@@ -19,6 +19,7 @@ import { canonicalKey } from "./read-tracker.mjs"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
 import { resolveToolPath } from "./read.mjs"
 import { diagnosticsAfterWrite } from "./write.mjs"
+import { replaceWithFallback, ReplaceError } from "./fuzzy-replace.mjs"
 
 export const applyPatchShape = {
   patch: z
@@ -47,6 +48,65 @@ function isDevNull(name) {
 function stripGitPrefix(name) {
   if (isDevNull(name)) return name
   return name.replace(/^[ab]\//, "")
+}
+
+/**
+ * Reconstruct a hunk's old (context + removed) and new (context + added) text
+ * blocks from its unified-diff lines. `\` "No newline at end of file" markers
+ * are skipped. Returns null when the hunk has no usable old block (pure
+ * insertion against unknown context — let strict applyPatch own that case).
+ */
+function hunkBlocks(hunk) {
+  const oldLines = []
+  const newLines = []
+  for (const line of hunk.lines ?? []) {
+    const tag = line[0]
+    const body = line.slice(1)
+    if (tag === " ") {
+      oldLines.push(body)
+      newLines.push(body)
+    } else if (tag === "-") {
+      oldLines.push(body)
+    } else if (tag === "+") {
+      newLines.push(body)
+    }
+    // tag === "\" → "No newline" marker, ignore.
+  }
+  if (oldLines.length === 0) return null
+  return { oldBlock: oldLines.join("\n"), newBlock: newLines.join("\n") }
+}
+
+/**
+ * Conservative rescue for a modification hunk set that strict `applyPatch`
+ * rejected (context drifted past the diff library's fuzz factor). Each hunk's
+ * old block is located via the shared fuzzy-replace cascade (exact →
+ * line-trimmed → whitespace → indentation → block-anchor) and swapped for its
+ * new block. Reuses `edit`'s matcher so behaviour is consistent across tools.
+ *
+ * Returns the rewritten content on success, or null when ANY hunk fails to
+ * match UNIQUELY — ambiguity is never guessed; the caller then throws as
+ * before. Applies hunks in reverse file order so earlier edits don't shift
+ * later anchors.
+ */
+function tryFuzzyRescue(sourceContent, fp) {
+  const hunks = Array.isArray(fp.hunks) ? [...fp.hunks] : []
+  if (hunks.length === 0) return null
+  hunks.sort((a, b) => (b.oldStart ?? 0) - (a.oldStart ?? 0))
+
+  let content = sourceContent
+  for (const hunk of hunks) {
+    const blocks = hunkBlocks(hunk)
+    if (!blocks) return null
+    if (blocks.oldBlock === blocks.newBlock) continue // pure-context hunk, no-op
+    try {
+      content = replaceWithFallback(content, blocks.oldBlock, blocks.newBlock, false).content
+    } catch (err) {
+      // not_found / not_unique → refuse to guess.
+      if (err instanceof ReplaceError) return null
+      throw err
+    }
+  }
+  return content
 }
 
 /**
@@ -102,11 +162,17 @@ async function planFilePatch(fp, cwd, readTracker) {
   const traits = decodeText(raw)
   // applyPatch compares against LF-normalized source so CRLF files still match;
   // the original traits are re-applied on write to preserve EOL/BOM.
-  const out = applyPatch(traits.content, fp)
+  let out = applyPatch(traits.content, fp)
   if (out === false) {
-    throw new Error(
-      `patch does not apply cleanly: ${abs} — re-read the file and regenerate the diff`
-    )
+    // Strict apply failed (context drifted past the diff fuzz factor). Try a
+    // bounded, unique-match-only fuzzy rescue before giving up — but never
+    // guess: an ambiguous or unfound hunk still aborts the whole patch.
+    out = tryFuzzyRescue(traits.content, fp)
+    if (out === null || out === false) {
+      throw new Error(
+        `patch does not apply cleanly: ${abs} — re-read the file and regenerate the diff`
+      )
+    }
   }
   return { abs, action: "modify", content: out, traits }
 }

@@ -363,6 +363,7 @@ function pluginToolToAiSdkTool(manifest, { emit, sessionId, pendingPluginToolCal
  *   pendingApprovals?: Map<string, { resolve: (r: any) => void }>,
  *   pendingPluginToolCalls?: Map<string, { resolve: (r: any) => void }>,
  *   lspResolver?: unknown,
+ *   codeGraphResolver?: unknown,
  *   readTracker?: unknown,
  * }} params
  * @returns {Record<string, ReturnType<typeof tool>>}
@@ -374,6 +375,7 @@ export function buildAiSdkTools({
   pendingApprovals,
   pendingPluginToolCalls,
   lspResolver,
+  codeGraphResolver,
   readTracker,
   bgShells,
   doomGuard: providedDoomGuard,
@@ -426,6 +428,7 @@ export function buildAiSdkTools({
   for (const def of collectCogniaToolDefs({
     enabled: sendOptions.builtinTools,
     lspResolver,
+    codeGraphResolver,
     readTracker,
     cwd: sendOptions.cwd,
     dispatchPath: "ai-sdk",

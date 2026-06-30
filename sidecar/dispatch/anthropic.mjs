@@ -32,6 +32,7 @@ import {
 } from "./tool-search-policy.mjs"
 import { buildLspHooks } from "./lsp-hooks.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
@@ -162,6 +163,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // (Construction shared with the ai-sdk path — see lsp-resolver-factory.mjs.)
   const lsp = makeLazyLspResolver({ sendOptions, log })
   const { lspEnabled, lspResolver } = lsp
+  // Per-session code-graph index (resolver-bound like LSP — see
+  // codegraph-resolver-factory.mjs). Lazily built on first tool call.
+  const codeGraph = makeLazyCodeGraphResolver({ sendOptions, log })
 
   // Read-before-write tracking for the coreFiles suite. On this path the
   // suite is registered only via the `coreFilesOnAnthropic` escape hatch
@@ -176,6 +180,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     enabled: builtinEnabled,
     alwaysLoad: serverAlwaysLoad(BUILTIN_SERVER_NAME),
     lspResolver,
+    codeGraphResolver: codeGraph.codeGraphResolver,
     readTracker,
     cwd: sendOptions.cwd,
     dispatchPath: "anthropic",
@@ -518,6 +523,8 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       session._ended = true
       // Tear down any per-session LSP servers the resolver started.
       lsp.dispose()
+      // Close the code-graph store + file watcher.
+      codeGraph.dispose()
       // Kill any background shells the agent left running this session.
       bgShells.killAll()
     }

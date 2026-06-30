@@ -16,6 +16,7 @@ import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
@@ -480,6 +481,9 @@ export function dispatchAiSdk({
   // teardown so no background process outlives the session.
   const bgShells = createBgShellRegistry()
   const lsp = makeLazyLspResolver({ sendOptions, log })
+  // Per-session code-graph index (resolver-bound like LSP). Lazily built on
+  // first tool call; disposed at session teardown.
+  const codeGraph = makeLazyCodeGraphResolver({ sendOptions, log })
   // Agentic step budget for the WHOLE user turn. The turn runs a manual agent
   // loop (see `runTurn`) of `STEP_CHUNK`-step legs until the model naturally
   // stops or this budget is exhausted — a runaway backstop, NOT a task-length
@@ -872,6 +876,7 @@ export function dispatchAiSdk({
           pendingApprovals,
           pendingPluginToolCalls,
           lspResolver: lsp.lspResolver,
+          codeGraphResolver: codeGraph.codeGraphResolver,
           readTracker,
           bgShells,
           doomGuard: toolDoomGuard,
@@ -1376,6 +1381,7 @@ export function dispatchAiSdk({
       activeAbortController?.abort()
       inputStream.close()
       lsp.dispose()
+      codeGraph.dispose()
       // Disconnect any external MCP servers opened for this session.
       if (mcpClose) {
         const done = mcpClose
