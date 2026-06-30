@@ -88,6 +88,42 @@ describe("buildModuleStats", () => {
   })
 })
 
+describe("buildModuleStats with an import graph (PageRank)", () => {
+  // lib/a, lib/b, lib/c are line-heavy but each only imports lib/core;
+  // lib/core is tiny. Size-only ranks core LAST; PageRank ranks it FIRST.
+  const chunks = [
+    chunk({ module: "lib/a", filePath: "lib/a/x.ts", lineStart: 1, lineEnd: 40 }),
+    chunk({ module: "lib/b", filePath: "lib/b/x.ts", lineStart: 1, lineEnd: 40 }),
+    chunk({ module: "lib/c", filePath: "lib/c/x.ts", lineStart: 1, lineEnd: 40 }),
+    chunk({ module: "lib/core", filePath: "lib/core/x.ts", lineStart: 1, lineEnd: 4 }),
+  ]
+  const importGraph = new Map<string, Set<string>>([
+    ["lib/a", new Set(["lib/core"])],
+    ["lib/b", new Set(["lib/core"])],
+    ["lib/c", new Set(["lib/core"])],
+  ])
+
+  it("size-only ranks the tiny but heavily-imported module LAST", () => {
+    const sizeStats = buildModuleStats(chunks)
+    expect(sizeStats[sizeStats.length - 1].module).toBe("lib/core")
+  })
+
+  it("PageRank promotes the heavily-imported module to the top", () => {
+    const prStats = buildModuleStats(chunks, { importGraph })
+    expect(prStats[0].module).toBe("lib/core")
+  })
+
+  it("the 1-arg path is identical to passing empty options (no graph)", () => {
+    expect(buildModuleStats(chunks)).toEqual(buildModuleStats(chunks, {}))
+  })
+
+  it("an empty import graph degrades to the size heuristic", () => {
+    const sizeStats = buildModuleStats(chunks)
+    const emptyGraphStats = buildModuleStats(chunks, { importGraph: new Map() })
+    expect(emptyGraphStats).toEqual(sizeStats)
+  })
+})
+
 describe("chunksWithinBudget", () => {
   it("returns empty for non-positive budget", () => {
     expect(chunksWithinBudget([chunk({ tokenCount: 10 })], 0)).toEqual([])

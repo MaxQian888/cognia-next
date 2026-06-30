@@ -1,23 +1,34 @@
 /**
- * RepoMapAgent — pure heuristic ranking of modules.
+ * RepoMapAgent — module ranking for `wiki_search` ordering.
  *
- * Aider's classic implementation runs personalized PageRank over a
- * tree-sitter import graph. That's the right long-term answer; for Phase 1
- * MVP we ship a simpler size-based heuristic that's good enough to bias
- * `wiki_search` toward the architecturally heavy modules without the
- * static-analysis dependency.
+ * Two modes, selected by whether an import graph is supplied:
  *
- * Heuristic score per module:
- *   raw = totalLines × file-type boost
- *     • index.ts / page.tsx / layout.tsx / route.ts files boost ×1.5
- *     • README.md / mod.rs files boost ×1.5
- *     • everything else ×1.0
- *   pageRank = raw / max(raw across all modules)   // normalize 0..1
+ *   • Size heuristic (default / fallback) — `raw = totalLines × file-type
+ *     boost`, normalized 0..1. index/page/layout/route + README/mod.rs files
+ *     boost ×1.5. Cheap, no static analysis.
  *
- * Real PageRank lands in Phase 2 alongside the import-graph extractor.
+ *   • PageRank (Phase 2, when `opts.importGraph` is provided) — Aider-style
+ *     personalized PageRank over the module import graph, blended with the size
+ *     heuristic as a tiebreak. Modules that many others import rank up. This is
+ *     the long-promised replacement for the size-only heuristic; the import
+ *     graph is built in the renderer by `buildImportGraph` (the heavyweight
+ *     tree-sitter graph stays sidecar-side).
+ *
+ * The single-argument call is byte-for-byte the original heuristic, so existing
+ * callers/tests are unaffected; PageRank is purely additive and degrades back
+ * to the heuristic whenever the graph is empty/unavailable.
  */
 
 import type { CodeChunk, ModuleStat } from "../types"
+import { personalizedPageRank, normalizeScores } from "./pagerank"
+
+/** Weight given to PageRank vs. the size heuristic when blending. */
+const PAGERANK_WEIGHT = 0.65
+
+export interface RepoMapOptions {
+  /** `importer → imported` module graph (from `buildImportGraph`). */
+  importGraph?: ReadonlyMap<string, ReadonlySet<string>>
+}
 
 const BOOST_FILES = new Set([
   "index.ts",
@@ -45,7 +56,10 @@ function basenameOf(path: string): string {
  * orchestrator falls back to the file-walker's bucket list to render
  * placeholder articles for empty-but-existing modules.
  */
-export function buildModuleStats(chunks: readonly CodeChunk[]): ModuleStat[] {
+export function buildModuleStats(
+  chunks: readonly CodeChunk[],
+  opts: RepoMapOptions = {}
+): ModuleStat[] {
   const byModule = new Map<
     string,
     { paths: Set<string>; lines: number; tokens: number; boost: number }
@@ -78,13 +92,22 @@ export function buildModuleStats(chunks: readonly CodeChunk[]): ModuleStat[] {
   }
 
   const maxRaw = raws.reduce((m, r) => Math.max(m, r.raw), 0)
+  const sizeScore = (raw: number) => (maxRaw === 0 ? 0 : raw / maxRaw)
+
+  // PageRank blend — only when an import graph is supplied AND it actually
+  // connects something. Otherwise the score is exactly the legacy heuristic.
+  const prNorm = opts.importGraph ? normalizeScores(personalizedPageRank(opts.importGraph)) : null
+  const usePageRank = prNorm !== null && prNorm.size > 0
+
   return raws
     .map<ModuleStat>((r) => ({
       module: r.module,
       filePaths: r.paths,
       totalLines: r.lines,
       totalTokens: r.tokens,
-      pageRank: maxRaw === 0 ? 0 : r.raw / maxRaw,
+      pageRank: usePageRank
+        ? PAGERANK_WEIGHT * (prNorm!.get(r.module) ?? 0) + (1 - PAGERANK_WEIGHT) * sizeScore(r.raw)
+        : sizeScore(r.raw),
     }))
     .sort((a, b) => b.pageRank - a.pageRank)
 }
