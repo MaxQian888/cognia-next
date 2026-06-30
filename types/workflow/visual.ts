@@ -187,6 +187,8 @@ export type WorkflowNodeKind =
   | "ai.classify"
   | "ai.extract"
   | "ai.embed"
+  | "ai.council"
+  | "ai.ensemble"
   // Flow control
   | "flow.branch"
   | "flow.switch"
@@ -206,6 +208,7 @@ export type WorkflowNodeKind =
   | "flow.catch"
   // Data
   | "data.transform"
+  | "data.aggregate"
   | "data.code"
   | "data.template"
   | "ocr.extract"
@@ -215,6 +218,7 @@ export type WorkflowNodeKind =
   // I/O
   | "io.http"
   | "io.webhook.respond"
+  | "io.output"
   // Annotation
   | "annotation.note"
   | "annotation.group"
@@ -382,6 +386,8 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "ai.classify",
   "ai.extract",
   "ai.embed",
+  "ai.council",
+  "ai.ensemble",
   "flow.branch",
   "flow.switch",
   "flow.split",
@@ -394,6 +400,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "flow.continue",
   "flow.catch",
   "data.transform",
+  "data.aggregate",
   "data.code",
   "data.template",
   "ocr.extract",
@@ -401,6 +408,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "eval.gate",
   "io.http",
   "io.webhook.respond",
+  "io.output",
   "annotation.note",
   "annotation.group",
   "pattern.multi-modal-sweep",
@@ -472,6 +480,31 @@ export interface VisualWorkflow {
   staticData?: Record<string, unknown>
   /** Last saved canvas viewport so reopening lands the user where they were. */
   viewport?: WorkflowViewport
+  /**
+   * Declared call interface (D5). When present the workflow can be published as
+   * a typed callable unit — an agent tool, a typed `flow.subworkflow` target,
+   * and a skill-catalog entry. Stored as serializable JSON Schemas; the canvas
+   * `trigger.manual` input + `io.output` node edit them. Interface (schema) is
+   * declared separately from implementation (the graph).
+   */
+  interface?: WorkflowInterface
+  /** Set when the workflow has been published as a callable unit. */
+  published?: WorkflowPublication
+}
+
+/** Typed input/output contract a published workflow exposes to callers. */
+export interface WorkflowInterface {
+  /** JSON object schema for the run payload (surfaces as `$trigger.payload`). */
+  inputSchema?: Record<string, unknown>
+  /** JSON object schema the terminal output must satisfy. */
+  outputSchema?: Record<string, unknown>
+}
+
+/** Publication record: registers the 3 call surfaces (tool / subworkflow / skill). */
+export interface WorkflowPublication {
+  at: number
+  /** Stable tool name the agent calls (also the skill-catalog canonical id). */
+  toolName: string
 }
 
 export interface WorkflowNode<TParams = Record<string, unknown>> {

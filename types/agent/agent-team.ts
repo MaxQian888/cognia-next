@@ -425,6 +425,20 @@ export interface AgentTeamConfig {
    * already-parsed sidecar events, throttled to tool boundaries.
    */
   streamProgress?: boolean
+  /**
+   * Guarded nudges (ADR — compaction/nudge). When a teammate turn fails on a
+   * provider rate limit, the runtime parses the cooldown and schedules a single
+   * "continue" nudge once it elapses (instead of aborting the wave). Guards:
+   * max nudges per member per hour, exponential backoff, agenda-fingerprint
+   * de-dup, and a busy-signal skip (recent tool activity). Default ON.
+   */
+  nudges?: {
+    enabled?: boolean
+    /** Max nudges delivered to one member within a rolling hour. Default 2. */
+    maxPerMemberPerHour?: number
+    /** Skip a nudge when the member had tool activity within this window (ms). Default 60000. */
+    busySignalWindowMs?: number
+  }
 }
 
 /**
@@ -475,6 +489,11 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
     allowAutonomousDelegation: false,
   },
   streamProgress: true,
+  nudges: {
+    enabled: true,
+    maxPerMemberPerHour: 2,
+    busySignalWindowMs: 60_000,
+  },
 }
 
 // ============================================================================
@@ -658,8 +677,54 @@ export interface AgentTeamTask {
   retryCount?: number
   /** First-class delegation / handoff lifecycle record */
   delegationRecord?: TeamDelegationRecord
+  /** Traceable discussion thread — findings, decisions, blockers, results. */
+  comments?: AgentTaskComment[]
+  /** Task-level file/artifact/link attachments. */
+  attachments?: TaskCommentAttachment[]
   /** Custom metadata */
   metadata?: Record<string, unknown>
+}
+
+/**
+ * A reference attachment on a task or task comment. We have no server, so nothing is
+ * copied — `ref` points at an existing resource the human opens from the workspace:
+ * an artifact id, a workspace-relative file path, or a URL.
+ */
+export interface TaskCommentAttachment {
+  /** Unique id. */
+  id: string
+  /** Display name (file name / artifact title / link label). */
+  name: string
+  /** What `ref` points at. */
+  kind: "artifact" | "file" | "link"
+  /** Artifact id, workspace-relative path, or URL — per `kind`. */
+  ref: string
+  /** Optional MIME type. */
+  mimeType?: string
+  /** Optional size in bytes. */
+  sizeBytes?: number
+}
+
+/**
+ * A comment on a task — the durable, board-visible delivery channel. Teammates record
+ * findings, decisions, blockers, and results here (via `task_add_comment`); the operator
+ * reads them in the task's expanded thread.
+ */
+export interface AgentTaskComment {
+  /** Unique id. */
+  id: string
+  /** The task this comment belongs to. */
+  taskId: string
+  /** Teammate id of the author (or "user" for the operator). */
+  authorId: string
+  /** Author display name. */
+  authorName: string
+  /** Comment body (markdown). */
+  text: string
+  /** Creation timestamp. */
+  createdAt: Date
+  /** Optional attachments on this comment. */
+  attachments?: TaskCommentAttachment[]
 }
 
 // ============================================================================
@@ -695,6 +760,11 @@ export type StructuredMessagePayload =
   | { type: "task_assignment"; taskId: string; taskTitle?: string }
   | { type: "consensus_request"; consensusId: string; question: string }
   | { type: "consensus_vote"; consensusId: string; option: string }
+  | {
+      type: "nudge"
+      nudgeType: "agenda_sync" | "review_pickup" | "rate_limit_resume"
+      generation: number
+    }
 
 /**
  * Type guard: check if a message has a structured payload
@@ -1150,6 +1220,17 @@ export interface CreateTaskInput {
   estimatedDuration?: number
   order?: number
   metadata?: Record<string, unknown>
+}
+
+/**
+ * Input for adding a comment to a task. `authorId` is a teammate id or "user"; the store
+ * resolves `authorName`. Attachments omit their `id` (the store mints it).
+ */
+export interface AddTaskCommentInput {
+  taskId: string
+  authorId: string
+  text: string
+  attachments?: Array<Omit<TaskCommentAttachment, "id">>
 }
 
 /**
