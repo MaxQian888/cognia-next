@@ -13,6 +13,8 @@ node_modules
 
 # testing
 /coverage
+# nested coverage output from workspace packages (e.g. packages/*/coverage)
+**/coverage/
 junit.xml
 *.test.js.snap
 *.test.ts.snap
@@ -130,6 +132,12 @@ rustc-ice-*.txt
 .citest-map.json
 .ci/
 .codegraph/
+# Per-project code-graph index DB (written by the sidecar code-graph subsystem).
+.cognia/codegraph.db
+.cognia/codegraph.db-*
+# Code-graph tree-sitter grammars are build artifacts copied from
+# tree-sitter-wasms by scripts/build/copy-codegraph-grammars.mjs.
+sidecar/builtin-tools/code/grammars/*.wasm
 batch-final-verify-*.png
 workflows-*.png
 dist
