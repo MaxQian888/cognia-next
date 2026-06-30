@@ -12,6 +12,8 @@ jest.mock("@/lib/logging", () => {
     debug: jest.fn(),
   }
   return {
+    createLogger: () => ({ ...childLogger, child: () => childLogger }),
+    logger: { ...childLogger, child: () => childLogger },
     loggers: {
       agent: {
         child: () => childLogger,
@@ -92,7 +94,8 @@ describe("migrateAgentTeamPersisted", () => {
     expect(migrated.teams.live.status).toBe("idle")
     expect(migrated.teams.done.status).toBe("completed")
     expect(migrated.teammates).toEqual({})
-    expect(migrated.tasks).toEqual({ task_a: { id: "task_a" } })
+    // v5 backfills an empty comments thread on every legacy task.
+    expect(migrated.tasks).toEqual({ task_a: { id: "task_a", comments: [] } })
   })
 
   it("creates a default config when a legacy snapshot omitted it", () => {

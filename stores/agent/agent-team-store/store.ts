@@ -41,7 +41,7 @@ import type { AgentTeamState } from "./types"
  *     live controller after restart, so its status is reset to `idle` to avoid
  *     a phantom "live" run in the UI.
  */
-const PERSIST_VERSION = 4
+const PERSIST_VERSION = 5
 const AGENT_TEAM_STORAGE_KEY = "cognia-agent-teams"
 
 function agentTeamAccountStorageKey(accountId: string): string {
@@ -140,6 +140,14 @@ export function migrateAgentTeamPersisted(
   }
   if (!raw.tasks || typeof raw.tasks !== "object") {
     raw.tasks = {}
+  }
+
+  // v5: task comment threads. Older tasks have no `comments` — default to an empty
+  // array so the UI and selectors can treat it as always-present.
+  for (const task of Object.values(raw.tasks as Record<string, { comments?: unknown }>)) {
+    if (task && typeof task === "object" && !Array.isArray(task.comments)) {
+      task.comments = []
+    }
   }
 
   return raw as unknown as AgentTeamState

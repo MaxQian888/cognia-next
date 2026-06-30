@@ -10,6 +10,8 @@ jest.mock("@/lib/logging", () => {
     debug: jest.fn(),
   }
   return {
+    createLogger: () => ({ ...childLogger, child: () => childLogger }),
+    logger: { ...childLogger, child: () => childLogger },
     loggers: {
       agent: {
         child: () => childLogger,
