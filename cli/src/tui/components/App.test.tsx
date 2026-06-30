@@ -34,6 +34,7 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CreateSession } from "../hooks/useAgentSession"
 import type { TranscriptEntry, TranscriptFs } from "../../agent/transcript"
+import type { RunShellOpts, ShellResult } from "../../agent/run-shell"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "../state/types"
 
@@ -1152,6 +1153,95 @@ describe("App", () => {
       expect.objectContaining({ cwd: "/work", onChunk: expect.any(Function) })
     )
     await waitFor(() => expect(container.textContent).toContain("file-a"))
+  })
+
+  it("Ctrl+C kills a blocking foreground !command (abort signal fires)", async () => {
+    const { create } = fakeSession()
+    // A blocking command that only resolves once its abort signal fires — the
+    // dev-server case the fix targets.
+    const runShell = jest.fn(
+      (_cmd: string, opts: RunShellOpts): Promise<ShellResult> =>
+        new Promise((resolve) => {
+          opts.signal?.addEventListener("abort", () =>
+            resolve({ stdout: "", stderr: "", code: 130, aborted: true })
+          )
+        })
+    )
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+    )
+    type("!sleep 100")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // runShell received an abort signal it can be killed through.
+    expect(runShell).toHaveBeenCalledWith(
+      "sleep 100",
+      expect.objectContaining({ signal: expect.anything() })
+    )
+    // A single Ctrl+C (empty composer) kills it — no double-press exit needed.
+    await act(async () => {
+      __fireInput("c", { ctrl: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Command interrupted"))
+    await waitFor(() => expect(container.textContent).toContain("[interrupted]"))
+  })
+
+  it("Ctrl+B moves a running foreground !command to the background", async () => {
+    const { create } = fakeSession()
+    // Never resolves: stays "running" so we can observe the background label.
+    const runShell = jest.fn((): Promise<ShellResult> => new Promise(() => {}))
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+    )
+    type("!npm run dev")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      __fireInput("b", { ctrl: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Command moved to background"))
+    await waitFor(() => expect(container.textContent).toContain("(background)"))
+  })
+
+  it("/analyze sends the last failed !command to the agent", async () => {
+    const { create, prompts } = fakeSession("looking into it")
+    const runShell = jest.fn().mockResolvedValue({ stdout: "", stderr: "boom", code: 1 })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+    )
+    type("!false")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // A failed foreground command surfaces the /analyze hint.
+    await waitFor(() => expect(container.textContent).toContain("/analyze"))
+    type("/analyze")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(prompts.some((p) => p.includes("boom") && p.includes("false"))).toBe(true)
+    )
+  })
+
+  it("/analyze with no failed command shows a notice", async () => {
+    const { create, prompts } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/analyze")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("No failed command to analyze"))
+    expect(prompts).toHaveLength(0)
   })
 
   it("/diff shells git diff and opens the changes in the pager", async () => {

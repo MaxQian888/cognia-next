@@ -78,4 +78,44 @@ describe("runShell", () => {
     expect(r.code).toBe(0)
     expect(r.stdout).toContain("ok")
   }, 15000)
+
+  it("kills the child and resolves aborted when the signal fires", async () => {
+    // A long-running fake child that only closes once killed, so we can drive
+    // the abort path deterministically.
+    const handlers: Record<string, ((arg: unknown) => void)[]> = {}
+    const kill = jest.fn((_signal?: unknown) => {
+      handlers.close?.forEach((cb) => cb(null))
+    })
+    const child: ShellChild = {
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (arg: unknown) => void)
+      },
+      kill,
+    }
+    const controller = new AbortController()
+    const promise = runShell("sleep 100", { spawn: () => child, signal: controller.signal })
+    controller.abort()
+    const r = await promise
+    expect(kill).toHaveBeenCalledWith("SIGTERM")
+    expect(r.aborted).toBe(true)
+    expect(r.code).toBe(130)
+  })
+
+  it("resolves aborted immediately when the signal is already aborted", async () => {
+    const handlers: Record<string, ((arg: unknown) => void)[]> = {}
+    const kill = jest.fn(() => handlers.close?.forEach((cb) => cb(null)))
+    const child: ShellChild = {
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (arg: unknown) => void)
+      },
+      kill,
+    }
+    const r = await runShell("x", { spawn: () => child, signal: AbortSignal.abort() })
+    expect(kill).toHaveBeenCalled()
+    expect(r.aborted).toBe(true)
+  })
 })

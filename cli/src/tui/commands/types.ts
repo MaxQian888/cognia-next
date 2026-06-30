@@ -88,6 +88,9 @@ export type CommandEffect =
   | { kind: "openSessions" }
   | { kind: "resumeLast" }
   | { kind: "runBash"; command: string }
+  /** Ask the agent to diagnose the last failed `!command` (`/analyze`). The App
+   * holds the captured command + output and builds the prompt. */
+  | { kind: "analyzeBash" }
   | { kind: "runtime"; runtime: RuntimeRequest }
   /** Persist + live-apply a status-bar customization (`/statusbar`). */
   | { kind: "statusBar"; patch: StatusBarConfig }

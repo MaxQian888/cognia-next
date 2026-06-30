@@ -28,6 +28,10 @@ export function SelectList({
   maxRows,
   width,
   footerHint,
+  query,
+  onQueryChange,
+  searchPlaceholder,
+  emptyHint,
 }: {
   title?: string
   items: SelectItem[]
@@ -44,6 +48,16 @@ export function SelectList({
   /** Override the bottom key-hint line; pass `false` to hide it. Defaults to the
    * shared `↑/↓ navigate · Enter select · Esc cancel`. */
   footerHint?: string | false
+  /** Opt-in typeahead search: when `onQueryChange` is supplied, a search line is
+   * rendered above the list and printable keys/backspace edit `query`. The parent
+   * owns the filtering — it passes the already-filtered `items` — so the list
+   * stays a pure presenter. Omit both to keep the plain (non-searchable) list. */
+  query?: string
+  onQueryChange?: (query: string) => void
+  /** Placeholder shown on the search line while `query` is empty. */
+  searchPlaceholder?: string
+  /** Line shown in place of the list when a search filters everything out. */
+  emptyHint?: string
 }) {
   const theme = useTheme()
   const boxRef = useRef<DOMElement | null>(null)
@@ -53,10 +67,10 @@ export function SelectList({
 
   // Mouse (fullscreen `scroll` mode only): a click on a row both highlights and
   // selects it (Claude-Code parity); the wheel moves the highlight. Header rows
-  // above the items = the optional title line.
+  // above the items = the optional title line + the optional search line.
   const handleMouse = usePanelClick({
     boxRef,
-    headerRows: title ? 1 : 0,
+    headerRows: (title ? 1 : 0) + (onQueryChange ? 1 : 0),
     hasAboveMore: win.above > 0,
     visibleCount: visible.length,
     onPick: (offset) => {
@@ -74,6 +88,13 @@ export function SelectList({
       else if (key.downArrow) onMove(1)
       else if (key.return) onSelect(index)
       else if (key.escape) onCancel?.()
+      // Typeahead: only when searchable, and only for keys the navigation branch
+      // above didn't consume (printable chars, backspace) — arrows/Enter/Esc stay
+      // list controls so the highlight and search box never fight over a key.
+      else if (onQueryChange) {
+        if (key.backspace || key.delete) onQueryChange((query ?? "").slice(0, -1))
+        else if (input && !key.ctrl && !key.meta && !key.tab) onQueryChange((query ?? "") + input)
+      }
     },
     { isActive }
   )
@@ -88,6 +109,21 @@ export function SelectList({
       width={width}
     >
       {title ? <Text bold>{title}</Text> : null}
+      {onQueryChange ? (
+        <Text color={theme.muted}>
+          {"🔎 "}
+          {query && query.length > 0 ? (
+            <Text color={theme.accent}>{query}</Text>
+          ) : (
+            <Text dimColor>{searchPlaceholder ?? "type to filter"}</Text>
+          )}
+        </Text>
+      ) : null}
+      {onQueryChange && items.length === 0 ? (
+        <Text color={theme.muted} dimColor>
+          {`  ${emptyHint ?? "no matches"}`}
+        </Text>
+      ) : null}
       {win.above > 0 ? <Text color={theme.muted} dimColor>{`  ↑ ${win.above} more`}</Text> : null}
       {visible.map((item, i) => {
         const row = win.start + i

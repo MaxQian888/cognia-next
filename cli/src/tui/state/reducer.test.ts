@@ -964,7 +964,7 @@ describe("tuiReducer", () => {
   it("SET_MODEL and SET_MODE update config and close the overlay", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
-      overlay: { kind: "model", options: ["a"], index: 0 },
+      overlay: { kind: "model", options: ["a"], index: 0, query: "" },
     })
     s = reduce(s, { type: "SET_MODEL", model: "claude-x" })
     expect(s.config.model).toBe("claude-x")
@@ -1215,12 +1215,189 @@ describe("tuiReducer", () => {
   it("OVERLAY_SET_INDEX clamps to the list bounds and no-ops for non-lists", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
-      overlay: { kind: "model", options: ["a", "b"], index: 0 },
+      overlay: { kind: "model", options: ["a", "b"], index: 0, query: "" },
     })
     s = reduce(s, { type: "OVERLAY_SET_INDEX", index: 9 })
     expect((s.overlay as { index: number }).index).toBe(1)
     const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
     expect(reduce(usage, { type: "OVERLAY_SET_INDEX", index: 3 })).toBe(usage)
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS swaps the live list and keeps the selected id", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "model",
+        options: ["anthropic/claude-sonnet-4", "openai/gpt-5"],
+        index: 1,
+        query: "",
+      },
+    })
+    // Live catalog lands with a superset; the selected id ("openai/gpt-5") moves.
+    s = reduce(s, {
+      type: "OVERLAY_REFRESH_MODEL_OPTIONS",
+      options: ["aaa/free", "openai/gpt-5", "anthropic/claude-sonnet-4", "zzz/big"],
+    })
+    expect(s.overlay).toEqual({
+      kind: "model",
+      options: ["aaa/free", "openai/gpt-5", "anthropic/claude-sonnet-4", "zzz/big"],
+      index: 1,
+      query: "",
+    })
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS clamps to 0 when the selected id is gone", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "model", options: ["old/model"], index: 0, query: "" },
+    })
+    s = reduce(s, { type: "OVERLAY_REFRESH_MODEL_OPTIONS", options: ["new/a", "new/b"] })
+    expect((s.overlay as { index: number }).index).toBe(0)
+    expect((s.overlay as { options: string[] }).options).toEqual(["new/a", "new/b"])
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS no-ops when the model overlay is not open or list is empty", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "OVERLAY_REFRESH_MODEL_OPTIONS", options: ["a"] })).toBe(usage)
+    const model = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "model", options: ["a"], index: 0, query: "" },
+    })
+    expect(reduce(model, { type: "OVERLAY_REFRESH_MODEL_OPTIONS", options: [] })).toBe(model)
+  })
+
+  it("OVERLAY_MODEL_QUERY filters the picker and resets the highlight to the top", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "model",
+        options: ["anthropic/claude-opus", "anthropic/claude-sonnet", "openai/gpt-5"],
+        index: 2,
+        query: "",
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_MODEL_QUERY", query: "claude" })
+    expect(s.overlay).toEqual({
+      kind: "model",
+      options: ["anthropic/claude-opus", "anthropic/claude-sonnet", "openai/gpt-5"],
+      index: 0,
+      query: "claude",
+    })
+    // Navigation now ranges over the filtered view (2 claude rows), not all 3.
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(1)
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 2nd match
+  })
+
+  it("OVERLAY_MODEL_QUERY no-ops when the model overlay is not open", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "OVERLAY_MODEL_QUERY", query: "x" })).toBe(usage)
+  })
+
+  it("OVERLAY_QUERY filters a generic select overlay and resets the highlight", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "select",
+        title: "Plugins",
+        items: [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+        ],
+        index: 2,
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_QUERY", query: "beta" })
+    expect((s.overlay as { query: string }).query).toBe("beta")
+    expect((s.overlay as { index: number }).index).toBe(0)
+    // Navigation now ranges over the single filtered row (wraps to itself).
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0)
+  })
+
+  it("OVERLAY_QUERY filters sessions, inspect and quickActions overlays", () => {
+    const sessions = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "sessions",
+        items: [
+          { sessionId: "1", title: "login bug", turns: 1, updatedAt: 0 },
+          { sessionId: "2", title: "dark mode", turns: 1, updatedAt: 0 },
+        ],
+        index: 1,
+      },
+    })
+    const sAfter = reduce(sessions, { type: "OVERLAY_QUERY", query: "dark" })
+    expect((sAfter.overlay as { query: string }).query).toBe("dark")
+    expect((sAfter.overlay as { index: number }).index).toBe(0)
+
+    const quick = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "quickActions",
+        rows: [
+          { id: "model", label: "Model", hint: "opus", command: "/model" },
+          { id: "diff", label: "Git diff", hint: "changes", command: "/diff" },
+        ],
+        index: 0,
+      },
+    })
+    const qAfter = reduce(quick, { type: "OVERLAY_QUERY", query: "diff" })
+    expect((qAfter.overlay as { query: string }).query).toBe("diff")
+  })
+
+  it("OVERLAY_QUERY no-ops for an overlay kind without typeahead", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "OVERLAY_QUERY", query: "x" })).toBe(usage)
+  })
+
+  it("MARKETPLACE_PATCH_ENTRY updates one entry's badge in the open browser", () => {
+    const s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "marketplace",
+        entries: [
+          { installRef: "a/x", name: "Alpha", installed: true, enabled: true },
+          { installRef: "b/y", name: "Beta", installed: true, enabled: true },
+        ],
+      },
+    })
+    const after = reduce(s, {
+      type: "MARKETPLACE_PATCH_ENTRY",
+      ref: "a/x",
+      patch: { enabled: false },
+    })
+    const entries = (after.overlay as { entries: { installRef: string; enabled: boolean }[] })
+      .entries
+    expect(entries[0].enabled).toBe(false)
+    expect(entries[1].enabled).toBe(true)
+  })
+
+  it("MARKETPLACE_PATCH_ENTRY is a no-op when the marketplace isn't open", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "MARKETPLACE_PATCH_ENTRY", ref: "a/x", patch: {} })).toBe(usage)
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS keeps the selected id across a refresh while filtered", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "model",
+        options: ["a/claude-opus", "a/claude-sonnet", "b/gpt"],
+        index: 1,
+        query: "claude",
+      },
+    })
+    // Selected id is the 2nd claude match ("a/claude-sonnet"); after a refresh it
+    // sits at a new position in the freshly-filtered superset.
+    s = reduce(s, {
+      type: "OVERLAY_REFRESH_MODEL_OPTIONS",
+      options: ["a/claude-haiku", "a/claude-sonnet", "a/claude-opus", "b/gpt"],
+    })
+    expect((s.overlay as { index: number }).index).toBe(1) // claude-sonnet among 3 claude matches
+    expect((s.overlay as { query: string }).query).toBe("claude")
   })
 
   it("OVERLAY_MOVE no-ops on an empty list", () => {
@@ -1328,6 +1505,42 @@ describe("tuiReducer", () => {
   it("BASH_RESULT no-ops when there is no running bash cell", () => {
     const s0 = base()
     expect(reduce(s0, { type: "BASH_RESULT", output: "x", status: "done" })).toBe(s0)
+  })
+
+  it("id-targeted BASH_APPEND/RESULT fill the matching cell, not the most recent", () => {
+    // Two concurrent runs: a backgrounded one (a) and a fresh foreground one (b).
+    let s = reduce(base(), { type: "BASH_START", command: "a", id: "bash-1" })
+    s = reduce(s, { type: "BASH_BACKGROUND", id: "bash-1" })
+    s = reduce(s, { type: "BASH_START", command: "b", id: "bash-2" })
+    // A late chunk for `a` lands on `a`, even though `b` started later.
+    s = reduce(s, { type: "BASH_APPEND", chunk: "from-a", id: "bash-1" })
+    const a = s.cells.find((c) => c.id === "bash-1")
+    expect(a).toMatchObject({ kind: "bash", output: "from-a", background: true })
+    // `a`'s result settles `a` and clears its background marker; `b` untouched.
+    s = reduce(s, {
+      type: "BASH_RESULT",
+      output: "done-a",
+      status: "done",
+      exitCode: 0,
+      id: "bash-1",
+    })
+    expect(s.cells.find((c) => c.id === "bash-1")).toMatchObject({
+      kind: "bash",
+      status: "done",
+      background: false,
+    })
+    expect(s.cells.find((c) => c.id === "bash-2")).toMatchObject({ status: "running" })
+  })
+
+  it("BASH_BACKGROUND marks a running cell and only a running one", () => {
+    let s = reduce(base(), { type: "BASH_START", command: "srv", id: "bash-1" })
+    s = reduce(s, { type: "BASH_BACKGROUND", id: "bash-1" })
+    expect(s.cells.find((c) => c.id === "bash-1")).toMatchObject({ background: true })
+    // Settled, then a stray BASH_BACKGROUND is a no-op on the now-done cell.
+    s = reduce(s, { type: "BASH_RESULT", output: "x", status: "done", id: "bash-1" })
+    const settled = s.cells.find((c) => c.id === "bash-1")
+    s = reduce(s, { type: "BASH_BACKGROUND", id: "bash-1" })
+    expect(s.cells.find((c) => c.id === "bash-1")).toBe(settled)
   })
 
   it("ACTIVITY_START/PROGRESS/END drive the background activity pill", () => {

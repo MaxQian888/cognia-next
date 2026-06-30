@@ -32,7 +32,7 @@ import {
 } from "../../plugin/plugin-trust"
 import { openDocument } from "./shared"
 import { buildToolsDocument } from "./tool-doc"
-import type { MarketplaceBrowseEntry } from "./marketplace-filter"
+import { annotateInstallState, type MarketplaceBrowseEntry } from "./marketplace-filter"
 import {
   DANGEROUS_PERMISSIONS,
   PERMISSION_DESCRIPTIONS,
@@ -868,8 +868,19 @@ export async function pluginMarketplace(deps: PluginDeps): Promise<void> {
     deps.dispatch({ type: "NOTICE", message: "No plugins found in the configured sources." })
     return
   }
+  // Cross-reference the install provenance (where each installed plugin came
+  // from + its version) with the disabled set so each catalog row can show an
+  // installed / disabled / update badge and offer in-place actions.
+  const origins = getOriginsOf(deps)
+  const disabled = disabledOf(deps)
+  const installed = Object.entries(origins).map(([id, o]) => ({
+    id,
+    repoRef: o.repoRef,
+    version: o.version,
+    enabled: !disabled.has(id),
+  }))
   deps.dispatch({
     type: "OVERLAY_OPEN",
-    overlay: { kind: "marketplace", entries: result.entries },
+    overlay: { kind: "marketplace", entries: annotateInstallState(result.entries, installed) },
   })
 }

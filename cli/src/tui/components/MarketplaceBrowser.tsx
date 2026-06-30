@@ -1,17 +1,23 @@
 /**
  * Interactive plugin-marketplace browser overlay: a live search box + section
- * tabs over the fetched catalog. Owns its query/section/highlight locally (like
- * the historySearch overlay) and reuses `windowList` + `OverlayFooter`; the
- * parent only supplies the cached entries and the select/cancel callbacks.
+ * tabs over the fetched catalog, with install-state badges and in-place actions.
+ * Owns its query/section/highlight locally (like the historySearch overlay) and
+ * reuses `windowList` + `OverlayFooter`; the parent supplies the (already
+ * install-annotated) entries and routes the chosen action.
  *
  * Keys: type to filter · Backspace edits · Tab cycles section · ↑/↓ move ·
- * Enter previews the highlighted entry · Esc closes.
+ * Enter installs (or opens detail if installed) · Ctrl+E enable/disable ·
+ * Ctrl+U update · Ctrl+X uninstall · Esc closes. Single letters stay free for
+ * typeahead, so actions use Ctrl-combos (same convention as the Skills panel).
+ * Rows are clickable (fullscreen `scroll` mode): a click runs the primary action.
  */
-import React, { useState } from "react"
+import React, { useRef, useState } from "react"
 import { Box, Text, useInput } from "ink"
+import type { DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
+import { usePanelClick } from "../input/use-panel-click"
 import { windowList } from "./list-window"
 import { OverlayFooter } from "./OverlayFooter"
 import {
@@ -19,24 +25,41 @@ import {
   filterMarketplace,
   nextSection,
   MARKETPLACE_SECTIONS,
+  type MarketplaceAction,
   type MarketplaceBrowseEntry,
   type MarketplaceSection,
 } from "../runtime/marketplace-filter"
 
 const DEFAULT_MAX_ROWS = 8
-const FOOTER_HINT = "type to search · Tab section · ↑/↓ move · Enter preview · Esc close"
+// Header rows above the list: title + section tabs + search line.
+const HEADER_ROWS = 3
+
+/** The action Enter / a click runs on an entry. */
+function primaryAction(e: MarketplaceBrowseEntry): MarketplaceAction {
+  return e.installed ? "show" : "install"
+}
+
+/** Footer hint, tailored to whether the highlighted entry is installed. */
+function footerHint(e: MarketplaceBrowseEntry | undefined): string {
+  if (e?.installed) {
+    const toggle = e.enabled === false ? "Ctrl+E enable" : "Ctrl+E disable"
+    const update = e.updatable ? " · Ctrl+U update" : ""
+    return `Enter detail · ${toggle}${update} · Ctrl+X uninstall · Tab section · Esc close`
+  }
+  return "Enter install · type search · Tab section · ↑/↓ move · Esc close"
+}
 
 export function MarketplaceBrowser({
   entries,
-  onSelect,
+  onAction,
   onCancel,
   isActive = true,
   maxRows = DEFAULT_MAX_ROWS,
   width,
 }: {
   entries: MarketplaceBrowseEntry[]
-  /** Called with the highlighted entry's install ref on Enter. */
-  onSelect: (installRef: string) => void
+  /** Run the chosen action on an entry (install/show/enable/disable/update/uninstall). */
+  onAction: (entry: MarketplaceBrowseEntry, action: MarketplaceAction) => void
   onCancel: () => void
   isActive?: boolean
   maxRows?: number
@@ -46,16 +69,62 @@ export function MarketplaceBrowser({
   const [query, setQuery] = useState("")
   const [section, setSection] = useState<MarketplaceSection>("all")
   const [index, setIndex] = useState(0)
+  const boxRef = useRef<DOMElement | null>(null)
 
   const filtered = filterMarketplace(entries, query, section)
   const safeIndex = filtered.length > 0 ? Math.min(index, filtered.length - 1) : 0
+  const current = filtered[safeIndex]
+
+  const win = windowList(filtered.length, safeIndex, maxRows)
+  const visible = filtered.slice(win.start, win.end)
+
+  // Mouse (fullscreen `scroll` only): a click runs the row's primary action.
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: HEADER_ROWS,
+    hasAboveMore: win.above > 0,
+    visibleCount: visible.length,
+    onPick: (offset) => {
+      const target = filtered[win.start + offset]
+      if (target) {
+        setIndex(win.start + offset)
+        onAction(target, primaryAction(target))
+      }
+    },
+    onWheel: (dir) =>
+      setIndex((i) =>
+        dir === "up"
+          ? Math.max(0, Math.min(i, filtered.length - 1) - 1)
+          : Math.min(filtered.length - 1, i + 1)
+      ),
+  })
 
   useInput(
     (input, key) => {
-      if (key.escape) return onCancel()
+      if (handleMouse(input)) return
+      if (key.escape) {
+        if (query) {
+          setQuery("")
+          setIndex(0)
+        } else onCancel()
+        return
+      }
       if (key.return) {
-        const e = filtered[safeIndex]
-        if (e) onSelect(e.installRef)
+        if (current) onAction(current, primaryAction(current))
+        return
+      }
+      // Ctrl-combo actions on the highlighted entry (single letters stay free
+      // for typeahead). Enable/disable toggles by current state.
+      if (key.ctrl && (input === "e" || input === "E")) {
+        if (current?.installed) onAction(current, current.enabled === false ? "enable" : "disable")
+        return
+      }
+      if (key.ctrl && (input === "u" || input === "U")) {
+        if (current?.installed && current.updatable) onAction(current, "update")
+        return
+      }
+      if (key.ctrl && (input === "x" || input === "X")) {
+        if (current?.installed) onAction(current, "uninstall")
         return
       }
       if (key.tab) {
@@ -84,11 +153,9 @@ export function MarketplaceBrowser({
     { isActive }
   )
 
-  const win = windowList(filtered.length, safeIndex, maxRows)
-  const visible = filtered.slice(win.start, win.end)
-
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}
@@ -139,7 +206,7 @@ export function MarketplaceBrowser({
           ) : null}
         </>
       )}
-      <OverlayFooter hint={FOOTER_HINT} />
+      <OverlayFooter hint={footerHint(current)} />
     </Box>
   )
 }

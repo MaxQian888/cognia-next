@@ -110,6 +110,9 @@ export interface BashCell {
   output: string
   status: "running" | "done" | "error"
   exitCode?: number
+  /** Moved to the background (Ctrl+B): keeps running but is no longer the
+   * foreground Ctrl+C target. Cleared once the command settles. */
+  background?: boolean
 }
 
 /**
@@ -317,7 +320,11 @@ export type Overlay =
   | { kind: "permission"; req: PermissionRequestEvent; choices: PermissionChoice[]; index: number }
   | { kind: "slash"; query: string; index: number }
   | { kind: "files"; token: string; completions: string[]; index: number }
-  | { kind: "model"; options: string[]; index: number }
+  // `/model` switcher. `options` is the FULL provider catalog; `query` is the
+  // live typeahead filter (the list can run to hundreds of OpenRouter ids), and
+  // `index` points into the FILTERED view, not `options` — so navigation and
+  // selection always track what's on screen.
+  | { kind: "model"; options: string[]; index: number; query: string }
   | { kind: "mode"; options: PermissionMode[]; index: number }
   // Reasoning-effort slider (replaces the old vertical `thinking` list). `off`
   // mirrors the "use model default" checkbox; `index` points into the non-off
@@ -327,7 +334,7 @@ export type Overlay =
   | { kind: "effortSlider"; off: boolean; index: number }
   | { kind: "provider"; options: ProviderOption[]; index: number }
   | { kind: "config"; rows: ConfigMenuRow[]; index: number }
-  | { kind: "sessions"; items: SessionSummary[]; index: number }
+  | { kind: "sessions"; items: SessionSummary[]; index: number; query?: string }
   | { kind: "usage" }
   // Subscription limits/usage panel (`/limits`, alias `/subscription`). Renders
   // Claude-Code-style utilization bars across every configured subscription
@@ -355,12 +362,19 @@ export type Overlay =
   // Generic list overlay any feature can open without touching App per-feature.
   // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`. When
   // `onSelectCommand` is omitted the list is view-only — Enter just closes it.
-  | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand?: string }
+  | {
+      kind: "select"
+      title: string
+      items: SelectItem[]
+      index: number
+      onSelectCommand?: string
+      query?: string
+    }
   // Tool-output inspector (`/inspect`, default Ctrl+G). A picker of every
   // tool/bash/subagent cell that produced output, newest-first; Enter opens the
   // chosen cell's full, syntax-highlighted output in the document pager. Gives
   // the transcript a "jump to any output" affordance without a per-cell cursor.
-  | { kind: "inspect"; items: InspectItem[]; index: number }
+  | { kind: "inspect"; items: InspectItem[]; index: number; query?: string }
   // Scrollable read-only pager. `markdown` bodies are rendered through the
   // Markdown tokenizer; `text` bodies are shown verbatim (optionally syntax-
   // highlighted by `lang`). Used by skill/tool detail and the `/view` file
@@ -436,11 +450,13 @@ export type Overlay =
   // submission resolves the blocked tool call. `request` is the parsed prompt
   // (question + options + flags); the dialog owns its draft (selection + text).
   | { kind: "askUser"; request: AskUserRequest }
-  // `/menu` command center — a curated, clickable index of the most common
-  // actions (mode/model/thinking pickers, settings, mcp, skills, agents, usage,
-  // diff, context…). Each row carries the slash command it runs when picked; the
-  // panel owns its own highlight (no reducer cursor). See `build-quick-actions`.
-  | { kind: "quickActions"; rows: QuickActionRow[] }
+  // `/menu` command center — a searchable, clickable index over the curated
+  // quick actions PLUS every visible registry command (see
+  // `build-command-palette`). Each row carries the slash command it runs when
+  // picked. Reducer-owned cursor + typeahead (`index`/`query`) so it renders
+  // through the shared SelectList like `select`. The list can run to dozens of
+  // commands, so the 🔎 search row is always on.
+  | { kind: "quickActions"; rows: QuickActionRow[]; index: number; query?: string }
 
 /** One row of the `/menu` command center. Picking it runs {@link command}. */
 export interface QuickActionRow {
@@ -659,11 +675,21 @@ export type TuiAction =
   | { type: "COPILOT_SET_PROPOSAL"; proposalId: string }
   | { type: "COPILOT_CLEAR_PROPOSAL" }
   | { type: "COPILOT_MARK_DIRTY" }
-  // Shell-out (`!command`)
-  | { type: "BASH_START"; command: string }
+  // Shell-out (`!command`). `id` targets a specific cell so concurrent runs
+  // (e.g. a backgrounded command + a new foreground one) never cross-fill; when
+  // omitted, the most-recent still-running bash cell is used (legacy callers).
+  | { type: "BASH_START"; command: string; id?: string }
   /** Append streamed output to the running shell cell as the process writes. */
-  | { type: "BASH_APPEND"; chunk: string }
-  | { type: "BASH_RESULT"; output: string; status: "done" | "error"; exitCode?: number }
+  | { type: "BASH_APPEND"; chunk: string; id?: string }
+  | {
+      type: "BASH_RESULT"
+      output: string
+      status: "done" | "error"
+      exitCode?: number
+      id?: string
+    }
+  /** Move a running shell cell to the background (keeps running). */
+  | { type: "BASH_BACKGROUND"; id: string }
   // Cells
   | { type: "TOGGLE_COLLAPSE"; id: string }
   /** Expand every collapsed tool/thinking cell, or collapse them all when none
@@ -711,6 +737,23 @@ export type TuiAction =
   | { type: "OVERLAY_CLOSE" }
   | { type: "OVERLAY_MOVE"; delta: number }
   | { type: "OVERLAY_SET_INDEX"; index: number }
+  // Live-refresh the option list of an open `model` overlay (no-op if a
+  // different overlay is open). Used by the OpenRouter `/model` picker: the
+  // overlay opens instantly with whatever models are cached, then this swaps in
+  // the full real-time `/models` catalog the moment the async sync completes —
+  // so the picker stops looking "stuck" on the static fallback subset.
+  | { type: "OVERLAY_REFRESH_MODEL_OPTIONS"; options: string[] }
+  // Set the `/model` picker's typeahead filter (no-op unless the model overlay
+  // is open). Resets the highlight to the top of the freshly-filtered list.
+  | { type: "OVERLAY_MODEL_QUERY"; query: string }
+  // Set the typeahead filter on a generic searchable overlay (`select`,
+  // `sessions`, `inspect`, `quickActions`). Resets the highlight to the top of
+  // the freshly-filtered list; no-op for any other overlay kind.
+  | { type: "OVERLAY_QUERY"; query: string }
+  // Live-patch one marketplace entry (by installRef) in an open `marketplace`
+  // overlay — used for in-place enable/disable so the badge updates without
+  // closing the browser (no-op if a different overlay is open).
+  | { type: "MARKETPLACE_PATCH_ENTRY"; ref: string; patch: Partial<MarketplaceBrowseEntry> }
   | { type: "FORM_UPDATE"; form: FormOverlayState }
   // Live-patch one MCP server's status/error/toolCount into an open `mcp`
   // overlay as its async probe resolves (no-op if a different overlay is open).

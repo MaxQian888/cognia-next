@@ -478,11 +478,18 @@ function BashView({ cell }: { cell: BashCell }) {
       <Text>
         <Text color={theme.secondary}>! </Text>
         <Text bold>{cell.command}</Text>
-        {cell.status === "running" ? <Text color={theme.statusRunning}> …</Text> : null}
+        {cell.status === "running" ? (
+          <Text color={theme.statusRunning}> {cell.background ? "(background) …" : "…"}</Text>
+        ) : null}
       </Text>
       {cell.output ? (
         <Text color={color} dimColor>
           {cell.output}
+        </Text>
+      ) : null}
+      {cell.status === "running" && !cell.background ? (
+        <Text color={theme.muted} dimColor>
+          Ctrl+C kill · Ctrl+B background
         </Text>
       ) : null}
     </Box>

@@ -360,6 +360,44 @@ describe("CellView", () => {
     expect(renderCell({ id: "1", kind: "notice", message: "fyi" })).toContain("fyi")
   })
 
+  it("renders a running bash cell with the kill/background hint", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "bash",
+      command: "npm run dev",
+      output: "listening",
+      status: "running",
+    })
+    expect(text).toContain("npm run dev")
+    expect(text).toContain("Ctrl+C kill")
+    expect(text).toContain("Ctrl+B background")
+  })
+
+  it("labels a backgrounded bash cell and drops the kill hint", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "bash",
+      command: "npm run dev",
+      output: "",
+      status: "running",
+      background: true,
+    })
+    expect(text).toContain("(background)")
+    expect(text).not.toContain("Ctrl+C kill")
+  })
+
+  it("shows no hint once a bash cell has settled", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "bash",
+      command: "ls",
+      output: "a\nb",
+      status: "done",
+      exitCode: 0,
+    })
+    expect(text).not.toContain("Ctrl+C kill")
+  })
+
   describe("clickable file paths (OSC-8)", () => {
     const ORIG = { ...process.env }
     afterEach(() => {

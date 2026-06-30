@@ -103,6 +103,100 @@ describe("SelectList", () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 
+  describe("searchable (typeahead)", () => {
+    it("renders the search line with a placeholder while the query is empty", () => {
+      const { container } = render(
+        <SelectList
+          items={items}
+          index={0}
+          query=""
+          onQueryChange={() => {}}
+          searchPlaceholder="type to filter models"
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("🔎")
+      expect(text).toContain("type to filter models")
+    })
+
+    it("shows the current query instead of the placeholder", () => {
+      const { container } = render(
+        <SelectList
+          items={items}
+          index={0}
+          query="opus"
+          onQueryChange={() => {}}
+          searchPlaceholder="type to filter models"
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("opus")
+      expect(text).not.toContain("type to filter models")
+    })
+
+    it("appends printable keys and trims on backspace", () => {
+      const onQueryChange = jest.fn()
+      render(
+        <SelectList
+          items={items}
+          index={0}
+          query="op"
+          onQueryChange={onQueryChange}
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      __fireInput("u", {})
+      expect(onQueryChange).toHaveBeenLastCalledWith("opu")
+      __fireInput("", { backspace: true })
+      expect(onQueryChange).toHaveBeenLastCalledWith("o")
+    })
+
+    it("keeps arrows/Enter/Esc as list controls (not typed into the query)", () => {
+      const onMove = jest.fn()
+      const onSelect = jest.fn()
+      const onCancel = jest.fn()
+      const onQueryChange = jest.fn()
+      render(
+        <SelectList
+          items={items}
+          index={0}
+          query=""
+          onQueryChange={onQueryChange}
+          onMove={onMove}
+          onSelect={onSelect}
+          onCancel={onCancel}
+        />
+      )
+      __fireInput("", { downArrow: true })
+      __fireInput("", { return: true })
+      __fireInput("", { escape: true })
+      expect(onMove).toHaveBeenCalledWith(1)
+      expect(onSelect).toHaveBeenCalledWith(0)
+      expect(onCancel).toHaveBeenCalled()
+      expect(onQueryChange).not.toHaveBeenCalled()
+    })
+
+    it("shows the empty hint when a search filters everything out", () => {
+      const { container } = render(
+        <SelectList
+          items={[]}
+          index={0}
+          query="zzz"
+          onQueryChange={() => {}}
+          emptyHint="no models match"
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      expect(container.textContent ?? "").toContain("no models match")
+    })
+  })
+
   it("windows a long list around the selection with scroll hints", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ label: `Item ${i}` }))
     const { container } = render(

@@ -49,6 +49,13 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     handler: () => ({ kind: "gitDiff" }),
   },
   {
+    name: "analyze",
+    aliases: ["debug"],
+    description: "ask the agent to diagnose the last failed !command",
+    category: "system",
+    handler: () => ({ kind: "analyzeBash" }),
+  },
+  {
     name: "export",
     description: "export this session to a file",
     category: "session",

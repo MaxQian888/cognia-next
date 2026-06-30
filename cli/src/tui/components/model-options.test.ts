@@ -2,11 +2,17 @@
  * @jest-environment node
  */
 import { catalogModelIds } from "@/lib/ai/model-options"
+import {
+  primeOpenRouterCatalogCache,
+  __resetOpenRouterCatalogCacheForTesting,
+} from "@cognia/provider-core/providers/openrouter-catalog-sync"
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 
 import { collectModelOptions, formatModelOptionLabel, modelInfoHint } from "./model-options"
+
+afterEach(() => __resetOpenRouterCatalogCacheForTesting())
 
 const base = (over: Partial<ResolvedConfig>): ResolvedConfig => ({
   ...DEFAULT_RESOLVED_CONFIG,
@@ -72,6 +78,32 @@ describe("collectModelOptions", () => {
     expect(list.filter((m) => m === active)).toHaveLength(1)
     expect(list[0]).toBe(active)
   })
+
+  it("folds the synced OpenRouter catalog into the openrouter picker", () => {
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      models: [
+        { id: "anthropic/claude-sonnet-4.5", name: "Claude Sonnet 4.5" },
+        { id: "openai/gpt-5", name: "GPT-5" },
+      ],
+    })
+    const list = collectModelOptions(base({ provider: "openrouter", providers: {} }))
+    expect(list).toContain("anthropic/claude-sonnet-4.5")
+    expect(list).toContain("openai/gpt-5")
+  })
+
+  it("does not leak the OpenRouter catalog into a non-openrouter provider", () => {
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      models: [{ id: "openai/gpt-5", name: "GPT-5" }],
+    })
+    const list = collectModelOptions(base({ provider: "anthropic", providers: {} }))
+    expect(list).not.toContain("openai/gpt-5")
+  })
 })
 
 describe("formatModelOptionLabel", () => {
@@ -106,5 +138,26 @@ describe("modelInfoHint", () => {
 
   it("returns undefined for an unknown provider", () => {
     expect(modelInfoHint("anything", "no-such-provider")).toBeUndefined()
+  })
+
+  it("enriches an OpenRouter catalog model the static subset doesn't carry", () => {
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      models: [
+        {
+          id: "x-ai/grok-4",
+          name: "Grok 4",
+          contextLength: 256000,
+          supportsTools: true,
+          supportsVision: true,
+        },
+      ],
+    })
+    const hint = modelInfoHint("x-ai/grok-4", "openrouter")
+    expect(hint).toMatch(/K|M/)
+    expect(hint).toContain("tools")
+    expect(hint).toContain("vision")
   })
 })

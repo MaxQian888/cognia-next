@@ -10,6 +10,13 @@
  * the visual order (text → tool → text → …) faithful to arrival order.
  */
 import { emptyInputState } from "./initial"
+import { filterByQuery } from "../components/select-list-state"
+import {
+  filterInspectItems,
+  filterQuickActions,
+  filterSelectItems,
+  filterSessionItems,
+} from "./overlay-search"
 import { isTodoTool, parseTodos } from "../format/tools"
 import { formatCompactBoundary } from "../format/compaction"
 import {
@@ -60,6 +67,22 @@ import {
 
 function makeId(seq: number): string {
   return `c${seq}`
+}
+
+/**
+ * Locate the bash cell a streamed-output action targets. With an `id`, find that
+ * exact cell (running or not); without one, fall back to the most recent
+ * still-running bash cell (legacy behaviour for callers that don't pass ids).
+ */
+function bashCellIndex(cells: Cell[], id: string | undefined): number {
+  if (id !== undefined) {
+    return cells.findIndex((c) => c.id === id && c.kind === "bash")
+  }
+  for (let i = cells.length - 1; i >= 0; i--) {
+    const c = cells[i]
+    if (c.kind === "bash" && c.status === "running") return i
+  }
+  return -1
 }
 
 /** Index of the last user-message cell, or null when there are none. */
@@ -225,6 +248,10 @@ function overlayLength(overlay: Overlay): number | null {
     case "permission":
       return overlay.choices.length
     case "model":
+      // The `/model` overlay navigates the FILTERED view, so its length must
+      // reflect the active typeahead query (else OVERLAY_MOVE/SET_INDEX would
+      // range over hidden rows and the highlight could land off-screen).
+      return filterByQuery(overlay.options, overlay.query).length
     case "mode":
     case "provider":
       return overlay.options.length
@@ -235,11 +262,15 @@ function overlayLength(overlay: Overlay): number | null {
     case "settings":
       return overlay.sections[overlay.section]?.rows.length ?? 0
     case "sessions":
-      return overlay.items.length
+      // Searchable overlays navigate the FILTERED view (same reason as `model`),
+      // so the length must reflect the active typeahead query.
+      return filterSessionItems(overlay.items, overlay.query ?? "").length
     case "select":
-      return overlay.items.length
+      return filterSelectItems(overlay.items, overlay.query ?? "").length
     case "inspect":
-      return overlay.items.length
+      return filterInspectItems(overlay.items, overlay.query ?? "").length
+    case "quickActions":
+      return filterQuickActions(overlay.rows, overlay.query ?? "").length
     case "files":
       return overlay.completions.length
     case "plan":
@@ -725,7 +756,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         cells: [
           ...state.cells,
           {
-            id: makeId(state.seq),
+            id: action.id ?? makeId(state.seq),
             kind: "bash",
             command: action.command,
             output: "",
@@ -735,17 +766,11 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         seq: state.seq + 1,
       }
     case "BASH_APPEND": {
-      // Stream a chunk into the most recent still-running bash cell so output
-      // appears live (the fullscreen transcript re-renders in place). A no-op if
-      // no bash cell is running (the result already landed).
-      let idx = -1
-      for (let i = state.cells.length - 1; i >= 0; i--) {
-        const c = state.cells[i]
-        if (c.kind === "bash" && c.status === "running") {
-          idx = i
-          break
-        }
-      }
+      // Stream a chunk into the target bash cell so output appears live (the
+      // fullscreen transcript re-renders in place). With an `id`, target that
+      // cell exactly; otherwise the most recent still-running one. A no-op when
+      // the cell is gone / already settled (the result already landed).
+      const idx = bashCellIndex(state.cells, action.id)
       if (idx < 0) return state
       const updated = [...state.cells]
       const cell = updated[idx] as Extract<Cell, { kind: "bash" }>
@@ -753,23 +778,26 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return { ...state, cells: updated }
     }
     case "BASH_RESULT": {
-      // Fill the most recent still-running bash cell.
-      let idx = -1
-      for (let i = state.cells.length - 1; i >= 0; i--) {
-        const c = state.cells[i]
-        if (c.kind === "bash" && c.status === "running") {
-          idx = i
-          break
-        }
-      }
+      const idx = bashCellIndex(state.cells, action.id)
       if (idx < 0) return state
       const updated = [...state.cells]
       updated[idx] = {
         ...(updated[idx] as Extract<Cell, { kind: "bash" }>),
         output: action.output,
         status: action.status,
+        // The command has settled — drop the background marker so the cell
+        // renders as a plain done/error result.
+        background: false,
         ...(action.exitCode !== undefined ? { exitCode: action.exitCode } : {}),
       }
+      return { ...state, cells: updated }
+    }
+    case "BASH_BACKGROUND": {
+      const updated = state.cells.map((c) =>
+        c.id === action.id && c.kind === "bash" && c.status === "running"
+          ? { ...c, background: true }
+          : c
+      )
       return { ...state, cells: updated }
     }
 
@@ -1062,6 +1090,45 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       if (len === null) return state
       const clamped = Math.max(0, Math.min(action.index, len - 1))
       return { ...state, overlay: withOverlayIndex(state.overlay, clamped) }
+    }
+    case "OVERLAY_REFRESH_MODEL_OPTIONS": {
+      // Only applies while the model picker is the active overlay (a close /
+      // other-open between dispatch and resolve silently drops it). Keep the
+      // current selection if its id survives the refresh, else clamp to range.
+      if (state.overlay.kind !== "model") return state
+      if (action.options.length === 0) return state
+      const { query } = state.overlay
+      // `index` points into the filtered view, so resolve the selected id there
+      // and re-find it within the freshly-filtered new catalog.
+      const currentId = filterByQuery(state.overlay.options, query)[state.overlay.index]
+      const nextIndex = Math.max(0, filterByQuery(action.options, query).indexOf(currentId))
+      return {
+        ...state,
+        overlay: { kind: "model", options: action.options, index: nextIndex, query },
+      }
+    }
+    case "OVERLAY_MODEL_QUERY": {
+      if (state.overlay.kind !== "model") return state
+      // Reset the highlight to the top of the freshly-filtered list — a typeahead
+      // refinement should land on the best (first) match, not a stale row index.
+      return { ...state, overlay: { ...state.overlay, query: action.query, index: 0 } }
+    }
+    case "OVERLAY_QUERY": {
+      // Generic typeahead for the searchable reducer-owned overlays. Reset the
+      // highlight to the top of the freshly-filtered list (best match first).
+      const k = state.overlay.kind
+      if (k !== "select" && k !== "sessions" && k !== "inspect" && k !== "quickActions")
+        return state
+      return { ...state, overlay: { ...state.overlay, query: action.query, index: 0 } }
+    }
+    case "MARKETPLACE_PATCH_ENTRY": {
+      // Live status from an in-place plugin action (enable/disable) — only applies
+      // while the marketplace browser is the active overlay.
+      if (state.overlay.kind !== "marketplace") return state
+      const entries = state.overlay.entries.map((e) =>
+        e.installRef === action.ref ? { ...e, ...action.patch } : e
+      )
+      return { ...state, overlay: { kind: "marketplace", entries } }
     }
     case "FORM_UPDATE":
       if (state.overlay.kind !== "form") return state

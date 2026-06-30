@@ -31,7 +31,6 @@ import { outputStyleCommand } from "./output-style-command"
 import { agentModeCommand } from "./agent-mode-command"
 import { layoutCommand } from "./layout-command"
 import { mouseCommand } from "./mouse-command"
-import { menuCommand } from "./menu-command"
 import { editorCommands } from "./editor-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
@@ -88,7 +87,7 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
           message: "No models configured. Set one with `cognia-agent config set model <id>`.",
         }
       }
-      return { kind: "openOverlay", overlay: { kind: "model", options, index: 0 } }
+      return { kind: "openOverlay", overlay: { kind: "model", options, index: 0, query: "" } }
     },
   },
   {
@@ -131,7 +130,6 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   agentModeCommand,
   layoutCommand,
   mouseCommand,
-  menuCommand,
   ...editorCommands,
   {
     name: "retry",

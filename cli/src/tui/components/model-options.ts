@@ -9,8 +9,17 @@
  */
 import { catalogModelIds, resolveModelDisplayName } from "@/lib/ai/model-options"
 import { PROVIDERS } from "@cognia/provider-types/provider"
+import type { ProviderModelDiscoveryEntry } from "@cognia/provider-types/provider"
+import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
 
 import type { ResolvedConfig } from "../../config/schema"
+
+/** Synced OpenRouter catalog entry for `modelId`, from the primed in-memory cache
+ * (populated at TUI boot by the openrouter-catalog controller). Used to enrich a
+ * `/model` row whose id the static `PROVIDERS.openrouter` subset doesn't carry. */
+function openRouterCatalogEntry(modelId: string): ProviderModelDiscoveryEntry | undefined {
+  return getCachedOpenRouterCatalogModels().find((m) => m.id === modelId)
+}
 
 /**
  * Friendly label for one `/model` row: "<display name> · <id>" when the shared
@@ -40,7 +49,12 @@ function formatContextWindow(tokens: number): string {
  * the id (custom / discovered ids), so the row falls back to just its label.
  */
 export function modelInfoHint(modelId: string, providerId: string): string | undefined {
-  const m = PROVIDERS[providerId]?.models?.find((x) => x.id === modelId)
+  // The static catalog is the primary metadata source; for OpenRouter, whose
+  // full list comes from the synced catalog, fall back to the catalog entry so a
+  // live-synced model still shows its context window + capabilities.
+  const m =
+    PROVIDERS[providerId]?.models?.find((x) => x.id === modelId) ??
+    (providerId === "openrouter" ? openRouterCatalogEntry(modelId) : undefined)
   if (!m) return undefined
   const parts: string[] = []
   if (typeof m.contextLength === "number" && m.contextLength > 0) {
@@ -70,6 +84,13 @@ export function collectModelOptions(config: ResolvedConfig): string[] {
   // stops a stale top-level pin (or another provider's model) from leaking in.
   add(config.providers[config.provider]?.model)
   for (const id of catalogModelIds(config.provider)) add(id)
+  // OpenRouter's full real-time list lives in the synced catalog (Dexie v93,
+  // shared with the GUI and primed at TUI boot), not the static `PROVIDERS`
+  // subset — fold every catalogued id in so `/model` reflects the live `/models`
+  // list. Empty until the first sync, so it degrades to the curated subset above.
+  if (config.provider === "openrouter") {
+    for (const m of getCachedOpenRouterCatalogModels()) add(m.id)
+  }
   // Uncatalogued provider with no per-provider memory: the legacy top-level
   // model is all we know — surface it so an enabled provider never renders an
   // empty list. (Matches `resolveActiveModel`'s last-resort fallback.)
