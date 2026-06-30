@@ -574,9 +574,12 @@ describe("TerminalInstance", () => {
       cb!({ kind: "command_end", exit_code: 1 }) // failed → red
     })
     expect(painted).toHaveLength(2)
-    // Running marker: neutral colour, thin, and crucially row-height (not 100%).
+    // Running marker: neutral colour, and crucially row-height (not 100%).
+    // The "command actions" feature defaults on, so the tick is interactive
+    // (5px, pointer-events auto) — clicking opens the command menu.
     expect(painted[0]!.backgroundColor).toBe("#a1a1aa")
-    expect(painted[0]!.width).toBe("3px")
+    expect(painted[0]!.width).toBe("5px")
+    expect(painted[0]!.pointerEvents).toBe("auto")
     expect(painted[0]!.height).not.toBe("100%")
     expect(painted[0]!.height).toBe("17px") // xterm's per-row height is preserved
     // Recoloured marker after a non-zero exit.

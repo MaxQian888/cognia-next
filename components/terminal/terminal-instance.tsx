@@ -70,6 +70,10 @@ import { TerminalBackpressure } from "@/lib/terminal/backpressure"
 import { findColorScheme, resolveTerminalTheme } from "@/lib/terminal/color-schemes"
 import type { TerminalTheme } from "@/lib/terminal/color-schemes"
 import { exitMarkerColor, nextMarkerLine, prevMarkerLine } from "@/lib/terminal/command-markers"
+import { joinOutput, readBufferRange } from "@/lib/terminal/command-output"
+import { evaluateQuickFixes } from "@/lib/terminal/quick-fix/evaluate"
+import type { QuickFixAction } from "@/lib/terminal/quick-fix/matchers"
+import { shouldShowSticky, stickyCommandFor } from "@/lib/terminal/sticky-scroll"
 import { getLiveSession } from "@/lib/terminal/session-registry"
 import { matchFileLinks, resolveLinkPath } from "@/lib/terminal/terminal-links"
 import type { IntegrationEvent } from "@/lib/terminal/types"
@@ -77,8 +81,11 @@ import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalAutocomplete } from "@/hooks/terminal/use-terminal-autocomplete"
+import { TerminalCommandMenu } from "@/components/terminal/terminal-command-menu"
 import { TerminalCompletionPopup } from "@/components/terminal/terminal-completion-popup"
 import { TerminalGhostText } from "@/components/terminal/terminal-ghost-text"
+import { TerminalQuickFix } from "@/components/terminal/terminal-quick-fix"
+import { TerminalStickyScroll } from "@/components/terminal/terminal-sticky-scroll"
 
 /**
  * DEL (0x7f) — what xterm emits for Backspace and what readline/PSReadLine
@@ -127,24 +134,40 @@ interface CommandMarkerEntry {
   marker: IMarker
   decoration: IDecoration | undefined
   exitCode: number | null
+  /** Marker at the row after the command's output (bounds output extraction). */
+  endMarker: IMarker | undefined
+  /** Authoritative command line (keystroke capture via the store's ring). */
+  commandLine: string
+  /** ms-since-epoch when the command started / ended (for the duration header). */
+  startedAt: number
+  endedAt: number | null
+  /** Quick-fix actions resolved at command_end (VS Code parity). */
+  quickFixes: QuickFixAction[]
 }
 
-/** Paint a gutter bar for a command marker, coloured by exit state. */
-function paintMarkerDecoration(decoration: IDecoration | undefined, exitCode: number | null) {
-  if (!decoration || typeof decoration.onRender !== "function") return
-  const color = exitMarkerColor(exitCode)
-  decoration.onRender((el) => {
-    // xterm already positions the element at the command's start row and
-    // sizes it to a single cell-row (inline `top` + `height`). Only restyle
-    // the cosmetics here. Do NOT set `height: 100%`: that stretches every
-    // marker from its row to the bottom of the viewport, so with `left: 0`
-    // they stack and overlap into one solid bar down the left edge instead
-    // of a per-command gutter tick.
-    el.style.left = "0"
-    el.style.width = "3px"
-    el.style.backgroundColor = color
-    el.style.pointerEvents = "none"
-  })
+/** Snapshot of a command needed to render the command-actions menu. */
+interface CommandMenuState {
+  left: number
+  top: number
+  commandLine: string
+  exitCode: number | null
+  durationMs: number | null
+  output: string
+}
+
+/** Active quick-fix lightbulb (most recent fixable command), anchored at the cursor. */
+interface QuickFixState {
+  actions: QuickFixAction[]
+  left: number
+  top: number
+}
+
+/** Pinned sticky-scroll header. */
+interface StickyState {
+  text: string
+  line: number
+  background: string
+  foreground: string
 }
 
 /** Minimal xterm surface used to scroll between command markers. */
@@ -328,6 +351,19 @@ function TerminalInstanceImpl(
       (s.settings?.terminal as { renderer?: "auto" | "webgl" | "canvas" | "dom" } | undefined)
         ?.renderer ?? "auto"
   )
+  // VS Code-parity feature switches (all default on). Read inside the xterm
+  // setup-effect closures through refs so toggling them never forces a remount
+  // (same pattern as `copyOnSelect`); the effect below keeps the refs current.
+  const quickFixesEnabled = useSettingsStore(
+    (s) => (s.settings?.terminal as { quickFixes?: boolean } | undefined)?.quickFixes ?? true
+  )
+  const commandActionsEnabled = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { commandActions?: boolean } | undefined)?.commandActions ?? true
+  )
+  const stickyScrollEnabled = useSettingsStore(
+    (s) => (s.settings?.terminal as { stickyScroll?: boolean } | undefined)?.stickyScroll ?? true
+  )
 
   const fontFamily =
     fontFamilyProp ??
@@ -352,6 +388,58 @@ function TerminalInstanceImpl(
     acRef.current = autocomplete
   })
   const [ghostPos, setGhostPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 })
+
+  // VS Code-parity overlays. State lives here (rendered in JSX); the xterm
+  // setup-effect closures drive them via the setters + the feature refs below.
+  const [commandMenu, setCommandMenu] = useState<CommandMenuState | null>(null)
+  const [quickFix, setQuickFix] = useState<QuickFixState | null>(null)
+  const [quickFixOpen, setQuickFixOpen] = useState(false)
+  const [sticky, setSticky] = useState<StickyState | null>(null)
+
+  const quickFixesRef = useRef(quickFixesEnabled)
+  const commandActionsRef = useRef(commandActionsEnabled)
+  const stickyScrollRef = useRef(stickyScrollEnabled)
+  useEffect(() => {
+    quickFixesRef.current = quickFixesEnabled
+    commandActionsRef.current = commandActionsEnabled
+    stickyScrollRef.current = stickyScrollEnabled
+  })
+  // NB: no "clear on toggle-off" effect — each overlay is render-gated on its
+  // setting in the JSX below, so flipping a feature off hides it immediately
+  // without a setState-in-effect cascade. The in-memory state is refreshed on
+  // the next scroll / command when the feature is turned back on.
+
+  // Clipboard write shared by the command-menu copy actions. Best-effort —
+  // a denied/absent clipboard must never throw into the menu handlers.
+  const copyText = async (text: string): Promise<void> => {
+    try {
+      if (text && navigator.clipboard) await navigator.clipboard.writeText(text)
+    } catch {
+      /* noop */
+    }
+  }
+
+  // Dispatch a chosen quick-fix action. `run-command` writes into the PTY
+  // (auto-running only when the matcher set `addNewLine`); `open-url` reuses
+  // the OSC 8 allowlist; `kill-port` frees the port via the Tauri command then
+  // re-runs the original command (VS Code's free-port behaviour).
+  const runQuickFix = async (action: QuickFixAction): Promise<void> => {
+    try {
+      if (action.type === "run-command") {
+        const s = getLiveSession(sessionId)
+        if (s) void s.write(action.command + (action.addNewLine ? "\r" : ""))
+      } else if (action.type === "open-url") {
+        openExternalLink(action.url)
+      } else if (action.type === "kill-port") {
+        const { invoke } = await import("@tauri-apps/api/core")
+        await invoke("terminal_kill_port", { port: action.port })
+        const s = getLiveSession(sessionId)
+        if (s) void s.write(action.command + "\r")
+      }
+    } catch {
+      // Best-effort — a quick fix must never break the terminal.
+    }
+  }
 
   // Re-anchor the ghost text / popup to the cursor whenever the suffix or
   // popup state changes (covers both keystroke-driven and async-resolved
@@ -608,6 +696,14 @@ function TerminalInstanceImpl(
           applyZoom()
           return false
         }
+        // Ctrl/Cmd+. opens the quick-fix menu for the most recent fixable
+        // command (VS Code's quick-fix shortcut). No-op when no bulb is active.
+        if (mod && !e.shiftKey && e.key === ".") {
+          if (quickFixesRef.current) {
+            setQuickFixOpen(true)
+            return false
+          }
+        }
         if (mod && e.shiftKey && (e.key === "C" || e.key === "c")) {
           const sel = term.getSelection()
           if (sel && navigator.clipboard) {
@@ -736,10 +832,129 @@ function TerminalInstanceImpl(
         acRef.current.feed(text)
       })
 
-      // OSC 633 command markers (1B). Register a marker + gutter decoration
-      // at command_start; recolour it by exit code on command_end. The
-      // store still receives the same events (via spawn-orchestrator) for
-      // the history rail — this listener only owns the in-terminal gutter.
+      // Absolute-buffer-line text reader for output extraction + sticky scroll.
+      const readBufferLine = (line: number): string | null => {
+        try {
+          return term.buffer?.active?.getLine?.(line)?.translateToString(true) ?? null
+        } catch {
+          return null
+        }
+      }
+
+      // Output rows captured between a command's start marker (output begins
+      // here per OSC 633 `C`) and its end marker (the row after output, OSC 633
+      // `D`), falling back to the live cursor row. VS Code's getOutput.
+      const captureOutput = (entry: CommandMarkerEntry): string => {
+        let start: number
+        try {
+          start = entry.marker.line
+        } catch {
+          return ""
+        }
+        const active = term.buffer?.active
+        const fallbackEnd = (active?.baseY ?? 0) + (active?.cursorY ?? 0)
+        let end = fallbackEnd
+        if (entry.endMarker) {
+          try {
+            end = entry.endMarker.line
+          } catch {
+            end = fallbackEnd
+          }
+        }
+        return joinOutput(readBufferRange(readBufferLine, start, end))
+      }
+
+      // Open the command-actions menu anchored to a command's gutter tick.
+      const openCommandMenu = (entry: CommandMarkerEntry, el: HTMLElement): void => {
+        if (!commandActionsRef.current) return
+        const containerRect = container.getBoundingClientRect()
+        const rect = el.getBoundingClientRect()
+        const left = Math.min(
+          Math.max(0, rect.left - containerRect.left + 6),
+          Math.max(0, container.clientWidth - 248)
+        )
+        const top = Math.max(0, rect.top - containerRect.top)
+        setCommandMenu({
+          left,
+          top,
+          commandLine: entry.commandLine,
+          exitCode: entry.exitCode,
+          durationMs: entry.endedAt != null ? entry.endedAt - entry.startedAt : null,
+          output: captureOutput(entry),
+        })
+      }
+
+      // OSC 633 command markers (1B). Register a marker + gutter decoration at
+      // command_start; recolour it on command_end. With the "command actions"
+      // feature on, the tick becomes click-to-open the command menu. The store
+      // still receives the same events (via spawn-orchestrator) for the history
+      // rail — this listener only owns the in-terminal gutter + overlays.
+      const decorate = (entry: CommandMarkerEntry): void => {
+        const decoration = term.registerDecoration?.({ marker: entry.marker })
+        entry.decoration = decoration
+        if (!decoration || typeof decoration.onRender !== "function") return
+        decoration.onRender((el: HTMLElement) => {
+          // xterm positions + sizes the element at the marker row; only restyle
+          // cosmetics. Never set height:100% (it stacks every tick into one bar
+          // down the left edge instead of a per-command gutter mark).
+          el.style.left = "0"
+          el.style.backgroundColor = exitMarkerColor(entry.exitCode)
+          if (commandActionsRef.current) {
+            el.style.width = "5px"
+            el.style.cursor = "pointer"
+            el.style.pointerEvents = "auto"
+            el.title = t("commandMenu.trigger")
+            el.onclick = (ev) => {
+              ev.stopPropagation()
+              openCommandMenu(entry, el)
+            }
+          } else {
+            el.style.width = "3px"
+            el.style.pointerEvents = "none"
+            el.onclick = null
+          }
+        })
+      }
+
+      // Sticky scroll: pin the prompt row of the command whose output the
+      // viewport is currently inside. The start marker sits at output-start, so
+      // the prompt+command line is the row immediately above it.
+      const recomputeSticky = (): void => {
+        if (!stickyScrollRef.current) {
+          setSticky(null)
+          return
+        }
+        const active = term.buffer?.active
+        if (!active) return
+        const viewportTop = active.viewportY ?? 0
+        const headerLines: number[] = []
+        for (const entry of markersRef.current) {
+          try {
+            const header = entry.marker.line - 1
+            if (header >= 0) headerLines.push(header)
+          } catch {
+            // disposed marker — skip
+          }
+        }
+        const pinned = stickyCommandFor(headerLines, viewportTop)
+        if (!shouldShowSticky(pinned, viewportTop)) {
+          setSticky(null)
+          return
+        }
+        const text = readBufferLine(pinned as number) ?? ""
+        if (!text.trim()) {
+          setSticky(null)
+          return
+        }
+        const theme = term.options?.theme ?? {}
+        setSticky({
+          text,
+          line: pinned as number,
+          background: theme.background ?? "#000000",
+          foreground: theme.foreground ?? "#ffffff",
+        })
+      }
+
       const offIntegration = session.onIntegration((ev: IntegrationEvent) => {
         // A fresh prompt or a submitted command means the previous input
         // line is gone — reset the autocomplete line model so a stale ghost
@@ -748,24 +963,72 @@ function TerminalInstanceImpl(
           acRef.current.reset()
         }
         if (ev.kind === "command_start") {
+          // A new command invalidates the prior command's quick-fix bulb and
+          // any open command menu.
+          setQuickFix(null)
+          setQuickFixOpen(false)
+          setCommandMenu(null)
           const marker = term.registerMarker?.()
           if (!marker) return
-          const decoration = term.registerDecoration?.({ marker })
-          paintMarkerDecoration(decoration, null)
-          markersRef.current.push({ marker, decoration, exitCode: null })
+          const entry: CommandMarkerEntry = {
+            marker,
+            decoration: undefined,
+            exitCode: null,
+            endMarker: undefined,
+            commandLine: "",
+            startedAt: Date.now(),
+            endedAt: null,
+            quickFixes: [],
+          }
+          markersRef.current.push(entry)
+          decorate(entry)
         } else if (ev.kind === "command_end") {
           for (let i = markersRef.current.length - 1; i >= 0; i--) {
             const entry = markersRef.current[i]
-            if (entry.exitCode === null) {
-              entry.exitCode = ev.exit_code
-              // xterm decorations expose no recolour API — recreate it.
-              entry.decoration?.dispose()
-              entry.decoration = term.registerDecoration?.({ marker: entry.marker })
-              paintMarkerDecoration(entry.decoration, ev.exit_code)
-              break
+            // `endedAt` (not exitCode) marks the running command — a shell may
+            // legitimately report a null exit code without re-matching it.
+            if (entry.endedAt !== null) continue
+            entry.exitCode = ev.exit_code
+            entry.endedAt = Date.now()
+            // Bound the command's output for copy / quick-fix extraction.
+            entry.endMarker = term.registerMarker?.() ?? undefined
+            // Authoritative command line: spawn-orchestrator's wiring listener
+            // is registered before this one (at spawn / rehydrate, ahead of
+            // mount), so the freshly-pushed ring record is this command.
+            const ring = useTerminalStore.getState().sessions[sessionId]?.lastCommands
+            entry.commandLine = ring && ring.length > 0 ? ring[ring.length - 1].cmd : ""
+            // Recolour the tick (xterm has no recolour API → recreate).
+            entry.decoration?.dispose()
+            decorate(entry)
+            // Quick fixes (VS Code parity) — only when an exit code is known.
+            if (quickFixesRef.current && ev.exit_code !== null) {
+              const output = captureOutput(entry)
+              const outputLines = output.length > 0 ? output.split("\n") : []
+              const actions = evaluateQuickFixes({
+                commandLine: entry.commandLine,
+                outputLines,
+                exitCode: ev.exit_code,
+              })
+              entry.quickFixes = actions
+              if (actions.length > 0) {
+                const pos = cursorPixelPosition(term) ?? { left: 8, top: 8 }
+                setQuickFix({ actions, left: pos.left, top: pos.top })
+                setQuickFixOpen(false)
+              } else {
+                setQuickFix(null)
+              }
             }
+            break
           }
         }
+      })
+
+      // Sticky-scroll recompute on scroll; a scroll also invalidates a command
+      // menu anchored to a now-moved gutter tick. `onScroll` is guarded — the
+      // DOM renderer / test fakes may not expose it.
+      const offScroll: { dispose: () => void } | undefined = term.onScroll?.(() => {
+        setCommandMenu(null)
+        recomputeSticky()
       })
 
       // File-path / error links (1D). Clickable `path:line:col` tokens open
@@ -835,6 +1098,11 @@ function TerminalInstanceImpl(
         offData()
         offIntegration()
         try {
+          offScroll?.dispose()
+        } catch {
+          /* noop */
+        }
+        try {
           linkDisposable?.dispose?.()
         } catch {
           /* noop */
@@ -850,8 +1118,19 @@ function TerminalInstanceImpl(
           } catch {
             /* noop */
           }
+          try {
+            entry.endMarker?.dispose()
+          } catch {
+            /* noop */
+          }
         }
         markersRef.current = []
+        // Drop overlays from the torn-down session so the next session (on a
+        // sessionId change) doesn't briefly show stale state.
+        setCommandMenu(null)
+        setQuickFix(null)
+        setQuickFixOpen(false)
+        setSticky(null)
         ro.disconnect()
         themeObserver.disconnect()
         bp.dispose()
@@ -979,6 +1258,54 @@ function TerminalInstanceImpl(
               }
             }
           }}
+        />
+      ) : null}
+      {stickyScrollEnabled && sticky ? (
+        <TerminalStickyScroll
+          text={sticky.text}
+          fontFamily={fontFamily}
+          fontSize={fontSize}
+          background={sticky.background}
+          foreground={sticky.foreground}
+          onClick={() => {
+            try {
+              termRef.current?.scrollToLine?.(sticky.line)
+            } catch {
+              /* noop */
+            }
+          }}
+        />
+      ) : null}
+      {commandActionsEnabled && commandMenu ? (
+        <TerminalCommandMenu
+          commandLine={commandMenu.commandLine}
+          exitCode={commandMenu.exitCode}
+          durationMs={commandMenu.durationMs}
+          hasOutput={commandMenu.output.trim().length > 0}
+          left={commandMenu.left}
+          top={commandMenu.top}
+          onRerun={() => {
+            const session = getLiveSession(sessionId)
+            if (session && commandMenu.commandLine.trim()) {
+              void session.write(commandMenu.commandLine + "\r")
+            }
+          }}
+          onCopyCommand={() => void copyText(commandMenu.commandLine)}
+          onCopyOutput={() => void copyText(commandMenu.output)}
+          onCopyCommandAndOutput={() =>
+            void copyText(`${commandMenu.commandLine}\n${commandMenu.output}`)
+          }
+          onClose={() => setCommandMenu(null)}
+        />
+      ) : null}
+      {quickFixesEnabled && quickFix ? (
+        <TerminalQuickFix
+          actions={quickFix.actions}
+          left={quickFix.left}
+          top={quickFix.top}
+          open={quickFixOpen}
+          onOpenChange={setQuickFixOpen}
+          onRun={(action) => void runQuickFix(action)}
         />
       ) : null}
     </div>
