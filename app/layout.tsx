@@ -30,6 +30,7 @@ import { StoragePersistenceInitializer } from "@/components/providers/initialize
 import { AutoModeInitializer } from "@/components/providers/initializers/auto-mode-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
 import { ModelsDevCatalogInitializer } from "@/components/providers/initializers/models-dev-catalog-initializer"
+import { OpenRouterCatalogInitializer } from "@/components/providers/initializers/openrouter-catalog-initializer"
 import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-runtime-initializer"
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
 import { RoutingRuntimeInitializer } from "@/components/providers/initializers/routing-runtime-initializer"
@@ -172,6 +173,7 @@ export default async function RootLayout({
                       <ExternalAgentInitializer />
                       <ProjectStoreInitializer />
                       <ModelsDevCatalogInitializer />
+                      <OpenRouterCatalogInitializer />
                       <OcrRuntimeInitializer />
                       <AgentTeamRuntimeInitializer />
                       <SchedulerInitializer />
