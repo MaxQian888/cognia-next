@@ -101,6 +101,48 @@ describe("retrieveMemories", () => {
     expect(out.map((r) => r.memory.id)).toContain("hit")
   })
 
+  it("does not inject a memory that overlaps the query only on stopwords", async () => {
+    // Regression: BM25 returns any doc sharing a token and min-max normalization
+    // promotes the lone hit to relevance 1.0, so a memory matching only
+    // "is"/"the" used to be force-injected every turn.
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [mem("The user is happy with the onboarding", { id: "noise" })],
+    }
+    const out = await retrieveMemories(
+      { queryText: "is the deploy done", topK: 5, relevanceFloor: 0 },
+      deps
+    )
+    expect(out).toEqual([])
+  })
+
+  it("still injects when a meaningful term is shared (stopword gate is not over-broad)", async () => {
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [mem("The user prefers the deploy on Fridays", { id: "real" })],
+    }
+    const out = await retrieveMemories(
+      { queryText: "is the deploy done", topK: 5, relevanceFloor: 0 },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["real"])
+  })
+
+  it("keeps a vector-only semantic hit even with no lexical overlap", async () => {
+    // The stopword gate filters the BM25 leg only; a pure semantic (vector) hit
+    // with no shared term must still surface.
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The customer churned last quarter", { id: "sem", vectorDocId: "vsem" }),
+      ],
+      embed: async () => [0.1, 0.2],
+      vectorSearch: async () => [{ id: "vsem", score: 0.88 }],
+    }
+    const out = await retrieveMemories(
+      { queryText: "retention numbers", topK: 5, relevanceFloor: 0 },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["sem"])
+  })
+
   it("applies the relevance floor (drops weak matches)", async () => {
     const deps: MemoryRetrieverDeps = {
       loadCandidates: async () => [

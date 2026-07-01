@@ -15,7 +15,149 @@
 
 import type { Memory, MemoryType } from "@/types/memory/memory"
 import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
+import { tokenizeMultilingual } from "@cognia/rag/cjk-tokenizer"
 import { scoreMemories } from "./scoring"
+
+/**
+ * Terms too common to signal topical relevance. The BM25 leg returns *any* doc
+ * sharing ≥1 term (the tokenizer has no stopword list), and `normalizeScores`
+ * then promotes a lone weak hit to relevance 1.0 — so without a stopword gate a
+ * memory that overlaps the query only on "the" / "用户" gets force-injected
+ * nearly every turn. Covers EN function words + the most common CJK particles
+ * (the multilingual tokenizer emits one token per CJK character, so single
+ * particles dominate spurious overlaps).
+ */
+const STOPWORDS = new Set<string>([
+  // English function words
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "if",
+  "then",
+  "else",
+  "of",
+  "to",
+  "in",
+  "on",
+  "at",
+  "for",
+  "from",
+  "by",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "am",
+  "do",
+  "does",
+  "did",
+  "has",
+  "have",
+  "had",
+  "i",
+  "you",
+  "he",
+  "she",
+  "it",
+  "we",
+  "they",
+  "me",
+  "him",
+  "her",
+  "them",
+  "my",
+  "your",
+  "his",
+  "its",
+  "our",
+  "their",
+  "this",
+  "that",
+  "these",
+  "those",
+  "there",
+  "here",
+  "with",
+  "as",
+  "so",
+  "not",
+  "no",
+  "yes",
+  "ok",
+  "what",
+  "when",
+  "where",
+  "who",
+  "why",
+  "how",
+  "which",
+  "will",
+  "would",
+  "can",
+  "could",
+  "should",
+  "about",
+  // Common CJK function words / particles (tokenized per-character)
+  "的",
+  "了",
+  "和",
+  "是",
+  "我",
+  "你",
+  "他",
+  "她",
+  "它",
+  "我们",
+  "你们",
+  "他们",
+  "这",
+  "那",
+  "在",
+  "有",
+  "就",
+  "也",
+  "都",
+  "与",
+  "及",
+  "对",
+  "把",
+  "被",
+  "着",
+  "过",
+  "吗",
+  "呢",
+  "吧",
+  "啊",
+  "会",
+  "要",
+  "让",
+  "给",
+  "但",
+  "而",
+  "或",
+  "等",
+  "个",
+  "之",
+  "其",
+  "上",
+  "下",
+])
+
+/** Distinct non-stopword tokens in `text` (case handled by the tokenizer). */
+function meaningfulTerms(text: string): Set<string> {
+  const out = new Set<string>()
+  for (const term of tokenizeMultilingual(text)) {
+    if (term.length === 0 || STOPWORDS.has(term)) continue
+    out.add(term)
+  }
+  return out
+}
 
 export interface MemoryRetrieverDeps {
   /** Active candidate pool for the reader (global + character override layer). */
@@ -71,7 +213,24 @@ export async function retrieveMemories(
   // Keyword leg — always available.
   const bm25 = new BM25Index()
   bm25.addDocuments(candidates.map((m) => ({ id: m.id, content: m.text })))
-  const keywordHits = bm25.search(query, input.topK * OVERFETCH)
+  const rawKeywordHits = bm25.search(query, input.topK * OVERFETCH)
+
+  // Stopword gate: drop keyword hits that overlap the query only on stopwords.
+  // BM25 returns any doc sharing a single term, and the min-max normalization
+  // below would promote such a lone weak hit to relevance 1.0 — injecting an
+  // off-topic memory on a shared "the" / "用户". Require ≥1 shared MEANINGFUL
+  // term. Skipped for a degenerate all-stopword query (keep prior behavior).
+  const queryTerms = meaningfulTerms(query)
+  const keywordHits =
+    queryTerms.size === 0
+      ? rawKeywordHits
+      : rawKeywordHits.filter((h) => {
+          const m = byId.get(h.id)
+          if (!m) return false
+          const terms = meaningfulTerms(m.text)
+          for (const t of queryTerms) if (terms.has(t)) return true
+          return false
+        })
 
   // Vector leg — best effort; any failure degrades to BM25-only.
   let vectorHits: { id: string; score: number }[] = []

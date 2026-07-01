@@ -54,6 +54,45 @@ describe("runMemoryExtraction", () => {
     expect(res.applied).toEqual([{ op: "NOOP" }])
   })
 
+  it("redacts PII from the extraction inputs before the LLM call", async () => {
+    let seen: { userText: string; assistantText: string } | undefined
+    const d = deps({
+      extract: jest.fn(async (eInput) => {
+        seen = eInput.newPair
+        return []
+      }),
+    })
+    await runMemoryExtraction(
+      input({
+        newPair: {
+          userText: "I always use pnpm; reach me at dev@example.com",
+          assistantText: "Noted.",
+        },
+      }),
+      d
+    )
+    expect(seen?.userText).not.toContain("dev@example.com")
+    expect(seen?.userText).toContain("<EMAIL_")
+    // Non-PII content survives so the fact still extracts.
+    expect(seen?.userText).toContain("pnpm")
+  })
+
+  it("honors an injected redact dependency", async () => {
+    let seen: string | undefined
+    const d = deps({
+      redact: (t) => t.replace(/secret/g, "[X]"),
+      extract: jest.fn(async (eInput) => {
+        seen = eInput.newPair.userText
+        return []
+      }),
+    })
+    await runMemoryExtraction(
+      input({ newPair: { userText: "I always use pnpm with a secret", assistantText: "ok" } }),
+      d
+    )
+    expect(seen).toBe("I always use pnpm with a [X]")
+  })
+
   it("allows procedural for user provenance, not for inbound", async () => {
     const d = deps()
     await runMemoryExtraction(input({ provenance: "user" }), d)

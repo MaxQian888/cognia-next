@@ -160,11 +160,16 @@ export async function consolidate(
       await deps.invalidate(targetId, memory.id)
       applied.push({ op: "DELETE", targetId })
       applied.push({ op: "ADD", memory, candidate })
-    } else if (op === "ADD") {
+    } else if (op === "NOOP") {
+      applied.push({ op: "NOOP" })
+    } else {
+      // ADD, or an UPDATE/DELETE whose targetId was missing/hallucinated (not in
+      // the candidate set). Keep the new fact rather than silently dropping it —
+      // the same safe default as the parse-failure path above. Falling through
+      // to NOOP here would lose a genuinely new memory whenever the model named
+      // a non-existent id.
       const memory = await persistCandidate(candidate, input, deps)
       applied.push({ op: "ADD", memory, candidate })
-    } else {
-      applied.push({ op: "NOOP" })
     }
   }
 

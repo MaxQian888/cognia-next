@@ -48,10 +48,17 @@ export async function runMemoryMaintenance(
     },
     deps.distillDeps
   )
+  // Global-scope memories are persisted with `characterId: undefined` (see
+  // `Memory.characterId` — "Set iff scope === character"). The decay queries
+  // filter rows by characterId, so passing a session's characterId while the
+  // active scope is global matches *nothing*: eviction/expiry silently no-op and
+  // `maxActivePerScope` is never enforced. Drop characterId for non-character
+  // scopes, mirroring how the write path nulls it for global memories.
+  const decayCharacterId = input.scope === "character" ? input.characterId : undefined
   await evictOverflow(
     {
       scope: input.scope,
-      characterId: input.characterId,
+      characterId: decayCharacterId,
       maxActivePerScope: input.config.maxActivePerScope,
     },
     deps.decayDeps
@@ -62,7 +69,7 @@ export async function runMemoryMaintenance(
   await expireStale(
     {
       scope: input.scope,
-      characterId: input.characterId,
+      characterId: decayCharacterId,
       maxIdleDays: input.config.maxIdleDays ?? 0,
       now: input.now,
     },
