@@ -40,6 +40,15 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: () => tryBuildTwinDepsImpl(),
 }))
 
+// Memory read-deps are mocked so the connector tests stay focused: the real
+// builder transitively calls tryBuildTwinDeps, which would pollute the twin
+// call-count assertions. Default → no backend (memory recall is a no-op).
+let tryBuildMemoryDepsImpl: jest.Mock = jest.fn(async () => undefined)
+jest.mock("@/lib/memory/runtime/build-deps", () => ({
+  __esModule: true,
+  tryBuildMemoryDeps: (...a: unknown[]) => tryBuildMemoryDepsImpl(...a),
+}))
+
 // Team dispatch is mocked so the team-branch can be probed without importing
 // the heavy Agent-Team graph. Returns `started: true` by default.
 const mockStartTeamRunFromIM = jest.fn(async (..._args: unknown[]) => ({ started: true as const }))
@@ -186,6 +195,7 @@ beforeEach(async () => {
     messageId: "uuid-asst-1",
   })
   tryBuildTwinDepsImpl = jest.fn(async () => undefined)
+  tryBuildMemoryDepsImpl = jest.fn(async () => undefined)
   endSpanMock.mockClear()
   installRuntime(bus, { runAndCapture: DEFAULT_RUN_AND_CAPTURE })
 })
@@ -477,6 +487,15 @@ describe("installRuntime — ai-run (twin injection)", () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_notwin" })
     await callHandler(event, "ai-run")
     expect(tryBuildTwinDepsImpl).not.toHaveBeenCalled()
+  })
+
+  it("builds memory recall deps for the inbound turn (parity with direct chat)", async () => {
+    // Memory is character-agnostic (global store), so it is built even for a
+    // non-twin character — this is the connector↔direct recall parity fix.
+    await getDb().characters.put({ id: "char_abc", name: "Plain" } as never)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_mem" })
+    await callHandler(event, "ai-run")
+    expect(tryBuildMemoryDepsImpl).toHaveBeenCalledTimes(1)
   })
 })
 

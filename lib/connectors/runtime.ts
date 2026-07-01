@@ -37,6 +37,8 @@ import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { endSpan } from "@cognia/agent-trace/emitter"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
+import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
@@ -446,6 +448,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const twinHandshake =
           character?.twinId && event.plainText.trim() ? await tryBuildTwinDeps() : undefined
 
+        // Long-term memory recall (parity with use-claude-chat): ground the
+        // inbound reply in the operator's memory store. `tryBuildMemoryDeps`
+        // no-ops when memory is disabled, and memories are PII-filtered at write
+        // time. Inbound content is never *written* back (provenance gate in
+        // run-memory-extraction), but recall keeps connector replies consistent
+        // with direct chat instead of being blind to the user's known facts.
+        const memoryHandshake = event.plainText.trim()
+          ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory))
+          : undefined
+
         const sendOptions = await resolveSendOptions({
           session,
           character,
@@ -459,6 +471,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           imAdapterRow: adapterRow,
           twinDeps: twinHandshake,
           twinUserMessage: twinHandshake ? event.plainText : undefined,
+          memoryDeps: memoryHandshake,
+          memoryUserMessage: memoryHandshake ? event.plainText : undefined,
           // Open the connector turn's agent-trace ROOT span so the whole ai-run
           // appears in the waterfall under surface "connector". The span is
           // ended on the capture-error / success branches below with the
