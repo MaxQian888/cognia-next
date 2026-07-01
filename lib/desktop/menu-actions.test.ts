@@ -61,6 +61,11 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: () => ({ save: settingsSave }) },
 }))
 
+const openFolderAsWorkspace = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openFolderAsWorkspace: (...args: unknown[]) => openFolderAsWorkspace(...args),
+}))
+
 const killSwitch = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/automation/client", () => ({
   desktop: { killSwitch: () => killSwitch() },
@@ -139,6 +144,7 @@ beforeEach(() => {
   toggleStatusBar.mockClear()
   requestCreate.mockClear()
   settingsSave.mockClear().mockResolvedValue(undefined)
+  openFolderAsWorkspace.mockReset().mockResolvedValue(null)
   killSwitch.mockClear().mockResolvedValue(undefined)
   openVsxClear.mockClear().mockResolvedValue(undefined)
   listSessionsMock.mockReset().mockResolvedValue([])
@@ -185,14 +191,15 @@ test("newCharacterAction requests character creation and routes to characters ta
   expect(router.push).toHaveBeenCalledWith("/settings?section=characters")
 })
 
-test("openWorkspaceAction persists the picked directory", async () => {
-  openDialog.mockResolvedValueOnce("/picked")
+test("openWorkspaceAction creates/activates a workspace via the unified flow", async () => {
+  openFolderAsWorkspace.mockResolvedValueOnce({ id: "p1" })
   await openWorkspaceAction()
-  expect(settingsSave).toHaveBeenCalledWith({ defaultWorkingDir: "/picked" })
+  expect(openFolderAsWorkspace).toHaveBeenCalledTimes(1)
+  expect(settingsSave).not.toHaveBeenCalled()
 })
 
-test("openWorkspaceAction logs a warning when the dialog throws", async () => {
-  openDialog.mockRejectedValueOnce(new Error("nope"))
+test("openWorkspaceAction logs a warning when the flow throws", async () => {
+  openFolderAsWorkspace.mockRejectedValueOnce(new Error("nope"))
   await openWorkspaceAction()
   expect(logWarn).toHaveBeenCalledWith(
     "menu action open-workspace failed",
@@ -201,7 +208,7 @@ test("openWorkspaceAction logs a warning when the dialog throws", async () => {
 })
 
 test("openWorkspaceAction tolerates non-Error rejection", async () => {
-  openDialog.mockRejectedValueOnce("plain")
+  openFolderAsWorkspace.mockRejectedValueOnce("plain")
   await openWorkspaceAction()
   expect(logWarn).toHaveBeenCalledWith(
     "menu action open-workspace failed",
@@ -209,10 +216,10 @@ test("openWorkspaceAction tolerates non-Error rejection", async () => {
   )
 })
 
-test("openWorkspaceAction skips save when the user cancels", async () => {
-  openDialog.mockResolvedValueOnce(null)
+test("openWorkspaceAction tolerates a cancelled picker (null result)", async () => {
+  openFolderAsWorkspace.mockResolvedValueOnce(null)
   await openWorkspaceAction()
-  expect(settingsSave).not.toHaveBeenCalled()
+  expect(logWarn).not.toHaveBeenCalled()
 })
 
 test("openSettingsAction routes to /settings without a section", () => {

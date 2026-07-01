@@ -26,7 +26,6 @@ import { loggers } from "@/lib/logging"
 import { desktop as automation } from "@/lib/automation/client"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useUIStore } from "@/stores/ui/ui-store"
-import { useSettingsStore } from "@/stores/settings"
 import type { AppLanguage, AppSettings, ChatSession } from "@/lib/claude/types"
 
 const log = loggers.ui
@@ -204,15 +203,11 @@ export function newCharacterAction(router: AppRouterInstance): void {
 export async function openWorkspaceAction(): Promise<void> {
   log.info("menu action open-workspace")
   try {
-    const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
-    const picked = await openDialog({
-      directory: true,
-      multiple: false,
-      title: "Select workspace",
-    })
-    if (typeof picked === "string") {
-      await useSettingsStore.getState().save({ defaultWorkingDir: picked })
-    }
+    // Unified flow: pick a folder and create/activate a real workspace Project
+    // (visible in the switcher, binds the Git panel + agent cwd). The old
+    // `defaultWorkingDir`-only write was shadowed by the active workspace root.
+    const { openFolderAsWorkspace } = await import("@/lib/workspace/open-folder")
+    await openFolderAsWorkspace()
   } catch (err) {
     log.warn("menu action open-workspace failed", {
       error: err instanceof Error ? err.message : String(err),

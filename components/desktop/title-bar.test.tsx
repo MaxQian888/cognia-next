@@ -19,6 +19,16 @@ jest.mock("@/lib/logging", () => ({
       warn: (...args: unknown[]) => logWarn(...args),
       error: (...args: unknown[]) => logError(...args),
     },
+    // Pulled in transitively by the plugin extension slot → agent-team-store,
+    // which calls `loggers.agent.child(...)` at module load.
+    agent: {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: function () {
+        return this
+      },
+    },
   },
   // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
   createLogger: () => ({
@@ -124,6 +134,11 @@ jest.mock("@/stores/settings", () => {
   )
   return { useSettingsStore }
 })
+
+const openFolderAsWorkspace = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openFolderAsWorkspace: (...args: unknown[]) => openFolderAsWorkspace(...args),
+}))
 
 const openExternal = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri/opener", () => ({
@@ -272,6 +287,7 @@ beforeEach(() => {
   isAlwaysOnTop.mockClear().mockResolvedValue(false)
   onResized.mockClear().mockResolvedValue(() => {})
   openDialog.mockClear().mockResolvedValue(null)
+  openFolderAsWorkspace.mockReset().mockResolvedValue(null)
   settingsSave.mockClear().mockResolvedValue(undefined)
   applyZoom.mockReset().mockImplementation(async (n: number) => Math.round(n * 20) / 20)
   openExternal.mockClear().mockResolvedValue(undefined)
@@ -378,7 +394,7 @@ test("setup-failed warning falls back to String(err) for non-Error", async () =>
 test("Open Workspace warning falls back to String(err) for non-Error", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
-  openDialog.mockRejectedValueOnce("not-an-error")
+  openFolderAsWorkspace.mockRejectedValueOnce("not-an-error")
   const user = userEvent.setup()
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
@@ -500,17 +516,18 @@ test("File > New Chat clears chat and resets guild", async () => {
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
 })
 
-test("File > Open Workspace persists picked path", async () => {
+test("File > Open Workspace creates/activates a workspace via the unified flow", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
-  openDialog.mockResolvedValueOnce("/picked/path")
+  openFolderAsWorkspace.mockResolvedValueOnce({ id: "p1" })
   const user = userEvent.setup()
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
   await user.click(screen.getByText("desktop.menu.file.label"))
   await user.click(await screen.findByText("desktop.menu.file.openWorkspace"))
-  await waitFor(() =>
-    expect(settingsSave).toHaveBeenCalledWith({ defaultWorkingDir: "/picked/path" })
+  await waitFor(() => expect(openFolderAsWorkspace).toHaveBeenCalledTimes(1))
+  expect(settingsSave).not.toHaveBeenCalledWith(
+    expect.objectContaining({ defaultWorkingDir: expect.anything() })
   )
 })
 
