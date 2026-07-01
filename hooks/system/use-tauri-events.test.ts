@@ -109,6 +109,11 @@ jest.mock("@tauri-apps/plugin-dialog", () => ({
   open: (...a: unknown[]) => openDialogMock(...a),
 }))
 
+const openPathAsWorkspaceMock = jest.fn()
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openPathAsWorkspace: (...a: unknown[]) => openPathAsWorkspaceMock(...a),
+}))
+
 const openExternalMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri/opener", () => ({
   openExternal: (...a: unknown[]) => openExternalMock(...a),
@@ -149,6 +154,7 @@ beforeEach(() => {
   setSelectedGuild.mockClear()
   saveSettings.mockClear()
   openDialogMock.mockReset()
+  openPathAsWorkspaceMock.mockReset()
   openExternalMock.mockClear()
   dispatchTrayClickMock.mockClear()
   dispatchShortcutMock.mockClear()
@@ -181,7 +187,8 @@ describe("useTauriEvents", () => {
     expect(onTauriEventMock).toHaveBeenCalledWith(TAURI_EVENTS.deepLink, expect.any(Function))
     expect(listenHandlers["menu://new-chat"]).toBeDefined()
     expect(listenHandlers[TAURI_EVENTS.menuOpenLogs]).toBeDefined()
-    expect(listenHandlers["menu://open-workspace"]).toBeDefined()
+    // menu://open-workspace is owned by use-menu-event-router, NOT here.
+    expect(listenHandlers["menu://open-workspace"]).toBeUndefined()
     expect(listenHandlers["menu://documentation"]).toBeDefined()
   })
 
@@ -247,23 +254,13 @@ describe("useTauriEvents", () => {
     expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
   })
 
-  it("menu Open Workspace saves chosen path on success", async () => {
-    openDialogMock.mockResolvedValueOnce("/picked")
+  it("does NOT subscribe to menu://open-workspace (owned by the menu router)", async () => {
     renderHook(() => useTauriEvents())
     await flushPromises()
-    await listenHandlers["menu://open-workspace"]?.({ payload: null })
-    await flushPromises()
-    expect(saveSettings).toHaveBeenCalledWith({ defaultWorkingDir: "/picked" })
-    expect(toastSuccess).toHaveBeenCalled()
-  })
-
-  it("menu Open Workspace ignores cancellation (non-string result)", async () => {
-    openDialogMock.mockResolvedValueOnce(null)
-    renderHook(() => useTauriEvents())
-    await flushPromises()
-    await listenHandlers["menu://open-workspace"]?.({ payload: null })
-    await flushPromises()
-    expect(saveSettings).not.toHaveBeenCalled()
+    // Subscribing here too would fire a second folder picker for one click —
+    // the listener was intentionally removed in favour of use-menu-event-router.
+    expect(listenHandlers["menu://open-workspace"]).toBeUndefined()
+    expect(openDialogMock).not.toHaveBeenCalled()
   })
 
   it("menu Documentation opens the external Tauri URL", async () => {
@@ -308,10 +305,9 @@ describe("useTauriEvents", () => {
       expect(requestOpenSettings).toHaveBeenCalledWith("advanced")
     })
 
-    it("workspace deep link saves the path and toasts", async () => {
+    it("workspace deep link creates/activates a workspace for the path", async () => {
       await fireDeepLinks(["cognia://workspace?path=/work"])
-      expect(saveSettings).toHaveBeenCalledWith({ defaultWorkingDir: "/work" })
-      expect(toastSuccess).toHaveBeenCalled()
+      expect(openPathAsWorkspaceMock).toHaveBeenCalledWith("/work")
     })
 
     it("unknown deep link surfaces a toast warning", async () => {

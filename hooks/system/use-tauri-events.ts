@@ -9,7 +9,7 @@ import { TAURI_EVENTS, onTauriEvent } from "@/lib/tauri"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
-import { useSettingsStore } from "@/stores/settings"
+import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { dispatchTrayClick, dispatchShortcut } from "@/lib/tray/dispatcher"
 import {
   checkUpdates,
@@ -33,7 +33,7 @@ interface ParsedDeepLink {
  *
  *   cognia://chat/<id>            → open that session
  *   cognia://settings[?tab=xyz]   → open settings (optionally on a tab)
- *   cognia://workspace?path=…     → set the default working directory
+ *   cognia://workspace?path=…     → create/activate a workspace for that path
  */
 function parseDeepLink(raw: string): ParsedDeepLink {
   let url: URL
@@ -109,14 +109,9 @@ export function useTauriEvents(): void {
             break
           }
           case "workspace": {
-            if (action.workspacePath) {
-              void useSettingsStore.getState().save({
-                defaultWorkingDir: action.workspacePath,
-              })
-              toast.success("Working directory updated", {
-                description: action.workspacePath,
-              })
-            }
+            // Unified flow: create/activate a real workspace Project for the
+            // deep-linked path (consistent with the File menu / switcher).
+            if (action.workspacePath) openPathAsWorkspace(action.workspacePath)
             break
           }
           default: {
@@ -148,22 +143,10 @@ export function useTauriEvents(): void {
       const unlistenMenuOpenLogs = await listen<null>(TAURI_EVENTS.menuOpenLogs, () =>
         navigateToLogs()
       )
-      const unlistenOpenWs = await listen<null>("menu://open-workspace", async () => {
-        try {
-          const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
-          const picked = await openDialog({
-            directory: true,
-            multiple: false,
-            title: "Select workspace",
-          })
-          if (typeof picked === "string") {
-            await useSettingsStore.getState().save({ defaultWorkingDir: picked })
-            toast.success("Workspace updated", { description: picked })
-          }
-        } catch (err) {
-          console.warn("open-workspace dialog failed", err)
-        }
-      })
+      // NOTE: `menu://open-workspace` is intentionally NOT handled here. It is
+      // owned solely by `use-menu-event-router` → `openWorkspaceAction` (the
+      // unified create/activate-workspace flow). Subscribing here too would fire
+      // two folder pickers for one menu click.
       const unlistenDocs = await listen<null>("menu://documentation", async () => {
         const { openExternal } = await import("@/lib/tauri/opener")
         await openExternal("https://v2.tauri.app")
@@ -257,7 +240,6 @@ export function useTauriEvents(): void {
         trayOpenLogs()
         unlistenNewChat()
         unlistenMenuOpenLogs()
-        unlistenOpenWs()
         unlistenDocs()
         cliMatches()
         cliSecondInstance()
@@ -279,7 +261,6 @@ export function useTauriEvents(): void {
         trayOpenLogs,
         unlistenNewChat,
         unlistenMenuOpenLogs,
-        unlistenOpenWs,
         unlistenDocs,
         cliMatches,
         cliSecondInstance,
