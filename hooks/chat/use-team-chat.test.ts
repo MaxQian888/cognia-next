@@ -57,6 +57,10 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: jest.fn().mockResolvedValue(undefined),
 }))
 
+jest.mock("@/lib/memory/runtime/build-deps", () => ({
+  tryBuildMemoryDeps: jest.fn().mockResolvedValue(undefined),
+}))
+
 const buildSupervisorRosterMock = jest.fn((..._a: unknown[]) => "roster")
 const parseDispatchesMock = jest.fn((..._a: unknown[]): unknown[] => [])
 const routeTurnMock = jest.fn((..._a: unknown[]): unknown[] => [])
