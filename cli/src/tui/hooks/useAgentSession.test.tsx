@@ -231,6 +231,18 @@ describe("useAgentSession", () => {
     expect(h.close).toHaveBeenCalled()
   })
 
+  it("changeCwd dispatches SET_CWD and drops the session so the next turn relocates", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    await act(async () => {
+      await h.api().changeCwd("/new/dir")
+    })
+    expect(h.actions).toContainEqual({ type: "SET_CWD", cwd: "/new/dir" })
+    expect(h.close).toHaveBeenCalled()
+  })
+
   it("switchMode mutates a LIVE session in place without dropping it (context preserved)", async () => {
     const h = harness({ isLive: true })
     await act(async () => {

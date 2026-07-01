@@ -52,9 +52,19 @@ export interface GateController {
 /**
  * Build a permission gate whose decisions are supplied asynchronously by the UI.
  * `onRequest` fires when the model asks for approval (the UI opens its overlay);
- * the UI later calls `resolve(decision)`. Requests are queued so a second ask
- * never drops the first (capture is serial per turn, but this stays correct if
- * that ever changes).
+ * the UI later calls `resolve(decision)`.
+ *
+ * Requests are queued and surfaced ONE AT A TIME: `onRequest` fires only for the
+ * request at the HEAD of the queue, and `resolve` re-fires it for the next queued
+ * request once the head settles. This matters because a single assistant message
+ * can emit several `tool_use` blocks in parallel, so `canUseTool` (and thus this
+ * responder) is invoked concurrently for all of them. Firing `onRequest` for
+ * every arrival would overwrite the overlay down to the last request, and the UI
+ * — which resolves one decision and then closes the overlay — would leave the
+ * other resolvers stranded: their `canUseTool` promises never settle, their
+ * tool_results are never sent, and the whole turn hangs forever "waiting for API
+ * response". Serialising the overlay keeps the displayed request and the resolved
+ * resolver in lockstep (FIFO) and guarantees every parallel ask is answered.
  */
 /** Optional PreToolUse pre-check: a deny here blocks the tool before the
  * approval overlay is ever shown (settings.json `PreToolUse` hooks). */
@@ -73,7 +83,10 @@ export function createGateController(
   preCheck?: GatePreCheck,
   autoApprove?: GateAutoApprove
 ): GateController {
-  const queue: Array<(d: CapturePermissionDecision) => void> = []
+  const queue: Array<{
+    req: PermissionRequestEvent
+    resolve: (d: CapturePermissionDecision) => void
+  }> = []
 
   const responder: PermissionResponder = (req) =>
     new Promise<CapturePermissionDecision>((resolve) => {
@@ -83,8 +96,10 @@ export function createGateController(
           resolve({ decision: "allow" })
           return
         }
-        queue.push(resolve)
-        onRequest(req)
+        queue.push({ req, resolve })
+        // Only open the overlay when this request is the head — queued asks wait
+        // their turn and are surfaced by `resolve` as the head settles.
+        if (queue.length === 1) onRequest(req)
       }
       if (!preCheck) {
         proceed()
@@ -110,8 +125,11 @@ export function createGateController(
   return {
     responder,
     resolve(decision) {
-      const next = queue.shift()
-      if (next) next(decision)
+      const head = queue.shift()
+      if (head) head.resolve(decision)
+      // Surface the next queued ask (if any) so a batch of parallel tool calls
+      // is approved/denied one overlay at a time instead of stranding the rest.
+      if (queue.length > 0) onRequest(queue[0].req)
     },
     isPending() {
       return queue.length > 0

@@ -172,6 +172,28 @@ describe("createAgentSession", () => {
     expect(capOptions.idleTimeoutMs).toBe(30_000)
   })
 
+  it("marks the build context interactive so the live turn keeps partials (idle-watchdog feed)", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const resolveOptions = jest
+      .fn()
+      .mockResolvedValue({ model: "m", provider: "anthropic" } as never)
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_interactive",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const ctx = resolveOptions.mock.calls[0][0] as { interactive?: boolean }
+    expect(ctx.interactive).toBe(true)
+  })
+
   it("injects the config's aiSdkMaxSteps into the sendOptions handed to capture", async () => {
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({

@@ -61,6 +61,10 @@ export interface AgentSessionApi {
    * tools / model / permission fold deep into resolved SendOptions, so the
    * session is recreated to take effect on the next turn. */
   switchAgentMode(modeId: string): Promise<void>
+  /** Switch the session working directory (`/cd`). Like the model, the cwd folds
+   * deep into resolved SendOptions and drives the sidecar respawn, so the live
+   * session is dropped and recreated under the new cwd on the next turn. */
+  changeCwd(dir: string): Promise<void>
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
   invalidate(): void
@@ -402,7 +406,11 @@ export function useAgentSession({
   const resolvePermission = useCallback(
     (decision: CapturePermissionDecision) => {
       gate.resolve(decision)
-      dispatch({ type: "OVERLAY_CLOSE" })
+      // `gate.resolve` re-opens the overlay (via the `onRequest` dispatch) for the
+      // next queued request when a batch of parallel tool calls is awaiting
+      // approval. Only close the overlay once the queue has fully drained —
+      // closing unconditionally would hide the next ask and hang those tools.
+      if (!gate.isPending()) dispatch({ type: "OVERLAY_CLOSE" })
     },
     [dispatch, gate]
   )
@@ -437,6 +445,18 @@ export function useAgentSession({
       dispatch({ type: "SET_MODEL", model })
       // Options resolve lazily and are cached per session; recreate so the new
       // model takes effect on the next turn.
+      await dropSession()
+    },
+    [dispatch, dropSession]
+  )
+
+  const changeCwd = useCallback(
+    async (dir: string) => {
+      dispatch({ type: "SET_CWD", cwd: dir })
+      // The cwd is baked into the captured SendOptions of a live session (and the
+      // sidecar spawned under it); only a fresh session picks up the new dir. Drop
+      // it so the next turn recreates from the updated config — same contract as
+      // switchModel. configRef is refreshed by the SET_CWD re-render before then.
       await dropSession()
     },
     [dispatch, dropSession]
@@ -603,6 +623,7 @@ export function useAgentSession({
     switchThinking,
     switchProvider,
     switchAgentMode,
+    changeCwd,
     invalidate,
     compact,
     listCheckpoints,

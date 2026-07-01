@@ -43,6 +43,36 @@ describe("createGateController", () => {
     await expect(b).resolves.toEqual({ decision: "deny" })
   })
 
+  it("surfaces parallel requests one overlay at a time (head only, then re-pumps)", async () => {
+    // Regression: a single assistant message can emit several tool_use blocks in
+    // parallel, so the responder is invoked concurrently for all of them. The
+    // overlay must show ONE request at a time — firing onRequest for every
+    // arrival overwrote the overlay down to the last ask, and the UI resolved a
+    // single decision then closed, stranding the other resolvers (their
+    // canUseTool promises never settled → the turn hung forever).
+    const opened: string[] = []
+    const gate = createGateController((req) => opened.push(req.toolName))
+    const a = gate.responder({ toolName: "dir_a" } as never)
+    const b = gate.responder({ toolName: "dir_b" } as never)
+    const c = gate.responder({ toolName: "dir_c" } as never)
+    // Only the head opened an overlay; the other two wait their turn.
+    expect(opened).toEqual(["dir_a"])
+    expect(gate.isPending()).toBe(true)
+
+    gate.resolve({ decision: "allow" }) // dir_a → re-pumps dir_b
+    expect(opened).toEqual(["dir_a", "dir_b"])
+    gate.resolve({ decision: "allow" }) // dir_b → re-pumps dir_c
+    expect(opened).toEqual(["dir_a", "dir_b", "dir_c"])
+    gate.resolve({ decision: "allow" }) // dir_c → queue drained, no re-pump
+    expect(opened).toEqual(["dir_a", "dir_b", "dir_c"])
+    expect(gate.isPending()).toBe(false)
+
+    // Every parallel ask was answered — none stranded.
+    await expect(a).resolves.toEqual({ decision: "allow" })
+    await expect(b).resolves.toEqual({ decision: "allow" })
+    await expect(c).resolves.toEqual({ decision: "allow" })
+  })
+
   it("reset clears pending resolvers so the next request doesn't pop a stale one", async () => {
     const gate = createGateController(() => {})
     // Simulate a timed-out turn: a permission was requested but never resolved.

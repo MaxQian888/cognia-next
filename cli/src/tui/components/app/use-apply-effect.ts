@@ -68,6 +68,10 @@ export interface ApplyEffectDeps {
   syncAndRefreshModelOverlay: () => void
   takeSteer: () => string | null
   doExit: () => void
+  /** Switch the session working directory (owned by App: trusts the folder,
+   * dispatches `SET_CWD`, and re-resolves SendOptions). The effect handler
+   * validates the path before calling this. */
+  changeCwd: (dir: string) => void
   /** Arm/clear the shared runtime-abort controller (a ref owned by App). Passed
    * as accessors rather than the raw ref so the hook never mutates a prop. */
   setRuntimeAbort: (controller: AbortController | null) => void
@@ -112,6 +116,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     syncAndRefreshModelOverlay,
     takeSteer,
     doExit,
+    changeCwd,
     setRuntimeAbort,
     getRuntimeAbort,
   } = deps
@@ -253,6 +258,32 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             )
           }
           dispatch({ type: "NOTICE", message: r.message })
+          break
+        }
+        case "changeCwd": {
+          // Resolve `/cd <dir>` against the live cwd and validate it before
+          // switching — App.changeCwd trusts + re-resolves SendOptions but does
+          // no validation, so a bad path would silently strand the agent in a
+          // non-existent directory.
+          const target = nodePath.resolve(state.config.cwd, effect.dir)
+          let isDir = false
+          try {
+            isDir = fs.statSync(target).isDirectory()
+          } catch {
+            isDir = false
+          }
+          if (!isDir) {
+            dispatch({ type: "NOTICE", message: `Not a directory: ${target}` })
+            break
+          }
+          // Compare against the NORMALIZED current cwd so `/cd .` (or the same
+          // path spelled differently) is recognised as a no-op on every platform.
+          if (target === nodePath.resolve(state.config.cwd)) {
+            dispatch({ type: "NOTICE", message: `Already in ${target}` })
+            break
+          }
+          changeCwd(target)
+          dispatch({ type: "NOTICE", message: `Working directory: ${target}` })
           break
         }
         case "runBash":
@@ -617,6 +648,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       startLoopRun,
       syncAndRefreshModelOverlay,
       takeSteer,
+      changeCwd,
       scrollReset,
       cursor,
       fullscreen,

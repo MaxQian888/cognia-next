@@ -1,4 +1,6 @@
 import { renderHook } from "@testing-library/react"
+import fs from "node:fs"
+import nodePath from "node:path"
 
 import { useApplyEffect, type ApplyEffectDeps } from "./use-apply-effect"
 import { createInitialState } from "../../state/initial"
@@ -52,6 +54,7 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     syncAndRefreshModelOverlay: jest.fn(),
     takeSteer: jest.fn(() => null),
     doExit: jest.fn(),
+    changeCwd: jest.fn(),
     setRuntimeAbort: jest.fn(),
     getRuntimeAbort: jest.fn(() => null),
     ...over,
@@ -160,5 +163,50 @@ describe("useApplyEffect", () => {
     run(deps)({ kind: "resumeLast" })
     expect(deps.openSessions).toHaveBeenCalled()
     expect(deps.resumeMostRecent).toHaveBeenCalled()
+  })
+
+  describe("changeCwd", () => {
+    // config.cwd is "/work"; normalize it the way the handler does so the
+    // assertions hold on every platform's path semantics.
+    const base = nodePath.resolve(config.cwd)
+
+    it("switches to a valid directory and notices the new cwd", () => {
+      jest.spyOn(fs, "statSync").mockReturnValue({ isDirectory: () => true } as never)
+      const deps = buildDeps()
+      const target = nodePath.resolve(config.cwd, "sub")
+      run(deps)({ kind: "changeCwd", dir: "sub" })
+      expect(deps.changeCwd).toHaveBeenCalledWith(target)
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "NOTICE",
+        message: `Working directory: ${target}`,
+      })
+    })
+
+    it("rejects a non-directory path without switching", () => {
+      jest.spyOn(fs, "statSync").mockImplementation(() => {
+        throw new Error("ENOENT")
+      })
+      const deps = buildDeps()
+      run(deps)({ kind: "changeCwd", dir: "nope" })
+      expect(deps.changeCwd).not.toHaveBeenCalled()
+      expect(deps.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "NOTICE",
+          message: expect.stringContaining("Not a directory"),
+        })
+      )
+    })
+
+    it("no-ops when the target resolves to the current cwd", () => {
+      jest.spyOn(fs, "statSync").mockReturnValue({ isDirectory: () => true } as never)
+      const deps = buildDeps()
+      run(deps)({ kind: "changeCwd", dir: base })
+      expect(deps.changeCwd).not.toHaveBeenCalled()
+      expect(deps.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "NOTICE", message: `Already in ${base}` })
+      )
+    })
+
+    afterEach(() => jest.restoreAllMocks())
   })
 })

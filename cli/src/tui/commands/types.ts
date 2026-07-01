@@ -142,6 +142,11 @@ export type CommandEffect =
   | { kind: "planRefine" }
   /** Manage `/add-dir` extra working roots (App validates + persists + applies). */
   | { kind: "addDir"; op: "add" | "remove" | "list"; arg: string }
+  /** Switch the session working directory (`/cd <dir>`). The App resolves `dir`
+   * against the current cwd, validates it is an existing directory, then trusts
+   * it + dispatches `SET_CWD` + re-resolves SendOptions so the next turn (and the
+   * respawned sidecar) operates there. */
+  | { kind: "changeCwd"; dir: string }
   /** Open the `/rewind` checkpoint picker (App reads the live capture). */
   | { kind: "rewindList" }
   /** Restore a checkpoint by seq — files and/or conversation. */

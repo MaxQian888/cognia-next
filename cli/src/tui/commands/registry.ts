@@ -192,9 +192,13 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "cwd",
-    description: "show the working directory",
+    aliases: ["cd"],
+    description: "show or change the working directory",
     category: "system",
-    handler: (ctx) => ({ kind: "notice", message: ctx.config.cwd }),
+    handler: (ctx) => {
+      const dir = ctx.args.trim()
+      return dir ? { kind: "changeCwd", dir } : { kind: "notice", message: ctx.config.cwd }
+    },
   },
   {
     name: "about",

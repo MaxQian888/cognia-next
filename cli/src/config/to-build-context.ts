@@ -33,6 +33,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 import { resolveActiveModel } from "./active-model"
 import { effectivePermissionMode } from "./agent-mode"
+import { buildDefaultSystemPrompt } from "./default-system-prompt"
 import { composeSystemPrompt } from "./output-style"
 import { RESOLVER_PROTOCOLS, type ResolvedConfig } from "./schema"
 import { modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
@@ -66,6 +67,16 @@ export interface ToBuildContextParams {
    * allow-list, model override, and permission ruleset. Resolution is async
    * (reads disk), so the caller resolves it and passes it in. */
   agentMode?: AgentModeConfig | null
+  /**
+   * Marks a live, user-facing TUI turn so the shared `resolveSendOptions` still
+   * requests token-level partial messages despite the CLI's injected
+   * `preloadedEnv` / `preloadedMcpServers`. Without partials the native
+   * Anthropic SDK streams nothing during a long single generation (e.g. writing
+   * a large file), starving the run-and-capture idle watchdog into a spurious
+   * "stream idle for 60000ms" interrupt. Only the interactive session-runner
+   * sets this; one-shot (`run.ts`, idle disabled) and subagents leave it off.
+   */
+  interactive?: boolean
   /** Injected clock for deterministic tests; defaults to `Date.now()`. */
   now?: number
 }
@@ -179,7 +190,13 @@ export function buildCliSession(
     model,
     providerOverride: config.provider,
     // The active output style appends its instruction to the system prompt.
-    systemPrompt: composeSystemPrompt(config.systemPrompt, config.outputStyle),
+    // Fall back to the default CLI base prompt when the user hasn't set one, so
+    // the model always knows its working directory and prefers `edit` over
+    // `write` (see {@link buildDefaultSystemPrompt}).
+    systemPrompt: composeSystemPrompt(
+      config.systemPrompt ?? buildDefaultSystemPrompt({ cwd: config.cwd, now }),
+      config.outputStyle
+    ),
     workingDir: config.cwd,
     permissionMode,
     ...(effort ? { effort } : {}),
@@ -196,7 +213,10 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
   const appSettings = {
     defaultProvider: config.provider,
     defaultModel: model,
-    defaultSystemPrompt: composeSystemPrompt(config.systemPrompt, config.outputStyle),
+    defaultSystemPrompt: composeSystemPrompt(
+      config.systemPrompt ?? buildDefaultSystemPrompt({ cwd: config.cwd, now }),
+      config.outputStyle
+    ),
     permissionMode: config.permissionMode,
     builtinTools: config.builtinTools,
     providerSettings: buildProviderSettings(config),
@@ -249,5 +269,8 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
       ? { referencedPaths: config.additionalRoots.map((p) => ({ absolute: p, isDir: true })) }
       : {}),
     preloadedEnv: buildPreloadedEnv(config),
+    // Live TUI turns opt into token-level partials so the idle watchdog stays
+    // fed during a long single generation (see ToBuildContextParams.interactive).
+    ...(params.interactive ? { interactive: true } : {}),
   }
 }

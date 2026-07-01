@@ -134,6 +134,15 @@ describe("command registry", () => {
     expect(effect).toEqual({ kind: "settingsSet", field: "systemPrompt", value: "be concise" })
   })
 
+  it("/cwd shows the directory bare and changes it with an arg (via the /cd alias)", () => {
+    const cwd = getCommand("cwd")
+    expect(getCommand("cd")?.name).toBe("cwd")
+    const ctx = (args: string) =>
+      ({ state: {}, config: { cwd: "/w" }, version: "0", args }) as never
+    expect(cwd?.handler?.(ctx(""))).toEqual({ kind: "notice", message: "/w" })
+    expect(cwd?.handler?.(ctx("  ../other  "))).toEqual({ kind: "changeCwd", dir: "../other" })
+  })
+
   it("/clear confirms before wiping, and `--yes` performs the reset", () => {
     const clear = getCommand("clear")
     const ctx = (args: string) => ({ state: {}, config: {}, version: "0", args }) as never

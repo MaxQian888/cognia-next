@@ -53,6 +53,29 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect(ctx.appSettings?.builtinTools).toEqual(ctx.appSettings?.builtinTools)
   })
 
+  it("falls back to the default base prompt when none is configured", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ cwd: "/work/here" }),
+    })
+    const prompt = (ctx.session as { systemPrompt?: string }).systemPrompt ?? ""
+    expect(prompt).toContain("Working directory: /work/here")
+    expect(prompt).toMatch(/prefer the `edit` tool/i)
+    expect(ctx.appSettings?.defaultSystemPrompt).toContain("Working directory: /work/here")
+  })
+
+  it("lets a user-configured systemPrompt win over the default base prompt", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ systemPrompt: "be terse" }),
+    })
+    const prompt = (ctx.session as { systemPrompt?: string }).systemPrompt ?? ""
+    expect(prompt).toBe("be terse")
+    expect(prompt).not.toContain("Working directory")
+  })
+
   it("appends the output-style instruction to the system prompt", () => {
     const ctx = toBuildContext({
       sessionId: "s1",
@@ -96,6 +119,16 @@ describe("toBuildContext — session + appSettings shaping", () => {
     const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
     expect(ctx.agentMode).toBeNull()
     expect(ctx.preloadedMcpServers).toEqual([])
+  })
+
+  it("omits the interactive flag by default (one-shot / subagent)", () => {
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
+    expect((ctx as { interactive?: boolean }).interactive).toBeUndefined()
+  })
+
+  it("threads interactive:true so the live TUI turn keeps partials (idle-watchdog feed)", () => {
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg(), interactive: true })
+    expect((ctx as { interactive?: boolean }).interactive).toBe(true)
   })
 
   it("threads provided MCP servers + ephemeral skill ids into the seams", () => {

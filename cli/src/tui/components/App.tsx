@@ -747,8 +747,11 @@ export function App({
     dispatch({ type: "STARTUP_TRUST" })
   }, [home, trustFolderFn, state.config.cwd])
 
-  // Folder picker confirmed a directory: switch cwd, trust it, and enter chat.
-  // The agent's SendOptions are re-resolved so the new cwd reaches the first turn.
+  // Folder picker confirmed a directory (or `/cd <dir>`): switch cwd, trust it,
+  // and enter chat. `agent.changeCwd` dispatches SET_CWD and recreates the
+  // session so the new cwd reaches the next turn (and respawns the sidecar under
+  // it). A live mid-session `/cd` therefore actually relocates the agent, not
+  // just the `/cwd` display.
   const changeCwd = useCallback(
     (dir: string) => {
       try {
@@ -756,9 +759,8 @@ export function App({
       } catch {
         // best-effort persistence
       }
-      dispatch({ type: "SET_CWD", cwd: dir })
+      void agent.changeCwd(dir)
       dispatch({ type: "STARTUP_TRUST" })
-      agent.invalidate()
     },
     [agent, home, trustFolderFn]
   )
@@ -880,6 +882,7 @@ export function App({
     syncAndRefreshModelOverlay,
     takeSteer,
     doExit,
+    changeCwd,
     setRuntimeAbort,
     getRuntimeAbort,
   })

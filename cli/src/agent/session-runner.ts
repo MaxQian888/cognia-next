@@ -312,6 +312,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         ephemeralSkillIds,
         ...(params.sessionKind ? { sessionKind: params.sessionKind } : {}),
         ...(agentMode ? { agentMode } : {}),
+        // Live TUI turn: request token-level partials so the deltas keep feeding
+        // the idle watchdog through a long single generation (large file write),
+        // preventing a spurious "stream idle for 60000ms" interrupt.
+        interactive: true,
         now: now(),
       })
       options = withCliDisabledMcpTools(
