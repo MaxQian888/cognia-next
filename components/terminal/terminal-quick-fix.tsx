@@ -55,7 +55,7 @@ export function TerminalQuickFix({
   if (actions.length === 0) return null
 
   function labelFor(action: QuickFixAction): string {
-    return t(`quickFix.${action.labelKey}` as never, action.labelArgs ?? {})
+    return t(`quickFix.${action.labelKey}` as never, (action.labelArgs ?? {}) as never)
   }
 
   return (
