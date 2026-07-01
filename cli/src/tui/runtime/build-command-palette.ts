@@ -8,7 +8,7 @@
  */
 import { buildQuickActions } from "./build-quick-actions"
 import { listVisibleCommands } from "../commands/registry"
-import type { ResolvedConfig } from "../config/schema"
+import type { ResolvedConfig } from "../../config/schema"
 import type { QuickActionRow } from "../state/types"
 
 /**
