@@ -84,6 +84,16 @@ export async function embedRedactedChunks(
       apiKey: config.apiKey,
       baseURL: config.baseURL,
     })
+    // Guard against a provider returning fewer vectors than inputs: without this
+    // `result.embeddings[j]` is `undefined`, which would be cached and persisted
+    // as a broken vector (and upserted to the remote store). Fail the source
+    // instead — the per-source try/catch in the job runner isolates it.
+    if (result.embeddings.length !== batch.length) {
+      throw new Error(
+        `embedRedactedChunks: provider returned ${result.embeddings.length} vectors ` +
+          `for a batch of ${batch.length} — refusing to persist undefined embeddings.`
+      )
+    }
     for (let j = 0; j < batch.length; j++) {
       const vector = result.embeddings[j]
       resolved.set(batch[j], vector)

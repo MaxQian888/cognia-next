@@ -181,18 +181,39 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
  * Mutates a *new* draft object (no in-place mutation of the orchestrator
  * output) so partial-failure code paths don't see surprises.
  */
-function sanitizeDraftPayload<
+/**
+ * Recursively re-redact every string leaf under `value`, at any nesting depth.
+ * The previous top-level-only walk let PII reach a persisted draft as soon as a
+ * payload carried a nested array/object — matching the edit-time deep guard
+ * (`draft-pii-guard.ts:hasNoLeakingPiiDeep`) keeps one source of truth. Draft
+ * payloads are parsed LLM JSON, so there are no cycles to guard against.
+ */
+function sanitizeDeep(value: unknown, onLeak: () => void): unknown {
+  if (typeof value === "string") {
+    if (hasNoLeakingPii(value)) return value
+    onLeak()
+    return redactText(value).redacted
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => sanitizeDeep(v, onLeak))
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeDeep(v, onLeak)
+    }
+    return out
+  }
+  return value
+}
+
+export function sanitizeDraftPayload<
   T extends { payload: { kind: string; data: Record<string, unknown> } },
 >(draft: T, jobId: string, twinId: string): T {
-  const data = draft.payload.data
   let mutated = false
-  const sanitizedData: Record<string, unknown> = { ...data }
-  for (const [key, value] of Object.entries(data)) {
-    if (typeof value !== "string") continue
-    if (hasNoLeakingPii(value)) continue
+  const sanitizedData = sanitizeDeep(draft.payload.data, () => {
     mutated = true
-    sanitizedData[key] = redactText(value).redacted
-  }
+  }) as Record<string, unknown>
   if (!mutated) return draft
   loggers.scheduler.warn("twin distill: re-redacted draft payload after PII leak", {
     jobId,

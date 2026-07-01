@@ -27,6 +27,7 @@ import { runTwinPdfOcr } from "./ocr-fallback"
 import { persistChunks, vectorCollectionName } from "./persist"
 import { prepareChunks } from "./chunk"
 import { redactText, translateOffsetsThroughRedaction, unredactText } from "./redact"
+import { encryptRedactionMap } from "./redaction-key"
 
 export interface RunIngestInput {
   job: TwinJob
@@ -72,6 +73,59 @@ export interface RunIngestResult {
 }
 
 const TOTAL_STAGES = 6 // route+parse counted as one progress step
+
+// Speaker labels the chat importers emit for non-human roles (see
+// `lib/twin/importers/chat-export/*`). Feeding these to the redactor would
+// replace the literal words "User"/"System"/… throughout the transcript with
+// NAME placeholders, corrupting the embeddable text — so they are dropped.
+const GENERIC_SPEAKER_LABELS = new Set([
+  "user",
+  "assistant",
+  "system",
+  "tool",
+  "unknown",
+  "chatgpt",
+  "claude",
+  "gemini",
+  "lark",
+  "slack",
+  "wechat",
+  "dingtalk",
+  "bot",
+])
+
+/**
+ * Derive the per-source redaction name hints.
+ *
+ * Chat + email importers stash the human participants on
+ * `baseMetadata.speakers` (chat speaker list, email From/To headers).
+ * `redactText` only redacts names it is explicitly told about — it has no
+ * free-text name heuristic — so without this every participant name flows
+ * *verbatim* to the cloud embedder and the distill LLM. The shipped pipeline
+ * never supplied hints, making this the system's closest thing to a redaction
+ * bypass.
+ *
+ * Generic role labels ("User", "ChatGPT", …) are dropped to avoid
+ * over-redaction, and email-style `Name <addr@host>` speakers are reduced to
+ * the display name (the address itself is already caught by the EMAIL pass).
+ */
+export function deriveNameHints(raw: RawSource, jobHints: string[] = []): string[] {
+  const out = new Set<string>()
+  for (const hint of jobHints) {
+    const trimmed = hint.trim()
+    if (trimmed) out.add(trimmed)
+  }
+  for (const speaker of raw.baseMetadata?.speakers ?? []) {
+    const name = speaker
+      .replace(/<[^>]*>/g, "") // drop "<addr@host>" — the EMAIL pass handles it
+      .replace(/["']/g, "")
+      .trim()
+    if (name.length <= 1) continue
+    if (GENERIC_SPEAKER_LABELS.has(name.toLowerCase())) continue
+    out.add(name)
+  }
+  return [...out]
+}
 
 async function progress(jobId: string, phase: string, ratio: number) {
   await updateJobProgress(jobId, {
@@ -146,13 +200,31 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
 
       // Stage 3 — redact PII.
       await progress(job.id, `redacting:${raw.filename}`, (stageBase + 2) / TOTAL_STAGES)
-      const redaction = redactText(parsed.embeddableText, input.nameHints ?? [])
+      const redaction = redactText(parsed.embeddableText, deriveNameHints(raw, input.nameHints))
+
+      // Persist the encrypted redaction map so the Drafts → Accept unredaction
+      // flow (`previewUnredact` → `loadTwinUnredactMap`) can restore PII
+      // placeholders in the workbench's "original" view. Without this the map is
+      // computed-and-discarded every run and `loadTwinUnredactMap` always reads
+      // an empty blob, so the entire restore feature is dead. Best-effort: a
+      // key/crypto failure must not fail the source — the persisted chunks are
+      // still safe (redacted); only the UI restore is unavailable. Skip when no
+      // PII was found (empty map → nothing to restore).
+      let redactionMapEnc: string | undefined
+      if (Object.keys(redaction.map).length > 0) {
+        try {
+          redactionMapEnc = await encryptRedactionMap(redaction.map)
+        } catch (err) {
+          console.warn("twin ingest: failed to encrypt redaction map", err)
+        }
+      }
 
       await updateTwinSource(row.id, {
         kind: parsed.kind,
         title: parsed.title,
         bytes: parsed.bytes,
         redacted: true,
+        ...(redactionMapEnc ? { redactionMapEnc } : {}),
       })
       row = (await getTwinSource(row.id)) as TwinSource
 
