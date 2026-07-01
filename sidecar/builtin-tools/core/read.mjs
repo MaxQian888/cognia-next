@@ -151,6 +151,12 @@ export function createReadTool({ cwd, readTracker, model, provider } = {}) {
       }
 
       const { content } = decodeText(buf.toString("utf-8"))
+      // Empty file — return an explicit notice instead of a bare "1\t" line, so
+      // the model doesn't mistake the blank numbering for a one-line file.
+      if (content.length === 0) {
+        readTracker?.record(abs, st)
+        return toolText(`(${abs} is empty — 0 bytes)`)
+      }
       const allLines = content.split("\n")
       const start = args.offset ?? 1
       const limit = args.limit ?? DEFAULT_LIMIT

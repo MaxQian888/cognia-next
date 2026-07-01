@@ -4,7 +4,12 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 
-import { execFileAppend, execFileBinaryWrite } from "./file-write.mjs"
+import {
+  execFileAppend,
+  execFileBinaryWrite,
+  exceedsBinaryWriteLimit,
+  MAX_BINARY_WRITE_BYTES,
+} from "./file-write.mjs"
 
 let TMP
 before(() => {
@@ -42,4 +47,13 @@ test("file_binary_write creates parent dirs when asked", async () => {
     createDirectories: true,
   })
   assert.equal(fs.existsSync(f), true)
+})
+
+test("exceedsBinaryWriteLimit flags oversized payloads by length alone", () => {
+  // Length-based so neither the check nor the test allocates the payload.
+  const overLength = Math.ceil((MAX_BINARY_WRITE_BYTES * 4) / 3) + 16
+  assert.equal(exceedsBinaryWriteLimit(overLength), true)
+  assert.equal(exceedsBinaryWriteLimit(16), false)
+  // Exactly at the limit is allowed; one decoded byte over is rejected.
+  assert.equal(exceedsBinaryWriteLimit(Math.floor((MAX_BINARY_WRITE_BYTES * 4) / 3)), false)
 })

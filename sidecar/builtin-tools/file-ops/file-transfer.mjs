@@ -45,10 +45,16 @@ export const fileCopyTool = tool(
 const fileRenameShape = {
   oldPath: z.string().min(1).describe("Current absolute path."),
   newPath: z.string().min(1).describe("New absolute path."),
+  overwrite: z.boolean().default(false).describe("Overwrite the destination if it exists."),
 }
 
 async function execFileRename(args) {
   try {
+    // Guard against silently clobbering an existing file (matches file_copy).
+    if (!args.overwrite) {
+      const exists = await statOrNull(args.newPath)
+      if (exists) return toolError(`destination already exists: ${args.newPath}`)
+    }
     await fsp.rename(args.oldPath, args.newPath)
     return toolText({ oldPath: args.oldPath, newPath: args.newPath })
   } catch (err) {
@@ -58,7 +64,7 @@ async function execFileRename(args) {
 
 export const fileRenameTool = tool(
   "file_rename",
-  "Rename a file in place (atomic when source and destination share a filesystem).",
+  "Rename a file in place (atomic when source and destination share a filesystem). Refuses to overwrite an existing destination unless overwrite=true.",
   fileRenameShape,
   execFileRename
 )
@@ -68,10 +74,16 @@ export const fileRenameTool = tool(
 const fileMoveShape = {
   source: z.string().min(1).describe("Absolute path of the file to move."),
   destination: z.string().min(1).describe("New absolute path."),
+  overwrite: z.boolean().default(false).describe("Overwrite the destination if it exists."),
 }
 
 async function execFileMove(args) {
   try {
+    // Guard against silently clobbering an existing file (matches file_copy).
+    if (!args.overwrite) {
+      const exists = await statOrNull(args.destination)
+      if (exists) return toolError(`destination already exists: ${args.destination}`)
+    }
     try {
       await fsp.rename(args.source, args.destination)
     } catch (err) {
@@ -91,7 +103,7 @@ async function execFileMove(args) {
 
 export const fileMoveTool = tool(
   "file_move",
-  "Move a file. Falls back to copy-then-delete across filesystems.",
+  "Move a file. Falls back to copy-then-delete across filesystems. Refuses to overwrite an existing destination unless overwrite=true.",
   fileMoveShape,
   execFileMove
 )

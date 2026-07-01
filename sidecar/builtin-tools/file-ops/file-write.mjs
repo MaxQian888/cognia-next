@@ -44,14 +44,37 @@ export const fileAppendTool = tool(
 
 // ---- file_binary_write ----------------------------------------------------
 
+// Upper bound on the decoded payload. Mirrors the read-side `file_hash` 100 MB
+// cap so the write side can't be handed an unbounded base64 blob that
+// allocates a huge Buffer before any I/O. Checked against the base64 LENGTH
+// (≈ 4/3 of the decoded size) so we reject BEFORE decoding.
+export const MAX_BINARY_WRITE_BYTES = 100 * 1024 * 1024
+
+/**
+ * True when a base64 string of the given length would decode to more than
+ * {@link MAX_BINARY_WRITE_BYTES}. Pure + length-based so the check (and its
+ * test) never allocates the payload.
+ */
+export function exceedsBinaryWriteLimit(base64Length) {
+  return Math.floor((base64Length * 3) / 4) > MAX_BINARY_WRITE_BYTES
+}
+
 const fileBinaryWriteShape = {
   path: z.string().min(1).describe("Absolute path to write."),
-  data: z.string().min(1).describe("Base64-encoded binary content."),
+  data: z.string().min(1).describe("Base64-encoded binary content (≤100 MB decoded)."),
   createDirectories: z.boolean().default(false).describe("Create parent directories if missing."),
 }
 
 async function execFileBinaryWrite(args) {
   try {
+    // Reject early so a multi-hundred-MB blob never reaches Buffer.from.
+    if (exceedsBinaryWriteLimit(args.data.length)) {
+      const estimatedMB = Math.round((args.data.length * 3) / 4 / 1024 / 1024)
+      return toolError(
+        `payload too large: ~${estimatedMB} MB exceeds the ${MAX_BINARY_WRITE_BYTES / 1024 / 1024} MB limit`,
+        "file_binary_write"
+      )
+    }
     if (args.createDirectories) {
       const parent = path.dirname(args.path)
       await fsp.mkdir(parent, { recursive: true })

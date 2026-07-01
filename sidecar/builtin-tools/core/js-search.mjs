@@ -182,13 +182,21 @@ export async function jsGrep({ pattern, root, glob, ignoreCase, multiline, cap =
 
       if (multiline) {
         // Multiline: run against the whole content, report the start line of
-        // each match.
+        // each match. Split into lines ONCE and track the line number with a
+        // monotonic newline counter — exec() yields matches in non-decreasing
+        // index order, so we never rescan from the start (the previous
+        // slice(0,index).split() per match was O(matches × fileSize)).
         const g = new RegExp(pattern, flags.includes("g") ? flags : `g${flags}`)
+        const fileLines = content.split("\n")
+        let scanPos = 0
+        let scanLine = 1
         let m
         while ((m = g.exec(content)) !== null) {
-          const line = content.slice(0, m.index).split("\n").length
-          const lineText = content.split("\n")[line - 1] ?? ""
-          matches.push({ file: rel, line, text: lineText })
+          while (scanPos < m.index) {
+            if (content.charCodeAt(scanPos) === 10 /* \n */) scanLine++
+            scanPos++
+          }
+          matches.push({ file: rel, line: scanLine, text: fileLines[scanLine - 1] ?? "" })
           if (matches.length >= cap) {
             truncated = true
             break

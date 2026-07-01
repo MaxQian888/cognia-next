@@ -603,8 +603,17 @@ function startReadLoop() {
 // Run the protocol loop only when executed as a process entry point — importing
 // this module (e.g. from the co-located test) must NOT start reading stdin or
 // emit `ready`.
+//
+// `COGNIA_ROLE === "sidecar"` is the second entry signal: inside the packaged
+// CLI binary there is no system `node`, so the binary self-execs itself with
+// that env and the sidecar role IMPORTS this module to launch it (see
+// cli/src/runtime/sidecar-role.ts). In that path `process.argv[1]` is the pkg
+// bootstrap, not this file, so the argv check alone would never fire and the
+// host would exit before emitting `ready`. The co-located test imports the
+// module WITHOUT that env, so it stays guarded.
 const isEntryPoint = (() => {
   try {
+    if (process.env.COGNIA_ROLE === "sidecar") return true
     return import.meta.url === pathToFileURL(process.argv[1] ?? "").href
   } catch {
     return false

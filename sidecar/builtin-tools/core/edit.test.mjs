@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createEditTool, createMultiEditTool } from "./edit.mjs"
+import { createEditTool, createMultiEditTool, renderEditSnippet } from "./edit.mjs"
 import { createReadTracker } from "./read-tracker.mjs"
 
 const BOM = String.fromCharCode(0xfeff)
@@ -154,6 +154,64 @@ test("multi_edit aborts atomically when a later edit fails", async () => {
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }
+})
+
+test("edit echoes a cat -n snippet of the changed region", async () => {
+  const { dir, tracker } = await fixture("a\nb\nc\nTARGET\nd\ne\nf\n")
+  const tool = createEditTool({ cwd: dir, readTracker: tracker })
+  try {
+    const res = await tool.handler(
+      { file_path: "f.ts", old_string: "TARGET", new_string: "REPLACED" },
+      {}
+    )
+    const text = textOf(res)
+    // The replaced line is on line 4; the snippet must number it as such and
+    // frame it with surrounding context lines.
+    assert.match(text, /1 replacement/)
+    assert.match(text, /\b4\tREPLACED/)
+    assert.match(text, /\b2\tb/) // context before
+    assert.match(text, /\b6\te/) // context after
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("multi_edit anchors its snippet on the first edit after later shifts", async () => {
+  // A later edit inserts lines ABOVE the first edit; the anchor must follow it
+  // so the snippet still frames the first edit's final line number.
+  const { dir, tracker } = await fixture("L1\nL2\nFIRST\nL4\nL5\nSECOND\n")
+  const tool = createMultiEditTool({ cwd: dir, readTracker: tracker })
+  try {
+    const res = await tool.handler(
+      {
+        file_path: "f.ts",
+        edits: [
+          { old_string: "FIRST", new_string: "FIRST_EDITED" },
+          { old_string: "L1\nL2", new_string: "L1\nNEW\nL2" }, // adds a line above FIRST
+        ],
+      },
+      {}
+    )
+    const text = textOf(res)
+    // After the second edit FIRST_EDITED sits on line 4 (was 3), and the anchor
+    // tracked the shift, so the snippet numbers it 4.
+    assert.match(text, /\b4\tFIRST_EDITED/)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("renderEditSnippet head-clips a very large insertion", () => {
+  const inserted = Array.from({ length: 200 }, (_, i) => `new${i}`).join("\n")
+  const content = `head\n${inserted}\ntail\n`
+  const snippet = renderEditSnippet(content, "head\n".length, inserted)
+  assert.match(snippet, /more changed line\(s\) not shown/)
+  // Bounded output: never the full 200-line block.
+  assert.ok(snippet.split("\n").length < 60, "snippet should be head-clipped")
+})
+
+test("renderEditSnippet returns empty when the anchor is unknown", () => {
+  assert.equal(renderEditSnippet("a\nb\n", -1, "x"), "")
 })
 
 test("edit on a missing file errors cleanly", async () => {

@@ -8,7 +8,13 @@
 import { runCapped } from "../shared/exec.mjs"
 import { headTruncate } from "../shared/truncate.mjs"
 
-export const MAX_OUTPUT_BYTES = 256 * 1024 // 256 KB per command
+export const MAX_OUTPUT_BYTES = 256 * 1024 // 256 KB display cap (trimTail)
+// The child may BUFFER far more than we DISPLAY. Keeping the execFile maxBuffer
+// equal to the display cap meant any command over 256 KB (a large diff/log)
+// rejected with "maxBuffer exceeded" before trimTail could turn it into a
+// useful truncated preview. Capture up to 16 MB, then trimTail caps the
+// model-facing slice — so overflow degrades to a truncation, not a hard error.
+export const MAX_CAPTURE_BYTES = 16 * 1024 * 1024
 export const DEFAULT_TIMEOUT_MS = 30 * 1000
 
 /**
@@ -24,7 +30,14 @@ export async function runGit(args, cwd, opts = {}) {
     if (typeof a !== "string") throw new Error("every git arg must be a string")
   }
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  return runCapped("git", args, { cwd, timeoutMs: timeout, maxBuffer: MAX_OUTPUT_BYTES })
+  // Repo-wide config applied to every git invocation:
+  //   core.quotepath=false — emit non-ASCII paths (CJK, accented) verbatim
+  //     instead of octal-escaped ("\346\265\213…"), so status/diff/log output
+  //     is readable for the model and the user.
+  //   --no-optional-locks — read-only commands (status, diff) won't take the
+  //     index lock, avoiding contention with a concurrent git process.
+  const fullArgs = ["-c", "core.quotepath=false", "--no-optional-locks", ...args]
+  return runCapped("git", fullArgs, { cwd, timeoutMs: timeout, maxBuffer: MAX_CAPTURE_BYTES })
 }
 
 // Every git tool calls `assertRepo` before its real command — a second `git`

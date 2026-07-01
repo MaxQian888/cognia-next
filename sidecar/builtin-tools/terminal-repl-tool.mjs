@@ -134,9 +134,18 @@ const spawnShape = {
     .record(z.string(), z.string())
     .optional()
     .describe("Extra env vars to merge into the child env."),
-  cols: z.number().int().min(20).max(500).default(80),
-  rows: z.number().int().min(5).max(200).default(24),
+  cols: z.number().int().min(20).max(500).default(80).describe("Terminal width in columns."),
+  rows: z.number().int().min(5).max(200).default(24).describe("Terminal height in rows."),
 }
+
+// Shared identity params for the write/read/kill actions — these reach the
+// model via the JSON schema, so the guidance lives in `.describe()` (a JS
+// comment would be invisible to the model).
+const ownerAgentIdParam = z
+  .string()
+  .min(1)
+  .describe("Caller identity — must match the agentId that spawned the session.")
+const sessionIdParam = z.string().min(1).describe("The sessionId returned by terminal_repl_spawn.")
 
 async function execSpawn(args) {
   reapIdleSessions()
@@ -207,12 +216,12 @@ async function execSpawn(args) {
     session.lastActivityAt = Date.now()
   })
 
-  return toolText(JSON.stringify({ sessionId: id, shell: args.shell }))
+  return toolText({ sessionId: id, shell: args.shell })
 }
 
 const writeShape = {
-  agentId: z.string().min(1),
-  sessionId: z.string().min(1),
+  agentId: ownerAgentIdParam,
+  sessionId: sessionIdParam,
   data: z.string().describe("Bytes to write to PTY stdin. Append `\\n` to submit a command."),
 }
 
@@ -233,20 +242,25 @@ async function execWrite(args) {
       "terminal_repl_write"
     )
   }
-  return toolText(JSON.stringify({ ok: true }))
+  return toolText({ ok: true })
 }
 
 const readShape = {
-  agentId: z.string().min(1),
-  sessionId: z.string().min(1),
-  /**
-   * When true, drain the in-memory ring buffer after returning it. Default
-   * true — read is destructive so successive reads return only new bytes.
-   * Pass false for an idempotent peek.
-   */
-  drain: z.boolean().default(true),
-  /** Max bytes to return. The ring buffer caps at 256 KiB. */
-  maxBytes: z.number().int().min(256).max(OUTPUT_RING_BYTES).default(OUTPUT_RING_BYTES),
+  agentId: ownerAgentIdParam,
+  sessionId: sessionIdParam,
+  drain: z
+    .boolean()
+    .default(true)
+    .describe(
+      "When true (default), clear the output ring after returning it so successive reads return only new bytes. Pass false for an idempotent peek."
+    ),
+  maxBytes: z
+    .number()
+    .int()
+    .min(256)
+    .max(OUTPUT_RING_BYTES)
+    .default(OUTPUT_RING_BYTES)
+    .describe("Max bytes to return (most-recent). The ring buffer caps at 256 KiB."),
 }
 
 async function execRead(args) {
@@ -265,21 +279,21 @@ async function execRead(args) {
     session.truncated = false
   }
   session.lastActivityAt = Date.now()
-  return toolText(
-    JSON.stringify({
-      data: out,
-      truncated,
-      exited: session.exited,
-      exitCode: session.exitCode,
-    })
-  )
+  return toolText({
+    data: out,
+    truncated,
+    exited: session.exited,
+    exitCode: session.exitCode,
+  })
 }
 
 const killShape = {
-  agentId: z.string().min(1),
-  sessionId: z.string().min(1),
-  /** POSIX signal name (Unix). Ignored on Windows. */
-  signal: z.string().optional(),
+  agentId: ownerAgentIdParam,
+  sessionId: sessionIdParam,
+  signal: z
+    .string()
+    .optional()
+    .describe('POSIX signal name to send, e.g. "SIGTERM" (Unix only; ignored on Windows).'),
 }
 
 async function execKill(args) {
@@ -299,7 +313,7 @@ async function execKill(args) {
   }
   session.exited = true
   session.lastActivityAt = Date.now()
-  return toolText(JSON.stringify({ ok: true, exitCode: session.exitCode }))
+  return toolText({ ok: true, exitCode: session.exitCode })
 }
 
 const terminal_repl_spawn = tool(

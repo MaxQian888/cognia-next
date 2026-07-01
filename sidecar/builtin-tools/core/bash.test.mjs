@@ -132,6 +132,22 @@ test("bash inlines output under the limit without leaving a spill file", async (
   assert.doesNotMatch(textOf(res), /full output saved/)
 })
 
+test("bash never creates a temp spill file for small output", async () => {
+  // Lazy-spill: under the inline budget no temp file should be created at all
+  // (not created-then-unlinked). Snapshot the cognia-bash-* temp files before
+  // and after; the count must not grow.
+  const tmp = os.tmpdir()
+  const countSpills = async () =>
+    (await fsp.readdir(tmp)).filter((f) => f.startsWith("cognia-bash-")).length
+  const before = await countSpills()
+  const tool = createBashTool({ cwd: tmp, shell: legacyShell })
+  for (let i = 0; i < 3; i++) {
+    const res = await tool.handler({ command: "echo no-spill-please" }, {})
+    assert.ok(!res.isError, textOf(res))
+  }
+  assert.equal(await countSpills(), before, "small runs must not create spill files")
+})
+
 test("timeout bounds are sane", () => {
   assert.equal(DEFAULT_TIMEOUT_MS, 120_000)
   assert.equal(MAX_TIMEOUT_MS, 600_000)

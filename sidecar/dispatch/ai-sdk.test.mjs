@@ -215,6 +215,50 @@ test("session exposes pendingApprovals AND pendingPluginToolCalls (gate-first co
   assert.ok(session.pendingPluginToolCalls instanceof Map)
 })
 
+test("refuses to dispatch an OpenRouter key with no base URL (credential-leak guard)", async () => {
+  const { events, emit } = captureEmit()
+  let streamCalled = false
+  dispatchAiSdk({
+    provider: "openrouter",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    // Key present, base URL dropped — the exact stale-build shape that would
+    // otherwise send sk-or-… to api.openai.com.
+    sendOptions: { model: "poolside/laguna-m.1:free", providerCredentials: { apiKey: "sk-or-v1" } },
+    emit,
+    log: () => {},
+    streamText: () => {
+      streamCalled = true
+      return makeFakeStream([])()
+    },
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.match(ended.error, /refused to avoid leaking the key to OpenAI/)
+  assert.equal(streamCalled, false, "must not reach the provider HTTP call")
+})
+
+test("dispatches an OpenRouter key normally once its base URL is present", async () => {
+  const { events, emit } = captureEmit()
+  let seenBaseURL
+  dispatchAiSdk({
+    provider: "openrouter",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "poolside/laguna-m.1:free",
+      providerCredentials: { apiKey: "sk-or-v1", baseURL: "https://openrouter.ai/api/v1" },
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([{ type: "finish", finishReason: "stop" }]),
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const ended = events.find((e) => e.type === "session_ended")
+  // No leak error — the guard let it through.
+  assert.ok(!ended.error || !/leaking the key/.test(ended.error))
+})
+
 test("v6 text-delta (field `text`) produces non-empty assistant text end-to-end", async () => {
   const { events, emit } = captureEmit()
   dispatchAiSdk({
@@ -936,7 +980,7 @@ test("cacheOptimizationEnabled without the anthropic protocol keeps the single c
     firstPrompt: "hi",
     sendOptions: {
       model: "deepseek-chat",
-      providerCredentials: { apiKey: "k" },
+      providerCredentials: { apiKey: "k", baseURL: "https://api.deepseek.com" },
       systemPrompt: "STABLE_PREFIX",
       appendSystemPrompt: "DYNAMIC_TAIL",
       cacheOptimizationEnabled: true,
@@ -1173,7 +1217,11 @@ test("dispatchAiSdk surfaces an in-stream error part (not a throw) as session_en
     firstPrompt: "hi",
     sendOptions: {
       model: "deepseek-v4-flash",
-      providerCredentials: { apiKey: "sk", protocol: "openai" },
+      providerCredentials: {
+        apiKey: "sk",
+        protocol: "openai",
+        baseURL: "https://api.deepseek.com",
+      },
     },
     emit,
     log: () => {},
@@ -2162,7 +2210,11 @@ test("an interrupted tool-call leg does not corrupt the next turn's request", as
     firstPrompt: "turn 1",
     sendOptions: {
       model: "deepseek-chat",
-      providerCredentials: { apiKey: "k", protocol: "openai" },
+      providerCredentials: {
+        apiKey: "k",
+        protocol: "openai",
+        baseURL: "https://api.deepseek.com",
+      },
     },
     emit,
     log: () => {},

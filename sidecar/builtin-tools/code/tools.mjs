@@ -14,6 +14,13 @@ import { z } from "zod"
 
 import { toolError, toolText } from "../safety.mjs"
 
+// Output bounds — mirror the file-ops/process tools' `{total, truncated, note}`
+// contract so a large graph traversal or source body never dumps unbounded
+// tokens into the model's context. Traversal arrays are row-capped; verbatim
+// source bodies are byte-capped.
+export const MAX_ROWS = 100
+export const MAX_SOURCE_CHARS = 12_000
+
 /** Compact node row (token-frugal). */
 function row(node) {
   if (!node) return null
@@ -25,6 +32,41 @@ function row(node) {
     file: node.file_path,
     line: node.start_line,
   }
+}
+
+/**
+ * Cap a result array to {@link MAX_ROWS}. Returns the (possibly sliced) rows
+ * alongside the true `total` and a `truncated` flag so the model is never
+ * misled into thinking a capped list was complete.
+ */
+function capRows(rows, limit = MAX_ROWS) {
+  if (rows.length <= limit) return { rows, total: rows.length, truncated: false }
+  return { rows: rows.slice(0, limit), total: rows.length, truncated: true }
+}
+
+/**
+ * Attach a capped row array to `payload` under `key`, plus `total`/`truncated`/
+ * `note` fields when the list was clipped. Wraps the result with the staleness
+ * banner so callers stay one-liners.
+ */
+function withCappedRows(resolver, payload, key, rows, { limit = MAX_ROWS, hint } = {}) {
+  const { rows: shown, total, truncated } = capRows(rows, limit)
+  const out = { ...payload, [key]: shown }
+  if (truncated) {
+    out.truncated = true
+    out.total = total
+    out.shown = shown.length
+    out.note = `… showing first ${shown.length} of ${total}; ${total - shown.length} more not shown${
+      hint ? ` (${hint})` : ""
+    }.`
+  }
+  return withBanner(resolver, out)
+}
+
+/** Byte-cap a verbatim source body so a huge symbol can't flood the context. */
+function capSource(text) {
+  if (typeof text !== "string" || text.length <= MAX_SOURCE_CHARS) return text
+  return `${text.slice(0, MAX_SOURCE_CHARS)}\n… (source truncated at ${MAX_SOURCE_CHARS} chars — use the read tool for the full body)`
 }
 
 /** Attach the staleness banner to a payload as a leading `warning` field. */
@@ -80,11 +122,18 @@ export function createCodeGraphTools(resolver) {
         limit: z.number().int().min(1).max(100).default(20).describe("Max rows."),
       },
       async (args) =>
-        run(resolver, "codegraph_search", async () =>
-          withBanner(resolver, {
-            results: resolver.search(args.query, { kind: args.kind, limit: args.limit }).map(row),
-          })
-        )
+        run(resolver, "codegraph_search", async () => {
+          const results = resolver
+            .search(args.query, { kind: args.kind, limit: args.limit })
+            .map(row)
+          // The resolver applies `limit` internally, so we can't see the true
+          // total; a full page is the signal that more may exist.
+          const note =
+            results.length >= args.limit
+              ? `${results.length} results (capped at limit=${args.limit}; raise limit or refine the query for more).`
+              : undefined
+          return withBanner(resolver, { results, ...(note ? { note } : {}) })
+        })
     ),
     tool(
       "codegraph_node",
@@ -103,7 +152,7 @@ export function createCodeGraphTools(resolver) {
             is_exported: !!node.is_exported,
             is_async: !!node.is_async,
             end_line: node.end_line,
-            source: resolver.snippetFor(node),
+            source: capSource(resolver.snippetFor(node)),
           })
         })
     ),
@@ -117,11 +166,11 @@ export function createCodeGraphTools(resolver) {
       async (args) =>
         run(resolver, "codegraph_callers", async () => {
           const node = resolveTarget(resolver, args.target)
-          return withBanner(resolver, {
-            target: node.qualified_name,
-            callers: resolver
-              .callers(node.id, args.depth)
-              .map((r) => ({ ...row(r.node), distance: r.distance })),
+          const callers = resolver
+            .callers(node.id, args.depth)
+            .map((r) => ({ ...row(r.node), distance: r.distance }))
+          return withCappedRows(resolver, { target: node.qualified_name }, "callers", callers, {
+            hint: "lower depth or inspect specific callers",
           })
         })
     ),
@@ -135,11 +184,11 @@ export function createCodeGraphTools(resolver) {
       async (args) =>
         run(resolver, "codegraph_callees", async () => {
           const node = resolveTarget(resolver, args.target)
-          return withBanner(resolver, {
-            target: node.qualified_name,
-            callees: resolver
-              .callees(node.id, args.depth)
-              .map((r) => ({ ...row(r.node), distance: r.distance })),
+          const callees = resolver
+            .callees(node.id, args.depth)
+            .map((r) => ({ ...row(r.node), distance: r.distance }))
+          return withCappedRows(resolver, { target: node.qualified_name }, "callees", callees, {
+            hint: "lower depth or inspect specific callees",
           })
         })
     ),
@@ -154,11 +203,17 @@ export function createCodeGraphTools(resolver) {
         run(resolver, "codegraph_impact", async () => {
           const node = resolveTarget(resolver, args.target)
           const reached = resolver.impact(node.id, args.depth)
-          return withBanner(resolver, {
-            target: node.qualified_name,
-            impactCount: reached.length,
-            impacted: reached.map((r) => ({ ...row(r.node), distance: r.distance })),
-          })
+          const impacted = reached.map((r) => ({ ...row(r.node), distance: r.distance }))
+          // `impactCount` always reflects the TRUE blast-radius size; the
+          // `impacted` array itself is row-capped so a wide radius can't flood
+          // the context.
+          return withCappedRows(
+            resolver,
+            { target: node.qualified_name, impactCount: reached.length },
+            "impacted",
+            impacted,
+            { hint: "lower depth to focus the blast radius" }
+          )
         })
     ),
     tool(
@@ -195,16 +250,17 @@ export function createCodeGraphTools(resolver) {
       "List the indexed source files with their per-file symbol counts, language, and any extraction errors.",
       {},
       async () =>
-        run(resolver, "codegraph_files", async () =>
-          withBanner(resolver, {
-            files: resolver.files().map((f) => ({
-              path: f.path,
-              language: f.language,
-              symbols: f.node_count,
-              errors: f.errors ? JSON.parse(f.errors) : undefined,
-            })),
+        run(resolver, "codegraph_files", async () => {
+          const files = resolver.files().map((f) => ({
+            path: f.path,
+            language: f.language,
+            symbols: f.node_count,
+            errors: f.errors ? JSON.parse(f.errors) : undefined,
+          }))
+          return withCappedRows(resolver, {}, "files", files, {
+            hint: "use codegraph_search to find symbols instead of listing all files",
           })
-        )
+        })
     ),
   ]
 }
@@ -217,7 +273,7 @@ function formatContext(resolver, ctx) {
     snippets: ctx.snippets.map((s) => ({
       qualified_name: s.qualified_name,
       file: s.file,
-      source: s.text,
+      source: capSource(s.text),
     })),
     relatedFiles: ctx.relatedFiles,
     dropped: ctx.dropped.length ? ctx.dropped : undefined,

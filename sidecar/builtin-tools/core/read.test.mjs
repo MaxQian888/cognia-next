@@ -33,6 +33,23 @@ test("read returns cat -n numbered content and records into the tracker", async 
   }
 })
 
+test("read returns an explicit notice for an empty file and still records it", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-"))
+  const file = path.join(dir, "empty.txt")
+  await fsp.writeFile(file, "")
+  const tracker = createReadTracker()
+  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  try {
+    const res = await tool.handler({ file_path: "empty.txt" }, {})
+    const text = textOf(res)
+    assert.match(text, /is empty — 0 bytes/)
+    assert.doesNotMatch(text, /\b1\t/) // no bogus blank line 1
+    assert.equal(tracker.hasRead(file), true) // editable afterward
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("read windows with offset/limit and emits a continuation hint", async () => {
   const { dir } = await fixture()
   const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() })

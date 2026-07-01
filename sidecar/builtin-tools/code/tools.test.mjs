@@ -1,7 +1,12 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { createCodeGraphTools, CODE_GRAPH_TOOL_NAMES } from "./tools.mjs"
+import {
+  createCodeGraphTools,
+  CODE_GRAPH_TOOL_NAMES,
+  MAX_ROWS,
+  MAX_SOURCE_CHARS,
+} from "./tools.mjs"
 
 /** A fake resolver implementing the index-service query surface. */
 function fakeResolver(over = {}) {
@@ -127,4 +132,63 @@ test("codegraph_files surfaces per-file symbol counts", async () => {
   const tools = byName(createCodeGraphTools(fakeResolver()))
   const out = parse(await tools.get("codegraph_files").handler({}))
   assert.equal(out.files[0].symbols, 1)
+})
+
+/** Build N distinct fake nodes for cap tests. */
+function manyNodes(n, base) {
+  return Array.from({ length: n }, (_, i) => ({
+    node: { ...base, id: `a.ts::foo::${i}`, qualified_name: `foo${i}` },
+    distance: 1,
+  }))
+}
+
+test("codegraph_impact row-caps the impacted array but keeps the true impactCount", async () => {
+  const resolver = fakeResolver()
+  const big = manyNodes(MAX_ROWS + 25, resolver._node)
+  resolver.impact = () => big
+  const tools = byName(createCodeGraphTools(resolver))
+  const out = parse(await tools.get("codegraph_impact").handler({ target: "foo", depth: 4 }))
+  assert.equal(out.impactCount, MAX_ROWS + 25) // true total, uncapped
+  assert.equal(out.impacted.length, MAX_ROWS) // array clipped
+  assert.equal(out.truncated, true)
+  assert.match(out.note, /more not shown/)
+})
+
+test("codegraph_callers / callees clip to MAX_ROWS with total + note", async () => {
+  const resolver = fakeResolver()
+  resolver.callers = () => manyNodes(MAX_ROWS + 5, resolver._node)
+  resolver.callees = () => manyNodes(MAX_ROWS + 5, resolver._node)
+  const tools = byName(createCodeGraphTools(resolver))
+  const callers = parse(await tools.get("codegraph_callers").handler({ target: "foo", depth: 3 }))
+  assert.equal(callers.callers.length, MAX_ROWS)
+  assert.equal(callers.total, MAX_ROWS + 5)
+  const callees = parse(await tools.get("codegraph_callees").handler({ target: "foo", depth: 3 }))
+  assert.equal(callees.callees.length, MAX_ROWS)
+  assert.equal(callees.truncated, true)
+})
+
+test("an uncapped list emits no truncation fields", async () => {
+  const tools = byName(createCodeGraphTools(fakeResolver()))
+  const callers = parse(await tools.get("codegraph_callers").handler({ target: "foo", depth: 3 }))
+  assert.equal(callers.callers.length, 1)
+  assert.equal(callers.truncated, undefined)
+  assert.equal(callers.note, undefined)
+})
+
+test("codegraph_node byte-caps a huge source body", async () => {
+  const resolver = fakeResolver()
+  resolver.snippetFor = () => "x".repeat(MAX_SOURCE_CHARS + 5_000)
+  const tools = byName(createCodeGraphTools(resolver))
+  const out = parse(await tools.get("codegraph_node").handler({ target: "foo" }))
+  assert.ok(out.source.length < MAX_SOURCE_CHARS + 200)
+  assert.match(out.source, /source truncated/)
+})
+
+test("codegraph_search flags a full page as possibly-more", async () => {
+  const resolver = fakeResolver()
+  resolver.search = () => Array.from({ length: 20 }, (_, i) => ({ ...resolver._node, id: `n${i}` }))
+  const tools = byName(createCodeGraphTools(resolver))
+  const out = parse(await tools.get("codegraph_search").handler({ query: "foo", limit: 20 }))
+  assert.equal(out.results.length, 20)
+  assert.match(out.note, /capped at limit=20/)
 })

@@ -24,6 +24,7 @@ import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
 import {
   resolveProviderProtocol,
   normalizeProtocol,
+  isMisroutedToOpenAi,
 } from "./protocol-adapters/provider-protocol.mjs"
 import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
 import { planStrategy } from "./compaction-strategies.mjs"
@@ -400,6 +401,25 @@ export function dispatchAiSdk({
       type: "session_ended",
       sessionId,
       error: `provider "${provider}" is not configured: no API key or base URL was found. Add credentials for "${provider}" (CLI: ~/.cognia/credentials.json or the matching *_API_KEY env var; desktop: Settings → Providers) and try again.`,
+    })
+    return null
+  }
+
+  // Credential-leak guard. A built-in openai-PROTOCOL provider that is NOT a
+  // genuine OpenAI host (every aggregator — openrouter / deepseek / groq / xai /
+  // … — and the local engines) MUST carry its own base URL. If it got dropped
+  // upstream the openai client silently defaults to api.openai.com, which would
+  // send THIS provider's key (e.g. an `sk-or-…` OpenRouter key) to OpenAI — a
+  // credential leak that OpenAI rejects with a misleading "Incorrect API key"
+  // error. The renderer resolver fills the base URL from the provider catalog;
+  // this is the sidecar's last line of defence. Refuse with a clear, actionable
+  // message instead of leaking the key. (The base-URL-less case above already
+  // returned, so reaching here means a key IS present but the URL is wrong.)
+  if (protocol === "openai" && isMisroutedToOpenAi(provider, resolvedCreds.baseURL)) {
+    emit({
+      type: "session_ended",
+      sessionId,
+      error: `provider "${provider}" has no base URL, so the request would go to api.openai.com with the "${provider}" API key — refused to avoid leaking the key to OpenAI. This usually means the app is running an older build: restart it (desktop: quit and relaunch; web: hard-reload) to pick up the provider fix, or set the "${provider}" base URL in Settings → Providers.`,
     })
     return null
   }

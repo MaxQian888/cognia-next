@@ -4,11 +4,13 @@ import {
   BUILTIN_PROTOCOL_NAMES,
   PROVIDER_PROTOCOL,
   RESPONSES_ONLY_PROVIDERS,
+  OPENAI_HOST_PROVIDERS,
   isBuiltInProtocol,
   normalizeProtocol,
   resolveProviderProtocol,
   isGenuineOpenAiEndpoint,
   isResponsesOnlyEndpoint,
+  isMisroutedToOpenAi,
   decideOpenAiEndpointFlavor,
 } from "./provider-protocol.mjs"
 
@@ -76,6 +78,30 @@ test("isResponsesOnlyEndpoint detects the Codex ChatGPT backend only", () => {
   assert.equal(isResponsesOnlyEndpoint("https://chat.openai.com/backend-api/codex"), true)
   assert.equal(isResponsesOnlyEndpoint("https://api.openai.com/v1"), false)
   assert.equal(isResponsesOnlyEndpoint(undefined), false)
+})
+
+test("isMisroutedToOpenAi flags an aggregator that would hit OpenAI, sparing genuine OpenAI/Codex", () => {
+  // The reported bug: an OpenRouter key with no base URL would reach OpenAI.
+  assert.equal(isMisroutedToOpenAi("openrouter", undefined), true)
+  assert.equal(isMisroutedToOpenAi("openrouter", ""), true)
+  assert.equal(isMisroutedToOpenAi("openrouter", "https://api.openai.com/v1"), true)
+  // Other openai-compatible aggregators are caught the same way.
+  for (const id of ["deepseek", "groq", "xai", "togetherai", "fireworks", "deepinfra"]) {
+    assert.equal(isMisroutedToOpenAi(id, undefined), true, id)
+  }
+  // Local engines that lost their localhost URL would also leak — caught too.
+  assert.equal(isMisroutedToOpenAi("ollama", undefined), true)
+  // The provider's correct host is NOT a misroute.
+  assert.equal(isMisroutedToOpenAi("openrouter", "https://openrouter.ai/api/v1"), false)
+  assert.equal(isMisroutedToOpenAi("deepseek", "https://api.deepseek.com/v1"), false)
+  // Genuine OpenAI + Codex legitimately dispatch to *.openai.com.
+  assert.equal(isMisroutedToOpenAi("openai", undefined), false)
+  assert.equal(isMisroutedToOpenAi("codex", "https://api.openai.com/v1"), false)
+  assert.ok(OPENAI_HOST_PROVIDERS.has("openai") && OPENAI_HOST_PROVIDERS.has("codex"))
+  // Non-openai protocols and unknown/custom ids are never flagged.
+  assert.equal(isMisroutedToOpenAi("anthropic", undefined), false)
+  assert.equal(isMisroutedToOpenAi("my-self-hosted", undefined), false)
+  assert.equal(isMisroutedToOpenAi(undefined, undefined), false)
 })
 
 test("decideOpenAiEndpointFlavor: explicit apiFlavor always wins (unlocks Azure/gateway/custom)", () => {

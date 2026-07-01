@@ -110,6 +110,38 @@ export function resolveProviderProtocol(providerId) {
 export const RESPONSES_ONLY_PROVIDERS = new Set(["codex"])
 
 /**
+ * Built-in openai-PROTOCOL provider ids that legitimately dispatch to an
+ * `*.openai.com` host: genuine OpenAI itself, and Codex (whose API backend is
+ * `api.openai.com/v1`). EVERY OTHER openai-protocol built-in — the cloud
+ * aggregators (openrouter / deepseek / groq / xai / togetherai / fireworks /
+ * deepinfra / opencode / …) and the local engines (ollama / lmstudio / …) —
+ * lives on its OWN host and MUST carry an explicit base URL. The renderer
+ * resolver fills that base URL from the provider catalog before each turn; this
+ * set is the sidecar's last-line check that the value actually arrived.
+ */
+export const OPENAI_HOST_PROVIDERS = Object.freeze(new Set(["openai", "codex"]))
+
+/**
+ * True when dispatching the (already openai-protocol) built-in provider
+ * `providerId` against `baseURL` would WRONGLY reach OpenAI. The base URL was
+ * dropped somewhere upstream (stale renderer build, a base-URL-less custom row
+ * shadowing a built-in id, a config round-trip that lost it), so the openai
+ * client would fall back to `api.openai.com` and SEND THIS PROVIDER'S KEY (e.g.
+ * an `sk-or-…` OpenRouter key) TO OPENAI — a credential leak that surfaces as a
+ * misleading "Incorrect API key" error. Drift-free: it needs no per-provider
+ * base-URL table, only the protocol map and the `*.openai.com` host check.
+ *
+ * Returns false for genuine OpenAI / Codex (their host IS openai), for non-
+ * openai protocols, and for unknown/custom ids (which carry their own protocol
+ * + base URL and are the user's responsibility).
+ */
+export function isMisroutedToOpenAi(providerId, baseURL) {
+  if (!providerId || OPENAI_HOST_PROVIDERS.has(providerId)) return false
+  if (resolveProviderProtocol(providerId) !== "openai") return false
+  return isGenuineOpenAiEndpoint(baseURL)
+}
+
+/**
  * Decide whether an openai-protocol base URL is genuine OpenAI (api.openai.com),
  * which serves the modern Responses API, versus an OpenAI-*compatible* gateway
  * (DeepSeek / OpenCode / Groq / OpenRouter / Ollama / LM Studio / …) that only
