@@ -19,6 +19,14 @@ import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
 const FAMILY = "lark.doc"
 const PLATFORMS = ["lark"] as const
 
+// Shared, described param (serialized to the model via manifest.ts).
+const docTokenParam = z
+  .string()
+  .min(1)
+  .describe(
+    'Doc token (looks like "doxcn…"). Obtain it from lark.doc.search, or a wiki node resolves to one via lark.wiki.read_node.'
+  )
+
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
   mcpToolName: string
@@ -77,8 +85,14 @@ registerBuiltInSkill(
       "zh-CN": "在用户的 Lark 云空间中全文搜索。",
     },
     schema: z.object({
-      query: z.string().min(1),
-      pageSize: z.number().int().min(1).max(50).optional(),
+      query: z.string().min(1).describe("Keywords to search doc titles/content for."),
+      pageSize: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("Max results to return (1–50)."),
     }),
     subcommand: ["docs", "+search"],
     mutation: "read",
@@ -96,11 +110,25 @@ registerBuiltInSkill(
       "zh-CN": "按 token 读取 Lark 文档内容，支持 range / outline 模式。",
     },
     schema: z.object({
-      docToken: z.string().min(1),
-      mode: z.enum(["full", "outline", "range", "keyword", "section"]).optional(),
-      format: z.enum(["simple", "with-ids", "full"]).optional(),
-      keyword: z.string().optional(),
-      sectionId: z.string().optional(),
+      docToken: docTokenParam,
+      mode: z
+        .enum(["full", "outline", "range", "keyword", "section"])
+        .optional()
+        .describe(
+          "How much to read: full body, outline only, a range, around a keyword, or one section (default full)."
+        ),
+      format: z
+        .enum(["simple", "with-ids", "full"])
+        .optional()
+        .describe('Output detail; use "with-ids" to get block ids for later block-targeted edits.'),
+      keyword: z
+        .string()
+        .optional()
+        .describe('Required when mode="keyword": the text to center on.'),
+      sectionId: z
+        .string()
+        .optional()
+        .describe('Required when mode="section": the section/block id.'),
     }),
     subcommand: ["docs", "+fetch", "--api-version", "v2"],
     mutation: "read",
@@ -118,10 +146,16 @@ registerBuiltInSkill(
       "zh-CN": "新建 Lark 文档，默认正文格式为 DocxXML。",
     },
     schema: z.object({
-      title: z.string().min(1),
-      body: z.string().min(1),
-      format: z.enum(["docx-xml", "markdown"]).optional(),
-      folderToken: z.string().optional(),
+      title: z.string().min(1).describe("Title of the new doc."),
+      body: z.string().min(1).describe("Document body, in the chosen format (default DocxXML)."),
+      format: z
+        .enum(["docx-xml", "markdown"])
+        .optional()
+        .describe("Body format: docx-xml (default) or markdown."),
+      folderToken: z
+        .string()
+        .optional()
+        .describe("Optional Drive folder token to create the doc in; omit for the root."),
     }),
     subcommand: ["docs", "+create", "--api-version", "v2"],
     mutation: "write",
@@ -144,17 +178,31 @@ registerBuiltInSkill(
       "zh-CN": "对 Lark 文档应用编辑操作（append / overwrite / block_replace 等）。",
     },
     schema: z.object({
-      docToken: z.string().min(1),
-      operation: z.enum([
-        "append",
-        "overwrite",
-        "block_replace",
-        "block_insert_after",
-        "block_delete",
-        "str_replace",
-      ]),
-      payload: z.string().min(1).describe("DocxXML / Markdown / plain string"),
-      anchor: z.string().optional().describe("Block id or string anchor for the op"),
+      docToken: docTokenParam,
+      operation: z
+        .enum([
+          "append",
+          "overwrite",
+          "block_replace",
+          "block_insert_after",
+          "block_delete",
+          "str_replace",
+        ])
+        .describe(
+          "Edit op: append/overwrite the whole doc, replace/insert-after/delete a block (by id anchor), or str_replace (by string anchor)."
+        ),
+      payload: z
+        .string()
+        .min(1)
+        .describe(
+          "New content — DocxXML, Markdown, or a plain string, depending on the operation."
+        ),
+      anchor: z
+        .string()
+        .optional()
+        .describe(
+          "Block id (block_* ops) or the existing string to match (str_replace). Get block ids via lark.doc.fetch with format=with-ids."
+        ),
     }),
     subcommand: ["docs", "+update", "--api-version", "v2"],
     mutation: "write",
@@ -177,9 +225,12 @@ registerBuiltInSkill(
       "zh-CN": "向 Lark 文档上传本地图片，可指定锚定 block。",
     },
     schema: z.object({
-      docToken: z.string().min(1),
-      imagePath: z.string().min(1).describe("Absolute local path"),
-      anchorBlockId: z.string().optional(),
+      docToken: docTokenParam,
+      imagePath: z.string().min(1).describe("Absolute local path to the image file."),
+      anchorBlockId: z
+        .string()
+        .optional()
+        .describe("Optional block id to insert the image after; omit to append at the end."),
     }),
     subcommand: ["docs", "+upload-image", "--api-version", "v2"],
     mutation: "write",
@@ -201,7 +252,7 @@ registerBuiltInSkill(
       "zh-CN": "将 Lark 文档移至回收站（30 天内可恢复）。",
     },
     schema: z.object({
-      docToken: z.string().min(1),
+      docToken: docTokenParam,
     }),
     subcommand: ["drive", "+delete"],
     mutation: "destructive",
