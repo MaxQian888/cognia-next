@@ -34,6 +34,20 @@ describe("A2UI_SYSTEM_PROMPT", () => {
     expect(A2UI_SYSTEM_PROMPT).toContain("components")
   })
 
+  it("documents every component its own examples/templates use", () => {
+    // The Quick Poll example and buildA2UIChoicePrompt both steer the model to
+    // RadioGroup — it must appear in the Component Reference so the reference
+    // and the examples don't contradict each other (regression guard).
+    const reference = A2UI_SYSTEM_PROMPT.slice(A2UI_SYSTEM_PROMPT.indexOf("## Component Reference"))
+    expect(reference).toContain("**RadioGroup**")
+    expect(reference).toContain("**Radio**")
+    // The poll example uses RadioGroup with a string `action` on the Button —
+    // confirm the prompt keeps teaching the string-action shape this layer's
+    // parser expects (not the connector-layer object action).
+    expect(A2UI_SYSTEM_PROMPT).toContain('"component": "RadioGroup"')
+    expect(A2UI_SYSTEM_PROMPT).toContain('"action": "submit-poll"')
+  })
+
   it("documents the RichOutput component and its advanced profiles", () => {
     expect(A2UI_SYSTEM_PROMPT).toContain("RichOutput")
     expect(A2UI_SYSTEM_PROMPT).toContain("profileId")

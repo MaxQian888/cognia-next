@@ -81,6 +81,8 @@ Wrap A2UI content in a code block with the \`a2ui\` language identifier:
 - **TextArea**: Multi-line input with \`value\`, \`label\`, \`rows\`
 - **Select**: Dropdown with \`value\`, \`label\`, \`options\` array
 - **Checkbox**: Toggle with \`checked\`, \`label\`
+- **Radio**: Single radio button with \`value\`, \`label\`, optional \`checked\`
+- **RadioGroup**: Single-choice group with \`value\`, \`options\` (\`{ value, label }\` array), optional \`label\` and \`orientation\` ("horizontal" | "vertical")
 - **Slider**: Range input with \`value\`, \`min\`, \`max\`, \`step\`, \`label\`
 
 ### Data Components
