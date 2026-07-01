@@ -44,8 +44,15 @@ const stubNextPlugin = {
       // `__esModule` MUST be falsy: esbuild's __toESM then sets `default` to the
       // whole (callable) proxy, so a default import like next/dynamic stays
       // callable. Any named export resolves to the same no-op.
+      //
+      // The `apply` trap MUST return the callable `noop`, NOT its result: a
+      // module-top-level `const C = dynamic(() => import(...))` then does
+      // `C.displayName` / renders `<C/>`. If calling the stub returned `null`
+      // (the target's return value), `C` is null and `C.displayName` throws
+      // "Cannot read properties of null". Returning `noop` makes `C` a no-op
+      // component whose props access is harmless.
       contents:
-        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop) });",
+        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop), apply: () => noop });",
       loader: "js",
     }))
   },

@@ -137,8 +137,11 @@ const stubNextPlugin = {
   setup(build) {
     build.onResolve({ filter: STUB_PATTERN }, (args) => ({ path: args.path, namespace: "cli-stub" }))
     build.onLoad({ filter: /.*/, namespace: "cli-stub" }, () => ({
+      // `apply: () => noop` so a module-top-level `const C = dynamic(...)`
+      // yields a no-op component, not `null` — otherwise `C.displayName`
+      // (e.g. markdown-renderer's withRendererErrorBoundary) throws at import.
       contents:
-        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop) });",
+        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop), apply: () => noop });",
       loader: "js",
     }))
   },
@@ -218,6 +221,22 @@ await esbuild.build({
   logLevel: "info",
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, path.join(sidecarOutDir, "claude-host.mjs"))}`)
+
+// 2b. Copy the sidecar's runtime-read data files next to the bundle. esbuild
+// inlines the JS but NOT files loaded via `fs.readFileSync(import.meta.url-
+// relative path)`; in the bundle `import.meta.url` resolves to claude-host.mjs,
+// so each such file must sit beside it. store-sqlite.mjs reads `schema.sql` at
+// module load (a top-level read — it runs even before the sqlite store is
+// constructed), so a missing file crashes the sidecar before it emits `ready`.
+const SIDECAR_DATA_FILES = [path.join(root, "sidecar/builtin-tools/code/schema.sql")]
+for (const src of SIDECAR_DATA_FILES) {
+  if (!fs.existsSync(src)) {
+    console.error(`build-cli-binary: missing sidecar data file ${path.relative(root, src)}`)
+    process.exit(1)
+  }
+  fs.cpSync(src, path.join(sidecarOutDir, path.basename(src)))
+}
+console.log(`build-cli-binary: copied ${SIDECAR_DATA_FILES.length} sidecar data file(s) → ${path.relative(root, sidecarOutDir)}`)
 
 // 3. Copy a pruned node_modules — just the externals (+ their nested deps).
 // Under pnpm's isolated layout each package nests its own deps, so a
