@@ -413,6 +413,28 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
     )
   })
 
+  it("fills the OpenRouter catalog base URL for a key-only built-in entry (no api.openai.com leak)", async () => {
+    // Repro of the reported bug: an OpenRouter key with no stored base URL must
+    // resolve to openrouter.ai, NOT default the openai client to api.openai.com.
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "c1",
+        providerId: "openrouter",
+        model: "poolside/laguna-m.1:free",
+      }),
+      appSettings: {
+        defaultProvider: "openrouter",
+        providerSettings: {
+          openrouter: { apiKey: "sk-or-v1-xxx" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("openrouter")
+    expect(opts.providerCredentials?.apiKey).toBe("sk-or-v1-xxx")
+    expect(opts.providerCredentials?.protocol).toBe("openai")
+    expect(opts.providerCredentials?.baseURL).toBe("https://openrouter.ai/api/v1")
+  })
+
   it("rides the declarative spec along for a plugin-contributed protocol (M2)", async () => {
     const { registerProtocolAdapter, __resetProtocolAdaptersForTesting } =
       await import("@cognia/provider-core/providers/protocol-adapter-registry")
@@ -3109,6 +3131,39 @@ describe("includePartialMessages (token-level streaming gate)", () => {
       character: makeChar({ id: "c1" }),
       preloadedEnv: null,
       preloadedMcpServers: [],
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("enables on an interactive CLI send (interactive flag set despite preloadedEnv/Mcp)", async () => {
+    // The CLI TUI injects preloadedEnv/preloadedMcpServers but IS a live turn —
+    // it must get partials so the deltas keep feeding the idle watchdog through
+    // a long single generation (large file write).
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+      interactive: true,
+    })
+    expect(opts.includePartialMessages).toBe(true)
+  })
+
+  it("interactive flag still defers to streamPartialMessages = false", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+      interactive: true,
+      appSettings: { streamPartialMessages: false } as AppSettings,
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("interactive flag does NOT override a connector send (conversationKey still wins)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      conversationKey: "telegram:123",
+      interactive: true,
     })
     expect(opts.includePartialMessages).toBeUndefined()
   })

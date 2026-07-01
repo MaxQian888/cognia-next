@@ -368,6 +368,19 @@ export interface BuildOptionsContext {
    */
   preloadedEnv?: Record<string, string> | null
   /**
+   * Marks a LIVE, user-facing turn that must receive token-level partial
+   * messages even though it injects `preloadedEnv` / `preloadedMcpServers`
+   * (the standalone agent CLI's interactive TUI). Without it those preloaded
+   * fields make `isInteractiveSend` false, so the native Anthropic SDK never
+   * streams `stream_event` deltas — and a long single generation (e.g. writing
+   * a large file) emits no events for >60s, starving the run-and-capture idle
+   * watchdog into a spurious "stream idle for 60000ms" interrupt. Headless /
+   * request-response callers (mobile companion API) leave this undefined so
+   * they keep consuming only the final result. Connector / nested-dispatch are
+   * still excluded independently via `conversationKey` / `dispatchContext`.
+   */
+  interactive?: boolean
+  /**
    * Nested-dispatch context (depth-N subagents). Present ONLY when this build is
    * for a dispatched subagent run (set by `agent-executor`). When present, the
    * resolver (a) suppresses the SDK-native `opts.agents` injection so the child
@@ -2419,16 +2432,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Request the SDK's partial-message stream so the renderer can paint
   // assistant text token-by-token. Only on INTERACTIVE sends: connector
   // (`conversationKey`), nested-dispatch (`dispatchContext`), and headless /
-  // standalone-CLI (`preloadedEnv` / `preloadedMcpServers` provided) paths
+  // request-response (`preloadedEnv` / `preloadedMcpServers` provided) paths
   // consume only the final result, so partial events there are wasted IPC
   // volume. Gated by `AppSettings.streamPartialMessages` (default on). The SDK
   // simply omits partials when a thinking budget is active, so this is a no-op
   // (graceful whole-message fallback) in that case rather than a conflict.
+  //
+  // EXCEPTION: the standalone agent CLI's interactive TUI sets `ctx.interactive`
+  // — it injects `preloadedEnv`/`preloadedMcpServers` (it can't reach Dexie /
+  // Tauri) but IS a live turn. It must get partials so the deltas keep feeding
+  // the idle watchdog; otherwise a long single generation (large file write)
+  // streams nothing for >60s and trips the spurious "stream idle" interrupt.
   const isInteractiveSend =
     !ctx.conversationKey &&
     !ctx.dispatchContext &&
-    ctx.preloadedEnv === undefined &&
-    ctx.preloadedMcpServers === undefined
+    (ctx.interactive === true ||
+      (ctx.preloadedEnv === undefined && ctx.preloadedMcpServers === undefined))
   if (isInteractiveSend && (appSettings?.streamPartialMessages ?? true)) {
     opts.includePartialMessages = true
   }
