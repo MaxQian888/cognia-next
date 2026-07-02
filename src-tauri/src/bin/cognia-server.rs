@@ -48,6 +48,10 @@ use app_lib::companion_api::{
     sync_registry::SyncTableRegistry,
     tls, CompanionState, SharedState,
 };
+use app_lib::headless::{
+    brain, headless_services, install_headless_services, kill_sidecar, ApiKeyState,
+    HeadlessServices, HeadlessSidecarHost, SIDECAR_SCRIPT_ENV,
+};
 use parking_lot::RwLock;
 
 use clap::{Parser, Subcommand};
@@ -73,12 +77,34 @@ enum CliCommand {
         /// Human label for the device being paired.
         #[arg(long, default_value = "headless-pair")]
         device_name: String,
+        /// Base URL encoded into the pair payload (what the phone will
+        /// dial). Defaults to `COGNIA_PUBLIC_URL`, else
+        /// `https://127.0.0.1:<port>`.
+        #[arg(long)]
+        advertise_url: Option<String>,
+        /// Port used for the default advertise URL when neither
+        /// `--advertise-url` nor `COGNIA_PUBLIC_URL` is set.
+        #[arg(long, default_value_t = 7890)]
+        port: u16,
     },
     /// Boot the HTTPS companion server. Binds 0.0.0.0:<port>.
     Serve {
         #[arg(long, default_value_t = 7890)]
         port: u16,
+        /// Public base URL advertised in pair payloads/logs. Defaults to
+        /// `COGNIA_PUBLIC_URL`, else `https://127.0.0.1:<bound port>`.
+        #[arg(long)]
+        advertise_url: Option<String>,
     },
+}
+
+/// Resolve the advertised base URL: explicit flag → `COGNIA_PUBLIC_URL` →
+/// loopback default for `port`. The old skeleton hardcoded
+/// `https://127.0.0.1:7890` regardless of the actual port.
+fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
+    flag.or_else(|| std::env::var("COGNIA_PUBLIC_URL").ok())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("https://127.0.0.1:{port}"))
 }
 
 fn data_dir() -> PathBuf {
@@ -112,8 +138,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tls_material = tls::ensure_certificate(&dir)?;
 
     match cli.command {
-        CliCommand::Pair { device_name } => run_pair(&store, &tls_material, &device_name).await,
-        CliCommand::Serve { port } => run_serve(&store, &tls_material, port).await,
+        CliCommand::Pair {
+            device_name,
+            advertise_url,
+            port,
+        } => {
+            let base_url = resolve_advertise_url(advertise_url, port);
+            run_pair(&store, &tls_material, &device_name, &base_url).await
+        }
+        CliCommand::Serve {
+            port,
+            advertise_url,
+        } => run_serve(&store, &tls_material, port, advertise_url).await,
     }
 }
 
@@ -121,6 +157,7 @@ async fn run_pair(
     store: &std::sync::Arc<SqliteAppStore>,
     tls: &tls::TlsMaterial,
     device_name: &str,
+    base_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Make sure the store opens cleanly — a successful list_sessions also
     // exercises the schema migration on first run.
@@ -142,7 +179,7 @@ async fn run_pair(
     // Build the same v2 pair payload the desktop QR code uses
     // (cgnp2|<base64>) so the mobile client can decode it unchanged.
     let payload = serde_json::json!({
-        "baseUrl": format!("https://127.0.0.1:7890"),
+        "baseUrl": base_url,
         "pairJwt": pair_jwt,
         "accountId": HEADLESS_LOCAL_ACCOUNT_ID,
         "fingerprint": tls.fingerprint_sha256,
@@ -158,13 +195,40 @@ async fn run_pair(
     Ok(())
 }
 
+/// Resolve the headless sidecar script: `COGNIA_SIDECAR_SCRIPT` env, with a
+/// dev-checkout fallback (`<repo>/sidecar/claude-host.mjs`) so a hand-run
+/// `cargo run --bin cognia-server serve` works without extra setup.
+fn resolve_sidecar_script_path() -> Option<PathBuf> {
+    if let Ok(raw) = std::env::var(SIDECAR_SCRIPT_ENV) {
+        if !raw.trim().is_empty() {
+            return Some(PathBuf::from(raw));
+        }
+    }
+    let dev_fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("sidecar")
+        .join("claude-host.mjs");
+    dev_fallback.exists().then_some(dev_fallback)
+}
+
+/// Resolve the brain entry (`COGNIA_BRAIN_ENTRY`). No dev fallback — the
+/// brain bundle is a build artifact (`scripts/build/build-cli.mjs`), so its
+/// absence is reported instead of guessed.
+fn resolve_brain_entry() -> Option<PathBuf> {
+    std::env::var(brain::BRAIN_ENTRY_ENV)
+        .ok()
+        .filter(|raw| !raw.trim().is_empty())
+        .map(PathBuf::from)
+}
+
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
     port: u16,
+    advertise_url: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Install the headless AppStore so every DataPlane::pick lands on the
-    // Direct variant (Phase D RPC handler rewrite).
+    // Install the headless AppStore — the DEGRADED data plane, serving only
+    // while no brain is connected (ADR-0059 D3/R4).
     install_headless_store(Some(store.clone() as Arc<dyn AppStore>));
 
     // Install the headless push-credential store (JSON file beside the
@@ -180,8 +244,8 @@ async fn run_serve(
     // Publish the TLS fingerprint for the whoami handler (P0.3).
     set_tls_fingerprint(tls_material.fingerprint_sha256.clone());
 
-    // Build a SharedState with `app_handle: None` — the bridges remain
-    // instantiated but the DataPlane never picks them in headless mode.
+    // Build a SharedState with `app_handle: None`; dispatch resolves the
+    // headless services registry instead (ADR-0059 R5/R7).
     let signing_secret = secret::load_or_generate()?;
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
@@ -199,32 +263,92 @@ async fn run_serve(
         push_tokens: PushTokenRegistry::new(),
     });
 
+    // Headless services registry (R7): the sidecar supervisor + provider-env
+    // store the claude_* dispatch arms resolve. The sidecar script comes from
+    // COGNIA_SIDECAR_SCRIPT (or the dev checkout); without one, chat arms
+    // fail at spawn time with a clear path error rather than at boot.
+    let api_keys = ApiKeyState::new();
+    let sidecar_script = resolve_sidecar_script_path().unwrap_or_else(|| {
+        eprintln!(
+            "[cognia-server] warning: no sidecar script found (set {SIDECAR_SCRIPT_ENV}); claude_send will fail",
+        );
+        PathBuf::from("claude-host.mjs")
+    });
+    let sidecar_host = Arc::new(HeadlessSidecarHost::new(
+        sidecar_script,
+        Arc::clone(&shared.event_bus),
+        api_keys.clone(),
+    ));
+    install_headless_services(Some(HeadlessServices::new(
+        sidecar_host,
+        api_keys,
+        Arc::clone(&shared.event_bus),
+    )));
+
     // LAN bind (false) so the headless server is reachable on every
     // interface — the typical deployment puts this behind a reverse proxy
     // or VPN; binding to loopback in a server context defeats the purpose.
-    let handle = server::spawn_server(port, false, tls_material.clone(), shared).await?;
+    let handle = server::spawn_server(port, false, tls_material.clone(), Arc::clone(&shared)).await?;
     // Publish the bind port for the public /healthz endpoint so emulator
     // probes can confirm the right server (matches the test+production
     // path used by CompanionServerState::start in mod.rs).
     set_advertised_port(handle.bound_port);
+    let public_url = resolve_advertise_url(advertise_url, handle.bound_port);
     println!(
         "[cognia-server] HTTPS listening on https://0.0.0.0:{}",
         handle.bound_port
     );
+    println!("[cognia-server] advertised base URL: {public_url}");
     println!(
         "[cognia-server] fingerprint: {}",
         tls_material.fingerprint_sha256
     );
+
+    // Brain supervisor (R8): spawn `node $COGNIA_BRAIN_ENTRY serve` against
+    // the bound port and keep it alive. Without an entry the server still
+    // runs — the degraded store serves reads and /healthz reports
+    // `brain.configured: false`.
+    let mut brain_supervisor: Option<Arc<brain::BrainSupervisor>> = None;
+    match resolve_brain_entry() {
+        Some(entry) => {
+            let config = brain::BrainConfig::for_port(
+                entry,
+                handle.bound_port,
+                data_dir.clone(),
+                HEADLESS_LOCAL_ACCOUNT_ID.to_string(),
+                tls_material.fingerprint_sha256.clone(),
+                Some(tls_material.cert_pem_path.clone()),
+            );
+            let supervisor = brain::BrainSupervisor::new(config, Arc::clone(&shared));
+            brain::install_brain(Some(Arc::clone(&supervisor)));
+            supervisor.start();
+            println!("[cognia-server] brain supervisor started");
+            brain_supervisor = Some(supervisor);
+        }
+        None => {
+            eprintln!(
+                "[cognia-server] warning: {} not set — running without a brain (degraded data plane only)",
+                brain::BRAIN_ENTRY_ENV
+            );
+        }
+    }
     println!("[cognia-server] press Ctrl-C to stop.");
 
-    // Block until Ctrl-C, then trigger graceful shutdown.
+    // Block until Ctrl-C, then trigger graceful shutdown: brain + sidecar
+    // first (children), then the HTTP listener.
     tokio::signal::ctrl_c()
         .await
         .map_err(|e| format!("ctrl-c handler: {e}"))?;
     println!("[cognia-server] shutting down…");
+    if let Some(supervisor) = brain_supervisor {
+        supervisor.shutdown();
+    }
+    if let Some(services) = headless_services() {
+        kill_sidecar(services.sidecar.clone()).await;
+    }
     let _ = handle.shutdown.send(());
     // Brief grace period so axum-server's graceful_shutdown(Some(10s)) has
-    // time to drain in-flight requests.
+    // time to drain in-flight requests and the children observe their kills.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     Ok(())
 }

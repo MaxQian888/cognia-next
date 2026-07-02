@@ -2162,6 +2162,11 @@ mod tests {
 
     #[tokio::test]
     async fn command_requiring_app_handle_returns_503_in_test_mode() {
+        // `DispatchHost::from_state` consults the process-global headless
+        // services slot — hold the shared global-slot lock so a concurrent
+        // test's install doesn't turn this 503 into a headless dispatch.
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
         let state = test_state(); // app_handle is None
         let router = build_router(state);
         let jwt = device_jwt("dev1");

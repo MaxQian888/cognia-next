@@ -14,14 +14,21 @@
 //! with install/read accessors, so the many `CompanionState` constructors
 //! don't have to thread it.
 
+pub mod brain;
+
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use crate::api_key::ApiKeyState;
-use crate::claude::host::SidecarHost;
 use crate::claude::SidecarState;
 use crate::companion_api::event_bus::EventBus;
+
+// Re-exports for the `cognia-server` binary (the `api_key` / `claude`
+// modules are crate-private; this module is the headless boot surface).
+// The `pub use` also brings the names into scope for this module.
+pub use crate::api_key::ApiKeyState;
+pub use crate::claude::host::{HeadlessSidecarHost, SidecarHost, SIDECAR_SCRIPT_ENV};
+pub use crate::claude::sidecar::kill_sidecar;
 
 /// Service container for the headless (no-Tauri) host. The `cognia-server`
 /// binary constructs one at boot (R8) and installs it process-wide; the
@@ -88,11 +95,11 @@ pub fn headless_services() -> Option<Arc<HeadlessServices>> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn install_and_clear_round_trip() {
-        // NOTE: process-global — this test is the only one that installs into
-        // the slot (dispatch tests construct `DispatchHost::Headless`
-        // directly), so no cross-test lock is needed yet.
+    #[tokio::test]
+    async fn install_and_clear_round_trip() {
+        // Process-global slot — serialize with the other global-slot tests
+        // (healthz's headless-shape test installs here too).
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
         install_headless_services(Some(HeadlessServices::stub_for_tests()));
         assert!(headless_services().is_some());
         install_headless_services(None);
