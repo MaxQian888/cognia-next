@@ -354,6 +354,34 @@ export function createAccountStore(
 
 export const useAccountStore = createAccountStore()
 
+/**
+ * ADR-0059 T-B3 — unlock a local account for a HEADLESS HOST process (the
+ * `cognia-agent serve` brain). The headless account has no interactive
+ * password flow: the host process owns the whole database file, so unlock
+ * is an assertion of host identity, not an authentication.
+ *
+ * Guarded: refuses unless the `__COGNIA_HEADLESS__` marker is set (the serve
+ * boot sets it before any lib code runs). In a real browser/WebView the
+ * marker never exists, so this can never bypass the password unlock there.
+ * The guard is unit-tested.
+ */
+export async function unlockAccountForHost(accountId: string): Promise<void> {
+  const marker = (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+  if (marker !== true) {
+    throw new Error(
+      "unlockAccountForHost is reserved for headless host processes (__COGNIA_HEADLESS__ not set)"
+    )
+  }
+  activateAccountDatabase(accountId)
+  useAccountStore.setState((state) => ({
+    activeAccountId: accountId,
+    unlockedAccountId: accountId,
+    locked: false,
+    error: null,
+    accountRevision: state.accountRevision + 1,
+  }))
+}
+
 export function selectActiveAccount(state: AccountStoreState): LocalAccountRecord | null {
   return state.accounts.find((account) => account.id === state.activeAccountId) ?? null
 }

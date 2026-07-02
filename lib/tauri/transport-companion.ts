@@ -931,7 +931,15 @@ export class CompanionTransport implements Transport {
   // ── Private: network awareness ─────────────────────────────────────────────
 
   private attachNetworkListeners(): void {
-    if (typeof window === "undefined" || this.networkListenersAttached) return
+    // The headless brain's window shim is `globalThis` (no EventTarget API),
+    // so require the method — network awareness is a browser concern.
+    if (
+      typeof window === "undefined" ||
+      typeof window.addEventListener !== "function" ||
+      this.networkListenersAttached
+    ) {
+      return
+    }
     this.networkListenersAttached = true
 
     this.onlineListener = () => {

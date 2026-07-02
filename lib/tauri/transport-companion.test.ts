@@ -261,6 +261,7 @@ describe("configProvider injection", () => {
         baseUrl: "https://127.0.0.1:7999",
         deviceJwt: "service.token.abc",
         deviceId: "brain-1",
+        serverVersion: "headless",
       }),
     })
 
@@ -286,6 +287,7 @@ describe("configProvider injection", () => {
         baseUrl: "https://127.0.0.1:7999",
         deviceJwt: token,
         deviceId: "brain-1",
+        serverVersion: "headless",
       }),
     })
 
