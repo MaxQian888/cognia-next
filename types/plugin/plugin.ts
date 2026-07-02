@@ -144,6 +144,8 @@ export type PluginCapability =
   | "auth-provider" // Contributes a native auth/OAuth provider (C1) — ctx.auth.registerProvider
   | "uri-handler" // Handles cognia://plugin/<id>/... deep-links (C2) — ctx.uri.registerHandler
   | "pet" // Reads + nurtures the desktop pet — gates ctx.pet (rate-limited, budget-clamped)
+  | "pet-achievement" // Contributes data-only pet achievements (condition DSL, manifest.petAchievements)
+  | "pet-item" // Contributes data-only pet shop items (manifest.petItems)
 
 /**
  * Plugin status in the lifecycle
@@ -747,6 +749,17 @@ export interface PluginManifest {
    * lifecycle. See `lib/plugin/registries/character-pack-registry.ts`.
    */
   characterPacks?: PluginCharacterPackDef[]
+  /**
+   * Data-only pet achievements (`pet-achievement` capability). Compiled from
+   * their condition DSL into predicates at check time; ids namespace as
+   * `plugin:<pluginId>:<id>`. See `lib/plugin/registries/pet-achievement-registry.ts`.
+   */
+  petAchievements?: import("./plugin-pet").PluginPetAchievementDef[]
+  /**
+   * Data-only pet shop items (`pet-item` capability), unioned into the host
+   * catalog static-first. See `lib/plugin/registries/pet-item-registry.ts`.
+   */
+  petItems?: import("./plugin-pet").PluginPetItemDef[]
   /**
    * Subagents contributed by this plugin (`subagent` capability). Each entry
    * mirrors the Claude Code SDK `AgentDefinition` shape and is registered

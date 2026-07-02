@@ -18,6 +18,10 @@ import { renamePet } from "@/lib/pet/runtime/rename-pet"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import {
+  PluginExtensionSlot,
+  usePluginSlotHasExtensions,
+} from "@/components/plugins/plugin-extension-slot"
 import { DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
 import { PetRenderer } from "../pet-renderer"
@@ -29,8 +33,16 @@ import { DexTab } from "./dex-tab"
 import { AchievementsTab } from "./achievements-tab"
 import { BindingTab } from "./binding-tab"
 
-type ConsoleTab = "nurture" | "shop" | "customize" | "dex" | "achievements" | "binding"
-const TABS: ConsoleTab[] = ["nurture", "shop", "customize", "dex", "achievements", "binding"]
+type ConsoleTab = "nurture" | "shop" | "customize" | "dex" | "achievements" | "binding" | "plugins"
+const TABS: ConsoleTab[] = [
+  "nurture",
+  "shop",
+  "customize",
+  "dex",
+  "achievements",
+  "binding",
+  "plugins",
+]
 
 export function PetConsole() {
   const t = useTranslations("pet")
@@ -47,6 +59,11 @@ export function PetConsole() {
     coreReady,
     hasActiveModel: Boolean(modelId),
   })
+
+  // The "Plugins" tab is host-owned and appears only while ≥1 plugin has
+  // registered a `pet.console.tab` extension.
+  const hasPluginTabs = usePluginSlotHasExtensions("pet.console.tab")
+  const visibleTabs = hasPluginTabs ? TABS : TABS.filter((id) => id !== "plugins")
 
   if (!profile || !view) {
     return (
@@ -91,7 +108,7 @@ export function PetConsole() {
         className="mt-3 flex items-center gap-1 border-b bg-background/80 px-2 py-2 backdrop-blur"
         role="tablist"
       >
-        {TABS.map((id) => (
+        {visibleTabs.map((id) => (
           <Button
             key={id}
             size="sm"
@@ -140,6 +157,18 @@ export function PetConsole() {
         {tab === "dex" && <DexTab bones={view.bones} />}
         {tab === "achievements" && <AchievementsTab />}
         {tab === "binding" && <BindingTab />}
+        {tab === "plugins" && (
+          <PluginExtensionSlot
+            point="pet.console.tab"
+            className="mx-auto flex w-full max-w-3xl flex-col gap-4"
+            context={{
+              level: profile.level,
+              stage: profile.stage,
+              mood: view.mood,
+              condition: view.condition,
+            }}
+          />
+        )}
       </div>
     </div>
   )

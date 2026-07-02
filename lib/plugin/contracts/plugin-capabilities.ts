@@ -1500,6 +1500,38 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: ["lib/plugin/api/pet-api.test.ts", "lib/plugin/api/pet-budget.test.ts"],
   },
+  {
+    id: "pet-achievement",
+    support: "supported",
+    manifestFields: ["petAchievements"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES dispatch → pet-achievement-registry (condition DSL compiled into checkAchievements)",
+    hostBindings: [
+      "lib/plugin/registries/pet-achievement-registry.ts",
+      "lib/plugin/contracts/capability-bridge-map.ts",
+      "lib/pet/achievements/check.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/manifest/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: ["lib/plugin/registries/pet-achievement-registry.test.ts"],
+  },
+  {
+    id: "pet-item",
+    support: "supported",
+    manifestFields: ["petItems"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES dispatch → pet-item-registry (unioned static-first into the shop catalog)",
+    hostBindings: [
+      "lib/plugin/registries/pet-item-registry.ts",
+      "lib/plugin/contracts/capability-bridge-map.ts",
+      "lib/pet/economy/item-catalog.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/manifest/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: ["lib/plugin/registries/pet-item-registry.test.ts"],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

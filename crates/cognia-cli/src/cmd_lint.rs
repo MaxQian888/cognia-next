@@ -172,6 +172,8 @@ const VALID_CAPABILITIES: &[&str] = &[
     // C2 — deep-link handler (ctx.uri + onUri activation; no manifest field).
     "uri-handler",
     "pet",
+    "pet-achievement",
+    "pet-item",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] = &["frontend", "python", "hybrid", "wasm", "vscode-extension"];
@@ -223,6 +225,8 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("fonts", &["fonts"]),
     ("wallpapers", &["wallpapers"]),
     ("cli-tools", &["cliTools"]),
+    ("pet-achievement", &["petAchievements"]),
+    ("pet-item", &["petItems"]),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

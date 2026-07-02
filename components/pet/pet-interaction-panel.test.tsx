@@ -8,6 +8,15 @@ jest.mock("./pet-renderer", () => ({
   ),
 }))
 
+// Plugin slot host — captured to assert the point + safe context bag.
+const slotProps = jest.fn()
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: (props: unknown) => {
+    slotProps(props)
+    return <div data-testid="pet-panel-slot" />
+  },
+}))
+
 import { PetInteractionPanel } from "./pet-interaction-panel"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
@@ -111,6 +120,21 @@ describe("PetInteractionPanel", () => {
     fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
     fireEvent.click(screen.getByLabelText("Send"))
     expect(h.onTalk).toHaveBeenCalledWith(undefined)
+  })
+
+  it("mounts the pet.panel.actions slot with the safe context bag", () => {
+    setup()
+    expect(screen.getByTestId("pet-panel-slot")).toBeInTheDocument()
+    expect(slotProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        point: "pet.panel.actions",
+        limit: 4,
+        context: expect.objectContaining({
+          level: expect.any(Number),
+          stage: "baby",
+        }),
+      })
+    )
   })
 
   it("wires sleep/clean/treat actions", () => {

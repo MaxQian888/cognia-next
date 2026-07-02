@@ -111,7 +111,16 @@ import {
   registerAuthenticationProvider,
   unregisterProvidersByPlugin,
 } from "@/lib/plugin/auth/auth-provider-registry"
+import {
+  registerPetAchievement,
+  unregisterPetAchievementsByPlugin,
+} from "@/lib/plugin/registries/pet-achievement-registry"
+import {
+  registerPetItem,
+  unregisterPetItemsByPlugin,
+} from "@/lib/plugin/registries/pet-item-registry"
 import type { PluginQuickActionDef, PluginAuthProviderDef } from "@/types/plugin"
+import type { PluginPetAchievementDef, PluginPetItemDef } from "@/types/plugin/plugin-pet"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -418,6 +427,26 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       })
     },
     unregisterAllByPlugin: unregisterProvidersByPlugin,
+  }),
+  "pet-achievement": defineOverlayCapability<PluginPetAchievementDef>({
+    // Data-only pet achievements (condition DSL, compiled at check time by
+    // lib/plugin/registries/pet-achievement-registry.ts). Ids namespace as
+    // `plugin:<pluginId>:<id>` inside the compiled view, so unlock records
+    // can't collide with the static PET_ACHIEVEMENTS.
+    manifestField: "petAchievements",
+    registerEntry: (def, ctx) => {
+      registerPetAchievement(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterPetAchievementsByPlugin,
+  }),
+  "pet-item": defineOverlayCapability<PluginPetItemDef>({
+    // Data-only pet shop items, unioned into the host catalog static-first
+    // (lib/pet/economy/item-catalog.ts listAllPetItems/getPetItem).
+    manifestField: "petItems",
+    registerEntry: (def, ctx) => {
+      registerPetItem(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterPetItemsByPlugin,
   }),
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

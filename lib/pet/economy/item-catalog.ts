@@ -1,9 +1,13 @@
 // Static shop catalog — the economy sibling of `lib/pet/achievements/registry.ts`.
 // Definitions live in code; only ownership (`petInventory`) is persisted.
-// Plugin-contributed items are unioned in via the overlay registry once the
-// plugin integration lands (static-first, overlay-fallback).
+// Plugin-contributed items union in via the overlay registry (static-first;
+// plugin ids are namespaced `plugin:<pluginId>:<id>` so they can't shadow).
 
 import type { PetShopItem } from "@/types/pet"
+import {
+  getProjectedPluginItem,
+  listProjectedPluginItems,
+} from "@/lib/plugin/registries/pet-item-registry"
 
 export const PET_ITEMS: PetShopItem[] = [
   // ── Food (consumable → "fed") ──────────────────────────────────────────────
@@ -61,5 +65,10 @@ export const PET_ITEMS: PetShopItem[] = [
 ]
 
 export function getPetItem(id: string): PetShopItem | undefined {
-  return PET_ITEMS.find((item) => item.id === id)
+  return PET_ITEMS.find((item) => item.id === id) ?? getProjectedPluginItem(id)
+}
+
+/** Full catalog: static items first, then plugin contributions. */
+export function listAllPetItems(): PetShopItem[] {
+  return [...PET_ITEMS, ...listProjectedPluginItems()]
 }

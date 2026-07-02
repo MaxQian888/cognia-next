@@ -25,6 +25,7 @@ import type { PetView } from "@/lib/pet/runtime/pet-view"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { useActionCooldown } from "@/hooks/pet/use-action-cooldown"
 import { useCommandHistory, handleHistoryArrowKey } from "@/hooks/use-command-history"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PetStatCard } from "./pet-stat-card"
 import { NeedBar } from "./need-bar"
 
@@ -169,6 +170,18 @@ export function PetInteractionPanel({
           <MessageCircleIcon className="size-4" />
         </Button>
       </div>
+
+      <PluginExtensionSlot
+        point="pet.panel.actions"
+        limit={4}
+        className="flex items-center gap-1 empty:hidden"
+        context={{
+          level: profile.level,
+          stage: profile.stage,
+          mood: view.mood,
+          condition: view.condition,
+        }}
+      />
 
       {talkOpen && (
         <div className="flex items-center gap-2" data-testid="pet-talk-composer">

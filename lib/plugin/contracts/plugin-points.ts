@@ -141,6 +141,14 @@ export const CANONICAL_EXTENSION_POINTS = [
   // with `goalId` / `status`.
   "goal.toolbar",
   "goal.detail.actions",
+  // Pet surfaces (main-window only — the transparent overlay window stays
+  // plugin-free by the three-window-role model). `pet.console.tab` fills the
+  // /pet console's host-owned "Plugins" tab (shown only when ≥1 contribution);
+  // `pet.panel.actions` is the action row in the interaction panel. Context
+  // bag: `level` / `stage` / `mood` / `condition` — safe aggregates only,
+  // never soul/bones data.
+  "pet.console.tab",
+  "pet.panel.actions",
   // Performance dashboard — plugins mount a tile/panel (e.g. a custom metric)
   // alongside the native Rust-sampled graphs.
   "perf.panel",
@@ -222,6 +230,8 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "canvas.sidebar",
   "goal.toolbar",
   "goal.detail.actions",
+  "pet.console.tab",
+  "pet.panel.actions",
   "perf.panel",
   "terminal.toolbar",
   "agent.team.panel",
@@ -301,6 +311,8 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "canvas.sidebar": "components/canvas/canvas-side-panels.tsx",
   "goal.toolbar": "components/goal/console/goal-console.tsx",
   "goal.detail.actions": "components/goal/goal-detail-sheet.tsx",
+  "pet.console.tab": "components/pet/console/pet-console.tsx",
+  "pet.panel.actions": "components/pet/pet-interaction-panel.tsx",
   "perf.panel": "components/performance/performance-dashboard.tsx",
   "terminal.toolbar": "components/terminal/terminal-dock.tsx",
   "agent.team.panel": "components/agent/workspace/overview.tsx",

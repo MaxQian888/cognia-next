@@ -38,6 +38,17 @@ jest.mock("@/lib/pet/runtime/rename-pet", () => ({
 }))
 jest.mock("./dex-tab", () => ({ DexTab: () => <div data-testid="tab-dex" /> }))
 jest.mock("./shop-tab", () => ({ ShopTab: () => <div data-testid="tab-shop" /> }))
+
+// Plugin slot host — controllable "has extensions" flag + a stub mount.
+let hasPluginExtensions = false
+const slotProps = jest.fn()
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  usePluginSlotHasExtensions: () => hasPluginExtensions,
+  PluginExtensionSlot: (props: unknown) => {
+    slotProps(props)
+    return <div data-testid="pet-plugin-slot" />
+  },
+}))
 jest.mock("./achievements-tab", () => ({ AchievementsTab: () => <div data-testid="tab-ach" /> }))
 jest.mock("./binding-tab", () => ({ BindingTab: () => <div data-testid="tab-bind" /> }))
 
@@ -72,6 +83,8 @@ beforeEach(() => {
   emitPetEvent.mockClear()
   renamePet.mockClear()
   rendererProps.mockClear()
+  slotProps.mockClear()
+  hasPluginExtensions = false
   settingsValue = {}
   useActiveLive2dModel.mockReset()
   useActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
@@ -126,6 +139,31 @@ describe("PetConsole", () => {
     settingsValue = { petSettings: { skinId: "live2d" } }
     render(<PetConsole />)
     expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ skinId: "svg" }))
+  })
+
+  it("hides the plugins tab until a pet.console.tab extension registers", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole />)
+    expect(document.querySelector('[data-tab="plugins"]')).toBeNull()
+  })
+
+  it("shows the plugins tab and mounts the slot with the safe context bag", () => {
+    hasPluginExtensions = true
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole />)
+    fireEvent.click(document.querySelector('[data-tab="plugins"]') as Element)
+    expect(screen.getByTestId("pet-plugin-slot")).toBeInTheDocument()
+    expect(slotProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        point: "pet.console.tab",
+        context: expect.objectContaining({
+          level: expect.any(Number),
+          stage: "baby",
+          mood: expect.any(String),
+          condition: expect.any(String),
+        }),
+      })
+    )
   })
 
   it("renames the pet from the header editor", () => {
