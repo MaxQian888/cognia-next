@@ -68,6 +68,8 @@ next-env.d.ts
 # docs workspace
 /docs/.next/
 /docs/.source/
+# Fumadocs static export output (`pnpm docs:build` → Cloudflare Pages, ADR-0059).
+/docs/out/
 /docs/superpowers/
 
 # Claude Code user-local state (per-user, not committed)
