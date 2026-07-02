@@ -77,6 +77,12 @@ const TARGETS = [
   { pkg: "node24-macos-arm64", dist: "cognia-agent-macos-arm64", bin: "cognia-agent", archive: "tar.gz" },
 ]
 
+// `--layout-only` (ADR-0059 W6): stop after assembling the plain-Node layout
+// (cli.mjs + TUI node_modules + sidecar/) into cli/dist/bin/cognia-agent-layout,
+// skipping the pkg binary + archives. This is what Dockerfile.cognia-server
+// ships — the container already has Node, so embedding one via pkg is waste.
+const LAYOUT_ONLY = process.argv.includes("--layout-only")
+
 let esbuild
 try {
   esbuild = await import("esbuild")
@@ -86,19 +92,23 @@ try {
 }
 
 let pkg
-try {
-  pkg = await import("@yao-pkg/pkg")
-} catch {
-  console.error("build-cli-binary: @yao-pkg/pkg is not installed. Run: pnpm add -D @yao-pkg/pkg")
-  process.exit(1)
+if (!LAYOUT_ONLY) {
+  try {
+    pkg = await import("@yao-pkg/pkg")
+  } catch {
+    console.error("build-cli-binary: @yao-pkg/pkg is not installed. Run: pnpm add -D @yao-pkg/pkg")
+    process.exit(1)
+  }
 }
 
 let archiver
-try {
-  archiver = (await import("archiver")).default
-} catch {
-  console.error("build-cli-binary: archiver is not installed. Run: pnpm add -D archiver")
-  process.exit(1)
+if (!LAYOUT_ONLY) {
+  try {
+    archiver = (await import("archiver")).default
+  } catch {
+    console.error("build-cli-binary: archiver is not installed. Run: pnpm add -D archiver")
+    process.exit(1)
+  }
 }
 
 // Stream a dist folder into a per-platform archive (zip for Windows, tar.gz for
@@ -261,6 +271,24 @@ for (const dep of SIDECAR_EXTERNALS) {
   fs.cpSync(src, path.join(destNodeModules, dep), { recursive: true, dereference: true })
 }
 console.log(`build-cli-binary: copied sidecar externals → ${path.relative(root, destNodeModules)}`)
+
+// 3c. Layout-only exit: assemble the plain-Node dist (no pkg binary). The
+// consumer runs `node <layout>/cli.mjs …`; cli.mjs resolves react/ink from the
+// adjacent node_modules, and the sidecar rides alongside exactly as in the
+// binary dists.
+if (LAYOUT_ONLY) {
+  const layoutDir = path.join(binDir, "cognia-agent-layout")
+  safeRm(layoutDir)
+  fs.mkdirSync(layoutDir, { recursive: true })
+  fs.cpSync(cliBundle, path.join(layoutDir, "cli.mjs"))
+  fs.cpSync(tuiNodeModules, path.join(layoutDir, "node_modules"), {
+    recursive: true,
+    dereference: true,
+  })
+  fs.cpSync(sidecarOutDir, path.join(layoutDir, "sidecar"), { recursive: true, dereference: true })
+  console.log(`build-cli-binary: assembled layout ${path.relative(root, layoutDir)}`)
+  process.exit(0)
+}
 
 // 3b. pkg snapshot entry: a tiny CJS bootstrap. pkg is rock-solid with CJS but
 // its ESM-from-snapshot resolution is broken on Windows (it hands Node a raw

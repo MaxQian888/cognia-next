@@ -1,50 +1,105 @@
-## Phase D — headless cognia-server binary.
+# syntax=docker/dockerfile:1.7
+## cognia-server — headless Cognia container (ADR-0059 W6).
 ##
-## Two-stage build: compile the Rust binary in a builder stage, then ship a
-## minimal runtime image with the binary + a Node sidecar layer for the
-## Anthropic agent SDK once that path is wired (placeholder for now).
+## Stages:
+##   chef → planner → deps        cargo-chef: the tauri/wasmtime dependency
+##                                cook is the expensive, highly-cacheable layer
+##                                (invalidated only by manifest/lock changes).
+##   builder | check              full release build vs. codegen-free
+##                                `cargo check` (the PR CI target).
+##   brain-builder                Node stage bundling the brain (cognia-agent
+##                                CLI layout) + sidecar via
+##                                scripts/build/build-cli-binary.mjs --layout-only.
+##   runtime-slim                 binary + brain + sidecar (default image).
+##   runtime-full                 + git + preinstalled external agent CLIs
+##                                (deploy/runner/install-agents.sh — shared with
+##                                the cognia-runner image so versions can't drift).
 ##
 ## Usage:
-##   docker build -f Dockerfile.cognia-server -t cognia-server .
+##   docker build -f Dockerfile.cognia-server --target runtime-slim -t cognia-server .
 ##   docker run --rm -v $HOME/cognia-data:/data -p 7890:7890 cognia-server
 ##
-## The container expects `/data` to be a writable volume so the SQLite store
-## and the self-signed TLS cert persist across restarts.
+## The container expects `/data` to be a writable volume so the SQLite store,
+## the secret store, and the self-signed TLS cert persist across restarts.
+## Headless secret-store note (ADR-0059 W5): set COGNIA_MASTER_KEY or
+## COGNIA_MASTER_KEY_FILE — there is no OS keyring in a container.
 
-# Base tracks the `rust-toolchain.toml` pin (1.93.0). rustup still honours the
-# toolchain file, but matching the base avoids re-downloading a second channel
-# at build time and keeps the image's advertised version honest.
-FROM rust:1.93-bookworm AS builder
+# ── Rust: cargo-chef base ────────────────────────────────────────────────────
+# Base tracks the `rust-toolchain.toml` pin (1.93.0); matching the base avoids
+# downloading a second channel at build time.
+FROM rust:1.93-bookworm AS chef
+RUN cargo install cargo-chef --locked
 WORKDIR /work
-# Workspace root files first — Cargo.toml declares members, rust-toolchain.toml
-# pins the MSRV (rustup auto-installs the pinned channel), and .cargo/config.toml
-# carries `--cfg tokio_unstable` (required by dial9-tokio-telemetry).
-COPY Cargo.toml rust-toolchain.toml ./
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
-# Workspace members. crates/cognia-cli is included so the workspace resolves;
-# we still build only the cognia-server binary.
 COPY src-tauri ./src-tauri
 COPY crates ./crates
-RUN cargo build --release --bin cognia-server
+RUN cargo chef prepare --recipe-path recipe.json
 
-FROM debian:bookworm-slim AS runtime
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+# The cook layer compiles every dependency of the workspace (tauri, wasmtime,
+# axum, …) and is reused as long as Cargo.lock + manifests are unchanged.
+FROM chef AS deps
+COPY rust-toolchain.toml ./
+COPY .cargo ./.cargo
+COPY --from=planner /work/recipe.json .
+RUN cargo chef cook --release --recipe-path recipe.json
 
-# Sidecar Node runtime — added preemptively so the serve subcommand can
-# spawn @anthropic-ai/claude-agent-sdk once the Phase D follow-up wires it.
+FROM deps AS builder
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY src-tauri ./src-tauri
+COPY crates ./crates
+RUN cargo build --release --locked --bin cognia-server
+
+# PR CI target: type/borrow-check the whole graph without codegen or linking.
+FROM deps AS check
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY src-tauri ./src-tauri
+COPY crates ./crates
+RUN cargo check --release --locked --bin cognia-server
+
+# ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
+# Full (non-slim) image: node-gyp needs python3/make/g++ for the sidecar's
+# native optional deps (node-pty, better-sqlite3).
+FROM node:22-bookworm AS brain-builder
+ENV HUSKY=0 \
+    CI=1
+RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
+WORKDIR /work
+# Manifests first so the store-heavy install layer survives source edits.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --parents docs/package.json mobile/package.json packages/*/package.json ./
+RUN pnpm install --frozen-lockfile
+COPY sidecar/package.json sidecar/pnpm-lock.yaml ./sidecar/
+RUN pnpm --dir sidecar install --ignore-workspace --frozen-lockfile
+# Sources last; the bundle step reaches cli/ + lib/ + the wider @/* TS graph.
+COPY . .
+RUN NODE_OPTIONS=--max-old-space-size=8192 node scripts/build/build-cli-binary.mjs --layout-only
+
+# ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
+FROM node:22-bookworm-slim AS runtime-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
+COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
 
-ENV COGNIA_DATA_DIR=/data
+ENV COGNIA_DATA_DIR=/data \
+    COGNIA_BRAIN_ENTRY=/app/brain/cli.mjs \
+    COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs
 VOLUME /data
 EXPOSE 7890
 
 ENTRYPOINT ["/usr/local/bin/cognia-server"]
 CMD ["serve", "--port", "7890"]
+
+# ── Runtime: full (external agent CLIs preinstalled + git) ──────────────────
+FROM runtime-slim AS runtime-full
+COPY deploy/runner/install-agents.sh /tmp/install-agents.sh
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && bash /tmp/install-agents.sh \
+    && rm -f /tmp/install-agents.sh \
+    && rm -rf /var/lib/apt/lists/*
