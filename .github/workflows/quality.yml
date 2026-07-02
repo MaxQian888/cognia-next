@@ -60,7 +60,6 @@ jobs:
 
       - name: Run ESLint
         run: pnpm lint
-        continue-on-error: true
 
       - name: Check formatting (Prettier)
         run: pnpm format:check

@@ -51,6 +51,15 @@ opt-level = 3
 # root — package-level `[profile.*]` in members is ignored by Cargo.
 [profile.release]
 debug = "line-tables-only"
+# Optimize the shipped desktop binary: thin-LTO + single codegen unit improve
+# runtime across the heavy dep tree (wasmtime JIT, crypto, sqlite), and `strip`
+# drops the symbol table for a much smaller download. `panic = "unwind"` is left
+# at its default — the crash-handler/minidumper path relies on unwinding, so do
+# NOT switch to `panic = "abort"`. `debug = "line-tables-only"` (above) is kept
+# so minidumps stay symbolicable.
+lto = "thin"
+codegen-units = 1
+strip = true
 
 # `cargo test` compiles the whole `app_lib` crate plus every inline
 # `#[cfg(test)]` module into ONE giant test binary (lib + all deps:
