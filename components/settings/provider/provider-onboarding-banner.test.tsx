@@ -105,6 +105,20 @@ describe("ProviderOnboardingBanner (dismissible hint)", () => {
     expect(btn).toBeDisabled()
   })
 
+  it("calls onScrollToProvider with the clicked quick-setup provider's id", () => {
+    const onScrollToProvider = jest.fn()
+    render(<ProviderOnboardingBanner onScrollToProvider={onScrollToProvider} />)
+    fireEvent.click(screen.getByText("Anthropic"))
+    expect(onScrollToProvider).toHaveBeenCalledWith("anthropic")
+  })
+
+  it("does not throw when a quick-setup badge is clicked without a matching sidebar row mounted", () => {
+    // No element with id="provider-openai" exists in this render — the
+    // internal getElementById lookup must no-op instead of throwing.
+    render(<ProviderOnboardingBanner />)
+    expect(() => fireEvent.click(screen.getByText("OpenAI"))).not.toThrow()
+  })
+
   it("exposes catalog counts + source via the control's hover title", () => {
     catalogState.row = { fetchedAt: 1_700_000_000_000, source: "remote", providers: {} }
     catalogState.providerCount = 21

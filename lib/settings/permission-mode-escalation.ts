@@ -15,7 +15,17 @@ export type PermissionMode =
   | "dontAsk"
   | "auto"
 
-/** Higher rank = more autonomous (fewer confirmations before the agent acts). */
+/**
+ * Higher rank = more autonomous (fewer confirmations before the agent acts).
+ *
+ * This ranks the **autonomy / trust** axis for the biometric-gate decision:
+ * `dontAsk` runs pre-approved tools without prompting, so it sits ABOVE
+ * `default`/`acceptEdits` here. That is deliberately DIFFERENT from
+ * `lib/ai/agent/external/permission-cascade.ts:MODE_RANK`, which ranks the
+ * orthogonal **restrictiveness-of-execution** axis (there `dontAsk` denies
+ * everything un-preapproved, so it sits BELOW `default`). The two tables are
+ * not drift — they measure different things and must not be merged.
+ */
 const PERMISSION_MODE_RANK: Record<PermissionMode, number> = {
   plan: 0,
   default: 1,

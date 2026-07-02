@@ -5,8 +5,8 @@
  * Provides preset configurations for popular third-party API providers
  */
 
-import { useState, useMemo } from "react"
-import { Check, ExternalLink, Eye, EyeOff, Zap, Search } from "lucide-react"
+import { useMemo, useState } from "react"
+import { ExternalLink, Eye, EyeOff, Zap, Search } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,15 +22,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings"
 import type { CustomModelMetadata } from "@/stores/settings/settings-store"
-import { testCustomProviderConnectionByProtocol } from "@/lib/ai/infrastructure/api-test"
+import { useConnectionTest } from "@/hooks/settings/use-connection-test"
 import { cn } from "@/lib/utils"
 import {
   buildQuickAddProviderPresets,
   type BuiltInProviderQuickAddPreset as QuickAddPreset,
 } from "@cognia/provider-types/built-in-provider-catalog"
 import { getCustomProviderReadiness } from "./provider-readiness"
+import { ConnectionStatusCard, toConnectionCardResult } from "./provider-config-tab"
 
 export type { BuiltInProviderQuickAddPreset as QuickAddPreset } from "@cognia/provider-types/built-in-provider-catalog"
 export const QUICK_ADD_PRESETS: QuickAddPreset[] = buildQuickAddProviderPresets()
@@ -40,6 +41,12 @@ type CategoryFilter = "all" | "china" | "global" | "proxy"
 interface QuickAddProviderDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * Escape hatch to the full `CustomProviderDialog` (create mode) for an
+   * arbitrary/unlisted OpenAI-compatible endpoint — the presets below only
+   * cover curated third-party providers.
+   */
+  onAddCustom?: () => void
 }
 
 function buildQuickAddModelMetadata(preset: QuickAddPreset): Record<string, CustomModelMetadata> {
@@ -76,7 +83,11 @@ function buildQuickAddProviderDraft(preset: QuickAddPreset, apiKey: string) {
   }
 }
 
-export function QuickAddProviderDialog({ open, onOpenChange }: QuickAddProviderDialogProps) {
+export function QuickAddProviderDialog({
+  open,
+  onOpenChange,
+  onAddCustom,
+}: QuickAddProviderDialogProps) {
   const t = useTranslations("providers")
   const tc = useTranslations("common")
 
@@ -85,8 +96,12 @@ export function QuickAddProviderDialog({ open, onOpenChange }: QuickAddProviderD
   const [selectedPreset, setSelectedPreset] = useState<QuickAddPreset | null>(null)
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<"success" | "error" | null>(null)
+  const {
+    testing,
+    result: testResult,
+    test: runConnectionTest,
+    reset: resetTestResult,
+  } = useConnectionTest()
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all")
   const [searchQuery, setSearchQuery] = useState("")
 
@@ -116,27 +131,12 @@ export function QuickAddProviderDialog({ open, onOpenChange }: QuickAddProviderD
   const handleSelectPreset = (preset: QuickAddPreset) => {
     setSelectedPreset(preset)
     setApiKey("")
-    setTestResult(null)
+    resetTestResult()
   }
 
   const handleTestConnection = async () => {
     if (!selectedPreset || !apiKey) return
-
-    setTesting(true)
-    setTestResult(null)
-
-    try {
-      const result = await testCustomProviderConnectionByProtocol(
-        selectedPreset.baseURL,
-        apiKey,
-        selectedPreset.apiProtocol
-      )
-      setTestResult(result.success ? "success" : "error")
-    } catch {
-      setTestResult("error")
-    } finally {
-      setTesting(false)
-    }
+    await runConnectionTest(selectedPreset.baseURL, apiKey, selectedPreset.apiProtocol)
   }
 
   const handleSave = () => {
@@ -147,14 +147,14 @@ export function QuickAddProviderDialog({ open, onOpenChange }: QuickAddProviderD
     // Reset and close
     setSelectedPreset(null)
     setApiKey("")
-    setTestResult(null)
+    resetTestResult()
     onOpenChange(false)
   }
 
   const handleBack = () => {
     setSelectedPreset(null)
     setApiKey("")
-    setTestResult(null)
+    resetTestResult()
   }
 
   const canSave = Boolean(
@@ -291,7 +291,7 @@ export function QuickAddProviderDialog({ open, onOpenChange }: QuickAddProviderD
                     value={apiKey}
                     onChange={(e) => {
                       setApiKey(e.target.value)
-                      setTestResult(null)
+                      resetTestResult()
                     }}
                     placeholder={t("apiKeyPlaceholder")}
                     className="pr-10"
@@ -317,16 +317,7 @@ export function QuickAddProviderDialog({ open, onOpenChange }: QuickAddProviderD
                   {testing ? tc("loading") : t("test")}
                 </Button>
               </div>
-              {testResult === "success" && (
-                <p className="flex items-center gap-1 text-sm text-green-600">
-                  <Check className="h-4 w-4" /> {t("connectionSuccess")}
-                </p>
-              )}
-              {testResult === "error" && (
-                <p className="flex items-center gap-1 text-sm text-destructive">
-                  {t("connectionFailed")}
-                </p>
-              )}
+              {testResult && <ConnectionStatusCard result={toConnectionCardResult(testResult)} />}
             </div>
 
             <p className="text-xs text-muted-foreground">
@@ -347,9 +338,23 @@ export function QuickAddProviderDialog({ open, onOpenChange }: QuickAddProviderD
               </Button>
             </>
           ) : (
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              {tc("cancel")}
-            </Button>
+            <>
+              {onAddCustom && (
+                <Button
+                  variant="ghost"
+                  className="mr-auto"
+                  onClick={() => {
+                    onOpenChange(false)
+                    onAddCustom()
+                  }}
+                >
+                  {t("addCustomProvider")}
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                {tc("cancel")}
+              </Button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>

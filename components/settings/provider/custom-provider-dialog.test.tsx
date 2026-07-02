@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { CustomProviderDialog } from "./custom-provider-dialog"
 
 // Mock next-intl
@@ -17,7 +17,7 @@ const mockRemoveCustomProvider = jest.fn()
 const mockDiscoverOpenAICompatibleModels = jest.fn()
 const mockCustomProviders: Record<string, unknown>[] = []
 
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: Record<string, unknown>) => unknown) => {
     const state = {
       customProviders: mockCustomProviders,
@@ -41,6 +41,10 @@ jest.mock("@cognia/provider-core/providers/model-discovery", () => {
 jest.mock("@/lib/ai/infrastructure/api-test", () => ({
   testCustomProviderConnectionByProtocol: jest.fn().mockResolvedValue({ success: true }),
 }))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const apiTest = require("@/lib/ai/infrastructure/api-test") as {
+  testCustomProviderConnectionByProtocol: jest.Mock
+}
 
 // Mock UI components
 jest.mock("@/components/ui/button")
@@ -300,6 +304,87 @@ describe("CustomProviderDialog", () => {
           enabled: true,
         })
       )
+    })
+  })
+
+  describe("connection test (shared useConnectionTest hook)", () => {
+    // The dialog's mount effect schedules a `setTimeout(...,0)` field reset
+    // (see the "Load data when editing" effect). Flush it before typing so
+    // the reset doesn't race and clobber the values fired below.
+    async function renderAndFlushMountReset() {
+      render(<CustomProviderDialog {...defaultProps} />)
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10))
+      })
+    }
+
+    it("shows the ConnectionStatusCard success state and forwards latency", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: true,
+        message: "Connected successfully.",
+        latency_ms: 88,
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "sk-x" } })
+      fireEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("configTab.connectionSuccess")).toBeInTheDocument()
+      expect(screen.getByText(/88/)).toBeInTheDocument()
+    })
+
+    it("shows the ConnectionStatusCard error state with the failure message", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: false,
+        message: "API error: 401",
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "bad-key" } })
+      fireEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("configTab.connectionFailed")).toBeInTheDocument()
+      expect(screen.getByText("API error: 401")).toBeInTheDocument()
+    })
+
+    it("shows the amber 'limited' state instead of collapsing it into success", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: true,
+        outcome: "limited",
+        message: "Verified with caveats.",
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "sk-x" } })
+      fireEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("configTab.verificationLimited")).toBeInTheDocument()
+      expect(screen.queryByText("configTab.connectionSuccess")).not.toBeInTheDocument()
+    })
+
+    it("clears a stale result when the base URL is edited again", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: false,
+        message: "API error: 401",
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "bad-key" } })
+      fireEvent.click(screen.getByText("test"))
+      expect(await screen.findByText("configTab.connectionFailed")).toBeInTheDocument()
+
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://retry.example.com/v1" },
+      })
+      expect(screen.queryByText("configTab.connectionFailed")).not.toBeInTheDocument()
     })
   })
 })

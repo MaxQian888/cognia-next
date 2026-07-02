@@ -43,8 +43,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { getBuiltInProviderSettingsBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  getBuiltInProviderSettingsBaseURL,
+  getBuiltInProviderProtocol,
+} from "@cognia/provider-types/built-in-provider-catalog"
 import type { UserProviderSettings, ApiKeyRotationStrategy } from "@cognia/provider-types"
+import type { ApiTestResult } from "@/lib/ai/infrastructure/api-test"
+import { ProtocolSelectContent } from "./protocol-select-content"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -65,6 +70,13 @@ export interface ProviderConfigTabProps {
   providerDocsUrl?: string
   onApiKeyChange: (key: string) => void
   onBaseURLChange: (url: string) => void
+  /**
+   * Wire protocol override for non-Anthropic built-ins. Omit (or leave
+   * unset) for `providerId === "anthropic"` — that slot always dispatches
+   * through the native Claude Agent SDK subprocess, so a protocol override
+   * would be silently ignored; the selector is hidden in that case.
+   */
+  onApiProtocolChange?: (protocol: string) => void
   onDefaultModelChange: (model: string) => void
   onTestConnection: () => Promise<TestResult>
   testResult?: TestResult | null
@@ -81,11 +93,26 @@ export interface ProviderConfigTabProps {
 
 /* ── Connection Status Card ──────────────────────────────────────────────── */
 
+/**
+ * Adapt a raw `ApiTestResult` (from `useConnectionTest`) to the `TestResult`
+ * shape `ConnectionStatusCard` renders. Centralised here — next to both the
+ * type and the card — so the success→error / latency_ms→latency mapping isn't
+ * copy-pasted (and silently drifted) across the provider dialogs.
+ */
+export function toConnectionCardResult(result: ApiTestResult): TestResult {
+  return {
+    success: result.success,
+    latency: result.latency_ms,
+    error: result.success ? undefined : result.message,
+    outcome: result.outcome,
+  }
+}
+
 interface ConnectionStatusCardProps {
   result: TestResult
 }
 
-function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
+export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
   const t = useTranslations("providers")
 
   if (result.success && result.outcome !== "limited") {
@@ -386,6 +413,7 @@ export function ProviderConfigTab({
   providerDocsUrl,
   onApiKeyChange,
   onBaseURLChange,
+  onApiProtocolChange,
   onDefaultModelChange,
   onTestConnection,
   testResult,
@@ -413,6 +441,13 @@ export function ProviderConfigTab({
   const defaultBaseURL = getBuiltInProviderSettingsBaseURL(providerId)
   const hasStoredBaseURL = !!settings.baseURL
   const isConfiguringProvider = !!settings.enabled || !!settings.apiKey
+
+  // Protocol override: offered for every built-in EXCEPT the literal
+  // "anthropic" id, which always dispatches through the native Claude Agent
+  // SDK subprocess regardless of this field (see `sidecar/dispatch/index.mjs`)
+  // — showing a selector there would be misleading since it wouldn't apply.
+  const showProtocolSelector = providerId !== "anthropic" && !!onApiProtocolChange
+  const catalogProtocol = getBuiltInProviderProtocol(providerId)
 
   // Once the user actually starts configuring this provider (enables it or
   // enters an API key), persist its default base URL so the saved settings
@@ -511,7 +546,27 @@ export function ProviderConfigTab({
             defaultBaseURL || t("configTab.baseURLPlaceholder") || "https://api.example.com/v1"
           }
         />
+        <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
       </div>
+
+      {/* ── 2b. API Protocol override (non-Anthropic built-ins only) ─── */}
+      {showProtocolSelector && (
+        <div className="space-y-2">
+          <Label htmlFor={`api-protocol-${providerId}`} className="text-sm font-medium">
+            {t("apiProtocol") || "API Protocol"}
+          </Label>
+          <Select
+            value={settings.apiProtocol ?? catalogProtocol ?? "openai"}
+            onValueChange={(v) => onApiProtocolChange?.(v)}
+          >
+            <SelectTrigger id={`api-protocol-${providerId}`}>
+              <SelectValue placeholder={t("selectProtocol") || "Select protocol"} />
+            </SelectTrigger>
+            <ProtocolSelectContent />
+          </Select>
+          <p className="text-xs text-muted-foreground">{t("apiProtocolHint")}</p>
+        </div>
+      )}
 
       {/* ── 3. Default Model ───────────────────────────────────────── */}
       {providerModels.length > 0 && (

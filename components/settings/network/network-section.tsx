@@ -20,11 +20,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { NetworkGeneralTab } from "./tabs/general-tab"
 import { NetworkDetectionTab } from "./tabs/detection-tab"
 import { NetworkTestTab } from "./tabs/test-tab"
+import { NetworkIpInfoTab } from "./tabs/ip-info-tab"
 
 const NETWORK_TAB_PARAM = "networkTab"
 
-export type NetworkTabId = "general" | "detection" | "test"
-const TAB_IDS: NetworkTabId[] = ["general", "detection", "test"]
+export type NetworkTabId = "general" | "detection" | "test" | "ipinfo"
+const TAB_IDS: NetworkTabId[] = ["general", "detection", "test", "ipinfo"]
 
 function isNetworkTab(value: string | null): value is NetworkTabId {
   return !!value && (TAB_IDS as string[]).includes(value)
@@ -60,6 +61,7 @@ export function NetworkSection() {
             <TabsTrigger value="general">{t("tabs.general")}</TabsTrigger>
             <TabsTrigger value="detection">{t("tabs.detection")}</TabsTrigger>
             <TabsTrigger value="test">{t("tabs.test")}</TabsTrigger>
+            <TabsTrigger value="ipinfo">{t("tabs.ipInfo")}</TabsTrigger>
           </TabsList>
         </div>
         <TabsContent value="general" className="mt-4">
@@ -70,6 +72,9 @@ export function NetworkSection() {
         </TabsContent>
         <TabsContent value="test" className="mt-4">
           <NetworkTestTab />
+        </TabsContent>
+        <TabsContent value="ipinfo" className="mt-4">
+          <NetworkIpInfoTab />
         </TabsContent>
       </Tabs>
     </div>

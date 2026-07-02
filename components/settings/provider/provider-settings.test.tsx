@@ -12,7 +12,7 @@
  */
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
-import { ProviderSettings } from "./provider-settings"
+import { ProviderSettings, deriveStatus } from "./provider-settings"
 
 const mockSetSelectedProviderId = jest.fn()
 const mockSetProviderConfig = jest.fn()
@@ -52,6 +52,7 @@ function makeHookState(overrides?: {
     presets: [] as unknown[],
     selectedProviderId: overrides?.selectedProviderId ?? null,
     setSelectedProviderId: mockSetSelectedProviderId,
+    setDefaultProvider: mockSetDefaultProvider,
   }
 }
 
@@ -96,6 +97,7 @@ const mockSettingsState = {
   setProviderConfig: mockSetProviderConfig,
   setDefaultProvider: mockSetDefaultProvider,
   providerUsageStats: {},
+  settings: { defaultProvider: "openai" } as { defaultProvider?: string },
 }
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: typeof mockSettingsState) => unknown) =>
@@ -112,13 +114,36 @@ jest.mock("./quick-add-provider-dialog", () => ({
   QuickAddProviderDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="quick-add-provider-dialog" /> : null,
 }))
+jest.mock("./local-provider-settings", () => ({
+  LocalProviderSettings: () => <div data-testid="local-provider-settings" />,
+}))
 
 // Slot tabs/panels — render distinct test stand-ins so we can verify
 // composition without dragging in their full implementations.
 jest.mock("./provider-detail-panel", () => ({
-  ProviderDetailPanel: ({ provider }: { provider: { id: string; name: string } | null }) => (
-    <div data-testid="provider-detail-panel" data-provider-id={provider?.id ?? ""}>
+  ProviderDetailPanel: ({
+    provider,
+    configTab,
+    isDefault,
+    onSetDefault,
+  }: {
+    provider: { id: string; name: string } | null
+    configTab?: React.ReactNode
+    isDefault?: boolean
+    onSetDefault?: () => void
+  }) => (
+    <div
+      data-testid="provider-detail-panel"
+      data-provider-id={provider?.id ?? ""}
+      data-is-default={String(isDefault ?? false)}
+    >
       {provider?.name ?? ""}
+      {onSetDefault && (
+        <button data-testid="mock-set-default" onClick={onSetDefault}>
+          set-default
+        </button>
+      )}
+      <div data-testid="provider-detail-config-tab">{configTab}</div>
     </div>
   ),
 }))
@@ -232,6 +257,16 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     )
   })
 
+  it("renders the local-provider dashboard instead of the generic detail panel for a local provider", async () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "" }]],
+      selectedProviderId: "ollama",
+    })
+    const { findByTestId } = render(<ProviderSettings />)
+    expect(await findByTestId("local-provider-settings")).toBeInTheDocument()
+    expect(screen.queryByTestId("provider-detail-panel")).not.toBeInTheDocument()
+  })
+
   it("filters built-in providers by name match against the search input", () => {
     mockHookState = makeHookState({
       filteredProviders: [
@@ -262,6 +297,63 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(screen.getByTestId("provider-sidebar-item-my-custom")).toHaveTextContent("My Custom")
   })
 
+  it("marks the current default provider and routes set-default through the hook", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [
+        ["openai", { name: "OpenAI", defaultModel: "gpt-4o" }],
+        ["deepseek", { name: "DeepSeek", defaultModel: "deepseek-chat" }],
+      ],
+      selectedProviderId: "openai",
+    })
+    const { rerender } = render(<ProviderSettings />)
+    // settings.defaultProvider is "openai" in the store mock.
+    expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute("data-is-default", "true")
+
+    mockHookState = makeHookState({
+      filteredProviders: [
+        ["openai", { name: "OpenAI", defaultModel: "gpt-4o" }],
+        ["deepseek", { name: "DeepSeek", defaultModel: "deepseek-chat" }],
+      ],
+      selectedProviderId: "deepseek",
+    })
+    rerender(<ProviderSettings />)
+    expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute("data-is-default", "false")
+    fireEvent.click(screen.getByTestId("mock-set-default"))
+    expect(mockSetDefaultProvider).toHaveBeenCalledWith("deepseek")
+  })
+
+  it("binds the custom-provider inline config to the customProviders row (read/write same source)", () => {
+    mockHookState = makeHookState({
+      visibleCustomProviderIds: ["my-custom"],
+      customProviders: {
+        "my-custom": {
+          customName: "My Custom",
+          baseURL: "https://proxy.example.com/v1",
+          apiKey: "sk-custom-123",
+          defaultModel: "x-1",
+          customModels: ["x-1"],
+          apiProtocol: "openai",
+        },
+      },
+      selectedProviderId: "my-custom",
+    })
+    render(<ProviderSettings />)
+    const configTab = screen.getByTestId("provider-detail-config-tab")
+    // Values must come from the customProviders row — NOT providerSettings[id]
+    // (empty here), or the controlled inputs reset on every keystroke.
+    expect(configTab.querySelector('input[type="password"]')).toHaveValue("sk-custom-123")
+    expect(configTab.querySelector('input[type="text"]')).toHaveValue(
+      "https://proxy.example.com/v1"
+    )
+    // Edits persist to the same source the values are read from.
+    fireEvent.change(configTab.querySelector('input[type="text"]') as HTMLInputElement, {
+      target: { value: "https://proxy.example.com/v2" },
+    })
+    expect(mockHookState.updateCustomProvider).toHaveBeenCalledWith("my-custom", {
+      baseURL: "https://proxy.example.com/v2",
+    })
+  })
+
   it("filters custom providers by customName against the search input", () => {
     mockHookState = makeHookState({
       visibleCustomProviderIds: ["c1", "c2"],
@@ -276,5 +368,35 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     })
     expect(screen.getByTestId("provider-sidebar-item-c1")).toBeInTheDocument()
     expect(screen.queryByTestId("provider-sidebar-item-c2")).not.toBeInTheDocument()
+  })
+})
+
+describe("deriveStatus", () => {
+  it("returns not-configured when neither an apiKey nor a baseURL is set", () => {
+    expect(deriveStatus(undefined, undefined, undefined)).toBe("not-configured")
+  })
+
+  it("returns limited when the test outcome is 'limited', even though testOk is true", () => {
+    expect(deriveStatus("sk-x", undefined, true, "limited")).toBe("limited")
+  })
+
+  it("prioritizes limited over a failed testOk (outcome is the more specific signal)", () => {
+    expect(deriveStatus("sk-x", undefined, false, "limited")).toBe("limited")
+  })
+
+  it("returns error when the test failed and outcome is not limited", () => {
+    expect(deriveStatus("sk-x", undefined, false)).toBe("error")
+  })
+
+  it("returns connected when the test succeeded outright", () => {
+    expect(deriveStatus("sk-x", undefined, true)).toBe("connected")
+  })
+
+  it("returns warning when configured but never tested", () => {
+    expect(deriveStatus("sk-x", undefined, undefined)).toBe("warning")
+  })
+
+  it("treats a configured baseURL (no key) the same as a configured key", () => {
+    expect(deriveStatus(undefined, "https://x.example.com", undefined)).toBe("warning")
   })
 })

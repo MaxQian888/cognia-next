@@ -223,6 +223,17 @@ describe("AdapterListRow", () => {
     expect(badge.textContent).toMatch(/Degraded/)
   })
 
+  it("tooltips the localized reason on the status badge when down for a known cause", () => {
+    mockHealth.current = {
+      state: "down",
+      reason: "credentials_missing",
+    } as typeof mockHealth.current
+    renderRow()
+    const badge = screen.getByTestId("adapter-row-status-tg-1")
+    expect(badge.getAttribute("title")).toMatch(/Credentials missing/i)
+    mockHealth.current = { state: "running" }
+  })
+
   it("renders the pending chip only when there are queued jobs", () => {
     const { row } = renderRow({}, 3)
     const badge = screen.getByTestId(`adapter-pending-${row.id}`)

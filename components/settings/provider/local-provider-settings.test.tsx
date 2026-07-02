@@ -32,7 +32,7 @@ jest.mock("next-intl", () => ({
 const mockProviderSettings: Record<string, { enabled?: boolean; baseURL?: string }> = {}
 const mockUpdateProviderSettings = jest.fn()
 
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) => {
     const state = {
       providerSettings: mockProviderSettings,

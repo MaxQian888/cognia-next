@@ -46,6 +46,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getPlatformMeta } from "./platform-meta"
 import { useSelectedAdapter } from "./use-selected-adapter"
 import { deriveAdapterStatus } from "./adapter-status"
+import { healthReasonLabel } from "./tabs/health-reason-label"
 
 export interface AdapterListRowProps {
   row: AdapterInstanceRow
@@ -64,6 +65,7 @@ export function AdapterListRow({
   onAfterSelect,
 }: AdapterListRowProps) {
   const t = useTranslations("settings.connections.adapters")
+  const tHealth = useTranslations("settings.connections.adapters.health")
   const { selectedAdapterId, setSelectedAdapterId, setActiveTab } = useSelectedAdapter()
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -75,6 +77,7 @@ export function AdapterListRow({
   const health = useAdapterHealth(row.id)
   const status = deriveAdapterStatus(row.enabled, health)
   const StatusIcon = status.Icon
+  const statusReason = healthReasonLabel(tHealth, status.reason)
 
   const onSelect = () => {
     setSelectedAdapterId(row.id)
@@ -152,6 +155,7 @@ export function AdapterListRow({
         data-testid={`adapter-row-status-${row.id}`}
         data-status={status.status}
         aria-label={t("rowHealth.aria", { state: t(status.labelKey) })}
+        title={statusReason}
         className={cn(
           "flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
           status.tint

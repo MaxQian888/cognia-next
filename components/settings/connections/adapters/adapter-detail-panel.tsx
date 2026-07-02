@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { getPlatformMeta } from "./platform-meta"
 import { deriveAdapterStatus } from "./adapter-status"
+import { healthReasonLabel } from "./tabs/health-reason-label"
 import { ConfigDetail } from "./tabs/config-detail"
 import { HealthDetail } from "./tabs/health-detail"
 import { ConversationsDetail } from "./tabs/conversations-detail"
@@ -39,6 +40,7 @@ export interface AdapterDetailPanelProps {
 
 export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
   const t = useTranslations("settings.connections.adapters")
+  const tHealth = useTranslations("settings.connections.adapters.health")
   const { activeTab, setActiveTab } = useSelectedAdapter()
   const health = useAdapterHealth(adapterId)
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
@@ -61,6 +63,7 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
   const platformLabel = t(`platforms.${labelKey}`)
   const status = deriveAdapterStatus(row.enabled, health)
   const StatusIcon = status.Icon
+  const statusReason = healthReasonLabel(tHealth, status.reason)
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="adapter-detail-panel">
@@ -84,6 +87,7 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
           <span
             data-testid="adapter-detail-status"
             data-status={status.status}
+            title={statusReason}
             className={cn(
               "flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
               status.tint

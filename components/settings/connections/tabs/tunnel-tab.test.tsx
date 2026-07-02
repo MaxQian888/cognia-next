@@ -154,7 +154,7 @@ describe("TunnelTab", () => {
     wrap(<TunnelTab />)
     await waitFor(() =>
       expect(screen.getByTestId("tunnel-adapter-url-lark-1")).toHaveTextContent(
-        "https://abc.trycloudflare.com/connectors/lark/lark-1"
+        "https://abc.trycloudflare.com/webhook/lark/lark-1"
       )
     )
     // OneBot uses reverse-WS, so no public URL.

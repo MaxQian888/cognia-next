@@ -382,6 +382,47 @@ async function syncApiKeyToTauri(key: string | null | undefined) {
   }
 }
 
+// `claude_set_provider_env` only mutates the sidecar's in-memory env state —
+// the running subprocess still has to be restarted for the Anthropic SDK to
+// pick up a new ANTHROPIC_API_KEY/ANTHROPIC_BASE_URL (it reads env once, at
+// spawn time). Editing the field in Settings fires `setProviderConfig` on
+// every keystroke, so restart immediately would kill in-flight turns —
+// coalesce rapid edits into a single restart after the user stops typing.
+const ANTHROPIC_ENV_RESTART_DEBOUNCE_MS = 800
+let anthropicEnvRestartTimer: ReturnType<typeof setTimeout> | null = null
+let lastAppliedAnthropicEnv: { apiKey: string | null; baseURL: string | null } | null = null
+
+function scheduleAnthropicSidecarRestart(apiKey: string | null, baseURL: string | null) {
+  if (
+    lastAppliedAnthropicEnv &&
+    lastAppliedAnthropicEnv.apiKey === apiKey &&
+    lastAppliedAnthropicEnv.baseURL === baseURL
+  ) {
+    return
+  }
+  lastAppliedAnthropicEnv = { apiKey, baseURL }
+  if (anthropicEnvRestartTimer) clearTimeout(anthropicEnvRestartTimer)
+  anthropicEnvRestartTimer = setTimeout(() => {
+    anthropicEnvRestartTimer = null
+    restartSidecar().catch((err) => console.warn("restartSidecar failed", err))
+  }, ANTHROPIC_ENV_RESTART_DEBOUNCE_MS)
+}
+
+/**
+ * Record an Anthropic env that was applied via an *immediate* restart (e.g. the
+ * provider switch in `setDefaultProvider`). Keeping `lastAppliedAnthropicEnv` in
+ * sync means a subsequent identical `setProviderConfig` edit is correctly
+ * deduped by `scheduleAnthropicSidecarRestart` instead of triggering a second,
+ * redundant debounced restart that could kill an in-flight turn.
+ */
+function markAnthropicEnvApplied(apiKey: string | null, baseURL: string | null) {
+  lastAppliedAnthropicEnv = { apiKey, baseURL }
+  if (anthropicEnvRestartTimer) {
+    clearTimeout(anthropicEnvRestartTimer)
+    anthropicEnvRestartTimer = null
+  }
+}
+
 /**
  * Repair the `importedVscodeThemes` list on load:
  *
@@ -580,8 +621,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // store doesn't cycle through this file.
         if (s.networkProxy) {
           try {
-            const { applyProxyToRust } = await import("@/stores/network-proxy")
+            const { applyProxyToRust, maybeAutoDetectProxy } =
+              await import("@/stores/network-proxy")
             await applyProxyToRust(s.networkProxy)
+            // Fire-and-forget: when mode is `auto`, re-probe local proxies and
+            // adopt the current port without blocking boot.
+            void maybeAutoDetectProxy()
           } catch (err) {
             console.warn("networkProxy.applyToRust failed", err)
           }
@@ -1112,19 +1157,40 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     },
 
     setDefaultProvider: async (providerId) => {
-      const next = await saveSettings({ defaultProvider: providerId })
+      const cur = get().settings
+      // Keep the (defaultModel, defaultProvider) pair coherent: a stale model
+      // from the previous provider would otherwise ride along and be sent to
+      // the new provider's base URL. Only rewritten when the current default
+      // model isn't servable by the new provider (see the resolver's contract).
+      const { resolveDefaultModelForProvider } = await import("@/lib/ai/model-options")
+      const syncedModel = resolveDefaultModelForProvider(
+        providerId,
+        cur?.defaultModel,
+        cur?.providerSettings,
+        cur?.customProviders
+      )
+      const next = await saveSettings({
+        defaultProvider: providerId,
+        ...(syncedModel !== undefined ? { defaultModel: syncedModel } : {}),
+      })
       set({ settings: next })
-      // Phase D wiring: push the newly-selected provider's credentials to
-      // the sidecar so the next chat send uses them. Sidecar does an atomic
-      // env restart via `claude_set_provider_env` (Rust). Skipped on web.
-      if (isTauri()) {
-        const cfg =
-          next.providerSettings?.[providerId] ??
-          next.customProviders?.find((p) => p.id === providerId)
+      // `ApiKeyState` (Rust) is an Anthropic-only env slot — only push to it,
+      // and only restart the sidecar, when switching TO the Anthropic
+      // provider. Every other provider is read fresh per-turn by the ai-sdk
+      // dispatch path (`providerCredentials`), so no push/restart is needed
+      // and pushing here would silently corrupt the Anthropic env slot.
+      if (isTauri() && providerId === "anthropic") {
+        const cfg = next.providerSettings?.[providerId]
+        const apiKey = cfg?.apiKey ?? null
+        const baseURL = cfg?.baseURL ?? null
         try {
-          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
+          await setProviderEnv(apiKey, baseURL)
+          await restartSidecar()
+          // We just restarted with this exact env — record it so a following
+          // identical config edit doesn't schedule a second debounced restart.
+          markAnthropicEnvApplied(apiKey, baseURL)
         } catch (err) {
-          console.warn("setProviderEnv failed", err)
+          console.warn("setProviderEnv/restartSidecar failed", err)
         }
       }
     },
@@ -1143,16 +1209,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const next = await saveSettings({ providerSettings: map })
       set({ settings: next })
       // If this is the active default provider AND the patch touched
-      // `apiKey` or `baseURL`, push the change to the sidecar so the next
-      // chat turn picks it up without requiring a default-provider switch.
+      // `apiKey` or `baseURL`, push the change to the sidecar and schedule a
+      // (debounced) restart so the next chat turn actually picks it up —
+      // `ApiKeyState` only holds Anthropic's env, so this only applies when
+      // the edited provider IS Anthropic (see `scheduleAnthropicSidecarRestart`).
       if (
         isTauri() &&
+        providerId === "anthropic" &&
         next.defaultProvider === providerId &&
         ("apiKey" in patch || "baseURL" in patch)
       ) {
         const cfg = map[providerId]
+        const apiKey = cfg?.apiKey ?? null
+        const baseURL = cfg?.baseURL ?? null
         try {
-          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
+          await setProviderEnv(apiKey, baseURL)
+          scheduleAnthropicSidecarRestart(apiKey, baseURL)
         } catch (err) {
           console.warn("setProviderEnv failed", err)
         }

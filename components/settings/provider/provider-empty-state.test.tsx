@@ -141,4 +141,21 @@ describe("ProviderEmptyState", () => {
     fireEvent.click(screen.getByText("Fix Now"))
     expect(onAction).toHaveBeenCalledTimes(1)
   })
+
+  it("hides the Import Settings button entirely when onImportSettings is omitted", () => {
+    render(<ProviderEmptyState onAddProvider={mockOnAddProvider} />)
+    expect(screen.getByTestId("button-default")).toBeInTheDocument()
+    expect(screen.queryByTestId("button-outline")).not.toBeInTheDocument()
+  })
+
+  it("renders a custom importButton even when onImportSettings is omitted", () => {
+    render(
+      <ProviderEmptyState
+        onAddProvider={mockOnAddProvider}
+        importButton={<div data-testid="custom-import-button" />}
+      />
+    )
+    expect(screen.getByTestId("custom-import-button")).toBeInTheDocument()
+    expect(screen.queryByTestId("button-outline")).not.toBeInTheDocument()
+  })
 })

@@ -13,7 +13,7 @@
  * call rejects with a stable code on the ai-sdk path / when no session is open).
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { PlugZapIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -55,11 +55,17 @@ export function McpLiveSessionCard() {
   const [available, setAvailable] = useState(true)
   const [loading, setLoading] = useState(false)
   const [busyServer, setBusyServer] = useState<string | null>(null)
+  // The session this card is currently showing. An async operation (reconnect /
+  // toggle / refresh) that resolves AFTER the user switched sessions must not
+  // write the old session's rows into the new session's view — every write is
+  // guarded against this ref, which the load effect keeps in sync.
+  const shownSessionRef = useRef<string | null>(null)
 
   // Initial / on-session-change load. State is written only in the promise
   // callbacks (never synchronously in the effect body) — mirrors mcp-health-tab.
   useEffect(() => {
     if (!(isTauri() && sessionId)) return
+    shownSessionRef.current = sessionId
     let cancelled = false
     getSessionMcpStatus(sessionId)
       .then((r) => {
@@ -80,41 +86,56 @@ export function McpLiveSessionCard() {
 
   if (!isTauri() || !sessionId || !available) return null
 
+  // Fetch fresh rows and apply them only if the shown session hasn't changed
+  // since this operation began — otherwise the result belongs to a now-hidden
+  // session and must be dropped.
+  const applyStatusIfCurrent = async (forSession: string) => {
+    const fresh = await getSessionMcpStatus(forSession)
+    if (shownSessionRef.current === forSession) {
+      setRows(fresh)
+      setAvailable(true)
+    }
+  }
+
   const refresh = async () => {
+    const forSession = sessionId
     setLoading(true)
     try {
-      setRows(await getSessionMcpStatus(sessionId))
-      setAvailable(true)
+      await applyStatusIfCurrent(forSession)
     } catch {
-      setAvailable(false)
-      setRows(null)
+      if (shownSessionRef.current === forSession) {
+        setAvailable(false)
+        setRows(null)
+      }
     } finally {
-      setLoading(false)
+      if (shownSessionRef.current === forSession) setLoading(false)
     }
   }
 
   const handleReconnect = async (name: string) => {
+    const forSession = sessionId
     setBusyServer(name)
     try {
-      await reconnectSessionMcpServer(sessionId, name)
+      await reconnectSessionMcpServer(forSession, name)
       toast.success(t("reconnectStarted", { name }))
-      setRows(await getSessionMcpStatus(sessionId))
+      await applyStatusIfCurrent(forSession)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
-      setBusyServer(null)
+      if (shownSessionRef.current === forSession) setBusyServer(null)
     }
   }
 
   const handleToggle = async (name: string, currentlyDisabled: boolean) => {
+    const forSession = sessionId
     setBusyServer(name)
     try {
-      await toggleSessionMcpServer(sessionId, name, currentlyDisabled)
-      setRows(await getSessionMcpStatus(sessionId))
+      await toggleSessionMcpServer(forSession, name, currentlyDisabled)
+      await applyStatusIfCurrent(forSession)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
-      setBusyServer(null)
+      if (shownSessionRef.current === forSession) setBusyServer(null)
     }
   }
 

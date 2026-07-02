@@ -153,6 +153,33 @@ describe("McpLiveSessionCard", () => {
     await waitFor(() => expect(toggleSessionMcpServer).toHaveBeenCalledWith("s1", "off", true))
   })
 
+  it("drops a stale status write after the session changes mid-operation", async () => {
+    let resolveReconnectFetch: (v: SdkMcpServerStatus[]) => void = () => {}
+    getSessionMcpStatus
+      .mockResolvedValueOnce([failedRow]) // s1 mount
+      .mockImplementationOnce(
+        () =>
+          new Promise<SdkMcpServerStatus[]>((res) => {
+            resolveReconnectFetch = res
+          })
+      ) // s1 reconnect refetch (deferred)
+      .mockResolvedValueOnce([okRow]) // s2 mount
+    reconnectSessionMcpServer.mockResolvedValue(undefined)
+    const { rerender } = render(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-github")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("reconnect"))
+    await waitFor(() => expect(reconnectSessionMcpServer).toHaveBeenCalledWith("s1", "github"))
+    // Switch sessions — the mount effect loads s2's rows (cognia).
+    activeSessionId = "s2"
+    rerender(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument())
+    // The stale s1 reconnect fetch resolves late with old (failed) data — the
+    // session guard must drop it so s2's view is not clobbered.
+    resolveReconnectFetch([failedRow])
+    await waitFor(() => expect(screen.queryByTestId("mcp-live-row-github")).toBeNull())
+    expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument()
+  })
+
   it("toasts an error when toggle fails", async () => {
     getSessionMcpStatus.mockResolvedValue([okRow])
     toggleSessionMcpServer.mockRejectedValue(new Error("nope"))

@@ -13,8 +13,9 @@ import type { AppSettings } from "@/lib/claude/types"
 // Thin wrapper around RoutingConfigPanel — the GLOBAL routing surface (strategy,
 // presets, alias mappings, constraints, reliability, semantic/difficulty
 // routing, live test). Reads NESTED `settings.routingConfig` + `settings.
-// modelMappings`; alias picker options come from FLAT `providerSettings`. The
-// `providerId` / `providerName` props are accepted but unused.
+// modelMappings`; alias picker options come from FLAT `providerSettings`.
+// Takes no props — this tab is intentionally the same regardless of which
+// provider is selected in the parent panel.
 const meta = {
   title: "Settings/Provider/RoutingTab",
   component: RoutingTab,

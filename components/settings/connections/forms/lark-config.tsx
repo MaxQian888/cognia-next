@@ -307,7 +307,11 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   }
 
   // ── Derived Webhook URL ──────────────────────────────────────────────────
-  const webhookPath = isNew ? null : `/connectors/lark/${row?.id ?? ""}`
+  // Must match the Rust axum route `POST /webhook/{adapter_type}/{adapter_id}`
+  // (axum_app.rs) — the same `/webhook/<type>/<id>` shape every other adapter
+  // form uses. The previous `/connectors/lark/...` prefix 404'd, so a Feishu
+  // webhook aimed at the surfaced URL never reached the receiver.
+  const webhookPath = isNew ? null : `/webhook/lark/${row?.id ?? ""}`
   const webhookUrl =
     tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
 

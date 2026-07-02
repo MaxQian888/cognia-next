@@ -2,11 +2,16 @@
 
 import React, { useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { Check, AlertTriangle, X, Circle } from "lucide-react"
+import { Check, AlertTriangle, X, Circle, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
-export type ProviderConnectionStatus = "connected" | "warning" | "not-configured" | "error"
+export type ProviderConnectionStatus =
+  | "connected"
+  | "warning"
+  | "not-configured"
+  | "error"
+  | "limited"
 
 interface ProviderSidebarItemProps {
   providerId: string
@@ -61,6 +66,16 @@ const STATUS_CONFIG: Record<
     className:
       "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400",
   },
+  // Verified but with caveats (e.g. authoritative verification wasn't
+  // possible in this runtime) — distinct from a plain "connected" pass so
+  // the sidebar badge doesn't overclaim.
+  limited: {
+    icon: Info,
+    labelKey: "statusLimited",
+    reasonKey: "reasonLimited",
+    className:
+      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400",
+  },
 }
 
 const PROVIDER_ICON_MAP: Record<string, string> = {
@@ -108,6 +123,7 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   return (
     <button
       type="button"
+      id={`provider-${providerId}`}
       onClick={handleClick}
       className={cn(
         "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200",

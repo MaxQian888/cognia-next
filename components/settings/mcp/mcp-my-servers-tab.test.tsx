@@ -17,6 +17,9 @@ jest.mock("@/lib/db/mcp-servers", () => ({
 
 jest.mock("@/lib/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
+  // The live-session card pulls in `@/stores/chat` → `lib/execution/broker`,
+  // which calls `createLogger` at module load; stub it so the suite can import.
+  createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))

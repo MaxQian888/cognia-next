@@ -13,10 +13,12 @@ jest.mock("next-intl", () => ({
       statusWarning: "Warning",
       statusUnconfigured: "Unconfigured",
       statusError: "Error",
+      statusLimited: "Limited",
       reasonConnected: "Connection verified",
       reasonWarning: "Configured but not verified — open to test the connection",
       reasonUnconfigured: "Add an API key to start using this provider",
       reasonError: "Last connection test failed — open to review the error",
+      reasonLimited: "Verified with caveats — could not be fully confirmed in this runtime",
     }
     return map[key] ?? key
   },
@@ -64,6 +66,11 @@ describe("ProviderSidebarItem", () => {
     expect(defaultProps.onClick).toHaveBeenCalledWith("openai")
   })
 
+  it("carries a stable provider-{id} DOM id for the onboarding banner's scroll-to-provider affordance", () => {
+    const { container } = render(<ProviderSidebarItem {...defaultProps} />)
+    expect(container.querySelector("#provider-openai")).toBeInTheDocument()
+  })
+
   it("surfaces the status reason as a tooltip on the status badge", () => {
     const { container } = render(<ProviderSidebarItem {...defaultProps} status="warning" />)
     const badge = container.querySelector('[data-status="warning"]')
@@ -81,5 +88,16 @@ describe("ProviderSidebarItem", () => {
     const { container } = render(<ProviderSidebarItem {...defaultProps} status="not-configured" />)
     const badge = container.querySelector('[data-status="not-configured"]')
     expect(badge).toHaveAttribute("title", "Add an API key to start using this provider")
+  })
+
+  it("renders a distinct 'limited' badge instead of collapsing it into 'connected'", () => {
+    const { container } = render(<ProviderSidebarItem {...defaultProps} status="limited" />)
+    const badge = container.querySelector('[data-status="limited"]')
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveAttribute(
+      "title",
+      "Verified with caveats — could not be fully confirmed in this runtime"
+    )
+    expect(screen.getByText("Limited")).toBeInTheDocument()
   })
 })

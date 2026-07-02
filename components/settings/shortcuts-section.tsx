@@ -24,6 +24,15 @@ const BUILT_IN_DEFAULTS: Array<{ id: string; chord: Chord; label: string }> = [
   { id: "tray.automation-kill", chord: "ctrl+alt+k", label: "Automation kill switch" },
 ]
 
+/**
+ * Ids with no built-in OS-level default (unlike `BUILT_IN_DEFAULTS`, Rust
+ * never seeds these — see `seed_builtins`) — the row starts unbound ("Not
+ * set") until the user records one. `id` must match a command registered in
+ * `lib/plugin/commands/registry.ts` so the bound chord actually dispatches
+ * somewhere (see `lib/pet/commands.ts:registerPetCommands`).
+ */
+const OPTIONAL_SHORTCUT_IDS = ["pet.toggle-window"] as const
+
 interface RecorderState {
   id: string
   chord: Chord | null
@@ -112,7 +121,7 @@ export function ShortcutsSection() {
   // rebindable rows. Items without an accelerator are still bindable via the
   // settings dialog later, but only appear here once they have one — keeps
   // the panel scoped to "things with a current chord".
-  const trayShortcutRows: Array<{ id: string; label: string; chord: Chord }> = []
+  const trayShortcutRows: Array<{ id: string; label: string; chord: Chord | null }> = []
   for (const item of trayItems) {
     if (item.kind !== "action") continue
     const accel: string | undefined = (item as Extract<TrayMenuItem, { kind: "action" }>)
@@ -126,13 +135,25 @@ export function ShortcutsSection() {
     })
   }
 
-  const rows = [
+  const optionalLabels: Record<(typeof OPTIONAL_SHORTCUT_IDS)[number], string> = {
+    "pet.toggle-window": t("petToggleWindow", { fallback: "Toggle desktop pet" }),
+  }
+  const optionalShortcutRows: Array<{ id: string; label: string; chord: Chord | null }> =
+    OPTIONAL_SHORTCUT_IDS.map((id) => ({
+      id,
+      label: optionalLabels[id],
+      chord: bindings[id] ?? null,
+    }))
+
+  const rows: Array<{ id: string; label: string; chord: Chord | null; hasDefault: boolean }> = [
     ...BUILT_IN_DEFAULTS.map((def) => ({
       id: def.id,
       label: def.label,
       chord: bindings[def.id] ?? def.chord,
+      hasDefault: true,
     })),
-    ...trayShortcutRows,
+    ...trayShortcutRows.map((row) => ({ ...row, hasDefault: false })),
+    ...optionalShortcutRows.map((row) => ({ ...row, hasDefault: false })),
   ]
 
   return (
@@ -159,7 +180,9 @@ export function ShortcutsSection() {
                     ? recorder?.chord
                       ? formatKeybinding(recorder.chord)
                       : t("pressKey", { fallback: "Press any key…" })
-                    : formatKeybinding(row.chord)}
+                    : row.chord
+                      ? formatKeybinding(row.chord)
+                      : t("notSet", { fallback: "Not set" })}
                 </div>
                 {isRecording && recorder?.conflict && recorder.conflict !== row.id && (
                   <div className="text-xs text-destructive">
@@ -182,14 +205,20 @@ export function ShortcutsSection() {
                     <Button size="sm" variant="outline" onClick={() => startRecording(row.id)}>
                       {t("record", { fallback: "Record" })}
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => resetRow(row.id)}
-                      aria-label={t("resetItem", { fallback: "Reset to default" })}
-                    >
-                      <RotateCcwIcon className="size-4" />
-                    </Button>
+                    {(row.hasDefault || row.chord) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => resetRow(row.id)}
+                        aria-label={
+                          row.hasDefault
+                            ? t("resetItem", { fallback: "Reset to default" })
+                            : t("clear", { fallback: "Clear" })
+                        }
+                      >
+                        <RotateCcwIcon className="size-4" />
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
