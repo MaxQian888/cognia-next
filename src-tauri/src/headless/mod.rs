@@ -23,12 +23,16 @@ use parking_lot::RwLock;
 use crate::claude::SidecarState;
 use crate::companion_api::event_bus::EventBus;
 
-// Re-exports for the `cognia-server` binary (the `api_key` / `claude`
-// modules are crate-private; this module is the headless boot surface).
-// The `pub use` also brings the names into scope for this module.
+// Re-exports for the `cognia-server` binary (the `api_key` / `claude` /
+// `secret_store` modules are crate-private; this module is the headless
+// boot surface). The `pub use` also brings the names into scope here.
 pub use crate::api_key::ApiKeyState;
 pub use crate::claude::host::{HeadlessSidecarHost, SidecarHost, SIDECAR_SCRIPT_ENV};
 pub use crate::claude::sidecar::kill_sidecar;
+pub use crate::secret_store::{
+    generate_master_key, init_headless as init_secret_store, parse_master_key,
+    resolve_master_key_from_env, rotate_master_key, MASTER_KEY_ENV, MASTER_KEY_FILE_ENV,
+};
 
 /// Service container for the headless (no-Tauri) host. The `cognia-server`
 /// binary constructs one at boot (R8) and installs it process-wide; the

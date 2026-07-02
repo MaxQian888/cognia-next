@@ -49,8 +49,9 @@ use app_lib::companion_api::{
     tls, CompanionState, SharedState,
 };
 use app_lib::headless::{
-    brain, headless_services, install_headless_services, kill_sidecar, ApiKeyState,
-    HeadlessServices, HeadlessSidecarHost, SIDECAR_SCRIPT_ENV,
+    brain, generate_master_key, headless_services, init_secret_store, install_headless_services,
+    kill_sidecar, parse_master_key, resolve_master_key_from_env, rotate_master_key, ApiKeyState,
+    HeadlessServices, HeadlessSidecarHost, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
 };
 use parking_lot::RwLock;
 
@@ -96,6 +97,15 @@ enum CliCommand {
         #[arg(long)]
         advertise_url: Option<String>,
     },
+    /// Re-encrypt the secret store under a new master key (ADR-0059 R9).
+    /// The old key comes from COGNIA_MASTER_KEY(_FILE); stored values —
+    /// including the JWT signing secret, so paired devices stay paired —
+    /// are unchanged. Update the env to the new key before the next boot.
+    RotateMasterKey {
+        /// The new 64-hex-char key. Omit to generate one (printed to stdout).
+        #[arg(long)]
+        new_key: Option<String>,
+    },
 }
 
 /// Resolve the advertised base URL: explicit flag → `COGNIA_PUBLIC_URL` →
@@ -130,6 +140,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
 
+    // Key rotation runs BEFORE the strict init (it re-opens the store file
+    // itself with the explicit old key) and exits.
+    if let CliCommand::RotateMasterKey { new_key } = &cli.command {
+        return run_rotate_master_key(&dir, new_key.as_deref());
+    }
+
+    // Strict secret-store init (ADR-0059 R9): master key from
+    // COGNIA_MASTER_KEY(_FILE), fatal without one, keyring + legacy
+    // migration disabled. MUST precede any secret access — the companion
+    // signing key, push creds, and provider vault all live in this store.
+    init_secret_store(&dir).map_err(|e| format!("secret store init: {e}"))?;
+
     // Boot the store unconditionally — every subcommand benefits from
     // verifying the schema is current.
     let store_path = dir.join("cognia-server.sqlite");
@@ -150,7 +172,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             port,
             advertise_url,
         } => run_serve(&store, &tls_material, port, advertise_url).await,
+        CliCommand::RotateMasterKey { .. } => unreachable!("handled above"),
     }
+}
+
+/// `cognia-server rotate-master-key [--new-key <64hex>]`.
+fn run_rotate_master_key(
+    data_dir: &std::path::Path,
+    new_key_hex: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let old_key = resolve_master_key_from_env()?
+        .ok_or_else(|| format!("current master key not found: set {MASTER_KEY_ENV}(_FILE)"))?;
+    let (new_key, generated) = match new_key_hex {
+        Some(raw) => (parse_master_key(raw)?, false),
+        None => (generate_master_key(), true),
+    };
+    rotate_master_key(data_dir, old_key, new_key)?;
+    println!("[cognia-server] secret store re-encrypted.");
+    if generated {
+        println!("\nNew master key (store it in your secret manager NOW):\n");
+        println!("    {}\n", hex::encode(new_key));
+    }
+    println!(
+        "Update {MASTER_KEY_ENV} (or the {0} file) to the new key before the next boot — \
+         the old key no longer decrypts the store.",
+        app_lib::headless::MASTER_KEY_FILE_ENV
+    );
+    Ok(())
 }
 
 async fn run_pair(

@@ -29,8 +29,20 @@
 //! return `errSecItemNotFound` with no prompt, so a fresh install only ever
 //! sees the master-key prompt.
 
+//! ## Headless mode (ADR-0059 R9)
+//!
+//! Containers have no OS keyring, and the old fallback silently generated a
+//! fresh in-memory key on every keyring failure — which would invalidate the
+//! companion signing secret (all JWTs) and drop every stored credential on
+//! each restart. Headless installs therefore run [`init_headless`] **before
+//! any secret access**: the master key comes from `COGNIA_MASTER_KEY`
+//! (64 hex chars) or `COGNIA_MASTER_KEY_FILE`, boot is **fatal** without one,
+//! the keyring source and legacy migration are disabled, and the store file
+//! lives under the server's own data dir with `0600` perms (unix).
+
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use aes_gcm::{
@@ -48,8 +60,13 @@ const MASTER_KEY_SERVICE: &str = "com.cognia.secret-store";
 #[cfg(not(test))]
 const MASTER_KEY_ACCOUNT: &str = "master-key";
 /// File name under `<dataDir>/cognia/` for the encrypted blob.
-#[cfg(not(test))]
 const STORE_FILE_NAME: &str = "secret-store.enc";
+
+/// Env var carrying the 64-hex master key directly (headless installs).
+pub const MASTER_KEY_ENV: &str = "COGNIA_MASTER_KEY";
+/// Env var naming a file whose contents are the 64-hex master key (for
+/// Docker/K8s secret mounts).
+pub const MASTER_KEY_FILE_ENV: &str = "COGNIA_MASTER_KEY_FILE";
 /// NUL separator joining `(service, account)` into one map key. NUL can never
 /// appear in a service/account string, so the composite key is unambiguous.
 const COMPOSITE_SEP: char = '\u{0}';
@@ -208,6 +225,17 @@ impl SecretStore {
             .map_err(|e| format!("persist secret-store: {e}"))?;
         // One encrypted backup is plenty for recovery; prune the rest.
         crate::fs_atomic::rotate_backups(path, 1);
+        // Ciphertext or not, the blob guards every credential — keep it
+        // owner-only where the platform can express that.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(path, perms);
+            }
+        }
         Ok(())
     }
 }
@@ -269,20 +297,21 @@ fn default_store_path() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("cognia").join(STORE_FILE_NAME))
 }
 
-/// Resolve the master key from the OS keyring, generating + storing one on
-/// first use. This is the single runtime keyring touch.
+/// Resolve the master key. Precedence (ADR-0059 R9):
+///
+/// 1. `COGNIA_MASTER_KEY` — 64 hex chars in the environment.
+/// 2. `COGNIA_MASTER_KEY_FILE` — a file containing the 64 hex chars.
+/// 3. The OS keyring, generating + storing one on first use (the single
+///    runtime keyring touch; desktop path).
 #[cfg(not(test))]
 fn load_or_create_master_key() -> Result<[u8; 32], String> {
+    if let Some(key) = resolve_master_key_from_env()? {
+        return Ok(key);
+    }
     let entry = keyring::Entry::new(MASTER_KEY_SERVICE, MASTER_KEY_ACCOUNT)
         .map_err(|e| format!("master key keyring init: {e}"))?;
     match entry.get_password() {
-        Ok(hex_key) => {
-            let bytes =
-                hex::decode(hex_key.trim()).map_err(|e| format!("master key decode: {e}"))?;
-            bytes
-                .try_into()
-                .map_err(|_| "master key must be 32 bytes".to_string())
-        }
+        Ok(hex_key) => parse_hex_key(&hex_key),
         Err(keyring::Error::NoEntry) => {
             let key = random_key();
             entry
@@ -292,6 +321,111 @@ fn load_or_create_master_key() -> Result<[u8; 32], String> {
         }
         Err(e) => Err(format!("master key read: {e}")),
     }
+}
+
+/// Parse a 64-hex-char master key.
+fn parse_hex_key(raw: &str) -> Result<[u8; 32], String> {
+    let bytes = hex::decode(raw.trim()).map_err(|e| format!("master key decode: {e}"))?;
+    bytes
+        .try_into()
+        .map_err(|_| "master key must be exactly 32 bytes (64 hex chars)".to_string())
+}
+
+/// Resolve the master key from the environment only (`COGNIA_MASTER_KEY` →
+/// `COGNIA_MASTER_KEY_FILE`). `Ok(None)` when neither is set.
+pub fn resolve_master_key_from_env() -> Result<Option<[u8; 32]>, String> {
+    if let Ok(raw) = std::env::var(MASTER_KEY_ENV) {
+        if !raw.trim().is_empty() {
+            return parse_hex_key(&raw).map(Some);
+        }
+    }
+    if let Ok(path) = std::env::var(MASTER_KEY_FILE_ENV) {
+        if !path.trim().is_empty() {
+            let raw = std::fs::read_to_string(&path)
+                .map_err(|e| format!("read {MASTER_KEY_FILE_ENV} ({path}): {e}"))?;
+            return parse_hex_key(&raw).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+// ---------------------------------------------------------------------------
+// Headless init + rotation (ADR-0059 R9)
+// ---------------------------------------------------------------------------
+
+/// Set once by [`init_headless`]; disables the legacy keyring migration
+/// (containers have no keyring — a migration attempt would error or hang).
+static HEADLESS_MODE: AtomicBool = AtomicBool::new(false);
+
+/// The store file path for a headless data dir.
+fn headless_store_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("cognia").join(STORE_FILE_NAME)
+}
+
+/// Build the headless store: env-resolved key (fatal if absent — the silent
+/// in-memory regeneration that invalidated JWTs and dropped credentials on
+/// every container restart is exactly the bug this replaces), file under the
+/// server's data dir. Split from [`init_headless`] so the container path is
+/// unit-testable without touching the process global.
+fn build_headless_store(data_dir: &Path) -> Result<SecretStore, String> {
+    let key = resolve_master_key_from_env()?.ok_or_else(|| {
+        format!(
+            "no master key configured: set {MASTER_KEY_ENV} (64 hex chars, e.g. `openssl rand -hex 32`) \
+             or {MASTER_KEY_FILE_ENV}; refusing to boot with an ephemeral key"
+        )
+    })?;
+    SecretStore::open(headless_store_path(data_dir), key)
+}
+
+/// Strict headless initialization. MUST run before any other secret access
+/// (the companion signing key, push creds, vault, connector creds all funnel
+/// through this store). Errors are fatal boot errors by design.
+pub fn init_headless(data_dir: &Path) -> Result<(), String> {
+    let store = build_headless_store(data_dir)?;
+    // Ensure perms even when nothing has been persisted yet this boot.
+    let _ = &store;
+    HEADLESS_MODE.store(true, Ordering::SeqCst);
+    GLOBAL
+        .set(RwLock::new(store))
+        .map_err(|_| "secret store already initialized; init_headless must run first".to_string())
+}
+
+/// Whether headless mode disabled the legacy keyring paths.
+fn legacy_enabled() -> bool {
+    !HEADLESS_MODE.load(Ordering::SeqCst)
+}
+
+/// Re-encrypt the store under a new master key (ADR-0059 R9). The old key is
+/// validated by decrypting the existing file; values — including the
+/// companion JWT signing secret — are unchanged, so issued device JWTs
+/// survive the rotation. The caller is responsible for updating
+/// `COGNIA_MASTER_KEY`(_FILE) before the next boot.
+pub fn rotate_master_key(
+    data_dir: &Path,
+    old_key: [u8; 32],
+    new_key: [u8; 32],
+) -> Result<(), String> {
+    let path = headless_store_path(data_dir);
+    if !path.exists() {
+        return Err(format!(
+            "no secret store at {} — nothing to rotate",
+            path.display()
+        ));
+    }
+    let mut store = SecretStore::open(path, old_key)?;
+    store.key = new_key;
+    store.persist()
+}
+
+/// Parse a user-supplied 64-hex key (rotate-master-key CLI). Public thin
+/// wrapper over the internal parser.
+pub fn parse_master_key(raw: &str) -> Result<[u8; 32], String> {
+    parse_hex_key(raw)
+}
+
+/// Generate a fresh random master key (rotate-master-key CLI `--generate`).
+pub fn generate_master_key() -> [u8; 32] {
+    random_key()
 }
 
 // ---------------------------------------------------------------------------
@@ -330,11 +464,15 @@ fn legacy_keyring_delete(_service: &str, _account: &str) {}
 
 /// Read a secret. Returns `Ok(None)` when nothing is stored under
 /// `(service, account)`. On a store miss, the legacy OS-keyring item (if any)
-/// is migrated in and then removed.
+/// is migrated in and then removed — desktop only; headless installs have no
+/// keyring and skip migration entirely.
 pub fn get(service: &str, account: &str) -> Result<Option<String>, String> {
     // Fast path: read lock, no migration.
     if let Some(value) = global().read().peek(service, account) {
         return Ok(Some(value));
+    }
+    if !legacy_enabled() {
+        return Ok(None);
     }
     // Slow path: take the write lock and attempt one-time legacy migration.
     let outcome = global()
@@ -361,7 +499,9 @@ pub fn set(service: &str, account: &str, value: &str) -> Result<(), String> {
 /// so a deleted secret can't be resurrected by a later `get` migration.
 pub fn delete(service: &str, account: &str) -> Result<(), String> {
     global().write().delete(service, account)?;
-    legacy_keyring_delete(service, account);
+    if legacy_enabled() {
+        legacy_keyring_delete(service, account);
+    }
     Ok(())
 }
 
@@ -532,6 +672,116 @@ mod tests {
             .get_or_migrate("svc", "acct", |_, _| Err("boom".to_string()))
             .unwrap_err();
         assert_eq!(err, "boom");
+    }
+
+    // ---- headless mode (ADR-0059 R9) ----
+
+    /// Container-path simulation: master key from env, no keyring, values
+    /// survive a "restart" (drop + reopen with the same env key). All env
+    /// manipulation lives in this single test to avoid parallel-test races
+    /// on the process environment.
+    #[test]
+    fn headless_container_path_env_key_and_restart_survival() {
+        let dir = tmp_path().parent().unwrap().to_path_buf();
+        let key_hex = hex::encode([42u8; 32]);
+
+        let prev_key = std::env::var(MASTER_KEY_ENV).ok();
+        let prev_file = std::env::var(MASTER_KEY_FILE_ENV).ok();
+
+        // 1. No key anywhere → fatal, with an actionable message.
+        std::env::remove_var(MASTER_KEY_ENV);
+        std::env::remove_var(MASTER_KEY_FILE_ENV);
+        let err = match build_headless_store(&dir) {
+            Ok(_) => panic!("no key must be fatal"),
+            Err(e) => e,
+        };
+        assert!(err.contains(MASTER_KEY_ENV), "message names the env var: {err}");
+        assert!(err.contains("refusing to boot"), "message is explicit: {err}");
+
+        // 2. Malformed key → fatal.
+        std::env::set_var(MASTER_KEY_ENV, "not-hex-at-all");
+        assert!(build_headless_store(&dir).is_err());
+
+        // 3. Valid env key → store opens; writes persist.
+        std::env::set_var(MASTER_KEY_ENV, &key_hex);
+        {
+            let mut store = build_headless_store(&dir).expect("env key opens the store");
+            store
+                .set("com.cognia.companion", "signing-key", "sekrit-1")
+                .expect("set persists");
+        }
+
+        // 4. "Restart": a fresh open with the same env key sees the value —
+        //    the silent-regeneration bug would have lost it.
+        {
+            let store = build_headless_store(&dir).expect("reopen with same key");
+            assert_eq!(
+                store.peek("com.cognia.companion", "signing-key"),
+                Some("sekrit-1".to_string())
+            );
+        }
+
+        // 5. Key-file source: same key via COGNIA_MASTER_KEY_FILE.
+        std::env::remove_var(MASTER_KEY_ENV);
+        let key_file = dir.join("master.key");
+        std::fs::write(&key_file, format!("{key_hex}\n")).unwrap();
+        std::env::set_var(MASTER_KEY_FILE_ENV, key_file.display().to_string());
+        {
+            let store = build_headless_store(&dir).expect("key file opens the store");
+            assert_eq!(
+                store.peek("com.cognia.companion", "signing-key"),
+                Some("sekrit-1".to_string())
+            );
+        }
+
+        // 6. Rotation: re-encrypt under a new key; values (and thus JWTs
+        //    signed by the stored signing secret) survive; old key now fails.
+        let old_key = [42u8; 32];
+        let new_key = [43u8; 32];
+        rotate_master_key(&dir, old_key, new_key).expect("rotate");
+        let reopened = SecretStore::open(headless_store_path(&dir), new_key).expect("new key");
+        assert_eq!(
+            reopened.peek("com.cognia.companion", "signing-key"),
+            Some("sekrit-1".to_string())
+        );
+        assert!(
+            SecretStore::open(headless_store_path(&dir), old_key).is_err(),
+            "old key must no longer decrypt"
+        );
+
+        // 7. Rotating a non-existent store errors loudly.
+        let empty_dir = tmp_path().parent().unwrap().join("no-store-here");
+        assert!(rotate_master_key(&empty_dir, old_key, new_key).is_err());
+
+        // Restore the environment for other tests.
+        match prev_key {
+            Some(v) => std::env::set_var(MASTER_KEY_ENV, v),
+            None => std::env::remove_var(MASTER_KEY_ENV),
+        }
+        match prev_file {
+            Some(v) => std::env::set_var(MASTER_KEY_FILE_ENV, v),
+            None => std::env::remove_var(MASTER_KEY_FILE_ENV),
+        }
+    }
+
+    #[test]
+    fn parse_master_key_validates_length_and_hex() {
+        assert!(parse_master_key("zz").is_err());
+        assert!(parse_master_key(&hex::encode([1u8; 16])).is_err(), "16 bytes rejected");
+        let key = parse_master_key(&hex::encode([9u8; 32])).expect("valid");
+        assert_eq!(key, [9u8; 32]);
+        // Whitespace tolerated (key files often end with a newline).
+        assert_eq!(
+            parse_master_key(&format!("  {}\n", hex::encode([9u8; 32]))).unwrap(),
+            [9u8; 32]
+        );
+    }
+
+    #[test]
+    fn generate_master_key_is_32_random_bytes() {
+        let a = generate_master_key();
+        let b = generate_master_key();
+        assert_ne!(a, b);
     }
 
     // ---- public API against the in-memory global ----
