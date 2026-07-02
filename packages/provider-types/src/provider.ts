@@ -209,6 +209,16 @@ export interface UserProviderSettings {
    * Omitted = "auto" (host heuristic). See {@link ApiFlavor}.
    */
   apiFlavor?: ApiFlavor
+  /**
+   * Wire protocol override (openai/anthropic/gemini/plugin id). Built-in
+   * providers normally get a fixed protocol from the catalog (looked up by
+   * provider id) — this lets the user override it for providers that sit
+   * behind a proxy/relay speaking a different format than the catalog
+   * assumes. Not offered for the literal `"anthropic"` provider id, which
+   * always dispatches through the native Claude Agent SDK subprocess
+   * regardless of this field (see `sidecar/dispatch/index.mjs`).
+   */
+  apiProtocol?: ApiProtocol
   defaultModel: string
   enabled: boolean
   discoveredModels?: ProviderModelDiscoveryEntry[]

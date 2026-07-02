@@ -16,7 +16,7 @@ import type {
   RoutingConfig,
   AliasResolutionResult,
 } from "@cognia/provider-types/model-mapping"
-import type { RoutingStrategy, RequestRoutingOverride } from "@cognia/provider-types/auto-router"
+import type { RequestRoutingOverride } from "@cognia/provider-types/auto-router"
 import type {
   RoutingDecisionContext,
   RoutingStrategyId,

@@ -13,7 +13,6 @@
  * selector never throws (engine contract).
  */
 
-import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import type { RoutingStrategySelector } from "@cognia/provider-types/routing-strategy"
 import type { DifficultyRoutingSettings } from "./routing-types"
 import { getProviderRoutingRuntimeAdapters } from "./runtime-adapters"
