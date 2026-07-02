@@ -1,9 +1,8 @@
 import "../global.css"
 import type { ReactNode } from "react"
 import { notFound } from "next/navigation"
-import { RootProvider } from "fumadocs-ui/provider/next"
+import { Provider } from "@/components/provider"
 import { i18n } from "@/lib/i18n"
-import { i18nUI } from "@/lib/layout.shared"
 
 export function generateStaticParams() {
   return i18n.languages.map((lang) => ({ lang }))
@@ -22,7 +21,7 @@ export default async function RootLayout({
   return (
     <html lang={lang} suppressHydrationWarning>
       <body>
-        <RootProvider i18n={i18nUI.provider(lang)}>{children}</RootProvider>
+        <Provider lang={lang}>{children}</Provider>
       </body>
     </html>
   )

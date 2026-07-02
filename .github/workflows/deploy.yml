@@ -44,6 +44,7 @@ on:
           - share-worker
           - signaling-fly
           - share-fly
+          - docs
         default: all
   workflow_call:
     inputs:
@@ -195,10 +196,65 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --remote-only --app "${{ vars.FLY_SHARE_APP }}"
 
+  deploy-docs:
+    name: Pages — docs
+    needs: gate
+    # ADR-0059 P0.6 / D8: the docs site is a static export (docs/out) hosted
+    # on Cloudflare Pages. Requires a Pages project named by the
+    # CF_DOCS_PAGES_PROJECT environment variable (create once with
+    # `wrangler pages project create <name>`).
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["all","docs"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+        working-directory: docs
+
+      - name: Build static export
+        run: pnpm build
+        working-directory: docs
+
+      - name: Guard Pages project variable
+        env:
+          PROJECT: ${{ vars.CF_DOCS_PAGES_PROJECT }}
+        run: |
+          if [ -z "$PROJECT" ]; then
+            echo "::error::CF_DOCS_PAGES_PROJECT environment variable is not set"
+            exit 1
+          fi
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: >
+            pages deploy docs/out --project-name "${{ vars.CF_DOCS_PAGES_PROJECT }}"
+            --branch "${{ inputs.environment == 'production' && 'main' || 'staging' }}"
+
   summary:
     name: Summary
     needs:
-      [gate, deploy-signaling-worker, deploy-share-worker, deploy-signaling-fly, deploy-share-fly]
+      [
+        gate,
+        deploy-signaling-worker,
+        deploy-share-worker,
+        deploy-signaling-fly,
+        deploy-share-fly,
+        deploy-docs,
+      ]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -213,6 +269,7 @@ jobs:
             echo "| Worker — share | ${{ needs.deploy-share-worker.result }} |"
             echo "| Fly — signaling | ${{ needs.deploy-signaling-fly.result }} |"
             echo "| Fly — share | ${{ needs.deploy-share-fly.result }} |"
+            echo "| Pages — docs | ${{ needs.deploy-docs.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail on any failed deploy

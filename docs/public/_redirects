@@ -1,0 +1,4 @@
+# Cloudflare Pages redirects (D8). No middleware in a static export — send
+# the bare roots to the default locale explicitly.
+/ /zh/ 302
+/docs/* /zh/docs/:splat 302
