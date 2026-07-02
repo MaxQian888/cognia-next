@@ -304,6 +304,34 @@ html.reduce-motion *::after {
     background: transparent !important;
   }
 
+  /* CRITICAL for real window transparency on Windows: next-themes writes an
+     inline `color-scheme: dark` on <html> (its `enableColorScheme` defaults to
+     true). Under a dark color-scheme, Chromium/WebView2 paints an OPAQUE base
+     backdrop *behind* the transparent <body>, so the frameless pet window shows
+     solid black even though the OS window and the webview are both transparent
+     — zeroing `background` alone can't reach that backdrop. `normal` removes the
+     forced scheme backdrop; `!important` beats next-themes' inline style. */
+  html[data-pet-overlay] {
+    color-scheme: normal !important;
+  }
+
+  /* Kill every wallpaper layer inside the pet windows. `<BackgroundApplier />`
+     mounts in this same root layout, so a user wallpaper is painted through TWO
+     pseudo-element layers — `body[data-bg-enabled]::before` (fixed, full-window)
+     and the `#app[data-bg-target]::before` layer used for global/all scope —
+     plus a legibility scrim `::after`. The base transparency rule above only
+     zeroes the `background` *property*, not these pseudos, so without this the
+     wallpaper fills what must be a transparent paint-through window. `!important`
+     beats the (unlayered, normal) wallpaper declarations regardless of cascade
+     layer. Belt-and-suspenders with the JS role gate in background-applier.tsx. */
+  html[data-pet-overlay] [data-bg-enabled="true"]::before,
+  html[data-pet-overlay] [data-bg-target]::before,
+  html[data-pet-overlay] [data-bg-scrim="true"]::after,
+  html[data-pet-overlay] [data-bg-target][data-bg-scrim="true"]::after {
+    display: none !important;
+    background: none !important;
+  }
+
   /* Window-blur dim. WindowFocusTracker writes data-window-focused on the
      <html> root; everything tagged [data-app-chrome] (title bar / status bar /
      resize handles) recedes when the user clicks away. */
