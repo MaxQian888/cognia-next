@@ -115,6 +115,8 @@
       "0": "Yummy! Thank you!",
       "1": "Best treat ever! ♥"
     },
+    "twinBusy": ["Quietly going through your notes…", "Learning a bit more about you…"],
+    "twinMilestone": ["I just learned something new about you!", "Fresh insight unlocked!"],
     "waiting": ["Your call!", "Waiting on you…"]
   },
   "care": {

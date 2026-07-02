@@ -23,6 +23,25 @@
     "subheading": "Discovers FlClash, Clash Verge Rev, Mihomo, and v2rayN via running processes and config files, then probes the well-known loopback ports.",
     "webUnsupported": "Auto-detection requires the Tauri desktop app."
   },
+  "ipInfo": {
+    "disabled": "IP lookup is off. Turn it on to fetch your current public IP and location from ipinfo.io.",
+    "enableHint": "Fetch your current public IP and geolocation from the public ipinfo.io endpoint. Routes through the active proxy, so it reports the egress IP the proxy uses.",
+    "enableLabel": "Show current IP & location",
+    "error": "Couldn't fetch IP info: {error}",
+    "fields": {
+      "city": "City",
+      "country": "Country",
+      "hostname": "Hostname",
+      "ip": "IP address",
+      "loc": "Coordinates",
+      "org": "Network / ASN",
+      "postal": "Postal code",
+      "region": "Region",
+      "timezone": "Time zone"
+    },
+    "heading": "Current public IP",
+    "refresh": "Refresh"
+  },
   "form": {
     "addBypass": "Add",
     "bypass": "Bypass list",
@@ -51,6 +70,7 @@
   "tabs": {
     "detection": "Auto-detect",
     "general": "General",
+    "ipInfo": "IP",
     "test": "Test"
   },
   "test": {

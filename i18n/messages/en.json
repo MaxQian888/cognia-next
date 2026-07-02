@@ -671,9 +671,20 @@
       "compose": "Compose",
       "composing": "Composing…",
       "confidence": "{pct}% confidence",
+      "consensusOption": "Consensus (council of models)",
       "created": "Team composed.",
       "dependsOn": "after {deps}",
       "description": "Describe an objective and let the system propose a specialist roster and task plan for your review.",
+      "executorLabel": "Executor: {executor}",
+      "executors": {
+        "background-handoff": "Background handoff",
+        "council": "Council",
+        "ensemble": "Ensemble",
+        "external-handoff": "External handoff",
+        "single-send": "Single agent",
+        "team-flat": "Agent team",
+        "team-ultracode": "Ultracode team"
+      },
       "failed": "Auto-compose failed: {error}",
       "lead": "lead",
       "noClient": "Auto-compose needs a provider with a renderer-side API key — configure one in settings.",
@@ -683,11 +694,13 @@
       "openButton": "Auto-compose",
       "piiRefused": "Refused: the objective still contains sensitive data after redaction.",
       "reject": "Back",
+      "resultDone": "Done",
       "rosterLabel": "Roster ({count})",
       "tasksLabel": "Tasks ({count})",
       "teamNameLabel": "Team name",
       "teamNamePlaceholder": "Name this team",
-      "title": "Auto-compose a team"
+      "title": "Auto-compose a team",
+      "verifyOption": "Verify (sampling ensemble)"
     },
     "builtInBadge": "Built-in",
     "cancel": "Cancel",
@@ -2281,6 +2294,10 @@
         "userLabel": "User memory"
       },
       "modelPicker": {
+        "autoBadge": "Auto",
+        "autoBadgeHint": "Auto routing is on — each prompt picks a model tier by difficulty.",
+        "autoToggle": "Auto routing",
+        "autoToggleHint": "Pick a model tier per prompt by difficulty",
         "capReasoning": "Reasoning",
         "capTools": "Tool use",
         "capVision": "Vision",
@@ -2780,6 +2797,10 @@
         "tooltip": "Auto-approve file edits; other tools still prompt."
       },
       "aria": "Permission mode: {label}. Click to cycle.",
+      "auto": {
+        "label": "Auto",
+        "tooltip": "Most actions run with background safety checks and minimal prompting."
+      },
       "bypass": {
         "label": "Bypass",
         "tooltip": "All tools auto-approved. Use with care — Claude can run any command."
@@ -2788,11 +2809,19 @@
         "label": "Default",
         "tooltip": "Tools prompt for permission as usual."
       },
+      "dontAsk": {
+        "label": "Don't ask",
+        "tooltip": "Only pre-approved and read-only tools run; anything else is denied."
+      },
       "plan": {
         "label": "Plan",
         "tooltip": "Read-only planning mode — Claude proposes changes without applying them."
       },
       "shiftTabHint": "Shift+Tab to cycle."
+    },
+    "planMode": {
+      "banner": "Plan mode — read-only research; the agent will propose a plan before making changes.",
+      "hint": "Shift+Tab"
     },
     "renderers": {
       "alert": {
@@ -3765,8 +3794,11 @@
       "openCommandPalette": "Open command palette",
       "openLogs": "Open logs",
       "permissionAcceptEdits": "Auto-accept",
+      "permissionAdvanced": "Advanced",
+      "permissionAuto": "Auto",
       "permissionBypass": "Bypass",
       "permissionDefault": "Default",
+      "permissionDontAsk": "Don't ask",
       "permissionMode": "Permission",
       "permissionPlan": "Plan",
       "streaming": "Streaming",
@@ -5156,8 +5188,11 @@
       "count": "{count, plural, =1 {1 event} other {# events}}",
       "empty": "No recent activity",
       "kind": {
+        "deliveryDeadlettered": "Delivery failed — gave up",
+        "deliveryError": "Delivery error",
         "goalBlockedIm": "Goal blocked",
         "goalStartedIm": "Goal started",
+        "inboundDeferredManualMode": "Reply held — manual mode",
         "inboundDeferredMuted": "Reply deferred — muted",
         "inboundDeferredQuietHours": "Reply deferred — quiet hours",
         "inboundDeleted": "Message deleted",
@@ -5165,9 +5200,16 @@
         "inboundHelpServed": "Help card sent",
         "inboundMemberAdded": "Member joined",
         "inboundMemberRemoved": "Member left",
+        "inboundPolicyBlocked": "Blocked by policy",
         "inboundReadIndicator": "Message read",
         "inboundWelcomeSent": "Welcome card sent",
-        "overrideComputerUseChanged": "Computer Use changed"
+        "notifyImPiiBlocked": "Notification blocked — PII",
+        "overrideComputerUseChanged": "Computer Use changed",
+        "pluginInboundBlocked": "Blocked by plugin",
+        "pluginRateBlocked": "Rate-limited by plugin",
+        "pluginTransformPiiBlocked": "Plugin transform blocked — PII",
+        "teamDispatched": "Routed to team",
+        "workflowDispatched": "Routed to workflow"
       },
       "title": "Activity",
       "toggle": "Toggle activity log"
@@ -9253,6 +9295,14 @@
         "0": "Yummy! Thank you!",
         "1": "Best treat ever! ♥"
       },
+      "twinBusy": [
+        "Quietly going through your notes…",
+        "Learning a bit more about you…"
+      ],
+      "twinMilestone": [
+        "I just learned something new about you!",
+        "Fresh insight unlocked!"
+      ],
       "waiting": [
         "Your call!",
         "Waiting on you…"
@@ -9435,7 +9485,19 @@
   "plan": {
     "approval": {
       "approve": "Approve & run",
-      "feedbackPlaceholder": "Optional feedback for rejection or refinement…",
+      "approveAcceptEdits": "Yes, auto-accept edits",
+      "approveFullAuto": "Approve & run fully automated",
+      "approveReviewEach": "Yes, review each edit",
+      "discard": "Discard plan",
+      "edit": "Edit plan",
+      "editCancel": "Cancel",
+      "editSave": "Save changes",
+      "editStepsHint": "One step per line…",
+      "editStepsLabel": "Steps (one per line)",
+      "editTitleLabel": "Title",
+      "feedbackPlaceholder": "Optional feedback for keep-planning, discard, or refinement…",
+      "keepPlanning": "No, keep planning",
+      "moreActions": "More plan actions",
       "noSteps": "This plan has no steps.",
       "progressLabel": "Progress",
       "refineExpand": "Expand",
@@ -9443,7 +9505,7 @@
       "refineReorder": "Reorder",
       "refineRepair": "Repair",
       "refineSimplify": "Simplify",
-      "reject": "Reject",
+      "refineUnavailable": "Can't refine — no model is configured for background tasks.",
       "sourceLabel": "Source: {source}",
       "title": "Review plan"
     },
@@ -9458,8 +9520,11 @@
       "paused": "Paused"
     },
     "tracker": {
+      "cancel": "Cancel plan",
       "empty": "No plan is running.",
+      "pause": "Pause",
       "progress": "{completed} of {total} steps",
+      "resume": "Resume",
       "statusBlocked": "Blocked",
       "statusCompleted": "Completed",
       "statusFailed": "Failed",
@@ -11196,10 +11261,13 @@
       "connected": "Connected",
       "connectionFailed": "Error",
       "connectionOk": "Connected · {latency}ms · Last test: {time}",
+      "defaultBadge": "Default",
       "emptyDescription": "Select a provider to configure, or add a new one",
       "emptyTitle": "No Provider Selected",
       "modelsAvailable": "{count} models available",
       "notConfigured": "Not configured",
+      "setDefault": "Set as default",
+      "setDefaultAria": "Use this provider for new chats by default",
       "testButton": "Test"
     },
     "detect": "Detect",
@@ -11614,6 +11682,14 @@
       "applyModeMergeDesc": "Preset aliases replace same-named aliases; your other aliases are kept.",
       "applyModeOverwrite": "Overwrite",
       "applyModeOverwriteDesc": "Replace the entire alias list with the preset.",
+      "auto": {
+        "desc": "Automatically route each prompt to the cheapest capable tier by scoring its difficulty (opt-in).",
+        "enabled": "Enable auto routing",
+        "hint": "When on, a non-alias prompt is scored 0–1 and routed across your tier aliases ({tiers}). Applies once matching aliases exist above.",
+        "thresholdBalanced": "Balanced threshold (0–1)",
+        "thresholdPowerful": "Powerful threshold (0–1)",
+        "title": "Auto Routing"
+      },
       "cancel": "Cancel",
       "confirmApply": "Apply preset",
       "constraintEnabled": "Constraint enabled",
@@ -11797,6 +11873,7 @@
       "modelCompare": "Model Compare",
       "reasonConnected": "Connection verified",
       "reasonError": "Last connection test failed — open to review the error",
+      "reasonLimited": "Verified with caveats — could not be fully confirmed in this runtime",
       "reasonUnconfigured": "Add an API key to start using this provider",
       "reasonWarning": "Configured but not verified — open to test the connection",
       "searchPlaceholder": "Search providers...",
@@ -11805,6 +11882,7 @@
       "statusConnected": "Connected",
       "statusError": "Error",
       "statusLabel": "Filter by status",
+      "statusLimited": "Limited",
       "statusUnconfigured": "Unconfigured",
       "statusWarning": "Warning"
     },
@@ -13412,12 +13490,20 @@
           "teacher": "Explanatory"
         },
         "permAcceptEdits": "Accept edits — auto-allow file writes",
+        "permAuto": "Auto — run most actions with background safety checks",
         "permBypass": "Bypass — allow everything (dangerous)",
         "permDefault": "Default — ask before edits",
+        "permDontAsk": "Don't ask — only pre-approved and read-only tools",
         "permPlan": "Plan — read-only, propose changes",
         "permissionDesc": "Default for new sessions — characters and individual sessions can still override.",
         "permissionMode": "Mode",
         "permissionTitle": "Permission mode",
+        "planDesc": "Defaults applied when a plan-mode turn proposes a plan (ExitPlanMode).",
+        "planMaxAutoRefinements": "Max automatic refinements",
+        "planMaxAutoRefinementsHint": "Cap on automatic repair replans after a step failure (0–10).",
+        "planRequireApproval": "Require plan approval",
+        "planRequireApprovalHint": "Show the approval card before implementing. When off, captured plans auto-resume in accept-edits mode.",
+        "planTitle": "Plan mode",
         "routingDesc": "When a turn fails, retry against the next entry in the alias's fallback chain. Disable to keep the original error visible.",
         "routingTitle": "Routing fallback",
         "thinkingActiveHint": "Active: up to {budget} tokens reserved per turn for reasoning before the visible reply.",
@@ -14876,6 +14962,12 @@
           "rateBucketAvailable": "{available}/{capacity} tokens",
           "rateBucketLabel": "Rate limit",
           "rateBucketNextRefill": "Next token in {seconds}s",
+          "reason": {
+            "credentials_missing": "Credentials missing — set App ID / App Secret",
+            "credentials_unavailable": "Credentials unavailable — keyring access denied",
+            "no_data": "No inbound data — connection idle or closed",
+            "transport_error": "Transport error — reconnecting"
+          },
           "reconnectNow": "Reconnect now",
           "reconnectQueued": "Reconnect queued.",
           "runtimeTitle": "Outbound runtime",
@@ -17331,6 +17423,25 @@
         "removeBypass": "Remove {entry} from bypass list",
         "username": "Username"
       },
+      "ipInfo": {
+        "disabled": "IP lookup is off. Turn it on to fetch your current public IP and location from ipinfo.io.",
+        "enableHint": "Fetch your current public IP and geolocation from the public ipinfo.io endpoint. Routes through the active proxy, so it reports the egress IP the proxy uses.",
+        "enableLabel": "Show current IP & location",
+        "error": "Couldn't fetch IP info: {error}",
+        "fields": {
+          "city": "City",
+          "country": "Country",
+          "hostname": "Hostname",
+          "ip": "IP address",
+          "loc": "Coordinates",
+          "org": "Network / ASN",
+          "postal": "Postal code",
+          "region": "Region",
+          "timezone": "Time zone"
+        },
+        "heading": "Current public IP",
+        "refresh": "Refresh"
+      },
       "mode": {
         "auto": "Auto-detected",
         "manual": "Manual",
@@ -17345,6 +17456,7 @@
       "tabs": {
         "detection": "Auto-detect",
         "general": "General",
+        "ipInfo": "IP",
         "test": "Test"
       },
       "test": {
@@ -17431,14 +17543,16 @@
           "description": "Show the pet floating on your desktop, outside the app window.",
           "label": "Desktop pet"
         },
+        "hotkeyLink": "Configure a global hotkey to show/hide the desktop pet",
         "size": {
           "label": "Desktop pet size ({size}px)"
         },
         "title": "Desktop pet",
         "wander": {
           "climbWindows": {
-            "description": "Let the pet climb onto and perch on the top edges of your open windows. Throw it onto a window to sit it there. Experimental; Windows only.",
-            "label": "Climb onto windows"
+            "description": "Let the pet climb onto and perch on the top edges of your open windows. Throw it onto a window to sit it there. Experimental; Windows and macOS only.",
+            "label": "Climb onto windows",
+            "unsupportedPlatform": "Not available on Linux — there's no stable way to read other apps' window positions."
           },
           "description": "Let the desktop pet stroll along the bottom of your screen on its own.",
           "enabled": {
@@ -17633,7 +17747,21 @@
           "label": "Volume ({value}%)"
         }
       },
-      "title": "Pet"
+      "title": "Pet",
+      "twinAwareness": {
+        "description": "Let the pet's mood react to a Twin's background activity — job counts and timestamps only, never the Twin's actual content. Off by default.",
+        "enabled": {
+          "description": "The pet looks busy while the watched Twin has work queued, and celebrates when it finishes learning something new.",
+          "label": "React to Twin activity"
+        },
+        "privacyNote": "Only reads job status and timestamps from the watched Twin — never its sources, chunks, or distilled profile.",
+        "title": "Twin awareness",
+        "twinSelect": {
+          "empty": "You don't have any Twins yet.",
+          "label": "Watched Twin",
+          "placeholder": "Choose a Twin…"
+        }
+      }
     },
     "plugins": {
       "audit": {
@@ -18015,10 +18143,13 @@
     "shortcuts": {
       "bindFailed": "Failed to bind shortcut",
       "cancel": "Cancel",
+      "clear": "Clear",
       "conflictBlocked": "Chord already bound",
       "conflictWith": "Conflicts with",
       "description": "Rebind the global hot-keys. Recording captures the next key combo you press.",
       "desktopOnly": "Global shortcuts are only available in the desktop build.",
+      "notSet": "Not set",
+      "petToggleWindow": "Toggle desktop pet",
       "pressKey": "Press any key…",
       "record": "Record",
       "resetItem": "Reset to default",
@@ -20501,6 +20632,13 @@
     },
     "newChat": "New Chat",
     "openLogs": "Open Log Panel",
+    "pet": {
+      "feed": "Feed",
+      "openSettings": "Pet settings…",
+      "pet": "Pet",
+      "play": "Play",
+      "title": "Pet"
+    },
     "petClickThroughOff": "Disable desktop pet click-through",
     "petToggle": "Toggle desktop pet",
     "quickGoal": "/goal …",
@@ -20512,6 +20650,7 @@
       "goalPaused": "Goal paused",
       "goalRunning": "Goal running",
       "idle": "Idle",
+      "petNeedsAttention": "Pet needs attention",
       "placeholder": "Status",
       "streaming": "Responding…"
     },
@@ -20800,6 +20939,9 @@
       "confirmReset": "Confirm reset",
       "distillLlm": "Distill LLM",
       "embedding": "Embedding",
+      "extraNameHintsHelp": "Comma or newline separated. These names are replaced with placeholders before any cloud embedding or LLM call — add your own name here, since chat exports label you generically (e.g. \"User\").",
+      "extraNameHintsLabel": "Always-redact names",
+      "extraNameHintsPlaceholder": "e.g. Alice Zhang, 张伟",
       "indexName": "Index name",
       "mode": "Mode",
       "model": "Model",
@@ -20810,7 +20952,11 @@
       "provider": "Provider",
       "ragDefaultsBody": "Per-character overrides live on the character record (twinSettings.ragTopK, twinSettings.styleSamplesK). When unset, the runtime falls back to topK = 6, styleSamplesK = 3, with both RAG and style few-shot enabled.",
       "ragDefaultsTitle": "RAG defaults",
-      "rerankerToggleHint": "Over-fetches a wider pool and re-scores by keyword coverage (local, no API key).",
+      "rerankerModelHint": "Lexical is local and key-free. LLM asks the distill model to rate relevance (uses the distill LLM API key).",
+      "rerankerModelLabel": "Reranker model",
+      "rerankerModelLexical": "Lexical (local, no API key)",
+      "rerankerModelLlm": "LLM relevance (uses distill LLM)",
+      "rerankerToggleHint": "Over-fetches a wider pool and re-scores before keeping the top-K.",
       "rerankerToggleLabel": "Rerank retrieved results",
       "resetButton": "Reset vector store",
       "resetDialogBody": "This deletes the local vectors.sqlite file. This cannot be undone.",

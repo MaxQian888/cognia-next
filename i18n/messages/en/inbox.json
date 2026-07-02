@@ -14,8 +14,11 @@
     "count": "{count, plural, =1 {1 event} other {# events}}",
     "empty": "No recent activity",
     "kind": {
+      "deliveryDeadlettered": "Delivery failed — gave up",
+      "deliveryError": "Delivery error",
       "goalBlockedIm": "Goal blocked",
       "goalStartedIm": "Goal started",
+      "inboundDeferredManualMode": "Reply held — manual mode",
       "inboundDeferredMuted": "Reply deferred — muted",
       "inboundDeferredQuietHours": "Reply deferred — quiet hours",
       "inboundDeleted": "Message deleted",
@@ -23,9 +26,16 @@
       "inboundHelpServed": "Help card sent",
       "inboundMemberAdded": "Member joined",
       "inboundMemberRemoved": "Member left",
+      "inboundPolicyBlocked": "Blocked by policy",
       "inboundReadIndicator": "Message read",
       "inboundWelcomeSent": "Welcome card sent",
-      "overrideComputerUseChanged": "Computer Use changed"
+      "notifyImPiiBlocked": "Notification blocked — PII",
+      "overrideComputerUseChanged": "Computer Use changed",
+      "pluginInboundBlocked": "Blocked by plugin",
+      "pluginRateBlocked": "Rate-limited by plugin",
+      "pluginTransformPiiBlocked": "Plugin transform blocked — PII",
+      "teamDispatched": "Routed to team",
+      "workflowDispatched": "Routed to workflow"
     },
     "title": "Activity",
     "toggle": "Toggle activity log"

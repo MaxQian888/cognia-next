@@ -671,9 +671,20 @@
       "compose": "组建",
       "composing": "组建中…",
       "confidence": "置信度 {pct}%",
+      "consensusOption": "共识（模型议会）",
       "created": "团队已组建。",
       "dependsOn": "依赖 {deps}",
       "description": "描述一个目标，系统将提出专家阵容和任务计划，供你审阅。",
+      "executorLabel": "执行器：{executor}",
+      "executors": {
+        "background-handoff": "后台移交",
+        "council": "议会",
+        "ensemble": "集成",
+        "external-handoff": "外部移交",
+        "single-send": "单一智能体",
+        "team-flat": "智能体团队",
+        "team-ultracode": "Ultracode 团队"
+      },
       "failed": "自动组建失败：{error}",
       "lead": "组长",
       "noClient": "自动组建需要一个在渲染端可用 API 密钥的提供方——请在设置中配置。",
@@ -683,11 +694,13 @@
       "openButton": "自动组建",
       "piiRefused": "已拒绝：脱敏后目标仍包含敏感数据。",
       "reject": "返回",
+      "resultDone": "完成",
       "rosterLabel": "阵容（{count}）",
       "tasksLabel": "任务（{count}）",
       "teamNameLabel": "团队名称",
       "teamNamePlaceholder": "为团队命名",
-      "title": "自动组建团队"
+      "title": "自动组建团队",
+      "verifyOption": "验证（采样集成）"
     },
     "builtInBadge": "内置",
     "cancel": "取消",
@@ -2281,6 +2294,10 @@
         "userLabel": "用户 memory"
       },
       "modelPicker": {
+        "autoBadge": "自动",
+        "autoBadgeHint": "已开启自动路由——每条提示按难度选择模型档位。",
+        "autoToggle": "自动路由",
+        "autoToggleHint": "按难度为每条提示选择模型档位",
         "capReasoning": "推理",
         "capTools": "工具调用",
         "capVision": "视觉",
@@ -2780,6 +2797,10 @@
         "tooltip": "自动批准文件编辑；其它工具仍会弹窗征求。"
       },
       "aria": "权限模式：{label}。点击切换。",
+      "auto": {
+        "label": "自动",
+        "tooltip": "多数操作在后台安全检查下运行，尽量减少弹窗征求。"
+      },
       "bypass": {
         "label": "全部放行",
         "tooltip": "所有工具自动批准。请谨慎 — Claude 可能执行任意命令。"
@@ -2788,11 +2809,19 @@
         "label": "默认",
         "tooltip": "工具按常规弹窗征求权限。"
       },
+      "dontAsk": {
+        "label": "不询问",
+        "tooltip": "仅运行预先批准和只读的工具；其它一律拒绝。"
+      },
       "plan": {
         "label": "计划模式",
         "tooltip": "只读规划模式 — Claude 仅提出方案，不会实际改动。"
       },
       "shiftTabHint": "按 Shift+Tab 可循环切换。"
+    },
+    "planMode": {
+      "banner": "计划模式——只读调研；智能体将在修改前先提出计划。",
+      "hint": "Shift+Tab"
     },
     "renderers": {
       "alert": {
@@ -3765,8 +3794,11 @@
       "openCommandPalette": "打开命令面板",
       "openLogs": "查看日志",
       "permissionAcceptEdits": "自动接受",
+      "permissionAdvanced": "高级",
+      "permissionAuto": "自动",
       "permissionBypass": "Bypass",
       "permissionDefault": "默认",
+      "permissionDontAsk": "不询问",
       "permissionMode": "权限",
       "permissionPlan": "Plan",
       "streaming": "流式响应中",
@@ -5156,8 +5188,11 @@
       "count": "{count, plural, other {# 条事件}}",
       "empty": "暂无最近动态",
       "kind": {
+        "deliveryDeadlettered": "投递失败——已放弃",
+        "deliveryError": "投递错误",
         "goalBlockedIm": "目标被拦截",
         "goalStartedIm": "目标已启动",
+        "inboundDeferredManualMode": "回复已挂起——手动模式",
         "inboundDeferredMuted": "回复已延后——已静音",
         "inboundDeferredQuietHours": "回复已延后——安静时段",
         "inboundDeleted": "消息已撤回",
@@ -5165,9 +5200,16 @@
         "inboundHelpServed": "已发送帮助卡片",
         "inboundMemberAdded": "成员加入",
         "inboundMemberRemoved": "成员退出",
+        "inboundPolicyBlocked": "被策略拦截",
         "inboundReadIndicator": "消息已读",
         "inboundWelcomeSent": "已发送欢迎卡片",
-        "overrideComputerUseChanged": "电脑操作权限变更"
+        "notifyImPiiBlocked": "通知被拦截——PII",
+        "overrideComputerUseChanged": "电脑操作权限变更",
+        "pluginInboundBlocked": "被插件拦截",
+        "pluginRateBlocked": "被插件限流",
+        "pluginTransformPiiBlocked": "插件改写被拦截——PII",
+        "teamDispatched": "已路由到团队",
+        "workflowDispatched": "已路由到工作流"
       },
       "title": "动态",
       "toggle": "切换动态记录"
@@ -9253,6 +9295,14 @@
         "0": "好吃！谢谢你！",
         "1": "最棒的奖励！♥"
       },
+      "twinBusy": [
+        "正在悄悄整理你的资料…",
+        "又了解了你一点…"
+      ],
+      "twinMilestone": [
+        "我刚学到了关于你的新东西！",
+        "解锁了新的洞察！"
+      ],
       "waiting": [
         "看你的了！",
         "等你一下…"
@@ -9435,7 +9485,19 @@
   "plan": {
     "approval": {
       "approve": "批准并运行",
-      "feedbackPlaceholder": "拒绝或优化的可选反馈…",
+      "approveAcceptEdits": "是，自动接受编辑",
+      "approveFullAuto": "批准并完全自动运行",
+      "approveReviewEach": "是，逐个审核编辑",
+      "discard": "丢弃计划",
+      "edit": "编辑计划",
+      "editCancel": "取消",
+      "editSave": "保存修改",
+      "editStepsHint": "每行一个步骤…",
+      "editStepsLabel": "步骤（每行一个）",
+      "editTitleLabel": "标题",
+      "feedbackPlaceholder": "继续规划、丢弃或优化的可选反馈…",
+      "keepPlanning": "否，继续规划",
+      "moreActions": "更多计划操作",
       "noSteps": "此计划没有步骤。",
       "progressLabel": "进度",
       "refineExpand": "细化",
@@ -9443,7 +9505,7 @@
       "refineReorder": "重排",
       "refineRepair": "修复",
       "refineSimplify": "简化",
-      "reject": "拒绝",
+      "refineUnavailable": "无法优化——未配置用于后台任务的模型。",
       "sourceLabel": "来源：{source}",
       "title": "审阅计划"
     },
@@ -9458,8 +9520,11 @@
       "paused": "已暂停"
     },
     "tracker": {
+      "cancel": "取消计划",
       "empty": "当前没有运行中的计划。",
+      "pause": "暂停",
       "progress": "{total} 步中已完成 {completed} 步",
+      "resume": "继续",
       "statusBlocked": "受阻",
       "statusCompleted": "已完成",
       "statusFailed": "失败",
@@ -11196,10 +11261,13 @@
       "connected": "已连接",
       "connectionFailed": "错误",
       "connectionOk": "已连接 · {latency}ms · 上次测试: {time}",
+      "defaultBadge": "默认",
       "emptyDescription": "选择一个提供商开始配置，或添加新的提供商",
       "emptyTitle": "未选择提供商",
       "modelsAvailable": "{count} 个模型可用",
       "notConfigured": "未配置",
+      "setDefault": "设为默认",
+      "setDefaultAria": "将此提供商设为新会话的默认提供商",
       "testButton": "测试"
     },
     "detect": "检测",
@@ -11614,6 +11682,14 @@
       "applyModeMergeDesc": "预设别名替换同名别名；你的其他别名保持不变。",
       "applyModeOverwrite": "覆盖",
       "applyModeOverwriteDesc": "用预设完全替换现有别名列表。",
+      "auto": {
+        "desc": "根据提示难度自动将每条提示路由到能胜任的最便宜档位（需手动开启）。",
+        "enabled": "启用自动路由",
+        "hint": "开启后，非别名提示会被打 0–1 的难度分并在你的档位别名之间路由（{tiers}）。需上方存在对应别名才生效。",
+        "thresholdBalanced": "均衡档阈值（0–1）",
+        "thresholdPowerful": "强力档阈值（0–1）",
+        "title": "自动路由"
+      },
       "cancel": "取消",
       "confirmApply": "应用预设",
       "constraintEnabled": "启用约束",
@@ -11797,6 +11873,7 @@
       "modelCompare": "模型对比",
       "reasonConnected": "连接已验证",
       "reasonError": "上次连接测试失败 — 打开查看错误详情",
+      "reasonLimited": "已验证但存在局限 — 无法在当前运行环境中完全确认",
       "reasonUnconfigured": "添加 API 密钥以开始使用该提供商",
       "reasonWarning": "已配置但未验证 — 打开以测试连接",
       "searchPlaceholder": "搜索提供商...",
@@ -11805,6 +11882,7 @@
       "statusConnected": "已连接",
       "statusError": "错误",
       "statusLabel": "按状态筛选",
+      "statusLimited": "受限",
       "statusUnconfigured": "未配置",
       "statusWarning": "警告"
     },
@@ -13412,12 +13490,20 @@
           "teacher": "讲解式"
         },
         "permAcceptEdits": "接受编辑 — 自动允许写文件",
+        "permAuto": "自动 — 多数操作在后台安全检查下运行",
         "permBypass": "绕过 — 允许全部（危险）",
         "permDefault": "默认 — 编辑前询问",
+        "permDontAsk": "不询问 — 仅预先批准和只读的工具",
         "permPlan": "计划 — 仅读取并提出建议",
         "permissionDesc": "新会话的默认权限模式，角色和会话仍可覆盖。",
         "permissionMode": "模式",
         "permissionTitle": "权限模式",
+        "planDesc": "计划模式回合提出计划（ExitPlanMode）时应用的默认设置。",
+        "planMaxAutoRefinements": "最大自动优化次数",
+        "planMaxAutoRefinementsHint": "步骤失败后自动修复重规划的上限（0–10）。",
+        "planRequireApproval": "计划需要审批",
+        "planRequireApprovalHint": "实施前显示审批卡片。关闭后，捕获的计划将以自动接受编辑模式直接继续。",
+        "planTitle": "计划模式",
         "routingDesc": "某次发送失败时，自动尝试别名回退链中的下一项。关闭后会保留原始错误，便于排查。",
         "routingTitle": "路由回退",
         "thinkingActiveHint": "已开启：每轮最多预留 {budget} token 用于回复前的推理。",
@@ -14876,6 +14962,12 @@
           "rateBucketAvailable": "{available}/{capacity} 令牌",
           "rateBucketLabel": "限流桶",
           "rateBucketNextRefill": "{seconds} 秒后补充下一令牌",
+          "reason": {
+            "credentials_missing": "缺少凭据 —— 请填写 App ID / App Secret",
+            "credentials_unavailable": "凭据不可用 —— 密钥串访问被拒绝",
+            "no_data": "无入站数据 —— 连接空闲或已关闭",
+            "transport_error": "传输错误 —— 正在重连"
+          },
           "reconnectNow": "立即重连",
           "reconnectQueued": "重连已入队。",
           "runtimeTitle": "出站运行时",
@@ -17331,6 +17423,25 @@
         "removeBypass": "从绕过列表中移除 {entry}",
         "username": "用户名"
       },
+      "ipInfo": {
+        "disabled": "IP 查询已关闭。开启后将从 ipinfo.io 获取当前公网 IP 及归属地。",
+        "enableHint": "从公共接口 ipinfo.io 获取当前公网 IP 与地理位置。请求走当前代理，因此显示的是代理的出口 IP。",
+        "enableLabel": "显示当前 IP 与位置",
+        "error": "获取 IP 信息失败：{error}",
+        "fields": {
+          "city": "城市",
+          "country": "国家/地区",
+          "hostname": "主机名",
+          "ip": "IP 地址",
+          "loc": "经纬度",
+          "org": "网络 / ASN",
+          "postal": "邮编",
+          "region": "省/州",
+          "timezone": "时区"
+        },
+        "heading": "当前公网 IP",
+        "refresh": "刷新"
+      },
       "mode": {
         "auto": "自动检测",
         "manual": "手动配置",
@@ -17345,6 +17456,7 @@
       "tabs": {
         "detection": "自动检测",
         "general": "通用",
+        "ipInfo": "IP",
         "test": "连通性测试"
       },
       "test": {
@@ -17431,14 +17543,16 @@
           "description": "在应用窗口之外，将宠物悬浮显示在桌面上。",
           "label": "桌面宠物"
         },
+        "hotkeyLink": "配置显示/隐藏桌宠的全局快捷键",
         "size": {
           "label": "桌宠大小（{size}px）"
         },
         "title": "桌面宠物",
         "wander": {
           "climbWindows": {
-            "description": "让桌宠爬上并停在你打开的窗口顶部边缘。把它甩到窗口上就能让它坐在那里。实验性；仅 Windows。",
-            "label": "爬上窗口"
+            "description": "让桌宠爬上并停在你打开的窗口顶部边缘。把它甩到窗口上就能让它坐在那里。实验性；仅 Windows 和 macOS。",
+            "label": "爬上窗口",
+            "unsupportedPlatform": "Linux 上不可用——没有稳定的方式读取其他应用的窗口位置。"
           },
           "description": "让桌宠沿屏幕底部自行散步。",
           "enabled": {
@@ -17633,7 +17747,21 @@
           "label": "音量（{value}%）"
         }
       },
-      "title": "宠物"
+      "title": "宠物",
+      "twinAwareness": {
+        "description": "让宠物的情绪反映数字分身（Twin）的后台活动——仅读取任务数量和时间戳，绝不读取 Twin 的实际内容。默认关闭。",
+        "enabled": {
+          "description": "被关注的 Twin 有排队任务时宠物会显得忙碌，学到新内容后会庆祝一下。",
+          "label": "感知 Twin 活动"
+        },
+        "privacyNote": "只读取被关注 Twin 的任务状态和时间戳——绝不读取其来源、分块或已提炼的档案内容。",
+        "title": "Twin 感知",
+        "twinSelect": {
+          "empty": "你还没有任何 Twin。",
+          "label": "关注的 Twin",
+          "placeholder": "选择一个 Twin…"
+        }
+      }
     },
     "plugins": {
       "audit": {
@@ -18015,10 +18143,13 @@
     "shortcuts": {
       "bindFailed": "绑定快捷键失败",
       "cancel": "取消",
+      "clear": "清除",
       "conflictBlocked": "该组合键已被占用",
       "conflictWith": "与之冲突：",
       "description": "重新绑定全局快捷键。点击录制后按下你想要的键位组合。",
       "desktopOnly": "全局快捷键仅在桌面端可用。",
+      "notSet": "未设置",
+      "petToggleWindow": "切换桌宠",
       "pressKey": "按下任意键…",
       "record": "录制",
       "resetItem": "恢复默认",
@@ -20501,6 +20632,13 @@
     },
     "newChat": "新建对话",
     "openLogs": "打开日志面板",
+    "pet": {
+      "feed": "喂食",
+      "openSettings": "宠物设置…",
+      "pet": "抚摸",
+      "play": "玩耍",
+      "title": "宠物"
+    },
     "petClickThroughOff": "关闭桌宠鼠标穿透",
     "petToggle": "切换桌面宠物",
     "quickGoal": "/goal …",
@@ -20512,6 +20650,7 @@
       "goalPaused": "目标已暂停",
       "goalRunning": "目标运行中",
       "idle": "空闲",
+      "petNeedsAttention": "宠物需要照顾",
       "placeholder": "状态",
       "streaming": "回复中…"
     },
@@ -20800,6 +20939,9 @@
       "confirmReset": "确认重置",
       "distillLlm": "蒸馏 LLM",
       "embedding": "向量嵌入",
+      "extraNameHintsHelp": "以逗号或换行分隔。这些姓名会在任何云端嵌入或 LLM 调用前被替换为占位符——建议加入你自己的姓名，因为聊天导出会把你标记为通用角色（如 \"User\"）。",
+      "extraNameHintsLabel": "始终脱敏的姓名",
+      "extraNameHintsPlaceholder": "例如：Alice Zhang, 张伟",
       "indexName": "索引名",
       "mode": "模式",
       "model": "模型",
@@ -20810,7 +20952,11 @@
       "provider": "提供方",
       "ragDefaultsBody": "每个角色可以在角色记录上单独覆盖（twinSettings.ragTopK、twinSettings.styleSamplesK）。未设置时，运行时回落到 topK = 6、styleSamplesK = 3，并默认启用 RAG 与风格少样本。",
       "ragDefaultsTitle": "RAG 默认值",
-      "rerankerToggleHint": "扩大候选池并按关键词覆盖率重新打分(本地运行,无需 API Key)。",
+      "rerankerModelHint": "Lexical 为本地运行、无需 Key。LLM 让蒸馏模型对相关性打分（使用蒸馏 LLM 的 API Key）。",
+      "rerankerModelLabel": "重排序模型",
+      "rerankerModelLexical": "Lexical（本地，无需 API Key）",
+      "rerankerModelLlm": "LLM 相关性（使用蒸馏 LLM）",
+      "rerankerToggleHint": "扩大候选池并重新打分，再保留 top-K。",
       "rerankerToggleLabel": "对检索结果重排序",
       "resetButton": "重置向量库",
       "resetDialogBody": "将删除本地的 vectors.sqlite 文件，此操作不可撤销。",

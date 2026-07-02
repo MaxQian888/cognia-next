@@ -14,8 +14,11 @@
     "count": "{count, plural, other {# 条事件}}",
     "empty": "暂无最近动态",
     "kind": {
+      "deliveryDeadlettered": "投递失败——已放弃",
+      "deliveryError": "投递错误",
       "goalBlockedIm": "目标被拦截",
       "goalStartedIm": "目标已启动",
+      "inboundDeferredManualMode": "回复已挂起——手动模式",
       "inboundDeferredMuted": "回复已延后——已静音",
       "inboundDeferredQuietHours": "回复已延后——安静时段",
       "inboundDeleted": "消息已撤回",
@@ -23,9 +26,16 @@
       "inboundHelpServed": "已发送帮助卡片",
       "inboundMemberAdded": "成员加入",
       "inboundMemberRemoved": "成员退出",
+      "inboundPolicyBlocked": "被策略拦截",
       "inboundReadIndicator": "消息已读",
       "inboundWelcomeSent": "已发送欢迎卡片",
-      "overrideComputerUseChanged": "电脑操作权限变更"
+      "notifyImPiiBlocked": "通知被拦截——PII",
+      "overrideComputerUseChanged": "电脑操作权限变更",
+      "pluginInboundBlocked": "被插件拦截",
+      "pluginRateBlocked": "被插件限流",
+      "pluginTransformPiiBlocked": "插件改写被拦截——PII",
+      "teamDispatched": "已路由到团队",
+      "workflowDispatched": "已路由到工作流"
     },
     "title": "动态",
     "toggle": "切换动态记录"

@@ -31,14 +31,16 @@
       "description": "在应用窗口之外，将宠物悬浮显示在桌面上。",
       "label": "桌面宠物"
     },
+    "hotkeyLink": "配置显示/隐藏桌宠的全局快捷键",
     "size": {
       "label": "桌宠大小（{size}px）"
     },
     "title": "桌面宠物",
     "wander": {
       "climbWindows": {
-        "description": "让桌宠爬上并停在你打开的窗口顶部边缘。把它甩到窗口上就能让它坐在那里。实验性；仅 Windows。",
-        "label": "爬上窗口"
+        "description": "让桌宠爬上并停在你打开的窗口顶部边缘。把它甩到窗口上就能让它坐在那里。实验性；仅 Windows 和 macOS。",
+        "label": "爬上窗口",
+        "unsupportedPlatform": "Linux 上不可用——没有稳定的方式读取其他应用的窗口位置。"
       },
       "description": "让桌宠沿屏幕底部自行散步。",
       "enabled": {
@@ -233,5 +235,19 @@
       "label": "音量（{value}%）"
     }
   },
-  "title": "宠物"
+  "title": "宠物",
+  "twinAwareness": {
+    "description": "让宠物的情绪反映数字分身（Twin）的后台活动——仅读取任务数量和时间戳，绝不读取 Twin 的实际内容。默认关闭。",
+    "enabled": {
+      "description": "被关注的 Twin 有排队任务时宠物会显得忙碌，学到新内容后会庆祝一下。",
+      "label": "感知 Twin 活动"
+    },
+    "privacyNote": "只读取被关注 Twin 的任务状态和时间戳——绝不读取其来源、分块或已提炼的档案内容。",
+    "title": "Twin 感知",
+    "twinSelect": {
+      "empty": "你还没有任何 Twin。",
+      "label": "关注的 Twin",
+      "placeholder": "选择一个 Twin…"
+    }
+  }
 }

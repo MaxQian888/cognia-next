@@ -28,6 +28,13 @@
   },
   "newChat": "New Chat",
   "openLogs": "Open Log Panel",
+  "pet": {
+    "feed": "Feed",
+    "openSettings": "Pet settings…",
+    "pet": "Pet",
+    "play": "Play",
+    "title": "Pet"
+  },
   "petClickThroughOff": "Disable desktop pet click-through",
   "petToggle": "Toggle desktop pet",
   "quickGoal": "/goal …",
@@ -39,6 +46,7 @@
     "goalPaused": "Goal paused",
     "goalRunning": "Goal running",
     "idle": "Idle",
+    "petNeedsAttention": "Pet needs attention",
     "placeholder": "Status",
     "streaming": "Responding…"
   },

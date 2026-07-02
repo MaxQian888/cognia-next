@@ -73,6 +73,12 @@
       "rateBucketAvailable": "{available}/{capacity} tokens",
       "rateBucketLabel": "Rate limit",
       "rateBucketNextRefill": "Next token in {seconds}s",
+      "reason": {
+        "credentials_missing": "Credentials missing — set App ID / App Secret",
+        "credentials_unavailable": "Credentials unavailable — keyring access denied",
+        "no_data": "No inbound data — connection idle or closed",
+        "transport_error": "Transport error — reconnecting"
+      },
       "reconnectNow": "Reconnect now",
       "reconnectQueued": "Reconnect queued.",
       "runtimeTitle": "Outbound runtime",

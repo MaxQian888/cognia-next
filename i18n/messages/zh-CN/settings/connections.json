@@ -73,6 +73,12 @@
       "rateBucketAvailable": "{available}/{capacity} 令牌",
       "rateBucketLabel": "限流桶",
       "rateBucketNextRefill": "{seconds} 秒后补充下一令牌",
+      "reason": {
+        "credentials_missing": "缺少凭据 —— 请填写 App ID / App Secret",
+        "credentials_unavailable": "凭据不可用 —— 密钥串访问被拒绝",
+        "no_data": "无入站数据 —— 连接空闲或已关闭",
+        "transport_error": "传输错误 —— 正在重连"
+      },
       "reconnectNow": "立即重连",
       "reconnectQueued": "重连已入队。",
       "runtimeTitle": "出站运行时",

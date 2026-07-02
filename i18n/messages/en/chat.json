@@ -232,6 +232,10 @@
       "userLabel": "User memory"
     },
     "modelPicker": {
+      "autoBadge": "Auto",
+      "autoBadgeHint": "Auto routing is on — each prompt picks a model tier by difficulty.",
+      "autoToggle": "Auto routing",
+      "autoToggleHint": "Pick a model tier per prompt by difficulty",
       "capReasoning": "Reasoning",
       "capTools": "Tool use",
       "capVision": "Vision",
@@ -375,6 +379,10 @@
     "pastedChip": "Pasted {count} lines",
     "removePastedChip": "Remove pasted text",
     "pasteReminder": "A large paste wasn't saved with the draft — re-paste it before sending ({count})."
+  },
+  "planMode": {
+    "banner": "Plan mode — read-only research; the agent will propose a plan before making changes.",
+    "hint": "Shift+Tab"
   },
   "concurrent": {
     "awaitingApproval": "Awaiting approval",
@@ -703,6 +711,10 @@
       "tooltip": "Auto-approve file edits; other tools still prompt."
     },
     "aria": "Permission mode: {label}. Click to cycle.",
+    "auto": {
+      "label": "Auto",
+      "tooltip": "Most actions run with background safety checks and minimal prompting."
+    },
     "bypass": {
       "label": "Bypass",
       "tooltip": "All tools auto-approved. Use with care — Claude can run any command."
@@ -710,6 +722,10 @@
     "default": {
       "label": "Default",
       "tooltip": "Tools prompt for permission as usual."
+    },
+    "dontAsk": {
+      "label": "Don't ask",
+      "tooltip": "Only pre-approved and read-only tools run; anything else is denied."
     },
     "plan": {
       "label": "Plan",
