@@ -1,0 +1,67 @@
+name: Compose E2E
+
+# ============================================================================
+# Brings up the self-host compose suite and runs the tiered smoke (ADR-0059
+# P0.4). Tier 1 (signaling + share) runs on every relevant PR and nightly;
+# it needs no secrets. Tier 2 (cognia-server) lands with W6 (D6).
+# ============================================================================
+
+on:
+  pull_request:
+    paths:
+      - "deploy/compose/**"
+      - "scripts/smoke/compose-smoke.mjs"
+      - "services/signaling-server/**"
+      - "services/share-server/**"
+      - ".github/workflows/compose-e2e.yml"
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: compose-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tier1:
+    name: Tier 1 (services)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build service images
+        run: |
+          docker build -t cognia-signaling:ci services/signaling-server
+          docker build -t cognia-share:ci services/share-server
+
+      - name: Up + wait
+        working-directory: deploy/compose
+        env:
+          SHARE_UPLOAD_SECRET: ci-smoke-secret
+          SIGNALING_IMAGE: cognia-signaling:ci
+          SHARE_IMAGE: cognia-share:ci
+        run: docker compose up -d --wait
+
+      - name: Smoke (tier services)
+        env:
+          SHARE_UPLOAD_SECRET: ci-smoke-secret
+        run: node scripts/smoke/compose-smoke.mjs --tier services
+
+      - name: Logs on failure
+        if: failure()
+        working-directory: deploy/compose
+        env:
+          SHARE_UPLOAD_SECRET: ci-smoke-secret
+        run: docker compose logs --no-color
+
+      - name: Down
+        if: always()
+        working-directory: deploy/compose
+        env:
+          SHARE_UPLOAD_SECRET: ci-smoke-secret
+        run: docker compose down -v

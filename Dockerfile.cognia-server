@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.12
 ## cognia-server — headless Cognia container (ADR-0059 W6).
 ##
 ## Stages:
@@ -67,9 +67,15 @@ ENV HUSKY=0 \
     CI=1
 RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
 WORKDIR /work
-# Manifests first so the store-heavy install layer survives source edits.
+# Workspace manifests first so the store-heavy install layer survives source
+# edits. pnpm --frozen-lockfile needs every workspace member's package.json
+# present; packages/* are small first-party TS libs, copied wholesale (their
+# node_modules/dist are stripped by .dockerignore). docs/ + mobile/ only need
+# their manifest here — full source arrives with the COPY . . below.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY --parents docs/package.json mobile/package.json packages/*/package.json ./
+COPY packages ./packages
+COPY docs/package.json ./docs/package.json
+COPY mobile/package.json ./mobile/package.json
 RUN pnpm install --frozen-lockfile
 COPY sidecar/package.json sidecar/pnpm-lock.yaml ./sidecar/
 RUN pnpm --dir sidecar install --ignore-workspace --frozen-lockfile

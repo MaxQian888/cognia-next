@@ -1,4 +1,4 @@
-FROM rust:1.82-bookworm AS builder
+FROM rust:1.93-bookworm AS builder
 WORKDIR /build
 # Copy the workspace manifests + sources. `core/` is a workspace member; the
 # TypeScript `worker/` and `pages/` dirs are not Rust crates and are not copied.
@@ -11,8 +11,10 @@ COPY tests ./tests
 RUN cargo build --release --locked
 
 FROM debian:bookworm-slim
+# curl is used by the compose healthcheck (the base image ships neither curl
+# nor wget, so an exec-form HTTP healthcheck is otherwise impossible).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build/target/release/cognia-share-server /usr/local/bin/cognia-share-server
 # Persist the SQLite database on a mounted volume; restarts must not lose shares.

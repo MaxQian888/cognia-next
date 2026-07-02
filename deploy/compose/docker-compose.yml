@@ -1,0 +1,128 @@
+# Cognia self-host compose suite (ADR-0059 P0.4 / W6 / F2 / D9).
+#
+# Profiles carry the phase ladder — one file, no drift:
+#   (none)         signaling + share            → P0.4 tier-1 smoke
+#   server         + cognia-server (headless)   → W6 tier-2 smoke
+#   tls            + Caddy ACME front door       → F2 tier-3 smoke
+#   observability  + Prometheus                  → D9
+#
+#   docker compose up -d --wait                          # signaling + share
+#   docker compose --profile server up -d --wait          # + cognia-server
+#   docker compose --profile server --profile tls up -d   # + Caddy
+#
+# Copy .env.example → .env and fill SHARE_UPLOAD_SECRET (+ COGNIA_MASTER_KEY
+# and provider keys for the server profile) before starting.
+name: cognia
+
+services:
+  signaling:
+    image: ${SIGNALING_IMAGE:-ghcr.io/maxqian888/cognia-signaling:latest}
+    build:
+      context: ../../services/signaling-server
+    environment:
+      PORT: "7892"
+      SIGNALING_ALLOWED_ORIGINS: ${SIGNALING_ALLOWED_ORIGINS:-}
+    ports:
+      - "7892:7892"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7892/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  share:
+    image: ${SHARE_IMAGE:-ghcr.io/maxqian888/cognia-share:latest}
+    build:
+      context: ../../services/share-server
+    environment:
+      PORT: "8787"
+      SHARE_DB_PATH: /data/shares.sqlite
+      SHARE_UPLOAD_SECRET: ${SHARE_UPLOAD_SECRET:?set SHARE_UPLOAD_SECRET in .env}
+    volumes:
+      - share_data:/data
+    ports:
+      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8787/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  cognia-server:
+    profiles: [server]
+    image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
+    build:
+      context: ../../
+      dockerfile: Dockerfile.cognia-server
+      target: runtime-full
+    environment:
+      COGNIA_DATA_DIR: /data
+      # W5: no OS keyring in a container — the master key MUST come from env.
+      # A `:?` marker here would abort even `docker compose up` (no profile),
+      # because compose interpolates the whole file before filtering profiles;
+      # cognia-server's own strict init (init_headless) fails fast when it's
+      # missing, so an empty default is safe.
+      COGNIA_MASTER_KEY: ${COGNIA_MASTER_KEY:-}
+      # Public URL stamped into the pair payload; overridden by Caddy domain in the tls profile.
+      COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:-https://127.0.0.1:7890}
+      # Provider creds for the sidecar chat turn (optional — smoke SKIPs the chat step without them).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Admit the smoke's stub ACP agent through SpawnPolicy (R11). Leave unset in production.
+      COGNIA_SMOKE_AGENT: ${COGNIA_SMOKE_AGENT:-}
+    volumes:
+      - cognia_data:/data
+    ports:
+      # Published for Capacitor direct-connect (fingerprint-pinned). Browsers go through Caddy.
+      - "7890:7890"
+    security_opt:
+      # Tuned profile lets bwrap (ADR-0028 sandbox) create user namespaces in a
+      # stock container. On AppArmor hosts (Ubuntu) also add: apparmor=unconfined.
+      - seccomp=./seccomp/cognia-userns.json
+    healthcheck:
+      test: ["CMD", "curl", "-kfsS", "https://localhost:7890/api/v1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  caddy:
+    profiles: [tls]
+    image: caddy:2.10
+    depends_on:
+      cognia-server:
+        condition: service_healthy
+    environment:
+      COGNIA_DOMAIN: ${COGNIA_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - cognia_data:/cognia-data:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+volumes:
+  share_data:
+  cognia_data:
+  caddy_data:
+  caddy_config:
+  prom_data:

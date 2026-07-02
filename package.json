@@ -63,6 +63,7 @@
     "test:e2e:install": "playwright install chromium webkit",
     "test:e2e:report": "playwright show-report",
     "webrtc:smoke": "node scripts/smoke/signaling-smoke.mjs",
+    "compose:smoke": "node scripts/smoke/compose-smoke.mjs",
     "sync:plugin-sdk-wit": "node scripts/sync/sync-plugin-sdk-wit.mjs",
     "sync:models-dev": "node scripts/sync/sync-models-dev.mjs",
     "lint:plugin-sdk-wit": "node scripts/gates/check-plugin-sdk-wit.mjs",
