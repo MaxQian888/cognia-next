@@ -34,6 +34,7 @@ jest.mock("@/lib/plugin", () => ({
 jest.mock("./scheduler-db", () => ({
   schedulerDb: {
     getTasksByStatus: jest.fn().mockResolvedValue([]),
+    getOverdueActiveTasks: jest.fn().mockResolvedValue([]),
     createTask: jest.fn().mockResolvedValue(undefined),
     updateTask: jest.fn().mockResolvedValue(undefined),
     deleteTask: jest.fn().mockResolvedValue(true),
@@ -587,6 +588,18 @@ describe("TaskScheduler", () => {
     })
 
     describe("missed-run reconciliation", () => {
+      it("queries schedulerDb.getOverdueActiveTasks instead of fetching all active tasks", async () => {
+        mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([])
+        mockSchedulerDb.getTasksByStatus.mockClear()
+
+        await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
+
+        expect(mockSchedulerDb.getOverdueActiveTasks).toHaveBeenCalledTimes(1)
+        // getTasksByStatus is still used elsewhere (init, stats) but must not
+        // be the source of checkMissedTasks's task list anymore.
+        expect(mockSchedulerDb.getTasksByStatus).not.toHaveBeenCalled()
+      })
+
       it("should skip overdue recurring task when runMissedOnStartup is disabled", async () => {
         const overdueTask: ScheduledTask = {
           id: "overdue-1",
@@ -611,7 +624,7 @@ describe("TaskScheduler", () => {
           updatedAt: new Date(),
         }
 
-        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+        mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
 
@@ -658,7 +671,7 @@ describe("TaskScheduler", () => {
           updatedAt: now,
         }
 
-        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+        mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
 
@@ -710,7 +723,7 @@ describe("TaskScheduler", () => {
           updatedAt: new Date(),
         }
 
-        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueOneTimeTask])
+        mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueOneTimeTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
 
@@ -1919,7 +1932,7 @@ describe("TaskScheduler", () => {
             catchupWindowMs: 2 * 60_000,
           },
         })
-        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+        mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
 
@@ -1954,7 +1967,7 @@ describe("TaskScheduler", () => {
             catchupWindowMs: 2.5 * 60_000,
           },
         })
-        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+        mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
         mockSchedulerDb.getTask.mockResolvedValue(overdueTask)
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
@@ -1983,7 +1996,7 @@ describe("TaskScheduler", () => {
             maxMissedRuns: 2,
           },
         })
-        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+        mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
         mockSchedulerDb.getTask.mockResolvedValue(overdueTask)
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()

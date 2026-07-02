@@ -124,6 +124,41 @@ describe("SchedulerDatabase", () => {
       expect(pausedTasks.length).toBe(1)
     })
 
+    it("should get overdue active tasks via the [status+nextRunAt] index", async () => {
+      const now = new Date()
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-overdue",
+          status: "active",
+          nextRunAt: new Date(now.getTime() - 60_000),
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-future",
+          status: "active",
+          nextRunAt: new Date(now.getTime() + 60_000),
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-no-next-run",
+          status: "active",
+          nextRunAt: undefined,
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-paused-overdue",
+          status: "paused",
+          nextRunAt: new Date(now.getTime() - 60_000),
+        })
+      )
+
+      const overdue = await schedulerDb.getOverdueActiveTasks(now)
+      expect(overdue.map((t) => t.id)).toEqual(["task-overdue"])
+    })
+
     it("should filter tasks by multiple criteria", async () => {
       await schedulerDb.createTask(
         createMockTask({

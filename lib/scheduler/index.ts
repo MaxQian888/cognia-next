@@ -21,6 +21,7 @@ export {
   stopTaskScheduler,
   registerTaskExecutor,
   unregisterTaskExecutor,
+  hasTaskExecutor,
   type ExecutionStatusEvent,
 } from "./task-scheduler"
 

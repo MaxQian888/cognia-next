@@ -191,6 +191,23 @@ class SchedulerDatabase extends Dexie {
   }
 
   /**
+   * Active tasks whose nextRunAt is already due (<= now) — used by the
+   * missed-task sweep. Uses the `[status+nextRunAt]` compound index instead
+   * of fetching every active task and filtering in JS; safe because
+   * `nextRunAt` is stored as a fixed-width ISO-8601 string, so lexicographic
+   * ordering matches chronological ordering. Tasks with no `nextRunAt` are
+   * naturally excluded — a compound-index entry requires every key part.
+   */
+  async getOverdueActiveTasks(now: Date = new Date()): Promise<ScheduledTask[]> {
+    const nowIso = now.toISOString()
+    const dbTasks = await this.tasks
+      .where("[status+nextRunAt]")
+      .between(["active", ""], ["active", nowIso], true, true)
+      .toArray()
+    return dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
+  }
+
+  /**
    * Get upcoming tasks
    */
   async getUpcomingTasks(limit: number = 10): Promise<ScheduledTask[]> {

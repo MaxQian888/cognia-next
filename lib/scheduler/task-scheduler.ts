@@ -4,6 +4,7 @@
  */
 
 import { nanoid } from "nanoid"
+import { computeBackoffDelay } from "@cognia/primitives"
 import {
   type ScheduledTask,
   type TaskExecution,
@@ -65,6 +66,13 @@ export function registerTaskExecutor(taskType: string, executor: TaskExecutor): 
 export function unregisterTaskExecutor(taskType: string): void {
   executors.delete(taskType)
   log.info(`Unregistered executor for task type: ${taskType}`)
+}
+
+/**
+ * Check whether a task executor is currently registered for a task type.
+ */
+export function hasTaskExecutor(taskType: string): boolean {
+  return executors.has(taskType)
 }
 
 /**
@@ -337,11 +345,11 @@ class TaskSchedulerImpl {
    * Check and run any missed tasks
    */
   private async checkMissedTasks(): Promise<void> {
-    const tasks = await schedulerDb.getTasksByStatus("active")
     const now = new Date()
+    const tasks = await schedulerDb.getOverdueActiveTasks(now)
 
     for (const task of tasks) {
-      if (!task.nextRunAt || task.nextRunAt > now) {
+      if (!task.nextRunAt) {
         continue
       }
 
@@ -1479,12 +1487,12 @@ class TaskSchedulerImpl {
    * Formula: min(baseDelay * 2^attempt + random_jitter, maxDelay)
    */
   private calculateRetryDelay(config: TaskExecutionConfig, attempt: number): number {
-    const baseDelay = config.retryDelay
-    const maxDelay = config.maxRetryDelay || 60000
-    const exponentialDelay = baseDelay * Math.pow(2, attempt)
-    // Add random jitter (0-25% of exponential delay) to prevent thundering herd
-    const jitter = Math.random() * exponentialDelay * 0.25
-    return Math.min(exponentialDelay + jitter, maxDelay)
+    return computeBackoffDelay(attempt, {
+      baseDelayMs: config.retryDelay,
+      maxDelayMs: config.maxRetryDelay || 60000,
+      // 0-25% of the exponential delay, to prevent thundering herd.
+      jitter: { kind: "ratio", ratio: 0.25, rng: this.rng },
+    })
   }
 
   /**

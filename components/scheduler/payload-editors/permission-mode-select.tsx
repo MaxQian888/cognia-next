@@ -11,6 +11,8 @@ import {
 import type { SendOptions } from "@/lib/claude/types"
 import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
 import { supportedPermissionModes } from "@/lib/ai/agent/external/permission-modes"
+import type { PermissionMode } from "@/lib/settings/permission-mode-escalation"
+import { permissionRiskMarker } from "@/lib/settings/permission-mode-meta"
 
 const SDK_MODES: NonNullable<SendOptions["permissionMode"]>[] = [
   "default",
@@ -71,11 +73,24 @@ export function PermissionModeSelect({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={SENTINEL_DEFAULT}>{t(placeholderKey)}</SelectItem>
-        {modes.map((m) => (
-          <SelectItem key={m} value={m as string}>
-            {t(`permissionModes.${m}`)}
-          </SelectItem>
-        ))}
+        {modes.map((m) => {
+          const marker = permissionRiskMarker(m as PermissionMode)
+          return (
+            <SelectItem key={m} value={m as string}>
+              <span className="flex items-center gap-1.5">
+                {marker && (
+                  <span
+                    aria-hidden
+                    className={marker === "⚠" ? "text-rose-500" : "text-muted-foreground"}
+                  >
+                    {marker}
+                  </span>
+                )}
+                {t(`permissionModes.${m}`)}
+              </span>
+            </SelectItem>
+          )
+        })}
       </SelectContent>
     </Select>
   )
