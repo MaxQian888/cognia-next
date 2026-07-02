@@ -14,6 +14,7 @@ import {
   type WorkflowNodeCategory,
   type WorkflowNodeKind,
 } from "@/types/workflow/visual"
+import type { CapabilityId } from "@/lib/platform/capabilities"
 
 export interface NodeCatalogEntry {
   kind: WorkflowNodeKind
@@ -30,6 +31,14 @@ export interface NodeCatalogEntry {
   hidden?: boolean
   /** True if the node only fires on Tauri (web-mode hides them). */
   desktopOnly?: boolean
+  /**
+   * Platform capabilities the node's executor needs at run time (ADR 0060).
+   * Checked by the orchestrator's capability preflight against
+   * `detectLocalCapabilities()`; surfaced as an affinity badge in the editor.
+   * Absent = runs anywhere the webview runs (unless `desktopOnly` — see
+   * {@link effectiveRequires}).
+   */
+  requires?: readonly CapabilityId[]
   /**
    * True if the node is authored but not yet driven by a real runtime
    * producer — authors can drop it on a canvas but it will only fire in
@@ -110,6 +119,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Webhook",
     keywords: ["webhook", "http", "post", "endpoint"],
     desktopOnly: true,
+    requires: ["always-on"],
   },
   "trigger.github.webhook": {
     label: "On GitHub event",
@@ -118,6 +128,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "GitBranch",
     keywords: ["github", "webhook", "pr", "issue", "push", "release"],
     desktopOnly: true,
+    requires: ["always-on"],
   },
   "trigger.team": {
     label: "On team finished",
@@ -638,6 +649,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "FilePlus2",
     keywords: ["git", "stage", "add", "index", "source control"],
     desktopOnly: true,
+    requires: ["shell"],
   },
   "action.git.commit": {
     label: "Git commit",
@@ -645,6 +657,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "GitCommitHorizontal",
     keywords: ["git", "commit", "source control"],
     desktopOnly: true,
+    requires: ["shell"],
   },
   "action.git.push": {
     label: "Git push",
@@ -652,6 +665,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "ArrowUpFromLine",
     keywords: ["git", "push", "remote", "upstream", "source control"],
     desktopOnly: true,
+    requires: ["shell"],
   },
   "action.git.branch": {
     label: "Git branch",
@@ -659,6 +673,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "GitBranch",
     keywords: ["git", "branch", "checkout", "switch", "source control"],
     desktopOnly: true,
+    requires: ["shell"],
   },
   // ── Desktop UI automation ─────────────────────────────────────────────────
   "action.desktop.screenshot": {
@@ -666,78 +681,91 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     description: "Capture the primary monitor or a region. Returns PNG bytes + dims.",
     iconName: "Camera",
     keywords: ["desktop", "screen", "screenshot", "capture", "image"],
+    requires: ["uia-automation"],
   },
   "action.desktop.findElement": {
     label: "Find element",
     description: "Locate a UI element by name / automation id / control type.",
     iconName: "Crosshair",
     keywords: ["desktop", "find", "element", "uia", "accessibility"],
+    requires: ["uia-automation"],
   },
   "action.desktop.readTree": {
     label: "Read tree",
     description: "Snapshot the accessibility subtree as JSON for downstream nodes.",
     iconName: "ListTree",
     keywords: ["desktop", "tree", "accessibility", "uia"],
+    requires: ["uia-automation"],
   },
   "action.desktop.click": {
     label: "Click",
     description: "Click an element or absolute screen coordinate.",
     iconName: "MousePointerClick",
     keywords: ["desktop", "click", "mouse"],
+    requires: ["uia-automation"],
   },
   "action.desktop.type": {
     label: "Type text",
     description: "Type a string into the focused element via SendInput.",
     iconName: "Keyboard",
     keywords: ["desktop", "type", "keyboard", "input"],
+    requires: ["uia-automation"],
   },
   "action.desktop.keys": {
     label: "Send keys",
     description: "Send a keyboard chord like ctrl+shift+t.",
     iconName: "Keyboard",
     keywords: ["desktop", "keys", "chord", "hotkey", "keyboard"],
+    requires: ["uia-automation"],
   },
   "action.desktop.invokePattern": {
     label: "Invoke pattern",
     description: "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …).",
     iconName: "Zap",
     keywords: ["desktop", "uia", "pattern", "invoke", "toggle"],
+    requires: ["uia-automation"],
   },
   "action.desktop.windowFocus": {
     label: "Focus window",
     description: "Bring a window to the foreground.",
     iconName: "AppWindow",
     keywords: ["desktop", "window", "focus", "foreground"],
+    requires: ["uia-automation"],
   },
   "action.desktop.windowClose": {
     label: "Close window",
     description: "Close a window via the UIA Window pattern.",
     iconName: "X",
     keywords: ["desktop", "window", "close"],
+    requires: ["uia-automation"],
   },
   "action.desktop.windowResize": {
     label: "Resize window",
     description: "Move/resize a window via the UIA Transform pattern.",
     iconName: "Move",
     keywords: ["desktop", "window", "resize", "move"],
+    requires: ["uia-automation"],
   },
   "action.desktop.wait": {
     label: "Wait for element",
     description: "Block until an element appears, disappears, or matches a property.",
     iconName: "Hourglass",
     keywords: ["desktop", "wait", "element", "appear"],
+    requires: ["uia-automation"],
   },
   "action.desktop.paste": {
     label: "Paste text",
     description: "Paste text via the clipboard (saves + restores the user clipboard).",
     iconName: "ClipboardPaste",
     keywords: ["desktop", "paste", "clipboard", "text", "input"],
+    requires: ["uia-automation"],
   },
   "action.desktop.launchApp": {
     label: "Launch app",
     description: "Launch an application by path/name, or focus an existing window by process.",
     iconName: "Rocket",
     keywords: ["desktop", "launch", "open", "app", "application", "focus", "start"],
+    requires: ["uia-automation"],
   },
   "trigger.desktop.event": {
     label: "On UIA event",
@@ -746,6 +774,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Bell",
     keywords: ["desktop", "trigger", "event", "uia", "focus"],
     desktopOnly: true,
+    requires: ["uia-automation"],
     experimental: true,
   },
   // ── System: integrated terminal ───────────────────────────────────────────
@@ -756,6 +785,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "shell", "command", "bash", "powershell", "dock", "run"],
     desktopOnly: true,
+    requires: ["pty"],
   },
   "action.terminal.session.open": {
     label: "Open terminal session",
@@ -764,6 +794,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "session", "shell", "open", "spawn", "headless", "unattended"],
     desktopOnly: true,
+    requires: ["pty"],
   },
   "action.terminal.session.run": {
     label: "Run in terminal session",
@@ -772,6 +803,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "session", "shell", "command", "run", "exec"],
     desktopOnly: true,
+    requires: ["pty"],
   },
   "action.terminal.session.close": {
     label: "Close terminal session",
@@ -780,6 +812,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "session", "close", "kill", "cleanup"],
     desktopOnly: true,
+    requires: ["pty"],
   },
   "action.terminal.script": {
     label: "Run script file",
@@ -788,6 +821,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "script", "file", "interpreter", "python", "bash", "powershell", "node"],
     desktopOnly: true,
+    requires: ["shell"],
   },
   "action.terminal.readRecent": {
     label: "Read terminal history",
@@ -796,6 +830,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "read", "recent", "history", "commands", "ring"],
     desktopOnly: true,
+    requires: ["pty"],
   },
   "action.terminal.waitForExit": {
     label: "Wait for terminal exit",
@@ -804,6 +839,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "wait", "exit", "command", "finish", "long-running"],
     desktopOnly: true,
+    requires: ["pty"],
   },
   "trigger.terminal.command": {
     label: "On terminal command",
@@ -812,6 +848,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Terminal",
     keywords: ["terminal", "trigger", "command", "exit", "failed", "shell", "dock"],
     desktopOnly: true,
+    requires: ["pty"],
   },
   // ── AI primitives ─────────────────────────────────────────────────────────
   "ai.prompt": {
@@ -986,6 +1023,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Webhook",
     keywords: ["webhook", "respond", "reply"],
     desktopOnly: true,
+    requires: ["always-on"],
   },
   "io.output": {
     label: "Output",
@@ -1084,6 +1122,28 @@ export function __resetPluginCatalogForTesting(): void {
   pluginCatalog.clear()
   catalogListeners.clear()
   invalidateCatalogSnapshot()
+}
+
+/**
+ * Effective run-time capability requirements of an entry (ADR 0060).
+ * Explicit `requires` wins; a legacy `desktopOnly` flag without one maps to
+ * `["shell"]` — `shell` is present exactly on the tauri baseline, so
+ * `desktopOnly` ≡ tauri-only under the capability model. Every built-in
+ * `desktopOnly` entry carries an explicit backfill; only future/plugin
+ * entries hit the fallback.
+ */
+export function effectiveRequires(
+  entry: Pick<NodeCatalogEntry, "requires" | "desktopOnly">
+): readonly CapabilityId[] {
+  return entry.requires ?? (entry.desktopOnly ? ["shell"] : [])
+}
+
+/** Capabilities `entry` needs that are absent from `local`. */
+export function missingCapabilities(
+  entry: Pick<NodeCatalogEntry, "requires" | "desktopOnly">,
+  local: readonly CapabilityId[]
+): CapabilityId[] {
+  return effectiveRequires(entry).filter((cap) => !local.includes(cap))
 }
 
 /**

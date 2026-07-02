@@ -41,6 +41,11 @@ import type {
 // Importing the built-ins triggers their registration side effect.
 import "@/lib/workflow/nodes/built-ins"
 import { createRunLogger } from "./event-log"
+import {
+  CAPABILITY_MISSING_CODE_PREFIX,
+  formatPreflightFailures,
+  preflightCapabilities,
+} from "./capability-preflight"
 import { IdempotencyCache } from "./idempotency"
 import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
@@ -197,6 +202,34 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     snapshot: validated as VisualWorkflow,
   })
   await logger.runStarted({ trigger })
+
+  // 2b. Capability preflight (ADR 0060): fail the run at t=0 — one structured,
+  // recoverable failure — when this runtime lacks a capability some node
+  // requires, instead of an executor-internal throw after earlier steps ran
+  // with side effects. Re-runs on resume by design (the resuming device must
+  // also hold the caps).
+  const preflightFailures = preflightCapabilities(validated, undefined, {
+    restrictToNodeIds: input.restrictToStepIds,
+    seededNodeIds: input.seedOutputs ? Object.keys(input.seedOutputs) : undefined,
+  })
+  if (preflightFailures.length > 0) {
+    const message = formatPreflightFailures(preflightFailures)
+    const code = CAPABILITY_MISSING_CODE_PREFIX + preflightFailures[0].missing[0]
+    const nodeId = preflightFailures[0].nodeId
+    await logger.runFailed({ message, nodeId, code })
+    runRow = {
+      ...runRow,
+      status: "failed",
+      completedAt: Date.now(),
+      error: { message, nodeId, code },
+    }
+    await getDb().workflowRuns.put(runRow)
+    await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
+    getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
+    getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    await releaseRunResources(runId)
+    return { runId, status: "failed", error: { message, nodeId, code } }
+  }
 
   // 3. Set up the abort + idempotency machinery.
   const ac = new AbortController()

@@ -22,6 +22,7 @@ import type {
   StepExecutionResult,
   WorkflowNodeCategory,
 } from "@/types/workflow/visual"
+import type { CapabilityId } from "@/lib/platform/capabilities"
 
 /** Node executor function — same shape as built-in node executors. */
 export type PluginNodeExecuteFn = (ctx: StepExecutionContext) => Promise<StepExecutionResult>
@@ -72,6 +73,12 @@ export interface PluginNodeDef {
   defaultParams?: Record<string, unknown>
   /** Marks the node as desktop-only; the editor shows a `Desktop` badge. */
   desktopOnly?: boolean
+  /**
+   * Platform capabilities the executor needs at run time (ADR 0060) — see
+   * `lib/platform/capabilities.ts`. Checked by the orchestrator's capability
+   * preflight; without it a bare `desktopOnly` maps to `["shell"]`.
+   */
+  requires?: readonly CapabilityId[]
   /** Whether the orchestrator should retry on transient failure. Default true. */
   retryable?: boolean
   /** Per-node timeout (ms). Falls back to the workflow's default. */
@@ -151,6 +158,7 @@ export interface PluginManifestNodeDef {
   paramsSchema: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   desktopOnly?: boolean
+  requires?: readonly CapabilityId[]
   retryable?: boolean
   timeoutMs?: number
 }

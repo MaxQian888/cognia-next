@@ -189,7 +189,7 @@ export function createRunLogger(runId: string) {
     runStarted: (payload?: unknown) => enqueueRunEvent({ runId, type: "run_started", payload }),
     runCompleted: (output?: unknown) =>
       enqueueRunEvent({ runId, type: "run_completed", payload: output }),
-    runFailed: (error: { message: string; stack?: string; nodeId?: string }) =>
+    runFailed: (error: { message: string; stack?: string; nodeId?: string; code?: string }) =>
       enqueueRunEvent({
         runId,
         type: "run_failed",

@@ -1,11 +1,14 @@
 import {
   NODE_CATALOG,
   addPluginCatalogEntry,
+  effectiveRequires,
   groupedCatalog,
+  missingCapabilities,
   nodeCatalogEntry,
   searchCatalog,
   __resetPluginCatalogForTesting,
 } from "./catalog"
+import { isCapabilityId } from "@/lib/platform/capabilities"
 import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
 import enMessages from "@/i18n/messages/en.json"
 import zhMessages from "@/i18n/messages/zh-CN.json"
@@ -128,6 +131,71 @@ describe("nodeCatalogEntry", () => {
     expect(e.description).toBe("Format text")
     expect(e.pluginId).toBe("demo")
     expect(e.iconName).toBe("Wand")
+    __resetPluginCatalogForTesting()
+  })
+})
+
+describe("capability requirements (ADR 0060)", () => {
+  it("every desktopOnly entry carries an explicit, well-formed requires backfill", () => {
+    for (const e of NODE_CATALOG.filter((e) => e.desktopOnly)) {
+      expect(e.requires?.length ?? 0).toBeGreaterThan(0)
+      for (const cap of e.requires ?? []) expect(isCapabilityId(cap)).toBe(true)
+    }
+  })
+
+  it("every requires tag anywhere in the catalog is a well-formed capability id", () => {
+    for (const e of NODE_CATALOG) {
+      for (const cap of e.requires ?? []) expect(isCapabilityId(cap)).toBe(true)
+    }
+  })
+
+  it("desktop UIA nodes require uia-automation (without becoming desktopOnly)", () => {
+    const uiaKinds = NODE_CATALOG.filter((e) => e.kind.startsWith("action.desktop."))
+    expect(uiaKinds.length).toBeGreaterThan(0)
+    for (const e of uiaKinds) {
+      expect(e.requires).toEqual(["uia-automation"])
+      expect(e.desktopOnly).toBeUndefined()
+    }
+    expect(nodeCatalogEntry("trigger.desktop.event").requires).toEqual(["uia-automation"])
+  })
+
+  it("webhook nodes require always-on; git nodes require shell; terminal nodes require pty", () => {
+    expect(nodeCatalogEntry("trigger.webhook").requires).toEqual(["always-on"])
+    expect(nodeCatalogEntry("io.webhook.respond").requires).toEqual(["always-on"])
+    expect(nodeCatalogEntry("action.git.commit").requires).toEqual(["shell"])
+    expect(nodeCatalogEntry("action.terminal.session.run").requires).toEqual(["pty"])
+    expect(nodeCatalogEntry("action.terminal.script").requires).toEqual(["shell"])
+  })
+
+  it("effectiveRequires: explicit wins, legacy desktopOnly maps to shell, else empty", () => {
+    expect(effectiveRequires({ requires: ["camera"] })).toEqual(["camera"])
+    expect(effectiveRequires({ requires: ["camera"], desktopOnly: true })).toEqual(["camera"])
+    expect(effectiveRequires({ desktopOnly: true })).toEqual(["shell"])
+    expect(effectiveRequires({})).toEqual([])
+  })
+
+  it("missingCapabilities subtracts the local set", () => {
+    expect(missingCapabilities({ requires: ["shell", "pty"] }, ["shell"])).toEqual(["pty"])
+    expect(missingCapabilities({ requires: ["shell"] }, ["shell", "pty"])).toEqual([])
+    expect(missingCapabilities({}, [])).toEqual([])
+    expect(missingCapabilities({ desktopOnly: true }, ["webview"])).toEqual(["shell"])
+  })
+
+  it("plugin catalog entries round-trip requires (and preflight math applies)", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.snap" as never,
+      category: "plugin",
+      label: "Snap",
+      description: "Take a photo",
+      iconName: "Camera",
+      keywords: [],
+      pluginId: "demo",
+      requires: ["camera", "plugin:demo"],
+    })
+    const e = nodeCatalogEntry("demo.action.snap" as never)
+    expect(e.requires).toEqual(["camera", "plugin:demo"])
+    expect(missingCapabilities(e, ["webview", "camera"])).toEqual(["plugin:demo"])
     __resetPluginCatalogForTesting()
   })
 })

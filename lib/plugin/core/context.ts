@@ -2383,6 +2383,7 @@ export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         iconName: def.iconName,
         keywords: def.keywords ?? [],
         desktopOnly: def.desktopOnly,
+        requires: def.requires,
         pluginId,
         // Surfacing the JSON Schema lets the inspector render a SchemaForm
         // instead of falling back to a raw-JSON editor.
