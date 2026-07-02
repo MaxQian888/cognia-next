@@ -130,6 +130,9 @@ ignore = "0.4"
 # launchd / systemd, plus a sqlite-backed metadata store for recovery.
 async-trait = "0.1"
 parking_lot = "0.12"
+# ADR-0059 R13 — Docker API client for ExecBackend::Container. Optional:
+# compiled only under the `container-exec` feature (headless server image).
+bollard = { version = "0.20", optional = true }
 rusqlite = { version = "0.39", features = ["bundled"] }
 # Native vector store backend — sqlite-vec FFI is loaded as a SQLite
 # auto-extension before any connection opens (mirrors the pattern in the
@@ -463,6 +466,10 @@ ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
 # ships an onnxruntime DLL alongside the executable (handled by `ort`'s
 # `copy-dylibs` feature).
 ocr-paddle = ["dep:oar-ocr", "dep:ort", "dep:image"]
+# ADR-0059 R13 — ExecBackend::Container for per-workspace runner containers
+# (T2 topology). Off desktop builds: only the headless `cognia-server` image
+# enables it, so the Docker client never enters the Tauri binary.
+container-exec = ["dep:bollard"]
 # Native PDF parsing with bounding boxes via `liteparse` (PDFium). Needs
 # network at build time (pdfium-sys downloads a prebuilt PDFium); the
 # PDFium dynamic library must ship next to the executable — see

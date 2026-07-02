@@ -30,6 +30,7 @@ pub use crate::api_key::ApiKeyState;
 pub use crate::claude::host::{HeadlessSidecarHost, SidecarHost, SIDECAR_SCRIPT_ENV};
 pub use crate::claude::sidecar::kill_sidecar;
 pub use crate::connectors::state::ConnectorsState;
+pub use crate::external_agent::container_backend::exec_backend_from_env;
 pub use crate::external_agent::presets::SpawnPolicy;
 pub use crate::secret_store::{
     generate_master_key, init_headless as init_secret_store, parse_master_key,
@@ -69,12 +70,32 @@ impl HeadlessServices {
         event_bus: Arc<EventBus>,
         spawn_policy: crate::external_agent::presets::SpawnPolicy,
     ) -> Arc<Self> {
+        Self::new_with_exec(
+            sidecar_host,
+            api_keys,
+            event_bus,
+            spawn_policy,
+            crate::external_agent::exec_backend::LocalProcessBackend::new(),
+        )
+    }
+
+    /// Like [`Self::new`] but with an explicit execution plane — the T2
+    /// server boot passes the env-resolved backend
+    /// ([`exec_backend_from_env`]) so `COGNIA_EXEC_BACKEND=container` routes
+    /// external agents into per-workspace runner containers (R13).
+    pub fn new_with_exec(
+        sidecar_host: Arc<dyn SidecarHost>,
+        api_keys: ApiKeyState,
+        event_bus: Arc<EventBus>,
+        spawn_policy: crate::external_agent::presets::SpawnPolicy,
+        exec: Arc<dyn crate::external_agent::exec_backend::ExecBackend>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             sidecar: SidecarState::new(),
             sidecar_host,
             api_keys,
             event_bus,
-            exec: crate::external_agent::exec_backend::LocalProcessBackend::new(),
+            exec,
             spawn_policy,
             connectors: ConnectorsState::new(),
         })

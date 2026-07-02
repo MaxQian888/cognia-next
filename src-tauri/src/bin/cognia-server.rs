@@ -49,9 +49,10 @@ use app_lib::companion_api::{
     tls, CompanionState, SharedState,
 };
 use app_lib::headless::{
-    brain, generate_master_key, headless_services, init_secret_store, install_headless_services,
-    kill_sidecar, parse_master_key, resolve_master_key_from_env, rotate_master_key, ApiKeyState,
-    HeadlessServices, HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
+    brain, exec_backend_from_env, generate_master_key, headless_services, init_secret_store,
+    install_headless_services, kill_sidecar, parse_master_key, resolve_master_key_from_env,
+    rotate_master_key, ApiKeyState, HeadlessServices, HeadlessSidecarHost, SpawnPolicy,
+    MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
 };
 use parking_lot::RwLock;
 
@@ -379,11 +380,18 @@ async fn run_serve(
         Arc::clone(&shared.event_bus),
         api_keys.clone(),
     ));
-    install_headless_services(Some(HeadlessServices::new(
+    // Execution plane (R10/R13): local processes by default;
+    // COGNIA_EXEC_BACKEND=container routes external agents into per-workspace
+    // runner containers. A misconfigured container mode is fatal — degrading
+    // to in-container local processes would silently void the T2 isolation.
+    let exec = exec_backend_from_env().map_err(|e| format!("exec backend: {e}"))?;
+    eprintln!("[cognia-server] exec backend: {}", exec.kind());
+    install_headless_services(Some(HeadlessServices::new_with_exec(
         sidecar_host,
         api_keys,
         Arc::clone(&shared.event_bus),
         SpawnPolicy::from_env(&data_dir),
+        exec,
     )));
 
     // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
