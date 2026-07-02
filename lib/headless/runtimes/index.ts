@@ -8,7 +8,15 @@
  *
  * ## Registered (extraction slices T-A2..A9 add entries here)
  *
- * (none yet — T-A2 lands `desktop-sync-source` first)
+ * - `desktop-sync-source` — answers `companion://sync-pull-request` from the
+ *   brain's Dexie (T-A2).
+ * - `desktop-message-source` — the five message/session RPCs plus the
+ *   generic desktop-write command channel (T-A3).
+ * - `a2ui-dispatch` — feeds sidecar `a2ui://dispatch` envelopes into the
+ *   A2UI store (T-A4).
+ *
+ * Pending extraction (tracked ADR-0059 T-A5..A9): backup-scheduler,
+ * connector-runtime, scheduler, workflow-runtime, initializer batches.
  *
  * ## Deliberately NOT registered (desktop/mobile-UI-only provider effects)
  *
@@ -23,8 +31,8 @@
  * - `pet` — desktop pet window runtime.
  */
 
-// Extraction slices append `registerHeadlessRuntime(...)` calls (or runtime
-// module imports) here, e.g.:
-//   import "./desktop-sync-source"
+import "./desktop-sync-source"
+import "./desktop-message-source"
+import "./a2ui-dispatch"
 
 export {}

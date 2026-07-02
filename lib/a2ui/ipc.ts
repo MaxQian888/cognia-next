@@ -19,16 +19,33 @@ export interface A2UIDispatchEnvelope {
   message: A2UIDispatchMessage
 }
 
+export interface SubscribeA2UIDispatchOptions {
+  /**
+   * Inject a listen-capable bridge (ADR-0059 T-A4). The headless brain
+   * passes its transport-backed bridge — `a2ui://dispatch` then arrives over
+   * `/ws/v1/events` instead of a Tauri event, with the same envelope. When a
+   * bridge is provided the Tauri platform gate is skipped.
+   */
+  bridge?: {
+    listen<T>(event: string, handler: (e: { payload: T }) => void): Promise<() => void>
+  }
+}
+
 /**
- * Subscribe to a2ui dispatch events. Returns an unlisten function. No-op
- * outside Tauri (web mode), where dispatches arrive purely through chat
- * codeblock detection / parser-driven flows.
+ * Subscribe to a2ui dispatch events. Returns an unlisten function. Without
+ * an injected bridge, no-op outside Tauri (web mode), where dispatches
+ * arrive purely through chat codeblock detection / parser-driven flows.
  */
-export async function subscribeA2UIDispatch(): Promise<UnlistenFn> {
-  if (!isTauri()) {
+export async function subscribeA2UIDispatch(
+  opts: SubscribeA2UIDispatchOptions = {}
+): Promise<UnlistenFn> {
+  if (!opts.bridge && !isTauri()) {
     return () => {}
   }
-  return listen<A2UIDispatchEnvelope>(A2UI_EVENT, (event) => {
+  const doListen = opts.bridge
+    ? opts.bridge.listen.bind(opts.bridge)
+    : (listen as NonNullable<SubscribeA2UIDispatchOptions["bridge"]>["listen"])
+  return doListen<A2UIDispatchEnvelope>(A2UI_EVENT, (event) => {
     const payload = event.payload
     if (!payload || payload.type !== "a2ui_dispatch" || !payload.message) {
       loggers.app.warn("a2ui dispatch payload shape unexpected", { payload })
