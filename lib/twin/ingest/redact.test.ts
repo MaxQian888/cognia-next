@@ -6,7 +6,14 @@
  *   3. zero PII in the redacted output (`hasNoLeakingPii` returns true)
  */
 
-import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText, unredactText } from "./redact"
+import {
+  PII_KINDS,
+  PII_PLACEHOLDER_SOURCE,
+  hasNoLeakingPii,
+  hasNoLeakingPiiDeep,
+  redactText,
+  unredactText,
+} from "./redact"
 
 describe("redactText", () => {
   it("redacts emails and round-trips perfectly", () => {
@@ -433,5 +440,58 @@ describe("translateOffsetsThroughRedaction", () => {
 
     const [out] = translateOffsetsThroughRedaction([entry(0, original.length + 50)], redacted, map)
     expect(out.charEnd).toBe(redacted.length)
+  })
+})
+
+describe("placeholder pattern single-source (PII_KINDS)", () => {
+  it("PII_KINDS covers every kind the redactor can emit", () => {
+    // One representative input per kind — each must tokenize under a kind
+    // that PII_KINDS contains, so a new emitter can't ship without joining
+    // the canonical list (and thus every derived scanner).
+    const samples: Record<string, string> = {
+      EMAIL: "mail alice@example.com",
+      PHONE: "call 13812345678 now",
+      CN_ID: "ID 11010519900101111X",
+      BANK_CARD: "Card: 4111111111111111",
+      NAME: "Bob said hi", // via nameHints
+      IP_ADDR: "server 8.8.8.8",
+      API_KEY: "key sk-proj-abcdefghijklmnop123456",
+      JWT: "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl",
+      PEM_KEY: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+      PASSPORT: "passport E12345678",
+      DRIVER_LICENSE: "driver license: 123456789012",
+    }
+    for (const [kind, text] of Object.entries(samples)) {
+      const { map } = redactText(text, kind === "NAME" ? ["Bob"] : [])
+      const kinds = Object.values(map).map((r) => r.kind)
+      expect(kinds).toContain(kind)
+      expect(PII_KINDS).toContain(kind as (typeof PII_KINDS)[number])
+    }
+    expect(PII_KINDS).toHaveLength(11)
+  })
+
+  it("PII_PLACEHOLDER_SOURCE matches every kind including JWT and PEM_KEY", () => {
+    const re = new RegExp(PII_PLACEHOLDER_SOURCE)
+    for (const kind of PII_KINDS) {
+      expect(re.test(`<${kind}_001>`)).toBe(true)
+    }
+    expect(re.test("<UNKNOWN_001>")).toBe(false)
+  })
+
+  it("unredactText round-trips placeholders with 4+ digit counters", () => {
+    const map = {
+      "<NAME_1234>": { placeholder: "<NAME_1234>", original: "张伟", kind: "NAME" as const },
+      "<JWT_1000>": { placeholder: "<JWT_1000>", original: "eyJx.eyJ5.zzz", kind: "JWT" as const },
+    }
+    const out = unredactText("hi <NAME_1234>, token <JWT_1000>", map)
+    expect(out).toBe("hi 张伟, token eyJx.eyJ5.zzz")
+  })
+
+  it("does not double-tokenize 4+ digit placeholders on a second pass", () => {
+    // The phone / compressed-IPv6 skip-guards must recognise wide counters,
+    // otherwise re-redacting already-redacted text mangles the tokens.
+    const already = "call <PHONE_1000> or ping <IP_ADDR_1000>"
+    const { redacted } = redactText(already)
+    expect(redacted).toBe(already)
   })
 })

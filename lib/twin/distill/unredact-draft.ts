@@ -20,7 +20,7 @@
  */
 
 import { decryptRedactionMap } from "@/lib/twin/ingest/redaction-key"
-import type { RedactionRecord } from "@/lib/twin/ingest/redact"
+import { PII_PLACEHOLDER_SOURCE, type RedactionRecord } from "@/lib/twin/ingest/redact"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import type { TwinDraft } from "@/types/twin"
 
@@ -42,8 +42,10 @@ export interface UnredactPreview {
   placeholders: UnredactPlaceholder[]
 }
 
-const PLACEHOLDER_RE =
-  /<(EMAIL|PHONE|CN_ID|BANK_CARD|NAME|IP_ADDR|API_KEY|PASSPORT|DRIVER_LICENSE)_\d{3}>/g
+// Derived from redact.ts so this scanner can never drift from the emitter
+// again (a hand-copied alternation here used to miss JWT / PEM_KEY and
+// stopped matching once a counter grew past three digits).
+const PLACEHOLDER_RE = new RegExp(PII_PLACEHOLDER_SOURCE, "g")
 
 /**
  * Read every `redactionMapEnc` blob for a twin and merge them into one
