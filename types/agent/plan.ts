@@ -323,6 +323,7 @@ export type PlanEventKind =
   | "plan_updated"
   | "approved"
   | "rejected"
+  | "deferred"
   | "refined"
   | "step_started"
   | "step_completed"
@@ -347,6 +348,8 @@ export type PlanEventPayload =
   | { kind: "plan_updated"; totalSteps: number }
   | { kind: "approved" }
   | { kind: "rejected"; feedback?: string }
+  /** "No, keep planning": approval deferred, plan retained as a draft. */
+  | { kind: "deferred"; feedback?: string }
   | {
       kind: "refined"
       refinementType: PlanRefinementType

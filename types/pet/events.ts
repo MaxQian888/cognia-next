@@ -11,6 +11,7 @@ export type PetEventSource =
   | "connector"
   | "terminal"
   | "workflow"
+  | "twin"
   | "user"
   | "system"
 
@@ -30,6 +31,9 @@ export type PetEventKind =
   | "inboundMessage"
   | "scheduledRun"
   | "workflowRun"
+  // ambient twin-awareness signals (opt-in; job metadata only, never content)
+  | "twinBusy"
+  | "twinMilestone"
   // direct user interactions
   | "fed"
   | "played"
