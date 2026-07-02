@@ -61,6 +61,7 @@ pub mod tls;
 pub mod tunnel;
 pub mod tunnel_config;
 pub mod ws;
+pub mod ws_bridge;
 pub mod ws_terminal;
 pub mod ws_terminal_test;
 

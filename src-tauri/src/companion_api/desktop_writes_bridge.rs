@@ -46,8 +46,12 @@ pub struct DesktopWriteRequest {
 }
 
 /// Generic response from the WebView. Same shape as the messages bridge.
+///
+/// The alias accepts the camelCase key the TS side sends verbatim over the
+/// headless bridge WS (`ws_bridge::route_respond`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct DesktopWriteResponse {
+    #[serde(alias = "requestId")]
     pub request_id: String,
     pub result: Option<Value>,
     pub error: Option<String>,

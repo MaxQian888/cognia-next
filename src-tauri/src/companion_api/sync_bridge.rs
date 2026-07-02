@@ -45,8 +45,13 @@ pub struct SyncPullRequest {
 }
 
 /// Payload received back from the WebView.
+///
+/// The alias accepts the camelCase key the TS side sends verbatim over the
+/// headless bridge WS (`ws_bridge::route_respond`); the desktop Tauri command
+/// path already converts to snake_case at the command boundary.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncPullResponse {
+    #[serde(alias = "requestId")]
     pub request_id: String,
     /// Either the full delta JSON, or null when the WebView reports an error.
     pub delta: Option<Value>,

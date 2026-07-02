@@ -136,8 +136,12 @@ pub struct SendMessageRequest {
 /// `result` for success and leaves `error` for failure (or vice-versa);
 /// both being `None` is a malformed bridge state and is reported as an
 /// error.
+///
+/// The alias accepts the camelCase key the TS side sends verbatim over the
+/// headless bridge WS (`ws_bridge::route_respond`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct MessageBridgeResponse {
+    #[serde(alias = "requestId")]
     pub request_id: String,
     pub result: Option<Value>,
     pub error: Option<String>,

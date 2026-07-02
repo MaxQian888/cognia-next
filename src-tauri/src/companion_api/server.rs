@@ -34,7 +34,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use super::{healthz, rpc, tls::TlsMaterial, ws, ws_terminal};
+use super::{healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
 use axum::{
     middleware::{from_fn, from_fn_with_state},
     routing::{any, get, post},
@@ -244,6 +244,10 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/v1/whoami", get(auth::whoami_handler))
         .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
         .route("/ws/v1/events", any(ws::ws_handler))
+        // Headless-brain data plane (ADR-0059 W3). The JWT middleware already
+        // enforces loopback for service-scope tokens; the handler additionally
+        // rejects non-service scopes before the upgrade.
+        .route("/ws/v1/bridge", any(ws_bridge::ws_bridge_handler))
         .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
         .layer(from_fn_with_state(
             state.clone(),
