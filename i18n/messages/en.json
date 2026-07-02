@@ -1937,6 +1937,41 @@
     "viewDiff": "View diff",
     "yesterday": "Yesterday"
   },
+  "capture": {
+    "bubbleAria": "Confirm capture",
+    "close": "Close",
+    "countdown": "{seconds}s",
+    "dismiss": "Dismiss",
+    "kind": {
+      "image": "Image",
+      "text": "Text",
+      "url": "Link"
+    },
+    "save": "Save",
+    "settings": {
+      "confirmTimeout": "Confirm timeout (s)",
+      "description": "Watch the clipboard and save items to your knowledge base (feeds the radar).",
+      "enabled": "Enable capture",
+      "enabledDesc": "Watch the clipboard on desktop.",
+      "mode": {
+        "confirm": "Confirm bubble",
+        "manual": "Manual only",
+        "silent": "Silent + toast"
+      },
+      "modeLabel": "Mode",
+      "pollInterval": "Poll interval (ms)",
+      "privacy": "Privacy pause",
+      "privacyDesc": "Temporarily stop reading the clipboard.",
+      "save": "Save",
+      "saved": "Capture settings saved.",
+      "title": "Content capture"
+    },
+    "toast": {
+      "duplicate": "Already captured — skipped.",
+      "failed": "Capture failed: {message}",
+      "saved": "Captured."
+    }
+  },
   "ccswitch": {
     "agents": {
       "claude-code": "Claude Code (~/.claude/settings.json)",
@@ -7798,6 +7833,10 @@
       "manualDivider": "or paste manually",
       "offlineSubtitle": "Couldn't reach the desktop — verify the desktop is awake and on the same network.",
       "offlineTitle": "Connection lost",
+      "payloadError": {
+        "invalid": "That pairing payload couldn't be decoded — copy the full cgnp2|… string from the server and paste it again.",
+        "versionMismatch": "This pairing payload is version {got}, which this app doesn't understand. Update the app or the server so both speak the same payload version."
+      },
       "permissions": {
         "localNetwork": {
           "description": "Grant local-network access so the phone can find the desktop on your Wi-Fi.",
@@ -7835,7 +7874,18 @@
       },
       "title": "Connect to desktop",
       "tokenLabel": "Pair token",
-      "transportLabel": "Transport"
+      "transportLabel": "Transport",
+      "web": {
+        "baseUrlLocked": "Server URL is set by this deployment",
+        "codeHint": "Generate a code on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",
+        "formCardDescription": "Paste the pairing payload or the 6-digit code issued by your cognia server — both use the same 5-minute pair token.",
+        "formCardTitle": "Pair this browser",
+        "intro": "Connect this browser to your cognia server. Paste the pairing payload or enter the 6-digit code to sign in.",
+        "pasteHint": "Paste the full cgnp2|… payload — the server URL fills in automatically — or just the raw pair JWT.",
+        "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
+        "storageNoticeTitle": "Credential stays in this browser",
+        "title": "Connect to your server"
+      }
     },
     "pairedOnly": {
       "description": "Connect a desktop to edit these settings",
@@ -8191,6 +8241,15 @@
     "workflow": {
       "activeBadge": "Active",
       "all": "All",
+      "approvals": {
+        "approve": "Approve",
+        "approvedToast": "Approved.",
+        "goneToast": "This approval is no longer pending.",
+        "heading": "{count, plural, one {# approval waiting} other {# approvals waiting}}",
+        "reject": "Reject",
+        "rejectedToast": "Rejected.",
+        "respondFailedToast": "Couldn't reach the desktop — try again."
+      },
       "density": {
         "comfortable": "Comfortable rows",
         "compact": "Compact rows"
@@ -9367,6 +9426,7 @@
         "binding": "Characters",
         "customize": "Customize",
         "dex": "Dex",
+        "insights": "Insights",
         "nurture": "Nurture",
         "plugins": "Plugins",
         "shop": "Shop"
@@ -12095,6 +12155,54 @@
     },
     "xai": "xAI (Grok)",
     "xaiDescription": "Grok 3, Grok 3 Mini"
+  },
+  "radar": {
+    "panel": {
+      "empty": "No report yet. Run the radar to analyze your recent info diet.",
+      "meta": "{count} items analyzed · {days}-day window",
+      "run": "Run now",
+      "runAria": "Generate a new radar report",
+      "title": "Attention Radar"
+    },
+    "section": {
+      "actions": "Actions",
+      "atAGlance": "At a glance",
+      "blindSpots": "Blind spots",
+      "graveyard": "Graveyard",
+      "heatmap": "Activity",
+      "infoDiet": "Info diet",
+      "subconscious": "Subconscious",
+      "topics": "Topics"
+    },
+    "settings": {
+      "enabled": "Enable radar",
+      "enabledDesc": "Auto-generate reports and nudge via the pet.",
+      "intervalDays": "Min interval (days)",
+      "save": "Save",
+      "saved": "Radar settings saved.",
+      "scheduleAction": {
+        "created": "Radar schedule created.",
+        "updated": "Radar schedule updated."
+      },
+      "scheduleCleared": "Radar schedule cleared.",
+      "scheduleCustomCronLabel": "Cron expression",
+      "scheduleInvalidCron": "Invalid cron expression: {expression}",
+      "scheduleMode": {
+        "custom": "Custom",
+        "daily": "Daily",
+        "off": "Off",
+        "weekly": "Weekly"
+      },
+      "scheduleModeLabel": "Schedule",
+      "scheduleSaveAria": "Save radar settings",
+      "windowDays": "Window (days)"
+    },
+    "toast": {
+      "failed": "Radar failed: {message}",
+      "generated": "Radar report generated.",
+      "noModel": "No LLM API key configured. Add one in Settings → Providers.",
+      "skipped": "Not enough recent activity yet — nothing to report."
+    }
   },
   "routingFallback": {
     "answeredVia": "Answered via {provider} ({model})",
@@ -16855,6 +16963,7 @@
       "scopeDescriptions": {
         "agent:dispatch": "⚠ Lets external agents run your built-in/plugin subagents or characters headlessly (tool loop + model calls). Returned text is PII-redacted. Default OFF.",
         "agent:team": "⚠ Lets external agents start an Agent Team headlessly — a multi-agent orchestration they couldn't otherwise reach. Default OFF.",
+        "inbound:write": "⚠ Lets external agents contribute lessons, skill drafts, and notes. Nothing is applied automatically — submissions land in a review queue as pending, untrusted drafts for you to accept or discard. Default OFF.",
         "inbox:connectors:read": "⚠ Read-only inbox introspection — adapters, conversations, drafts, audit. Metadata may include conversation handles and recent message snippets. Default OFF.",
         "inbox:connectors:send": "⚠ Lets external agents enqueue AI replies to your IM inbox. Goes through the same pipeline as in-app chat (PII gate, policy, outbound queue). Default OFF.",
         "mcp:computer-use": "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay.",
@@ -16974,6 +17083,40 @@
         "toastRebuildFailed": "Rebuild failed: {message}",
         "toastRebuilt": "Wiki rebuilt: {summary} ({duration})",
         "webModeWarning": "Wiki rebuild requires the Tauri desktop app."
+      },
+      "wikiLint": {
+        "articleCount": "Articles",
+        "brokenCount": "Broken links",
+        "brokenListSummary": "{count, plural, one {# article with broken links} other {# articles with broken links}}",
+        "description": "Check the compiled wiki for orphan pages and broken [[links]]. Runs locally, no LLM.",
+        "lastRun": "Last run",
+        "never": "Never",
+        "orphanCount": "Orphans",
+        "orphanListSummary": "{count, plural, one {# orphan page} other {# orphan pages}}",
+        "run": "Run lint",
+        "runAria": "Run the wiki lint check",
+        "scheduleAction": {
+          "created": "Wiki lint schedule created.",
+          "updated": "Wiki lint schedule updated."
+        },
+        "scheduleCleared": "Wiki lint schedule cleared.",
+        "scheduleCustomCronLabel": "Cron expression",
+        "scheduleHelp": "Automatic lint runs via the scheduler. Daily runs at 03:00 local; Weekly runs Sunday 03:00. Custom takes a 5-field cron expression.",
+        "scheduleInvalidCron": "Invalid cron expression: {expression}",
+        "scheduleMode": {
+          "custom": "Custom",
+          "daily": "Daily",
+          "off": "Off",
+          "weekly": "Weekly"
+        },
+        "scheduleModeLabel": "Frequency",
+        "scheduleSave": "Save",
+        "scheduleSaveAria": "Save wiki lint schedule",
+        "scheduleTitle": "Schedule",
+        "title": "Wiki Lint",
+        "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
+        "toastLintFailed": "Lint failed: {message}",
+        "toastLinted": "Lint done: {orphans} orphans, {broken} broken."
       }
     },
     "finder": {
@@ -21390,6 +21533,32 @@
       "savedOk": "Workflow saved",
       "startFailed": "Failed to start run"
     },
+    "capabilities": {
+      "names": {
+        "always-on": "Always-on listener",
+        "barcode-scan": "Barcode scanning",
+        "biometric": "Biometrics",
+        "camera": "Camera",
+        "connector-runtime": "Connector runtime",
+        "geolocation": "Location",
+        "headless": "Headless runtime",
+        "keyring": "OS keyring",
+        "mcp-runtime": "MCP runtime",
+        "ocr": "OCR",
+        "pty": "Integrated terminal",
+        "push-display": "Notifications",
+        "share-sheet": "Share sheet",
+        "shell": "Shell",
+        "sidecar": "Node sidecar",
+        "uia-automation": "Desktop automation",
+        "voice-record": "Voice recording",
+        "webview": "Interactive UI"
+      },
+      "tooltip": "Needs capabilities this device lacks: {caps}",
+      "tooltipRemote": "Runs on a paired device that provides: {caps}",
+      "unavailable": "Unavailable here",
+      "viaDevice": "Runs on phone"
+    },
     "card": {
       "action": "{count, plural, one {# action} other {# actions}}",
       "builtin": "Built-in",
@@ -21656,10 +21825,12 @@
       },
       "edge": {
         "edgeKind": {
+          "approved": "approved",
           "default": "default",
           "else": "else",
           "error": "on error",
           "false": "false",
+          "rejected": "rejected",
           "then": "then",
           "true": "true"
         },
@@ -21978,6 +22149,23 @@
         },
         "userPrompt": {
           "label": "User prompt"
+        }
+      },
+      "approvalRequest": {
+        "message": {
+          "label": "Message (optional)"
+        },
+        "onTimeout": {
+          "fail": "Fail the step",
+          "label": "On timeout",
+          "reject": "Route as rejected"
+        },
+        "timeoutMs": {
+          "hint": "How long to wait for a decision. Default 1 hour.",
+          "label": "Timeout (ms)"
+        },
+        "title": {
+          "label": "Title"
         }
       },
       "branch": {
@@ -23122,6 +23310,54 @@
         "text": {
           "hint": "One self-contained statement. Deduped against existing memories via the consolidator.",
           "label": "Fact"
+        }
+      },
+      "mobileCamera": {
+        "quality": {
+          "label": "JPEG quality (1–100)"
+        },
+        "width": {
+          "label": "Max width (px)"
+        }
+      },
+      "mobileLocation": {
+        "enableHighAccuracy": {
+          "label": "High accuracy (GPS)"
+        }
+      },
+      "mobileNotify": {
+        "body": {
+          "label": "Body"
+        },
+        "title": {
+          "label": "Title"
+        }
+      },
+      "mobileScanBarcode": {
+        "formats": {
+          "hint": "Comma-separated (e.g. QR_CODE, EAN_13). Empty = QR only.",
+          "label": "Formats"
+        }
+      },
+      "mobileShare": {
+        "text": {
+          "hint": "Text or URL is required.",
+          "label": "Text"
+        },
+        "title": {
+          "label": "Title (optional)"
+        },
+        "url": {
+          "label": "URL (optional)"
+        }
+      },
+      "mobileStep": {
+        "deviceId": {
+          "hint": "Empty = any capable paired device (freshest first).",
+          "label": "Device ID (optional)"
+        },
+        "timeoutMs": {
+          "label": "Timeout (ms)"
         }
       },
       "note": {
@@ -24433,8 +24669,10 @@
         }
       },
       "outputHandles": {
+        "approved": "approved",
         "default": "default",
         "false": "false",
+        "rejected": "rejected",
         "true": "true"
       },
       "pinnedTitle": "Pinned test data"
@@ -24445,6 +24683,12 @@
           "turn": {
             "description": "Run one full agent turn — tool-enabled via the desktop sidecar (approval-gated), text-only fallback on web.",
             "label": "Agent turn"
+          }
+        },
+        "approval": {
+          "request": {
+            "description": "Pause until a human approves or rejects — from the desktop notification center or a paired phone. Routes downstream via Approved / Rejected handles.",
+            "label": "Request approval"
           }
         },
         "character": {
@@ -24695,6 +24939,28 @@
           "store": {
             "description": "Store one durable fact into long-term memory via the shared consolidator (PII-gated).",
             "label": "Store memory"
+          }
+        },
+        "mobile": {
+          "camera": {
+            "description": "Opens the camera on a paired phone and returns the capture (base64) to the run.",
+            "label": "Take photo on phone"
+          },
+          "location": {
+            "description": "Reads the current GPS position from a paired phone.",
+            "label": "Get phone location"
+          },
+          "notify": {
+            "description": "Shows a local notification on a paired phone.",
+            "label": "Notify phone"
+          },
+          "scanBarcode": {
+            "description": "Opens the barcode/QR scanner on a paired phone and returns the raw value.",
+            "label": "Scan barcode on phone"
+          },
+          "share": {
+            "description": "Opens the native share sheet on a paired phone with the given text or link.",
+            "label": "Share from phone"
           }
         },
         "pet": {

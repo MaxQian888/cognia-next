@@ -1937,6 +1937,41 @@
     "viewDiff": "查看差异",
     "yesterday": "昨天"
   },
+  "capture": {
+    "bubbleAria": "确认捕获",
+    "close": "关闭",
+    "countdown": "{seconds} 秒",
+    "dismiss": "忽略",
+    "kind": {
+      "image": "图片",
+      "text": "文本",
+      "url": "链接"
+    },
+    "save": "保存",
+    "settings": {
+      "confirmTimeout": "确认超时（秒）",
+      "description": "监听剪贴板并保存到知识库（供雷达分析）。",
+      "enabled": "启用捕获",
+      "enabledDesc": "在桌面端监听剪贴板。",
+      "mode": {
+        "confirm": "确认气泡",
+        "manual": "仅手动",
+        "silent": "静默 + toast"
+      },
+      "modeLabel": "模式",
+      "pollInterval": "轮询间隔（毫秒）",
+      "privacy": "隐私暂停",
+      "privacyDesc": "临时停止读取剪贴板。",
+      "save": "保存",
+      "saved": "已保存捕获设置。",
+      "title": "内容捕获"
+    },
+    "toast": {
+      "duplicate": "已捕获过，已跳过。",
+      "failed": "捕获失败：{message}",
+      "saved": "已捕获。"
+    }
+  },
   "ccswitch": {
     "agents": {
       "claude-code": "Claude Code（~/.claude/settings.json）",
@@ -7798,6 +7833,10 @@
       "manualDivider": "或手动粘贴",
       "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
       "offlineTitle": "连接已断开",
+      "payloadError": {
+        "invalid": "无法解析该配对载荷——请从服务器完整复制 cgnp2|… 字符串后重新粘贴。",
+        "versionMismatch": "该配对载荷版本为 {got}，当前应用无法识别。请升级应用或服务器，使两端载荷版本一致。"
+      },
       "permissions": {
         "localNetwork": {
           "description": "请授予本地网络访问权限，本机才能在 Wi-Fi 上发现桌面端。",
@@ -7835,7 +7874,18 @@
       },
       "title": "连接桌面",
       "tokenLabel": "配对令牌",
-      "transportLabel": "传输层"
+      "transportLabel": "传输层",
+      "web": {
+        "baseUrlLocked": "服务器地址由部署方预设",
+        "codeHint": "在服务器上运行 “cognia-server pair” 生成配对码，或从桌面端 设置 → 伴侣 中复制。",
+        "formCardDescription": "粘贴配对载荷，或输入服务器签发的 6 位配对码——两者共用同一枚 5 分钟有效的配对令牌。",
+        "formCardTitle": "配对此浏览器",
+        "intro": "将此浏览器连接到你的 cognia 服务器。粘贴配对载荷或输入 6 位配对码即可登录。",
+        "pasteHint": "粘贴完整的 cgnp2|… 载荷（服务器地址会自动填入），或直接粘贴配对 JWT。",
+        "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
+        "storageNoticeTitle": "凭据保存在此浏览器中",
+        "title": "连接到服务器"
+      }
     },
     "pairedOnly": {
       "description": "连接桌面端后可编辑这些设置",
@@ -8191,6 +8241,15 @@
     "workflow": {
       "activeBadge": "活跃",
       "all": "全部",
+      "approvals": {
+        "approve": "批准",
+        "approvedToast": "已批准。",
+        "goneToast": "该审批已不在等待中。",
+        "heading": "{count, plural, one {# 项审批等待处理} other {# 项审批等待处理}}",
+        "reject": "拒绝",
+        "rejectedToast": "已拒绝。",
+        "respondFailedToast": "无法连接桌面端——请重试。"
+      },
       "density": {
         "comfortable": "宽松行距",
         "compact": "紧凑行距"
@@ -9367,6 +9426,7 @@
         "binding": "角色",
         "customize": "自定义",
         "dex": "图鉴",
+        "insights": "洞察",
         "nurture": "养育",
         "plugins": "插件",
         "shop": "商店"
@@ -12095,6 +12155,54 @@
     },
     "xai": "xAI (Grok)",
     "xaiDescription": "Grok 3、Grok 3 Mini"
+  },
+  "radar": {
+    "panel": {
+      "empty": "还没有报告。运行雷达以分析你近期的信息饮食。",
+      "meta": "已分析 {count} 项 · {days} 天窗口",
+      "run": "立即运行",
+      "runAria": "生成新的雷达报告",
+      "title": "注意力雷达"
+    },
+    "section": {
+      "actions": "行动",
+      "atAGlance": "速览",
+      "blindSpots": "盲区",
+      "graveyard": "墓地",
+      "heatmap": "活跃度",
+      "infoDiet": "信息饮食",
+      "subconscious": "潜意识",
+      "topics": "主题"
+    },
+    "settings": {
+      "enabled": "启用雷达",
+      "enabledDesc": "自动生成报告并通过桌宠提示。",
+      "intervalDays": "最小间隔（天）",
+      "save": "保存",
+      "saved": "已保存雷达设置。",
+      "scheduleAction": {
+        "created": "已创建雷达排期。",
+        "updated": "已更新雷达排期。"
+      },
+      "scheduleCleared": "已清除雷达排期。",
+      "scheduleCustomCronLabel": "Cron 表达式",
+      "scheduleInvalidCron": "无效的 cron 表达式：{expression}",
+      "scheduleMode": {
+        "custom": "自定义",
+        "daily": "每日",
+        "off": "关闭",
+        "weekly": "每周"
+      },
+      "scheduleModeLabel": "排期",
+      "scheduleSaveAria": "保存雷达设置",
+      "windowDays": "窗口（天）"
+    },
+    "toast": {
+      "failed": "雷达运行失败：{message}",
+      "generated": "已生成雷达报告。",
+      "noModel": "未配置 LLM API 密钥。请在 设置 → 提供商 中添加。",
+      "skipped": "近期活动不足，暂无可报告内容。"
+    }
   },
   "routingFallback": {
     "answeredVia": "已通过 {provider}（{model}）回应",
@@ -16855,6 +16963,7 @@
       "scopeDescriptions": {
         "agent:dispatch": "⚠ 允许外部代理无界面运行你的内置/插件子代理或角色（工具循环 + 模型调用）。返回文本经 PII 脱敏。默认关闭。",
         "agent:team": "⚠ 允许外部代理无界面启动智能体团队——它们本无法触及的多智能体编排。默认关闭。",
+        "inbound:write": "⚠ 允许外部代理提交经验、技能草稿与笔记。不会自动生效 —— 提交内容作为待审、不可信草稿进入审阅队列，由你接受或丢弃。默认关闭。",
         "inbox:connectors:read": "⚠ 只读收件箱自省 — 适配器、会话、草稿、审计。元数据可能包含会话句柄与近期消息片段。默认关闭。",
         "inbox:connectors:send": "⚠ 允许外部 Agent 向你的 IM 收件箱发送 AI 回复。与应用内聊天走同一管线（PII 门控、策略评估、出站队列）。默认关闭。",
         "mcp:computer-use": "⚠ 允许外部 Agent 操控本机（鼠标 / 键盘 / 截图）。遵循 设置 → 自动化 → 权限策略；每次调用按权限层级弹出授权确认。",
@@ -16974,6 +17083,40 @@
         "toastRebuildFailed": "重建失败：{message}",
         "toastRebuilt": "Wiki 重建完成：{summary}（耗时 {duration}）",
         "webModeWarning": "Wiki 重建需要 Tauri 桌面应用。"
+      },
+      "wikiLint": {
+        "articleCount": "文章数",
+        "brokenCount": "失效链接",
+        "brokenListSummary": "{count} 篇文章存在失效链接",
+        "description": "检查已编译的 wiki 中的孤儿页面和失效的 [[链接]]。本地运行，不调用 LLM。",
+        "lastRun": "上次运行",
+        "never": "从未",
+        "orphanCount": "孤儿页",
+        "orphanListSummary": "{count} 个孤儿页面",
+        "run": "运行检查",
+        "runAria": "运行 wiki 检查",
+        "scheduleAction": {
+          "created": "已创建 wiki 检查排期。",
+          "updated": "已更新 wiki 检查排期。"
+        },
+        "scheduleCleared": "已清除 wiki 检查排期。",
+        "scheduleCustomCronLabel": "Cron 表达式",
+        "scheduleHelp": "自动检查通过调度器运行。每日在本地时间 03:00；每周日 03:00。自定义使用 5 字段 cron 表达式。",
+        "scheduleInvalidCron": "无效的 cron 表达式：{expression}",
+        "scheduleMode": {
+          "custom": "自定义",
+          "daily": "每日",
+          "off": "关闭",
+          "weekly": "每周"
+        },
+        "scheduleModeLabel": "频率",
+        "scheduleSave": "保存",
+        "scheduleSaveAria": "保存 wiki 检查排期",
+        "scheduleTitle": "排期",
+        "title": "Wiki 检查",
+        "toastClean": "Wiki 无问题 —— 共 {count} 篇文章。",
+        "toastLintFailed": "检查失败：{message}",
+        "toastLinted": "检查完成：{orphans} 个孤儿页，{broken} 处失效链接。"
       }
     },
     "finder": {
@@ -21390,6 +21533,32 @@
       "savedOk": "工作流已保存",
       "startFailed": "启动运行失败"
     },
+    "capabilities": {
+      "names": {
+        "always-on": "常驻监听",
+        "barcode-scan": "扫码",
+        "biometric": "生物识别",
+        "camera": "相机",
+        "connector-runtime": "连接器运行时",
+        "geolocation": "定位",
+        "headless": "无头运行时",
+        "keyring": "系统钥匙串",
+        "mcp-runtime": "MCP 运行时",
+        "ocr": "OCR",
+        "pty": "集成终端",
+        "push-display": "通知",
+        "share-sheet": "分享面板",
+        "shell": "Shell",
+        "sidecar": "Node 边车",
+        "uia-automation": "桌面自动化",
+        "voice-record": "录音",
+        "webview": "交互界面"
+      },
+      "tooltip": "需要本设备缺少的能力：{caps}",
+      "tooltipRemote": "将在提供以下能力的已配对设备上执行：{caps}",
+      "unavailable": "本设备不可用",
+      "viaDevice": "手机执行"
+    },
     "card": {
       "action": "{count, plural, other {# 个操作}}",
       "builtin": "内置",
@@ -21656,10 +21825,12 @@
       },
       "edge": {
         "edgeKind": {
+          "approved": "已批准",
           "default": "默认",
           "else": "否则",
           "error": "错误时",
           "false": "假",
+          "rejected": "已拒绝",
           "then": "然后",
           "true": "真"
         },
@@ -21978,6 +22149,23 @@
         },
         "userPrompt": {
           "label": "用户提示词"
+        }
+      },
+      "approvalRequest": {
+        "message": {
+          "label": "说明（可选）"
+        },
+        "onTimeout": {
+          "fail": "步骤失败",
+          "label": "超时处理",
+          "reject": "按已拒绝路由"
+        },
+        "timeoutMs": {
+          "hint": "等待决定的时长。默认 1 小时。",
+          "label": "超时（毫秒）"
+        },
+        "title": {
+          "label": "标题"
         }
       },
       "branch": {
@@ -23122,6 +23310,54 @@
         "text": {
           "hint": "一条自洽的陈述。会经整合器与既有记忆去重。",
           "label": "事实"
+        }
+      },
+      "mobileCamera": {
+        "quality": {
+          "label": "JPEG 质量（1–100）"
+        },
+        "width": {
+          "label": "最大宽度（px）"
+        }
+      },
+      "mobileLocation": {
+        "enableHighAccuracy": {
+          "label": "高精度（GPS）"
+        }
+      },
+      "mobileNotify": {
+        "body": {
+          "label": "内容"
+        },
+        "title": {
+          "label": "标题"
+        }
+      },
+      "mobileScanBarcode": {
+        "formats": {
+          "hint": "逗号分隔（如 QR_CODE, EAN_13）。留空 = 仅二维码。",
+          "label": "格式"
+        }
+      },
+      "mobileShare": {
+        "text": {
+          "hint": "文本或 URL 必填其一。",
+          "label": "文本"
+        },
+        "title": {
+          "label": "标题（可选）"
+        },
+        "url": {
+          "label": "URL（可选）"
+        }
+      },
+      "mobileStep": {
+        "deviceId": {
+          "hint": "留空 = 任意具备能力的已配对设备（最近活跃优先）。",
+          "label": "设备 ID（可选）"
+        },
+        "timeoutMs": {
+          "label": "超时（毫秒）"
         }
       },
       "note": {
@@ -24433,8 +24669,10 @@
         }
       },
       "outputHandles": {
+        "approved": "已批准",
         "default": "默认",
         "false": "假",
+        "rejected": "已拒绝",
         "true": "真"
       },
       "pinnedTitle": "已固定测试数据"
@@ -24445,6 +24683,12 @@
           "turn": {
             "description": "执行一次完整的智能体回合——桌面端经 sidecar 启用工具（受审批门控），Web 端降级为纯文本。",
             "label": "智能体回合"
+          }
+        },
+        "approval": {
+          "request": {
+            "description": "暂停执行，等待人工批准或拒绝——可在桌面通知中心或已配对手机上处理。按「已批准 / 已拒绝」端口路由下游。",
+            "label": "请求审批"
           }
         },
         "character": {
@@ -24695,6 +24939,28 @@
           "store": {
             "description": "经共享整合器把一条持久事实写入长期记忆（强制 PII 防护）。",
             "label": "写入记忆"
+          }
+        },
+        "mobile": {
+          "camera": {
+            "description": "在已配对手机上打开相机，把拍摄结果（base64）返回给运行。",
+            "label": "手机拍照"
+          },
+          "location": {
+            "description": "从已配对手机读取当前 GPS 位置。",
+            "label": "获取手机定位"
+          },
+          "notify": {
+            "description": "在已配对手机上显示一条本地通知。",
+            "label": "通知手机"
+          },
+          "scanBarcode": {
+            "description": "在已配对手机上打开扫码器，返回条码/二维码原始值。",
+            "label": "手机扫码"
+          },
+          "share": {
+            "description": "在已配对手机上打开系统分享面板，分享给定文本或链接。",
+            "label": "从手机分享"
           }
         },
         "pet": {
