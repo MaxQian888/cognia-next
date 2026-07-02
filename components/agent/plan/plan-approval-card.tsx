@@ -2,20 +2,45 @@
 
 /**
  * Inline plan approval card (ADR-0045 P5). A controlled component: it renders
- * a draft / awaiting-approval `AgentPlan` and surfaces approve / reject /
- * refine actions as callbacks, so the host wires them to the plan runtime
+ * a draft / awaiting-approval `AgentPlan` and surfaces the Claude-Code-style
+ * approval decisions as callbacks, so the host wires them to the plan runtime
  * (and, for refine, an LlmClient). Mirrors the team `PlanApprovalPanel`.
+ *
+ * Decision model (Claude Code parity):
+ *  - "Yes, auto-accept edits"   → onApprove("acceptEdits")
+ *  - "Yes, review each edit"    → onApprove("default")
+ *  - "Approve & run fully automated" (overflow, elevated) → onApprove("auto")
+ *  - "No, keep planning"        → onKeepPlanning(feedback?) — non-destructive
+ *  - "Discard plan" (overflow, destructive) → onDiscard(feedback?)
+ *  - refine presets (overflow)  → onRefine(type, feedback?)
+ *  - pencil toggle              → inline title/steps edit, saved via onEdit
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, CircleIcon, ClockIcon, MinusCircleIcon, XCircleIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  CircleIcon,
+  ClockIcon,
+  MinusCircleIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  XCircleIcon,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { permissionRiskMarker } from "@/lib/settings/permission-mode-meta"
 import {
   computePlanCounts,
   type AgentPlan,
@@ -32,6 +57,12 @@ const REFINE_LABEL_KEY: Record<PlanRefinementType, string> = {
   reorder: "approval.refineReorder",
   repair: "approval.refineRepair",
 }
+
+/**
+ * The permission mode the session resumes in after an approval. Maps 1:1 onto
+ * `PermissionMode` members — the host applies it directly, no translation.
+ */
+export type PlanResumeMode = "acceptEdits" | "default" | "auto"
 
 export function stepStatusIcon(status: PlanStepStatus) {
   switch (status) {
@@ -51,118 +82,275 @@ export function stepStatusIcon(status: PlanStepStatus) {
 
 export interface PlanApprovalCardProps {
   plan: AgentPlan
-  onApprove: () => void
-  onReject: (feedback?: string) => void
-  /** When provided, refine controls are shown. */
+  /** Approve the plan; `mode` is the permission mode the session resumes in. */
+  onApprove: (mode: PlanResumeMode) => void
+  /**
+   * "No, keep planning" — defer the decision, keep the plan as a draft, stay
+   * in plan mode. Non-empty feedback should be sent to the model as a normal
+   * follow-up turn by the host.
+   */
+  onKeepPlanning: (feedback?: string) => void
+  /** Destructive discard (plan → cancelled). */
+  onDiscard: (feedback?: string) => void
+  /** When provided, refine presets are shown in the overflow menu. */
   onRefine?: (type: PlanRefinementType, feedback?: string) => void
+  /**
+   * When provided (and the plan is awaiting approval), a pencil toggle opens
+   * an inline editor; saving hands the edited title + one-per-line step titles
+   * to the host, which persists them via the runtime's `updatePlanDraft`.
+   */
+  onEdit?: (patch: { title: string; stepTitles: string[] }) => void
+  /** Disables all actions (e.g. while an approve/refine is in flight). */
+  disabled?: boolean
 }
 
-export function PlanApprovalCard({ plan, onApprove, onReject, onRefine }: PlanApprovalCardProps) {
+export function PlanApprovalCard({
+  plan,
+  onApprove,
+  onKeepPlanning,
+  onDiscard,
+  onRefine,
+  onEdit,
+  disabled,
+}: PlanApprovalCardProps) {
   const t = useTranslations("plan")
   const [feedback, setFeedback] = useState("")
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState("")
+  const [editSteps, setEditSteps] = useState("")
   const steps = [...plan.steps].sort((a, b) => a.order - b.order)
   const trimmed = () => feedback.trim() || undefined
   const { totalSteps, completedSteps } = computePlanCounts(plan.steps)
   const progressPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0
+  const canEdit = Boolean(onEdit) && plan.status === "awaiting_approval"
 
+  const openEditor = () => {
+    setEditTitle(plan.title)
+    setEditSteps(steps.map((s) => s.title).join("\n"))
+    setEditing(true)
+  }
+
+  const saveEdit = () => {
+    const stepTitles = editSteps
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+    onEdit?.({ title: editTitle.trim() || plan.title, stepTitles })
+    setEditing(false)
+  }
+
+  // max-h (not h) + flex column: short plans stay compact; long plans cap at
+  // 45vh with only the step list scrolling, so the action row and the composer
+  // below the dock are never pushed off-screen.
   return (
-    <Card className="space-y-3 p-3" data-testid="plan-approval-card">
+    <Card className="flex max-h-[45vh] flex-col gap-3 p-3" data-testid="plan-approval-card">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-semibold">{t("approval.title")}</span>
-        <Badge variant="secondary">{t(`status.${plan.status}`)}</Badge>
-      </div>
-
-      <div>
-        <div className="text-sm font-medium break-words">{plan.title}</div>
-        <div className="text-xs text-muted-foreground">
-          {t("approval.sourceLabel", { source: plan.source })}
+        <div className="flex items-center gap-1">
+          {canEdit && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-6"
+              disabled={disabled}
+              onClick={() => (editing ? setEditing(false) : openEditor())}
+              aria-label={t("approval.edit")}
+              data-testid="plan-approval-edit"
+            >
+              <PencilIcon className="size-3.5" />
+            </Button>
+          )}
+          <Badge variant="secondary">{t(`status.${plan.status}`)}</Badge>
         </div>
       </div>
 
-      {totalSteps > 0 && (
-        <div className="space-y-1" data-testid="plan-approval-progress">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{t("approval.progressLabel")}</span>
-            <span className="tabular-nums">
-              {completedSteps}/{totalSteps}
-            </span>
-          </div>
-          <div
-            className="h-1.5 overflow-hidden rounded-full bg-muted"
-            role="progressbar"
-            aria-valuenow={progressPct}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={t("approval.progressLabel")}
-          >
-            <div
-              className="h-full rounded-full bg-primary transition-all"
-              style={{ width: `${progressPct}%` }}
-            />
+      {editing ? (
+        <div className="flex min-h-0 flex-col gap-2" data-testid="plan-approval-editor">
+          <label className="text-xs text-muted-foreground" htmlFor="plan-edit-title">
+            {t("approval.editTitleLabel")}
+          </label>
+          <Input
+            id="plan-edit-title"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            className="h-8 text-sm"
+            data-testid="plan-edit-title"
+          />
+          <label className="text-xs text-muted-foreground" htmlFor="plan-edit-steps">
+            {t("approval.editStepsLabel")}
+          </label>
+          <Textarea
+            id="plan-edit-steps"
+            rows={8}
+            value={editSteps}
+            onChange={(e) => setEditSteps(e.target.value)}
+            placeholder={t("approval.editStepsHint")}
+            className="min-h-0 flex-1 text-xs"
+            data-testid="plan-edit-steps"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled}
+              onClick={() => setEditing(false)}
+              data-testid="plan-edit-cancel"
+            >
+              {t("approval.editCancel")}
+            </Button>
+            <Button size="sm" disabled={disabled} onClick={saveEdit} data-testid="plan-edit-save">
+              {t("approval.editSave")}
+            </Button>
           </div>
         </div>
-      )}
-
-      {steps.length > 0 ? (
-        <ScrollArea className="max-h-48 rounded-md bg-muted/40">
-          <ul className="space-y-1 p-2" data-testid="plan-approval-steps">
-            {steps.map((s) => (
-              <li key={s.id} className="flex items-start gap-2 text-xs" data-status={s.status}>
-                {stepStatusIcon(s.status)}
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 break-words",
-                    s.status === "completed" && "text-muted-foreground line-through"
-                  )}
-                >
-                  {s.title}
-                </span>
-                <Badge variant="outline" className="shrink-0 text-[10px]">
-                  {s.kind}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        </ScrollArea>
       ) : (
-        <p className="text-xs italic text-muted-foreground">{t("approval.noSteps")}</p>
-      )}
+        <>
+          <div>
+            <div className="text-sm font-medium break-words">{plan.title}</div>
+            <div className="text-xs text-muted-foreground">
+              {t("approval.sourceLabel", { source: plan.source })}
+            </div>
+          </div>
 
-      <Textarea
-        rows={2}
-        value={feedback}
-        onChange={(e) => setFeedback(e.target.value)}
-        placeholder={t("approval.feedbackPlaceholder")}
-        className="text-xs"
-        data-testid="plan-approval-feedback"
-      />
-
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        {onRefine
-          ? REFINE_TYPES.map((rt) => (
-              <Button
-                key={rt}
-                size="sm"
-                variant="ghost"
-                onClick={() => onRefine(rt, trimmed())}
-                data-testid={`plan-refine-${rt}`}
+          {totalSteps > 0 && (
+            <div className="space-y-1" data-testid="plan-approval-progress">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{t("approval.progressLabel")}</span>
+                <span className="tabular-nums">
+                  {completedSteps}/{totalSteps}
+                </span>
+              </div>
+              <div
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                aria-valuenow={progressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={t("approval.progressLabel")}
               >
-                {t(REFINE_LABEL_KEY[rt])}
-              </Button>
-            ))
-          : null}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onReject(trimmed())}
-          data-testid="plan-approval-reject"
-        >
-          {t("approval.reject")}
-        </Button>
-        <Button size="sm" onClick={onApprove} data-testid="plan-approval-approve">
-          {t("approval.approve")}
-        </Button>
-      </div>
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {steps.length > 0 ? (
+            // Native overflow, not Radix ScrollArea: a persistent grabbable thumb
+            // that keeps working while text is selected inside the transcript.
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md bg-muted/40">
+              <ul className="space-y-1 p-2" data-testid="plan-approval-steps">
+                {steps.map((s) => (
+                  <li key={s.id} className="flex items-start gap-2 text-xs" data-status={s.status}>
+                    {stepStatusIcon(s.status)}
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 break-words",
+                        s.status === "completed" && "text-muted-foreground line-through"
+                      )}
+                    >
+                      {s.title}
+                    </span>
+                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                      {s.kind}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-xs italic text-muted-foreground">{t("approval.noSteps")}</p>
+          )}
+
+          <Textarea
+            rows={2}
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder={t("approval.feedbackPlaceholder")}
+            className="text-xs"
+            data-testid="plan-approval-feedback"
+          />
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-8"
+                  disabled={disabled}
+                  aria-label={t("approval.moreActions")}
+                  data-testid="plan-approval-more"
+                >
+                  <MoreHorizontalIcon className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {/* Fully-automated run is an elevated-risk mode (outside the safe
+                    cycle), so it lives here rather than as a primary button. */}
+                <DropdownMenuItem
+                  disabled={disabled}
+                  onSelect={() => onApprove("auto")}
+                  data-testid="plan-approval-approve-full-auto"
+                >
+                  {`${permissionRiskMarker("auto")} ${t("approval.approveFullAuto")}`.trim()}
+                </DropdownMenuItem>
+                {onRefine && (
+                  <>
+                    <DropdownMenuSeparator />
+                    {REFINE_TYPES.map((rt) => (
+                      <DropdownMenuItem
+                        key={rt}
+                        disabled={disabled}
+                        onSelect={() => onRefine(rt, trimmed())}
+                        data-testid={`plan-refine-${rt}`}
+                      >
+                        {t(REFINE_LABEL_KEY[rt])}
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={disabled}
+                  onSelect={() => onDiscard(trimmed())}
+                  data-testid="plan-approval-discard"
+                >
+                  {t("approval.discard")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => onKeepPlanning(trimmed())}
+              data-testid="plan-approval-keep-planning"
+            >
+              {t("approval.keepPlanning")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => onApprove("default")}
+              data-testid="plan-approval-approve-review"
+            >
+              {t("approval.approveReviewEach")}
+            </Button>
+            <Button
+              size="sm"
+              disabled={disabled}
+              onClick={() => onApprove("acceptEdits")}
+              data-testid="plan-approval-approve-auto"
+            >
+              {t("approval.approveAcceptEdits")}
+            </Button>
+          </div>
+        </>
+      )}
     </Card>
   )
 }

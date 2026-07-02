@@ -10,7 +10,6 @@
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import type { AgentPlan, PlanStepStatus } from "@/types/agent/plan"
 import { stepStatusIcon } from "./plan-approval-card"
@@ -57,7 +56,9 @@ export function PlanTrackerPanel({ plan }: PlanTrackerPanelProps) {
       </div>
 
       {steps.length > 0 ? (
-        <ScrollArea className="max-h-64 rounded-md bg-muted/40">
+        // Native overflow, not Radix ScrollArea: persistent grabbable thumb
+        // that keeps working while text is selected (see plan-approval-card).
+        <div className="max-h-64 overflow-y-auto overscroll-contain rounded-md bg-muted/40">
           <ul className="space-y-1 p-2" data-testid="plan-tracker-steps">
             {steps.map((s) => (
               <li
@@ -82,7 +83,7 @@ export function PlanTrackerPanel({ plan }: PlanTrackerPanelProps) {
               </li>
             ))}
           </ul>
-        </ScrollArea>
+        </div>
       ) : (
         <p className="text-xs italic text-muted-foreground">{t("tracker.empty")}</p>
       )}

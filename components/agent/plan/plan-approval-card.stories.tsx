@@ -10,19 +10,26 @@ const meta = {
   args: {
     plan: buildDraftPlan(),
     onApprove: fn(),
-    onReject: fn(),
+    onKeepPlanning: fn(),
+    onDiscard: fn(),
   },
 } satisfies Meta<typeof PlanApprovalCard>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Approve / reject only (no refine controls).
+// Approve / keep-planning / discard only (no refine or edit affordances).
 export const Default: Story = {}
 
-// With onRefine, the four refinement buttons appear.
+// With onRefine, the refinement actions appear in the overflow menu.
 export const WithRefine: Story = {
   args: { onRefine: fn() },
+}
+
+// With onEdit and an awaiting-approval plan, the pencil toggle opens the
+// inline title/steps editor.
+export const WithInlineEdit: Story = {
+  args: { onEdit: fn() },
 }
 
 // A partially-executed plan shows progress + struck-through completed steps.
