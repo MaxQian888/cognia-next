@@ -7,6 +7,9 @@ import React from "react"
 import { render as inkRender } from "ink"
 
 import { App } from "./components/App"
+import { AppErrorBoundary } from "./components/AppErrorBoundary"
+import { defaultCrashLogger } from "./crash-log"
+import { installProcessCrashGuards } from "./process-guards"
 import { loadHistory } from "./input/history-store"
 import { mintSessionId } from "../agent/run"
 import { resolveActiveModel } from "../config/active-model"
@@ -34,6 +37,12 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // it once the folder has been confirmed (persisted in ~/.cognia).
   const home = resolveHome(process.env, os.homedir())
   const trusted = isTrusted(home, deps.config.cwd)
+  // Crash resilience: log render throws (via the error boundary below) and
+  // async faults (uncaughtException / unhandledRejection) to ~/.cognia/logs, and
+  // keep the TUI alive on a stray rejection instead of letting Node tear it down
+  // and smear the terminal. Guards are removed in the `finally` restore below.
+  const crashLogger = defaultCrashLogger(home)
+  const uninstallCrashGuards = installProcessCrashGuards(crashLogger)
   // Pin the displayed model to the one the agent will actually run with, so the
   // banner/footer/`/model` list are in sync from the very first frame — not just
   // after the user switches providers once (which is what used to set it).
@@ -65,15 +74,17 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
     applyMouseMode(config.mouse ?? DEFAULT_MOUSE_MODE)
   }
   const instance = render(
-    <App
-      config={config}
-      sessionId={sessionId}
-      createSession={deps.createSession}
-      pushHandoff={deps.pushHandoff}
-      trusted={trusted}
-      initialHistory={initialHistory}
-      altScreenPreEntered={fullscreen}
-    />,
+    <AppErrorBoundary onCrash={(err, stack) => crashLogger("render", err, stack)}>
+      <App
+        config={config}
+        sessionId={sessionId}
+        createSession={deps.createSession}
+        pushHandoff={deps.pushHandoff}
+        trusted={trusted}
+        initialHistory={initialHistory}
+        altScreenPreEntered={fullscreen}
+      />
+    </AppErrorBoundary>,
     // The App owns Ctrl+C: a single press shows the "press again to exit" hint,
     // a double press exits. Ink's built-in `exitOnCtrlC` (default true) would
     // also fire on the first press, calling `disableRawMode()` + tearing down
@@ -85,6 +96,7 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   try {
     await instance.waitUntilExit()
   } finally {
+    uninstallCrashGuards()
     disableBracketedPaste()
     // Restore the terminal's default title (no-op if disabled / non-TTY). The
     // App's unmount cleanup already does this on a clean exit; this is the

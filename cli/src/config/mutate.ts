@@ -318,6 +318,7 @@ export const BOOLEAN_FLAG_KEYS = [
   "externalSkills",
   "pluginTools",
   "notify",
+  "desktopNotifications",
 ] as const
 export type BooleanFlagKey = (typeof BOOLEAN_FLAG_KEYS)[number]
 

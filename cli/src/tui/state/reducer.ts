@@ -44,6 +44,7 @@ import type {
   ToolCell,
   TodoCell,
   ToolStat,
+  Toast,
   TuiAction,
   TuiState,
   UsageInfo,
@@ -67,6 +68,15 @@ import {
 
 function makeId(seq: number): string {
   return `c${seq}`
+}
+
+/** Max transient toasts kept on screen at once (newest win; oldest drop). */
+const MAX_TOASTS = 3
+
+/** Append a toast, keeping only the most recent {@link MAX_TOASTS}. Pure. */
+function pushToast(list: Toast[], toast: Toast): Toast[] {
+  const next = [...list, toast]
+  return next.length > MAX_TOASTS ? next.slice(next.length - MAX_TOASTS) : next
 }
 
 /**
@@ -585,6 +595,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         usageSeenThisTurn: false,
         planCapturedThisTurn: false,
         overlay: { kind: "none" },
+        // A fresh send respawns a dead sidecar, so clear the "backend down" flag.
+        sidecarDown: false,
       }
     }
     case "TURN_COMMIT": {
@@ -636,6 +648,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
         lastPlan,
+        lastCompletion: { kind: "turn", status: "done", label: "Response ready" },
         ...(fallbackUsage
           ? {
               usage: fallbackUsage,
@@ -667,13 +680,20 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         state.inflight.tools.length > 0 ? [...state.cells, ...state.inflight.tools] : state.cells
       const committed = commitInflight(baseCells, state.inflight, state.seq)
       const finalCells = committed.cells
-      finalCells.push({ id: makeId(committed.seq), kind: "error", message: action.message })
+      finalCells.push({
+        id: makeId(committed.seq),
+        kind: "error",
+        message: action.message,
+        ...(action.hint ? { hint: action.hint } : {}),
+        ...(action.category ? { category: action.category } : {}),
+      })
       return {
         ...state,
         cells: finalCells,
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
+        lastCompletion: { kind: "turn", status: "error", label: action.title ?? "Error" },
       }
     }
     case "TURN_ABORTED": {
@@ -690,6 +710,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
+        lastCompletion: { kind: "turn", status: "aborted", label: "Interrupted" },
       }
     }
 
@@ -715,17 +736,36 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         },
       }
     case "ACTIVITY_END": {
-      const cells = action.summary
-        ? [
-            ...state.cells,
-            { id: makeId(state.seq), kind: "notice" as const, message: action.summary },
-          ]
-        : state.cells
+      // Human label for the notification + the error toast, derived from the
+      // running activity (kind + label) so a run that ends while you're tabbed
+      // away is identifiable. Falls back to a generic phrase if the pill is gone.
+      const runLabel = state.activity
+        ? `${state.activity.label || state.activity.kind} ${action.status}`
+        : `Background run ${action.status}`
+      let seq = state.seq
+      const cells = [...state.cells]
+      if (action.summary) {
+        cells.push({ id: makeId(seq++), kind: "notice" as const, message: action.summary })
+      }
+      // An errored run used to vanish silently when it carried no summary — the
+      // pill just disappeared. Always surface the failure as an error toast so it
+      // can't pass unnoticed (in addition to any summary notice above).
+      let toasts = state.toasts
+      if (action.status === "error") {
+        toasts = pushToast(toasts, {
+          id: makeId(seq++),
+          severity: "error",
+          message: runLabel,
+          ...(action.summary ? {} : { hint: "See the transcript above for details." }),
+        })
+      }
       return {
         ...state,
         cells,
-        seq: action.summary ? state.seq + 1 : state.seq,
+        seq,
+        toasts,
         activity: undefined,
+        lastCompletion: { kind: "activity", status: action.status, label: runLabel },
       }
     }
     case "WORKFLOW_RUN_START":
@@ -883,12 +923,43 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       }
     case "EDIT_CLEAR":
       return state.editTarget ? { ...state, editTarget: undefined } : state
-    case "NOTICE":
+    case "NOTICE": {
+      const cells = [
+        ...state.cells,
+        { id: makeId(state.seq), kind: "notice" as const, message: action.message },
+      ]
+      // When flagged, also surface a transient toast so the message isn't lost in
+      // scrollback (uses a second seq tick for a stable, unique toast id).
+      if (action.toast) {
+        const toastId = makeId(state.seq + 1)
+        return {
+          ...state,
+          cells,
+          seq: state.seq + 2,
+          toasts: pushToast(state.toasts, {
+            id: toastId,
+            severity: action.severity ?? "info",
+            message: action.message,
+          }),
+        }
+      }
+      return { ...state, cells, seq: state.seq + 1 }
+    }
+    case "TOAST_PUSH":
       return {
         ...state,
-        cells: [...state.cells, { id: makeId(state.seq), kind: "notice", message: action.message }],
+        toasts: pushToast(state.toasts, {
+          id: makeId(state.seq),
+          severity: action.severity,
+          message: action.message,
+          ...(action.hint ? { hint: action.hint } : {}),
+        }),
         seq: state.seq + 1,
       }
+    case "TOAST_DISMISS":
+      return { ...state, toasts: state.toasts.filter((t) => t.id !== action.id) }
+    case "SIDECAR_STATUS":
+      return { ...state, sidecarDown: action.down }
     case "COMPACT_BOUNDARY":
       // Render the boundary inline as a notice cell (reuses the notice renderer).
       return {
@@ -938,6 +1009,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         prDraft: undefined,
         backtrack: undefined,
         editTarget: undefined,
+        toasts: [],
+        sidecarDown: false,
       }
 
     // ── Config switches ──────────────────────────────────────────────────────────

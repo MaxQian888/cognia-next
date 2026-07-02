@@ -42,8 +42,9 @@ describe("renderTui", () => {
 
   it("passes a provided session id through to the app element", async () => {
     let mountedSessionId: string | undefined
-    const render = jest.fn((element: { props: { sessionId: string } }) => {
-      mountedSessionId = element.props.sessionId
+    // The app element is wrapped in the crash-boundary, so read through children.
+    const render = jest.fn((element: { props: { children: { props: { sessionId: string } } } }) => {
+      mountedSessionId = element.props.children.props.sessionId
       return {
         unmount: jest.fn(),
         waitUntilExit: () => Promise.resolve(),
@@ -60,32 +61,36 @@ describe("renderTui", () => {
     // config has no explicit model; the app must mount with the provider's
     // resolved default rather than `undefined` (the first-entry sync fix).
     let mountedModel: string | undefined
-    const render = jest.fn((element: { props: { config: ResolvedConfig } }) => {
-      mountedModel = element.props.config.model
-      return {
-        unmount: jest.fn(),
-        waitUntilExit: () => Promise.resolve(),
-        rerender: jest.fn(),
-        clear: jest.fn(),
-        cleanup: jest.fn(),
+    const render = jest.fn(
+      (element: { props: { children: { props: { config: ResolvedConfig } } } }) => {
+        mountedModel = element.props.children.props.config.model
+        return {
+          unmount: jest.fn(),
+          waitUntilExit: () => Promise.resolve(),
+          rerender: jest.fn(),
+          clear: jest.fn(),
+          cleanup: jest.fn(),
+        }
       }
-    }) as never
+    ) as never
     await renderTui({ config: { ...config, model: undefined }, render })
     expect(mountedModel).toBeTruthy()
   })
 
   it("preserves the theme when backfilling the active model", async () => {
     let mountedTheme: string | undefined
-    const render = jest.fn((element: { props: { config: ResolvedConfig } }) => {
-      mountedTheme = element.props.config.theme
-      return {
-        unmount: jest.fn(),
-        waitUntilExit: () => Promise.resolve(),
-        rerender: jest.fn(),
-        clear: jest.fn(),
-        cleanup: jest.fn(),
+    const render = jest.fn(
+      (element: { props: { children: { props: { config: ResolvedConfig } } } }) => {
+        mountedTheme = element.props.children.props.config.theme
+        return {
+          unmount: jest.fn(),
+          waitUntilExit: () => Promise.resolve(),
+          rerender: jest.fn(),
+          clear: jest.fn(),
+          cleanup: jest.fn(),
+        }
       }
-    }) as never
+    ) as never
     await renderTui({ config: { ...config, theme: "dark" }, render })
     expect(mountedTheme).toBe("dark")
   })
@@ -97,8 +102,26 @@ describe("renderTui", () => {
     // fullscreen path passes `true` and the App's effect skips its blank-screen
     // re-clear after Ink's first paint.
     let preEntered: unknown
-    const render = jest.fn((element: { props: { altScreenPreEntered?: boolean } }) => {
-      preEntered = element.props.altScreenPreEntered
+    const render = jest.fn(
+      (element: { props: { children: { props: { altScreenPreEntered?: boolean } } } }) => {
+        preEntered = element.props.children.props.altScreenPreEntered
+        return {
+          unmount: jest.fn(),
+          waitUntilExit: () => Promise.resolve(),
+          rerender: jest.fn(),
+          clear: jest.fn(),
+          cleanup: jest.fn(),
+        }
+      }
+    ) as never
+    await renderTui({ config, render })
+    expect(typeof preEntered).toBe("boolean")
+  })
+
+  it("wraps the app in a crash boundary with a render-crash logger", async () => {
+    let onCrash: unknown
+    const render = jest.fn((element: { props: { onCrash?: unknown } }) => {
+      onCrash = element.props.onCrash
       return {
         unmount: jest.fn(),
         waitUntilExit: () => Promise.resolve(),
@@ -108,7 +131,7 @@ describe("renderTui", () => {
       }
     }) as never
     await renderTui({ config, render })
-    expect(typeof preEntered).toBe("boolean")
+    expect(typeof onCrash).toBe("function")
   })
 
   it("enables + disables bracketed paste around the render lifecycle", async () => {

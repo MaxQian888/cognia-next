@@ -628,6 +628,11 @@ export const cliConfigFileSchema = z
      * away during a long run and be alerted). Absent ⇒ off; only fires for turns
      * that ran long enough to be worth a notification. */
     notify: z.boolean().optional(),
+    /** Whether turn/background-run completion (and errors) also fire an OSC
+     * desktop notification, not just the terminal bell — so an unfocused terminal
+     * still pops a native alert. Only takes effect when `notify` is on; set
+     * `false` to keep the bell but suppress desktop popups. Absent ⇒ enabled. */
+    desktopNotifications: z.boolean().optional(),
     /** Clipboard OSC 52 strategy for `/copy` & the copy keybinding. Absent ⇒
      * `"auto"` (native helper locally, OSC 52 over SSH). */
     clipboard: clipboardSchema.optional(),
@@ -796,6 +801,9 @@ export interface ResolvedConfig {
   terminalTitle?: boolean
   /** Ring the terminal bell when a turn finishes. Absent ⇒ off. */
   notify?: boolean
+  /** Also fire an OSC desktop notification on completion/error (needs `notify`
+   * on). Absent ⇒ enabled; `false` keeps the bell but suppresses desktop popups. */
+  desktopNotifications?: boolean
   /** Clipboard OSC 52 strategy (`auto` / `always` / `never`). Absent ⇒ `auto`
    * (native helper locally, OSC 52 escape over SSH). */
   clipboard?: ClipboardConfig

@@ -189,6 +189,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     layout: layer.layout ?? acc.layout,
     mouse: layer.mouse ?? acc.mouse,
     notify: layer.notify ?? acc.notify,
+    desktopNotifications: layer.desktopNotifications ?? acc.desktopNotifications,
     clipboard: layer.clipboard
       ? { ...acc.clipboard, ...stripUndefined(layer.clipboard) }
       : acc.clipboard,

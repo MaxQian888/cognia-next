@@ -292,6 +292,16 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         },
       },
       {
+        id: "desktopNotifications",
+        label: "Desktop notifications on completion (needs bell on)",
+        value: onOff(config.notify === true && config.desktopNotifications !== false),
+        control: {
+          type: "boolean",
+          current: config.desktopNotifications !== false,
+          apply: { kind: "flag", key: "desktopNotifications" },
+        },
+      },
+      {
         id: "maxLines",
         label: "Inline result line cap",
         value: String(render.toolResultMaxLines),

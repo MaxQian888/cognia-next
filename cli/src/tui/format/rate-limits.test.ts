@@ -5,6 +5,7 @@ import {
   rateLimitResetText,
   rateLimitRightLabel,
   rateLimitSeverity,
+  rateLimitWarning,
   tightestRemainingPct,
 } from "./rate-limits"
 
@@ -147,5 +148,46 @@ describe("tightestRemainingPct", () => {
       NOW
     )
     expect(tightestRemainingPct(snap!)).toBe(12)
+  })
+})
+
+describe("rateLimitWarning", () => {
+  const snap = (limit: number, remaining: number) =>
+    parseRateLimitHeaders(
+      {
+        "anthropic-ratelimit-requests-limit": String(limit),
+        "anthropic-ratelimit-requests-remaining": String(remaining),
+      },
+      NOW
+    )!
+
+  it("returns null below the crit threshold", () => {
+    expect(rateLimitWarning(snap(100, 50))).toBeNull() // 50% used
+    expect(rateLimitWarning(snap(100, 12))).toBeNull() // 88% used (< 90)
+  })
+
+  it("warns at the crit threshold (>=90%)", () => {
+    const w = rateLimitWarning(snap(100, 8)) // 92% used
+    expect(w).toMatchObject({ severity: "warn", level: "crit" })
+    expect(w!.message).toMatch(/Approaching rate limit/)
+  })
+
+  it("errors when exhausted (>=100%)", () => {
+    const w = rateLimitWarning(snap(100, 0)) // 100% used
+    expect(w).toMatchObject({ severity: "error", level: "exceeded" })
+    expect(w!.message).toMatch(/Rate limit reached/)
+  })
+
+  it("picks the worst meter across windows", () => {
+    const both = parseRateLimitHeaders(
+      {
+        "anthropic-ratelimit-requests-limit": "100",
+        "anthropic-ratelimit-requests-remaining": "80", // 20% used
+        "anthropic-ratelimit-tokens-limit": "1000",
+        "anthropic-ratelimit-tokens-remaining": "0", // 100% used ← worst
+      },
+      NOW
+    )!
+    expect(rateLimitWarning(both)).toMatchObject({ level: "exceeded" })
   })
 })

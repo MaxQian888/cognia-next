@@ -142,4 +142,40 @@ describe("createHookRunner", () => {
     const { runner } = harness({})
     expect(await runner.preToolUse("Edit", {})).toEqual({ deny: false })
   })
+
+  it("fires SessionStart and SessionEnd", async () => {
+    const start = harness({ SessionStart: [{ hooks: [{ type: "command", command: "start.sh" }] }] })
+    start.runner.onSessionStart("ses-1")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(start.spawned).toContain("start.sh")
+
+    const end = harness({ SessionEnd: [{ hooks: [{ type: "command", command: "end.sh" }] }] })
+    end.runner.onSessionEnd("ses-1")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(end.spawned).toContain("end.sh")
+  })
+
+  it("fires PermissionRequest AND Notification on a permission request", async () => {
+    const { spawned, runner } = harness({
+      PermissionRequest: [{ hooks: [{ type: "command", command: "perm.sh" }] }],
+      Notification: [{ hooks: [{ type: "command", command: "notify.sh" }] }],
+    })
+    runner.onPermissionRequest("Bash", { command: "ls" })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(spawned).toContain("perm.sh")
+    expect(spawned).toContain("notify.sh")
+  })
+
+  it("fires PermissionDenied on a denial", async () => {
+    const { spawned, runner } = harness({
+      PermissionDenied: [{ hooks: [{ type: "command", command: "denied.sh" }] }],
+    })
+    runner.onPermissionDenied("Bash", "user rejected")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(spawned).toContain("denied.sh")
+  })
 })

@@ -85,8 +85,9 @@ export function computeTitle(phase: TitlePhase): string {
 /**
  * Strip anything that would terminate or corrupt the OSC string (control chars
  * incl. ESC/BEL, newlines), collapse runs of whitespace, and cap the length.
+ * Exported for reuse by other OSC emitters (e.g. desktop notifications).
  */
-function sanitize(text: string): string {
+export function sanitize(text: string): string {
   const cleaned = text
     .replace(/[\x00-\x1f\x7f]/g, " ")
     .replace(/\s+/g, " ")

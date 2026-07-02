@@ -55,5 +55,6 @@ export function createInitialState(
     exit: false,
     seq: 0,
     streamSeq: 0,
+    toasts: [],
   }
 }

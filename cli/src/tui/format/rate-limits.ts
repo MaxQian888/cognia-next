@@ -122,6 +122,47 @@ export function rateLimitColor(usedPct: number): MeterColorToken {
   return meterColor(rateLimitSeverity(usedPct))
 }
 
+/** A toast-worthy rate-limit warning, derived from the worst meter in a snapshot. */
+export interface RateLimitWarning {
+  severity: "warn" | "error"
+  message: string
+  hint: string
+  /** The bucket that triggered it — used by the caller to de-dupe repeats. */
+  level: "crit" | "exceeded"
+}
+
+/**
+ * Turn a live snapshot into a warning when the worst meter is crit (≥90%) or
+ * exceeded (≥100%), else null. Pure; the caller de-dupes so a stream of headers
+ * near the limit doesn't spam a toast every response.
+ */
+export function rateLimitWarning(snapshot: RateLimitSnapshot): RateLimitWarning | null {
+  let worst: RateLimitMeter | null = null
+  for (const m of snapshot.meters) {
+    if (!worst || m.usedPct > worst.usedPct) worst = m
+  }
+  if (!worst) return null
+  const sev = rateLimitSeverity(worst.usedPct)
+  const pct = Math.round(worst.usedPct)
+  if (sev === "exceeded") {
+    return {
+      severity: "error",
+      message: `Rate limit reached — ${worst.label} at ${pct}%`,
+      hint: "Requests may fail until the window resets — see /limits.",
+      level: "exceeded",
+    }
+  }
+  if (sev === "crit") {
+    return {
+      severity: "warn",
+      message: `Approaching rate limit — ${worst.label} at ${pct}%`,
+      hint: "Slow down or check the reset window with /limits.",
+      level: "crit",
+    }
+  }
+  return null
+}
+
 /** Reset subtitle for a live meter, or null when there's no parseable reset. */
 export function rateLimitResetText(resetAt: number | null, now: number): string | null {
   if (resetAt == null) return null

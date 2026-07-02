@@ -456,6 +456,19 @@ function PlanView({ cell }: { cell: PlanCell }) {
 
 function ErrorView({ cell }: { cell: ErrorCell }) {
   const theme = useTheme()
+  // A classified error carries a remediation hint — render it dim on a second
+  // line under the message so the fix is right there (not just the raw fault).
+  if (cell.hint) {
+    return (
+      <Box flexDirection="column">
+        <Text color={theme.danger}>✗ {cell.message}</Text>
+        <Text color={theme.muted} dimColor>
+          {"  ↳ "}
+          {cell.hint}
+        </Text>
+      </Box>
+    )
+  }
   return <Text color={theme.danger}>✗ {cell.message}</Text>
 }
 

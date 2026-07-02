@@ -587,6 +587,9 @@ export function App({
   const activityKind =
     state.activity && state.activity.status === "running" ? state.activity.kind : undefined
   const notifyEnabled = state.config.notify === true
+  // Desktop notifications ride on top of the bell: enabled only when notify is on
+  // AND the user hasn't explicitly opted out (`desktopNotifications: false`).
+  const desktopNotifyEnabled = notifyEnabled && state.config.desktopNotifications !== false
 
   // Terminal-integration effects: alt-screen + mouse lifecycle, dynamic
   // window/tab title, opt-in completion bell, and the scrollback resize repaint.
@@ -606,6 +609,8 @@ export function App({
     activityKind,
     cwd: state.config.cwd,
     notifyEnabled,
+    desktopNotifyEnabled,
+    lastCompletion: state.lastCompletion,
     now,
   })
 

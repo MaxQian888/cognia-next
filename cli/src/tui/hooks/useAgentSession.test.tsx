@@ -5,7 +5,22 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
+import type { HookRunner } from "../runtime/hook-runner"
 import type { TuiAction } from "../state/types"
+
+/** A spyable no-op HookRunner so tests can assert lifecycle-event firing. */
+function spyHookRunner(): jest.Mocked<HookRunner> {
+  return {
+    onCapture: jest.fn(),
+    onStop: jest.fn(),
+    onPrompt: jest.fn(),
+    preToolUse: jest.fn(async (_toolName: string, _input: unknown) => ({ deny: false })),
+    onSessionStart: jest.fn(),
+    onSessionEnd: jest.fn(),
+    onPermissionRequest: jest.fn(),
+    onPermissionDenied: jest.fn(),
+  }
+}
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -16,10 +31,19 @@ const result = (): RunAndCaptureResult => ({
   a2uiSurfaceOrder: [],
 })
 
-function harness(opts: { isLive?: boolean; sessionId?: string } = {}) {
+function harness(
+  opts: {
+    isLive?: boolean
+    sessionId?: string
+    hooks?: HookRunner
+    /** Custom `session.send` — receives the gate responder so a test can simulate
+     * a mid-turn tool permission request. */
+    sendImpl?: (prompt: string, o: { gate: (req: unknown) => Promise<unknown> }) => Promise<unknown>
+  } = {}
+) {
   const actions: TuiAction[] = []
   const dispatch = (a: TuiAction) => actions.push(a)
-  const send = jest.fn(async () => result())
+  const send = jest.fn(opts.sendImpl ?? (async () => result()))
   const close = jest.fn(async () => {})
   const setPermissionMode = jest.fn(async () => {})
   const create: CreateSession = jest.fn(() => ({
@@ -56,6 +80,7 @@ function harness(opts: { isLive?: boolean; sessionId?: string } = {}) {
       subscribeSidecar,
       requestCompact,
       createCheckpoints,
+      ...(opts.hooks ? { createHooks: () => opts.hooks as HookRunner } : {}),
     })
   )
   return {
@@ -149,6 +174,89 @@ describe("useAgentSession", () => {
       h.fireSidecar("not-an-object")
     })
     expect(h.actions.some((a) => a.type === "SET_RATE_LIMITS")).toBe(false)
+  })
+
+  it("surfaces a sidecar_exited event as SIDECAR_STATUS + an error toast", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({ type: "sidecar_exited" })
+    })
+    expect(h.actions).toContainEqual({ type: "SIDECAR_STATUS", down: true })
+    const toast = h.actions.find((a) => a.type === "TOAST_PUSH")
+    expect(toast).toMatchObject({ severity: "error", message: "Agent backend stopped" })
+  })
+
+  it("fires SessionStart when the session is lazily created", async () => {
+    const hooks = spyHookRunner()
+    const h = harness({ hooks })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(hooks.onSessionStart).toHaveBeenCalledTimes(1)
+    // A second send reuses the session — no second SessionStart.
+    await act(async () => {
+      await h.api().send("again")
+    })
+    expect(hooks.onSessionStart).toHaveBeenCalledTimes(1)
+  })
+
+  it("fires SessionEnd on /clear (drop + reset)", async () => {
+    const hooks = spyHookRunner()
+    const h = harness({ hooks })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    await act(async () => {
+      await h.api().clear("new-session")
+    })
+    expect(hooks.onSessionEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it("fires PermissionRequest on a tool ask and PermissionDenied on deny", async () => {
+    const hooks = spyHookRunner()
+    const h = harness({
+      hooks,
+      sendImpl: async (_p, o) => {
+        // Simulate the model requesting a tool mid-turn (fire-and-forget; the
+        // gate promise resolves when the UI later calls resolvePermission).
+        void o.gate({ toolName: "Bash", input: { command: "ls" } })
+        return result()
+      },
+    })
+    await act(async () => {
+      await h.api().send("run ls")
+    })
+    expect(hooks.onPermissionRequest).toHaveBeenCalledWith("Bash", { command: "ls" })
+    act(() => h.api().resolvePermission({ decision: "deny", message: "nope" }))
+    expect(hooks.onPermissionDenied).toHaveBeenCalledWith("Bash", "nope")
+  })
+
+  it("raises a rate-limit toast when a meter crosses crit, de-duped per level", () => {
+    const h = harness()
+    const critHeaders = {
+      "anthropic-ratelimit-requests-limit": "100",
+      "anthropic-ratelimit-requests-remaining": "5", // 95% used → crit
+    }
+    act(() => h.fireSidecar({ type: "usage_headers", headers: critHeaders }))
+    const first = h.actions.filter((a) => a.type === "TOAST_PUSH")
+    expect(first).toHaveLength(1)
+    expect(first[0]).toMatchObject({
+      severity: "warn",
+      message: expect.stringMatching(/Approaching/),
+    })
+    // A second reading at the same crit level must NOT re-toast.
+    act(() => h.fireSidecar({ type: "usage_headers", headers: critHeaders }))
+    expect(h.actions.filter((a) => a.type === "TOAST_PUSH")).toHaveLength(1)
+    // Escalating to exceeded toasts again (a new, more severe level).
+    act(() =>
+      h.fireSidecar({
+        type: "usage_headers",
+        headers: { ...critHeaders, "anthropic-ratelimit-requests-remaining": "0" },
+      })
+    )
+    const all = h.actions.filter((a) => a.type === "TOAST_PUSH")
+    expect(all).toHaveLength(2)
+    expect(all[1]).toMatchObject({ severity: "error" })
   })
 
   it("clear closes the session and dispatches RESET", async () => {
@@ -427,9 +535,10 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().send("crash")
     })
-    expect(h.actions.at(-1)).toEqual({
+    expect(h.actions.at(-1)).toMatchObject({
       type: "TURN_ERROR",
       message: "sidecar exited mid-run",
+      category: "sidecar",
     })
     // The stale session is dropped — close called, gate reset.
     expect(h.close).toHaveBeenCalled()
@@ -453,9 +562,10 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().send("stall")
     })
-    expect(h.actions.at(-1)).toEqual({
+    expect(h.actions.at(-1)).toMatchObject({
       type: "TURN_ERROR",
       message: "stream idle for 60000ms",
+      category: "timeout",
     })
     expect(h.close).not.toHaveBeenCalled() // session kept
     // The next message REUSES the same session (no respawn → still one create).

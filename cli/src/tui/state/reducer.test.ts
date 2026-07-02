@@ -2018,3 +2018,81 @@ describe("tuiReducer — workflow copilot mode", () => {
     expect(s.copilot).toBeUndefined()
   })
 })
+
+describe("tuiReducer — toasts & completion signals", () => {
+  it("TOAST_PUSH appends a toast and caps at three (oldest dropped)", () => {
+    const s = reduce(
+      base(),
+      { type: "TOAST_PUSH", severity: "info", message: "one" },
+      { type: "TOAST_PUSH", severity: "warn", message: "two" },
+      { type: "TOAST_PUSH", severity: "error", message: "three", hint: "fix it" },
+      { type: "TOAST_PUSH", severity: "info", message: "four" }
+    )
+    expect(s.toasts.map((t) => t.message)).toEqual(["two", "three", "four"])
+    expect(s.toasts[1]).toMatchObject({ severity: "error", hint: "fix it" })
+    // Ids are unique (derived from the monotonic seq).
+    expect(new Set(s.toasts.map((t) => t.id)).size).toBe(3)
+  })
+
+  it("TOAST_DISMISS removes the matching toast only", () => {
+    const pushed = reduce(base(), { type: "TOAST_PUSH", severity: "info", message: "keep" })
+    const id = pushed.toasts[0].id
+    const other = reduce(pushed, { type: "TOAST_PUSH", severity: "warn", message: "drop" })
+    const dropId = other.toasts[1].id
+    const after = reduce(other, { type: "TOAST_DISMISS", id: dropId })
+    expect(after.toasts.map((t) => t.id)).toEqual([id])
+  })
+
+  it("NOTICE with toast:true archives a cell AND raises a toast", () => {
+    const s = reduce(base(), { type: "NOTICE", message: "heads up", severity: "warn", toast: true })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "notice", message: "heads up" })
+    expect(s.toasts).toHaveLength(1)
+    expect(s.toasts[0]).toMatchObject({ severity: "warn", message: "heads up" })
+  })
+
+  it("NOTICE without toast only appends a cell", () => {
+    const s = reduce(base(), { type: "NOTICE", message: "quiet" })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "notice", message: "quiet" })
+    expect(s.toasts).toHaveLength(0)
+  })
+
+  it("SIDECAR_STATUS toggles the down flag; TURN_START clears it", () => {
+    const down = reduce(base(), { type: "SIDECAR_STATUS", down: true })
+    expect(down.sidecarDown).toBe(true)
+    const started = reduce(down, { type: "TURN_START", prompt: "hi" })
+    expect(started.sidecarDown).toBe(false)
+  })
+
+  it("TURN_ERROR carries hint/category and sets an error completion signal", () => {
+    const s = reduce(base(), {
+      type: "TURN_ERROR",
+      message: "401 Unauthorized",
+      hint: "run /provider",
+      category: "auth",
+      title: "Authentication failed",
+    })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "error", hint: "run /provider", category: "auth" })
+    expect(s.lastCompletion).toEqual({
+      kind: "turn",
+      status: "error",
+      label: "Authentication failed",
+    })
+  })
+
+  it("ACTIVITY_END with status error surfaces a toast even without a summary", () => {
+    const running = reduce(base(), { type: "ACTIVITY_START", kind: "goal", label: "ship it" })
+    const ended = reduce(running, { type: "ACTIVITY_END", status: "error" })
+    expect(ended.activity).toBeUndefined()
+    expect(ended.toasts).toHaveLength(1)
+    expect(ended.toasts[0]).toMatchObject({ severity: "error", message: "ship it error" })
+    expect(ended.lastCompletion).toMatchObject({ kind: "activity", status: "error" })
+  })
+
+  it("ACTIVITY_END done with a summary appends a notice and no toast", () => {
+    const running = reduce(base(), { type: "ACTIVITY_START", kind: "loop", label: "loop" })
+    const ended = reduce(running, { type: "ACTIVITY_END", status: "done", summary: "3 turns" })
+    expect(ended.cells.at(-1)).toMatchObject({ kind: "notice", message: "3 turns" })
+    expect(ended.toasts).toHaveLength(0)
+    expect(ended.lastCompletion).toMatchObject({ kind: "activity", status: "done" })
+  })
+})

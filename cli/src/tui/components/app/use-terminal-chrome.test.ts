@@ -4,6 +4,7 @@ import { useTerminalChrome, type TerminalChromeOptions } from "./use-terminal-ch
 import * as screenMod from "../../screen"
 import * as titleMod from "../../terminal-title"
 import * as notifyMod from "../../notify"
+import * as notifyDesktopMod from "../../notify-desktop"
 import type { ScreenStream } from "../../screen"
 import type { TitleStream } from "../../terminal-title"
 
@@ -21,6 +22,9 @@ jest.mock("../../terminal-title", () => ({
 jest.mock("../../notify", () => ({
   emitCompletionBell: jest.fn(),
   shouldNotifyOnDone: jest.fn(() => true),
+}))
+jest.mock("../../notify-desktop", () => ({
+  emitDesktopNotification: jest.fn(),
 }))
 
 const screen = { write: jest.fn() } as unknown as ScreenStream
@@ -43,6 +47,8 @@ function baseOpts(over: Partial<TerminalChromeOptions> = {}): TerminalChromeOpti
     activityKind: undefined,
     cwd: "/repo/project",
     notifyEnabled: false,
+    desktopNotifyEnabled: false,
+    lastCompletion: undefined,
     now: () => 0,
     ...over,
   }
@@ -101,26 +107,95 @@ describe("useTerminalChrome — title", () => {
   })
 })
 
-describe("useTerminalChrome — completion bell", () => {
+describe("useTerminalChrome — completion notification", () => {
   afterEach(() => jest.clearAllMocks())
 
-  it("rings the bell on a busy→idle transition when the gate passes", () => {
+  const doneTurn = { kind: "turn" as const, status: "done" as const, label: "Response ready" }
+
+  it("rings the bell on a done turn when the elapsed gate passes", () => {
     const now = jest.fn().mockReturnValueOnce(1000).mockReturnValueOnce(6000)
     const { rerender } = renderHook((p: TerminalChromeOptions) => useTerminalChrome(p), {
       initialProps: baseOpts({ busy: true, notifyEnabled: true, now }),
     })
-    rerender(baseOpts({ busy: false, notifyEnabled: true, now }))
+    rerender(baseOpts({ busy: false, notifyEnabled: true, lastCompletion: doneTurn, now }))
     expect(notifyMod.shouldNotifyOnDone).toHaveBeenCalledWith(true, 5000)
     expect(notifyMod.emitCompletionBell).toHaveBeenCalledWith(titleSink, undefined)
   })
 
-  it("does not ring on the busy→idle transition when the gate fails", () => {
+  it("does not ring a done turn when the elapsed gate fails", () => {
     ;(notifyMod.shouldNotifyOnDone as jest.Mock).mockReturnValueOnce(false)
     const { rerender } = renderHook((p: TerminalChromeOptions) => useTerminalChrome(p), {
       initialProps: baseOpts({ busy: true, notifyEnabled: true }),
     })
-    rerender(baseOpts({ busy: false, notifyEnabled: true }))
+    rerender(baseOpts({ busy: false, notifyEnabled: true, lastCompletion: doneTurn }))
     expect(notifyMod.emitCompletionBell).not.toHaveBeenCalled()
+  })
+
+  it("always rings on an error completion regardless of duration", () => {
+    const errorTurn = { kind: "turn" as const, status: "error" as const, label: "Auth failed" }
+    const { rerender } = renderHook((p: TerminalChromeOptions) => useTerminalChrome(p), {
+      initialProps: baseOpts({ busy: true, notifyEnabled: true }),
+    })
+    rerender(baseOpts({ busy: false, notifyEnabled: true, lastCompletion: errorTurn }))
+    // The elapsed gate is bypassed for errors.
+    expect(notifyMod.shouldNotifyOnDone).not.toHaveBeenCalled()
+    expect(notifyMod.emitCompletionBell).toHaveBeenCalled()
+  })
+
+  it("never notifies on an aborted completion", () => {
+    const aborted = { kind: "turn" as const, status: "aborted" as const, label: "Interrupted" }
+    const { rerender } = renderHook((p: TerminalChromeOptions) => useTerminalChrome(p), {
+      initialProps: baseOpts({ busy: true, notifyEnabled: true }),
+    })
+    rerender(baseOpts({ busy: false, notifyEnabled: true, lastCompletion: aborted }))
+    expect(notifyMod.emitCompletionBell).not.toHaveBeenCalled()
+    expect(notifyDesktopMod.emitDesktopNotification).not.toHaveBeenCalled()
+  })
+
+  it("notifies on a background-run completion (no busy edge) when notify is on", () => {
+    const activityDone = { kind: "activity" as const, status: "done" as const, label: "goal done" }
+    const { rerender } = renderHook((p: TerminalChromeOptions) => useTerminalChrome(p), {
+      initialProps: baseOpts({ notifyEnabled: true }),
+    })
+    rerender(baseOpts({ notifyEnabled: true, lastCompletion: activityDone }))
+    expect(notifyMod.emitCompletionBell).toHaveBeenCalled()
+  })
+
+  it("fires a desktop notification when desktopNotifyEnabled, with an error title", () => {
+    const errorTurn = { kind: "turn" as const, status: "error" as const, label: "Network error" }
+    const { rerender } = renderHook((p: TerminalChromeOptions) => useTerminalChrome(p), {
+      initialProps: baseOpts({ busy: true, notifyEnabled: true, desktopNotifyEnabled: true }),
+    })
+    rerender(
+      baseOpts({
+        busy: false,
+        notifyEnabled: true,
+        desktopNotifyEnabled: true,
+        lastCompletion: errorTurn,
+      })
+    )
+    expect(notifyDesktopMod.emitDesktopNotification).toHaveBeenCalledWith(
+      "cognia — error",
+      "Network error",
+      titleSink,
+      undefined
+    )
+  })
+
+  it("suppresses the desktop notification when only the bell is enabled", () => {
+    const { rerender } = renderHook((p: TerminalChromeOptions) => useTerminalChrome(p), {
+      initialProps: baseOpts({ busy: true, notifyEnabled: true, desktopNotifyEnabled: false }),
+    })
+    rerender(
+      baseOpts({
+        busy: false,
+        notifyEnabled: true,
+        desktopNotifyEnabled: false,
+        lastCompletion: doneTurn,
+      })
+    )
+    expect(notifyMod.emitCompletionBell).toHaveBeenCalled()
+    expect(notifyDesktopMod.emitDesktopNotification).not.toHaveBeenCalled()
   })
 })
 

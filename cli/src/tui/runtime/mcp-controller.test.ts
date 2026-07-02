@@ -135,7 +135,7 @@ describe("mcpAuthStartupNotices", () => {
     expect((actions[0] as { message: string }).message).toContain("/mcp auth gh")
   })
 
-  it("stays silent when a probe throws (treated as failed, not auth)", async () => {
+  it("raises a warn toast when a probe throws/fails (not an auth notice)", async () => {
     const { dispatch, actions } = recorder()
     await mcpAuthStartupNotices({
       ...base,
@@ -145,7 +145,12 @@ describe("mcpAuthStartupNotices", () => {
         throw new Error("boom")
       },
     })
-    expect(actions).toHaveLength(0)
+    expect(actions).toHaveLength(1)
+    expect(actions[0]).toMatchObject({
+      type: "TOAST_PUSH",
+      severity: "warn",
+      message: expect.stringContaining('"flaky" failed to load'),
+    })
   })
 
   it("does nothing when no remote servers are configured", async () => {

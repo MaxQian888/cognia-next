@@ -283,6 +283,17 @@ export async function mcpAuthStartupNotices(deps: McpDeps): Promise<void> {
               type: "NOTICE",
               message: `⚠ MCP server "${s.name}" needs authorization — run /mcp auth ${s.name}`,
             })
+          } else if (result.status === "failed") {
+            // A server that fails to load used to be visible only if the user
+            // opened /mcp. Surface it as a transient warn toast so a broken MCP
+            // config isn't silently swallowed at startup (probed once per server,
+            // so no de-dup needed).
+            deps.dispatch({
+              type: "TOAST_PUSH",
+              severity: "warn",
+              message: `MCP server "${s.name}" failed to load`,
+              hint: "Open /mcp to see the error.",
+            })
           }
         })
     )

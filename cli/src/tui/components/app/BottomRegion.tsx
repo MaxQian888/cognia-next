@@ -9,6 +9,8 @@ import React from "react"
 import { Box, Text, type DOMElement } from "ink"
 
 import { BottomStatus, type AgentTreeHit } from "../BottomStatus"
+import { Toasts } from "../Toasts"
+import { useToastExpiry } from "./use-toast-expiry"
 import { FindBar } from "../FindBar"
 import { Input } from "../Input"
 import { Mascot } from "../Mascot"
@@ -90,8 +92,13 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     footerSegmentsRef,
   } = props
 
+  // Auto-expire transient toasts (severity-dependent TTL). The reducer stays
+  // pure; the timing lives here with the render that shows them.
+  useToastExpiry(state.toasts, dispatch)
+
   return (
     <>
+      <Toasts toasts={state.toasts} />
       <BottomStatus
         turnStatus={state.turnStatus}
         activity={state.activity}

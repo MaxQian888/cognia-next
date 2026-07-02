@@ -22,7 +22,7 @@ import { createCheckpointCapture, type CheckpointCapture } from "../runtime/chec
 import { realCheckpointFs } from "../runtime/checkpoint-store"
 import { createGateController, runTurn } from "./turn-engine"
 import { captureEventToActions } from "../state/event-mapper"
-import { parseRateLimitHeaders } from "../format/rate-limits"
+import { parseRateLimitHeaders, rateLimitWarning } from "../format/rate-limits"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { ResolvedConfig } from "../../config/schema"
@@ -196,19 +196,49 @@ export function useAgentSession({
   // can show real remaining-quota + reset countdowns (not just plan windows).
   // This subscription is independent of the turn loop, so it survives /clear and
   // /resume and updates whenever a response lands.
+  // De-dupes rate-limit toasts: remembers the last warning bucket ("crit" /
+  // "exceeded" / null) so a stream of headers near the limit warns once per
+  // escalation, and re-warns only after quota recovers.
+  const rateWarnLevelRef = useRef<"crit" | "exceeded" | null>(null)
   useEffect(() => {
     const off = subscribeSidecar((payload) => {
-      if (
-        !payload ||
-        typeof payload !== "object" ||
-        (payload as { type?: unknown }).type !== "usage_headers"
-      ) {
+      if (!payload || typeof payload !== "object") return
+      const type = (payload as { type?: unknown }).type
+      if (type === "usage_headers") {
+        const headers = (payload as { headers?: unknown }).headers
+        if (!headers || typeof headers !== "object") return
+        const snapshot = parseRateLimitHeaders(headers as Record<string, string>, Date.now())
+        if (snapshot) {
+          dispatch({ type: "SET_RATE_LIMITS", snapshot })
+          // Warn when the worst meter crosses into crit/exceeded — the /limits
+          // panel had this data but nothing pushed it, so throttling was silent.
+          const warn = rateLimitWarning(snapshot)
+          const nextLevel = warn?.level ?? null
+          if (warn && nextLevel !== rateWarnLevelRef.current) {
+            dispatch({
+              type: "TOAST_PUSH",
+              severity: warn.severity,
+              message: warn.message,
+              hint: warn.hint,
+            })
+          }
+          rateWarnLevelRef.current = nextLevel
+        }
         return
       }
-      const headers = (payload as { headers?: unknown }).headers
-      if (!headers || typeof headers !== "object") return
-      const snapshot = parseRateLimitHeaders(headers as Record<string, string>, Date.now())
-      if (snapshot) dispatch({ type: "SET_RATE_LIMITS", snapshot })
+      if (type === "sidecar_exited") {
+        // The backend process died. Previously this was received but only mined
+        // for rate-limit headers, so an idle-time crash was invisible until the
+        // next send failed. Flag it and raise a transient toast so the user knows
+        // the backend is down (it respawns automatically on the next message).
+        dispatch({ type: "SIDECAR_STATUS", down: true })
+        dispatch({
+          type: "TOAST_PUSH",
+          severity: "error",
+          message: "Agent backend stopped",
+          hint: "It restarts automatically on your next message.",
+        })
+      }
     })
     return off
   }, [subscribeSidecar, dispatch])
@@ -246,11 +276,15 @@ export function useAgentSession({
   const gate = useMemo(
     () =>
       createGateController(
-        (req) =>
+        (req) => {
+          // Fire PermissionRequest + Notification so user hook scripts (and any
+          // OS-level notifier they wire) know Claude is waiting on approval.
+          hookRunner.onPermissionRequest(req.toolName, req.input)
           dispatch({
             type: "OVERLAY_OPEN",
             overlay: { kind: "permission", req, choices: DEFAULT_PERMISSION_CHOICES, index: 0 },
-          }),
+          })
+        },
         // PreToolUse hooks: a deny blocks the tool before the overlay shows.
         (req) => hookRunner.preToolUse(req.toolName, req.input),
         // Silent auto-approve for tools the user already chose "Allow always".
@@ -275,9 +309,12 @@ export function useAgentSession({
         config: configRef.current,
         ...(boundId ? { sessionId: boundId } : {}),
       })
+      // A chat session just began — fire SessionStart so hook scripts can seed
+      // context / log the session (Claude Code parity).
+      hookRunner.onSessionStart(sessionRef.current.sessionId)
     }
     return sessionRef.current
-  }, [createSession])
+  }, [createSession, hookRunner])
 
   const dropSession = useCallback(async () => {
     // Abort any in-flight turn FIRST. /clear, /resume, fork, and model/provider/
@@ -289,8 +326,13 @@ export function useAgentSession({
     abortRef.current?.abort()
     const current = sessionRef.current
     sessionRef.current = null
-    if (current) await current.close()
-  }, [])
+    if (current) {
+      // The session is being torn down (/clear, /resume, exit) — fire SessionEnd
+      // before closing so hook scripts can flush / summarize.
+      hookRunner.onSessionEnd(current.sessionId)
+      await current.close()
+    }
+  }, [hookRunner])
 
   // ── Workflow Copilot mode ──────────────────────────────────────────────────
   // A dedicated `workflow-editor`-kind session, isolated from the chat session
@@ -405,14 +447,20 @@ export function useAgentSession({
 
   const resolvePermission = useCallback(
     (decision: CapturePermissionDecision) => {
+      // Capture the head request BEFORE resolving (which pops it) so a denial can
+      // be attributed to its tool for the PermissionDenied hook.
+      const head = gate.peek()
       gate.resolve(decision)
+      if (decision.decision === "deny" && head) {
+        hookRunner.onPermissionDenied(head.toolName, decision.message)
+      }
       // `gate.resolve` re-opens the overlay (via the `onRequest` dispatch) for the
       // next queued request when a batch of parallel tool calls is awaiting
       // approval. Only close the overlay once the queue has fully drained —
       // closing unconditionally would hide the next ask and hang those tools.
       if (!gate.isPending()) dispatch({ type: "OVERLAY_CLOSE" })
     },
-    [dispatch, gate]
+    [dispatch, gate, hookRunner]
   )
 
   const rememberApproval = useCallback((toolName: string) => {

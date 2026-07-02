@@ -93,6 +93,12 @@ export interface ErrorCell {
   id: string
   kind: "error"
   message: string
+  /** Optional remediation hint, rendered as a dim second line under the error
+   * (e.g. "run /login or check your token"). Filled by {@link classifyError}. */
+  hint?: string
+  /** Classification bucket — auth | rateLimit | network | timeout | sidecar |
+   * permission | generic. Lets the renderer pick an icon/verb per category. */
+  category?: string
 }
 
 /** Non-error system notice (e.g. "Pushed to desktop", "Fresh session"). */
@@ -171,6 +177,40 @@ export interface ActivityState {
   /** A short status note (e.g. the current step). */
   note?: string
   status: "running" | "done" | "error"
+}
+
+/**
+ * A completion signal, bumped once each time a turn or a background run finishes.
+ * The terminal-chrome effect watches it (by object identity) to fire the bell +
+ * desktop notification exactly once per completion, with the right verb — a plain
+ * busy→idle transition can't distinguish done vs error vs abort, nor cover
+ * background runs (which never flip the turn's busy flag). `label` is the ready-made
+ * notification body.
+ */
+export interface CompletionSignal {
+  kind: "turn" | "activity"
+  status: "done" | "error" | "aborted"
+  /** Notification body (e.g. "Response ready", "Authentication failed", "goal loop done"). */
+  label: string
+}
+
+/** Severity of a transient toast — drives its glyph/color and dismiss TTL. */
+export type ToastSeverity = "info" | "warn" | "error"
+
+/**
+ * A transient, dismissible notification shown just above the composer (distinct
+ * from a permanent {@link NoticeCell}/{@link ErrorCell} in the scrollback). Used
+ * for events that would otherwise pass silently — sidecar death, rate-limit
+ * warnings, MCP load failures, background-run errors, hook failures. Auto-expires
+ * via an effect with an injected clock ({@link useToastExpiry}); the reducer never
+ * times anything, so it stays pure.
+ */
+export interface Toast {
+  id: string
+  severity: ToastSeverity
+  message: string
+  /** Optional second line with a remediation hint. */
+  hint?: string
 }
 
 /** Live per-node progress for a `/workflow run` in flight (panel above composer). */
@@ -628,6 +668,17 @@ export interface TuiState {
    * is loaded in the composer. Submitting forks the conversation here, discarding
    * every later turn. Absent when not editing. */
   editTarget?: { index: number }
+  /** Active transient toasts (newest last), capped to the most recent few. Shown
+   * above the composer and auto-expired by {@link useToastExpiry}. */
+  toasts: Toast[]
+  /** Latest turn/background-run completion, for the notification effect. A fresh
+   * object each completion so a watch on its identity fires once. Absent until the
+   * first turn/run finishes. */
+  lastCompletion?: CompletionSignal
+  /** True when the sidecar process has exited and not yet been respawned. Set on
+   * a `sidecar_exited` event, cleared at the next TURN_START (the send respawns
+   * it) and on RESET. Lets the footer flag a dead backend even while idle. */
+  sidecarDown?: boolean
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -663,7 +714,7 @@ export type TuiAction =
   // Turn lifecycle (from the turn engine)
   | { type: "TURN_START"; prompt: string }
   | { type: "TURN_COMMIT"; result: RunAndCaptureResult }
-  | { type: "TURN_ERROR"; message: string }
+  | { type: "TURN_ERROR"; message: string; hint?: string; category?: string; title?: string }
   | { type: "TURN_ABORTED" }
   // Background activity (goal / workflow / subagent runs)
   | { type: "ACTIVITY_START"; kind: ActivityKind; label: string; max?: number }
@@ -711,7 +762,17 @@ export type TuiAction =
   | { type: "TOGGLE_VERBOSE" }
   /** Force a full transcript repaint (resize recovery). */
   | { type: "REPAINT" }
-  | { type: "NOTICE"; message: string }
+  // A one-line system notice → permanent NoticeCell. When `toast` is set it ALSO
+  // raises a transient toast (severity defaults to "info"), so a single dispatch
+  // can both archive to scrollback and surface an ephemeral alert.
+  | { type: "NOTICE"; message: string; severity?: ToastSeverity; toast?: boolean }
+  // Raise a transient toast only (no scrollback cell). For otherwise-silent
+  // events — sidecar death, rate-limit warnings, MCP load failures, hook errors.
+  | { type: "TOAST_PUSH"; severity: ToastSeverity; message: string; hint?: string }
+  | { type: "TOAST_DISMISS"; id: string }
+  // Sidecar liveness — set `down` on a `sidecar_exited` event so the footer can
+  // flag a dead backend even while idle (cleared at the next TURN_START / RESET).
+  | { type: "SIDECAR_STATUS"; down: boolean }
   | { type: "LOAD_CELLS"; cells: Cell[] }
   | { type: "RESET"; sessionId: string }
   // Backtrack-to-edit: select a prior user message (Esc/↑↓), then commit it as

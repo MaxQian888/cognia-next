@@ -16,6 +16,8 @@ import {
   type TitleEnv,
 } from "../../terminal-title"
 import { emitCompletionBell, shouldNotifyOnDone } from "../../notify"
+import { emitDesktopNotification } from "../../notify-desktop"
+import type { CompletionSignal } from "../../state/types"
 import type { MouseMode } from "../../../config/schema"
 import { baseName, RESIZE_DEBOUNCE_MS } from "./app-helpers"
 
@@ -56,6 +58,12 @@ export interface TerminalChromeOptions {
   cwd: string
   /** Whether the completion bell is enabled (`config.notify === true`). */
   notifyEnabled: boolean
+  /** Whether OSC desktop notifications are enabled (notify on AND
+   * `config.desktopNotifications !== false`). */
+  desktopNotifyEnabled: boolean
+  /** Latest turn/background-run completion signal (drives bell + desktop
+   * notification). A fresh object per completion so the effect fires once. */
+  lastCompletion: CompletionSignal | undefined
   /** Injected clock (deterministic under test) for the bell's elapsed-time gate. */
   now: () => number
 }
@@ -83,6 +91,8 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
     activityKind,
     cwd,
     notifyEnabled,
+    desktopNotifyEnabled,
+    lastCompletion,
     now,
   } = opts
 
@@ -137,22 +147,46 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
     return () => resetTerminalTitle(titleSink, titleEnv)
   }, [titleEnabled, titleSink, titleEnv])
 
-  // Completion bell (opt-in via `config.notify`): ring the terminal bell when a
-  // turn finishes so you can tab away during a long run and be alerted. Gated on
-  // the turn's elapsed time so a quick reply doesn't beep. The `now` clock is
-  // injected, so the busy→idle transition + duration gate are deterministic.
+  // Track the turn's start time (on the busy rise) so the completion effect can
+  // gate the "done" bell on how long the turn ran. Kept separate from the emit so
+  // the two don't race at the busy→idle boundary. Injected `now` ⇒ deterministic.
   const turnStartRef = useRef<number | null>(null)
   const prevBusyRef = useRef(false)
   useEffect(() => {
-    if (busy && !prevBusyRef.current) {
-      turnStartRef.current = now()
-    } else if (!busy && prevBusyRef.current) {
-      const elapsed = turnStartRef.current !== null ? now() - turnStartRef.current : 0
-      turnStartRef.current = null
-      if (shouldNotifyOnDone(notifyEnabled, elapsed)) emitCompletionBell(titleSink, titleEnv)
-    }
+    if (busy && !prevBusyRef.current) turnStartRef.current = now()
     prevBusyRef.current = busy
-  }, [busy, notifyEnabled, now, titleSink, titleEnv])
+  }, [busy, now])
+
+  // Completion notification (opt-in via `config.notify`): ring the terminal bell
+  // — and, when enabled, pop an OSC desktop notification — each time a turn or a
+  // background run finishes, so you can tab away during a long run and be alerted.
+  // Driven by the reducer's `lastCompletion` signal (not a bare busy→idle edge)
+  // so it distinguishes done / error / abort AND covers background runs, which
+  // never flip the turn's busy flag:
+  //   • done turn     → only when it ran long enough (tab-away threshold)
+  //   • error         → always (any duration — an auth failure after 1s matters)
+  //   • aborted       → never (user-initiated; no need to alert)
+  //   • background run→ always (these are long by nature)
+  const prevCompletionRef = useRef<CompletionSignal | undefined>(undefined)
+  useEffect(() => {
+    if (!lastCompletion || lastCompletion === prevCompletionRef.current) return
+    prevCompletionRef.current = lastCompletion
+    const c = lastCompletion
+    const elapsed =
+      c.kind === "turn" && turnStartRef.current !== null ? now() - turnStartRef.current : 0
+    if (c.kind === "turn") turnStartRef.current = null
+    let shouldRing: boolean
+    if (c.status === "aborted") shouldRing = false
+    else if (c.status === "error") shouldRing = notifyEnabled
+    else if (c.kind === "turn") shouldRing = shouldNotifyOnDone(notifyEnabled, elapsed)
+    else shouldRing = notifyEnabled
+    if (!shouldRing) return
+    emitCompletionBell(titleSink, titleEnv)
+    if (desktopNotifyEnabled) {
+      const title = c.status === "error" ? "cognia — error" : "cognia"
+      emitDesktopNotification(title, c.label, titleSink, titleEnv)
+    }
+  }, [lastCompletion, notifyEnabled, desktopNotifyEnabled, now, titleSink, titleEnv])
 
   // Terminal resize recovery (scrollback mode only). `<Static>` wrote the
   // transcript into the scrollback at the OLD width; on resize Ink reflows its

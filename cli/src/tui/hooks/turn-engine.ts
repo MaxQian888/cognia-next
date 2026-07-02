@@ -11,6 +11,7 @@ import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claud
 import type { PermissionRequestEvent } from "@/lib/claude/types"
 
 import { captureEventToActions } from "../state/event-mapper"
+import { classifyError } from "../format/error-classify"
 import { formatActiveSkillsNotice } from "../runtime/active-skills"
 import { formatAttachmentNotice } from "../runtime/attachment-notice"
 import type { AttachmentSummary } from "../../agent/session-runner"
@@ -39,6 +40,10 @@ export interface GateController {
   responder: PermissionResponder
   /** Resolve the request currently shown to the user. */
   resolve(decision: CapturePermissionDecision): void
+  /** The request at the head of the queue (the one the overlay shows), or
+   * undefined when nothing is pending. Lets the UI attribute a decision to its
+   * tool (e.g. to fire a PermissionDenied hook) before `resolve` pops it. */
+  peek(): PermissionRequestEvent | undefined
   /** Whether a request is awaiting a decision. */
   isPending(): boolean
   /**
@@ -132,6 +137,9 @@ export function createGateController(
       // is approved/denied one overlay at a time instead of stranding the rest.
       if (queue.length > 0) onRequest(queue[0].req)
     },
+    peek() {
+      return queue[0]?.req
+    },
     isPending() {
       return queue.length > 0
     },
@@ -221,11 +229,21 @@ export async function runTurn(
       opts.hooks?.onStop(false)
       return { ok: false, recoverable: true }
     }
-    opts.dispatch({ type: "TURN_ERROR", message: (err as Error).message })
+    const code = err instanceof RunAndCaptureError ? err.code : undefined
+    const message = (err as Error).message
+    // Classify the fault so the error cell carries a remediation hint and the
+    // desktop notification gets a short, human title (instead of a raw string).
+    const classified = classifyError({ message, code })
+    opts.dispatch({
+      type: "TURN_ERROR",
+      message,
+      title: classified.title,
+      ...(classified.hint ? { hint: classified.hint } : {}),
+      category: classified.category,
+    })
     opts.hooks?.onStop(false)
     // Keep the session for faults that leave it usable; drop only when the
     // sidecar process is gone (or the fault is unknown).
-    const code = err instanceof RunAndCaptureError ? err.code : undefined
     const recoverable =
       code === "session_error" || code === "send_failed" || code === "no_assistant_text"
     return { ok: false, recoverable }
