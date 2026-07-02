@@ -28,12 +28,17 @@ describe("getSidebarCatalog", () => {
     expect(ids).not.toContain("performance")
     expect(ids).not.toContain("source-control")
     expect(ids).toContain("workflows")
-    expect(cat).toHaveLength(SIDEBAR_NAV_META.length - 2)
+    // Derived, not hard-coded — the browser pane addition broke a literal "-2".
+    expect(cat).toHaveLength(SIDEBAR_NAV_META.filter((m) => !m.desktopOnly).length)
   })
 
-  it("keeps desktop-only items on web", () => {
+  it("drops desktop-only items on web too (ADR-0059 F5 — no dead ends in a browser)", () => {
     const cat = getSidebarCatalog("web")
-    expect(cat.map((c) => c.id)).toContain("performance")
+    const ids = cat.map((c) => c.id)
+    expect(ids).not.toContain("performance")
+    expect(ids).not.toContain("source-control")
+    expect(ids).not.toContain("browser")
+    expect(ids).toContain("workflows")
   })
 })
 

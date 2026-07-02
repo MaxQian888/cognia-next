@@ -26,14 +26,21 @@ export function SidebarCustomizer(): React.ReactElement {
     items.map((i) => ({ id: i.id, Icon: i.Icon, label: t(i.i18nKey) }))
 
   // "Restore defaults" is a no-op when the live layout already matches the
-  // factory default. On mobile the desktop-only items are absent from the
-  // catalog but may linger in the stored arrays, so compare the resolved
-  // pinned ids instead of raw arrays.
+  // factory default. Off the desktop shell the desktop-only items are absent
+  // from the catalog (but may linger in the stored arrays), so project the
+  // factory default onto the visible catalog before comparing.
+  const catalogIds = new Set(
+    [...resolved.pinned, ...resolved.overflow, ...resolved.hidden].map((i) => i.id)
+  )
   const isDefault =
     JSON.stringify({
       pinned: resolved.pinned.map((i) => i.id),
       hidden: resolved.hidden.map((i) => i.id),
-    }) === JSON.stringify(DEFAULT_SIDEBAR_LAYOUT)
+    }) ===
+    JSON.stringify({
+      pinned: DEFAULT_SIDEBAR_LAYOUT.pinned.filter((id) => catalogIds.has(id)),
+      hidden: DEFAULT_SIDEBAR_LAYOUT.hidden,
+    })
 
   return (
     <CustomizerLists
