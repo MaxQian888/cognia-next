@@ -3,9 +3,11 @@
  */
 import {
   CORE_CAPABILITY_IDS,
+  detectHostProfile,
   detectLocalCapabilities,
   hasCapability,
   isCapabilityId,
+  serverBackedCapabilities,
 } from "./capabilities"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
@@ -122,5 +124,57 @@ describe("hasCapability", () => {
     setTauri(true)
     expect(hasCapability("shell")).toBe(true)
     expect(hasCapability("camera")).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Host profiles (ADR-0059 C3/F5)
+// ---------------------------------------------------------------------------
+
+const ENV_KEY = "NEXT_PUBLIC_COGNIA_SERVER_URL"
+
+describe("detectHostProfile", () => {
+  afterEach(() => {
+    delete process.env[ENV_KEY]
+    window.localStorage.clear()
+  })
+
+  it("desktop on Tauri, mobile-companion on Capacitor", () => {
+    setTauri(true)
+    expect(detectHostProfile()).toBe("desktop")
+    setTauri(false)
+    setCapacitorNative(true)
+    expect(detectHostProfile()).toBe("mobile-companion")
+  })
+
+  it("cloud-companion on web with a server target, web-standalone otherwise", () => {
+    expect(detectHostProfile()).toBe("web-standalone")
+    process.env[ENV_KEY] = "https://cloud.example.com"
+    expect(detectHostProfile()).toBe("cloud-companion")
+  })
+})
+
+describe("serverBackedCapabilities", () => {
+  it("companion profiles proxy execution capabilities to the server", () => {
+    for (const profile of ["mobile-companion", "cloud-companion"] as const) {
+      const caps = serverBackedCapabilities(profile)
+      expect(caps).toContain("shell")
+      expect(caps).toContain("sidecar")
+      expect(caps).toContain("headless")
+      // Local-machine surfaces are NOT server-backed.
+      expect(caps).not.toContain("uia-automation")
+      expect(caps).not.toContain("ocr")
+      expect(caps).not.toContain("pty")
+    }
+  })
+
+  it("empty for hosts that are their own execution plane or have no server", () => {
+    expect(serverBackedCapabilities("desktop")).toEqual([])
+    expect(serverBackedCapabilities("web-standalone")).toEqual([])
+  })
+
+  it("local-OR-server composition answers the C3 gating question", () => {
+    const caps = serverBackedCapabilities("cloud-companion")
+    expect(hasCapability("shell", caps)).toBe(true)
   })
 })

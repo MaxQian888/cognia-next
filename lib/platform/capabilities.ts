@@ -125,3 +125,63 @@ export function hasCapability(
 ): boolean {
   return caps.includes(cap)
 }
+
+// ---------------------------------------------------------------------------
+// Host profiles (ADR-0059 C3/F5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The deployment shape this client runs in. Orthogonal to
+ * {@link detectPlatform}: `web` splits into a *cloud companion* (browser
+ * paired to a headless cognia-server — execution happens server-side) and
+ * *web standalone* (BYOK, in-webview only). Companion profiles pair the
+ * local baseline with {@link serverBackedCapabilities}.
+ */
+export type HostProfile = "desktop" | "mobile-companion" | "cloud-companion" | "web-standalone"
+
+/** Resolve the host profile. Stable after first paint; memoize freely. */
+export function detectHostProfile(): HostProfile {
+  const platform = detectPlatform()
+  if (platform === "tauri") return "desktop"
+  if (platform === "mobile") return "mobile-companion"
+  // Lazy require keeps this module a pure leaf for non-web callers; the
+  // web-companion module is itself a leaf over localStorage + env.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { hasWebCompanionTarget } = require("./web-companion") as {
+    hasWebCompanionTarget: () => boolean
+  }
+  return hasWebCompanionTarget() ? "cloud-companion" : "web-standalone"
+}
+
+/**
+ * Capabilities the PAIRED SERVER executes on this profile's behalf (reached
+ * over the companion RPC, not locally). Empty for hosts that are themselves
+ * the execution plane (desktop) or have no server (web-standalone). UI
+ * surfaces that proxy work — agents, source control, connectors — gate on
+ * local-OR-server:
+ *
+ *   hasCapability(cap) || serverBackedCapabilities().includes(cap)
+ */
+export function serverBackedCapabilities(
+  profile: HostProfile = detectHostProfile()
+): readonly CapabilityId[] {
+  switch (profile) {
+    case "mobile-companion":
+    case "cloud-companion":
+      return SERVER_BACKED
+    case "desktop":
+    case "web-standalone":
+      return EMPTY_CAPS
+  }
+}
+
+const SERVER_BACKED: readonly CapabilityId[] = Object.freeze([
+  "shell",
+  "sidecar",
+  "always-on",
+  "connector-runtime",
+  "mcp-runtime",
+  "headless",
+] as const)
+
+const EMPTY_CAPS: readonly CapabilityId[] = Object.freeze([])
