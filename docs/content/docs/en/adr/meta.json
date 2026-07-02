@@ -49,6 +49,8 @@
     "0056-mobile-settings-parity",
     "0057-chat-rendering-completeness",
     "0058-desktop-pet-subsystem",
-    "0059-cloud-deployment-headless-brain"
+    "0059-cloud-deployment-headless-brain",
+    "0060-personal-knowledge-capture-and-insights",
+    "0061-cross-device-workflow-execution"
   ]
 }
