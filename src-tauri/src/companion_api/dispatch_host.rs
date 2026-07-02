@@ -62,11 +62,43 @@ impl DispatchHost {
     }
 
     /// The headless services registry, when this host is headless.
-    #[allow(dead_code)] // consumed by the claude arms in R7.
+    #[allow(dead_code)] // consumed by later slices (R10/R12).
     pub fn headless(&self) -> Option<&Arc<HeadlessServices>> {
         match self {
             Self::Tauri(_) => None,
             Self::Headless(services) => Some(services),
+        }
+    }
+
+    /// The sidecar supervisor state for this host (Tauri-managed on desktop,
+    /// registry-owned headless). Panics if the desktop app never managed
+    /// `SidecarState` — identical to the old `app.state::<T>()` behavior.
+    pub fn sidecar_state(&self) -> crate::claude::SidecarState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::claude::SidecarState>().inner().clone()
+            }
+            Self::Headless(services) => services.sidecar.clone(),
+        }
+    }
+
+    /// The provider-env store for this host.
+    pub fn api_keys(&self) -> crate::api_key::ApiKeyState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::api_key::ApiKeyState>().inner().clone()
+            }
+            Self::Headless(services) => services.api_keys.clone(),
+        }
+    }
+
+    /// The sidecar host seam for this host — what `sidecar::spawn` needs.
+    pub fn sidecar_host(&self) -> Arc<dyn crate::claude::host::SidecarHost> {
+        match self {
+            Self::Tauri(app) => Arc::new(crate::claude::host::TauriSidecarHost(app.clone())),
+            Self::Headless(services) => Arc::clone(&services.sidecar_host),
         }
     }
 
@@ -85,7 +117,7 @@ mod tests {
     use super::*;
 
     fn headless_host() -> DispatchHost {
-        DispatchHost::Headless(HeadlessServices::new())
+        DispatchHost::Headless(HeadlessServices::stub_for_tests())
     }
 
     #[test]
@@ -102,5 +134,19 @@ mod tests {
         let host = headless_host();
         assert!(host.headless().is_some());
         assert_eq!(host.kind(), "headless");
+    }
+
+    #[tokio::test]
+    async fn headless_service_accessors_share_the_registry_instances() {
+        let services = HeadlessServices::stub_for_tests();
+        let host = DispatchHost::Headless(Arc::clone(&services));
+
+        // api_keys is the same store the registry owns.
+        host.api_keys().set(Some("sk-x".into())).await;
+        assert_eq!(services.api_keys.get().await.as_deref(), Some("sk-x"));
+
+        // sidecar_state shares the registry's supervisor (Arc-backed clone).
+        assert!(!host.sidecar_state().is_ready().await);
+        assert_eq!(host.sidecar_host().kind(), "headless");
     }
 }

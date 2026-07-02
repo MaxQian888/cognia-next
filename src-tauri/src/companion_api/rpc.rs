@@ -50,11 +50,7 @@ use serde_json::Value;
 
 use crate::{
     agents::commands as agent_commands,
-    api_key::ApiKeyState,
-    claude::{
-        commands as claude_commands, mcp_test,
-        sidecar::{kill_sidecar, SidecarState},
-    },
+    claude::{commands as claude_commands, mcp_test, sidecar::kill_sidecar},
     mcp_server::McpServerState,
     skills::{install, native as skills_native, registry},
 };
@@ -950,23 +946,28 @@ pub(super) async fn dispatch(
     match name {
         // ── Chat session ─────────────────────────────────────────────────────
 
+        // The chat-session arms are host-generic (ADR-0059 R7): the sidecar
+        // state + host resolve from either the Tauri app or the headless
+        // services registry, so a cloud cognia-server executes chat turns.
         "claude_send" => {
             let session_id: String = required(&args, "session_id")?;
             let prompt: Value = required(&args, "prompt")?;
             let options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
-            let app = host.tauri_app(name)?;
-            let sidecar_state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_send(app.clone(), sidecar_state, session_id, prompt, options)
-                .await
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            claude_commands::claude_send_with_host(
+                host.sidecar_host(),
+                host.sidecar_state(),
+                session_id,
+                prompt,
+                options,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
         }
 
         "claude_interrupt" => {
             let session_id: String = required(&args, "session_id")?;
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_interrupt(state, session_id)
+            claude_commands::claude_interrupt_impl(&host.sidecar_state(), session_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -978,9 +979,7 @@ pub(super) async fn dispatch(
                 .get("focus")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_compact(state, session_id, focus)
+            claude_commands::claude_compact_impl(&host.sidecar_state(), session_id, focus)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -992,10 +991,8 @@ pub(super) async fn dispatch(
             let decision: String = required(&args, "decision")?;
             let message: Option<String> = optional(&args, "message")?;
             let updated_input: Option<Value> = optional(&args, "updated_input")?;
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_approve(
-                state,
+            claude_commands::claude_approve_impl(
+                &host.sidecar_state(),
                 session_id,
                 request_id,
                 decision,
@@ -1009,18 +1006,14 @@ pub(super) async fn dispatch(
 
         "claude_close_session" => {
             let session_id: String = required(&args, "session_id")?;
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_close_session(state, session_id)
+            claude_commands::claude_close_session_impl(&host.sidecar_state(), session_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
 
         "claude_sidecar_status" => {
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_sidecar_status(state)
+            claude_commands::claude_sidecar_status_impl(&host.sidecar_state())
                 .await
                 .map_err(RpcError::internal)
                 .and_then(|s| {
@@ -1038,9 +1031,7 @@ pub(super) async fn dispatch(
 
         "claude_set_oauth_bearer" => {
             let token: Option<String> = optional(&args, "token")?;
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            state.set_oauth_bearer(token).await;
+            host.api_keys().set_oauth_bearer(token).await;
             Ok(Value::Null)
         }
 
@@ -1048,39 +1039,29 @@ pub(super) async fn dispatch(
 
         "claude_set_api_key" => {
             let key: Option<String> = optional(&args, "key")?;
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            state.set(key).await;
+            host.api_keys().set(key).await;
             Ok(Value::Null)
         }
 
         "claude_set_provider_env" => {
             let api_key: Option<String> = optional(&args, "api_key")?;
             let base_url: Option<String> = optional(&args, "base_url")?;
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            state.set_provider(api_key, base_url).await;
+            host.api_keys().set_provider(api_key, base_url).await;
             Ok(Value::Null)
         }
 
         "claude_has_api_key" => {
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            let has = state.get().await.is_some();
+            let has = host.api_keys().get().await.is_some();
             Ok(Value::Bool(has))
         }
 
         "claude_has_oauth_bearer" => {
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            let has = state.get_oauth_bearer().await.is_some();
+            let has = host.api_keys().get_oauth_bearer().await.is_some();
             Ok(Value::Bool(has))
         }
 
         "claude_restart_sidecar" => {
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            kill_sidecar(state.inner().clone()).await;
+            kill_sidecar(host.sidecar_state()).await;
             Ok(Value::Null)
         }
 
@@ -2193,7 +2174,9 @@ mod tests {
     // ── DispatchHost (ADR-0059 R5) ────────────────────────────────────────────
 
     fn headless_host() -> super::super::dispatch_host::DispatchHost {
-        super::super::dispatch_host::DispatchHost::Headless(crate::headless::HeadlessServices::new())
+        super::super::dispatch_host::DispatchHost::Headless(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        )
     }
 
     /// Data-plane arms work on a headless host: `session_list` served from
@@ -2231,7 +2214,7 @@ mod tests {
     async fn headless_dispatch_rejects_desktop_only_arms() {
         let state = test_state();
         let err = dispatch(
-            "claude_sidecar_status",
+            "mcp_server_status",
             json!({}),
             &state,
             &headless_host(),
@@ -2242,7 +2225,64 @@ mod tests {
         .expect_err("desktop-only arm must 503 on a headless host");
         assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(err.1 .0.code, "headless_unsupported");
-        assert!(err.1 .0.message.contains("claude_sidecar_status"));
+        assert!(err.1 .0.message.contains("mcp_server_status"));
+    }
+
+    /// The claude arms are host-generic after R7: `claude_sidecar_status` on
+    /// a headless host reports the registry's (not-yet-spawned) sidecar.
+    #[tokio::test]
+    async fn headless_claude_arms_reach_the_registry_sidecar() {
+        let state = test_state();
+        let host = headless_host();
+
+        let status = dispatch(
+            "claude_sidecar_status",
+            json!({}),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+        )
+        .await
+        .expect("claude_sidecar_status must work headless");
+        assert_eq!(status["ready"], false);
+
+        // Provider-env arms hit the registry's ApiKeyState.
+        dispatch(
+            "claude_set_api_key",
+            json!({ "key": "sk-headless" }),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+        )
+        .await
+        .expect("claude_set_api_key must work headless");
+        let has = dispatch(
+            "claude_has_api_key",
+            json!({}),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+        )
+        .await
+        .expect("claude_has_api_key must work headless");
+        assert_eq!(has, Value::Bool(true));
+
+        // Control messages against a not-running sidecar surface the plain
+        // "not running" error (proving the arm reached write_command).
+        let err = dispatch(
+            "claude_interrupt",
+            json!({ "session_id": "s1" }),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+        )
+        .await
+        .expect_err("no sidecar running");
+        assert!(err.1 .0.message.contains("not running"));
     }
 
     /// `sync_pull` on a headless host routes through the connected brain's

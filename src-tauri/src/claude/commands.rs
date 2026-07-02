@@ -334,13 +334,71 @@ fn prepend_context_to_prompt(prompt: &Value, extra: &str) -> Value {
     prompt.clone()
 }
 
+// ---------------------------------------------------------------------------
+// Host-generic command bodies (ADR-0059 R7)
+//
+// The RPC dispatch arms resolve a `SidecarState` from either the Tauri app or
+// the headless services registry and call these `_impl` functions; the
+// `#[tauri::command]` wrappers delegate so desktop behavior is unchanged.
+// ---------------------------------------------------------------------------
+
+pub async fn claude_interrupt_impl(state: &SidecarState, session_id: String) -> Result<(), String> {
+    let msg = json!({ "type": "interrupt", "sessionId": session_id });
+    state.write_command(&msg).await
+}
+
+pub async fn claude_compact_impl(
+    state: &SidecarState,
+    session_id: String,
+    focus: Option<String>,
+) -> Result<(), String> {
+    let msg = json!({ "type": "compact", "sessionId": session_id, "focus": focus });
+    state.write_command(&msg).await
+}
+
+pub async fn claude_approve_impl(
+    state: &SidecarState,
+    session_id: String,
+    request_id: String,
+    decision: String,
+    message: Option<String>,
+    updated_input: Option<Value>,
+) -> Result<(), String> {
+    let valid = matches!(decision.as_str(), "allow" | "allow_always" | "deny");
+    if !valid {
+        return Err(format!("invalid decision: {decision}"));
+    }
+    let payload = json!({
+      "type": "permission_response",
+      "sessionId": session_id,
+      "requestId": request_id,
+      "decision": decision,
+      "message": message,
+      "updatedInput": updated_input,
+    });
+    state.write_command(&payload).await
+}
+
+pub async fn claude_close_session_impl(
+    state: &SidecarState,
+    session_id: String,
+) -> Result<(), String> {
+    let msg = json!({ "type": "close", "sessionId": session_id });
+    state.write_command(&msg).await
+}
+
+pub async fn claude_sidecar_status_impl(state: &SidecarState) -> Result<SidecarStatus, String> {
+    Ok(SidecarStatus {
+        ready: state.is_ready().await,
+    })
+}
+
 #[tauri::command]
 pub async fn claude_interrupt(
     state: State<'_, SidecarState>,
     session_id: String,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "interrupt", "sessionId": session_id });
-    state.write_command(&msg).await
+    claude_interrupt_impl(&state, session_id).await
 }
 
 /// Manually compact a session's context. Mirrors `claude_interrupt` — a control
@@ -352,8 +410,7 @@ pub async fn claude_compact(
     session_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "compact", "sessionId": session_id, "focus": focus });
-    state.write_command(&msg).await
+    claude_compact_impl(&state, session_id, focus).await
 }
 
 /// Undo a prior compaction by restoring the pre-compaction message snapshot.
@@ -378,19 +435,15 @@ pub async fn claude_approve(
     message: Option<String>,
     updated_input: Option<Value>,
 ) -> Result<(), String> {
-    let valid = matches!(decision.as_str(), "allow" | "allow_always" | "deny");
-    if !valid {
-        return Err(format!("invalid decision: {decision}"));
-    }
-    let payload = json!({
-      "type": "permission_response",
-      "sessionId": session_id,
-      "requestId": request_id,
-      "decision": decision,
-      "message": message,
-      "updatedInput": updated_input,
-    });
-    state.write_command(&payload).await
+    claude_approve_impl(
+        &state,
+        session_id,
+        request_id,
+        decision,
+        message,
+        updated_input,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -398,8 +451,7 @@ pub async fn claude_close_session(
     state: State<'_, SidecarState>,
     session_id: String,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "close", "sessionId": session_id });
-    state.write_command(&msg).await
+    claude_close_session_impl(&state, session_id).await
 }
 
 /// Allowlisted Claude Agent SDK `Query` control methods the renderer may drive
@@ -544,9 +596,7 @@ pub async fn claude_protocol_adapter_message(
 pub async fn claude_sidecar_status(
     state: State<'_, SidecarState>,
 ) -> Result<SidecarStatus, String> {
-    Ok(SidecarStatus {
-        ready: state.is_ready().await,
-    })
+    claude_sidecar_status_impl(&state).await
 }
 
 /// ADR-0028 Phase 14 — sidecar restart counter for the Diagnostics
@@ -567,6 +617,75 @@ mod tests {
 
     fn parse(json_str: &str) -> SendOptions {
         serde_json::from_str(json_str).expect("valid SendOptions JSON")
+    }
+
+    /// R7 acceptance: `claude_send_with_host` on a host-generic (recording)
+    /// host spawns a real `node` echo script and the send payload round-trips
+    /// through the sidecar reader back out as a host event. Skips gracefully
+    /// when Node is not installed.
+    #[tokio::test]
+    async fn claude_send_with_host_reaches_a_fake_echo_script() {
+        use crate::claude::host::test_support::RecordingSidecarHost;
+
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("echo-host.mjs");
+        std::fs::write(
+            &script,
+            concat!(
+                "process.stdout.write(JSON.stringify({type:'ready'})+'\\n');\n",
+                "process.stdin.setEncoding('utf8');\n",
+                "let buf='';\n",
+                "process.stdin.on('data',(d)=>{buf+=d;let i;\n",
+                "  while((i=buf.indexOf('\\n'))>=0){\n",
+                "    const line=buf.slice(0,i);buf=buf.slice(i+1);\n",
+                "    if(!line.trim())continue;\n",
+                "    process.stdout.write(JSON.stringify({type:'echo',payload:JSON.parse(line)})+'\\n');\n",
+                "  }});\n",
+                "process.stdin.on('end',()=>process.exit(0));\n",
+            ),
+        )
+        .expect("write echo script");
+
+        let host = RecordingSidecarHost::with_script(script);
+        let state = SidecarState::new();
+
+        claude_send_with_host(
+            host.clone(),
+            state.clone(),
+            "sess-echo".into(),
+            json!("hello from headless"),
+            None,
+        )
+        .await
+        .expect("send must spawn + write");
+
+        // The echo script reflects the send command back; the reader emits it
+        // as a host event on the sidecar channel.
+        let mut echoed = None;
+        for _ in 0..100 {
+            if let Some((_, payload)) = host
+                .events()
+                .into_iter()
+                .find(|(channel, payload)| {
+                    channel == super::super::sidecar::SIDECAR_EVENT && payload["type"] == "echo"
+                })
+            {
+                echoed = Some(payload);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let echoed = echoed.expect("echo event must arrive via the host");
+        assert_eq!(echoed["payload"]["type"], "send");
+        assert_eq!(echoed["payload"]["sessionId"], "sess-echo");
+        assert_eq!(echoed["payload"]["prompt"], "hello from headless");
+
+        super::super::sidecar::kill_sidecar(state).await;
     }
 
     #[test]
