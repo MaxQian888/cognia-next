@@ -355,6 +355,11 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // `lib/workflow/runtime/approval-notify.ts`.
     register_tauri_event(app, Arc::clone(&bus), "workflow://approval-request");
     register_tauri_event(app, Arc::clone(&bus), "workflow://approval-resolved");
+    // ADR-0061 P3 — desktop-issued remote step requests. Full params ride
+    // the authenticated WS only; the device answers via the
+    // `workflow_step_result` RPC. Emitted by
+    // `lib/workflow/runtime/remote-step-broker.ts`.
+    register_tauri_event(app, Arc::clone(&bus), "workflow://step-execute");
     // ADR-0061 P2 — sync invalidation. The mobile `installEventDrivenSync`
     // has subscribed to this channel since ADR-0027; the desktop now emits
     // it (terminal workflow runs → { table: "workflowRuns" }) so the phone
@@ -379,6 +384,9 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // backgrounded devices. Ids only (transits APNs/FCM) — the phone
     // fetches the request text via `workflow_approval_list` on open.
     register_push_trigger(app, "workflow://approval-pending");
+    // ADR-0061 P3 — a remote step is waiting on a device. Ids only; the
+    // request params ride the WS frame the device receives on open.
+    register_push_trigger(app, "workflow://step-pending");
 }
 
 /// Human-ish push body for a channel name: strip any `scheme://` prefix so

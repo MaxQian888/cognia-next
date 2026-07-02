@@ -1,13 +1,29 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, renderHook } from "@testing-library/react"
+import { render, screen, renderHook, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ReactNode } from "react"
 import enMessages from "@/i18n/messages/en.json"
+
+// Deterministic paired-device rows: mock the liveQuery layer itself so the
+// hook sees a synchronous snapshot (dexie-react-hooks needs a real Dexie
+// observable otherwise).
+let mockDevices: unknown[] = []
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => mockDevices,
+}))
+jest.mock("@/lib/db/paired-devices", () => ({
+  listPairedDevices: async () => mockDevices,
+}))
+
 import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
+
+beforeEach(() => {
+  mockDevices = []
+})
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -60,18 +76,60 @@ describe("useMissingNodeCapabilities", () => {
     })
     expect(result.current?.tooltip).toContain("plugin:demo")
   })
+
+  it("flags requirements covered by an active paired device as remote (ADR 0061 P3)", () => {
+    mockDevices = [
+      { deviceId: "dev-1", lastSeenAt: 1, capabilities: ["camera"] },
+      { deviceId: "dev-revoked", lastSeenAt: 2, revokedAt: 3, capabilities: ["pty"] },
+    ]
+    const { result } = renderHook(() => useMissingNodeCapabilities({ requires: ["camera"] }), {
+      wrapper,
+    })
+    expect(result.current?.satisfiedRemotely).toBe(true)
+    expect(result.current?.badgeLabel).toBe("Runs on phone")
+
+    // A revoked device's manifest does not count.
+    const { result: revoked } = renderHook(
+      () => useMissingNodeCapabilities({ requires: ["pty"] }),
+      {
+        wrapper,
+      }
+    )
+    expect(revoked.current?.satisfiedRemotely).toBe(false)
+  })
 })
 
 describe("CapabilityBadge", () => {
   it("renders the badge label with the tooltip as title", () => {
     render(
       <CapabilityBadge
-        info={{ missing: ["camera"], badgeLabel: "Unavailable here", tooltip: "Needs: Camera" }}
+        info={{
+          missing: ["camera"],
+          badgeLabel: "Unavailable here",
+          tooltip: "Needs: Camera",
+          satisfiedRemotely: false,
+        }}
       />,
       { wrapper }
     )
     const badge = screen.getByTestId("wf-capability-badge")
     expect(badge).toHaveTextContent("Unavailable here")
     expect(badge).toHaveAttribute("title", "Needs: Camera")
+    expect(badge).not.toHaveAttribute("data-remote")
+  })
+
+  it("styles remotely-satisfied requirements as informational", () => {
+    render(
+      <CapabilityBadge
+        info={{
+          missing: ["camera"],
+          badgeLabel: "Runs on phone",
+          tooltip: "Runs on a paired device that provides: Camera",
+          satisfiedRemotely: true,
+        }}
+      />,
+      { wrapper }
+    )
+    expect(screen.getByTestId("wf-capability-badge")).toHaveAttribute("data-remote", "true")
   })
 })

@@ -37,6 +37,54 @@
       "label": "启用工具"
     }
   },
+  "mobileCamera": {
+    "quality": {
+      "label": "JPEG 质量（1–100）"
+    },
+    "width": {
+      "label": "最大宽度（px）"
+    }
+  },
+  "mobileLocation": {
+    "enableHighAccuracy": {
+      "label": "高精度（GPS）"
+    }
+  },
+  "mobileNotify": {
+    "body": {
+      "label": "内容"
+    },
+    "title": {
+      "label": "标题"
+    }
+  },
+  "mobileScanBarcode": {
+    "formats": {
+      "hint": "逗号分隔（如 QR_CODE, EAN_13）。留空 = 仅二维码。",
+      "label": "格式"
+    }
+  },
+  "mobileShare": {
+    "text": {
+      "hint": "文本或 URL 必填其一。",
+      "label": "文本"
+    },
+    "title": {
+      "label": "标题（可选）"
+    },
+    "url": {
+      "label": "URL（可选）"
+    }
+  },
+  "mobileStep": {
+    "deviceId": {
+      "hint": "留空 = 任意具备能力的已配对设备（最近活跃优先）。",
+      "label": "设备 ID（可选）"
+    },
+    "timeoutMs": {
+      "label": "超时（毫秒）"
+    }
+  },
   "approvalRequest": {
     "message": {
       "label": "说明（可选）"

@@ -37,6 +37,54 @@
       "label": "Enable tools"
     }
   },
+  "mobileCamera": {
+    "quality": {
+      "label": "JPEG quality (1–100)"
+    },
+    "width": {
+      "label": "Max width (px)"
+    }
+  },
+  "mobileLocation": {
+    "enableHighAccuracy": {
+      "label": "High accuracy (GPS)"
+    }
+  },
+  "mobileNotify": {
+    "body": {
+      "label": "Body"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
+  "mobileScanBarcode": {
+    "formats": {
+      "hint": "Comma-separated (e.g. QR_CODE, EAN_13). Empty = QR only.",
+      "label": "Formats"
+    }
+  },
+  "mobileShare": {
+    "text": {
+      "hint": "Text or URL is required.",
+      "label": "Text"
+    },
+    "title": {
+      "label": "Title (optional)"
+    },
+    "url": {
+      "label": "URL (optional)"
+    }
+  },
+  "mobileStep": {
+    "deviceId": {
+      "hint": "Empty = any capable paired device (freshest first).",
+      "label": "Device ID (optional)"
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)"
+    }
+  },
   "approvalRequest": {
     "message": {
       "label": "Message (optional)"

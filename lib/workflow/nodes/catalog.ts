@@ -557,6 +557,42 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "UserCheck",
     keywords: ["approval", "approve", "reject", "human", "hitl", "gate", "review", "phone"],
   },
+  // ── Remote device steps (ADR 0061 P3) — hub proxies to a paired device ────
+  "action.mobile.camera": {
+    label: "Take photo on phone",
+    description: "Opens the camera on a paired phone and returns the capture (base64) to the run.",
+    iconName: "Camera",
+    keywords: ["mobile", "phone", "camera", "photo", "capture", "picture"],
+    requires: ["camera"],
+  },
+  "action.mobile.scanBarcode": {
+    label: "Scan barcode on phone",
+    description: "Opens the barcode/QR scanner on a paired phone and returns the raw value.",
+    iconName: "ScanLine",
+    keywords: ["mobile", "phone", "scan", "barcode", "qr", "code"],
+    requires: ["barcode-scan"],
+  },
+  "action.mobile.location": {
+    label: "Get phone location",
+    description: "Reads the current GPS position from a paired phone.",
+    iconName: "MapPin",
+    keywords: ["mobile", "phone", "location", "gps", "position", "geolocation"],
+    requires: ["geolocation"],
+  },
+  "action.mobile.share": {
+    label: "Share from phone",
+    description: "Opens the native share sheet on a paired phone with the given text or link.",
+    iconName: "Share2",
+    keywords: ["mobile", "phone", "share", "send", "sheet"],
+    requires: ["share-sheet"],
+  },
+  "action.mobile.notify": {
+    label: "Notify phone",
+    description: "Shows a local notification on a paired phone.",
+    iconName: "BellRing",
+    keywords: ["mobile", "phone", "notify", "notification", "alert"],
+    requires: ["push-display"],
+  },
   "action.mcp.invokeTool": {
     label: "Invoke MCP tool",
     description: "Calls a tool on a configured MCP server.",

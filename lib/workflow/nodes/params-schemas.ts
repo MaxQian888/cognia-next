@@ -699,6 +699,48 @@ const ApprovalRequestParams = z.object({
   onTimeout: z.enum(["reject", "fail"]).optional(),
 })
 
+/** Shared remote-device fields (ADR 0061 P3): pin a device, bound the wait. */
+const mobileStepBase = {
+  /** Pin to one paired device; empty = any capable device (freshest first). */
+  deviceId: optionalString,
+  /** How long to wait for the device. Default 120 s. */
+  timeoutMs: numberRange(1_000).optional(),
+}
+
+const MobileCameraParams = z.object({
+  ...mobileStepBase,
+  quality: numberRange(1, 100).optional(),
+  width: numberRange(64).optional(),
+})
+
+const MobileScanBarcodeParams = z.object({
+  ...mobileStepBase,
+  formats: z.array(z.string()).optional(),
+})
+
+const MobileLocationParams = z.object({
+  ...mobileStepBase,
+  enableHighAccuracy: z.boolean().optional(),
+})
+
+const MobileShareParams = z
+  .object({
+    ...mobileStepBase,
+    title: optionalString,
+    text: optionalString,
+    url: optionalString,
+  })
+  .refine((v) => Boolean(v.text?.length) || Boolean(v.url?.length), {
+    message: "required",
+    path: ["text"],
+  })
+
+const MobileNotifyParams = z.object({
+  ...mobileStepBase,
+  title: requiredString("required"),
+  body: optionalString,
+})
+
 const McpInvokeToolParams = z.object({
   serverId: requiredString("required"),
   toolName: requiredString("required"),
@@ -1511,6 +1553,12 @@ export const PARAMS_SCHEMAS = {
   "action.connector.draft": ConnectorDraftParams,
   // Actions: human-in-the-loop (ADR 0061 P2)
   "action.approval.request": ApprovalRequestParams,
+  // Actions: remote device steps (ADR 0061 P3)
+  "action.mobile.camera": MobileCameraParams,
+  "action.mobile.scanBarcode": MobileScanBarcodeParams,
+  "action.mobile.location": MobileLocationParams,
+  "action.mobile.share": MobileShareParams,
+  "action.mobile.notify": MobileNotifyParams,
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,

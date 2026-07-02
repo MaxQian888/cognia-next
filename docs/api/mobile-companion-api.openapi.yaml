@@ -2864,6 +2864,50 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/workflow_step_result:
+    post:
+      operationId: rpcWorkflowStepResult
+      tags: [rpc-workflows]
+      summary: Deliver a (chunked) result for a desktop-issued remote step (ADR-0061 P3).
+      description: |
+        A paired device answers a `workflow://step-execute` request. Results
+        are JSON-serialized then sliced into ≤32 KiB chunks to respect the
+        64 KiB body cap; the desktop broker reassembles by `seq`. Only the
+        request's target device may answer — the responder identity is the
+        JWT-verified `callerDeviceId` injected server-side.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, seq, total, chunk]
+              properties:
+                requestId: { type: string }
+                seq: { type: integer, minimum: 0 }
+                total: { type: integer, minimum: 1 }
+                chunk: { type: string, maxLength: 49152 }
+      responses:
+        "200":
+          description: Chunk accepted — ok=false means unknown/expired request or wrong device.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  complete: { type: boolean }
+                  reason: { type: string, enum: [not-found, wrong-device, malformed] }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   # ─────────────────────────────────────────────────────────────────────────
   # rpc — devices
   # ─────────────────────────────────────────────────────────────────────────

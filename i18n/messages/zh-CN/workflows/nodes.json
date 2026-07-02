@@ -178,6 +178,28 @@
         "label": "写入记忆"
       }
     },
+    "mobile": {
+      "camera": {
+        "description": "在已配对手机上打开相机，把拍摄结果（base64）返回给运行。",
+        "label": "手机拍照"
+      },
+      "location": {
+        "description": "从已配对手机读取当前 GPS 位置。",
+        "label": "获取手机定位"
+      },
+      "notify": {
+        "description": "在已配对手机上显示一条本地通知。",
+        "label": "通知手机"
+      },
+      "scanBarcode": {
+        "description": "在已配对手机上打开扫码器，返回条码/二维码原始值。",
+        "label": "手机扫码"
+      },
+      "share": {
+        "description": "在已配对手机上打开系统分享面板，分享给定文本或链接。",
+        "label": "从手机分享"
+      }
+    },
     "plugin": {
       "invoke": {
         "description": "调用插件运行时中注册的任务处理器。",

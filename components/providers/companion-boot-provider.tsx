@@ -34,6 +34,8 @@ import {
   installCapabilityReporter,
   type CapabilityReporterTransport,
 } from "@/lib/companion/capability-reporter"
+import { installRemoteStepServer } from "@/lib/companion/remote-step-server"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { getSettings } from "@/lib/db/settings"
 import { loggers } from "@/lib/logging"
 
@@ -198,6 +200,17 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       ) {
         cleanup.push(installCapabilityReporter(reporterTransport as CapabilityReporterTransport))
       }
+
+      // ── Remote step server (ADR-0061 P3) ─────────────────────────────
+      // Serve desktop-issued `workflow://step-execute` requests (camera,
+      // barcode, location, …) addressed to this device. Foreground-only by
+      // nature — the WS subscription lives with the app session.
+      cleanup.push(
+        installRemoteStepServer({
+          transport,
+          getDeviceId: () => loadCompanionConfig()?.deviceId,
+        })
+      )
 
       // ── Push notifications ────────────────────────────────────────────
       const push = await registerPushNotifications()

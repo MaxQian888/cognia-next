@@ -40,6 +40,13 @@ export interface CapabilityPreflightOptions {
    * instead of executing, so their requirements don't apply.
    */
   seededNodeIds?: ReadonlyArray<string>
+  /**
+   * Capabilities satisfiable via a paired device (ADR 0061 P3) — the union
+   * of active `pairedDevices` rows' reported manifests. A requirement missing
+   * locally but present here passes preflight; the hub-side proxy executor
+   * owns the run-time "is a device actually reachable" failure.
+   */
+  remoteCapabilities?: ReadonlyArray<CapabilityId>
 }
 
 /**
@@ -55,15 +62,39 @@ export function preflightCapabilities(
 ): CapabilityPreflightFailure[] {
   const restrict = opts.restrictToNodeIds ? new Set(opts.restrictToNodeIds) : undefined
   const seeded = new Set(opts.seededNodeIds ?? [])
+  const remote = new Set(opts.remoteCapabilities ?? [])
   const failures: CapabilityPreflightFailure[] = []
   for (const node of workflow.nodes) {
     if (node.type.startsWith("annotation.")) continue
     if (restrict && !restrict.has(node.id)) continue
     if (seeded.has(node.id)) continue
-    const missing = missingCapabilities(nodeCatalogEntry(node.type), local)
+    const missing = missingCapabilities(nodeCatalogEntry(node.type), local).filter(
+      (cap) => !remote.has(cap)
+    )
     if (missing.length > 0) failures.push({ nodeId: node.id, kind: node.type, missing })
   }
   return failures
+}
+
+/**
+ * Union of capability manifests reported by active paired devices — the
+ * `remoteCapabilities` input for {@link preflightCapabilities}. Best-effort:
+ * an unreadable registry yields the empty set (preflight then falls back to
+ * strict local checking).
+ */
+export async function remoteCapabilityUnion(): Promise<CapabilityId[]> {
+  try {
+    const { listPairedDevices } = await import("@/lib/db/paired-devices")
+    const rows = await listPairedDevices()
+    const union = new Set<CapabilityId>()
+    for (const row of rows) {
+      if (row.revokedAt !== undefined || row.pausedAt !== undefined) continue
+      for (const cap of row.capabilities ?? []) union.add(cap as CapabilityId)
+    }
+    return [...union]
+  } catch {
+    return []
+  }
 }
 
 /** One-line human summary used as the run failure message. */

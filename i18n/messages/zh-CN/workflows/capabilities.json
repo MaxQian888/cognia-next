@@ -20,5 +20,7 @@
     "webview": "交互界面"
   },
   "tooltip": "需要本设备缺少的能力：{caps}",
-  "unavailable": "本设备不可用"
+  "tooltipRemote": "将在提供以下能力的已配对设备上执行：{caps}",
+  "unavailable": "本设备不可用",
+  "viaDevice": "手机执行"
 }

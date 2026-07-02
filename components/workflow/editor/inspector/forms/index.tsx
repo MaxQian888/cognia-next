@@ -4560,6 +4560,184 @@ export function ApprovalRequestConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── action.mobile.* (ADR 0061 P3) ─────────────────────────────────────────
+// Shared routing fields: pin a paired device + bound the wait.
+function MobileRoutingFields({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.mobileStep")
+  const deviceId = readString(params, "deviceId")
+  const timeoutMs = readNumber(params, "timeoutMs", 120_000)
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field
+        label={t("deviceId.label")}
+        htmlFor="mob-device"
+        hint={t("deviceId.hint")}
+        name="deviceId"
+      >
+        <Input
+          id="mob-device"
+          value={deviceId}
+          onChange={(e) => onChange(patchParam(params, "deviceId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("timeoutMs.label")} htmlFor="mob-timeout" name="timeoutMs">
+        <Input
+          id="mob-timeout"
+          type="number"
+          min={1000}
+          value={timeoutMs}
+          onChange={(e) =>
+            onChange(patchParam(params, "timeoutMs", Number(e.target.value) || 120_000))
+          }
+        />
+      </Field>
+    </div>
+  )
+}
+
+export function MobileCameraConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.mobileCamera")
+  const quality = readNumber(params, "quality", 70)
+  const width = readNumber(params, "width", 1280)
+  return (
+    <FieldGroup>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("quality.label")} htmlFor="mc-quality" name="quality">
+          <Input
+            id="mc-quality"
+            type="number"
+            min={1}
+            max={100}
+            value={quality}
+            onChange={(e) => onChange(patchParam(params, "quality", Number(e.target.value) || 70))}
+          />
+        </Field>
+        <Field label={t("width.label")} htmlFor="mc-width" name="width">
+          <Input
+            id="mc-width"
+            type="number"
+            min={64}
+            value={width}
+            onChange={(e) => onChange(patchParam(params, "width", Number(e.target.value) || 1280))}
+          />
+        </Field>
+      </div>
+      <MobileRoutingFields params={params} onChange={onChange} />
+    </FieldGroup>
+  )
+}
+
+export function MobileScanBarcodeConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.mobileScanBarcode")
+  const raw = params.formats
+  const formats = Array.isArray(raw) ? (raw as string[]).join(", ") : ""
+  return (
+    <FieldGroup>
+      <Field
+        label={t("formats.label")}
+        htmlFor="ms-formats"
+        hint={t("formats.hint")}
+        name="formats"
+      >
+        <Input
+          id="ms-formats"
+          value={formats}
+          onChange={(e) =>
+            onChange(
+              patchParam(
+                params,
+                "formats",
+                e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              )
+            )
+          }
+        />
+      </Field>
+      <MobileRoutingFields params={params} onChange={onChange} />
+    </FieldGroup>
+  )
+}
+
+export function MobileLocationConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.mobileLocation")
+  const high = readBoolean(params, "enableHighAccuracy", false)
+  return (
+    <FieldGroup>
+      <Field label={t("enableHighAccuracy.label")} htmlFor="ml-high" name="enableHighAccuracy">
+        <Switch
+          id="ml-high"
+          checked={high}
+          onCheckedChange={(v) => onChange(patchParam(params, "enableHighAccuracy", v))}
+        />
+      </Field>
+      <MobileRoutingFields params={params} onChange={onChange} />
+    </FieldGroup>
+  )
+}
+
+export function MobileShareConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.mobileShare")
+  const title = readString(params, "title")
+  const text = readString(params, "text")
+  const url = readString(params, "url")
+  return (
+    <FieldGroup>
+      <Field label={t("title.label")} htmlFor="msh-title" name="title">
+        <Input
+          id="msh-title"
+          value={title}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+        />
+      </Field>
+      <Field label={t("text.label")} htmlFor="msh-text" hint={t("text.hint")} name="text">
+        <Textarea
+          id="msh-text"
+          value={text}
+          rows={3}
+          onChange={(e) => onChange(patchParam(params, "text", e.target.value))}
+        />
+      </Field>
+      <Field label={t("url.label")} htmlFor="msh-url" name="url">
+        <Input
+          id="msh-url"
+          value={url}
+          onChange={(e) => onChange(patchParam(params, "url", e.target.value))}
+        />
+      </Field>
+      <MobileRoutingFields params={params} onChange={onChange} />
+    </FieldGroup>
+  )
+}
+
+export function MobileNotifyConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.mobileNotify")
+  const title = readString(params, "title")
+  const body = readString(params, "body")
+  return (
+    <FieldGroup>
+      <Field label={t("title.label")} htmlFor="mn-title" name="title" required>
+        <Input
+          id="mn-title"
+          value={title}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+        />
+      </Field>
+      <Field label={t("body.label")} htmlFor="mn-body" name="body">
+        <Textarea
+          id="mn-body"
+          value={body}
+          rows={3}
+          onChange={(e) => onChange(patchParam(params, "body", e.target.value))}
+        />
+      </Field>
+      <MobileRoutingFields params={params} onChange={onChange} />
+    </FieldGroup>
+  )
+}
+
 // ── ai.classify ───────────────────────────────────────────────────────────
 export function AiClassifyConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.aiClassify")

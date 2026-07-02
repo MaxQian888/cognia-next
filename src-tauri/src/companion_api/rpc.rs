@@ -347,6 +347,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     // control-gated; the caller device id is injected server-side.
     "workflow_approval_list",
     "workflow_approval_respond",
+    // ── Remote step execution (ADR-0061 P3) ─────────────────────────────────
+    // A paired device answers a desktop-issued `workflow://step-execute`
+    // request with a (chunked) result. Only meaningful for a pending request
+    // addressed to that device — the TS broker verifies the JWT-injected
+    // caller against the request's target, so no control gate is needed.
+    "workflow_step_result",
     // ── Twin source CRUD + job control (ADR-0003) ───────────────────────────
     "twin_delete",
     "twin_source_list",
@@ -570,6 +576,7 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "workflow_trigger_manual",
     "device_capabilities_report",
     "workflow_approval_respond",
+    "workflow_step_result",
 ];
 
 /// Inject (and overwrite) `callerDeviceId` into `args` for the commands in
@@ -1432,6 +1439,8 @@ pub(super) async fn dispatch(
         // injected below so the responder identity is spoof-proof.
         | "workflow_approval_list"
         | "workflow_approval_respond"
+        // ADR-0061 P3 — chunked result for a desktop-issued remote step.
+        | "workflow_step_result"
         | "twin_delete"
         | "twin_source_list"
         | "twin_source_update"
@@ -3449,6 +3458,15 @@ mod tests {
         assert!(!READ_ONLY_COMMANDS.contains(&"device_capabilities_report"));
         // Baseline paired capability — not remote-control gated.
         assert!(!CONTROL_COMMANDS.contains(&"device_capabilities_report"));
+    }
+
+    #[test]
+    fn workflow_step_result_is_known_mutating_and_identity_injected() {
+        assert!(KNOWN_COMMANDS.contains(&"workflow_step_result"));
+        assert!(!READ_ONLY_COMMANDS.contains(&"workflow_step_result"));
+        // The broker's target check replaces a control gate here.
+        assert!(!CONTROL_COMMANDS.contains(&"workflow_step_result"));
+        assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_step_result"));
     }
 
     #[test]

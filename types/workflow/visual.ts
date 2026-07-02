@@ -123,6 +123,14 @@ export type WorkflowNodeKind =
   // rejects — desktop notification action, or a paired device via the
   // `workflow_approval_respond` RPC. Routes downstream via decision handles.
   | "action.approval.request"
+  // Remote device steps (ADR 0061 P3): hub-side proxy executors dispatch to
+  // a capable paired device via the remote-step broker and marshal the
+  // device's output back into the run.
+  | "action.mobile.camera"
+  | "action.mobile.scanBarcode"
+  | "action.mobile.location"
+  | "action.mobile.share"
+  | "action.mobile.notify"
   | "action.mcp.invokeTool"
   | "action.plugin.invoke"
   // GitHub Delivery (provided by the github-delivery plugin)
@@ -350,6 +358,11 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.send",
   "action.connector.draft",
   "action.approval.request",
+  "action.mobile.camera",
+  "action.mobile.scanBarcode",
+  "action.mobile.location",
+  "action.mobile.share",
+  "action.mobile.notify",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
   "action.github.openPr",

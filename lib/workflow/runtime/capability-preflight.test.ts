@@ -67,6 +67,20 @@ describe("preflightCapabilities", () => {
     expect(preflightCapabilities(wf, ["webview"], { seededNodeIds: ["n_git"] })).toEqual([])
   })
 
+  it("passes requirements covered by a paired device (ADR 0061 P3)", () => {
+    const wf = { nodes: [node("n_cam", "action.mobile.camera")] }
+    // Desktop baseline lacks "camera"…
+    expect(preflightCapabilities(wf, ["webview", "shell"])).toHaveLength(1)
+    // …but a paired phone's manifest satisfies it.
+    expect(
+      preflightCapabilities(wf, ["webview", "shell"], { remoteCapabilities: ["camera"] })
+    ).toEqual([])
+    // Remote capabilities never mask a genuinely-unsatisfiable requirement.
+    expect(
+      preflightCapabilities(wf, ["webview"], { remoteCapabilities: ["geolocation"] })
+    ).toHaveLength(1)
+  })
+
   it("defaults to the local baseline (web under jsdom lacks shell)", () => {
     const wf = { nodes: [node("n_git", "action.git.commit")] }
     const failures = preflightCapabilities(wf)

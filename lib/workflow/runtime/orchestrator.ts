@@ -45,6 +45,7 @@ import {
   CAPABILITY_MISSING_CODE_PREFIX,
   formatPreflightFailures,
   preflightCapabilities,
+  remoteCapabilityUnion,
 } from "./capability-preflight"
 import { IdempotencyCache } from "./idempotency"
 import { topoSort, upstream as upstreamOf } from "./topo-sort"
@@ -211,6 +212,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const preflightFailures = preflightCapabilities(validated, undefined, {
     restrictToNodeIds: input.restrictToStepIds,
     seededNodeIds: input.seedOutputs ? Object.keys(input.seedOutputs) : undefined,
+    // ADR 0061 P3 — requirements satisfiable via a paired device pass here;
+    // the mobile proxy executors own run-time reachability failures.
+    remoteCapabilities: await remoteCapabilityUnion(),
   })
   if (preflightFailures.length > 0) {
     const message = formatPreflightFailures(preflightFailures)

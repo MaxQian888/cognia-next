@@ -199,6 +199,8 @@ export async function dispatchCommand(
       return workflowApprovalList()
     case "workflow_approval_respond":
       return workflowApprovalRespond(payload)
+    case "workflow_step_result":
+      return workflowStepResult(payload)
     case "device_capabilities_report":
       return deviceCapabilitiesReport(payload)
     case "twin_ingest_source":
@@ -693,6 +695,28 @@ async function workflowApprovalRespond(
     respondedBy: deviceId ? `device:${deviceId}` : "companion",
   })
   return result.ok ? { ok: true } : { ok: false, reason: result.reason }
+}
+
+/** Feed one chunk of a remote-step result into the broker (ADR-0061 P3).
+ *  The responder identity is the JWT-injected `callerDeviceId`; the broker
+ *  rejects answers from any device other than the request's target. */
+async function workflowStepResult(
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; complete?: boolean; reason?: string }> {
+  const deviceId = payload.callerDeviceId as string | undefined
+  if (!deviceId) throw new Error("workflow_step_result.callerDeviceId is required")
+  const requestId = payload.requestId as string | undefined
+  if (!requestId) throw new Error("workflow_step_result.requestId is required")
+  const { resolveRemoteStep } = await import("@/lib/workflow/runtime/remote-step-broker")
+  const outcome = resolveRemoteStep(deviceId, {
+    requestId,
+    seq: payload.seq as number,
+    total: payload.total as number,
+    chunk: payload.chunk as string,
+  })
+  return outcome.ok
+    ? { ok: true, complete: outcome.complete }
+    : { ok: false, reason: outcome.reason }
 }
 
 /** Hard cap on the persisted capability list — well above the core vocabulary

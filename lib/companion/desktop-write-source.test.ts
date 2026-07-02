@@ -294,6 +294,58 @@ describe("dispatchCommand: workflow approvals", () => {
   })
 })
 
+describe("dispatchCommand: workflow_step_result", () => {
+  afterEach(async () => {
+    const { __resetRemoteStepBrokerForTesting } =
+      await import("@/lib/workflow/runtime/remote-step-broker")
+    __resetRemoteStepBrokerForTesting()
+  })
+
+  it("feeds chunks into the broker and resolves the pending dispatch", async () => {
+    const { dispatchRemoteStep, chunkRemoteStepResult } =
+      await import("@/lib/workflow/runtime/remote-step-broker")
+    let requestId = ""
+    const emit = jest.fn(async (_event: string, payload: unknown) => {
+      const p = payload as { requestId?: string }
+      if (p.requestId) requestId = p.requestId
+    })
+    const promise = dispatchRemoteStep(
+      {
+        targetDeviceId: "dev-5",
+        kind: "action.mobile.location",
+        params: {},
+        runId: "run_s",
+        stepId: "n_s",
+        workflowId: "wf_s",
+        timeoutMs: 5_000,
+      },
+      { emit, isTauriFn: () => true }
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    const [chunk] = chunkRemoteStepResult(requestId, { ok: true, output: { latitude: 1 } })
+    const outcome = await dispatchCommand("workflow_step_result", {
+      ...chunk,
+      callerDeviceId: "dev-5",
+    })
+    expect(outcome).toEqual({ ok: true, complete: true })
+    await expect(promise).resolves.toEqual({ latitude: 1 })
+  })
+
+  it("rejects chunks from a non-target device and requires identity", async () => {
+    const outcome = await dispatchCommand("workflow_step_result", {
+      requestId: "rst_ghost",
+      seq: 0,
+      total: 1,
+      chunk: "{}",
+      callerDeviceId: "dev-x",
+    })
+    expect(outcome).toEqual({ ok: false, reason: "not-found" })
+    await expect(
+      dispatchCommand("workflow_step_result", { requestId: "rst_x", seq: 0, total: 1, chunk: "{}" })
+    ).rejects.toThrow(/callerDeviceId is required/)
+  })
+})
+
 describe("dispatchCommand: device_capabilities_report", () => {
   const seedDevice = async (deviceId: string) => {
     await getDb().pairedDevices.put({

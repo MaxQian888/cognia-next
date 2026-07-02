@@ -55,6 +55,11 @@ import { EvalRunConfig, EvalGateConfig } from "./forms/eval-forms"
 import {
   AgentTurnConfig,
   ApprovalRequestConfig,
+  MobileCameraConfig,
+  MobileScanBarcodeConfig,
+  MobileLocationConfig,
+  MobileShareConfig,
+  MobileNotifyConfig,
   AiClassifyConfig,
   AiEmbedConfig,
   AiExtractConfig,
@@ -176,6 +181,12 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.agent.turn": AgentTurnConfig,
   // Actions: human-in-the-loop (ADR 0061 P2)
   "action.approval.request": ApprovalRequestConfig,
+  // Actions: remote device steps (ADR 0061 P3)
+  "action.mobile.camera": MobileCameraConfig,
+  "action.mobile.scanBarcode": MobileScanBarcodeConfig,
+  "action.mobile.location": MobileLocationConfig,
+  "action.mobile.share": MobileShareConfig,
+  "action.mobile.notify": MobileNotifyConfig,
   // Actions: goals
   "action.goal.create": GoalCreateConfig,
   "action.goal.get": GoalTransitionConfig,

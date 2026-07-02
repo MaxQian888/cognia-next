@@ -178,6 +178,28 @@
         "label": "Store memory"
       }
     },
+    "mobile": {
+      "camera": {
+        "description": "Opens the camera on a paired phone and returns the capture (base64) to the run.",
+        "label": "Take photo on phone"
+      },
+      "location": {
+        "description": "Reads the current GPS position from a paired phone.",
+        "label": "Get phone location"
+      },
+      "notify": {
+        "description": "Shows a local notification on a paired phone.",
+        "label": "Notify phone"
+      },
+      "scanBarcode": {
+        "description": "Opens the barcode/QR scanner on a paired phone and returns the raw value.",
+        "label": "Scan barcode on phone"
+      },
+      "share": {
+        "description": "Opens the native share sheet on a paired phone with the given text or link.",
+        "label": "Share from phone"
+      }
+    },
     "plugin": {
       "invoke": {
         "description": "Calls a plugin task handler registered in the plugin runtime.",

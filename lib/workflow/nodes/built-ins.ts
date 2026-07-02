@@ -2177,6 +2177,41 @@ registerNodeExecutor({
   execute: async (ctx) => (await import("./actions/approval")).runApprovalRequest(ctx),
 })
 
+// ── action.mobile.* (ADR 0061 P3) ─────────────────────────────────────────
+// Hub-side proxies: pick a capable paired device and dispatch through the
+// remote-step broker. Not retryable — most open interactive native UI on
+// the phone; a retry would re-prompt the human.
+registerNodeExecutor({
+  kind: "action.mobile.camera",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileCamera(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.scanBarcode",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileScanBarcode(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.location",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileLocation(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.share",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileShare(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.notify",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileNotify(ctx),
+})
+
 // ── action.memory.recall / action.memory.store ───────────────────────────
 // Long-term memory access (lib/memory). Recall is read-only and best-effort
 // (degrades, never throws on a missing backend); store mirrors /remember's
