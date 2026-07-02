@@ -10,12 +10,17 @@ import {
 } from "./ecosystem-adapters"
 
 describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
-  it("registers the four expected adapters", () => {
+  it("registers the nine expected adapters", () => {
     expect(Object.keys(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS).sort()).toEqual([
       "claude-code",
       "codex",
+      "copilot-cli",
       "cursor",
+      "droid",
       "gemini-cli",
+      "kiro",
+      "pi",
+      "qwen-code",
     ])
   })
 
@@ -38,6 +43,38 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
   })
 })
 
+describe("new ACP agent surfaces", () => {
+  const cases: Array<{ presetId: string; command: string; args: string[] }> = [
+    { presetId: "copilot-cli", command: "copilot", args: ["--acp"] },
+    { presetId: "kiro", command: "kiro-cli", args: ["acp"] },
+    { presetId: "qwen-code", command: "npx", args: ["-y", "@qwen-code/qwen-code", "--acp"] },
+    { presetId: "pi", command: "npx", args: ["-y", "pi-acp"] },
+    { presetId: "droid", command: "droid", args: ["exec", "--output-format", "acp"] },
+  ]
+
+  it.each(cases)(
+    "exposes an executable ACP stdio surface for $presetId",
+    ({ presetId, command, args }) => {
+      const found = findExternalAgentSurfaceByPresetId(presetId)
+      expect(found).not.toBeNull()
+      expect(found?.surface.protocol).toBe("acp")
+      expect(found?.surface.transport).toBe("stdio")
+      expect(found?.surface.supportTier).toBe("executable")
+      expect(found?.surface.executionMode).toBe("direct")
+      expect(found?.surface.process).toEqual({ command, args })
+      expect(found?.surface.docsUrl).toBeTruthy()
+    }
+  )
+
+  it("marks the Pi surface as a community adapter", () => {
+    const found = findExternalAgentSurfaceByPresetId("pi")
+    expect(found?.surface.tags).toEqual(
+      expect.arrayContaining(["community-adapter", "experimental"])
+    )
+    expect(found?.surface.limitationNote).toMatch(/community adapter/i)
+  })
+})
+
 describe("getExternalAgentEcosystemAdapter", () => {
   it("returns the adapter when it exists", () => {
     expect(getExternalAgentEcosystemAdapter("codex")?.id).toBe("codex")
@@ -52,7 +89,17 @@ describe("listExternalAgentEcosystemAdapters", () => {
   it("returns all registered adapters", () => {
     const list = listExternalAgentEcosystemAdapters()
     expect(list.length).toBe(Object.keys(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS).length)
-    expect(list.map((a) => a.id).sort()).toEqual(["claude-code", "codex", "cursor", "gemini-cli"])
+    expect(list.map((a) => a.id).sort()).toEqual([
+      "claude-code",
+      "codex",
+      "copilot-cli",
+      "cursor",
+      "droid",
+      "gemini-cli",
+      "kiro",
+      "pi",
+      "qwen-code",
+    ])
   })
 })
 

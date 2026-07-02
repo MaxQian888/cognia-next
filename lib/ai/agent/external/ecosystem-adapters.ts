@@ -228,6 +228,158 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
       },
     ],
   },
+  "copilot-cli": {
+    id: "copilot-cli",
+    name: "GitHub Copilot CLI",
+    description: "GitHub Copilot CLI coding agent surfaces",
+    docsUrl: "https://docs.github.com/copilot/reference/copilot-cli-reference/acp-server",
+    tags: ["coding", "github", "copilot"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "copilot-cli",
+        name: "GitHub Copilot CLI",
+        description: "GitHub Copilot CLI coding agent via its native ACP server mode",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "github", "copilot"],
+        docsUrl: "https://docs.github.com/copilot/reference/copilot-cli-reference/acp-server",
+        envVarHint:
+          "Authenticates via COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN (PAT with Copilot Requests permission), or run `copilot` once and use /login.",
+        setupHint:
+          "Requires the GitHub Copilot CLI on PATH (`npm install -g @github/copilot`, Node 22+). ACP support is public preview and may change.",
+        process: {
+          command: "copilot",
+          args: ["--acp"],
+        },
+        icon: "github",
+      },
+    ],
+  },
+  kiro: {
+    id: "kiro",
+    name: "Kiro CLI",
+    description: "AWS Kiro CLI coding agent surfaces",
+    docsUrl: "https://kiro.dev/docs/cli/acp/",
+    tags: ["coding", "aws", "kiro"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "kiro",
+        name: "Kiro CLI",
+        description: "AWS Kiro CLI coding agent via its native ACP mode",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "aws", "kiro"],
+        docsUrl: "https://kiro.dev/docs/cli/acp/",
+        setupHint:
+          "Install the Kiro CLI (https://kiro.dev/docs/cli/installation/) and sign in once via `kiro-cli` (AWS Builder ID / IAM Identity Center browser login). Use the full binary path if `kiro-cli` is not on PATH.",
+        process: {
+          command: "kiro-cli",
+          args: ["acp"],
+        },
+        icon: "aws",
+      },
+    ],
+  },
+  "qwen-code": {
+    id: "qwen-code",
+    name: "Qwen Code",
+    description: "Alibaba Qwen Code CLI coding assistant surfaces",
+    docsUrl: "https://qwenlm.github.io/qwen-code-docs/en/users/integration-zed/",
+    tags: ["coding", "alibaba", "qwen"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "qwen-code",
+        name: "Qwen Code",
+        description: "Alibaba Qwen Code CLI coding assistant via ACP",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "alibaba", "qwen"],
+        docsUrl: "https://qwenlm.github.io/qwen-code-docs/en/users/integration-zed/",
+        envVarHint:
+          "Uses Qwen OAuth device login on first run, or OpenAI-compatible auth via OPENAI_API_KEY / OPENAI_BASE_URL (config in ~/.qwen/).",
+        process: {
+          command: "npx",
+          args: ["-y", "@qwen-code/qwen-code", "--acp"],
+        },
+        icon: "qwen",
+      },
+    ],
+  },
+  pi: {
+    id: "pi",
+    name: "Pi",
+    description: "Pi coding agent surfaces (via community ACP adapter)",
+    docsUrl: "https://github.com/svkozak/pi-acp",
+    tags: ["coding", "pi", "experimental"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "pi",
+        name: "Pi (community adapter)",
+        description:
+          "Pi coding agent bridged over ACP by the community pi-acp adapter (experimental)",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "pi", "community-adapter", "experimental"],
+        docsUrl: "https://github.com/svkozak/pi-acp",
+        setupHint:
+          "Requires the Pi agent (`npm install -g @earendil-works/pi-coding-agent`) with provider keys configured in Pi's own settings (~/.pi/agent/settings.json). Pi has no native ACP support yet; the third-party pi-acp adapter bridges ACP to `pi --mode rpc`.",
+        limitationNote:
+          "pi-acp is a community adapter, not an official Pi surface — behavior may lag Pi releases.",
+        process: {
+          command: "npx",
+          args: ["-y", "pi-acp"],
+        },
+        icon: "pi",
+      },
+    ],
+  },
+  droid: {
+    id: "droid",
+    name: "Factory Droid",
+    description: "Factory Droid CLI coding agent surfaces",
+    docsUrl: "https://docs.factory.ai/integrations/zed",
+    tags: ["coding", "factory", "droid"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "droid",
+        name: "Factory Droid",
+        description: "Factory Droid CLI coding agent via its native ACP output mode",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "factory", "droid"],
+        docsUrl: "https://docs.factory.ai/integrations/zed",
+        envVarHint:
+          "Authenticates via FACTORY_API_KEY (create at app.factory.ai/settings/api-keys), or run `droid` once for device-code browser login.",
+        setupHint:
+          "Install the Factory Droid CLI (`curl -fsSL https://app.factory.ai/cli | sh`) and ensure `droid` is on PATH, or use the full binary path.",
+        process: {
+          command: "droid",
+          args: ["exec", "--output-format", "acp"],
+        },
+        icon: "factory",
+      },
+    ],
+  },
   cursor: {
     id: "cursor",
     name: "Cursor",

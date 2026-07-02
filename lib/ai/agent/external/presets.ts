@@ -29,6 +29,11 @@ export type ExternalAgentPresetId =
   | "claude-code"
   | "gemini-cli"
   | "cursor-cli"
+  | "copilot-cli"
+  | "kiro"
+  | "qwen-code"
+  | "pi"
+  | "droid"
   | "opencode-server"
   | "opencode-remote"
   | "custom"
@@ -160,6 +165,11 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "claude-code": buildPresetConfig("claude-code"),
   "gemini-cli": buildPresetConfig("gemini-cli"),
   "cursor-cli": buildPresetConfig("cursor-cli"),
+  "copilot-cli": buildPresetConfig("copilot-cli"),
+  kiro: buildPresetConfig("kiro"),
+  "qwen-code": buildPresetConfig("qwen-code"),
+  pi: buildPresetConfig("pi"),
+  droid: buildPresetConfig("droid"),
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,
   custom: null,
