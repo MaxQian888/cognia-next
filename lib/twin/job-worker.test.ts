@@ -13,6 +13,11 @@ jest.mock("./distill/job-runner", () => ({
   runDistillJob: (...args: unknown[]) => mockRunDistill(...args),
 }))
 
+const mockRunIngest = jest.fn()
+jest.mock("./ingest/job-runner", () => ({
+  runIngestJob: (...args: unknown[]) => mockRunIngest(...args),
+}))
+
 import { processJob, type JobWorkerConfig } from "./job-worker"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinJob, getTwinJob } from "@/lib/db/twin-jobs"
@@ -77,5 +82,31 @@ describe("processJob — distill partialFailures forwarding", () => {
     const done = await getTwinJob(job.id)
     expect(done?.status).toBe("completed")
     expect(done?.partialFailures).toBeUndefined()
+  })
+})
+
+describe("processJob — ingest nameHints forwarding", () => {
+  it("passes config.nameHints through to runIngestJob", async () => {
+    mockRunIngest.mockResolvedValue({
+      failureSummary: { allFailed: false, failures: [] },
+      totalEmbeddingTokens: 0,
+    })
+    const job = await createTwinJob({
+      twinId: "twin_alice",
+      kind: "ingest",
+      sourceIds: [],
+      status: "running",
+      phase: "parsing",
+      progress: 0,
+    })
+    await processJob(job.id, {
+      ...baseConfig,
+      store: { provider: "native" } as never,
+      nameHints: ["Carol"],
+    })
+    expect(mockRunIngest).toHaveBeenCalledTimes(1)
+    expect(mockRunIngest.mock.calls[0][0]).toMatchObject({ nameHints: ["Carol"] })
+    const done = await getTwinJob(job.id)
+    expect(done?.status).toBe("completed")
   })
 })

@@ -109,13 +109,22 @@ const GENERIC_SPEAKER_LABELS = new Set([
  * over-redaction, and email-style `Name <addr@host>` speakers are reduced to
  * the display name (the address itself is already caught by the EMAIL pass).
  */
-export function deriveNameHints(raw: RawSource, jobHints: string[] = []): string[] {
+export function deriveNameHints(
+  raw: RawSource,
+  jobHints: string[] = [],
+  parsedSpeakers: string[] = []
+): string[] {
   const out = new Set<string>()
+  // Job-level hints are explicit user intent (extraNameHints setting) —
+  // trusted verbatim, no generic-label filtering.
   for (const hint of jobHints) {
     const trimmed = hint.trim()
     if (trimmed) out.add(trimmed)
   }
-  for (const speaker of raw.baseMetadata?.speakers ?? []) {
+  // Raw-source speakers and parse-time importer speakers go through the
+  // same generic-label / length filter — the paste-mode path only discovers
+  // participants during `parseSource`, so both feeds matter.
+  for (const speaker of [...(raw.baseMetadata?.speakers ?? []), ...parsedSpeakers]) {
     const name = speaker
       .replace(/<[^>]*>/g, "") // drop "<addr@host>" — the EMAIL pass handles it
       .replace(/["']/g, "")
@@ -153,6 +162,7 @@ async function ensureSourceRow(twinId: string, raw: RawSource): Promise<TwinSour
     fingerprint: `auto_${raw.id}`,
     redacted: false,
     status: "parsing",
+    speakers: raw.baseMetadata?.speakers,
   })
 }
 
@@ -200,7 +210,10 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
 
       // Stage 3 — redact PII.
       await progress(job.id, `redacting:${raw.filename}`, (stageBase + 2) / TOTAL_STAGES)
-      const redaction = redactText(parsed.embeddableText, deriveNameHints(raw, input.nameHints))
+      const redaction = redactText(
+        parsed.embeddableText,
+        deriveNameHints(raw, input.nameHints, parsed.baseMetadata.speakers ?? [])
+      )
 
       // Persist the encrypted redaction map so the Drafts → Accept unredaction
       // flow (`previewUnredact` → `loadTwinUnredactMap`) can restore PII

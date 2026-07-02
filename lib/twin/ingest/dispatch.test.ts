@@ -65,6 +65,9 @@ describe("detectSourceFormat", () => {
     ["server.go", "code"],
     ["mailbox.mbox", "mbox"],
     ["msg.eml", "eml"],
+    // Regression: .json used to hit the unknown-file-type gate, making the
+    // uploader's chat-export JSON sniffing branch unreachable.
+    ["conversations.json", "markdown"],
   ])("maps %s to %s", (filename, expected) => {
     expect(detectSourceFormat(filename)).toBe(expected)
   })

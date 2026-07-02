@@ -121,6 +121,20 @@ describe("twinSources CRUD", () => {
     expect(fetched).toEqual(created)
   })
 
+  it("persists import-time speakers and omits them when absent", async () => {
+    const withSpeakers = await createTwinSource({
+      ...baseDraft,
+      fingerprint: "sha256:spk",
+      speakers: ["Alice Zhang", "张伟"],
+    })
+    const fetched = await getTwinSource(withSpeakers.id)
+    expect(fetched?.speakers).toEqual(["Alice Zhang", "张伟"])
+
+    const without = await createTwinSource({ ...baseDraft, fingerprint: "sha256:nospk" })
+    const fetchedWithout = await getTwinSource(without.id)
+    expect(fetchedWithout?.speakers).toBeUndefined()
+  })
+
   it("filters by twinId + kind / status", async () => {
     const a = await createTwinSource(baseDraft)
     const b = await createTwinSource({ ...baseDraft, kind: "chat", format: "claude-export" })

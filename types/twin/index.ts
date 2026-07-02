@@ -103,6 +103,15 @@ export interface TwinSource {
    * `lib/twin/ingest/redact.ts`).
    */
   redactionMapEnc?: string
+  /**
+   * Participant names captured at import time (chat speakers, email "From"
+   * headers, git authors). Fed to `deriveNameHints` so the redaction pass
+   * can scrub them before any cloud embed/LLM call. Non-indexed → schemaless
+   * in Dexie: old rows and plain documents simply omit it. Cleartext here is
+   * not a privacy regression — the row's `source` field already holds the
+   * full raw text.
+   */
+  speakers?: string[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -588,10 +597,20 @@ export interface TwinRuntimeSettings {
   llm: TwinRuntimeLlmSettings
   /** Optional RAG reranking stage. Off by default. */
   reranker?: TwinRuntimeRerankSettings
+  /**
+   * User-configured names that must ALWAYS be redacted during ingest,
+   * regardless of source metadata — e.g. the user's own name, which chat
+   * exports never list as a speaker (ChatGPT/Claude label the human side
+   * "User"). Applied to every source via the job worker's `nameHints`.
+   * Unlike import-time speakers these are NOT filtered through the
+   * generic-label list: they are explicit user intent.
+   */
+  extraNameHints: string[]
 }
 
 export const DEFAULT_TWIN_RUNTIME_SETTINGS: TwinRuntimeSettings = {
   workerEnabled: false,
+  extraNameHints: [],
   storage: {
     vectorBackend: "qdrant",
   },

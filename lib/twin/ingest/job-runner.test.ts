@@ -213,6 +213,18 @@ describe("deriveNameHints", () => {
     expect(deriveNameHints(raw(), ["Dave"])).toEqual(["Dave"])
     expect(deriveNameHints(raw())).toEqual([])
   })
+
+  it("filters parse-time speakers through the generic-label gate and de-dupes vs raw", () => {
+    expect(deriveNameHints(raw(["Alice"]), [], ["ChatGPT", "Alice", "李雷"])).toEqual([
+      "Alice",
+      "李雷",
+    ])
+  })
+
+  it("keeps job hints verbatim even when they look like generic labels", () => {
+    // extraNameHints are explicit user intent — never filtered.
+    expect(deriveNameHints(raw(), ["User"], ["User"])).toEqual(["User"])
+  })
 })
 
 describe("runIngestJob — name redaction (PII)", () => {
@@ -252,6 +264,42 @@ describe("runIngestJob — name redaction (PII)", () => {
     // The text handed to the embedder must not contain the raw name.
     const embedded = (mockEmbed.mock.calls[0][0] as string[]).join("\n")
     expect(embedded).not.toContain("张伟")
+    expect(embedded).toContain("<NAME_")
+  })
+
+  it("redacts speakers discovered only at parse time (paste-mode importer path)", async () => {
+    // The raw source carries no speakers; parseSource surfaces them on the
+    // parsed baseMetadata (importer fan-out union). The redaction pass must
+    // read the parsed result, not just the raw input.
+    const body = "### 李雷\nShip it, said 李雷."
+    mockParseSource.mockResolvedValue({
+      ...parsedSource(),
+      originalText: body,
+      embeddableText: body,
+      baseMetadata: { speakers: ["李雷"] },
+      pageMap: undefined,
+    })
+
+    await runIngestJob(runInput())
+
+    const embedded = (mockEmbed.mock.calls[0][0] as string[]).join("\n")
+    expect(embedded).not.toContain("李雷")
+    expect(embedded).toContain("<NAME_")
+  })
+
+  it("redacts user-configured extraNameHints passed as job-level nameHints", async () => {
+    const body = "Signed off by Max Qian this morning."
+    mockParseSource.mockResolvedValue({
+      ...parsedSource(),
+      originalText: body,
+      embeddableText: body,
+      pageMap: undefined,
+    })
+
+    await runIngestJob({ ...runInput(), nameHints: ["Max Qian"] })
+
+    const embedded = (mockEmbed.mock.calls[0][0] as string[]).join("\n")
+    expect(embedded).not.toContain("Max Qian")
     expect(embedded).toContain("<NAME_")
   })
 })

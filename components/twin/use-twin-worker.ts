@@ -112,10 +112,13 @@ function deriveVectorStoreConfig(settings: TwinRuntimeSettings): VectorStoreConf
 }
 
 function buildSourceLoader(): SourceLoader {
-  // The workbench's paste-text path stores the body in `twinSources.title` /
-  // a future File-pickup path will populate `binary`. For Phase 7 we only
-  // know how to load the markdown row from Dexie; binary sources surface a
-  // clear error so the worker fails the job rather than silently skipping.
+  // Every source is normalized to text at upload time: the paste path stores
+  // the body in `twinSources.source`, and the file/importer paths (PDF/DOCX,
+  // mbox/eml, chat exports, git-repo) are parsed client-side in
+  // `twin-source-uploader.tsx` and also land their extracted text in `source`
+  // (as `format: "markdown"`). So the worker only ever loads text — there is
+  // no binary round-trip to do here. Import-time `speakers` ride along as
+  // `baseMetadata.speakers` so `deriveNameHints` can seed the redaction pass.
   return async (source: TwinSource) => {
     const refreshed = await getTwinSource(source.id)
     if (!refreshed) throw new Error(`twin source ${source.id} disappeared mid-load`)
@@ -123,9 +126,8 @@ function buildSourceLoader(): SourceLoader {
       id: refreshed.id,
       filename: refreshed.title,
       format: refreshed.format,
-      // The paste-text uploader stores the body inside `source` for now;
-      // imported files round-trip through future importer modules.
       text: refreshed.source,
+      ...(refreshed.speakers?.length ? { baseMetadata: { speakers: refreshed.speakers } } : {}),
     }
   }
 }
@@ -170,6 +172,7 @@ export function buildTwinWorkerConfig(settings: TwinRuntimeSettings): JobWorkerC
     vectorBackend: settings.storage.vectorBackend,
     store,
     sourceLoader: buildSourceLoader(),
+    nameHints: settings.extraNameHints,
     llm: createAnthropicLlmClient({
       provider: settings.llm.provider,
       model: settings.llm.model,

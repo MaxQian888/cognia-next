@@ -101,6 +101,14 @@ describe("buildTwinWorkerConfig", () => {
     expect(config?.vectorBackend).toBe("qdrant")
   })
 
+  it("carries extraNameHints into the worker config", () => {
+    const config = buildTwinWorkerConfig({
+      ...COMPLETE_SETTINGS,
+      extraNameHints: ["Alice Zhang", "张伟"],
+    })
+    expect(config?.nameHints).toEqual(["Alice Zhang", "张伟"])
+  })
+
   it("returns null when the vector-store client cannot be constructed", () => {
     ;(createVectorStore as jest.Mock).mockImplementationOnce(() => {
       throw new Error("bad endpoint")
@@ -154,6 +162,19 @@ describe("buildTwinWorkerConfig sourceLoader", () => {
     const config = buildTwinWorkerConfig(COMPLETE_SETTINGS)
     const raw = await config!.sourceLoader({ id: "src1" } as never)
     expect(raw).toEqual({ id: "src1", filename: "doc.md", format: "markdown", text: "# body" })
+  })
+
+  it("emits persisted speakers as baseMetadata so redaction can seed nameHints", async () => {
+    getTwinSourceMock.mockResolvedValue({
+      id: "src2",
+      title: "chat.md",
+      format: "markdown",
+      source: "### 张伟\nhello",
+      speakers: ["张伟", "Alice Zhang"],
+    })
+    const config = buildTwinWorkerConfig(COMPLETE_SETTINGS)
+    const raw = await config!.sourceLoader({ id: "src2" } as never)
+    expect(raw.baseMetadata).toEqual({ speakers: ["张伟", "Alice Zhang"] })
   })
 
   it("throws when the source disappeared mid-load", async () => {

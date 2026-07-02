@@ -63,8 +63,54 @@ describe("TwinSourceUploader file picker", () => {
       const sources = await listTwinSourcesByTwin("twin_alice")
       expect(sources).toHaveLength(2)
       expect(sources.every((s) => s.format === "markdown" && s.kind === "email")).toBe(true)
+      // From-header participants must be persisted so the redaction pass can
+      // seed nameHints — without this the names leak to the cloud embedder.
+      expect(sources.every((s) => s.speakers?.includes("alice@example.com"))).toBe(true)
     })
     expect(await screen.findByText(/Imported 2 sources/i)).toBeInTheDocument()
+  })
+
+  it("persists chat-export speakers on the imported rows", async () => {
+    // Slack export shape (list of message objects with user_profile names).
+    const slackExport = JSON.stringify([
+      {
+        type: "message",
+        user: "U01",
+        user_profile: { real_name: "Alice Zhang", display_name: "alice" },
+        text: "morning all",
+        ts: "1700000000.000100",
+      },
+      {
+        type: "message",
+        user: "U02",
+        user_profile: { real_name: "张伟", display_name: "zw" },
+        text: "早上好",
+        ts: "1700000001.000100",
+      },
+    ])
+
+    render(<TwinSourceUploader twinId="twin_alice" />)
+    const input = screen.getByLabelText(/Pick text files/i) as HTMLInputElement
+    await userEvent.upload(input, makeFile("team-chat.json", slackExport, "application/json"))
+
+    await waitFor(async () => {
+      const sources = await listTwinSourcesByTwin("twin_alice")
+      expect(sources).toHaveLength(1)
+      expect(sources[0].kind).toBe("chat")
+      expect(sources[0].speakers).toEqual(expect.arrayContaining(["Alice Zhang", "张伟"]))
+    })
+  })
+
+  it("leaves speakers undefined for plain text files", async () => {
+    render(<TwinSourceUploader twinId="twin_alice" />)
+    const input = screen.getByLabelText(/Pick text files/i) as HTMLInputElement
+    await userEvent.upload(input, makeFile("notes2.md", "# Plain\n\nNo participants here."))
+
+    await waitFor(async () => {
+      const sources = await listTwinSourcesByTwin("twin_alice")
+      expect(sources).toHaveLength(1)
+      expect(sources[0].speakers).toBeUndefined()
+    })
   })
 
   it("flags unknown extensions in the per-file summary without throwing", async () => {
@@ -93,5 +139,33 @@ describe("TwinSourceUploader file picker", () => {
       expect(screen.getByText(/Imported 0 sources/i)).toBeInTheDocument()
     })
     expect(screen.getByText(/File is empty/i)).toBeInTheDocument()
+  })
+})
+
+describe("TwinSourceUploader paste path", () => {
+  it("persists the pasted body in `source` (not the label)", async () => {
+    render(<TwinSourceUploader twinId="twin_alice" />)
+    const body = "This is the pasted body that must survive to the worker."
+
+    await userEvent.type(screen.getByLabelText(/Title \(optional\)/i), "My label")
+    await userEvent.type(screen.getByLabelText(/^Content$/i), body)
+    await userEvent.click(screen.getByRole("button", { name: /Save pasted source/i }))
+
+    await waitFor(async () => {
+      const sources = await listTwinSourcesByTwin("twin_alice")
+      expect(sources).toHaveLength(1)
+      // Regression: `source` used to hold the label ("manual paste"), dropping
+      // the body so the worker embedded the label instead of the pasted text.
+      expect(sources[0].source).toBe(body)
+      expect(sources[0].title).toBe("My label")
+    })
+  })
+
+  it("requires content before saving", async () => {
+    render(<TwinSourceUploader twinId="twin_alice" />)
+    await userEvent.click(screen.getByRole("button", { name: /Save pasted source/i }))
+
+    expect(await screen.findByText(/Paste some content before saving/i)).toBeInTheDocument()
+    expect(await listTwinSourcesByTwin("twin_alice")).toEqual([])
   })
 })

@@ -215,6 +215,16 @@ function runChatJsonImporter(
   }
 }
 
+/**
+ * Importer-produced participant names, or undefined when absent/empty.
+ * Persisted on the source row so ingest can seed the redaction `nameHints`
+ * pass — without this the names leak verbatim to the cloud embedder.
+ */
+function speakersOf(raw: RawSource): string[] | undefined {
+  const speakers = raw.baseMetadata?.speakers
+  return speakers && speakers.length > 0 ? speakers : undefined
+}
+
 async function sha256(text: string): Promise<string> {
   const enc = new TextEncoder()
   const bytes = enc.encode(text)
@@ -380,6 +390,7 @@ async function ingestFile(
             redacted: false,
             status: "pending",
             tags: [CHAT_IMPORTER_TAGS[importerKey]],
+            speakers: speakersOf(raw),
           })
           count += 1
         }
@@ -426,6 +437,7 @@ async function ingestFile(
           redacted: false,
           status: "pending",
           tags: ["dingtalk-export"],
+          speakers: speakersOf(raw),
         })
         count += 1
       }
@@ -462,6 +474,7 @@ async function ingestFile(
         redacted: false,
         status: "pending",
         tags: [detected],
+        speakers: speakersOf(raw),
       })
       count += 1
     }
@@ -547,6 +560,7 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
           redacted: false,
           status: "pending",
           tags: ["git-repo"],
+          speakers: speakersOf(raw),
         })
         count += 1
       }
@@ -572,7 +586,11 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
         twinId,
         kind: inferKind(format),
         format,
-        source: title.trim() || "manual paste",
+        // `source` carries the body text for the worker to load (mirrors the
+        // file/importer path, which stores extracted text here). The user's
+        // optional label lives in `title`, NOT `source` — storing the label in
+        // `source` dropped the pasted body so the worker embedded the label.
+        source: content,
         title: title.trim() || `Pasted ${format} (${new Date().toLocaleString()})`,
         bytes: content.length,
         fingerprint,

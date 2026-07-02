@@ -137,6 +137,11 @@ const EXTENSION_FORMAT: Record<string, TwinSourceFormat> = {
   h: "code",
   swift: "code",
   kt: "code",
+  // Generic .json routes as markdown text; the uploader sniffs chat-export
+  // shapes (ChatGPT/Claude/Slack/…) AFTER this coarse detection and rewrites
+  // the format to the matching importer. Without this key .json files died
+  // at the unknown-file-type gate and the JSON import branch was unreachable.
+  json: "markdown",
 }
 
 /**
