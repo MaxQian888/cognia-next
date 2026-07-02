@@ -1,0 +1,37 @@
+# Caddy front door for cognia-server (ADR-0059 F2 / D7).
+#
+# Terminate-and-reproxy: Caddy owns the PUBLIC TLS story (ACME for a real
+# domain, its internal CA for `localhost`) and re-encrypts the hop to
+# cognia-server's self-signed HTTPS on the compose network. We deliberately
+# do NOT add a plaintext mode to cognia-server — the re-encrypted hop never
+# leaves the compose network and keeps the front door's TLS surface
+# unchanged (considered-and-rejected: TCP passthrough, which would force
+# browsers to trust the self-signed cert they cannot pin).
+#
+# Upstream verification: the self-signed cert's SANs are
+# localhost / cognia-companion.local / 127.0.0.1 / ::1 (companion_api/tls.rs)
+# — NOT the compose DNS name `cognia-server` — so the transport pins the
+# trust pool to the cert file on the shared volume AND overrides the
+# verification name to a real SAN via tls_server_name. If a rotated cert
+# ever drops those SANs, the documented fallback is replacing the two tls_*
+# lines with `tls_insecure_skip_verify` (acceptable: the hop is
+# compose-network-internal).
+#
+# Env:
+#   COGNIA_DOMAIN  public hostname (ACME) — `localhost` uses Caddy's
+#                  internal CA, ideal for local testing.
+#   ACME_EMAIL     optional; add an `email` global option if you want
+#                  Let's Encrypt expiry mail.
+#
+# WebSocket upgrades (/ws/v1/events, /ws/v1/bridge, /ws/v1/terminal) are
+# proxied natively by reverse_proxy — no extra config.
+
+{$COGNIA_DOMAIN:localhost} {
+	reverse_proxy https://cognia-server:7890 {
+		transport http {
+			tls
+			tls_trust_pool file /cognia-data/cognia/companion/tls.pem
+			tls_server_name localhost
+		}
+	}
+}
