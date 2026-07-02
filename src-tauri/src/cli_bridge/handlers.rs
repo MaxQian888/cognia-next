@@ -681,10 +681,125 @@ fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ACP token broker
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Synthetic device identity minted for the `cognia acp` stdio bridge. One
+/// fixed id (rather than one per connection) keeps the paired-devices view
+/// clean and lets the deny list revoke the whole surface in one entry.
+const ACP_DEVICE_ID: &str = "acp-cli";
+
+/// Account id stamped into ACP bridge tokens. Purely local (the companion
+/// JWT layer only validates the format), but stable so audit lines and
+/// `whoami` output are recognizable.
+const ACP_ACCOUNT_ID: &str = "local_acct_acp";
+
+/// Build the broker response payload from resolved inputs. Split from the
+/// axum handler so the token/URL contract is unit-testable without a Tauri
+/// app handle.
+fn build_acp_token_payload(
+    port: u16,
+    secret: &[u8],
+    tls_fingerprint: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let token = crate::companion_api::jwt::issue_device_jwt(secret, ACP_DEVICE_ID, ACP_ACCOUNT_ID)
+        .map_err(|e| anyhow::anyhow!("issue ACP device JWT: {e}"))?;
+    Ok(json!({
+        "ok": true,
+        "wsUrl": format!("wss://127.0.0.1:{port}/ws/v1/acp"),
+        "token": token,
+        "tlsFingerprint": tls_fingerprint,
+    }))
+}
+
+/// `POST /api/v1/dev/acp/token` — mint a device-scope JWT for the
+/// `cognia acp` stdio↔WS bridge and point it at the companion API's
+/// `/ws/v1/acp` endpoint.
+///
+/// Trust model: identical to plugin install — loopback origin + per-launch
+/// dev token (enforced by the router middleware). The minted JWT carries the
+/// baseline device scope only; the elevated control/service RPC arms stay
+/// out of reach of an ACP client.
+pub async fn acp_token(State(state): State<SharedState>) -> Response {
+    let Some(server_state) = state
+        .app_handle
+        .try_state::<crate::companion_api::CompanionServerState>()
+    else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion server state unavailable",
+        );
+    };
+    let Some(port) = server_state.bound_port() else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion API server is not running — start it from Settings → Companion",
+        );
+    };
+    let secret = match crate::companion_api::secret::load_or_generate() {
+        Ok(secret) => secret,
+        Err(e) => {
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("load companion signing secret: {e}"),
+            );
+        }
+    };
+    match build_acp_token_payload(port, &secret, &crate::companion_api::tls_fingerprint()) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+fn err_response(status: StatusCode, message: &str) -> Response {
+    (
+        status,
+        Json(ErrResponse {
+            ok: false,
+            error: message.to_string(),
+        }),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    const TEST_SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+
+    #[test]
+    fn acp_token_payload_mints_verifiable_device_jwt() {
+        let payload = build_acp_token_payload(7890, TEST_SECRET, "AA:BB").unwrap();
+        assert_eq!(payload["ok"], true);
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:7890/ws/v1/acp");
+        assert_eq!(payload["tlsFingerprint"], "AA:BB");
+
+        let token = payload["token"].as_str().unwrap();
+        let claims =
+            crate::companion_api::jwt::verify(TEST_SECRET, token, "device").expect("verify");
+        assert_eq!(claims.scope, "device");
+        assert_eq!(claims.device_id.as_deref(), Some(ACP_DEVICE_ID));
+        assert_eq!(claims.account_id.as_deref(), Some(ACP_ACCOUNT_ID));
+    }
+
+    #[test]
+    fn acp_token_payload_rejects_wrong_secret() {
+        let payload = build_acp_token_payload(7890, TEST_SECRET, "").unwrap();
+        let token = payload["token"].as_str().unwrap();
+        assert!(
+            crate::companion_api::jwt::verify(b"another-secret-32-bytes-exactly_", token, "device")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn acp_token_payload_uses_bound_port() {
+        let payload = build_acp_token_payload(43210, TEST_SECRET, "").unwrap();
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:43210/ws/v1/acp");
+    }
 
     fn make_test_bundle(manifest: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut buf = Vec::new();

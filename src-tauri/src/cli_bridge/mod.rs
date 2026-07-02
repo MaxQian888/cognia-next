@@ -19,6 +19,8 @@
 //! - `POST /api/v1/dev/plugins/reload`    — re-install (if bundle/source dir
 //!                                          path given) or emit a hot-reload event
 //! - `GET  /api/v1/dev/health`            — liveness probe
+//! - `POST /api/v1/dev/acp/token`         — mint a device-scope companion JWT
+//!                                          for the `cognia acp` stdio bridge
 //!
 //! # Discovery
 //!

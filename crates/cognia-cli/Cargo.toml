@@ -27,6 +27,10 @@ wasmparser = "0.221"
 # cognia desktop's CLI bridge. Plain HTTP because the bridge binds to
 # 127.0.0.1 only — see src-tauri/src/cli_bridge/.
 ureq = { version = "2", default-features = false, features = ["json"] }
+# `cognia acp` stdio↔WS bridge to the companion API's ACP endpoint. Sync
+# (blocking) client keeps tokio out of the binary, matching the ureq choice.
+tungstenite = { version = "0.26", features = ["native-tls"] }
+native-tls = "0.2"
 directories = "5"
 parking_lot = "0.12"
 # ── UX/TUI stack (Phase 1 — see plans/cli-tui-majestic-quokka.md) ─────────

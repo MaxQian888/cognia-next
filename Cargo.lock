@@ -1614,6 +1614,7 @@ dependencies = [
  "hex",
  "indicatif 0.17.11",
  "is-terminal",
+ "native-tls",
  "notify",
  "owo-colors",
  "parking_lot",
@@ -1623,6 +1624,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "tiny_http",
+ "tungstenite 0.26.2",
  "ureq 2.12.1",
  "wasmparser 0.221.3",
  "zip 2.4.2",
@@ -11308,6 +11310,24 @@ dependencies = [
  "rustls-pki-types",
  "sha1 0.10.6",
  "thiserror 1.0.69",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "native-tls",
+ "rand 0.9.4",
+ "sha1 0.10.6",
+ "thiserror 2.0.18",
  "utf-8",
 ]
 

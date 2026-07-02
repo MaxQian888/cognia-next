@@ -66,6 +66,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod build_ts;
+mod cmd_acp;
 mod cmd_build;
 mod cmd_dev;
 mod cmd_info;
@@ -126,6 +127,10 @@ enum TopCommand {
         #[command(subcommand)]
         command: PluginCommand,
     },
+    /// Bridge stdio to the cognia ACP server so ACP clients (Zed, Neovim,
+    /// JetBrains) can drive cognia. Configure your editor with
+    /// `{"command": "cognia", "args": ["acp"]}`.
+    Acp,
 }
 
 #[derive(Subcommand, Debug)]
@@ -304,6 +309,7 @@ fn main() -> eyre::Result<()> {
     // + (with RUST_BACKTRACE=1) backtrace.
     let result: Result<()> = match cli.command {
         TopCommand::Plugin { command } => dispatch_plugin(command, &mut ui),
+        TopCommand::Acp => cmd_acp::run(),
     };
     result.map_err(anyhow_to_eyre)?;
     Ok(())

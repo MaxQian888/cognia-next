@@ -73,6 +73,10 @@ pub fn build_router(state: SharedState) -> Router {
         )
         .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
         .route("/api/v1/dev/plugins/reload", post(handlers::reload))
+        // ── ACP bridge token broker ─────────────────────────────────────
+        // Mints a device-scope companion JWT for the `cognia acp` stdio↔WS
+        // bridge (same loopback + dev-token trust model as plugin install).
+        .route("/api/v1/dev/acp/token", post(handlers::acp_token))
         // ── Session handoff (standalone agent CLI → desktop) ────────────
         // The CLI POSTs a session transcript; we emit it on
         // `cli-bridge:session-handoff` for the renderer to import + open.
