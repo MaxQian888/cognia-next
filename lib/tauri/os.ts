@@ -55,3 +55,20 @@ export function isMacPlatform(): boolean {
     return false
   }
 }
+
+/**
+ * Quick check for "is the user on Linux" — drives the desktop-pet
+ * window-climbing gate (only Windows/macOS can enumerate other apps'
+ * windows; Wayland has no such API and X11-only support isn't worth the
+ * maintenance surface for a minority of sessions).
+ */
+export function isLinuxPlatform(): boolean {
+  if (!isTauri()) {
+    return typeof navigator !== "undefined" && /linux/i.test(navigator.platform)
+  }
+  try {
+    return platformNative() === "linux"
+  } catch {
+    return false
+  }
+}
