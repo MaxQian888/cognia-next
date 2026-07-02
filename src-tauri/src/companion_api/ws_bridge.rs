@@ -632,11 +632,60 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
 }
 
 // ---------------------------------------------------------------------------
+// Test support (shared with sibling modules' tests)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// The socket-bridge slot is process-global; every test (in ANY module)
+    /// that installs, clears, or asserts on it must hold this lock so
+    /// parallel test threads don't steal each other's slot. tokio's `Mutex`
+    /// (not std/parking_lot) because guards are held across await points for
+    /// whole test bodies.
+    pub(crate) static GLOBAL_SLOT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    pub(crate) async fn lock_slot() -> tokio::sync::MutexGuard<'static, ()> {
+        GLOBAL_SLOT_LOCK.lock().await
+    }
+
+    /// Install a fake connected brain into the process-global slot without a
+    /// real WebSocket. Returns the receiver of the outgoing frame queue so
+    /// the test can assert on emitted frames. Hold the slot lock first.
+    pub(crate) fn install_socket_for_testing() -> mpsc::UnboundedReceiver<Message> {
+        let (tx, rx) = mpsc::unbounded_channel::<Message>();
+        let conn_id = CONN_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let transport = SocketBridgeTransport::new(tx, conn_id);
+        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
+        install_socket_bridge(
+            transport,
+            shutdown_tx,
+            BrainHello {
+                brain_version: "0.0.0-test".to_string(),
+                account_id: "local_acct_a".to_string(),
+                capabilities: Vec::new(),
+            },
+        );
+        rx
+    }
+
+    /// Clear the slot regardless of owner. Hold the slot lock first.
+    pub(crate) fn clear_socket_for_testing() {
+        SOCKET_BRIDGE.write().take();
+        let _ = READY.0.send(false);
+        BRAIN_RSS_BYTES.store(0, Ordering::SeqCst);
+        BRAIN_LAST_FLUSH_AT.store(0, Ordering::SeqCst);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::lock_slot;
     use super::*;
     use crate::companion_api::{
         deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
@@ -651,16 +700,6 @@ mod tests {
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
-
-    /// The socket-bridge slot is process-global; serialize the tests that
-    /// touch it so parallel test threads don't steal each other's slot.
-    /// tokio's `Mutex` (not std/parking_lot) because the guard is held across
-    /// await points for the whole test body.
-    static GLOBAL_SLOT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    async fn lock_slot() -> tokio::sync::MutexGuard<'static, ()> {
-        GLOBAL_SLOT_LOCK.lock().await
-    }
 
     fn test_state() -> SharedState {
         Arc::new(CompanionState {
