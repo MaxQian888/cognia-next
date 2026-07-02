@@ -771,6 +771,21 @@ export interface WorkflowTriggeredFrom {
  */
 export type WorkflowRow = VisualWorkflow
 
+/**
+ * Execution lease (ADR 0061 P4). Exactly one executor process may drive a
+ * run: the lease is claimed before the first step and heartbeat-renewed
+ * while the run is live, so a second process (crash-resume race, a future
+ * cloud brain) backs off instead of double-executing. Additive +
+ * non-indexed — no Dexie version bump.
+ */
+export interface WorkflowRunLease {
+  /** Per-process executor id (`lib/workflow/runtime/run-lease.ts`). */
+  ownerId: string
+  claimedAt: number
+  /** Epoch ms; a lease past this is stale and free to claim. */
+  expiresAt: number
+}
+
 export interface WorkflowRunRow {
   id: string
   workflowId: string
@@ -825,6 +840,14 @@ export interface WorkflowRunRow {
    * for legacy rows (`triggeredBy?.source ?? "ui"`).
    */
   triggeredBySource?: string
+  /** Execution lease (ADR 0061 P4) — see {@link WorkflowRunLease}. */
+  lease?: WorkflowRunLease
+  /**
+   * Epoch ms when a cancel was requested by a surface that could NOT abort
+   * the run locally (the lease is held by another live executor). The lease
+   * owner's heartbeat observes this and aborts. Additive + non-indexed.
+   */
+  cancelRequestedAt?: number
   /**
    * Dead-letter / replay metadata (A3). All additive + non-indexed (no Dexie
    * version bump): the dead-letter panel queries the existing `status` index

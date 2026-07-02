@@ -57,6 +57,13 @@ import { type SecretResolver } from "./secret-resolver"
 import { getDefaultSecretResolver } from "./secret-resolver-keyring"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
 import { registerRun, unregisterRun } from "./run-cancel-registry"
+import {
+  claimRunLease,
+  getExecutorId,
+  releaseRunLease,
+  startLeaseHeartbeat,
+  stopLeaseHeartbeat,
+} from "./run-lease"
 import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
 
 /**
@@ -72,8 +79,19 @@ async function releaseRunResources(runId: string): Promise<void> {
   } catch {
     // best-effort cleanup
   }
+  // Lease teardown (ADR 0061 P4) — stop renewing, then free the claim so a
+  // resume/replay elsewhere isn't blocked for a full TTL.
+  stopLeaseHeartbeat(runId)
+  try {
+    await releaseRunLease(runId)
+  } catch {
+    // best-effort — an unreleased lease simply expires
+  }
   unregisterRun(runId)
 }
+
+/** Terminal run statuses — never re-enter execution for these. */
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed", "cancelled"])
 
 export interface RunWorkflowInput {
   workflow: VisualWorkflow
@@ -172,6 +190,26 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // any step executes). Fires once per run() invocation.
   getPluginEventHooks().dispatchWorkflowStart(workflow.id, workflow.name)
 
+  // 2a. Ownership guards (ADR 0061 P4) — BEFORE the unconditional `put`
+  // below, which would otherwise clobber another executor's row.
+  //   - A terminal row (soft-cancelled from a companion, or already
+  //     finished) must never be resurrected by a resume replay: ack the
+  //     mirror so Rust stops offering it, and report the terminal state.
+  //   - A live lease held by another executor process means the run is
+  //     already being driven — back off instead of double-executing.
+  const existingRow = await getDb().workflowRuns.get(runId)
+  if (existingRow && TERMINAL_RUN_STATUSES.has(existingRow.status)) {
+    await ackRunCompleted(runId)
+    return { runId, status: existingRow.status, error: existingRow.error }
+  }
+  if (
+    existingRow?.lease &&
+    existingRow.lease.expiresAt > Date.now() &&
+    existingRow.lease.ownerId !== getExecutorId()
+  ) {
+    return { runId, status: existingRow.status }
+  }
+
   // 2. Persist the WorkflowRunRow up front so the UI can render it as
   // "running" immediately. We freeze the workflow snapshot here.
   const startedAt = Date.now()
@@ -196,6 +234,17 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   }
   // If we're resuming, the row may already exist — Dexie's `put` handles both.
   await getDb().workflowRuns.put(runRow)
+
+  // 2a′. Claim the execution lease (ADR 0061 P4). The transaction serialises
+  // racing claimants; losing the race here (a concurrent resume beat us
+  // between the read above and this claim) backs off exactly like the
+  // pre-put guard. Renewed by the heartbeat below, released with the run's
+  // resources on every terminal path.
+  const claim = await claimRunLease(runId)
+  if (claim === "held") {
+    return { runId, status: "running" }
+  }
+
   await persistRunState({
     runId,
     workflowId: workflow.id,
@@ -241,6 +290,12 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // `workflow_cancel_run` RPC can abort it. Unregistered on every terminal
   // path below.
   registerRun(runId, ac)
+  // Lease heartbeat (ADR 0061 P4): keeps the claim fresh and observes
+  // cross-executor cancel requests (`cancelRequestedAt` stamped by a
+  // surface whose local abort couldn't reach this process).
+  startLeaseHeartbeat(runId, {
+    onCancelRequested: () => ac.abort(new Error("Workflow run cancelled by another device")),
+  })
   const externalAbort = () => ac.abort(new Error("Workflow run aborted"))
   if (input.signal) {
     if (input.signal.aborted) ac.abort(new Error("Workflow run aborted"))

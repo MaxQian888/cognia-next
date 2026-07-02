@@ -164,15 +164,43 @@ export interface TeamDispatchDecision {
 }
 
 /**
+ * Structured claimant identity for an external-handoff pickup (ADR 0061
+ * P4). Replaces the bare `claimedBy` string so the claim records WHO
+ * resolved it — an external agent over the bridge, a paired device, or the
+ * desktop itself — instead of a hardcoded constant.
+ */
+export interface TeamPickupClaimant {
+  kind: "external-agent" | "device" | "desktop"
+  id: string
+  label?: string
+}
+
+/**
  * External-handoff pickup state. Set when a proposal materializes with the
  * `external-handoff` executor; cleared semantics are additive — an external
  * agent claims the team through the bridge's `team_run`, which stamps
- * `claimedBy`/`claimedAt` (idempotently — a second run never overwrites).
+ * `claimant`/`claimedAt` (idempotently — a second run never overwrites a
+ * LIVE claim; an expired claim lease re-advertises the pickup).
  */
 export interface TeamExternalPickup {
   requestedAt: Date
+  /**
+   * Pickup addressed to one specific executor (paired-device id or a
+   * bridge client name). Absent = any claimant may take it.
+   */
+  targetId?: string
+  /** Legacy string mirror of `claimant.id` — kept for persisted-store and
+   *  bridge-consumer compatibility. Prefer `claimant`. */
   claimedBy?: string
+  /** Structured claim identity (ADR 0061 P4). */
+  claimant?: TeamPickupClaimant
   claimedAt?: Date
+  /**
+   * Claim lease. A claim whose lease expired while the team never left its
+   * pre-run status frees the pickup — the claimant died between claim and
+   * dispatch. Absent on legacy claims (treated as non-expiring).
+   */
+  claimLeaseExpiresAt?: Date
 }
 
 /**

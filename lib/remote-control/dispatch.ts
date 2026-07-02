@@ -65,10 +65,6 @@ function settleFrom(
   return promise.catch((error) => ({ status: "failed", detail: errText(error) }))
 }
 
-/** Workflow run statuses past which a soft-cancel is a no-op. Mirrors the set
- * in `lib/companion/desktop-write-source.ts`. */
-const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"])
-
 type RemoteCommandHandler = (command: RemoteCommand) => Promise<RemoteCommandDispatchResult>
 
 /**
@@ -202,21 +198,12 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
   "workflow.cancel": async ({ args, runId }) => {
     const targetRunId = str(args, "runId")
     if (!targetRunId) return reject(runId, "runId required")
-    const { requestCancelRun } = await import("@/lib/workflow/runtime/run-cancel-registry")
-    // Abort a run executing in this runtime, if any.
-    const live = requestCancelRun(targetRunId, "cancelled via remote control")
-    if (live) return accept(runId, `workflow run ${targetRunId} aborted`)
-    // Soft-cancel: when the run is not live here (already finished, or owned by
-    // another process) mark a non-terminal row as cancelled so the UI reflects
-    // it. Mirrors `workflowCancelRun` in desktop-write-source.ts.
-    const { getDb } = await import("@/lib/db/schema")
-    const row = await getDb().workflowRuns.get(targetRunId)
-    if (row && !TERMINAL_RUN_STATUSES.has(row.status)) {
-      await getDb().workflowRuns.update(targetRunId, {
-        status: "cancelled",
-        completedAt: Date.now(),
-      })
-      return accept(runId, `workflow run ${targetRunId} soft-cancelled`)
+    // Shared cancel ladder (ADR 0061 P4): local abort → lease signal to the
+    // owning executor → soft-cancel with companion fan-out.
+    const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
+    const result = await cancelWorkflowRun(targetRunId, "cancelled via remote control")
+    if (result.cancelled) {
+      return accept(runId, `workflow run ${targetRunId} ${result.mode}`)
     }
     return reject(runId, "run not found or already terminal")
   },

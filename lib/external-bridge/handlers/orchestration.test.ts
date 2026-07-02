@@ -126,7 +126,7 @@ describe("teamRun", () => {
   it("starts the team and returns its status", async () => {
     runTeamMock.mockResolvedValue({ teamId: "t1", status: "completed" })
     const out = await teamRun({ teamId: "t1", ultracode: true })
-    expect(runTeamMock).toHaveBeenCalledWith("t1", { ultracode: true })
+    expect(runTeamMock).toHaveBeenCalledWith("t1", { origin: "external", ultracode: true })
     expect(out).toEqual({ ok: true, teamId: "t1", status: "completed" })
   })
 
@@ -161,6 +161,62 @@ describe("teamRun", () => {
     }
     await teamRun({ teamId: "t1" })
     expect(updateTeamMock).not.toHaveBeenCalled()
+  })
+
+  it("stamps a structured claimant + claim lease (ADR 0061 P4)", async () => {
+    runTeamMock.mockResolvedValue({ teamId: "t1", status: "running" })
+    storeTeams = { t1: { id: "t1", status: "idle", externalPickup: { requestedAt: new Date(0) } } }
+    await teamRun({
+      teamId: "t1",
+      claimant: { kind: "device", id: "dev-9", label: "Max's phone" },
+    })
+    expect(updateTeamMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        externalPickup: expect.objectContaining({
+          claimedBy: "dev-9",
+          claimant: { kind: "device", id: "dev-9", label: "Max's phone" },
+          claimLeaseExpiresAt: expect.any(Date),
+        }),
+      })
+    )
+  })
+
+  it("re-claims an expired claim lease on a still-idle team", async () => {
+    runTeamMock.mockResolvedValue({ teamId: "t1", status: "running" })
+    storeTeams = {
+      t1: {
+        id: "t1",
+        status: "idle",
+        externalPickup: {
+          requestedAt: new Date(0),
+          claimedBy: "dead-claimant",
+          claimedAt: new Date(1),
+          claimLeaseExpiresAt: new Date(Date.now() - 60_000),
+        },
+      },
+    }
+    await teamRun({ teamId: "t1" })
+    expect(updateTeamMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        externalPickup: expect.objectContaining({ claimedBy: "external-bridge" }),
+      })
+    )
+  })
+
+  it("rejects a claimant when the pickup is addressed to someone else", async () => {
+    storeTeams = {
+      t1: {
+        id: "t1",
+        status: "idle",
+        externalPickup: { requestedAt: new Date(0), targetId: "dev-only" },
+      },
+    }
+    const out = await teamRun({ teamId: "t1" })
+    expect(out.ok).toBe(false)
+    expect(out.error).toContain("dev-only")
+    expect(runTeamMock).not.toHaveBeenCalled()
   })
 })
 
@@ -219,6 +275,43 @@ describe("teamList", () => {
       id: "waiting",
       awaitingExternalPickup: true,
       requestedAt: "2026-07-02T00:00:00.000Z",
+    })
+  })
+
+  it("re-advertises an expired claim on a still-idle team and exposes claimant (ADR 0061 P4)", async () => {
+    storeTeams = {
+      stale: {
+        id: "stale",
+        name: "S",
+        status: "idle",
+        task: "x",
+        externalPickup: {
+          requestedAt: new Date("2026-07-02T00:00:00Z"),
+          claimedBy: "dead-claimant",
+          claimant: { kind: "external-agent", id: "dead-claimant" },
+          claimedAt: new Date("2026-07-02T01:00:00Z"),
+          claimLeaseExpiresAt: new Date(Date.now() - 1_000),
+        },
+      },
+      dispatched: {
+        id: "dispatched",
+        name: "D",
+        status: "executing",
+        task: "y",
+        externalPickup: {
+          requestedAt: new Date("2026-07-02T00:00:00Z"),
+          claimedBy: "live-claimant",
+          claimedAt: new Date("2026-07-02T01:00:00Z"),
+          claimLeaseExpiresAt: new Date(Date.now() - 1_000),
+        },
+      },
+    }
+    const out = await teamList({ awaitingExternalOnly: true })
+    // Expired + idle → free again; expired + executing → the claim did its
+    // job (the team is running), never re-advertised.
+    expect(out.teams?.map((t) => t.id)).toEqual(["stale"])
+    expect(out.teams?.[0]).toMatchObject({
+      claimant: { kind: "external-agent", id: "dead-claimant" },
     })
   })
 })

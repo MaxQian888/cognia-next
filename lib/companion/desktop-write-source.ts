@@ -38,7 +38,6 @@ import {
   type WorkflowPatch,
 } from "@/lib/db/workflows"
 import { createWorkflowSource } from "@/lib/scheduler/sources/workflow-source"
-import { requestCancelRun } from "@/lib/workflow/runtime/run-cancel-registry"
 import { createTwin, deleteTwin, type TwinInput } from "@/lib/db/twins"
 import {
   createTwinSource,
@@ -801,30 +800,15 @@ async function workflowRunList(payload: Record<string, unknown>): Promise<{ runs
   return { runs }
 }
 
-const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"])
-
 async function workflowCancelRun(
   payload: Record<string, unknown>
-): Promise<{ cancelled: boolean; live: boolean }> {
+): Promise<{ cancelled: boolean; live: boolean; mode: string }> {
   const runId = payload.runId as string | undefined
   if (!runId) throw new Error("workflow_cancel_run.runId is required")
-  // Abort a run executing in this runtime, if any.
-  const live = requestCancelRun(runId, "cancelled via Companion API")
-  // Soft-cancel: when the run is not live here (e.g. already finished, or owned
-  // by another process) mark a non-terminal row as cancelled so the UI reflects
-  // it. A live abort lets the orchestrator finalize the row itself.
-  let cancelled = live
-  if (!live) {
-    const row = await getDb().workflowRuns.get(runId)
-    if (row && !TERMINAL_RUN_STATUSES.has(row.status)) {
-      await getDb().workflowRuns.update(runId, {
-        status: "cancelled",
-        completedAt: Date.now(),
-      })
-      cancelled = true
-    }
-  }
-  return { cancelled, live }
+  // Shared cancel ladder (ADR 0061 P4): local abort → lease signal to the
+  // owning executor → soft-cancel with companion fan-out.
+  const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
+  return cancelWorkflowRun(runId, "cancelled via Companion API")
 }
 
 async function workflowScheduleSet(

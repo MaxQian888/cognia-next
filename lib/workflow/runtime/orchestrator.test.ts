@@ -51,6 +51,10 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listRunEvents } from "./event-log"
 import type { TriggerEvent, VisualWorkflow } from "@/types/workflow/visual"
 
+// Cold-opening the full schema ladder on fresh fake-indexeddb regularly
+// exceeds Jest's 5 s default on a busy machine (grew again with v95–v98).
+jest.setTimeout(30_000)
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
