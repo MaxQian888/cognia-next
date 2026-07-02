@@ -37,6 +37,7 @@ import {
   ArrowUpFromLine as PushIcon,
   FilePlus2 as StageIcon,
   Terminal as TerminalIcon,
+  PawPrint as PawPrintIcon,
   type LucideIcon,
 } from "lucide-react"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
@@ -47,6 +48,8 @@ const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "trigger.connector.inbound": InboxIcon,
   "trigger.chat.message": MessageIcon,
   "trigger.goal.completed": TargetIcon,
+  "trigger.pet.event": PawPrintIcon,
+  "action.pet.interact": PawPrintIcon,
   "trigger.webhook": WebhookIcon,
   "action.character.send": SendIcon,
   "action.character.create": UsersIcon,

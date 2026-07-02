@@ -100,6 +100,10 @@ import "./desktop"
 // OCR extraction node (ADR-0024) — turns an image/PDF/screen into text.
 import "./ocr"
 
+// Desktop-pet nodes — the `action.pet.interact` emitter + the
+// `trigger.pet.event` pass-through (real firing: runtime/pet-event-trigger).
+import "./pet"
+
 // Eval nodes — run a dataset eval / gate a run from a workflow.
 import "./eval"
 

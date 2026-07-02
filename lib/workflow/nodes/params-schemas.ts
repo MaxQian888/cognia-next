@@ -93,6 +93,21 @@ const TeamTriggerParams = z.object({
   status: z.enum(["completed", "failed", "cancelled"]).optional(),
 })
 
+/** Lifecycle kinds `trigger.pet.event` may subscribe to. */
+export const PET_TRIGGER_KINDS = ["levelUp", "evolved", "achievementUnlocked", "unwell"] as const
+
+const PetEventTriggerParams = z.object({
+  // Unscoped = any of the four lifecycle kinds.
+  kinds: z.array(z.enum(PET_TRIGGER_KINDS)).optional(),
+  cooldownMs: z.number().int().nonnegative().optional(),
+})
+
+const PetInteractActionParams = z.object({
+  kind: z.enum(["fed", "played", "petted", "talked", "slept", "cleaned", "treated"]),
+  // Optional shop-item id — the controller applies the item's restore.
+  itemId: optionalString,
+})
+
 const WebhookTriggerParams = z.object({
   path: requiredString("required").regex(/^[a-z0-9][a-z0-9-_/]*$/i, "webhookPath"),
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "*"]).optional(),
@@ -1403,6 +1418,8 @@ export const PARAMS_SCHEMAS = {
   "trigger.connector.inbound": ConnectorInboundParams,
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.goal.completed": GoalCompletedTriggerParams,
+  "trigger.pet.event": PetEventTriggerParams,
+  "action.pet.interact": PetInteractActionParams,
   "trigger.webhook": WebhookTriggerParams,
   "trigger.github.webhook": WebhookTriggerParams,
   "trigger.team": TeamTriggerParams,

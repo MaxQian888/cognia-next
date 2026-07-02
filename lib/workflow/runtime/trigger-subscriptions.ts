@@ -36,6 +36,7 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.terminal.command",
   "trigger.team",
   "trigger.desktop.event",
+  "trigger.pet.event",
 ]
 
 interface SubscriptionState {
@@ -136,6 +137,12 @@ export interface TriggerMatchContext {
    */
   desktopEventKind?: string
   /**
+   * Pet lifecycle event kind (trigger.pet.event) — matched against the
+   * node's `kinds` array param (levelUp / evolved / achievementUnlocked /
+   * unwell). A node without a `kinds` filter matches every lifecycle kind.
+   */
+  petEventKind?: string
+  /**
    * Command line (terminal.command) — matched as a *substring* against the
    * node's `commandContains` param. Already PII-gated by the dispatcher;
    * an empty string only matches nodes without a `commandContains` filter.
@@ -184,7 +191,10 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
     if (ctx.teamId !== p.teamId) return false
   }
   if (Array.isArray(p.kinds) && p.kinds.length > 0) {
-    if (typeof ctx.desktopEventKind !== "string" || !p.kinds.includes(ctx.desktopEventKind)) {
+    // Shared `kinds` filter shape — desktop and pet triggers each pass their
+    // own ctx field, and entries are already partitioned per trigger kind.
+    const eventKind = ctx.desktopEventKind ?? ctx.petEventKind
+    if (typeof eventKind !== "string" || !p.kinds.includes(eventKind)) {
       return false
     }
   }

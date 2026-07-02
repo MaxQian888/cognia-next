@@ -152,6 +152,22 @@ describe("trigger-subscriptions", () => {
     expect(focus.map((m) => m.workflowId)).not.toContain("wf_struct")
   })
 
+  it("indexes trigger.pet.event and matches by the kinds filter", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_any", [trigger("n", "trigger.pet.event", {})]),
+      wf("wf_unwell", [trigger("n", "trigger.pet.event", { kinds: ["unwell"] })]),
+      wf("wf_level", [trigger("n", "trigger.pet.event", { kinds: ["levelUp", "evolved"] })]),
+    ])
+    expect(_peekTriggerSubscriptions().get("trigger.pet.event")).toHaveLength(3)
+
+    const unwell = findMatchingWorkflows("trigger.pet.event", { petEventKind: "unwell" })
+    expect(unwell.map((m) => m.workflowId)).toEqual(expect.arrayContaining(["wf_any", "wf_unwell"]))
+    expect(unwell.map((m) => m.workflowId)).not.toContain("wf_level")
+
+    const level = findMatchingWorkflows("trigger.pet.event", { petEventKind: "levelUp" })
+    expect(level.map((m) => m.workflowId)).toEqual(expect.arrayContaining(["wf_any", "wf_level"]))
+  })
+
   it("indexes terminal.command and matches by session / project / status / substring", () => {
     _seedTriggerSubscriptionsForTest([
       wf("wf_any", [trigger("n", "trigger.terminal.command", {})]),

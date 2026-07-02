@@ -182,6 +182,10 @@ export type WorkflowNodeKind =
   // workflow-spawned tabs are excluded to prevent self-trigger loops).
   // TS-hook trigger — fan-out lives in `lib/terminal/command-trigger.ts`.
   | "trigger.terminal.command"
+  // Desktop-pet lifecycle trigger (levelUp/evolved/achievementUnlocked/unwell)
+  // + nurture action. Runner lives in `lib/workflow/runtime/pet-event-trigger.ts`.
+  | "trigger.pet.event"
+  | "action.pet.interact"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
@@ -382,6 +386,8 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.terminal.readRecent",
   "action.terminal.waitForExit",
   "trigger.terminal.command",
+  "trigger.pet.event",
+  "action.pet.interact",
   "ai.prompt",
   "ai.classify",
   "ai.extract",

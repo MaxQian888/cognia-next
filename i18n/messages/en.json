@@ -24697,6 +24697,12 @@
             "label": "Store memory"
           }
         },
+        "pet": {
+          "interact": {
+            "description": "Feed / play with / clean the desktop pet (optionally consuming a shop item by id).",
+            "label": "Nurture pet"
+          }
+        },
         "plan": {
           "approve": {
             "description": "Move a draft or pending plan into the approved state.",
@@ -25088,6 +25094,12 @@
         "manual": {
           "description": "Fires when you click Run in the editor.",
           "label": "Run manually"
+        },
+        "pet": {
+          "event": {
+            "description": "Fires when the desktop pet levels up, evolves, unlocks an achievement, or becomes unwell.",
+            "label": "On pet event"
+          }
         },
         "team": {
           "description": "Internal trigger fired by the agent-team synthesizer when a team run starts. Not hand-authored.",

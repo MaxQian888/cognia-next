@@ -90,6 +90,20 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Target",
     keywords: ["goal", "objective", "completed", "done", "finished", "loop"],
   },
+  "trigger.pet.event": {
+    label: "On pet event",
+    description:
+      "Fires when the desktop pet levels up, evolves, unlocks an achievement, or becomes unwell.",
+    iconName: "PawPrint",
+    keywords: ["pet", "level", "evolve", "achievement", "unwell", "mascot"],
+  },
+  "action.pet.interact": {
+    label: "Nurture pet",
+    description:
+      "Feed / play with / clean the desktop pet (optionally consuming a shop item by id).",
+    iconName: "PawPrint",
+    keywords: ["pet", "feed", "play", "nurture", "care", "mascot"],
+  },
   "trigger.webhook": {
     label: "On webhook",
     description: "Fires when an HTTP request hits the workflow's webhook path.",

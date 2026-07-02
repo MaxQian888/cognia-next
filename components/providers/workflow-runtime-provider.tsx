@@ -10,6 +10,10 @@ import {
   initDesktopEventTrigger,
   disposeDesktopEventTrigger,
 } from "@/lib/workflow/runtime/desktop-event-trigger"
+import {
+  initPetEventTrigger,
+  disposePetEventTrigger,
+} from "@/lib/workflow/runtime/pet-event-trigger"
 import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
@@ -84,6 +88,18 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
             error: err instanceof Error ? err.message : String(err),
           })
         }
+      }
+
+      // Pet lifecycle events (trigger.pet.event) ride the in-renderer pet
+      // event bus — NOT Tauri-gated, the pet runs on web too.
+      try {
+        initPetEventTrigger()
+        disposers.push(() => disposePetEventTrigger())
+        log.info?.("workflow runtime: pet-event trigger initialised")
+      } catch (err) {
+        log.warn?.("workflow runtime: initPetEventTrigger failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
       }
 
       try {
