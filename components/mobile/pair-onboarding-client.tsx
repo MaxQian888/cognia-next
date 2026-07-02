@@ -23,14 +23,16 @@
  * working for the existing test suite.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { usePlatform } from "@/hooks/use-platform"
 import { mobileTransition } from "@/lib/ui/motion"
+import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 import { loadRecentServers, recentServersToDiscovered } from "@/lib/connectivity/recent-servers"
@@ -73,6 +75,9 @@ const EMPTY_SELECTION: Selection = {
   autoScan: false,
 }
 
+/** Stepper steps shown on a plain browser — there is no LAN discovery. */
+const WEB_STEPS: readonly PairStepName[] = ["pair", "paired"] as const
+
 /** Reveal the manual-entry escape on the loading screen after this long. */
 const SLOW_HINT_MS = 2500
 /** Hard ceiling: stop waiting on hydration and show the discover step. */
@@ -81,6 +86,18 @@ const CEILING_MS = 8000
 export function PairOnboardingClient() {
   const router = useRouter()
   const t = useTranslations("mobile.pair")
+  // ADR-0059 C2 — a plain browser has no camera plugin and no LAN to scan:
+  // skip the Discover step, land straight on the manual pair form, and
+  // pre-fill (and lock) the server URL when the deployment baked one in via
+  // NEXT_PUBLIC_COGNIA_SERVER_URL.
+  const platform = usePlatform()
+  const isWebHost = platform === "web"
+  const unpairedStep: PairStepName = isWebHost ? "pair" : "discover"
+  const unpairedSelection = useMemo<Selection>(() => {
+    if (!isWebHost) return EMPTY_SELECTION
+    const envUrl = buildTimeServerUrl()
+    return { ...EMPTY_SELECTION, baseUrl: envUrl ?? "", locked: envUrl !== null }
+  }, [isWebHost])
 
   const [phase, setPhase] = useState<Phase>({ kind: "loading" })
   const [step, setStep] = useState<PairStepName>("discover")
@@ -117,7 +134,8 @@ export function PairOnboardingClient() {
       if (cancelled || settled) return
       settled = true
       setPhase({ kind: "unpaired" })
-      setStep("discover")
+      setSelection(unpairedSelection)
+      setStep(unpairedStep)
     }
 
     const slowTimer = setTimeout(() => {
@@ -145,7 +163,8 @@ export function PairOnboardingClient() {
           setStep("paired")
         } else {
           setPhase({ kind: "unpaired" })
-          setStep("discover")
+          setSelection(unpairedSelection)
+          setStep(unpairedStep)
         }
       })
       .catch(() => {
@@ -153,20 +172,22 @@ export function PairOnboardingClient() {
         settled = true
         finish()
         setPhase({ kind: "unpaired" })
-        setStep("discover")
+        setSelection(unpairedSelection)
+        setStep(unpairedStep)
       })
 
     return () => {
       cancelled = true
       finish()
     }
-  }, [])
+    // unpairedStep/-Selection are platform-derived and stable after mount.
+  }, [unpairedStep, unpairedSelection])
 
   const onSkipLoading = useCallback(() => {
     setPhase({ kind: "unpaired" })
-    setSelection(EMPTY_SELECTION)
-    setStep("discover")
-  }, [])
+    setSelection(unpairedSelection)
+    setStep(unpairedStep)
+  }, [unpairedStep, unpairedSelection])
 
   const onSelectServer = useCallback((server: DiscoveredServer) => {
     setSelection({
@@ -212,9 +233,9 @@ export function PairOnboardingClient() {
 
   const onAfterSignOut = useCallback(() => {
     setPhase({ kind: "unpaired" })
-    setSelection(EMPTY_SELECTION)
-    setStep("discover")
-  }, [])
+    setSelection(unpairedSelection)
+    setStep(unpairedStep)
+  }, [unpairedStep, unpairedSelection])
 
   if (phase.kind === "loading") {
     return (
@@ -255,10 +276,14 @@ export function PairOnboardingClient() {
     >
       <header className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("intro")}</p>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+            {isWebHost ? t("web.title") : t("title")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {isWebHost ? t("web.intro") : t("intro")}
+          </p>
         </div>
-        <PairStepper current={step} />
+        <PairStepper current={step} steps={isWebHost ? WEB_STEPS : undefined} />
       </header>
 
       <AnimatePresence mode="wait" initial={false}>
@@ -269,7 +294,7 @@ export function PairOnboardingClient() {
           exit={reduce ? undefined : { opacity: 0, y: -8 }}
           transition={mobileTransition("fast")}
         >
-          {step === "discover" ? (
+          {step === "discover" && !isWebHost ? (
             <DiscoverStep
               history={recentServers}
               onSelect={onSelectServer}
@@ -286,8 +311,9 @@ export function PairOnboardingClient() {
               prefilledFingerprint={selection.fingerprint}
               lockBaseUrl={selection.locked}
               autoScan={selection.autoScan}
+              webMode={isWebHost}
               onPaired={onPaired}
-              onBack={onBackToDiscover}
+              onBack={isWebHost ? undefined : onBackToDiscover}
             />
           ) : null}
 

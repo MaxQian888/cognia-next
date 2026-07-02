@@ -11,12 +11,15 @@ const ORDER: readonly PairStep[] = ["discover", "pair", "paired"] as const
 
 export interface PairStepperProps {
   current: PairStep
+  /** Subset of steps to render (defaults to all three). The web pair flow
+   *  has no LAN discovery, so it passes `["pair", "paired"]`. */
+  steps?: readonly PairStep[]
   className?: string
 }
 
-export function PairStepper({ current, className }: PairStepperProps) {
+export function PairStepper({ current, steps = ORDER, className }: PairStepperProps) {
   const t = useTranslations("mobile.pair.step")
-  const currentIdx = ORDER.indexOf(current)
+  const currentIdx = steps.indexOf(current)
   return (
     <ol
       role="list"
@@ -24,7 +27,7 @@ export function PairStepper({ current, className }: PairStepperProps) {
       className={cn("flex items-center gap-2 rounded-full bg-muted/40 p-1.5 text-xs", className)}
       data-testid="pair-stepper"
     >
-      {ORDER.map((step, idx) => {
+      {steps.map((step, idx) => {
         const status: "done" | "current" | "todo" =
           idx < currentIdx ? "done" : idx === currentIdx ? "current" : "todo"
         return (
@@ -48,12 +51,12 @@ export function PairStepper({ current, className }: PairStepperProps) {
               className={cn(
                 "truncate text-xs font-medium",
                 status === "current" ? "text-foreground" : "text-muted-foreground",
-                idx === ORDER.length - 1 && "pr-1"
+                idx === steps.length - 1 && "pr-1"
               )}
             >
               {t(step)}
             </span>
-            {idx < ORDER.length - 1 ? (
+            {idx < steps.length - 1 ? (
               <span
                 aria-hidden="true"
                 className={cn(

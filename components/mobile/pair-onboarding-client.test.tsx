@@ -16,6 +16,14 @@ import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 
 const VALID_JWT = "aaa.bbb.ccc"
 
+// The coordinator branches on the runtime platform (ADR-0059 C2): jsdom
+// detects as "web", which would flip every legacy test into the web pair
+// flow — pin "mobile" by default and let the web-mode cases override.
+let platformMock: "tauri" | "mobile" | "web" = "mobile"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformMock,
+}))
+
 // Stub the transport singleton — no real RPC layer in jsdom.
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn().mockReturnValue(false),
@@ -166,6 +174,8 @@ jest.mock("next-intl", () => ({
 }))
 
 beforeEach(() => {
+  platformMock = "mobile"
+  delete process.env.NEXT_PUBLIC_COGNIA_SERVER_URL
   window.localStorage.clear()
   ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn()
   pushMock.mockReset()
@@ -361,6 +371,54 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     await user.click(await screen.findByTestId("pair-signout"))
     await waitFor(() => expect(screen.getByTestId("pair-discover-step")).toBeInTheDocument())
     expect(window.localStorage.getItem("cognia.companion.config.v1")).toBeNull()
+  })
+})
+
+describe("<PairOnboardingClient /> — web host (ADR-0059 C2)", () => {
+  beforeEach(() => {
+    platformMock = "web"
+  })
+
+  it("skips discover and lands straight on the pair step", async () => {
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    expect(screen.queryByTestId("pair-discover-step")).not.toBeInTheDocument()
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
+  })
+
+  it("renders a two-step stepper (no Discover) and hides QR + back affordances", async () => {
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-pair-step")
+    const stepper = screen.getByTestId("pair-stepper")
+    expect(stepper.querySelectorAll("li")).toHaveLength(2)
+    expect(screen.queryByTestId("pair-scan-qr")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("pair-back-to-discover")).not.toBeInTheDocument()
+    expect(screen.getByTestId("pair-web-storage-notice")).toBeInTheDocument()
+  })
+
+  it("prefills and locks the server URL from NEXT_PUBLIC_COGNIA_SERVER_URL", async () => {
+    process.env.NEXT_PUBLIC_COGNIA_SERVER_URL = "https://cloud.example.com:7890/"
+    render(<PairOnboardingClient />)
+    const baseUrl = (await screen.findByTestId("pair-baseurl")) as HTMLInputElement
+    expect(baseUrl.value).toBe("https://cloud.example.com:7890")
+    expect(baseUrl).toHaveAttribute("readonly")
+  })
+
+  it("sign-out returns to the pair step, not discover", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+    await user.click(await screen.findByTestId("pair-signout"))
+    await waitFor(() => expect(screen.getByTestId("pair-pair-step")).toBeInTheDocument())
+    expect(screen.queryByTestId("pair-discover-step")).not.toBeInTheDocument()
   })
 })
 
