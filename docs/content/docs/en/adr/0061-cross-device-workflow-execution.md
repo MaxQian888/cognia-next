@@ -191,11 +191,21 @@ foundation.
     Approve/Reject actions, `workflow_approval_list` /
     `workflow_approval_respond` RPCs (control-gated, JWT-injected responder
     identity), and the mobile PendingApprovalsCard.
-- **P3 — reverse execution:** `step_execute` RPC with the
-  `desktop_writes_bridge` `{requestId, command, payload}` shape; the phone
-  serves it over the symmetric WebRTC DataChannel (no listening ports, same
-  HMAC envelope + idempotency); first mobile nodes (camera / scan /
-  location / voice); foreground-first, background-runner later.
+- **P3 — reverse execution (implemented):** hub-orchestrated remote steps
+  over existing plumbing — the broker
+  (`lib/workflow/runtime/remote-step-broker.ts`) emits
+  `workflow://step-execute` WS frames + ids-only `workflow://step-pending`
+  push; the phone's remote-step server executes through the
+  `lib/capacitor` outcome façades and answers via the chunked
+  `workflow_step_result` RPC (32 KiB slices under the 64 KiB body cap;
+  responder identity JWT-verified against the request target). Five node
+  kinds shipped: `action.mobile.{camera,scanBarcode,location,share,notify}`
+  with hub proxy executors (freshest capable device, pinnable), remote-aware
+  preflight (`remoteCapabilityUnion`), and "Runs on phone" editor badges.
+  Foreground-first; deferred follow-ups: voice recording (audio payloads
+  want a blob relay, not chunked JSON), an OS background-runner path, and
+  serving requests over the symmetric WebRTC DataChannel when HTTP/WS is
+  down.
 - **P4 — run lease & handoff unification:** structured `PickupTicket`
   (`claimedBy: { kind, id }`, `targetDevice`, `leaseExpiresAt`) replacing
   `TeamExternalPickup`'s string claimant; the same lease on
