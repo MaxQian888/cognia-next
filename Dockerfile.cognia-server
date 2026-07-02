@@ -68,9 +68,20 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
 COPY services/signaling-server/core ./services/signaling-server/core
+# src-tauri/src/plugins/computer_use reaches this crate via #[path] includes.
+COPY plugins/computer-use/rust ./plugins/computer-use/rust
+# Out-of-tree include_str! targets (release: browser overlay JS; the spec
+# fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
+COPY lib/browser/overlay.injected.js ./lib/browser/overlay.injected.js
+COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
+COPY docs/api/mobile-companion-api.openapi.yaml docs/api/remote-control.openapi.yaml ./docs/api/
 COPY sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
 COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
 COPY hooks/builtin ./hooks/builtin
+# tauri-build also requires each resource GLOB to match >=1 file; the real
+# trees are desktop bundle content the headless bin never reads.
+RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder
+RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt
 RUN cargo build --release --locked --bin cognia-server
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
@@ -79,9 +90,20 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
 COPY services/signaling-server/core ./services/signaling-server/core
+# src-tauri/src/plugins/computer_use reaches this crate via #[path] includes.
+COPY plugins/computer-use/rust ./plugins/computer-use/rust
+# Out-of-tree include_str! targets (release: browser overlay JS; the spec
+# fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
+COPY lib/browser/overlay.injected.js ./lib/browser/overlay.injected.js
+COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
+COPY docs/api/mobile-companion-api.openapi.yaml docs/api/remote-control.openapi.yaml ./docs/api/
 COPY sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
 COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
 COPY hooks/builtin ./hooks/builtin
+# tauri-build also requires each resource GLOB to match >=1 file; the real
+# trees are desktop bundle content the headless bin never reads.
+RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder
+RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt
 RUN cargo check --release --locked --bin cognia-server
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
