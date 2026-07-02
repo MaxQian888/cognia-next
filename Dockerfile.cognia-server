@@ -28,6 +28,16 @@
 # Base tracks the `rust-toolchain.toml` pin (1.93.0); matching the base avoids
 # downloading a second channel at build time.
 FROM rust:1.93-bookworm AS chef
+# cognia-server links the full app_lib, which (today) compiles the Tauri
+# desktop stack wholesale — the standard Tauri v2 Linux build deps are
+# required even though no WebView ever opens headless. Slimming this via a
+# no-tauri cargo feature on app_lib is a tracked follow-up (ADR-0059).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       pkg-config libssl-dev libglib2.0-dev libgtk-3-dev \
+       libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+       libayatana-appindicator3-dev librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked
 WORKDIR /work
 
@@ -50,11 +60,17 @@ COPY services/signaling-server/core ./services/signaling-server/core
 COPY --from=planner /work/recipe.json .
 RUN cargo chef cook --release --recipe-path recipe.json
 
+# tauri-build validates every plain-file resource path in tauri.conf.json at
+# compile time (even for the headless bin). Ship the small sidecar/hook
+# scripts it lists; the `**/*` node_modules globs match nothing and pass.
 FROM deps AS builder
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
 COPY services/signaling-server/core ./services/signaling-server/core
+COPY sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
+COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
+COPY hooks/builtin ./hooks/builtin
 RUN cargo build --release --locked --bin cognia-server
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
@@ -63,6 +79,9 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
 COPY services/signaling-server/core ./services/signaling-server/core
+COPY sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
+COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
+COPY hooks/builtin ./hooks/builtin
 RUN cargo check --release --locked --bin cognia-server
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
@@ -82,6 +101,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
 COPY docs/package.json ./docs/package.json
 COPY mobile/package.json ./mobile/package.json
+# postinstall needs its guard script (it skips the sidecar steps here — the
+# sidecar tree arrives later; its deps install as their own layer below).
+COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
 RUN pnpm install --frozen-lockfile
 COPY sidecar/package.json sidecar/pnpm-lock.yaml ./sidecar/
 RUN pnpm --dir sidecar install --ignore-workspace --frozen-lockfile
@@ -91,8 +113,13 @@ RUN NODE_OPTIONS=--max-old-space-size=8192 node scripts/build/build-cli-binary.m
 
 # ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
 FROM node:22-bookworm-slim AS runtime-slim
+# The binary dynamically links the Tauri desktop stack (see the chef-stage
+# note) — ship the runtime .so set alongside the headless essentials.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 curl \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates libssl3 curl \
+       libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
+       libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server

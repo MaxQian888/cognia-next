@@ -238,6 +238,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connector_reject_draft",
     "workflow_trigger_manual",
     "twin_ingest_source",
+    // ADR-0060 — a paired device reports its platform capability manifest
+    // (camera, geolocation, …) on connect; persisted onto its `pairedDevices`
+    // row by the TS dispatch arm. Direct `transport.call` from the mobile
+    // shell — deliberately NOT part of `MOBILE_OUTBOUND_COMMANDS` (no
+    // offline-queue semantics; a stale report is refreshed on next connect).
+    "device_capabilities_report",
     // Remote Session Control — attach/detach a remote watcher + steer host
     // goal loops. All round-trip through desktop_writes_bridge. Gated by the
     // remote-control capability (see CONTROL_COMMANDS).
@@ -545,6 +551,28 @@ static CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
 /// True when `name` requires the remote-control capability.
 fn is_control_command(name: &str) -> bool {
     CONTROL_COMMANDS_SET.contains(name)
+}
+
+/// Commands whose TS dispatch arm needs the authenticated caller's device id
+/// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
+/// exactly these names — see [`inject_caller_device_id`].
+const CALLER_DEVICE_ID_COMMANDS: &[&str] = &["workflow_trigger_manual", "device_capabilities_report"];
+
+/// Inject (and overwrite) `callerDeviceId` into `args` for the commands in
+/// [`CALLER_DEVICE_ID_COMMANDS`]. Overwriting is the point: the value comes
+/// from the verified JWT, so a device can never claim another's identity by
+/// pre-filling the field. Non-object payloads pass through untouched (the TS
+/// arm rejects them anyway).
+fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Value {
+    if CALLER_DEVICE_ID_COMMANDS.contains(&name) {
+        if let Value::Object(map) = &mut args {
+            map.insert(
+                "callerDeviceId".to_string(),
+                Value::String(device_id.to_string()),
+            );
+        }
+    }
+    args
 }
 
 /// RCE-grade commands that ONLY the headless brain's service token may call
@@ -899,6 +927,22 @@ fn required<T: DeserializeOwned>(
         .ok_or_else(|| RpcError::malformed(format!("missing required field: {field}")))?;
     serde_json::from_value(v.clone())
         .map_err(|e| RpcError::malformed(format!("field '{field}': {e}")))
+}
+
+/// Extract a field that may arrive under either of two keys. The headless
+/// brain's acp-client sends the desktop Tauri arg shape (camelCase, which
+/// Tauri converts at the command boundary); the RPC arms parse snake_case -
+/// accept both so the two hosts share one client (ADR-0059 T-A10).
+fn required_aliased<T: DeserializeOwned>(
+    args: &Value,
+    primary: &str,
+    alias: &str,
+) -> Result<T, (StatusCode, Json<RpcError>)> {
+    let v = args.get(primary).or_else(|| args.get(alias)).ok_or_else(|| {
+        RpcError::malformed(format!("missing required field: {primary} (or {alias})"))
+    })?;
+    serde_json::from_value(v.clone())
+        .map_err(|e| RpcError::malformed(format!("field '{primary}': {e}")))
 }
 
 /// Extract an optional field from a JSON object.
@@ -1346,6 +1390,9 @@ pub(super) async fn dispatch(
         | "connector_reject_draft"
         | "workflow_trigger_manual"
         | "twin_ingest_source"
+        // ADR-0060 — device capability report; TS arm persists onto the
+        // caller's `pairedDevices` row (caller id injected below).
+        | "device_capabilities_report"
         // Remote Session Control — attach/detach a remote watcher + steer
         // host goal loops. Same generic bridge; TS-side dispatch arms live in
         // `lib/companion/desktop-write-source.ts`. Gated by CONTROL_COMMANDS.
@@ -1388,6 +1435,10 @@ pub(super) async fn dispatch(
         // `lib/companion/desktop-write-source.ts`.
         | "external_agent_list"
         | "external_agent_update" => {
+            // ADR-0060: some TS dispatch arms must know the authenticated
+            // caller device. Injected server-side (overwriting any
+            // client-sent value) so a device can never spoof another's id.
+            let args = inject_caller_device_id(name, args, device_id);
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
             let transport = super::ws_bridge::resolve_bridge_transport(state)
@@ -1471,7 +1522,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let agent_id: String = required(&args, "agent_id")?;
+            let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
             let message: String = required(&args, "message")?;
             super::audit::record(
                 "external_agent_send",
@@ -1492,7 +1543,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let agent_id: String = required(&args, "agent_id")?;
+            let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
             super::audit::record(
                 "external_agent_kill",
                 device_id,
@@ -1512,7 +1563,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let agent_id: String = required(&args, "agent_id")?;
+            let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
             match services.exec.status(&agent_id).await {
                 Some(status) => Ok(Value::String(format!("{status:?}"))),
                 None => Err(RpcError::internal(format!("Agent {agent_id} not found"))),
@@ -3336,6 +3387,48 @@ mod tests {
         assert!(KNOWN_COMMANDS.contains(&"message_update"));
         assert!(KNOWN_COMMANDS.contains(&"message_delete"));
         assert!(KNOWN_COMMANDS.contains(&"session_list"));
+    }
+
+    // ── ADR-0060 caller-device-id injection ──────────────────────────────────
+
+    #[test]
+    fn inject_caller_device_id_overwrites_spoofed_values() {
+        let args = json!({ "workflowId": "wf_1", "callerDeviceId": "spoofed" });
+        let out = inject_caller_device_id("workflow_trigger_manual", args, "dev-real");
+        assert_eq!(out["callerDeviceId"], json!("dev-real"));
+        assert_eq!(out["workflowId"], json!("wf_1"));
+    }
+
+    #[test]
+    fn inject_caller_device_id_only_touches_allowlisted_commands() {
+        let args = json!({ "id": "c_1" });
+        let out = inject_caller_device_id("character_upsert", args, "dev-real");
+        assert!(out.get("callerDeviceId").is_none());
+    }
+
+    #[test]
+    fn inject_caller_device_id_applies_to_capability_report() {
+        let out = inject_caller_device_id(
+            "device_capabilities_report",
+            json!({ "capabilities": ["camera"] }),
+            "dev-cap",
+        );
+        assert_eq!(out["callerDeviceId"], json!("dev-cap"));
+    }
+
+    #[test]
+    fn inject_caller_device_id_ignores_non_object_payloads() {
+        let out = inject_caller_device_id("workflow_trigger_manual", json!("nope"), "dev-real");
+        assert_eq!(out, json!("nope"));
+    }
+
+    #[test]
+    fn device_capabilities_report_is_known_and_mutating() {
+        assert!(KNOWN_COMMANDS.contains(&"device_capabilities_report"));
+        // Mutating (persists onto pairedDevices) → must keep idempotency.
+        assert!(!READ_ONLY_COMMANDS.contains(&"device_capabilities_report"));
+        // Baseline paired capability — not remote-control gated.
+        assert!(!CONTROL_COMMANDS.contains(&"device_capabilities_report"));
     }
 
     #[test]
