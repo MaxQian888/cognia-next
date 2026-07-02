@@ -84,6 +84,23 @@ describe("me-entries registry", () => {
       section: "connection",
     })
   })
+
+  it("surfaces the platform-agnostic desktop-parity sections", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("characters")).toMatchObject({ href: "/me/characters", section: "connection" })
+    expect(byId("skills")).toMatchObject({ href: "/me/skills", section: "connection" })
+    expect(byId("teams")).toMatchObject({ href: "/me/teams", section: "connection" })
+    expect(byId("agent-modes")).toMatchObject({ href: "/me/agent-modes", section: "connection" })
+    expect(byId("a2ui")).toMatchObject({ href: "/me/a2ui", section: "connection" })
+    expect(byId("artifacts")).toMatchObject({ href: "/me/artifacts", section: "appearance" })
+    expect(byId("canvas")).toMatchObject({ href: "/me/canvas", section: "appearance" })
+    expect(byId("memory-settings")).toMatchObject({
+      href: "/me/memory-settings",
+      section: "data",
+    })
+    expect(byId("logs")).toMatchObject({ href: "/me/logs", section: "about" })
+    expect(byId("diagnostics")).toMatchObject({ href: "/me/diagnostics", section: "about" })
+  })
 })
 
 describe("matchMeEntry", () => {

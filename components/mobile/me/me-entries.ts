@@ -13,6 +13,15 @@
 
 import type { LucideIcon } from "lucide-react"
 import {
+  ActivityIcon,
+  AppWindowIcon,
+  BrainCircuitIcon,
+  DramaIcon,
+  FileTextIcon,
+  GraduationCapIcon,
+  PenToolIcon,
+  ShapesIcon,
+  UserCogIcon,
   BellIcon,
   BotIcon,
   BookmarkIcon,
@@ -189,6 +198,22 @@ export const ME_ENTRIES: MeEntry[] = [
     section: "appearance",
     keywords: ["conversation", "title", "timeline", "minimap", "会话", "标题", "时间线"],
   },
+  {
+    id: "artifacts",
+    icon: ShapesIcon,
+    labelKey: "artifactsRow",
+    href: "/me/artifacts",
+    section: "appearance",
+    keywords: ["artifact", "code", "html", "react", "svg", "mermaid", "制品"],
+  },
+  {
+    id: "canvas",
+    icon: PenToolIcon,
+    labelKey: "canvasRow",
+    href: "/me/canvas",
+    section: "appearance",
+    keywords: ["canvas", "monaco", "editor", "画布", "编辑器"],
+  },
 
   // === Connection & extensions ===
   {
@@ -360,6 +385,46 @@ export const ME_ENTRIES: MeEntry[] = [
     section: "connection",
     keywords: ["agent team", "template", "collaboration", "团队", "智能体团队", "模板"],
   },
+  {
+    id: "characters",
+    icon: DramaIcon,
+    labelKey: "charactersRow",
+    href: "/me/characters",
+    section: "connection",
+    keywords: ["character", "persona", "role", "角色", "人格"],
+  },
+  {
+    id: "skills",
+    icon: GraduationCapIcon,
+    labelKey: "skillsRow",
+    href: "/me/skills",
+    section: "connection",
+    keywords: ["skill", "instruction", "技能", "指令块"],
+  },
+  {
+    id: "teams",
+    icon: UsersRoundIcon,
+    labelKey: "teamsRow",
+    href: "/me/teams",
+    section: "connection",
+    keywords: ["team", "multi-character", "coordination", "团队", "多角色", "协作"],
+  },
+  {
+    id: "agent-modes",
+    icon: UserCogIcon,
+    labelKey: "agentModesRow",
+    href: "/me/agent-modes",
+    section: "connection",
+    keywords: ["agent mode", "custom mode", "system prompt", "代理模式", "自定义模式"],
+  },
+  {
+    id: "a2ui",
+    icon: AppWindowIcon,
+    labelKey: "a2uiRow",
+    href: "/me/a2ui",
+    section: "connection",
+    keywords: ["a2ui", "mini app", "agent ui", "迷你应用", "界面"],
+  },
 
   // === Automation ===
   {
@@ -420,6 +485,14 @@ export const ME_ENTRIES: MeEntry[] = [
     section: "data",
     keywords: ["memory", "recall", "long-term", "记忆", "长期记忆"],
   },
+  {
+    id: "memory-settings",
+    icon: BrainCircuitIcon,
+    labelKey: "memorySettingsRow",
+    href: "/me/memory-settings",
+    section: "data",
+    keywords: ["memory settings", "extraction", "recall", "privacy", "记忆设置", "召回", "隐私"],
+  },
 
   // === About ===
   {
@@ -453,6 +526,22 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/device-info",
     section: "about",
     keywords: ["device info", "build", "permission", "设备信息", "权限"],
+  },
+  {
+    id: "logs",
+    icon: FileTextIcon,
+    labelKey: "logsRow",
+    href: "/me/logs",
+    section: "about",
+    keywords: ["log", "level", "transport", "retention", "日志", "级别", "留存"],
+  },
+  {
+    id: "diagnostics",
+    icon: ActivityIcon,
+    labelKey: "diagnosticsRow",
+    href: "/me/diagnostics",
+    section: "about",
+    keywords: ["diagnostics", "crash", "error", "诊断", "崩溃", "错误"],
   },
 ]
 
