@@ -260,8 +260,24 @@ export class CompanionTransport implements Transport {
    */
   private rtcCandidateKind: "host" | "srflx" | "prflx" | "relay" | "unknown" = "unknown"
 
-  constructor() {
+  /**
+   * Optional config source override (ADR-0059 T-B2). When set, every config
+   * read in this instance goes through it instead of the module-level
+   * storage cache — the headless brain injects an in-memory
+   * `{ baseUrl, deviceJwt: serviceToken, deviceId: "brain-<id>" }` that is
+   * never persisted (token refreshes just change the provider's return).
+   * The wire shape is unchanged; mobile/web instances pass nothing.
+   */
+  private readonly configProvider: (() => CompanionConfig | null) | null
+
+  constructor(opts: { configProvider?: () => CompanionConfig | null } = {}) {
+    this.configProvider = opts.configProvider ?? null
     this.attachNetworkListeners()
+  }
+
+  /** The active config: injected provider first, storage cache otherwise. */
+  private config(): CompanionConfig | null {
+    return this.configProvider ? this.configProvider() : loadCompanionConfig()
   }
 
   // ── Public: connection state observable ────────────────────────────────────
@@ -280,7 +296,7 @@ export class CompanionTransport implements Transport {
   // ── Transport.call ─────────────────────────────────────────────────────────
 
   async call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
-    const config = loadCompanionConfig()
+    const config = this.config()
     if (!config) {
       return Promise.reject(
         new CompanionError({
@@ -400,7 +416,7 @@ export class CompanionTransport implements Transport {
   ): Promise<void> {
     if (this.rtc) return // Already open or about to be.
     if (this.rtcConnecting) return this.rtcConnecting
-    const config = options.configOverride ?? loadCompanionConfig()
+    const config = options.configOverride ?? this.config()
     if (!config) {
       console.warn("CompanionTransport.enableWebRtcTier: companion not paired")
       return
@@ -556,7 +572,7 @@ export class CompanionTransport implements Transport {
    */
   public isOnConnectedLan(): boolean {
     if (this.connectionState !== "connected") return false
-    const config = loadCompanionConfig()
+    const config = this.config()
     return !!config && classifyWsHost(config.baseUrl) === "ws-lan"
   }
 
@@ -614,7 +630,7 @@ export class CompanionTransport implements Transport {
       this.rtcCandidateKind = kind
       next = kind === "relay" ? "rtc-relay" : "rtc-direct"
     } else if (this.connectionState === "connected") {
-      const config = loadCompanionConfig()
+      const config = this.config()
       next = config ? classifyWsHost(config.baseUrl) : "offline"
     } else {
       next = "offline"
@@ -664,7 +680,7 @@ export class CompanionTransport implements Transport {
           headers,
           body,
           signal: controller.signal,
-          serverFingerprint: loadCompanionConfig()?.serverFingerprint,
+          serverFingerprint: this.config()?.serverFingerprint,
         })
       } catch (err: unknown) {
         clearTimeout(timeoutId)
@@ -739,7 +755,7 @@ export class CompanionTransport implements Transport {
   // ── Private: WebSocket lifecycle ───────────────────────────────────────────
 
   private openWebSocket(): void {
-    const config = loadCompanionConfig()
+    const config = this.config()
     if (!config || this.wsDestroyed) return
 
     // Build ?since= from the highest cursor across all active channels.
