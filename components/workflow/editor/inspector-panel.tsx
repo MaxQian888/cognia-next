@@ -38,7 +38,7 @@ import { ErrorHandlingSection } from "./inspector/forms/shared/error-handling-se
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
 import { DataTabs } from "./inspector/data/data-tabs"
 import { BulkNodeInspector } from "./bulk-node-inspector"
-import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
+import { useMissingNodeCapabilities } from "./capability-badge"
 import {
   getNodeConfigComponentForEntry,
   hasDedicatedConfigForEntry,
