@@ -95,6 +95,9 @@ async fn run(
     app: tauri::AppHandle,
     device_id: String,
 ) {
+    // The WebRTC controller only runs inside the desktop WebView shell, so
+    // this path is always Tauri-hosted (ADR-0059 R5).
+    let host = crate::companion_api::dispatch_host::DispatchHost::Tauri(app);
     // Subscribe to EventBus with since=None → start at high-water mark
     // (matches the existing WS subscription default behaviour).
     use crate::companion_api::event_bus::SubscribeResult;
@@ -124,7 +127,7 @@ async fn run(
                     &peer,
                     bytes,
                     &state,
-                    &app,
+                    &host,
                     &device_id,
                 )
                 .await
@@ -167,7 +170,7 @@ async fn handle_inbound(
     peer: &PeerSession,
     bytes: Vec<u8>,
     state: &SharedState,
-    app: &tauri::AppHandle,
+    host: &crate::companion_api::dispatch_host::DispatchHost,
     device_id: &str,
 ) -> Result<(), String> {
     let rpc: InboundRpc =
@@ -203,7 +206,7 @@ async fn handle_inbound(
 
     // Route through the existing dispatch table.
     let result =
-        crate::companion_api::rpc::dispatch(&rpc.method, rpc.params, state, app, device_id, None)
+        crate::companion_api::rpc::dispatch(&rpc.method, rpc.params, state, host, device_id, None)
             .await;
     let outbound = match result {
         Ok(value) => {

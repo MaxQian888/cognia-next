@@ -104,6 +104,20 @@ impl RpcError {
         )
     }
 
+    /// ADR-0059 R5 — the command's body still requires the desktop Tauri
+    /// runtime and this process is a headless `cognia-server`. Distinct code
+    /// from `service_unavailable` so clients can tell "retry later" (server
+    /// booting) from "this feature does not exist on a headless install".
+    pub(super) fn headless_unsupported(name: &str) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(Self::new(
+                "headless_unsupported",
+                format!("RPC command '{name}' is not available on a headless server (requires the desktop app)"),
+            )),
+        )
+    }
+
     fn internal(detail: String) -> (StatusCode, Json<Self>) {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -799,8 +813,11 @@ pub async fn rpc_handler(
         validate_app_settings_update(&args)?;
     }
 
-    // Obtain the AppHandle — required for commands that spawn the sidecar.
-    let app = state.app_handle.clone().ok_or_else(|| {
+    // Resolve the dispatch host (ADR-0059 R5): the desktop AppHandle, or the
+    // headless services registry installed by `cognia-server` at boot. Absent
+    // both (bare unit-test states) → 503, preserving the historical
+    // test-mode contract.
+    let host = super::dispatch_host::DispatchHost::from_state(&state).ok_or_else(|| {
         RpcError::service_unavailable("app_handle not available (test mode)".to_string())
     })?;
 
@@ -809,7 +826,7 @@ pub async fn rpc_handler(
         &name,
         args,
         &state,
-        &app,
+        &host,
         &ctx.device_id,
         Some(&ctx.account_id),
     )
@@ -889,8 +906,11 @@ fn to_json<T: serde::Serialize>(value: T) -> Result<Value, (StatusCode, Json<Rpc
 /// Dispatch an RPC call to the corresponding Tauri command body.
 ///
 /// Each arm deserialises the JSON `args`, obtains the necessary Tauri state
-/// from `app.state::<T>()`, calls the underlying function (not the IPC
-/// wrapper), and serialises the result back to [`Value`].
+/// via `host.tauri_app(name)?.state::<T>()` (a per-arm `503
+/// headless_unsupported` when this process is a headless `cognia-server` —
+/// see the availability table in [`super::dispatch_host`]), calls the
+/// underlying function (not the IPC wrapper), and serialises the result back
+/// to [`Value`].
 ///
 /// If a command's signature is incompatible with this pattern (e.g., it
 /// requires `tauri::Window`), it must be excluded from the V1 allowlist.
@@ -902,7 +922,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    app: &tauri::AppHandle,
+    host: &super::dispatch_host::DispatchHost,
     device_id: &str,
     account_id: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
@@ -934,6 +954,7 @@ pub(super) async fn dispatch(
             let session_id: String = required(&args, "session_id")?;
             let prompt: Value = required(&args, "prompt")?;
             let options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
+            let app = host.tauri_app(name)?;
             let sidecar_state: tauri::State<'_, SidecarState> = app.state();
             claude_commands::claude_send(app.clone(), sidecar_state, session_id, prompt, options)
                 .await
@@ -943,6 +964,7 @@ pub(super) async fn dispatch(
 
         "claude_interrupt" => {
             let session_id: String = required(&args, "session_id")?;
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, SidecarState> = app.state();
             claude_commands::claude_interrupt(state, session_id)
                 .await
@@ -956,6 +978,7 @@ pub(super) async fn dispatch(
                 .get("focus")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, SidecarState> = app.state();
             claude_commands::claude_compact(state, session_id, focus)
                 .await
@@ -969,6 +992,7 @@ pub(super) async fn dispatch(
             let decision: String = required(&args, "decision")?;
             let message: Option<String> = optional(&args, "message")?;
             let updated_input: Option<Value> = optional(&args, "updated_input")?;
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, SidecarState> = app.state();
             claude_commands::claude_approve(
                 state,
@@ -985,6 +1009,7 @@ pub(super) async fn dispatch(
 
         "claude_close_session" => {
             let session_id: String = required(&args, "session_id")?;
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, SidecarState> = app.state();
             claude_commands::claude_close_session(state, session_id)
                 .await
@@ -993,6 +1018,7 @@ pub(super) async fn dispatch(
         }
 
         "claude_sidecar_status" => {
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, SidecarState> = app.state();
             claude_commands::claude_sidecar_status(state)
                 .await
@@ -1012,6 +1038,7 @@ pub(super) async fn dispatch(
 
         "claude_set_oauth_bearer" => {
             let token: Option<String> = optional(&args, "token")?;
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, ApiKeyState> = app.state();
             state.set_oauth_bearer(token).await;
             Ok(Value::Null)
@@ -1021,6 +1048,7 @@ pub(super) async fn dispatch(
 
         "claude_set_api_key" => {
             let key: Option<String> = optional(&args, "key")?;
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, ApiKeyState> = app.state();
             state.set(key).await;
             Ok(Value::Null)
@@ -1029,24 +1057,28 @@ pub(super) async fn dispatch(
         "claude_set_provider_env" => {
             let api_key: Option<String> = optional(&args, "api_key")?;
             let base_url: Option<String> = optional(&args, "base_url")?;
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, ApiKeyState> = app.state();
             state.set_provider(api_key, base_url).await;
             Ok(Value::Null)
         }
 
         "claude_has_api_key" => {
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, ApiKeyState> = app.state();
             let has = state.get().await.is_some();
             Ok(Value::Bool(has))
         }
 
         "claude_has_oauth_bearer" => {
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, ApiKeyState> = app.state();
             let has = state.get_oauth_bearer().await.is_some();
             Ok(Value::Bool(has))
         }
 
         "claude_restart_sidecar" => {
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, SidecarState> = app.state();
             kill_sidecar(state.inner().clone()).await;
             Ok(Value::Null)
@@ -1125,6 +1157,7 @@ pub(super) async fn dispatch(
         // ── MCP server ────────────────────────────────────────────────────────
 
         "mcp_server_status" => {
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, McpServerState> = app.state();
             let status = state.status();
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
@@ -1203,11 +1236,14 @@ pub(super) async fn dispatch(
                 )));
             }
             let bridge = std::sync::Arc::clone(&state.sync_bridge);
-            let transport =
-                crate::companion_api::bridge_transport::WebViewBridgeTransport(app.clone());
+            // Connected brain first, desktop WebView second (ADR-0059 R4/R5);
+            // 503 while a headless server's brain is down — sync has no
+            // degraded-store path.
+            let transport = super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
             bridge
                 .pull(
-                    &transport,
+                    transport.as_ref(),
                     table,
                     since,
                     account_id.to_string(),
@@ -1336,11 +1372,12 @@ pub(super) async fn dispatch(
         | "external_agent_list"
         | "external_agent_update" => {
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
-            let transport =
-                crate::companion_api::bridge_transport::WebViewBridgeTransport(app.clone());
+            // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
+            let transport = super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(
-                    &transport,
+                    transport.as_ref(),
                     name,
                     args,
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
@@ -1361,6 +1398,7 @@ pub(super) async fn dispatch(
                 serde_json::from_value(args).map_err(|e| {
                     RpcError::malformed(format!("automation_consent_respond args: {e}"))
                 })?;
+            let app = host.tauri_app(name)?;
             let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
                 app.state();
             crate::automation::commands::automation_consent_respond(automation_state, respond_args)
@@ -1389,11 +1427,12 @@ pub(super) async fn dispatch(
             // `dispatch` directly) stays guarded too.
             validate_app_settings_update(&args)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
-            let transport =
-                crate::companion_api::bridge_transport::WebViewBridgeTransport(app.clone());
+            // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
+            let transport = super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(
-                    &transport,
+                    transport.as_ref(),
                     name,
                     args,
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
@@ -1789,6 +1828,7 @@ pub(super) async fn dispatch(
         // Live PTY streaming stays on `/ws/v1/terminal`. These are
         // request/response only; `terminal_exec` is a one-shot command runner.
         "terminal_list_all" => {
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
             crate::terminal::commands::terminal_list_all(st)
                 .map_err(RpcError::internal)
@@ -1796,6 +1836,7 @@ pub(super) async fn dispatch(
         }
         "terminal_list_for_project" => {
             let project_id: String = required(&args, "projectId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
             crate::terminal::commands::terminal_list_for_project(st, project_id)
                 .map_err(RpcError::internal)
@@ -1803,6 +1844,7 @@ pub(super) async fn dispatch(
         }
         "terminal_kill" => {
             let id: String = required(&args, "id")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
             crate::terminal::commands::terminal_kill(st, id)
                 .map(|_| Value::Null)
@@ -1825,6 +1867,7 @@ pub(super) async fn dispatch(
         // snapshot; a remote install takes effect on the next renderer reload
         // (it does not hot-load into the running TS PluginManager).
         "plugin_list" => {
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_get_all(st)
                 .await
@@ -1833,6 +1876,7 @@ pub(super) async fn dispatch(
         }
         "plugin_runtime_snapshot" => {
             let plugin_id: String = required(&args, "pluginId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_runtime_snapshot(st, plugin_id)
                 .await
@@ -1847,6 +1891,7 @@ pub(super) async fn dispatch(
             let payload: crate::plugin_api::lifecycle::InstallPayload =
                 serde_json::from_value(payload_val)
                     .map_err(|e| RpcError::malformed(format!("plugin_install.payload: {e}")))?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_install(st, plugin_id, source, payload)
                 .await
@@ -1857,6 +1902,7 @@ pub(super) async fn dispatch(
             let repo: String = required(&args, "repo")?;
             let git_ref: Option<String> = optional(&args, "gitRef")?;
             let subdir: Option<String> = optional(&args, "subdir")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::github::installer::plugin_install_from_github(
                 st, repo, git_ref, subdir,
@@ -1867,6 +1913,7 @@ pub(super) async fn dispatch(
         }
         "plugin_uninstall" => {
             let plugin_id: String = required(&args, "pluginId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_uninstall(st, plugin_id)
                 .await
@@ -1876,6 +1923,7 @@ pub(super) async fn dispatch(
         "plugin_backup_create" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let label: Option<String> = optional(&args, "label")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_create(st, plugin_id, label)
                 .await
@@ -1885,6 +1933,7 @@ pub(super) async fn dispatch(
         "plugin_backup_restore" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_restore(st, plugin_id, backup_id)
                 .await
@@ -1894,6 +1943,7 @@ pub(super) async fn dispatch(
         "plugin_backup_delete" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_delete(st, plugin_id, backup_id)
                 .await
@@ -2138,6 +2188,117 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 503);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "service_unavailable");
+    }
+
+    // ── DispatchHost (ADR-0059 R5) ────────────────────────────────────────────
+
+    fn headless_host() -> super::super::dispatch_host::DispatchHost {
+        super::super::dispatch_host::DispatchHost::Headless(crate::headless::HeadlessServices::new())
+    }
+
+    /// Data-plane arms work on a headless host: `session_list` served from
+    /// the degraded SQLite store, no AppHandle anywhere.
+    #[tokio::test]
+    async fn headless_dispatch_serves_the_data_plane_from_the_store() {
+        use crate::companion_api::store::AppStore;
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+        let store =
+            crate::companion_api::store::sqlite::SqliteAppStore::in_memory().expect("open");
+        crate::companion_api::data_plane::install_headless_store(Some(
+            store.clone() as Arc<dyn AppStore>
+        ));
+
+        let state = test_state();
+        let result = dispatch(
+            "session_list",
+            json!({ "limit": 10, "offset": 0 }),
+            &state,
+            &headless_host(),
+            "dev1",
+            Some(ACCOUNT_ID),
+        )
+        .await
+        .expect("session_list must work on a headless host");
+        assert_eq!(result["total"], 0);
+
+        crate::companion_api::data_plane::install_headless_store(None);
+    }
+
+    /// Desktop-only arms reply with the per-arm 503 `headless_unsupported`
+    /// naming the command — not a generic service_unavailable.
+    #[tokio::test]
+    async fn headless_dispatch_rejects_desktop_only_arms() {
+        let state = test_state();
+        let err = dispatch(
+            "claude_sidecar_status",
+            json!({}),
+            &state,
+            &headless_host(),
+            "dev1",
+            Some(ACCOUNT_ID),
+        )
+        .await
+        .expect_err("desktop-only arm must 503 on a headless host");
+        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.1 .0.code, "headless_unsupported");
+        assert!(err.1 .0.message.contains("claude_sidecar_status"));
+    }
+
+    /// `sync_pull` on a headless host routes through the connected brain's
+    /// socket transport end-to-end (RPC arm → event frame → respond →
+    /// resolved delta).
+    #[tokio::test]
+    async fn headless_sync_pull_routes_through_the_connected_brain() {
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        let mut rx = crate::companion_api::ws_bridge::test_support::install_socket_for_testing();
+        let state = test_state();
+
+        let dispatch_task = {
+            let state = Arc::clone(&state);
+            tokio::spawn(async move {
+                dispatch(
+                    "sync_pull",
+                    json!({ "table": "sessions", "since": 0 }),
+                    &state,
+                    &headless_host(),
+                    "dev1",
+                    Some(ACCOUNT_ID),
+                )
+                .await
+            })
+        };
+
+        // The fake brain: receive the emitted event frame off the socket queue.
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("event frame timeout")
+            .expect("socket queue closed");
+        let axum::extract::ws::Message::Text(text) = msg else {
+            panic!("expected text frame");
+        };
+        let frame: serde_json::Value = serde_json::from_str(text.as_str()).unwrap();
+        assert_eq!(frame["type"], "event");
+        assert_eq!(frame["event"], "companion://sync-pull-request");
+        assert_eq!(frame["payload"]["table"], "sessions");
+        let request_id = frame["payload"]["request_id"].as_str().unwrap().to_string();
+
+        // Respond exactly as ws_bridge::route_respond would.
+        state
+            .sync_bridge
+            .resolve(crate::companion_api::sync_bridge::SyncPullResponse {
+                request_id,
+                delta: Some(json!({ "rows": [] })),
+                error: None,
+            });
+
+        let result = dispatch_task
+            .await
+            .expect("join")
+            .expect("sync_pull must succeed via the brain");
+        assert_eq!(result, json!({ "rows": [] }));
+
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
     }
 
     // ── Malformed args → 400 ──────────────────────────────────────────────────

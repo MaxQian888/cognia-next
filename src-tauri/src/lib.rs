@@ -20,6 +20,7 @@ mod fs_atomic;
 mod gateway;
 mod git;
 mod github;
+pub mod headless;
 mod hooks;
 mod keyring_secrets;
 mod logging;
