@@ -15,7 +15,13 @@ import type {
   PetStreak,
 } from "@/types/pet"
 import { normalizeCoins, normalizeStatProgress, normalizeStreak } from "@/types/pet"
-import { applyDecay, applyInteraction, type PetInteractionKind } from "@/lib/pet/needs/decay"
+import {
+  applyDecay,
+  applyInteraction,
+  applyNeedEffect,
+  type PetInteractionKind,
+} from "@/lib/pet/needs/decay"
+import { getPetItem } from "@/lib/pet/economy/item-catalog"
 import { levelForXp, stageForLevel } from "@/lib/pet/xp/leveling"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
 import { coinsForEvent } from "@/lib/pet/economy/coin-table"
@@ -88,8 +94,14 @@ export function applyPetEvent(
   // fire from pure time passing (decay was previously only ever persisted by an
   // interaction). Decay is monotonic and timestamp-keyed, so re-settling on
   // frequent events is a no-op beyond advancing `lastTickAt`.
+  // An item consumption rides its interaction kind with `meta.itemId`; the
+  // item's differentiated restore replaces the base interaction effect (an
+  // unknown id falls back to the base table).
+  const item = typeof event.meta?.itemId === "string" ? getPetItem(event.meta.itemId) : undefined
   const needs = INTERACTION_KINDS.has(event.kind)
-    ? applyInteraction(profile.needs, event.kind as PetInteractionKind, now)
+    ? item?.needsEffect
+      ? applyNeedEffect(profile.needs, item.needsEffect, now)
+      : applyInteraction(profile.needs, event.kind as PetInteractionKind, now)
     : applyDecay(profile.needs, now)
 
   // 2) XP + derived level/stage.

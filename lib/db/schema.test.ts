@@ -2315,6 +2315,22 @@ describe("v90 sessionFolders (conversation folders)", () => {
   })
 })
 
+describe("v94 petInventory (pet economy)", () => {
+  it("round-trips inventory rows keyed by catalog item id", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(94)
+    await db.petInventory.put({ id: "berry", qty: 3, acquiredAt: 100, updatedAt: 200 })
+    await db.petInventory.put({ id: "yarn-ball", qty: 1, acquiredAt: 150, updatedAt: 150 })
+    expect(await db.petInventory.count()).toBe(2)
+    expect((await db.petInventory.get("berry"))?.qty).toBe(3)
+    // PK upsert semantics — same id replaces, never duplicates.
+    await db.petInventory.put({ id: "berry", qty: 4, acquiredAt: 100, updatedAt: 300 })
+    expect(await db.petInventory.count()).toBe(2)
+    expect((await db.petInventory.get("berry"))?.qty).toBe(4)
+  })
+})
+
 describe("schema seed error handling isolation", () => {
   it("logs non-Error rejection values", async () => {
     jest.resetModules()

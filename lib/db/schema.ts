@@ -127,6 +127,7 @@ import type {
   PetCharacterBinding,
   PetAchievementRecord,
   PetConversationRow,
+  PetInventoryRow,
 } from "@/types/pet"
 import { accountDatabaseName } from "@/lib/accounts/account-db"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
@@ -2158,6 +2159,14 @@ export class CogniaDB extends Dexie {
     this.version(93).stores({
       openrouterCatalog: "&id, fetchedAt",
     })
+
+    // v94 — Pet item inventory (economy wave, ADR-0058). Catalog item id is
+    // the PK; qty/timestamps are non-indexed payload. The catalog itself is
+    // static code (`lib/pet/economy/item-catalog.ts`), never persisted. Pure
+    // additive — no upgrade hook. See `lib/db/pet.ts`.
+    this.version(94).stores({
+      petInventory: "&id",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2187,6 +2196,8 @@ export class CogniaDB extends Dexie {
   petCharacterBindings!: Table<PetCharacterBinding, string>
   petActivityLog!: Table<PetActivityRow, number>
   petAchievements!: Table<PetAchievementRecord, string>
+  // v94 — Pet item inventory (economy wave). See `lib/db/pet.ts`.
+  petInventory!: Table<PetInventoryRow, string>
   // v72 — Remote-control durable audit. See `lib/db/remote-control-audit.ts`.
   remoteControlAudit!: Table<RemoteControlAuditEntry, string>
   // v92 — Remote-control run-status projection. See `lib/db/remote-control-run-status.ts`.

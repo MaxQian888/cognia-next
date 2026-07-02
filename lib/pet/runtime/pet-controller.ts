@@ -139,6 +139,21 @@ export function handlePetEvent(event: PetEvent): Promise<void> {
   return chain
 }
 
+/**
+ * Run profile-mutating work serialized after any in-flight event handling.
+ * Every profile write OUTSIDE the event path (shop purchases, decor applies)
+ * MUST go through this — the controller's read-modify-write `upsertPetProfile`
+ * would otherwise silently overwrite a concurrent coin deduction.
+ */
+export function enqueuePetWork<T>(fn: () => Promise<T>): Promise<T> {
+  const result = chain.then(() => fn())
+  chain = result.then(
+    () => {},
+    () => {}
+  )
+  return result
+}
+
 /** Test helper: drain the serialization chain. */
 export function whenPetEventsSettled(): Promise<void> {
   return chain

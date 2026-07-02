@@ -207,6 +207,27 @@ describe("applyPetEvent", () => {
       expect(res.coinsEarned).toBe(9)
     })
 
+    it("applies an item's differentiated restore instead of the base effect", () => {
+      const base = {
+        needs: { energy: 30, mood: 50, bond: 50, lastTickAt: new Date(DAY).toISOString() },
+      }
+      const feast = applyPetEvent(
+        profile(base),
+        { source: "user", kind: "fed", meta: { itemId: "royal-feast" }, at: DAY },
+        DAY
+      )
+      // royal-feast restores +45 energy (base fed is +25).
+      expect(feast.profile.needs.energy).toBe(75)
+      expect(feast.oneShots).toContain("fed")
+
+      const unknown = applyPetEvent(
+        profile(base),
+        { source: "user", kind: "fed", meta: { itemId: "not-a-thing" }, at: DAY },
+        DAY
+      )
+      expect(unknown.profile.needs.energy).toBe(55) // base fed +25
+    })
+
     it("earns nothing on passive kinds and normalizes a legacy coin-less profile", () => {
       const res = applyPetEvent(profile(), event("idle"), DAY)
       expect(res.coinsEarned).toBe(0)
