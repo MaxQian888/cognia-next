@@ -54,6 +54,16 @@ flyctl deploy
 The container listens on `$PORT` (default 7892). Fly's edge serves TLS so
 clients connect with `wss://<app>.fly.dev/v1/signaling`.
 
+## Deploy from CI
+
+`.github/workflows/deploy.yml` deploys both the Worker (`worker/`, via
+`wrangler deploy`, staging = `--env staging` → `cognia-signaling-staging` on
+`*.workers.dev`) and the Fly app — manual dispatch only, gated by the
+`DEPLOY_ENABLED` repo variable plus environment-scoped
+`CLOUDFLARE_API_TOKEN` / `FLY_API_TOKEN` secrets and the `FLY_SIGNALING_APP`
+variable. See `CI_CD.md` → "Deploy (services)" for the full matrix and the
+one-time provisioning steps.
+
 ## Resource expectations
 
 A single process comfortably hosts thousands of rooms because per-message

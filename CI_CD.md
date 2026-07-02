@@ -8,10 +8,9 @@ The CI/CD pipeline is implemented using GitHub Actions and includes the followin
 
 1. **Code Quality & Security** - Linting, type checking, and security audits
 2. **Test Suite** - Unit tests with coverage reporting
-3. **Deploy Preview** - Automatic preview deployments for pull requests
-4. **Deploy Production** - Production deployments (disabled by default)
-5. **Build Tauri** - Cross-platform desktop application builds
-6. **Create Release** - Automated GitHub releases for tagged versions
+3. **Deploy (services)** - Manual, opt-in deploys of the signaling/share Workers and Fly apps
+4. **Build Tauri** - Cross-platform desktop application builds
+5. **Create Release** - Automated GitHub releases for tagged versions
 
 ## Workflow Triggers
 
@@ -60,64 +59,49 @@ This job performs:
 - Lines: 70%
 - Statements: 70%
 
-### 3. Deploy Preview
+### 3. Deploy (services) — OPT-IN, MANUAL
 
-**Runs on:** Pull requests only  
-**Duration:** ~2-3 minutes
+**Workflow:** `.github/workflows/deploy.yml`  
+**Runs on:** `workflow_dispatch` (or `workflow_call`) only — never on push
 
-Automatically deploys preview versions of the application for pull requests.
+Deploys the two cloud services (ADR-0059 P0.1):
 
-**Required Secrets:**
+| Target             | Platform          | Source                              |
+| ------------------ | ----------------- | ----------------------------------- |
+| `signaling-worker` | Cloudflare Worker | `services/signaling-server/worker/` |
+| `share-worker`     | Cloudflare Worker | `services/share-server/worker/`     |
+| `signaling-fly`    | Fly.io (axum)     | `services/signaling-server/`        |
+| `share-fly`        | Fly.io (axum)     | `services/share-server/`            |
 
-- `VERCEL_TOKEN` - Vercel deployment token
-- `VERCEL_ORG_ID` - Vercel organization ID
-- `VERCEL_PROJECT_ID` - Vercel project ID
+Dispatch inputs: `environment` (`staging` / `production`) and `target`
+(`all`, `workers`, `fly`, or one of the four above). Staging Workers deploy
+via the `[env.staging]` stanzas in each `wrangler.toml` (separate worker
+names, no custom-domain routes → `*.workers.dev`).
 
-**Setup Instructions:**
+**Safety model (forks stay green with zero configuration):**
 
-1. Install Vercel CLI: `npm i -g vercel`
-2. Run `vercel login` and authenticate
-3. Run `vercel link` in your project directory
-4. Get your tokens:
+1. Manual trigger only.
+2. The repo variable `DEPLOY_ENABLED` must be the string `true`.
+3. Each platform job requires its secret to be present.
 
-   ```bash
-   vercel whoami
-   cat .vercel/project.json
-   ```
+Any gate failing skips the job (green) instead of failing it.
 
-5. Add secrets to GitHub repository settings
+**GitHub Environments** `staging` and `production` hold the same names so the
+workflow reads one set:
 
-### 4. Deploy Production (DISABLED BY DEFAULT)
+| Kind     | Name                       | Notes                                        |
+| -------- | -------------------------- | -------------------------------------------- |
+| secret   | `CLOUDFLARE_API_TOKEN`     | Workers deploy token                         |
+| secret   | `FLY_API_TOKEN`            | `fly tokens create deploy`                   |
+| variable | `CLOUDFLARE_ACCOUNT_ID`    |                                              |
+| variable | `CF_SHARE_KV_NAMESPACE_ID` | injected into `wrangler.toml` at deploy time |
+| variable | `FLY_SIGNALING_APP`        | e.g. `cognia-signaling` / `-staging`         |
+| variable | `FLY_SHARE_APP`            | e.g. `cognia-share` / `-staging`             |
 
-**Runs on:** Pushes to `master` branch (when enabled)  
-**Duration:** ~2-3 minutes
-
-⚠️ **This job is commented out by default for safety.**
-
-**To Enable Production Deployments:**
-
-1. **Set up GitHub Environment Protection:**
-   - Go to `Settings > Environments`
-   - Create a new environment named `production`
-   - Add required reviewers (recommended)
-   - Add deployment branch restrictions (optional)
-   - Add environment secrets
-
-2. **Configure Required Secrets:**
-   - `VERCEL_TOKEN`
-   - `VERCEL_ORG_ID`
-   - `VERCEL_PROJECT_ID`
-
-3. **Uncomment the job** in `.github/workflows/ci.yml`
-
-4. **Update the environment URL** to match your production domain
-
-**Additional Safety Measures:**
-
-- Consider requiring specific labels on commits
-- Only deploy on tagged releases
-- Add time-based deployment windows
-- Require manual approval via GitHub Environments
+Give `production` protection rules (required reviewers, branch restriction to
+`master`) under `Settings > Environments`. One-time provisioning per
+environment is documented in each service README (R2 bucket, KV namespace,
+`wrangler secret put SHARE_UPLOAD_SECRET`, `flyctl volumes create share_data`).
 
 ### 5. Build Tauri Desktop Application
 
@@ -270,11 +254,13 @@ All jobs upload artifacts that are retained for 7-30 days:
 
 ## Required GitHub Secrets
 
-### For Preview/Production Deployments (Optional)
+### For Service Deployments (Optional — environment-scoped)
 
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
+- `CLOUDFLARE_API_TOKEN`
+- `FLY_API_TOKEN`
+
+(plus the `DEPLOY_ENABLED` repo variable and the environment variables listed
+in the Deploy section above)
 
 ### For Codecov Integration (Optional)
 

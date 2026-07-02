@@ -96,6 +96,19 @@ The container listens on `$PORT` (default 8787); Fly's edge serves TLS, so
 clients reach `https://<app>.fly.dev/v1/share`. The share database lives on the
 `share_data` volume mounted at `/data` and survives restarts.
 
+## Deploy from CI
+
+`.github/workflows/deploy.yml` deploys both the Worker (`worker/`, via
+`wrangler deploy`; staging = `--env staging` → `cognia-share-staging` on
+`*.workers.dev` with its own `cognia-shares-staging` R2 bucket + KV namespace)
+and the Fly app — manual dispatch only, gated by the `DEPLOY_ENABLED` repo
+variable plus environment-scoped `CLOUDFLARE_API_TOKEN` / `FLY_API_TOKEN`
+secrets. The KV namespace id is injected at deploy time from the
+environment-scoped `CF_SHARE_KV_NAMESPACE_ID` variable (the tracked
+`wrangler.toml` keeps the `REPLACE_WITH_KV_NAMESPACE_ID` placeholder). Fly
+staging needs its own app + `share_data` volume (`FLY_SHARE_APP` variable).
+See `CI_CD.md` → "Deploy (services)".
+
 ## Security
 
 - **Bearer auth** with a length-independent constant-time comparison gates

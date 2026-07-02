@@ -86,3 +86,21 @@ enabled = true
 # Uncomment after upgrading to Workers Paid.
 # [[analytics_engine_datasets]]
 # binding = "METRICS"
+
+# ── Staging (ADR-0059 P0.1) ─────────────────────────────────────────────────
+# `wrangler deploy --env staging` → a separate worker on *.workers.dev (no
+# custom-domain route, so it never fights the production hostname). Named envs
+# do not inherit vars or bindings, so both are repeated here; [[migrations]]
+# is top-level and applies to every env.
+[env.staging]
+name = "cognia-signaling-staging"
+
+[env.staging.vars]
+SIGNALING_MAX_PEERS_PER_ROOM = "4"
+SIGNALING_MAX_DESKTOPS = "1"
+SIGNALING_MAX_CONN_PER_IP_PER_ROOM = "4"
+SIGNALING_ALLOWED_ORIGINS = ""
+AE_SAMPLE_N = "10"
+
+[env.staging.durable_objects]
+bindings = [{ name = "ROOM", class_name = "RoomDurableObject" }]

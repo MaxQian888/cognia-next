@@ -1,155 +1,220 @@
 name: Deploy
 
 # ============================================================================
-# Deployment Workflows (DISABLED BY DEFAULT)
-# ============================================================================
-# This workflow handles preview and production deployments.
+# Real, opt-in deployments for the two cloud services (ADR-0059 P0.1):
+#   - Cloudflare Workers: cognia-signaling (Rust/wasm), cognia-share (TS)
+#   - Fly.io axum twins:  signaling-server, share-server
 #
-# ⚠️ DEPLOYMENTS ARE DISABLED BY DEFAULT ⚠️
+# Safety model (forks stay green with zero configuration):
+#   1. Trigger is manual (workflow_dispatch) or an explicit workflow_call.
+#   2. The repo variable DEPLOY_ENABLED must be the string "true".
+#   3. Each platform job additionally requires its secret to be present.
+#   Any gate failing → the job is skipped (green), never red.
 #
-# To enable Vercel deployments:
-# 1. Add the required secrets to your GitHub repository:
-#    - VERCEL_TOKEN: Your Vercel deployment token
-#    - VERCEL_ORG_ID: Your Vercel organization ID
-#    - VERCEL_PROJECT_ID: Your Vercel project ID
-# 2. Set DEPLOY_ENABLED to true in the workflow
-# 3. See CI_CD.md for detailed setup instructions
+# Configuration lives in GitHub Environments `staging` and `production`, both
+# holding the SAME names so the workflow reads one set:
+#   secrets:  CLOUDFLARE_API_TOKEN, FLY_API_TOKEN
+#   variables: CLOUDFLARE_ACCOUNT_ID, CF_SHARE_KV_NAMESPACE_ID,
+#              FLY_SIGNALING_APP, FLY_SHARE_APP
+# `production` should carry protection rules (required reviewers) — configured
+# in Settings → Environments, documented in CI_CD.md.
 #
-# For production deployments, also configure:
-# - GitHub Environment protection rules (Settings > Environments)
-# - Required reviewers for manual approval
-# - Deployment branch restrictions
+# Staging Workers deploy via the [env.staging] stanzas in each wrangler.toml
+# (separate worker names, no custom-domain routes → *.workers.dev).
 # ============================================================================
 
 on:
-  workflow_call:
-    inputs:
-      environment:
-        description: "Deployment environment (preview or production)"
-        required: true
-        type: string
-        default: "preview"
   workflow_dispatch:
     inputs:
       environment:
         description: "Deployment environment"
         required: true
         type: choice
+        options: [staging, production]
+        default: staging
+      target:
+        description: "What to deploy"
+        required: true
+        type: choice
         options:
-          - preview
-          - production
-        default: "preview"
+          - all
+          - workers
+          - fly
+          - signaling-worker
+          - share-worker
+          - signaling-fly
+          - share-fly
+        default: all
+  workflow_call:
+    inputs:
+      environment:
+        description: "Deployment environment (staging or production)"
+        required: true
+        type: string
+      target:
+        description: "What to deploy"
+        required: false
+        type: string
+        default: all
 
-env:
-  # Set to true to enable deployments (requires Vercel secrets)
-  DEPLOY_ENABLED: false
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  # Never cancel a mid-flight deploy — a second dispatch queues behind it.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
-  # Preview deployment for pull requests
-  deploy-preview:
-    name: Deploy Preview
+  gate:
+    name: Gate (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    if: ${{ inputs.environment == 'preview' }}
-
+    environment: ${{ inputs.environment }}
+    outputs:
+      enabled: ${{ steps.g.outputs.enabled }}
+      has_cf: ${{ steps.g.outputs.has_cf }}
+      has_fly: ${{ steps.g.outputs.has_fly }}
     steps:
-      - name: Check deployment status
+      - id: g
+        env:
+          DEPLOY_ENABLED: ${{ vars.DEPLOY_ENABLED }}
+          HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_FLY: ${{ secrets.FLY_API_TOKEN != '' }}
         run: |
-          if [ "${{ env.DEPLOY_ENABLED }}" != "true" ]; then
-            echo "⚠️ Deployment is disabled. Set DEPLOY_ENABLED to true and configure Vercel secrets."
-            echo "See CI_CD.md for setup instructions."
-            exit 0
-          fi
+          {
+            echo "enabled=${DEPLOY_ENABLED:-false}"
+            echo "has_cf=${HAS_CF}"
+            echo "has_fly=${HAS_FLY}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Deploy gate — ${{ inputs.environment }}"
+            echo ""
+            echo "| Check | Value |"
+            echo "| --- | --- |"
+            echo "| DEPLOY_ENABLED | \`${DEPLOY_ENABLED:-unset}\` |"
+            echo "| CLOUDFLARE_API_TOKEN present | \`${HAS_CF}\` |"
+            echo "| FLY_API_TOKEN present | \`${HAS_FLY}\` |"
+            echo "| target | \`${{ inputs.target }}\` |"
+            echo ""
+            echo "Jobs whose gate is false are skipped (green)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Checkout code
-        if: ${{ env.DEPLOY_ENABLED == 'true' }}
-        uses: actions/checkout@v6
-
-      - name: Download build artifacts
-        if: ${{ env.DEPLOY_ENABLED == 'true' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: nextjs-build
-          path: out/
-
-      # Uncomment the following steps when Vercel secrets are configured:
-      #
-      # - name: Deploy to Vercel Preview
-      #   uses: amondnet/vercel-action@v25
-      #   env:
-      #     VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      #     VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      #     VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      #   if: ${{ env.VERCEL_TOKEN != '' && env.VERCEL_ORG_ID != '' && env.VERCEL_PROJECT_ID != '' }}
-      #   with:
-      #     vercel-token: ${{ env.VERCEL_TOKEN }}
-      #     vercel-org-id: ${{ env.VERCEL_ORG_ID }}
-      #     vercel-project-id: ${{ env.VERCEL_PROJECT_ID }}
-      #     working-directory: ./
-      #   continue-on-error: true
-      #
-      # - name: Comment Preview URL
-      #   uses: actions/github-script@v7
-      #   with:
-      #     script: |
-      #       github.rest.issues.createComment({
-      #         issue_number: context.issue.number,
-      #         owner: context.repo.owner,
-      #         repo: context.repo.repo,
-      #         body: '🚀 Preview deployment is ready! Check the deployment status above.'
-      #       })
-      #   continue-on-error: true
-
-  # Production deployment (requires manual approval)
-  deploy-production:
-    name: Deploy to Production
+  deploy-signaling-worker:
+    name: Worker — signaling
+    needs: gate
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["all","workers","signaling-worker"]'), inputs.target)
     runs-on: ubuntu-latest
-    if: ${{ inputs.environment == 'production' }}
-
-    # Requires manual approval via GitHub Environments
-    # environment:
-    #   name: production
-    #   url: https://your-app-url.com
-
+    environment: ${{ inputs.environment }}
     steps:
-      - name: Check deployment status
-        run: |
-          if [ "${{ env.DEPLOY_ENABLED }}" != "true" ]; then
-            echo "⚠️ Production deployment is disabled."
-            echo "To enable:"
-            echo "1. Set DEPLOY_ENABLED to true"
-            echo "2. Configure Vercel secrets"
-            echo "3. Set up GitHub Environment protection rules"
-            echo "See CI_CD.md for detailed instructions."
-            exit 0
-          fi
+      - uses: actions/checkout@v6
 
-      - name: Checkout code
-        if: ${{ env.DEPLOY_ENABLED == 'true' }}
-        uses: actions/checkout@v6
-
-      - name: Download build artifacts
-        if: ${{ env.DEPLOY_ENABLED == 'true' }}
-        uses: actions/download-artifact@v8
+      - name: Setup Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
         with:
-          name: nextjs-build
-          path: out/
+          targets: wasm32-unknown-unknown
 
-      # Uncomment the following steps when Vercel secrets are configured:
-      #
-      # - name: Deploy to Vercel Production
-      #   uses: amondnet/vercel-action@v25
-      #   with:
-      #     vercel-token: ${{ secrets.VERCEL_TOKEN }}
-      #     vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-      #     vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-      #     vercel-args: '--prod'
-      #     working-directory: ./
-      #
-      # - name: Create deployment summary
-      #   run: |
-      #     echo "## 🚀 Production Deployment" >> $GITHUB_STEP_SUMMARY
-      #     echo "" >> $GITHUB_STEP_SUMMARY
-      #     echo "✅ Successfully deployed to production" >> $GITHUB_STEP_SUMMARY
-      #     echo "📅 Deployed at: $(date)" >> $GITHUB_STEP_SUMMARY
-      #     echo "🔗 Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-      #     echo "🌐 URL: https://your-app-url.com" >> $GITHUB_STEP_SUMMARY
+      - name: Install worker-build
+        uses: taiki-e/install-action@v2
+        with:
+          tool: worker-build
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: services/signaling-server/worker
+          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
+
+  deploy-share-worker:
+    name: Worker — share
+    needs: gate
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["all","workers","share-worker"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Inject KV namespace id
+        env:
+          KV_ID: ${{ vars.CF_SHARE_KV_NAMESPACE_ID }}
+        run: |
+          if [ -z "$KV_ID" ]; then
+            echo "::error::CF_SHARE_KV_NAMESPACE_ID environment variable is not set"
+            exit 1
+          fi
+          sed -i "s/REPLACE_WITH_KV_NAMESPACE_ID/$KV_ID/" services/share-server/worker/wrangler.toml
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: services/share-server/worker
+          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
+
+  deploy-signaling-fly:
+    name: Fly — signaling
+    needs: gate
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_fly == 'true' &&
+      contains(fromJSON('["all","fly","signaling-fly"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        working-directory: services/signaling-server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app "${{ vars.FLY_SIGNALING_APP }}"
+
+  deploy-share-fly:
+    name: Fly — share
+    needs: gate
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_fly == 'true' &&
+      contains(fromJSON('["all","fly","share-fly"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        working-directory: services/share-server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app "${{ vars.FLY_SHARE_APP }}"
+
+  summary:
+    name: Summary
+    needs:
+      [gate, deploy-signaling-worker, deploy-share-worker, deploy-signaling-fly, deploy-share-fly]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Render result table
+        run: |
+          {
+            echo "## Deploy results — ${{ inputs.environment }} (target: ${{ inputs.target }})"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "| Worker — signaling | ${{ needs.deploy-signaling-worker.result }} |"
+            echo "| Worker — share | ${{ needs.deploy-share-worker.result }} |"
+            echo "| Fly — signaling | ${{ needs.deploy-signaling-fly.result }} |"
+            echo "| Fly — share | ${{ needs.deploy-share-fly.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on any failed deploy
+        if: contains(needs.*.result, 'failure')
+        run: exit 1
