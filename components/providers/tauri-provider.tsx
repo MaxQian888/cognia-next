@@ -22,6 +22,7 @@ import { useSyncShortcutsToRust } from "@/lib/shortcuts/sync"
 import { rasterizeAndRegisterTrayIcons } from "@/lib/tray/icon-builder"
 import { pushCrashContext } from "@/lib/native/crash-context"
 import { installNotificationBridges } from "@/lib/notifications/install"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 
 /**
  * Single mount point for desktop-runtime concerns:
@@ -58,7 +59,7 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   // (theme / locale) — these are the meaningful signals and don't churn. No-op
   // on web; `pushCrashContext` short-circuits when not under Tauri.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || !isMainAppWindow()) return
     void pushCrashContext({
       runtime: "tauri",
       colorTheme: appearanceColorTheme,
@@ -73,7 +74,7 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   // with the in-app theme. No-op on web; `setWindowBackgroundColor`
   // short-circuits when not running under Tauri.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || !isMainAppWindow()) return
     if (!resolvedTheme) return
     const shellColors = getShellColors(
       {
@@ -87,7 +88,12 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   }, [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes])
 
   useEffect(() => {
-    if (!isTauri()) return
+    // The transparent pet overlay/popup windows load this same root layout but
+    // are least-privilege (see `src-tauri/capabilities/pet.json`) — running the
+    // main-window boot sequence there only logs denied-capability warnings for
+    // notification / tray-store / CLI / deep-link. Skip it in pet windows; they
+    // start their own presentation-only view.
+    if (!isTauri() || !isMainAppWindow()) return
     void ensureNotificationPermission()
 
     // Kick off tray-store hydration as soon as the provider mounts. The
