@@ -1,15 +1,15 @@
 /**
  * @jest-environment jsdom
  */
-const mockNotifyRequested = jest.fn(async () => undefined)
-const mockNotifyResolved = jest.fn(async () => undefined)
+const mockNotifyRequested = jest.fn(async (..._a: unknown[]) => undefined)
+const mockNotifyResolved = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/workflow/runtime/approval-notify", () => ({
   notifyApprovalRequested: (...a: unknown[]) => mockNotifyRequested(...a),
   notifyApprovalResolved: (...a: unknown[]) => mockNotifyResolved(...a),
 }))
 
-const mockListRunEvents = jest.fn(async (): Promise<unknown[]> => [])
-const mockAppendEvent = jest.fn(async () => undefined)
+const mockListRunEvents = jest.fn(async (..._a: unknown[]): Promise<unknown[]> => [])
+const mockAppendEvent = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/workflow/runtime/event-log", () => ({
   listRunEvents: (...a: unknown[]) => mockListRunEvents(...a),
   appendEvent: (...a: unknown[]) => mockAppendEvent(...a),

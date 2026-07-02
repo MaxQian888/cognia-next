@@ -61,7 +61,7 @@ describe("notifyApprovalRequested", () => {
 
   it("fans the full entry to WS and ids-only to the push channel (Tauri)", async () => {
     const notify = jest.fn(async () => "n1")
-    const emit = jest.fn(async () => undefined)
+    const emit = jest.fn(async (_event: string, _payload: unknown) => undefined)
     await notifyApprovalRequested(entry, { notify, emit, isTauriFn: () => true })
     expect(emit).toHaveBeenCalledWith(APPROVAL_REQUEST_CHANNEL, entry)
     expect(emit).toHaveBeenCalledWith(APPROVAL_PENDING_PUSH_CHANNEL, {
