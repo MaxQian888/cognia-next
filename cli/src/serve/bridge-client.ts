@@ -35,7 +35,7 @@ export interface WebSocketLike {
   close(code?: number, reason?: string): void
   addEventListener(
     type: "open" | "message" | "close" | "error",
-    listener: (event: never) => void
+    listener: (event: { data?: unknown }) => void
   ): void
 }
 
@@ -211,7 +211,7 @@ export class BridgeClient implements RuntimeBridge {
       }, timeoutMs)
     })
 
-    socket.addEventListener("message", (event: { data: unknown }) => {
+    socket.addEventListener("message", (event: { data?: unknown }) => {
       const text = typeof event.data === "string" ? event.data : String(event.data)
       const frame = parseBridgeFrame(text)
       if (!frame) {
