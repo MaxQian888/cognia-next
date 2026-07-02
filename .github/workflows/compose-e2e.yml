@@ -17,6 +17,17 @@ on:
       - "services/signaling-server/**"
       - "services/share-server/**"
       - ".github/workflows/compose-e2e.yml"
+  # schedule/workflow_dispatch only fire from the default branch, where this
+  # workflow does not exist yet — the dev-scoped push trigger is what actually
+  # runs tier 2 while ADR-0059 lives on dev. Paths stay narrow: tier 2 is a
+  # 3h cargo cook, so only image/compose/smoke changes re-run it.
+  push:
+    branches: [dev]
+    paths:
+      - "Dockerfile.cognia-server"
+      - "deploy/compose/**"
+      - "scripts/smoke/**"
+      - ".github/workflows/compose-e2e.yml"
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
@@ -72,7 +83,7 @@ jobs:
   tier2:
     name: Tier 2 (cognia-server)
     # The cargo-chef cook makes this a long job — keep it off the PR path.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
