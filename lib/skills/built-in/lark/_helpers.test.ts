@@ -34,11 +34,15 @@ describe("buildConfirmSurface", () => {
       summary: "Delete the thing.",
       details: [{ label: "Id", value: "rec_1" }],
     })
+    const components = s.components as Record<
+      string,
+      { props?: Record<string, unknown>; children?: string[] }
+    >
     expect(s.rootId).toBe("sfc_1")
-    expect(s.components.btn_confirm.props?.action).toEqual({ type: "button", value: "confirm" })
-    expect(s.components.detail_0.props?.text).toContain("rec_1")
+    expect(components.btn_confirm.props?.action).toEqual({ type: "button", value: "confirm" })
+    expect(components.detail_0.props?.text).toContain("rec_1")
     // Card children wire summary + detail rows + the actions row.
-    expect(s.components.sfc_1.children).toEqual(["summary", "detail_0", "actions"])
+    expect(components.sfc_1.children).toEqual(["summary", "detail_0", "actions"])
   })
 })
 
