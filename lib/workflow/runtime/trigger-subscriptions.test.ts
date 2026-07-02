@@ -137,6 +137,21 @@ describe("trigger-subscriptions", () => {
     expect(otherFailed.map((m) => m.workflowId)).not.toContain("wf_team")
   })
 
+  it("indexes trigger.desktop.event and matches by kinds array (unscoped matches any)", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_any", [trigger("n", "trigger.desktop.event", {})]),
+      wf("wf_focus", [trigger("n", "trigger.desktop.event", { kinds: ["focus-changed"] })]),
+      wf("wf_struct", [trigger("n", "trigger.desktop.event", { kinds: ["structure-changed"] })]),
+    ])
+    expect(_peekTriggerSubscriptions().get("trigger.desktop.event")).toHaveLength(3)
+
+    const focus = findMatchingWorkflows("trigger.desktop.event", {
+      desktopEventKind: "focus-changed",
+    })
+    expect(focus.map((m) => m.workflowId)).toEqual(expect.arrayContaining(["wf_any", "wf_focus"]))
+    expect(focus.map((m) => m.workflowId)).not.toContain("wf_struct")
+  })
+
   it("indexes terminal.command and matches by session / project / status / substring", () => {
     _seedTriggerSubscriptionsForTest([
       wf("wf_any", [trigger("n", "trigger.terminal.command", {})]),

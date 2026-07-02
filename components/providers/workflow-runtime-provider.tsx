@@ -6,6 +6,11 @@ import {
   initTriggerSubscriptions,
   disposeTriggerSubscriptions,
 } from "@/lib/workflow/runtime/trigger-subscriptions"
+import {
+  initDesktopEventTrigger,
+  disposeDesktopEventTrigger,
+} from "@/lib/workflow/runtime/desktop-event-trigger"
+import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
@@ -65,6 +70,20 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
         log.warn?.("workflow runtime: initTriggerSubscriptions failed", {
           error: err instanceof Error ? err.message : String(err),
         })
+      }
+
+      // Live desktop UI events (trigger.desktop.event) ride the Rust
+      // automation backend — Tauri-only; web/Capacitor have no event source.
+      if (isTauri()) {
+        try {
+          initDesktopEventTrigger()
+          disposers.push(() => disposeDesktopEventTrigger())
+          log.info?.("workflow runtime: desktop-event trigger initialised")
+        } catch (err) {
+          log.warn?.("workflow runtime: initDesktopEventTrigger failed", {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
       }
 
       try {

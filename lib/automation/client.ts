@@ -22,6 +22,7 @@ import type {
   DragOpts,
   ElementInfo,
   ElementRef,
+  EventFilter,
   KeyChord,
   Locator,
   MouseButton,
@@ -35,6 +36,33 @@ import type {
   TypeOpts,
   WindowOp,
 } from "./types"
+
+/** Tauri event name carrying live UI events from the Rust watcher threads. */
+export const UIA_EVENT_NAME = "automation:uia-event"
+
+/** Mirror of Rust `automation::events::UiaEventPayload` (serde camelCase). */
+export interface UiaEventPayload {
+  subscriptionId: number
+  kind: string
+  /** Focused element's accessible name — may carry user text; PII-gate before
+   * forwarding into workflow payloads. */
+  name?: string
+  controlType?: string
+  processId?: number
+  at: number
+}
+
+/**
+ * Listen for live UI events. Returns the unlisten fn. Kept out of the
+ * `desktop` transport object because event listening is Tauri-only (the
+ * companion HTTP transport has no event channel).
+ */
+export async function listenUiaEvents(
+  handler: (payload: UiaEventPayload) => void
+): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen<UiaEventPayload>(UIA_EVENT_NAME, (event) => handler(event.payload))
+}
 
 export type Surface = "workflow" | "computerUse" | "mcp" | "plugin" | "sandbox"
 
@@ -273,6 +301,21 @@ export const desktop = {
   },
 
   /**
+   * Subscribe to live UI events (v1: `focus-changed` on Windows). Read-only
+   * observing call. Events arrive on the `automation:uia-event` Tauri event
+   * (see {@link UIA_EVENT_NAME} / {@link UiaEventPayload}); the returned
+   * subscription id pairs with {@link desktop.unsubscribeEvents}.
+   */
+  subscribeEvents(filter: EventFilter = {}, ctx: CallContext = {}): Promise<number> {
+    return transport.call<number>("desktop_subscribe_events", { filter, ctx })
+  },
+
+  /** Stop a live UI-event subscription started by {@link desktop.subscribeEvents}. */
+  unsubscribeEvents(sub: number, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_unsubscribe", { sub, ctx })
+  },
+
+  /**
    * Resolve the topmost UI element at the given screen coordinates.
    * Read-only — used by Inspector's "Pick" affordance after the overlay
    * captures the user's intended target.
@@ -331,9 +374,23 @@ export const desktop = {
     return transport.call<AutomationSettings>("automation_settings_get", {})
   },
 
-  /** Replace the permission settings. */
+  /** Replace the permission settings. Never resumes an engaged kill switch. */
   settingsSet(settings: AutomationSettings): Promise<void> {
     return transport.call<void>("automation_settings_set", { settings })
+  },
+
+  /**
+   * Explicit operator toggle of the master enable flag. Enabling is the
+   * deliberate "resume" action that releases an engaged kill switch — unlike a
+   * bulk `settingsSet`, which never does.
+   */
+  setEnabled(enabled: boolean): Promise<void> {
+    return transport.call<void>("automation_set_enabled", { enabled })
+  },
+
+  /** Whether the runtime emergency kill switch is currently engaged. */
+  killSwitchEngaged(): Promise<boolean> {
+    return transport.call<boolean>("automation_kill_switch_engaged", {})
   },
 
   /** Engage the global kill switch — every in-flight call rejects with KILL_SWITCH_ACTIVE. */

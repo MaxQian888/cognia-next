@@ -815,6 +815,8 @@ pub fn run() {
             plugin_api::devtools::plugin_reload,
             plugin_api::devtools::plugin_list_dev_plugins,
             automation::commands::desktop_capabilities,
+            automation::commands::desktop_subscribe_events,
+            automation::commands::desktop_unsubscribe,
             automation::commands::desktop_get_focus,
             automation::commands::desktop_read_tree,
             automation::commands::desktop_find,
@@ -842,6 +844,8 @@ pub fn run() {
             automation::commands::automation_policy_set,
             automation::commands::automation_settings_get,
             automation::commands::automation_settings_set,
+            automation::commands::automation_set_enabled,
+            automation::commands::automation_kill_switch_engaged,
             automation::commands::automation_kill_switch,
             automation::commands::automation_consent_respond,
             automation::commands::automation_drain_init_failure,
@@ -1011,6 +1015,11 @@ pub fn run() {
                 // state the `cua_sandbox_*` lifecycle commands read and the
                 // `AutomationState` the `cua_route` dispatch layer reads, so
                 // both see the same running containers.
+                // Live UI-event delivery (trigger.desktop.event): watcher
+                // threads forward focus-changed events through this sink to
+                // `automation:uia-event`, which the TS workflow fan-out
+                // (`lib/workflow/runtime/desktop-event-trigger.ts`) consumes.
+                automation::events::wire_uia_event_sink(app.handle().clone());
                 let cua_registry = cua_sandbox::CuaSandboxRegistry::default();
                 app.manage(cua_registry.clone());
                 app.manage(automation::commands::AutomationState::new(

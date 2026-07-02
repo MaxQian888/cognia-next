@@ -22124,9 +22124,13 @@
         }
       },
       "desktopEventTrigger": {
-        "desktopOnly": "Desktop only — fires on UI Automation events; has no effect in the browser.",
+        "cooldownMs": {
+          "hint": "Minimum time between fires for this workflow — guards against the workflow's own desktop actions re-triggering it.",
+          "label": "Cooldown (ms)"
+        },
+        "desktopOnly": "Desktop only — fires on live UI Automation events (v1: focus-changed on Windows); has no effect in the browser.",
         "kinds": {
-          "hint": "Fire when any of the selected UI Automation events occur.",
+          "hint": "Fire when any of the selected UI Automation events occur. v1 delivers focus-changed; the other kinds are pending.",
           "label": "Event kinds",
           "options": {
             "focus-changed": "Focus changed",

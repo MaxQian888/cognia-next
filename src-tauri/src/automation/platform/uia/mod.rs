@@ -12,6 +12,7 @@ use crate::automation::backend::AutomationBackend;
 use crate::automation::types::*;
 
 mod element;
+mod events;
 mod find;
 mod input;
 mod pattern;
@@ -22,6 +23,7 @@ use element::{element_info, ElementCache};
 pub struct UiaBackend {
     automation: UIAutomation,
     cache: ElementCache,
+    events: events::EventSubscriptions,
 }
 
 impl UiaBackend {
@@ -31,6 +33,7 @@ impl UiaBackend {
         Ok(Self {
             automation,
             cache: ElementCache::new(),
+            events: events::EventSubscriptions::new(),
         })
     }
 }
@@ -42,7 +45,7 @@ impl AutomationBackend for UiaBackend {
             has_uia: true,
             has_input_sim: true,
             has_screenshot: true,
-            has_events: false,   // M1.6 ships without UIA events; M2 adds them.
+            has_events: true, // v1: focus-changed via the poll watcher (events.rs).
             has_a11y_tree: true, // UIA exposes a full element tree.
             monitors: screenshot::list_monitors(),
         }
@@ -184,17 +187,14 @@ impl AutomationBackend for UiaBackend {
         pattern::dispatch_window_op(&elt, op)
     }
 
-    fn subscribe_events(&self, _filter: EventFilter) -> Result<SubscriptionId> {
-        // Event subscription requires forwarding UIA's COM-thread callbacks
-        // through an mpsc channel. M2 adds this; M1 advertises hasEvents=false.
-        Err(AutomationError::BackendError {
-            message: "subscribe_events pending M2".into(),
-        })
+    fn subscribe_events(&self, filter: EventFilter) -> Result<SubscriptionId> {
+        // v1: focus-changed via a dedicated poll-watcher thread (see
+        // events.rs for why COM event handlers are deferred). Events reach
+        // the renderer through `automation::events::emit_uia_event`.
+        self.events.subscribe(&filter)
     }
-    fn unsubscribe(&self, _sub: SubscriptionId) -> Result<()> {
-        Err(AutomationError::BackendError {
-            message: "unsubscribe pending M2".into(),
-        })
+    fn unsubscribe(&self, sub: SubscriptionId) -> Result<()> {
+        self.events.unsubscribe(&sub)
     }
 
     // ── M5 completion primitives ─────────────────────────────────────────

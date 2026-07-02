@@ -97,6 +97,7 @@ const messages = {
       },
       desktopEventTrigger: {
         desktopOnly: "Desktop only.",
+        cooldownMs: { label: "Cooldown (ms)", hint: "Minimum time between fires." },
         kinds: {
           label: "Event kinds",
           hint: "Fire on UIA events.",
@@ -468,6 +469,17 @@ describe("DesktopEventTriggerConfig", () => {
     wrap(<DesktopEventTriggerConfig params={{ kinds: ["focus-changed"] }} onChange={onChange} />)
     fireEvent.click(screen.getByTestId("desktop-event-focus-changed"))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kinds: [] }))
+  })
+
+  it("edits the cooldown loop-guard (clamped to ≥0, default 2000)", () => {
+    const onChange = jest.fn()
+    wrap(<DesktopEventTriggerConfig params={{}} onChange={onChange} />)
+    const input = screen.getByTestId("desktop-event-cooldown") as HTMLInputElement
+    expect(input.value).toBe("2000")
+    fireEvent.change(input, { target: { value: "5000" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ cooldownMs: 5000 }))
+    fireEvent.change(input, { target: { value: "-3" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ cooldownMs: 0 }))
   })
 })
 

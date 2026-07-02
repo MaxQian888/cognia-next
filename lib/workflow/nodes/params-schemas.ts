@@ -929,6 +929,11 @@ const DesktopEventKind = z.enum(["focus-changed", "structure-changed", "property
 const DesktopEventTriggerParams = z.object({
   kinds: z.array(DesktopEventKind).optional(),
   scope: DesktopElementRef.optional(),
+  /**
+   * Loop guard: minimum ms between fires per workflow (a workflow's own
+   * desktop actions cause focus events). Default 2000.
+   */
+  cooldownMs: numberRange(0).optional(),
 })
 
 // ── AI primitives ──────────────────────────────────────────────────────────

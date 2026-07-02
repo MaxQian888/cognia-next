@@ -5804,6 +5804,7 @@ const DESKTOP_EVENT_KINDS = ["focus-changed", "structure-changed", "property-cha
 export function DesktopEventTriggerConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.desktopEventTrigger")
   const selected = Array.isArray(params.kinds) ? (params.kinds as string[]) : []
+  const cooldownMs = readNumber(params, "cooldownMs", 2000)
   const toggle = (kind: string) => {
     const next = selected.includes(kind) ? selected.filter((k) => k !== kind) : [...selected, kind]
     onChange(patchParam(params, "kinds", next))
@@ -5827,6 +5828,23 @@ export function DesktopEventTriggerConfig({ params, onChange }: ConfigProps) {
             </label>
           ))}
         </div>
+      </Field>
+      <Field
+        label={t("cooldownMs.label")}
+        htmlFor="det-cooldown"
+        hint={t("cooldownMs.hint")}
+        name="cooldownMs"
+      >
+        <Input
+          id="det-cooldown"
+          type="number"
+          min={0}
+          value={cooldownMs}
+          data-testid="desktop-event-cooldown"
+          onChange={(e) =>
+            onChange(patchParam(params, "cooldownMs", Math.max(0, Number(e.target.value) || 0)))
+          }
+        />
       </Field>
     </FieldGroup>
   )

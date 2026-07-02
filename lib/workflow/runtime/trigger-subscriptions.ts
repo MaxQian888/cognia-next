@@ -35,6 +35,7 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.goal.completed",
   "trigger.terminal.command",
   "trigger.team",
+  "trigger.desktop.event",
 ]
 
 interface SubscriptionState {
@@ -129,6 +130,12 @@ export interface TriggerMatchContext {
   /** Team id (trigger.team) — optional; unspecified node matches any team. */
   teamId?: string
   /**
+   * Desktop UI event kind (trigger.desktop.event) — matched against the
+   * node's `kinds` array param ("focus-changed" / …). A node without a
+   * `kinds` filter matches every event kind.
+   */
+  desktopEventKind?: string
+  /**
    * Command line (terminal.command) — matched as a *substring* against the
    * node's `commandContains` param. Already PII-gated by the dispatcher;
    * an empty string only matches nodes without a `commandContains` filter.
@@ -175,6 +182,11 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   }
   if (typeof p.teamId === "string" && p.teamId.length > 0) {
     if (ctx.teamId !== p.teamId) return false
+  }
+  if (Array.isArray(p.kinds) && p.kinds.length > 0) {
+    if (typeof ctx.desktopEventKind !== "string" || !p.kinds.includes(ctx.desktopEventKind)) {
+      return false
+    }
   }
   if (typeof p.commandContains === "string" && p.commandContains.length > 0) {
     if (typeof ctx.command !== "string" || !ctx.command.includes(p.commandContains)) return false

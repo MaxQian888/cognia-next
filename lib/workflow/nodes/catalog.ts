@@ -728,7 +728,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   "trigger.desktop.event": {
     label: "On UIA event",
     description:
-      "Fire when a UIA focus / structure / property event matches. Experimental: not yet wired to real UIA events — only fires in manual runs.",
+      "Fire on live desktop UI events. v1: focus-changed on Windows (structure/property pending). A per-workflow cooldown guards against a workflow's own desktop actions re-triggering it.",
     iconName: "Bell",
     keywords: ["desktop", "trigger", "event", "uia", "focus"],
     desktopOnly: true,

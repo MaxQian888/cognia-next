@@ -22124,9 +22124,13 @@
         }
       },
       "desktopEventTrigger": {
-        "desktopOnly": "仅桌面端——在 UI Automation 事件上触发；浏览器中无效。",
+        "cooldownMs": {
+          "hint": "本工作流两次触发之间的最短间隔——防止工作流自身的桌面操作再次触发它。",
+          "label": "冷却时间（毫秒）"
+        },
+        "desktopOnly": "仅桌面端——在实时 UI Automation 事件上触发（v1：Windows 焦点变化）；浏览器中无效。",
         "kinds": {
-          "hint": "当所选的任一 UI Automation 事件发生时触发。",
+          "hint": "当所选的任一 UI Automation 事件发生时触发。v1 仅投递焦点变化，其余类型待实现。",
           "label": "事件类型",
           "options": {
             "focus-changed": "焦点变化",
