@@ -38,6 +38,19 @@ jest.mock("@/stores/agent/custom-mode-store", () => ({
   useCustomModeStore: { getState: jest.fn() },
 }))
 
+// Dynamically imported only on the API-key-rotation persist path (ADR-0043
+// Phase 3) — mocked so that path never touches Dexie/Zustand in this file.
+const mockSetProviderConfig = jest.fn().mockResolvedValue(undefined)
+const mockUpdateCustomProvider = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({
+      setProviderConfig: (...args: unknown[]) => mockSetProviderConfig(...args),
+      updateCustomProvider: (...args: unknown[]) => mockUpdateCustomProvider(...args),
+    }),
+  },
+}))
+
 jest.mock("@/lib/agent", () => ({
   buildAgentModeSessionUpdate: jest.fn(),
 }))
@@ -114,6 +127,7 @@ import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
 import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@/lib/logging"
+import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provider-routing"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
@@ -391,6 +405,182 @@ describe("resolveSendOptions — Anthropic native fallbackModel activation", () 
   })
 })
 
+describe("resolveSendOptions — opt-in Auto routing", () => {
+  const routingConfig = {
+    strategy: "quality",
+    allowPerRequestOverride: true,
+    providerConstraints: [],
+    requestTimeoutMs: 30000,
+    maxFallbackAttempts: 3,
+  }
+  const mapping = (alias: string, modelId: string) => ({
+    id: `m-${alias}`,
+    alias,
+    providers: [{ providerId: "anthropic", modelId }],
+    distribution: "priority",
+    enabled: true,
+    isDefault: false,
+    createdAt: 0,
+    updatedAt: 0,
+  })
+  const tierMappings = [
+    mapping("fast", "claude-haiku-4-5-20251001"),
+    mapping("balanced", "claude-sonnet-4-6"),
+    mapping("powerful", "claude-opus-4-8"),
+  ]
+  // Guarantees scoreDifficulty >= the powerful threshold (fenced code +
+  // reasoning keywords + length + many sentences all saturate).
+  const HARD_PROMPT =
+    "Please implement and optimize this algorithm step-by-step. Analyze the architecture. Prove correctness. Debug the derivative. ```ts\nfor (;;) {}\n```. " +
+    "Refactor the recursive proof into a multi-step analysis of the optimization theorem. ".repeat(
+      30
+    )
+  const settings = (autoRouting?: unknown): AppSettings =>
+    ({
+      defaultProvider: "anthropic",
+      defaultModel: "claude-sonnet-4-6",
+      providerSettings: {},
+      routingConfig,
+      modelMappings: tierMappings,
+      ...(autoRouting ? { autoRouting } : {}),
+    }) as unknown as AppSettings
+
+  it("is a no-op when disabled (concrete model is untouched)", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings(),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("routes a hard prompt to the powerful tier and stamps the decision", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.autoRouting?.tier).toBe("powerful")
+    expect(opts.autoRouting?.score).toBeGreaterThanOrEqual(0.67)
+    // The alias engine then resolved the tier to its concrete model.
+    expect(opts.model).toBe("claude-opus-4-8")
+    expect(opts.aliasResolution?.alias).toBe("powerful")
+  })
+
+  it("routes an easy prompt to the fast tier", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: "hi" },
+    })
+    expect(opts.autoRouting?.tier).toBe("fast")
+    expect(opts.model).toBe("claude-haiku-4-5-20251001")
+  })
+
+  it("never re-routes an explicitly-typed alias", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "auto-alias", providerId: "anthropic", model: "fast" }),
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    // Typed "fast" wins; auto never fires.
+    expect(opts.autoRouting).toBeUndefined()
+    expect(opts.aliasResolution?.alias).toBe("fast")
+  })
+
+  it("is a no-op when the prompt text is empty", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: "" },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("falls back to the concrete model when an auto tier has no eligible deployment", async () => {
+    // Force the alias engine to report zero candidates for the auto-picked tier.
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "selectProvider")
+      .mockImplementation(() => {
+        throw new RoutingNoCandidatesError("powerful")
+      })
+    try {
+      const opts = await resolveSendOptions({
+        appSettings: settings({
+          enabled: true,
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+        }),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      // Auto rewrote the model to a tier, resolution threw → we revert to the
+      // concrete default model instead of hard-failing the send.
+      expect(opts.model).toBe("claude-sonnet-4-6")
+      expect(opts.autoRouting).toBeUndefined()
+      expect(opts.aliasResolution).toBeUndefined()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("rethrows for an explicitly-typed alias with no eligible deployment", async () => {
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "selectProvider")
+      .mockImplementation(() => {
+        throw new RoutingNoCandidatesError("fast")
+      })
+    try {
+      await expect(
+        resolveSendOptions({
+          character: makeChar({ id: "typed", providerId: "anthropic", model: "fast" }),
+          appSettings: settings({
+            enabled: true,
+            thresholds: { balanced: 0.34, powerful: 0.67 },
+            candidateAliases: ["fast", "balanced", "powerful"],
+          }),
+          routingContextHint: { promptText: HARD_PROMPT },
+        })
+      ).rejects.toBeInstanceOf(RoutingNoCandidatesError)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("is a no-op when no candidate alias is enabled in modelMappings", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        defaultProvider: "anthropic",
+        defaultModel: "claude-sonnet-4-6",
+        providerSettings: {},
+        routingConfig,
+        modelMappings: [mapping("reasoning", "claude-opus-4-8")],
+        autoRouting: {
+          enabled: true,
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+        },
+      } as unknown as AppSettings,
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+})
+
 describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)", () => {
   it("forwards the resolved protocol + modelParams for a configured built-in provider", async () => {
     const opts = await resolveSendOptions({
@@ -472,6 +662,129 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
     } finally {
       __resetProtocolAdaptersForTesting()
     }
+  })
+})
+
+describe("resolveSendOptions — multi-API-key rotation (ADR-0043 Phase 3)", () => {
+  // Deterministic microtask flush for the fire-and-forget persist call,
+  // which the code intentionally does not await before returning `opts`.
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+
+  it("overrides the single-key credential with the round-robin-selected pool key", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0", "sk-pool-1"],
+            apiKeyRotationEnabled: true,
+            apiKeyRotationStrategy: "round-robin",
+            currentKeyIndex: 0,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    // currentKeyIndex 0 -> round-robin advances to pool[1], NOT the plain apiKey.
+    expect(opts.providerCredentials?.apiKey).toBe("sk-pool-1")
+  })
+
+  it("persists the rotation advance onto the built-in provider row", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0", "sk-pool-1"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    await flush()
+    expect(mockSetProviderConfig).toHaveBeenCalledWith(
+      "openai",
+      expect.objectContaining({
+        currentKeyIndex: 0,
+        apiKeyUsageStats: expect.objectContaining({
+          "sk-pool-0": expect.objectContaining({ usageCount: 1 }),
+        }),
+      })
+    )
+    expect(mockUpdateCustomProvider).not.toHaveBeenCalled()
+  })
+
+  it("persists the rotation advance onto the custom provider row instead", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "acme", model: "acme-chat" }),
+      appSettings: {
+        defaultProvider: "acme",
+        providerSettings: {},
+        customProviders: [
+          {
+            id: "acme",
+            isCustom: true,
+            protocol: "openai",
+            baseURL: "https://llm.acme.dev",
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        ],
+      } as unknown as AppSettings,
+    })
+    await flush()
+    expect(mockUpdateCustomProvider).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({ currentKeyIndex: 0 })
+    )
+    expect(mockSetProviderConfig).not.toHaveBeenCalled()
+  })
+
+  it("leaves the plain apiKey untouched when rotation is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: { apiKey: "sk-solo", apiKeys: ["sk-pool-0", "sk-pool-1"] },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials?.apiKey).toBe("sk-solo")
+    await flush()
+    expect(mockSetProviderConfig).not.toHaveBeenCalled()
+  })
+
+  it("does not block the turn when the persist call rejects", async () => {
+    mockSetProviderConfig.mockRejectedValueOnce(new Error("dexie unavailable"))
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials?.apiKey).toBe("sk-pool-0")
+    await flush()
+    expect(warnSpy).toHaveBeenCalledWith(
+      "api key rotation advance persist failed",
+      expect.any(Error)
+    )
+    warnSpy.mockRestore()
   })
 })
 
@@ -857,6 +1170,81 @@ describe("resolveSendOptions — direct-chat subagents (opts.agents)", () => {
       ).toBe(true)
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-2")
+    }
+  })
+
+  it("force-offers dispatch_agent in plan mode even when nesting is off", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { permissionMode: "plan" } as never,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    // Plan mode dispatches read-only Explore/Plan subagents (Claude Code parity),
+    // so the tool must be offered even without the nesting opt-in.
+    expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 0 })
+    expect(lastCall?.dispatchAgent.available.some((a: { id: string }) => a.id === "Explore")).toBe(
+      true
+    )
+    expect(lastCall?.dispatchAgent.available.some((a: { id: string }) => a.id === "Plan")).toBe(
+      true
+    )
+  })
+
+  it("does not offer dispatch_agent in default mode without nesting", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("withholds dispatch_agent from a dispatched leaf child in plan mode (no re-nesting)", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    // A dispatched Explore/Plan child (isDispatchedSubagent, no dispatchContext —
+    // its def never set allowNesting) must NOT hit the plan-mode force-offer:
+    // it is a leaf, not a top-level chat (CLI leaf parity).
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { permissionMode: "plan" } as never,
+      isDispatchedSubagent: true,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("withholds dispatch_agent from a dispatched leaf child even when nesting is enabled", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { subagentNesting: { enabled: true, maxDepth: 2 } } as never,
+      isDispatchedSubagent: true,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("still offers dispatch_agent to a dispatched child that carries a dispatchContext", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-nest-3",
+      name: "Nesting Child",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      // allowNesting defs DO get a dispatchContext — the flag must not demote them.
+      await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        dispatchContext: { depth: 1, maxDepth: 3, parentChain: [] },
+        isDispatchedSubagent: true,
+      })
+      const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+      expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 1, maxDepth: 3 })
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-3")
     }
   })
 })
@@ -1856,15 +2244,17 @@ describe("resolveSendOptions — plan mode prompt", () => {
       session: makeSession({ id: "s1", permissionMode: "plan" }),
     })
     expect(opts.permissionMode).toBe("plan")
-    expect(opts.appendSystemPrompt).toContain("You are in plan mode")
+    expect(opts.appendSystemPrompt).toContain("Plan mode (READ-ONLY")
     expect(opts.appendSystemPrompt).toContain("ExitPlanMode")
+    // Guides the Claude-Code-style research flow via read-only subagents.
+    expect(opts.appendSystemPrompt).toContain("Explore")
   })
 
   it("omits the plan-mode reminder outside plan mode", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", permissionMode: "acceptEdits" }),
     })
-    expect(opts.appendSystemPrompt ?? "").not.toContain("You are in plan mode")
+    expect(opts.appendSystemPrompt ?? "").not.toContain("Plan mode (READ-ONLY")
   })
 })
 
@@ -2910,6 +3300,16 @@ describe("desktop-independent DI seams (standalone CLI)", () => {
         permissionCeiling: { permissionMode: "plan" },
       })
       expect(opts.permissionMode).toBe("plan")
+    })
+
+    it("a dontAsk parent ceiling clamps the child's mode (dontAsk is a valid SendOptions mode)", async () => {
+      // Regression: the final clamp used to guard `!== "dontAsk"` out as
+      // "type-unsafe", silently dropping a dontAsk parent's ceiling.
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", permissionMode: "acceptEdits" }),
+        permissionCeiling: { permissionMode: "dontAsk" },
+      })
+      expect(opts.permissionMode).toBe("dontAsk")
     })
 
     it("a restricted parent caps a child that declared NO allow-list (no widening to all)", async () => {

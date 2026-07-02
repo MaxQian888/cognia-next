@@ -580,24 +580,94 @@ function appendDelta(
 }
 
 /**
+ * Extract a partial live {@link UsageInfo} from a raw Anthropic streaming
+ * event's `usage` block: `message_start` carries `input_tokens` + cache counts,
+ * `message_delta` carries the running `output_tokens`. Snake_case per the SDK.
+ * Returns null when no numeric usage is present (e.g. ai-sdk `message_start`
+ * frames, which carry only an id).
+ */
+function liveUsageFromStreamEvent(raw: {
+  type?: string
+  message?: { usage?: Record<string, unknown> }
+  usage?: Record<string, unknown>
+}): Partial<UsageInfo> | null {
+  const u = raw.type === "message_start" ? raw.message?.usage : raw.usage
+  if (!u || typeof u !== "object") return null
+  const num = (k: string) => (typeof u[k] === "number" ? (u[k] as number) : undefined)
+  const info: Partial<UsageInfo> = {
+    inputTokens: num("input_tokens"),
+    outputTokens: num("output_tokens"),
+    cacheCreationInputTokens: num("cache_creation_input_tokens"),
+    cacheReadInputTokens: num("cache_read_input_tokens"),
+  }
+  if (Object.values(info).every((v) => v === undefined)) return null
+  return info
+}
+
+/**
+ * Merge a partial live usage into the last assistant message's `metadata.usage`,
+ * only ADDING fields the frame carries — a later frame (or the trailing `result`)
+ * never gets a known value downgraded to undefined. Powers mid-turn ctx%.
+ */
+function mergeLiveUsage(messages: UIMessage[], partial: Partial<UsageInfo>): UIMessage[] {
+  const idx = findLastAssistantIndex(messages)
+  if (idx < 0) return messages
+  const msg = messages[idx]
+  const prior = ((msg as { metadata?: Record<string, unknown> }).metadata ?? {}) as Record<
+    string,
+    unknown
+  >
+  const usage: Record<string, unknown> = { ...((prior.usage as Record<string, unknown>) ?? {}) }
+  for (const [k, v] of Object.entries(partial)) {
+    if (v !== undefined) usage[k] = v
+  }
+  const out = messages.slice()
+  out[idx] = {
+    ...msg,
+    ...({ metadata: { ...prior, usage } } as { metadata: Record<string, unknown> }),
+  }
+  return out
+}
+
+/**
  * Apply a `stream_event` (SDKPartialAssistantMessage) to the in-progress
  * assistant message. `message_start` seeds an empty assistant message keyed by
- * the Anthropic message id; `content_block_delta` (text_delta / thinking_delta)
- * grows it. Other raw events (content_block_start/stop, message_delta/stop) are
- * ignored — the final `assistant` message carries the canonical content.
+ * the Anthropic message id (and attaches live input/cache usage); each
+ * `content_block_delta` (text_delta / thinking_delta) grows it; `message_delta`
+ * merges the running output-token usage. Other raw events (content_block
+ * start/stop, message_stop) are ignored — the final `assistant` message carries
+ * the canonical content and the `result` message the authoritative usage.
  */
 function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage): UIMessage[] {
   const raw = evt.event as unknown as {
     type?: string
-    message?: { id?: string }
+    message?: { id?: string; usage?: Record<string, unknown> }
+    usage?: Record<string, unknown>
     delta?: { type?: string; text?: string; thinking?: string }
   }
   if (!raw || typeof raw !== "object") return messages
 
   if (raw.type === "message_start") {
     const id = raw.message?.id
-    if (!id || messages.some((m) => m.id === id)) return messages
-    return [...messages, { id, role: "assistant", parts: [] } as UIMessage]
+    if (!id) return messages
+    let next = messages
+    if (!messages.some((m) => m.id === id)) {
+      next = [...messages, { id, role: "assistant", parts: [] } as UIMessage]
+    }
+    // Live context-usage refresh: the native Anthropic `message_start` carries the
+    // turn's real input + cache token counts. Attaching them to the in-progress
+    // assistant lets the ctx% indicator update mid-turn (the trailing `result`
+    // usage replaces them authoritatively at turn end). ai-sdk `message_start`
+    // frames carry no usage → this is a no-op there.
+    const live = liveUsageFromStreamEvent(raw)
+    return live ? mergeLiveUsage(next, live) : next
+  }
+
+  if (raw.type === "message_delta") {
+    // Anthropic emits the running `output_tokens` on each `message_delta`; merge
+    // it into the live usage so the ctx% window figure grows as the reply streams.
+    const live = liveUsageFromStreamEvent(raw)
+    return live ? mergeLiveUsage(messages, live) : messages
   }
 
   if (raw.type === "content_block_delta") {

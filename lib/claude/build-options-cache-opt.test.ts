@@ -1,10 +1,10 @@
 /**
  * Targeted coverage for the cache-friendly prompt assembly branch of
- * `resolveSendOptions` (`AppSettings.cacheOptimizationEnabled`). The flag
- * must be a strict opt-in: OFF keeps the legacy assembly byte-identical,
- * ON moves every per-turn dynamic section (memory recall, twin retrieved
- * chunks + style few-shot) to the END of `appendSystemPrompt` so the
- * leading prompt prefix stays stable across turns.
+ * `resolveSendOptions` (`AppSettings.cacheOptimizationEnabled`). The flag is
+ * ON by default (opt-out): explicit `false` keeps the legacy assembly
+ * byte-identical, otherwise every per-turn dynamic section (memory recall,
+ * twin retrieved chunks + style few-shot) moves to the END of
+ * `appendSystemPrompt` so the leading prompt prefix stays stable across turns.
  */
 
 import "fake-indexeddb/auto"
@@ -57,9 +57,12 @@ const memoryCtx = {
   memoryUserMessage: "what did I say about caching?",
 }
 
-describe("cacheOptimizationEnabled = OFF (legacy assembly)", () => {
+describe("cacheOptimizationEnabled = OFF (explicit opt-out, legacy assembly)", () => {
+  // Default is ON, so the legacy path now requires an explicit `false`.
+  const offSettings = { cacheOptimizationEnabled: false } as AppSettings
+
   it("keeps the memory section inside systemPrompt and out of appendSystemPrompt", async () => {
-    const opts = await resolveSendOptions({ character, ...memoryCtx })
+    const opts = await resolveSendOptions({ character, appSettings: offSettings, ...memoryCtx })
     expect(opts.systemPrompt).toContain(MEMORY_SECTION)
     expect(opts.appendSystemPrompt ?? "").not.toContain(MEMORY_SECTION)
   })
@@ -77,6 +80,7 @@ describe("cacheOptimizationEnabled = OFF (legacy assembly)", () => {
     })
     const opts = await resolveSendOptions({
       character: { ...character, twinId: "twin_1" },
+      appSettings: offSettings,
       twinDeps: {} as never,
       twinUserMessage: "hello twin",
     })
@@ -88,10 +92,17 @@ describe("cacheOptimizationEnabled = OFF (legacy assembly)", () => {
 describe("cacheOptimizationEnabled = ON (cache-friendly assembly)", () => {
   const appSettings = { cacheOptimizationEnabled: true } as AppSettings
 
-  it("forwards the flag to SendOptions for the sidecar (and omits it when off)", async () => {
+  it("forwards the flag to SendOptions for the sidecar (and omits it only when explicitly off)", async () => {
     const on = await resolveSendOptions({ character, appSettings })
     expect(on.cacheOptimizationEnabled).toBe(true)
-    const off = await resolveSendOptions({ character })
+    // Default (no appSettings) is ON — the flag is opt-out now.
+    const dflt = await resolveSendOptions({ character })
+    expect(dflt.cacheOptimizationEnabled).toBe(true)
+    // Only an explicit `false` opts out and stops forwarding.
+    const off = await resolveSendOptions({
+      character,
+      appSettings: { cacheOptimizationEnabled: false } as AppSettings,
+    })
     expect(off.cacheOptimizationEnabled).toBeUndefined()
   })
 

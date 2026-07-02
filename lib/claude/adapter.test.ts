@@ -1080,6 +1080,54 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
     expect(b).toHaveLength(1)
   })
 
+  it("message_start attaches live input/cache usage for a mid-turn ctx% refresh", () => {
+    const { messages } = applySdkEvent(
+      [],
+      streamEvt({
+        type: "message_start",
+        message: {
+          id: "asst-usage",
+          usage: {
+            input_tokens: 1200,
+            cache_read_input_tokens: 300,
+            cache_creation_input_tokens: 50,
+          },
+        },
+      })
+    )
+    const usage = (messages[0] as { metadata?: { usage?: Record<string, number> } }).metadata?.usage
+    expect(usage).toMatchObject({
+      inputTokens: 1200,
+      cacheReadInputTokens: 300,
+      cacheCreationInputTokens: 50,
+    })
+  })
+
+  it("message_delta merges the running output_tokens without dropping prior input", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({
+        type: "message_start",
+        message: { id: "m", usage: { input_tokens: 1000 } },
+      })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "message_delta", usage: { output_tokens: 42 } })
+    ).messages
+    const usage = (msgs[0] as { metadata?: { usage?: Record<string, number> } }).metadata?.usage
+    // input from message_start is preserved; output added by message_delta.
+    expect(usage).toMatchObject({ inputTokens: 1000, outputTokens: 42 })
+  })
+
+  it("a usage-less message_start (ai-sdk path) attaches no metadata", () => {
+    const { messages } = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "ai-sdk" } })
+    )
+    expect((messages[0] as { metadata?: unknown }).metadata).toBeUndefined()
+  })
+
   it("text_delta accumulates into a single streaming text part", () => {
     let msgs = applySdkEvent(
       [],

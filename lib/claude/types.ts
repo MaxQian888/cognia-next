@@ -221,6 +221,15 @@ export interface SendOptions {
    */
   aiSdkMaxSteps?: number
   /**
+   * Non-Anthropic (ai-sdk) channel only: per-leg agentic step cap (STEP_CHUNK).
+   * Each `streamText` leg re-sends the whole growing conversation, so a LARGER
+   * chunk means fewer legs → fewer full re-sends for a long tool-using turn (less
+   * prompt-token overhead), at the cost of inspecting the context window less
+   * often within a turn. Undefined ⇒ the dispatcher's default (16). Ignored by
+   * the Anthropic Agent SDK path.
+   */
+  aiSdkStepChunk?: number
+  /**
    * Non-Anthropic (ai-sdk) channel only: per-tool execution deadline (ms) for
    * READ-ONLY built-in tools (`content_search`, `file_search`, `glob`, `grep`,
    * `read`, the git read tools, `lsp_*`, …). These walk the workspace with no
@@ -593,6 +602,14 @@ export interface SendOptions {
      */
     overBudgetWarning?: { providerId: string; spend: number; budget: number }
   }
+
+  /**
+   * Set when opt-in auto routing rewrote a non-alias model to a tier alias
+   * (before `aliasResolution` resolved it): the difficulty `score` and the
+   * chosen `tier` alias, for the transparency badge. Sidecar-protocol metadata
+   * only — the sidecar ignores it (mirrors `routingDecision`).
+   */
+  autoRouting?: { score: number; tier: string }
 
   /**
    * Advisory capability-gate notice: the user requested a feature (e.g. a
@@ -2547,6 +2564,18 @@ export interface AppSettings {
    */
   surfaceSkillsEnabled?: boolean
   /**
+   * Plan-mode capture defaults (ADR-0045). Applied by `captureExitPlanMode`
+   * when an ExitPlanMode tool call materialises a draft `AgentPlan`:
+   * - `requireApproval` — gate execution behind the approval dock (default
+   *   true). False lands the capture `approved` and the dock auto-resumes the
+   *   implementing turn once (idempotent via a metadata stamp).
+   * - `maxAutoRefinements` — cap on automatic repair replans per plan.
+   */
+  planSettings?: {
+    requireApproval?: boolean
+    maxAutoRefinements?: number
+  }
+  /**
    * Per-provider configuration. Stores the full `UserProviderSettings`
    * shape (api key, base URL, model list, key rotation, OAuth state,
    * health metrics) used by the providers settings UI. The lean
@@ -2613,6 +2642,14 @@ export interface AppSettings {
    * strategy or per-request override once a model pair is configured.
    */
   difficultyRouting?: import("@/types/routing/tool-route").DifficultyRoutingSettings
+  /**
+   * Opt-in automatic tier routing (default OFF). When enabled,
+   * `resolveSendOptions` scores each non-alias prompt's difficulty and rewrites
+   * the model to one of `candidateAliases`, resolved by the existing alias
+   * engine. Strict no-op until opted in and until matching aliases exist in
+   * `modelMappings`. See `lib/routing/auto-tier.ts`.
+   */
+  autoRouting?: import("@/types/routing/tool-route").AutoRoutingSettings
   /**
    * When true, on a `session_ended.error` for a turn that resolved via an
    * alias with non-empty `aliasResolution.fallbackEntries`, the renderer

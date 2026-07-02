@@ -77,6 +77,7 @@ import {
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@cognia/provider-core/providers/inference-params"
+import { selectApiKey, recordKeyUse } from "@cognia/provider-core/providers/api-key-rotation"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
@@ -87,9 +88,12 @@ import { getModelContextWindow } from "@/lib/claude/usage"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
+  RoutingNoCandidatesError,
   createMappingRegistry,
+  scoreDifficulty,
   type RoutingEngineDeps,
 } from "@cognia/provider-routing"
+import { pickAutoAlias } from "@/lib/routing/auto-tier"
 import {
   applyCircuitBreakerSettings,
   buildRoutingEngineDeps,
@@ -97,6 +101,7 @@ import {
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { PLAN_MODE_PROMPT } from "./plan-mode-prompt"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
@@ -108,14 +113,12 @@ export const BRIEF_OUTPUT_SNIPPET =
 
 /**
  * Snippet appended to `appendSystemPrompt` when the session is in plan mode
- * (`permissionMode === "plan"`). Reinforces the two behaviours the plan-mode
- * UX depends on: clarifying questions stay plain text (so they don't trip the
- * approval flow), and the final plan is submitted via the exit-plan tool (the
- * structured signal the surface listens for). Kept short so it doesn't fight
- * the Anthropic SDK's own plan-mode prompt. Exported for reuse/testing.
+ * (`permissionMode === "plan"`). Re-exported from the shared single source
+ * (`plan-mode-prompt.ts`) that the CLI's `PLAN_MODE_PROMPT_SECTION` also
+ * re-exports — the two surfaces must not drift. The export name is kept for
+ * the ACP route and tests.
  */
-export const PLAN_MODE_SNIPPET =
-  "You are in plan mode: research and propose an approach, but do NOT make any edits or run side-effecting tools yet. If you need clarification, ask the user directly in plain text — do not call the plan-submission tool for a question. When your plan is complete and ready for approval, call the ExitPlanMode tool (or exit_plan_mode if available) with the full plan as markdown; do not just print the plan as text."
+export const PLAN_MODE_SNIPPET = PLAN_MODE_PROMPT
 
 /**
  * Build the workflow-editor system-prompt snapshot block.
@@ -389,6 +392,14 @@ export interface BuildOptionsContext {
    */
   dispatchContext?: import("@/lib/claude/agents/dispatch-context-registry").DispatchContext
   /**
+   * True when this run is a dispatched subagent (set by `dispatchSubagent` →
+   * `executeAgent`). A dispatched run WITHOUT a `dispatchContext` is a leaf
+   * (its def never opted into nesting): `resolveDispatchAgentGate` withholds
+   * `dispatch_agent` from it — including the plan-mode force-offer — instead
+   * of treating it as top-level chat (CLI leaf parity).
+   */
+  isDispatchedSubagent?: boolean
+  /**
    * Parent permission ceiling for a dispatched child run. When present,
    * `resolveSendOptions` intersects `allowedTools`, unions `disallowedTools`,
    * and clamps `permissionMode` against it as the FINAL step (after the plugin
@@ -493,6 +504,11 @@ export interface TwinRuntimeDepsForBuild {
       query: string,
       candidate: { id: string; content: string; score: number; sourceTitle?: string }
     ) => number | Promise<number>
+    /** Whole-pool scorer (LLM reranker). See `lib/twin/runtime/reranker.ts`. */
+    batchScorer?: (
+      query: string,
+      candidates: readonly { id: string; content: string; score: number; sourceTitle?: string }[]
+    ) => number[] | Promise<number[]>
   }
 }
 
@@ -578,8 +594,17 @@ async function listDispatchAgentAvailable(): Promise<Array<{ id: string; descrip
  * Decide whether — and at what depth — the `dispatch_agent` host tool is offered
  * on this build. Returns `undefined` (tool withheld) when nesting is off, there
  * are no dispatchable subagents, or the session isn't a nesting surface.
+ *
+ * `permissionMode` is the already-resolved mode: in `plan` mode the tool is
+ * force-offered (Claude Code parity — plan mode dispatches read-only Explore/Plan
+ * subagents to research before proposing), even when the user hasn't turned on
+ * subagent nesting, because the dispatched child inherits the read-only `plan`
+ * ceiling and cannot make edits.
  */
-async function resolveDispatchAgentGate(ctx: BuildOptionsContext): Promise<
+async function resolveDispatchAgentGate(
+  ctx: BuildOptionsContext,
+  permissionMode?: string
+): Promise<
   | {
       enabled: boolean
       depth: number
@@ -601,17 +626,22 @@ async function resolveDispatchAgentGate(ctx: BuildOptionsContext): Promise<
       available,
     }
   }
-  // Top-level direct chat with nesting enabled (not workflow-editor / team,
-  // which keep their SDK-native subagent surface).
+  // A dispatched child WITHOUT a dispatchContext is a leaf (its def never set
+  // `allowNesting`): never offer dispatch_agent — including the plan-mode
+  // force-offer below, which is a top-level-only affordance. Otherwise a
+  // plan-mode Explore/Plan child would be re-offered dispatch and could nest
+  // unboundedly (the CLI enforces leaf children; this is the GUI parity).
+  if (ctx.isDispatchedSubagent) return undefined
+  // Top-level direct chat: offered when the user enabled nesting OR the session
+  // is in plan mode (read-only research dispatch). Never on the workflow-editor /
+  // team surfaces, which keep their SDK-native subagent surface.
   const nesting = appSettings?.subagentNesting
-  if (
-    nesting?.enabled === true &&
-    session?.kind !== "workflow-editor" &&
-    session?.kind !== "team"
-  ) {
+  const isNestingSurface = session?.kind !== "workflow-editor" && session?.kind !== "team"
+  const planMode = permissionMode === "plan"
+  if (isNestingSurface && (nesting?.enabled === true || planMode)) {
     const available = await listDispatchAgentAvailable()
     if (available.length === 0) return undefined
-    return { enabled: true, depth: 0, maxDepth: nesting.maxDepth ?? 2, available }
+    return { enabled: true, depth: 0, maxDepth: nesting?.maxDepth ?? 2, available }
   }
   return undefined
 }
@@ -765,6 +795,50 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appSettings?.defaultProvider ??
     "anthropic"
 
+  // Rough text of the outgoing prompt (CJK-aware sizing happens later). Only the
+  // text the caller handed us — history/system additions are not counted, which
+  // keeps auto-routing + the token estimate conservative-but-cheap.
+  const promptText = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage
+
+  // When auto routing rewrites `model` to a tier alias below, these hold the
+  // concrete model/provider it replaced so alias resolution can fall back to
+  // them instead of hard-failing the send when the tier has no live deployment.
+  let autoTierOriginalModel: string | undefined
+  let autoTierOriginalProvider: string | undefined
+
+  // --- Auto routing (opt-in tier selection) ---------------------------------
+  // Before alias resolution: when auto routing is on and `model` is a concrete
+  // id (NOT already an alias), score the prompt's difficulty and rewrite the
+  // model to a tier alias (fast/balanced/powerful) so the alias block below
+  // resolves it through the full engine (filters/strategy/fallback + stamping).
+  // Strict no-op unless enabled AND a matching alias is enabled in
+  // `modelMappings` — see `lib/routing/auto-tier.ts:pickAutoAlias`.
+  if (
+    model &&
+    promptText &&
+    promptText.length > 0 &&
+    appSettings?.autoRouting?.enabled &&
+    appSettings.modelMappings &&
+    appSettings.modelMappings.length > 0
+  ) {
+    const enabledAliases = new Set(
+      appSettings.modelMappings.filter((m) => m.enabled !== false).map((m) => m.alias.toLowerCase())
+    )
+    // An explicitly-typed alias always wins over auto — never re-route it.
+    if (!enabledAliases.has(model.toLowerCase())) {
+      const score = scoreDifficulty(promptText)
+      const tier = pickAutoAlias(score, appSettings.autoRouting, enabledAliases)
+      if (tier) {
+        // Preserve the concrete model/provider so we can fall back to it if the
+        // tier alias resolves to zero eligible deployments (see below).
+        autoTierOriginalModel = model
+        autoTierOriginalProvider = providerId
+        opts.autoRouting = { score, tier }
+        model = tier
+      }
+    }
+  }
+
   // --- Alias resolution (P4) ------------------------------------------------
   // When `model` matches a registered alias (e.g., "fast", "coding"), run
   // it through the routing engine to pick a concrete provider:model from
@@ -784,22 +858,37 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // pricing, and the context-window resolver all live in
     // `lib/ai/routing/build-preview-engine.ts`.
     const deps: RoutingEngineDeps = buildRoutingEngineDeps(appSettings)
-    // Rough token estimate of the outgoing prompt (CJK-aware). Only the text
-    // the caller handed us — history/system additions are not counted, which
-    // keeps the check conservative-but-cheap (O(prompt length), no awaits).
-    const promptText = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage
+    // Rough token estimate of the outgoing prompt (CJK-aware). Uses the hoisted
+    // `promptText` (also feeds auto-routing above). History/system additions are
+    // not counted, keeping the check conservative-but-cheap (no awaits).
     const estimatedInputTokens =
       promptText && promptText.length > 0 ? estimateCJKTokenCount(promptText) : undefined
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
     // May throw RoutingNoCandidatesError (alias matched, every deployment
-    // filtered out) — callers surface it as the send error; passing the alias
-    // through as a model id would fail downstream with a worse message.
-    const result = engine.selectProvider({
-      model,
-      estimatedInputTokens,
-      promptText,
-      sessionId: session?.id,
-    })
+    // filtered out). For an EXPLICITLY-typed alias we surface it as the send
+    // error (passing the alias through as a model id would fail downstream with
+    // a worse message). But for an AUTO-selected tier alias, the user picked a
+    // concrete model — auto routing is a best-effort optimization, so fall back
+    // to that concrete model instead of hard-failing a send that would succeed.
+    let result: ReturnType<typeof engine.selectProvider> | null
+    try {
+      result = engine.selectProvider({
+        model,
+        estimatedInputTokens,
+        promptText,
+        sessionId: session?.id,
+      })
+    } catch (err) {
+      if (err instanceof RoutingNoCandidatesError && autoTierOriginalModel) {
+        // Revert the auto-tier rewrite and continue with the concrete model.
+        model = autoTierOriginalModel
+        providerId = autoTierOriginalProvider ?? providerId
+        delete opts.autoRouting
+        result = null
+      } else {
+        throw err
+      }
+    }
     if (result?.fromAlias && result.alias) {
       model = result.modelId
       providerId = result.providerId
@@ -915,6 +1004,33 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           appSettings?.customProviders?.find((p) => p.id === providerId)
         const modelParams = buildModelInferenceParams(providerCfg)
         if (modelParams) opts.modelParams = modelParams
+        // Multi-API-key rotation (ADR-0043 Phase 3): when the provider has a
+        // key pool with rotation enabled, override the single-key credential
+        // with the next key in rotation and persist the advance
+        // (currentKeyIndex + per-key usage stats) fire-and-forget — a
+        // persist failure must never block the turn.
+        if (providerCfg?.apiKeyRotationEnabled) {
+          const selection = selectApiKey(providerCfg)
+          if (selection.apiKey) {
+            opts.providerCredentials.apiKey = selection.apiKey
+          }
+          const persisted = recordKeyUse(providerCfg, selection)
+          if (persisted) {
+            void (async () => {
+              try {
+                const { useSettingsStore } = await import("@/stores/settings")
+                const store = useSettingsStore.getState()
+                if (resolution.isCustomProvider) {
+                  await store.updateCustomProvider(providerId, persisted)
+                } else {
+                  await store.setProviderConfig(providerId, persisted)
+                }
+              } catch (err) {
+                console.warn("api key rotation advance persist failed", err)
+              }
+            })()
+          }
+        }
         // OpenCode managed plans: a provider entry with a base URL but no key
         // resolves above — backfill the key from the subscription vault so a
         // pasted Zen/Go key is usable without re-typing it in Settings.
@@ -1002,7 +1118,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // automatic caching, Anthropic cache_control) keep hitting. When the flag
   // is off this array stays empty and assembly is byte-identical to the
   // legacy path.
-  const cacheOptimizationEnabled = appSettings?.cacheOptimizationEnabled === true
+  const cacheOptimizationEnabled = appSettings?.cacheOptimizationEnabled !== false
   const dynamicTailSections: string[] = []
   // Forward the flag so the sidecar's ai-sdk dispatcher can place an
   // explicit anthropic cacheControl breakpoint on the stable segment.
@@ -1095,6 +1211,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           topK: memoryConfig.retrievalTopK,
           relevanceFloor: memoryConfig.relevanceFloor,
           twinChunkTexts,
+          // Reuse the turn's query embedding (memory's vector backend shares the
+          // twin embedding model via resolveMemoryBackend) — no re-embed.
+          precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
           deps: ctx.memoryDeps,
         })
         if (result.systemPromptSection) {
@@ -1717,7 +1836,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // top-level direct chat and the user enabled nesting. Withheld otherwise
       // (default off → zero change). The cap-reached withholding is the depth-N
       // generalization of Claude Code dropping the Agent tool from subagents.
-      const dispatchAgentGate = await resolveDispatchAgentGate(ctx)
+      const dispatchAgentGate = await resolveDispatchAgentGate(ctx, opts.permissionMode)
       let manifest = buildPluginToolsManifest({
         exposeDockToAgents,
         ...(dispatchAgentGate ? { dispatchAgent: dispatchAgentGate } : {}),
@@ -2747,11 +2866,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     else delete opts.allowedTools
     if (merged.disallowedTools) opts.disallowedTools = [...merged.disallowedTools].sort()
     else delete opts.disallowedTools
-    // `merged.permissionMode` is an `AcpPermissionMode`, which adds `"dontAsk"`
-    // on top of the four Claude SDK modes. Both the ceiling and the child derive
-    // from `opts.permissionMode` (the narrow Claude union), so `"dontAsk"` never
-    // reaches here in practice; guard it out so the assignment stays type-safe.
-    if (merged.permissionMode && merged.permissionMode !== "dontAsk") {
+    // Every `AcpPermissionMode` (incl. `dontAsk`) is a valid SendOptions mode:
+    // the AI-SDK gate enforces dontAsk (deny-without-prompt) and the Anthropic
+    // SDK enforces it natively, so a dontAsk parent ceiling must clamp the
+    // child's mode like any other.
+    if (merged.permissionMode) {
       opts.permissionMode = merged.permissionMode
     }
   }
