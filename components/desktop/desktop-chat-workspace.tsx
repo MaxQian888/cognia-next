@@ -23,6 +23,7 @@ import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
 import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
+import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/shell/member-list"
@@ -40,6 +41,7 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
+import { updateSession } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@/lib/logging"
@@ -299,6 +301,23 @@ export function DesktopChatWorkspace() {
   )
   const paneClose = useCallback((sid: string) => void directChat.close(sid), [directChat])
 
+  // After a plan is approved in the plan-approval dock, switch the session's
+  // permission mode and resume the turn. The store mode is set FIRST (so the
+  // composer's persist effect can't clobber the row back to `plan`), the row is
+  // then written authoritatively and AWAITED before `send` — `send` resolves the
+  // mode from the session row, not the store, so a stale row would run the resume
+  // turn in `plan` mode. `skipUserAppend` injects the turn with no user bubble.
+  const resumeAfterPlanApproval = useCallback(
+    async (prompt: string, mode: PlanResumeMode, sid: string) => {
+      if (useChatStore.getState().activeSessionId === sid) {
+        useChatStore.getState().setPermissionMode(mode)
+      }
+      await updateSession(sid, { permissionMode: mode })
+      await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
+    },
+    [directChat]
+  )
+
   const handleChannelNewDirect = useCallback(() => {
     void handleNewDirect()
   }, [handleNewDirect])
@@ -518,6 +537,7 @@ export function DesktopChatWorkspace() {
                     recentSessions={recentSessions}
                     onResumeSession={handleSwitchToSession}
                     composerRef={composerRef}
+                    onResumeAfterPlanApproval={resumeAfterPlanApproval}
                   />
                 </>
               )}

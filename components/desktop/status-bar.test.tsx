@@ -336,6 +336,22 @@ test("runtime badge says Web in browser mode", () => {
   expect(screen.getByTestId("status-runtime")).toHaveTextContent("desktop.statusBar.web")
 })
 
+test("permission popover exposes advanced modes with a danger marker", async () => {
+  const user = userEvent.setup()
+  render(<StatusBar />)
+  await user.click(screen.getByTestId("status-permission"))
+  await waitFor(() =>
+    expect(screen.getByTestId("status-permission-bypassPermissions")).toBeInTheDocument()
+  )
+  // Power modes are kept out of the quick cycle but reachable here, each carrying
+  // its risk marker so bypass never reads the same as a safe mode.
+  expect(screen.getByTestId("status-permission-dontAsk")).toBeInTheDocument()
+  expect(screen.getByTestId("status-permission-auto")).toBeInTheDocument()
+  expect(screen.getByTestId("status-permission-bypassPermissions")).toHaveTextContent("⚠")
+  await user.click(screen.getByTestId("status-permission-bypassPermissions"))
+  expect(setPermissionMode).toHaveBeenCalledWith("bypassPermissions")
+})
+
 test("permission popover marks the active mode with bg-accent", async () => {
   const user = userEvent.setup()
   chatRef.permissionMode = "plan"

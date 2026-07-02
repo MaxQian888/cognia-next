@@ -36,6 +36,9 @@ beforeEach(() => {
   setTitleMock.mockClear()
   warnMock.mockClear()
   document.title = "initial"
+  // `isMainAppWindow` reads the real Tauri internals (not the mocked
+  // `@/lib/tauri`); clear any pet-window label a test set.
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
 })
 
 describe("computeWindowTitle", () => {
@@ -72,6 +75,20 @@ describe("useWindowTitle", () => {
     labelRef.value = "Ship it"
     renderHook(() => useWindowTitle())
     await waitFor(() => expect(setTitleMock).toHaveBeenCalledWith("Ship it · Cognia"))
+  })
+
+  it("does not call setTitle in a least-privilege pet window", async () => {
+    isTauriMock.mockReturnValue(true)
+    // A "pet" webview label makes `isMainAppWindow()` false — the pet window
+    // isn't granted `core:window:allow-set-title`.
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      metadata: { currentWebview: { label: "pet" } },
+    }
+    labelRef.value = "Sprite"
+    renderHook(() => useWindowTitle())
+    // The document.title write still happens (harmless); the native call is skipped.
+    await waitFor(() => expect(document.title).toBe("Sprite · Cognia"))
+    expect(setTitleMock).not.toHaveBeenCalled()
   })
 
   it("logs a warning when the Tauri setTitle call fails", async () => {
