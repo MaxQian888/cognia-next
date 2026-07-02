@@ -88,8 +88,10 @@ describe("processJob — distill partialFailures forwarding", () => {
 describe("processJob — ingest nameHints forwarding", () => {
   it("passes config.nameHints through to runIngestJob", async () => {
     mockRunIngest.mockResolvedValue({
-      failureSummary: { allFailed: false, failures: [] },
+      failureSummary: { allFailed: false, failures: [], failureCount: 0 },
       totalEmbeddingTokens: 0,
+      totalChunks: 0,
+      parsedSourceIds: [],
     })
     const job = await createTwinJob({
       twinId: "twin_alice",
