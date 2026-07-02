@@ -12,6 +12,7 @@
 import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
 import type { PluginDefinition, PluginManifest, PluginTool } from "@/types/plugin"
+import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
 
 const wasmLoaderLogger = loggers.plugin.child("wasm-loader")
 
@@ -171,6 +172,50 @@ export function buildWasmToolDefinitions(manifest: PluginManifest): PluginTool[]
     },
     execute: async (args: Record<string, unknown>) =>
       callWasmExport(pluginId, "tool-execute", { kind: toolDef.name, ...args }),
+  }))
+}
+
+/**
+ * Project a WASM plugin's declared `manifest.workflows.nodes` into runnable
+ * `PluginNodeDef`s. A WASM guest implements a single `workflow-node-execute(
+ * node-kind, params)` export that dispatches by kind (the host's `extract_kind`
+ * reads the payload `kind`), so every declared node routes through that one
+ * export with its UNPREFIXED kind carried in the payload.
+ *
+ * Without this projection the Rust `workflow-node-execute` dispatch (and the
+ * guest's implementation) is unreachable: the orchestrator's `getExecutor`
+ * misses and `step-executor` throws `No executor registered for <kind>`. The
+ * returned defs are registered through the same `ctx.workflow.registerNode`
+ * machinery as frontend plugins (kind-prefixing, catalog entry, unregister on
+ * deactivate), so no registration logic is duplicated here.
+ */
+export function buildWasmNodeDefs(manifest: PluginManifest): PluginNodeDef[] {
+  const pluginId = manifest.id
+  const nodes = manifest.workflows?.nodes ?? []
+  return nodes.map((node) => ({
+    kind: node.kind,
+    typeVersion: node.typeVersion,
+    category: node.category,
+    label: node.label,
+    description: node.description,
+    iconName: node.iconName,
+    keywords: node.keywords,
+    paramsSchema: node.paramsSchema,
+    defaultParams: node.defaultParams,
+    desktopOnly: node.desktopOnly,
+    retryable: node.retryable,
+    timeoutMs: node.timeoutMs,
+    // The guest dispatches by the UNPREFIXED manifest kind; the registry uses
+    // the pluginId-prefixed kind (applied by registerNode). Pass the resolved
+    // params + upstream outputs so the guest node has its inputs.
+    execute: async (ctx) => {
+      const output = await callWasmExport(pluginId, "workflow-node-execute", {
+        kind: node.kind,
+        params: ctx.params,
+        upstream: ctx.upstream,
+      })
+      return { output }
+    },
   }))
 }
 

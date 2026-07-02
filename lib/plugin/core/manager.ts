@@ -39,6 +39,7 @@ import { PluginLoader } from "@/lib/plugin/core/loader"
 import { PluginRegistry } from "@/lib/plugin/core/registry"
 import {
   createFullPluginContext,
+  createWorkflowAPI,
   teardownPluginWorkflowRegistrations,
 } from "@/lib/plugin/core/context"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
@@ -122,7 +123,7 @@ import {
   type LoadOrderBlockReason,
 } from "@/lib/plugin/core/load-order"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
-import { buildWasmToolDefinitions } from "./wasm-loader"
+import { buildWasmNodeDefs, buildWasmToolDefinitions } from "./wasm-loader"
 // PR-D — overlay-registry capabilities (skills / mcp-server-preset /
 // native-anthropic-tool / external-agent-preset) now flow through the
 // codified `CAPABILITY_BRIDGE_MAP`. Bespoke capabilities (modes,
@@ -3930,6 +3931,27 @@ export class PluginManager {
     for (const tool of buildWasmToolDefinitions(plugin.manifest)) {
       this.registry.registerTool(pluginId, tool)
       store.registerPluginTool(pluginId, tool)
+    }
+    // Project the manifest's declared workflow nodes into executors that route
+    // through the WASM `workflow-node-execute` export. Registered through the
+    // SAME machinery as frontend plugins (kind-prefix + catalog + per-plugin
+    // teardown via `teardownPluginWorkflowRegistrations`), so a disabled WASM
+    // plugin's nodes disappear cleanly. Without this the Rust dispatch + guest
+    // impl were unreachable (`No executor registered for <kind>`).
+    const nodeDefs = buildWasmNodeDefs(plugin.manifest)
+    if (nodeDefs.length > 0) {
+      const workflowApi = createWorkflowAPI(pluginId)
+      for (const def of nodeDefs) {
+        try {
+          workflowApi.registerNode(def)
+        } catch (error) {
+          loggers.manager.warn("WASM workflow node registration failed", {
+            pluginId,
+            kind: def.kind,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
     }
   }
 

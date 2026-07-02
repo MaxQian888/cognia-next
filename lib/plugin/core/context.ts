@@ -2353,7 +2353,7 @@ function getOrCreatePluginRegistry(pluginId: string) {
 // readable. Single source of truth lives in `lib/plugin/bridge/kind-prefix.ts`.
 const prefixKind = prefixPluginKind
 
-function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
+export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
   return {
     registerNode(def: PluginNodeDef): () => void {
       const prefixed = prefixKind(pluginId, def.kind)

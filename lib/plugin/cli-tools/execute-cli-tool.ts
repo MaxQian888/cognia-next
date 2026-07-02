@@ -22,12 +22,7 @@
  * without Tauri/Dexie.
  */
 
-import type {
-  PluginBinaryRequirement,
-  PluginCliToolDef,
-  PluginManifest,
-  PluginPermission,
-} from "@/types/plugin"
+import type { PluginBinaryRequirement, PluginCliToolDef, PluginPermission } from "@/types/plugin"
 import type { AutomationAuditLogRow } from "@/lib/db/schema"
 import type { BinaryDetectionResult } from "@/lib/cli-bridge/detect-cli"
 import type { CliBinaryEvaluation } from "./cli-binary-policy"
