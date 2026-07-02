@@ -88,6 +88,27 @@ export function registerPetInteractionCommands(): () => void {
       pluginId: null,
       handler: () => emitPetEvent({ source: "user", kind: "petted" }),
     }),
+    registerCommand({
+      id: "pet.sleep",
+      title: "Put the pet to sleep",
+      category: "Pet",
+      pluginId: null,
+      handler: () => emitPetEvent({ source: "user", kind: "slept" }),
+    }),
+    registerCommand({
+      id: "pet.clean",
+      title: "Clean the pet",
+      category: "Pet",
+      pluginId: null,
+      handler: () => emitPetEvent({ source: "user", kind: "cleaned" }),
+    }),
+    registerCommand({
+      id: "pet.treat",
+      title: "Give the pet a treat",
+      category: "Pet",
+      pluginId: null,
+      handler: () => emitPetEvent({ source: "user", kind: "treated" }),
+    }),
   ]
   return () => {
     for (const dispose of disposers) dispose()

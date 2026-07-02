@@ -23,6 +23,7 @@ import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { startOverlayPetBridge, type OverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
+import type { PetBridgeInteractionKind } from "@/lib/pet/events/cross-window-protocol"
 import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import {
   closePetPopup,
@@ -81,7 +82,7 @@ export function PetPopupView() {
       bridgeRef.current = null
     }
   }, [])
-  const send = (kind: "fed" | "played" | "petted" | "talked", text?: string) =>
+  const send = (kind: PetBridgeInteractionKind, text?: string) =>
     bridgeRef.current?.sendInteraction(kind, text)
 
   // Esc dismisses the popup (blur dismissal is handled natively in Rust).
@@ -147,6 +148,9 @@ export function PetPopupView() {
             onPlay={() => send("played")}
             onPet={() => send("petted")}
             onTalk={(text) => send("talked", text)}
+            onSleep={() => send("slept")}
+            onClean={() => send("cleaned")}
+            onTreat={() => send("treated")}
             skinId={effectiveSkin}
           />
         ) : null}

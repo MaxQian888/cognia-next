@@ -25,12 +25,18 @@ jest.mock("./pet-interaction-panel", () => ({
     onPlay,
     onPet,
     onTalk,
+    onSleep,
+    onClean,
+    onTreat,
     skinId,
   }: {
     onFeed: () => void
     onPlay: () => void
     onPet: () => void
     onTalk: (text?: string) => void
+    onSleep: () => void
+    onClean: () => void
+    onTreat: () => void
     skinId?: string
   }) => (
     <div data-testid="pet-interaction-panel" data-skin={skinId ?? "default"}>
@@ -38,6 +44,9 @@ jest.mock("./pet-interaction-panel", () => ({
       <button onClick={() => onPlay()}>play</button>
       <button onClick={() => onPet()}>pet</button>
       <button onClick={() => onTalk("hi pet")}>talk</button>
+      <button onClick={() => onSleep()}>sleep</button>
+      <button onClick={() => onClean()}>clean</button>
+      <button onClick={() => onTreat()}>treat</button>
     </div>
   ),
 }))
@@ -203,10 +212,16 @@ describe("PetPopupView", () => {
     fireEvent.click(screen.getByText("play"))
     fireEvent.click(screen.getByText("pet"))
     fireEvent.click(screen.getByText("talk"))
+    fireEvent.click(screen.getByText("sleep"))
+    fireEvent.click(screen.getByText("clean"))
+    fireEvent.click(screen.getByText("treat"))
     expect(bridgeSendInteraction).toHaveBeenCalledWith("fed", undefined)
     expect(bridgeSendInteraction).toHaveBeenCalledWith("played", undefined)
     expect(bridgeSendInteraction).toHaveBeenCalledWith("petted", undefined)
     expect(bridgeSendInteraction).toHaveBeenCalledWith("talked", "hi pet")
+    expect(bridgeSendInteraction).toHaveBeenCalledWith("slept", undefined)
+    expect(bridgeSendInteraction).toHaveBeenCalledWith("cleaned", undefined)
+    expect(bridgeSendInteraction).toHaveBeenCalledWith("treated", undefined)
   })
 
   it("click-through enables the OS flag, persists clickThrough=true, and closes the popup", () => {

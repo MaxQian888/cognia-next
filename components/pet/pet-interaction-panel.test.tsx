@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 
 // Stub the renderer so the stat-card preview's resolved skin is observable
 // without mounting the live2d skin (stores + canvas) in this unit test.
@@ -11,7 +11,20 @@ jest.mock("./pet-renderer", () => ({
 import { PetInteractionPanel } from "./pet-interaction-panel"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
+import { usePetStore } from "@/stores/pet/pet-store"
 import type { PetProfile } from "@/types/pet"
+
+function makeHandlers() {
+  return {
+    onFeed: jest.fn(),
+    onPlay: jest.fn(),
+    onPet: jest.fn(),
+    onTalk: jest.fn(),
+    onSleep: jest.fn(),
+    onClean: jest.fn(),
+    onTreat: jest.fn(),
+  }
+}
 
 function setup() {
   const profile: PetProfile = {
@@ -22,7 +35,7 @@ function setup() {
     level: 2,
   }
   const view = computePetView(profile, null, 0)
-  const handlers = { onFeed: jest.fn(), onPlay: jest.fn(), onPet: jest.fn(), onTalk: jest.fn() }
+  const handlers = makeHandlers()
   render(<PetInteractionPanel profile={profile} view={view} {...handlers} />)
   return handlers
 }
@@ -30,6 +43,7 @@ function setup() {
 describe("PetInteractionPanel", () => {
   beforeEach(() => {
     window.localStorage.clear()
+    usePetStore.setState({ actionCooldowns: {} })
   })
 
   it("renders the stat card and the three need bars", () => {
@@ -47,7 +61,7 @@ describe("PetInteractionPanel", () => {
       stage: "baby",
     }
     const view = computePetView(profile, null, 0)
-    const handlers = { onFeed: jest.fn(), onPlay: jest.fn(), onPet: jest.fn(), onTalk: jest.fn() }
+    const handlers = makeHandlers()
     const { rerender } = render(<PetInteractionPanel profile={profile} view={view} {...handlers} />)
     expect(screen.getByTestId("pet-preview").dataset.skin).toBe("default")
     rerender(<PetInteractionPanel profile={profile} view={view} {...handlers} skinId="live2d" />)
@@ -97,5 +111,37 @@ describe("PetInteractionPanel", () => {
     fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
     fireEvent.click(screen.getByLabelText("Send"))
     expect(h.onTalk).toHaveBeenCalledWith(undefined)
+  })
+
+  it("wires sleep/clean/treat actions", () => {
+    const h = setup()
+    fireEvent.click(document.querySelector('[data-action="slept"]') as Element)
+    fireEvent.click(document.querySelector('[data-action="cleaned"]') as Element)
+    fireEvent.click(document.querySelector('[data-action="treated"]') as Element)
+    expect(h.onSleep).toHaveBeenCalledTimes(1)
+    expect(h.onClean).toHaveBeenCalledTimes(1)
+    expect(h.onTreat).toHaveBeenCalledTimes(1)
+  })
+
+  it("starts a cooldown after an action and re-enables when it elapses", () => {
+    jest.useFakeTimers()
+    try {
+      const h = setup()
+      const sleepBtn = document.querySelector('[data-action="slept"]') as HTMLButtonElement
+      fireEvent.click(sleepBtn)
+      expect(h.onSleep).toHaveBeenCalledTimes(1)
+      // Cooling: disabled, shows a whole-seconds countdown, clicks ignored.
+      expect(sleepBtn).toBeDisabled()
+      expect(sleepBtn.textContent).toMatch(/^\d+$/)
+      fireEvent.click(sleepBtn)
+      expect(h.onSleep).toHaveBeenCalledTimes(1)
+      // Elapse the 5s sleep cooldown (ticker runs every 250ms).
+      act(() => {
+        jest.advanceTimersByTime(5500)
+      })
+      expect(sleepBtn).not.toBeDisabled()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

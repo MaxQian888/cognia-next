@@ -6,9 +6,9 @@ import { resetStore } from "@/lib/storybook/seed-stores"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { makePetProfile, makePetView, makePetNeeds } from "@/lib/storybook/fixtures/pet-core"
 
-// The expanded-widget interaction panel: stat card + need bars + level/XP + the
-// feed/play/pet/talk actions (talk reveals a composer). Reads `lastGrewStats`
-// from the pet store, so reset it between stories.
+// The expanded-widget interaction panel: stat card + need bars + level/XP + all
+// seven care actions (talk reveals a composer). Reads `lastGrewStats` and the
+// action cooldowns from the pet store, so reset it between stories.
 const meta = {
   title: "Pet/InteractionPanel",
   component: PetInteractionPanel,
@@ -23,6 +23,9 @@ const meta = {
     onPlay: fn(),
     onPet: fn(),
     onTalk: fn(),
+    onSleep: fn(),
+    onClean: fn(),
+    onTreat: fn(),
   },
   decorators: [
     (Story) => (

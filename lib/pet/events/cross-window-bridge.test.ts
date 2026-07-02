@@ -128,6 +128,17 @@ describe("startMainPetBridge", () => {
     expect(emit).toHaveBeenCalledWith({ source: "user", kind: "petted", meta: undefined })
   })
 
+  it("replays the care interactions (sleep/clean/treat) as user pet events", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const emit = jest.fn()
+    startMainPetBridge({ channel, store: store as never, emit })
+    for (const kind of ["slept", "cleaned", "treated"] as const) {
+      channel.deliver({ v: 1, t: "interaction", kind })
+      expect(emit).toHaveBeenCalledWith({ source: "user", kind, meta: undefined })
+    }
+  })
+
   it("forwards typed talk text as event meta", () => {
     const channel = new FakeChannel()
     const store = makeStore()
@@ -265,6 +276,8 @@ describe("startOverlayPetBridge", () => {
     const { sendInteraction } = startOverlayPetBridge({ channel, store: store as never })
     sendInteraction("talked")
     expect(channel.msgs()).toContainEqual({ v: 1, t: "interaction", kind: "talked" })
+    sendInteraction("treated")
+    expect(channel.msgs()).toContainEqual({ v: 1, t: "interaction", kind: "treated" })
   })
 
   it("sendInteraction carries trimmed talk text and caps it at 500 chars", () => {

@@ -19,6 +19,9 @@ describe("cross-window-protocol", () => {
     { v: 1, t: "bubble", bubble: null },
     { v: 1, t: "interaction", kind: "fed" },
     { v: 1, t: "interaction", kind: "talked", text: "hello pet" },
+    { v: 1, t: "interaction", kind: "slept" },
+    { v: 1, t: "interaction", kind: "cleaned" },
+    { v: 1, t: "interaction", kind: "treated" },
     { v: 1, t: "request-state" },
     { v: 1, t: "activity", at: 1717575600000 },
   ]

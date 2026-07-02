@@ -20645,11 +20645,14 @@
     "newChat": "New Chat",
     "openLogs": "Open Log Panel",
     "pet": {
+      "clean": "Clean",
       "feed": "Feed",
       "openSettings": "Pet settings…",
       "pet": "Pet",
       "play": "Play",
-      "title": "Pet"
+      "sleep": "Sleep",
+      "title": "Pet",
+      "treat": "Treat"
     },
     "petClickThroughOff": "Disable desktop pet click-through",
     "petToggle": "Toggle desktop pet",

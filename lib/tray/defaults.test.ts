@@ -93,6 +93,9 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "tray.pet.feed",
       "tray.pet.play",
       "tray.pet.pet",
+      "tray.pet.sleep",
+      "tray.pet.clean",
+      "tray.pet.treat",
       "tray.pet.sep-0",
       "tray.pet.settings",
     ])
@@ -101,7 +104,14 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       .map((it) =>
         it.kind === "action" && it.payload.kind === "command" ? it.payload.commandId : ""
       )
-    expect(commandIds).toEqual(["pet.feed", "pet.play", "pet.pet"])
+    expect(commandIds).toEqual([
+      "pet.feed",
+      "pet.play",
+      "pet.pet",
+      "pet.sleep",
+      "pet.clean",
+      "pet.treat",
+    ])
   })
 
   it("attaches the documented accelerators to the built-in shortcut ids", () => {

@@ -61,7 +61,8 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   const reduced =
     settings.motion === "reduced" || (settings.motion === "auto" && Boolean(osReduced))
 
-  const { profile, view, feed, play, petStroke, talk } = usePet(activeCharacterId)
+  const { profile, view, feed, play, petStroke, talk, sleep, clean, treat } =
+    usePet(activeCharacterId)
   const { state, oneShot } = usePetAnimationState(reduced)
   usePetBubbles(settings.enabled && !settings.mutedBubbles)
   // Owns every `talked` bubble (LLM side channel + template fallback). Main
@@ -196,6 +197,9 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
             onPlay={play}
             onPet={petStroke}
             onTalk={talk}
+            onSleep={sleep}
+            onClean={clean}
+            onTreat={treat}
             skinId={effectiveSkin}
           />
         </div>

@@ -104,17 +104,25 @@ describe("toggleDesktopPetWindow", () => {
 })
 
 describe("registerPetCommands", () => {
-  it("registers the four pet commands under the Pet category", () => {
+  it("registers the seven pet commands under the Pet category", () => {
     registerPetCommands()
     const ids = registerCommand.mock.calls.map(([reg]) => reg.id)
-    expect(ids).toEqual(["pet.toggle-window", "pet.feed", "pet.play", "pet.pet"])
+    expect(ids).toEqual([
+      "pet.toggle-window",
+      "pet.feed",
+      "pet.play",
+      "pet.pet",
+      "pet.sleep",
+      "pet.clean",
+      "pet.treat",
+    ])
     for (const [reg] of registerCommand.mock.calls) {
       expect(reg.pluginId).toBeNull()
       expect(reg.category).toBe("Pet")
     }
   })
 
-  it("pet.feed/play/pet handlers emit the matching interaction event", () => {
+  it("interaction command handlers emit the matching interaction event", () => {
     registerPetCommands()
     const byId = Object.fromEntries(
       registerCommand.mock.calls.map(([reg]) => [reg.id, reg.handler])
@@ -126,6 +134,12 @@ describe("registerPetCommands", () => {
     expect(emitPetEvent).toHaveBeenCalledWith({ source: "user", kind: "played" })
     byId["pet.pet"]()
     expect(emitPetEvent).toHaveBeenCalledWith({ source: "user", kind: "petted" })
+    byId["pet.sleep"]()
+    expect(emitPetEvent).toHaveBeenCalledWith({ source: "user", kind: "slept" })
+    byId["pet.clean"]()
+    expect(emitPetEvent).toHaveBeenCalledWith({ source: "user", kind: "cleaned" })
+    byId["pet.treat"]()
+    expect(emitPetEvent).toHaveBeenCalledWith({ source: "user", kind: "treated" })
   })
 
   it("pet.toggle-window handler delegates to toggleDesktopPetWindow", async () => {
@@ -138,8 +152,8 @@ describe("registerPetCommands", () => {
     expect(openPetWindow).toHaveBeenCalledTimes(1)
   })
 
-  it("returns a dispose function that unregisters all four commands", () => {
-    const disposeFns = [jest.fn(), jest.fn(), jest.fn(), jest.fn()]
+  it("returns a dispose function that unregisters all seven commands", () => {
+    const disposeFns = Array.from({ length: 7 }, () => jest.fn())
     let call = 0
     registerCommand.mockImplementation(() => disposeFns[call++])
     const disposeAll = registerPetCommands()
@@ -169,14 +183,14 @@ describe("registerPetWindowCommand", () => {
 })
 
 describe("registerPetInteractionCommands", () => {
-  it("registers only feed/play/pet, without the window toggle", () => {
+  it("registers all six interaction commands, without the window toggle", () => {
     registerPetInteractionCommands()
     const ids = registerCommand.mock.calls.map(([reg]) => reg.id)
-    expect(ids).toEqual(["pet.feed", "pet.play", "pet.pet"])
+    expect(ids).toEqual(["pet.feed", "pet.play", "pet.pet", "pet.sleep", "pet.clean", "pet.treat"])
   })
 
-  it("returns a dispose function that unregisters the three commands", () => {
-    const disposeFns = [jest.fn(), jest.fn(), jest.fn()]
+  it("returns a dispose function that unregisters the six commands", () => {
+    const disposeFns = Array.from({ length: 6 }, () => jest.fn())
     let call = 0
     registerCommand.mockImplementation(() => disposeFns[call++])
     registerPetInteractionCommands()()

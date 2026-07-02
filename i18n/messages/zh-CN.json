@@ -20645,11 +20645,14 @@
     "newChat": "新建对话",
     "openLogs": "打开日志面板",
     "pet": {
+      "clean": "清洁",
       "feed": "喂食",
       "openSettings": "宠物设置…",
       "pet": "抚摸",
       "play": "玩耍",
-      "title": "宠物"
+      "sleep": "哄睡",
+      "title": "宠物",
+      "treat": "零食"
     },
     "petClickThroughOff": "关闭桌宠鼠标穿透",
     "petToggle": "切换桌面宠物",

@@ -1,12 +1,21 @@
-// The interaction panel shown when the widget is expanded (and as the /pet
-// nurture tab): the stat card, the three need bars, level/XP progress, and the
-// feed/play/pet/talk actions.
+// The interaction panel shown when the widget is expanded (and inside the pet
+// popup window): the stat card, the three need bars, level/XP progress, and
+// all seven care actions (feed/play/pet/talk/sleep/clean/treat).
 
 "use client"
 
-import { useState } from "react"
+import { useState, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
-import { CookieIcon, Gamepad2Icon, HeartIcon, MessageCircleIcon, SendIcon } from "lucide-react"
+import {
+  CookieIcon,
+  DropletsIcon,
+  Gamepad2Icon,
+  GiftIcon,
+  HeartIcon,
+  MessageCircleIcon,
+  MoonIcon,
+  SendIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -14,6 +23,7 @@ import { levelProgress } from "@/lib/pet/xp/leveling"
 import type { PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
 import { usePetStore } from "@/stores/pet/pet-store"
+import { useActionCooldown } from "@/hooks/pet/use-action-cooldown"
 import { useCommandHistory, handleHistoryArrowKey } from "@/hooks/use-command-history"
 import { PetStatCard } from "./pet-stat-card"
 import { NeedBar } from "./need-bar"
@@ -26,9 +36,20 @@ export interface PetInteractionPanelProps {
   onPet: () => void
   /** Talk action. Submitted composer text rides along; bare click omits it. */
   onTalk: (text?: string) => void
+  onSleep: () => void
+  onClean: () => void
+  onTreat: () => void
   /** Effective skin for the stat-card preview (so it matches the live pet). */
   skinId?: string
   className?: string
+}
+
+interface ActionDef {
+  kind: string
+  labelKey: string
+  Icon: ComponentType<{ className?: string }>
+  run: () => void
+  cooldownMs: number
 }
 
 export function PetInteractionPanel({
@@ -38,12 +59,20 @@ export function PetInteractionPanel({
   onPlay,
   onPet,
   onTalk,
+  onSleep,
+  onClean,
+  onTreat,
   skinId,
   className,
 }: PetInteractionPanelProps) {
   const t = useTranslations("pet")
   const progress = levelProgress(profile.xp)
   const grewStats = usePetStore((s) => s.lastGrewStats)
+  // Cooldowns live in the per-window zustand store (UI-only spam gate — the
+  // controller processes every event). In the popup window that store is a
+  // fresh instance, so cooldowns reset when the popup reopens; acceptable by
+  // design, and they must NOT join the persisted {minimized, position} slice.
+  const { remaining, trigger } = useActionCooldown()
   const [talkOpen, setTalkOpen] = useState(false)
   const [talkText, setTalkText] = useState("")
   // ↑/↓ recall of previous things said to the pet, persisted globally (one pet
@@ -56,6 +85,23 @@ export function PetInteractionPanel({
     onTalk(text || undefined)
     setTalkText("")
   }
+
+  // `kind` matches the emitted PetEvent kind so the cooldown is keyed
+  // identically to the nurture tab's — same key, same gate.
+  const actions: ActionDef[] = [
+    { kind: "fed", labelKey: "actions.feed", Icon: CookieIcon, run: onFeed, cooldownMs: 1500 },
+    { kind: "played", labelKey: "actions.play", Icon: Gamepad2Icon, run: onPlay, cooldownMs: 1500 },
+    { kind: "petted", labelKey: "actions.pet", Icon: HeartIcon, run: onPet, cooldownMs: 1500 },
+    { kind: "slept", labelKey: "actions.sleep", Icon: MoonIcon, run: onSleep, cooldownMs: 5000 },
+    {
+      kind: "cleaned",
+      labelKey: "actions.clean",
+      Icon: DropletsIcon,
+      run: onClean,
+      cooldownMs: 4000,
+    },
+    { kind: "treated", labelKey: "actions.treat", Icon: GiftIcon, run: onTreat, cooldownMs: 10000 },
+  ]
 
   return (
     <div data-testid="pet-interaction-panel" className={cn("flex w-72 flex-col gap-3", className)}>
@@ -90,15 +136,30 @@ export function PetInteractionPanel({
       </div>
 
       <div className="grid grid-cols-4 gap-2">
-        <Button size="sm" variant="secondary" onClick={onFeed} aria-label={t("actions.feed")}>
-          <CookieIcon className="size-4" />
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onPlay} aria-label={t("actions.play")}>
-          <Gamepad2Icon className="size-4" />
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onPet} aria-label={t("actions.pet")}>
-          <HeartIcon className="size-4" />
-        </Button>
+        {actions.map((a) => {
+          const rem = remaining(a.kind)
+          const cooling = rem > 0
+          return (
+            <Button
+              key={a.kind}
+              size="sm"
+              variant="secondary"
+              disabled={cooling}
+              data-action={a.kind}
+              aria-label={t(a.labelKey)}
+              onClick={() => {
+                a.run()
+                trigger(a.kind, a.cooldownMs)
+              }}
+            >
+              {cooling ? (
+                <span className="text-xs tabular-nums">{Math.ceil(rem / 1000)}</span>
+              ) : (
+                <a.Icon className="size-4" />
+              )}
+            </Button>
+          )
+        })}
         <Button
           size="sm"
           variant={talkOpen ? "default" : "secondary"}

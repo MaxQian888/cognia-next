@@ -77,6 +77,27 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
         iconHint: "pet",
         payload: { kind: "command", commandId: "pet.pet" },
       },
+      {
+        kind: "action",
+        id: "tray.pet.sleep",
+        label: "tray.pet.sleep",
+        iconHint: "pet",
+        payload: { kind: "command", commandId: "pet.sleep" },
+      },
+      {
+        kind: "action",
+        id: "tray.pet.clean",
+        label: "tray.pet.clean",
+        iconHint: "pet",
+        payload: { kind: "command", commandId: "pet.clean" },
+      },
+      {
+        kind: "action",
+        id: "tray.pet.treat",
+        label: "tray.pet.treat",
+        iconHint: "pet",
+        payload: { kind: "command", commandId: "pet.treat" },
+      },
       { kind: "separator", id: "tray.pet.sep-0" },
       {
         kind: "action",
