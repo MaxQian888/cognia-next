@@ -44,6 +44,7 @@ pub mod detect;
 pub mod download;
 pub mod handlers;
 pub mod release_key;
+pub mod renderer_bridge;
 pub mod server;
 
 use ::anyhow::{Context, Result};
@@ -68,6 +69,11 @@ pub struct CliBridgeState {
     /// AppHandle so handlers can reach into `PluginRuntimeState` and
     /// emit refresh events to the TS plugin manager.
     pub app_handle: tauri::AppHandle,
+    /// Round-trip bridge for renderer-backed routes (twin context, agent
+    /// teams). Shared with `CliBridgeServerState` so the
+    /// `cli_bridge_renderer_response` Tauri command can resolve pending
+    /// requests without reaching into the axum task.
+    pub renderer: Arc<renderer_bridge::RendererBridge>,
 }
 
 pub type SharedState = Arc<CliBridgeState>;
@@ -76,6 +82,9 @@ pub type SharedState = Arc<CliBridgeState>;
 /// keep it alive for the app's lifetime.
 pub struct CliBridgeServerState {
     inner: Mutex<Option<RunningBridge>>,
+    /// Created eagerly (before `init`) so the `cli_bridge_renderer_response`
+    /// command always has a target, even if the axum spawn failed.
+    renderer: Arc<renderer_bridge::RendererBridge>,
 }
 
 struct RunningBridge {
@@ -87,6 +96,7 @@ impl Default for CliBridgeServerState {
     fn default() -> Self {
         Self {
             inner: Mutex::new(None),
+            renderer: renderer_bridge::RendererBridge::new(),
         }
     }
 }
@@ -108,6 +118,10 @@ impl CliBridgeServerState {
         if let Some(running) = self.inner.lock().take() {
             let _ = running.shutdown.send(());
         }
+    }
+
+    pub fn renderer(&self) -> Arc<renderer_bridge::RendererBridge> {
+        self.renderer.clone()
     }
 }
 
@@ -165,6 +179,7 @@ pub async fn init(app_handle: tauri::AppHandle, state: &CliBridgeServerState) ->
     let shared = Arc::new(CliBridgeState {
         dev_token: dev_token.clone(),
         app_handle: app_handle.clone(),
+        renderer: state.renderer(),
     });
     let (bound_port, shutdown) = server::spawn(shared)
         .await
@@ -218,6 +233,18 @@ pub fn cli_bridge_status(state: tauri::State<'_, CliBridgeServerState>) -> CliBr
         bound_port: state.bound_port(),
         endpoint_file: endpoint_file_path().map(|p| p.display().to_string()),
     }
+}
+
+/// IPC surface — resolve a pending renderer-backed CLI bridge request. The
+/// renderer's `cli-bridge://renderer-request` listener calls this with the
+/// request id + result/error; unknown ids are a no-op (the request may have
+/// timed out on the Rust side already).
+#[tauri::command]
+pub fn cli_bridge_renderer_response(
+    state: tauri::State<'_, CliBridgeServerState>,
+    response: renderer_bridge::RendererResponse,
+) {
+    state.renderer.resolve(response);
 }
 
 /// IPC surface — resolve the cognia CLI home (`$COGNIA_HOME` or `~/.cognia`)

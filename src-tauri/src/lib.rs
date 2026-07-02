@@ -41,6 +41,7 @@ mod shell;
 mod skills;
 mod subscription;
 mod terminal;
+mod timing;
 mod tts;
 mod twin;
 mod vector;
@@ -522,6 +523,7 @@ pub fn run() {
             keyring_secrets::keyring_secret_set,
             keyring_secrets::keyring_secret_clear,
             cli_bridge::cli_bridge_status,
+            cli_bridge::cli_bridge_renderer_response,
             cli_bridge::resolve_cli_home,
             cli_bridge::write_cli_home_file,
             cli_bridge::plugin_install_from_directory,

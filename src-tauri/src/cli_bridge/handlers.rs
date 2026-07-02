@@ -108,6 +108,75 @@ pub async fn health(State(_state): State<SharedState>) -> Response {
     Json(json!({ "ok": true })).into_response()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Renderer-backed routes — twin context / agent teams
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Round-trip one renderer-backed command through the WebView and wrap the
+/// result in the bridge's `{ ok, result | error }` envelope. Renderer-side
+/// handler failures come back as 502 (the desktop is up but the renderer
+/// declined / errored); timeouts read the same way.
+async fn renderer_roundtrip(
+    state: &SharedState,
+    command: &str,
+    payload: serde_json::Value,
+) -> Response {
+    match state
+        .renderer
+        .clone()
+        .dispatch(
+            &state.app_handle,
+            command,
+            payload,
+            super::renderer_bridge::DEFAULT_TIMEOUT,
+        )
+        .await
+    {
+        Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "ok": false, "error": err })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/v1/dev/twin/context` — build the twin runtime context for a
+/// message (renderer runs `tryBuildTwinDeps` → `applyTwinContext`). The
+/// renderer handler returns REDACTED prompt segments only — raw chunk
+/// content never crosses this boundary.
+pub async fn twin_context(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "twin_context_get", payload).await
+}
+
+/// `POST /api/v1/dev/teams/list` — project the renderer's AgentTeam store.
+pub async fn teams_list(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_list", payload).await
+}
+
+/// `POST /api/v1/dev/teams/run` — fire-and-forget start of a team run.
+pub async fn teams_run(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_run", payload).await
+}
+
+/// `POST /api/v1/dev/teams/run-status` — newest run row + events since a
+/// cursor, projected without step payloads (PII posture).
+pub async fn teams_run_status(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_run_status", payload).await
+}
+
 /// Wire shape for `GET /api/v1/dev/plugins/installed` — a privacy-safe
 /// subset of [`PluginRuntimeSnapshot`]. Only the fields the CLI needs
 /// for a preflight install collision check are exposed; runtime_state

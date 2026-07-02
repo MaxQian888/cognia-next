@@ -77,6 +77,18 @@ pub fn build_router(state: SharedState) -> Router {
         // The CLI POSTs a session transcript; we emit it on
         // `cli-bridge:session-handoff` for the renderer to import + open.
         .route("/api/v1/dev/sessions/handoff", post(handlers::handoff))
+        // ── Renderer-backed routes (twin context / agent teams) ─────────
+        // These round-trip through the WebView via the renderer bridge —
+        // twin retrieval reads Dexie + the vector store, and AgentTeam
+        // definitions live in the renderer's Zustand store, so the Rust
+        // side cannot answer them directly.
+        .route("/api/v1/dev/twin/context", post(handlers::twin_context))
+        .route("/api/v1/dev/teams/list", post(handlers::teams_list))
+        .route("/api/v1/dev/teams/run", post(handlers::teams_run))
+        .route(
+            "/api/v1/dev/teams/run-status",
+            post(handlers::teams_run_status),
+        )
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state)
