@@ -27,6 +27,7 @@ export interface TurnSession {
       onEvent?: (event: CaptureStreamEvent) => void
       onActiveSkills?: (skillIds: string[]) => void
       onAttachments?: (summary: AttachmentSummary) => void
+      onTwinNotice?: (message: string) => void
       signal?: AbortSignal
       timeoutMs?: number
     }
