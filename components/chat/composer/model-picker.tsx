@@ -40,6 +40,9 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
 
 interface ModelPickerProps {
   session: ChatSession | null
@@ -115,6 +118,9 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
+  const autoRouting = useSettingsStore((s) => s.settings?.autoRouting)
+  const saveSettings = useSettingsStore((s) => s.save)
+  const autoEnabled = autoRouting?.enabled === true
   const [open, setOpen] = useState(false)
   // Optimistic state so the button label reflects the user's selection
   // immediately, before the parent re-renders with the updated session prop.
@@ -183,6 +189,12 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
     }
   }
 
+  const toggleAuto = (checked: boolean) => {
+    void saveSettings({
+      autoRouting: { ...(autoRouting ?? DEFAULT_AUTO_ROUTING), enabled: checked },
+    })
+  }
+
   // No session yet (composer rendered between sessions) — render a static
   // chip so layout doesn't shift.
   if (!session) {
@@ -220,6 +232,14 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           aria-label={t("switchModelAria")}
         >
           <CpuIcon className="size-3.5 shrink-0" />
+          {autoEnabled ? (
+            <span
+              className="shrink-0 rounded-sm bg-primary/10 px-1 text-[10px] font-medium text-primary"
+              title={t("autoBadgeHint")}
+            >
+              {t("autoBadge")}
+            </span>
+          ) : null}
           <span className="min-w-0 truncate" title={activeModel}>
             {activeModelName}
           </span>
@@ -227,6 +247,21 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[340px] max-w-[calc(100vw-2rem)] p-0">
+        <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+          <div className="flex min-w-0 flex-col">
+            <Label htmlFor="composer-auto-routing" className="text-xs">
+              {t("autoToggle")}
+            </Label>
+            <span className="truncate text-[10px] text-muted-foreground">
+              {t("autoToggleHint")}
+            </span>
+          </div>
+          <Switch
+            id="composer-auto-routing"
+            checked={autoEnabled}
+            onCheckedChange={(c) => toggleAuto(c === true)}
+          />
+        </div>
         <Command>
           <CommandInput placeholder={t("searchPlaceholder")} />
           <CommandList>

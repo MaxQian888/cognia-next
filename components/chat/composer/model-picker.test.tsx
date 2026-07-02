@@ -351,6 +351,50 @@ describe("friendly name rendering", () => {
   })
 })
 
+describe("auto routing toggle + badge", () => {
+  const session: ChatSession = {
+    id: "ses_1",
+    title: "t",
+    kind: "direct",
+    model: PROVIDERS.anthropic.defaultModel,
+    providerOverride: "anthropic",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const renderPicker = () =>
+    render(
+      <NextIntlClientProvider locale="en" messages={{}}>
+        <ModelPicker session={session} />
+      </NextIntlClientProvider>
+    )
+
+  afterEach(() => useSettingsStore.setState({ settings: undefined as never }))
+
+  it("shows the Auto badge on the trigger when auto routing is enabled", () => {
+    useSettingsStore.setState({ settings: { autoRouting: { enabled: true } } as never })
+    const { container } = renderPicker()
+    // The badge is the only primary-tinted chip in the trigger.
+    expect(container.querySelector(".text-primary")).not.toBeNull()
+  })
+
+  it("omits the badge when auto routing is off", () => {
+    useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never })
+    const { container } = renderPicker()
+    expect(container.querySelector(".text-primary")).toBeNull()
+  })
+
+  it("toggling the popover switch persists the enabled flag through save", () => {
+    const save = jest.fn(async () => undefined)
+    useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never, save })
+    renderPicker()
+    fireEvent.click(screen.getByRole("button")) // open the popover
+    fireEvent.click(screen.getByRole("switch"))
+    expect(save).toHaveBeenCalledWith({
+      autoRouting: expect.objectContaining({ enabled: true }),
+    })
+  })
+})
+
 describe("live model switch", () => {
   function renderPicker(session: ChatSession) {
     return render(

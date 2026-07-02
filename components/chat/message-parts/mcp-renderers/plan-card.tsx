@@ -17,10 +17,16 @@ export function PlanCard({ part }: { part: ToolUIPart }) {
   const plan = typeof input.plan === "string" ? input.plan.trim() : ""
   if (!plan) return null
 
+  // A long plan is capped and scrolls inside its own container instead of
+  // expanding the whole transcript inline. Native overflow (not Radix
+  // ScrollArea): the hover-only Radix scrollbar is ungrabbable mid-text-selection
+  // when nested inside the transcript scroller.
   return (
     <McpCardShell title={t("title")} testId="mcp-plan-card">
-      <div data-testid="mcp-plan-body" className="text-sm">
-        <MarkdownRenderer content={plan} />
+      <div className="max-h-80 overflow-y-auto overscroll-contain">
+        <div data-testid="mcp-plan-body" className="pr-3 text-sm">
+          <MarkdownRenderer content={plan} />
+        </div>
       </div>
     </McpCardShell>
   )

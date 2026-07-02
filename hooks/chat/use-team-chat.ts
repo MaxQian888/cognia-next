@@ -212,7 +212,8 @@ export function useTeamChat() {
       // deps once per turn so every member injects the shared memory store (the
       // team runtime previously read twin RAG but never recalled memory).
       turnMemoryDeps = await tryBuildMemoryDeps(
-        resolveMemoryConfig(useSettingsStore.getState().settings?.memory)
+        resolveMemoryConfig(useSettingsStore.getState().settings?.memory),
+        turnTwinDeps
       )
     }
 

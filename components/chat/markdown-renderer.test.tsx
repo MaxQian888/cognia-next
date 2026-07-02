@@ -62,7 +62,6 @@ jest.mock("@/components/chat/renderers/a2ui-block", () => ({
 
 jest.mock("@/components/chat/renderers/image-block", () => ({
   ImageBlock: ({ src, alt }: { src: string; alt: string }) => (
-    // eslint-disable-next-line @next/next/no-img-element -- test stub for ImageBlock; next/image is overkill here
     <img data-test="image-block" src={src} alt={alt} />
   ),
 }))

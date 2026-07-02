@@ -15,6 +15,8 @@ import {
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
 import { RunStatusBar } from "./run-status-bar"
+import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
+import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
@@ -82,6 +84,21 @@ interface ChatPaneProps {
   /** When provided, opens the mobile inline @-mention popover on `@`. */
   mobileMentionMembers?: readonly Character[]
   /**
+   * Resume the chat turn after the user approves a plan in the plan-approval
+   * dock. The host switches the session permission mode to `mode`
+   * (acceptEdits / default / auto) and sends the resume prompt. When omitted
+   * the dock is not rendered (e.g. surfaces without a send pipeline).
+   */
+  onResumeAfterPlanApproval?: (
+    prompt: string,
+    mode: import("@/components/agent/plan/plan-approval-card").PlanResumeMode
+  ) => void | Promise<void>
+  /**
+   * "Keep planning" feedback channel: send `feedback` as a normal user turn
+   * (session stays in plan mode). Optional — keep-planning works without it.
+   */
+  onSendPlanFeedback?: (feedback: string) => void | Promise<void>
+  /**
    * When false, the internal `<ChatHeader>` is omitted. The Inbox detail
    * panel uses this so its own `<ConversationHeader>` (mode + policy +
    * character chip) is the only header, avoiding duplicate chrome.
@@ -131,6 +148,8 @@ export function ChatPane({
   onResumeSession,
   composerRef,
   mobileMentionMembers,
+  onResumeAfterPlanApproval,
+  onSendPlanFeedback,
   showHeader = true,
   emptyState,
   welcomeExtras,
@@ -387,6 +406,17 @@ export function ChatPane({
             />
             <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
             {errorAndFooter}
+            {boundId && onResumeAfterPlanApproval && (
+              <PlanApprovalDock
+                sessionId={boundId}
+                session={activeSession}
+                onResume={onResumeAfterPlanApproval}
+                onSendPlanFeedback={onSendPlanFeedback}
+              />
+            )}
+            {/* Executing/paused plans surface the live tracker in the same slot
+                (statuses are mutually exclusive with awaiting_approval). */}
+            {boundId && <PlanTrackerDock sessionId={boundId} />}
             {runStatusEl}
             {composerEl}
           </motion.div>

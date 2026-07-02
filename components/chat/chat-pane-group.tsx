@@ -44,6 +44,12 @@ export interface ChatPaneGroupProps {
   onResumeSession?: (id: string) => void
   composerRef?: Ref<ComposerHandle>
   mobileMentionMembers?: readonly Character[]
+  /** Per-session plan-approval resume (switch mode + send the resume turn). */
+  onResumeAfterPlanApproval?: (
+    prompt: string,
+    mode: import("@/components/agent/plan/plan-approval-card").PlanResumeMode,
+    sessionId: string
+  ) => Promise<void> | void
 }
 
 /** Inline, session-scoped approval gate for one pane. */
@@ -84,6 +90,7 @@ export function ChatPaneGroup({
   onResumeSession,
   composerRef,
   mobileMentionMembers,
+  onResumeAfterPlanApproval,
 }: ChatPaneGroupProps) {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const openSessionIds = useChatStore((s) => s.openSessionIds)
@@ -144,6 +151,16 @@ export function ChatPaneGroup({
         onResumeSession={onResumeSession}
         composerRef={withComposerRef ? composerRef : undefined}
         mobileMentionMembers={mobileMentionMembers}
+        onResumeAfterPlanApproval={
+          onResumeAfterPlanApproval && sessionId
+            ? (prompt, mode) => onResumeAfterPlanApproval(prompt, mode, sessionId)
+            : undefined
+        }
+        // "Keep planning" feedback rides the pane's normal send pipeline: a
+        // regular user turn with a bubble, session row untouched (still plan).
+        onSendPlanFeedback={
+          sessionId ? (feedback) => Promise.resolve(send(feedback, sessionId)) : undefined
+        }
       />
     )
   }

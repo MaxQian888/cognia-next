@@ -55,10 +55,7 @@ jest.mock("next/image", () => ({
     placeholder?: "blur" | "empty"
     blurDataURL?: string
     loader?: unknown
-  }) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img {...props} alt={props.alt || ""} />
-  ),
+  }) => <img {...props} alt={props.alt || ""} />,
 }))
 
 describe("A2UIImage", () => {

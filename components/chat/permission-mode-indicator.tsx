@@ -1,35 +1,26 @@
 "use client"
 
 // Status pill rendered at the bottom of the composer showing the active
-// permission mode. Clicking it cycles through the modes (default →
-// acceptEdits → plan → bypassPermissions → default), the same cycle as
-// Shift+Tab on the textarea. Tooltip explains what each mode does.
+// permission mode. Clicking it cycles through the SAFE CORE only (default →
+// acceptEdits → plan → default), the same cycle as Shift+Tab on the textarea —
+// the danger `bypassPermissions` / power modes are reachable only via the
+// status-bar Advanced group or settings, so a misclick can never land on a
+// no-guardrail mode. Tooltip explains what each mode does.
 
 import { useTranslations } from "next-intl"
 import { useChatStore, type PermissionMode } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import {
+  cyclePermissionMode,
+  permissionModeMeta,
+  permissionRiskMarker,
+} from "@/lib/settings/permission-mode-meta"
 
-const ORDER: (PermissionMode | null)[] = [null, "acceptEdits", "plan", "bypassPermissions"]
-
-const TONE_BY_MODE: Record<string, string> = {
-  null: "text-muted-foreground",
-  acceptEdits: "text-blue-500",
-  plan: "text-amber-500",
-  bypassPermissions: "text-rose-500",
-}
-
-const TRANSLATION_KEY_BY_MODE: Record<string, "default" | "acceptEdits" | "plan" | "bypass"> = {
-  null: "default",
-  acceptEdits: "acceptEdits",
-  plan: "plan",
-  bypassPermissions: "bypass",
-}
-
+/** The next mode when the chip is clicked / Shift+Tab is pressed (safe core). */
 export function nextPermissionMode(cur: PermissionMode | null): PermissionMode | null {
-  const idx = ORDER.indexOf(cur)
-  return ORDER[(idx + 1) % ORDER.length]
+  return cyclePermissionMode(cur)
 }
 
 export interface PermissionModeIndicatorProps {
@@ -45,10 +36,10 @@ export interface PermissionModeIndicatorProps {
 export function PermissionModeIndicator({ onCycle, disabled }: PermissionModeIndicatorProps) {
   const t = useTranslations("chat.permissionMode")
   const mode = useChatStore((s) => s.permissionMode)
-  const key = TRANSLATION_KEY_BY_MODE[String(mode)] ?? "default"
-  const label = t(`${key}.label`)
-  const tooltip = t(`${key}.tooltip`)
-  const toneClass = TONE_BY_MODE[String(mode)] ?? TONE_BY_MODE.null
+  const meta = permissionModeMeta(mode ?? "default")
+  const label = t(`${meta.i18nKey}.label`)
+  const tooltip = t(`${meta.i18nKey}.tooltip`)
+  const marker = permissionRiskMarker(mode ?? "default")
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -60,11 +51,12 @@ export function PermissionModeIndicator({ onCycle, disabled }: PermissionModeInd
           onClick={() => onCycle(nextPermissionMode(mode))}
           className={cn(
             "h-auto px-2 py-0.5 font-mono text-[11px] font-normal transition-colors hover:bg-accent",
-            toneClass
+            meta.tone
           )}
           aria-label={t("aria", { label })}
         >
-          ⇧⇥ {label}
+          ⇧⇥ {marker ? `${marker} ` : ""}
+          {label}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs">

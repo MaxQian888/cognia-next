@@ -24,5 +24,9 @@ export function useMentionableSubagents(): SubagentMentionTarget[] {
   const templates = useSubagentRuntimeStore((s) => s.templates)
   // Re-derive only when the templates slice identity changes. The rest of the
   // inputs (plugin registry, host built-ins) are stable for the session.
+  // `templates` is a semantic (not lexical) dependency: buildChatMentionTargets
+  // reads the store via getState() internally, so ESLint can't see the link —
+  // but it's the only change signal that must re-run the memo.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   return useMemo(() => buildChatMentionTargets(), [templates])
 }

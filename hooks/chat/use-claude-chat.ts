@@ -120,6 +120,7 @@ setToolSpanEventPublisher((eventType, payload) => {
 })
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
@@ -1580,11 +1581,25 @@ async function buildSendOptions(
   // run the injection based on `character.twinId`.
   const twinHandshake = userMessage?.trim() ? await tryBuildTwinDeps() : undefined
 
+  // Embed the user message ONCE per turn (when twin deps exist) so the twin RAG
+  // leg and the memory recall leg share one query vector instead of embedding
+  // the same text twice. Memory's vector backend shares the twin embedding model
+  // (resolveMemoryBackend), so the vector is valid for both. Best-effort — on
+  // failure the resolver falls back to per-leg embedding.
+  let turnEmbedding: number[] | undefined
+  if (twinHandshake && userMessage?.trim()) {
+    try {
+      turnEmbedding = (await generateEmbedding(userMessage, twinHandshake.embedding)).embedding
+    } catch {
+      turnEmbedding = undefined
+    }
+  }
+
   // Long-term memory: build the read-runtime deps when memory is enabled and
   // the turn carries a user message. `resolveSendOptions` decides (per its own
   // enabled/temporary gate) whether to actually recall + inject.
   const memoryHandshake = userMessage?.trim()
-    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory))
+    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory), twinHandshake)
     : undefined
 
   // Per-message ephemeral skills attached via the composer's SkillPicker.
@@ -1637,6 +1652,7 @@ async function buildSendOptions(
     twinUserMessage: twinHandshake ? userMessage : undefined,
     memoryDeps: memoryHandshake,
     memoryUserMessage: memoryHandshake ? userMessage : undefined,
+    precomputedQueryEmbedding: turnEmbedding,
     // Routing context-window pre-check input (B4): always pass the raw user
     // message (unlike twin/memory it needs no handshake gate).
     routingContextHint: userMessage ? { promptText: userMessage } : undefined,

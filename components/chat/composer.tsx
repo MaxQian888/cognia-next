@@ -152,6 +152,7 @@ import type { OcrResult } from "@/types/ocr"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { SkillChipRow } from "./composer/skill-chip-row"
 import { GoalStatusPill } from "@/components/goal/goal-status-pill"
+import { PlanModeBanner } from "@/components/chat/plan-mode-banner"
 import { LoopStatusPill } from "@/components/loop/loop-status-pill"
 import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
@@ -1223,7 +1224,7 @@ function ComposerInner(props: InnerProps) {
     return () => {
       cancelled = true
     }
-  }, [sessionId, draftHydratedFor, controller.textInput])
+  }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput])
 
   useEffect(() => {
     if (!persistDrafts) return
@@ -1378,6 +1379,8 @@ function ComposerInner(props: InnerProps) {
       <GoalStatusPill sessionId={sessionId} />
       {/* /loop status + controls; self-hides when no open loop. */}
       <LoopStatusPill sessionId={sessionId} />
+      {/* Plan-mode state banner; self-hides outside plan mode. */}
+      <PlanModeBanner />
       <div
         className={cn(
           // Claude-style stack on every platform when the container is narrow:
@@ -1388,7 +1391,11 @@ function ComposerInner(props: InnerProps) {
           // flex-1 textarea (basis-0) then prevents any further wrapping.
           // Mobile (Capacitor) keeps the stack at every width.
           "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
-          "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
+          "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15",
+          // Plan mode: amber tint on the input surface (with the banner above)
+          // so the read-only state is unmistakable (Claude Code parity).
+          permissionMode === "plan" &&
+            "border-amber-500/50 focus-within:border-amber-500/70 focus-within:ring-amber-500/15"
         )}
         // Opt the input surface into the shared wallpaper-aware tonality system
         // (app/globals.css §5): when a background is active the hardcoded
