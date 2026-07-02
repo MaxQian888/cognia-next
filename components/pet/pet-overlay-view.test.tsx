@@ -146,7 +146,11 @@ import {
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 
 const PROFILE = { stage: "baby" }
-const VIEW = { effectiveBones: { eyes: "dot" }, condition: "well" }
+const VIEW = {
+  effectiveBones: { eyes: "dot" },
+  condition: "well",
+  effectiveStats: { debugging: 0, patience: 0, chaos: 0, wisdom: 0, snark: 0 },
+}
 
 function withPet(view: Record<string, unknown> = VIEW) {
   mockUsePet.mockReturnValue({ profile: PROFILE, view, loading: false })

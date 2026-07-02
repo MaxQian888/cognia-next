@@ -39,6 +39,19 @@ const IDLE_MOOD_VARIANTS: Record<PetMood, number> = {
   grumpy: 2,
 }
 
+/** Kinds with an authored snarky overlay pool (`pet.bubbles.snarky.<kind>.<n>`).
+ *  Counts must match the i18n bundle, like `VARIANTS`. */
+const SNARK_VARIANTS: Partial<Record<PetEventKind, number>> = {
+  fed: 2,
+  played: 2,
+  petted: 2,
+  success: 2,
+  error: 2,
+}
+
+/** Effective snark stat at/above this unlocks the snarky sprinkle. */
+export const SNARK_THRESHOLD = 60
+
 function indexFromSeed(seed: number, count: number): number {
   // Stable, non-negative index without Math.random.
   return Math.abs(Math.trunc(seed)) % count
@@ -46,11 +59,26 @@ function indexFromSeed(seed: number, count: number): number {
 
 /**
  * Pick the i18n key for an event's bubble, or null if the kind is silent.
- * `seed` (e.g. `event.at`) makes the choice deterministic.
+ * `seed` (e.g. `event.at`) makes the choice deterministic. A high-snark pet
+ * (effective stat ≥ {@link SNARK_THRESHOLD}) swaps in a snarky line ~1 in 3
+ * reactions for kinds with an authored snarky pool — same sprinkle cadence as
+ * `pickCustomBubble`, still seed-deterministic.
  */
-export function pickBubbleKey(kind: PetEventKind, seed: number): string | null {
+export function pickBubbleKey(
+  kind: PetEventKind,
+  seed: number,
+  stats?: { snark?: number }
+): string | null {
   const count = VARIANTS[kind]
   if (!count) return null
+  const snarkCount = SNARK_VARIANTS[kind]
+  if (
+    snarkCount &&
+    (stats?.snark ?? 0) >= SNARK_THRESHOLD &&
+    Math.abs(Math.trunc(seed)) % 3 === 0
+  ) {
+    return `bubbles.snarky.${kind}.${indexFromSeed(seed, snarkCount)}`
+  }
   return `bubbles.${kind}.${indexFromSeed(seed, count)}`
 }
 

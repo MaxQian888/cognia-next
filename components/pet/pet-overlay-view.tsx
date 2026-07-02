@@ -183,6 +183,7 @@ export function PetOverlayView() {
     paused: locomotionPaused,
     wander,
     lowPower: pet.lowPower ?? false,
+    statsChaos: view?.effectiveStats.chaos ?? 0,
     petSize: size,
     lastInteractionAtMs: () => lastInteractionRef.current,
     onSettle: (x, y) => void persistRef.current(x, y),

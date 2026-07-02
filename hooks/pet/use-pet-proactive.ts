@@ -210,7 +210,10 @@ export function usePetProactive({ profile, view, enabled }: UsePetProactiveArgs)
     if (!eventCommentsOn) return
     const off = getPetEventBus().subscribe((event: PetEvent) => {
       if (event.source === "user") markActivity(event.at)
-      const decision = evaluateEventComment(event)
+      // A wiser pet comments on more of the (high-frequency) workflow runs.
+      const decision = evaluateEventComment(event, {
+        wisdom: latest.current.view?.effectiveStats.wisdom ?? 0,
+      })
       if (!decision) return
       const fallback = () => {
         const key = pickBubbleKey(event.kind, event.at)

@@ -58,6 +58,8 @@ export interface UsePetLocomotionArgs {
   paused: boolean
   wander: PetWanderSettings
   lowPower: boolean
+  /** Effective chaos stat — ≥70 promotes the wander bucket one step livelier. */
+  statsChaos?: number
   /** Pet render-box size (logical px) — resolves the overlay window box. */
   petSize: number
   /** Reads the latest user-interaction timestamp (same clock as `io.now`). */
@@ -173,7 +175,7 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
       if (!area || !rng) return null
       const scale = scaleRef.current
       const logical = overlayWindowSize(a.petSize)
-      const tuning = resolveWanderTuning(a.wander.frequency, a.lowPower)
+      const tuning = resolveWanderTuning(a.wander.frequency, a.lowPower, a.statsChaos ?? 0)
       return {
         nowMs,
         paused: a.paused,

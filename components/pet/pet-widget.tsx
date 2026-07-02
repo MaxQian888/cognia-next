@@ -64,7 +64,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   const { profile, view, feed, play, petStroke, talk, sleep, clean, treat } =
     usePet(activeCharacterId)
   const { state, oneShot } = usePetAnimationState(reduced)
-  usePetBubbles(settings.enabled && !settings.mutedBubbles)
+  usePetBubbles(settings.enabled && !settings.mutedBubbles, view?.effectiveStats.snark ?? 0)
   // Owns every `talked` bubble (LLM side channel + template fallback). Main
   // window only — overlay talk replays here through the cross-window bridge.
   usePetSpeak({

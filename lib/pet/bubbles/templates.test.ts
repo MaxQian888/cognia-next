@@ -1,4 +1,4 @@
-import { pickBubbleKey, pickIdleBubbleKey, pickCustomBubble } from "./templates"
+import { pickBubbleKey, pickIdleBubbleKey, pickCustomBubble, SNARK_THRESHOLD } from "./templates"
 import type { PetEventKind, PetMood } from "@/types/pet"
 
 describe("pickBubbleKey", () => {
@@ -51,6 +51,36 @@ describe("pickBubbleKey", () => {
         /^bubbles\.achievementUnlocked\.[0-1]$/
       )
     }
+  })
+
+  describe("snarky sprinkle", () => {
+    const HIGH = { snark: SNARK_THRESHOLD }
+    const LOW = { snark: SNARK_THRESHOLD - 1 }
+
+    it("swaps in a snarky key at high snark when the seed lands on the sprinkle", () => {
+      // seed % 3 === 0 → snarky pool.
+      expect(pickBubbleKey("fed", 9, HIGH)).toMatch(/^bubbles\.snarky\.fed\.[0-1]$/)
+      expect(pickBubbleKey("error", 12, HIGH)).toMatch(/^bubbles\.snarky\.error\.[0-1]$/)
+    })
+
+    it("keeps the base pool off the sprinkle seeds", () => {
+      expect(pickBubbleKey("fed", 10, HIGH)).toMatch(/^bubbles\.fed\.\d+$/)
+      expect(pickBubbleKey("fed", 11, HIGH)).toMatch(/^bubbles\.fed\.\d+$/)
+    })
+
+    it("stays on the base pool below the threshold or without stats", () => {
+      expect(pickBubbleKey("fed", 9, LOW)).toMatch(/^bubbles\.fed\.\d+$/)
+      expect(pickBubbleKey("fed", 9)).toMatch(/^bubbles\.fed\.\d+$/)
+    })
+
+    it("never snarks on kinds without an authored snarky pool", () => {
+      expect(pickBubbleKey("goalComplete", 9, HIGH)).toMatch(/^bubbles\.goalComplete\.\d+$/)
+      expect(pickBubbleKey("slept", 9, HIGH)).toMatch(/^bubbles\.slept\.\d+$/)
+    })
+
+    it("is deterministic", () => {
+      expect(pickBubbleKey("petted", 33, HIGH)).toBe(pickBubbleKey("petted", 33, HIGH))
+    })
   })
 })
 

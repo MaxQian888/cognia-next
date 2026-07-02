@@ -9296,6 +9296,28 @@
         "0": "Zzz…",
         "1": "So cozy…"
       },
+      "snarky": {
+        "error": [
+          "Who wrote this? …Oh.",
+          "Not my bug."
+        ],
+        "fed": [
+          "Finally.",
+          "Acceptable."
+        ],
+        "petted": [
+          "I'll allow it.",
+          "Hmph. Nice."
+        ],
+        "played": [
+          "I let you win.",
+          "Again. Obviously."
+        ],
+        "success": [
+          "I did most of that.",
+          "As expected."
+        ]
+      },
       "success": [
         "Nailed it!",
         "Done and done.",
