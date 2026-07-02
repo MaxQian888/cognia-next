@@ -1045,3 +1045,89 @@ describe("createAgentSession.setPermissionMode", () => {
     expect(followUpOptions.permissionMode).toBe("acceptEdits")
   })
 })
+
+describe("createAgentSession — twin grounding", () => {
+  const applied = { systemPrompt: "SP-FULL", stable: "TWIN-STABLE", dynamic: "TWIN-DYN" }
+  const twinOk = {
+    ok: true as const,
+    applied,
+    degraded: false,
+    sources: [],
+    styleSampleCount: 0,
+  }
+
+  function twinSession(opts: {
+    fetchTwin: jest.Mock
+    capture: jest.Mock
+    twin?: { enabled?: boolean; characterId?: string }
+  }) {
+    return createAgentSession({
+      config: cfg({ twin: opts.twin ?? { enabled: true, characterId: "char-1" } }),
+      sessionId: "s_twin",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () =>
+        ({ model: "m", provider: "anthropic", systemPrompt: "BASE" }) as never,
+      capture: opts.capture,
+      transcriptFs: memFs().fsx,
+      fetchTwin: opts.fetchTwin as never,
+    })
+  }
+
+  it("appends the stable segment once and prepends the dynamic block per turn", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const fetchTwin = jest.fn().mockResolvedValue(twinOk)
+    const session = twinSession({ fetchTwin, capture })
+    const gate = createPermissionGate({ yes: true })
+
+    await session.send("first question", { gate })
+    await session.send("second question", { gate })
+
+    expect(fetchTwin).toHaveBeenCalledTimes(2)
+    expect(fetchTwin.mock.calls[0][0]).toMatchObject({
+      characterId: "char-1",
+      message: "first question",
+      sessionId: "s_twin",
+    })
+    // Stable segment lands in the cached system prompt exactly once.
+    const optionsArg = capture.mock.calls[0][2] as SendOptions
+    expect(optionsArg.systemPrompt).toBe("BASE\n\nTWIN-STABLE")
+    const optionsArg2 = capture.mock.calls[1][2] as SendOptions
+    expect(optionsArg2.systemPrompt).toBe("BASE\n\nTWIN-STABLE")
+    // Dynamic block rides each turn's user content.
+    expect(capture.mock.calls[0][1]).toBe(
+      "<twin-context>\nTWIN-DYN\n</twin-context>\n\nfirst question"
+    )
+    expect(capture.mock.calls[1][1]).toBe(
+      "<twin-context>\nTWIN-DYN\n</twin-context>\n\nsecond question"
+    )
+  })
+
+  it("notices once per session when the desktop is unreachable and stays ungrounded", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const fetchTwin = jest.fn().mockResolvedValue(null)
+    const session = twinSession({ fetchTwin, capture })
+    const gate = createPermissionGate({ yes: true })
+    const notices: string[] = []
+
+    await session.send("q1", { gate, onTwinNotice: (m) => notices.push(m) })
+    await session.send("q2", { gate, onTwinNotice: (m) => notices.push(m) })
+
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toMatch(/not reachable/i)
+    // No twin material anywhere.
+    expect((capture.mock.calls[0][2] as SendOptions).systemPrompt).toBe("BASE")
+    expect(capture.mock.calls[0][1]).toBe("q1")
+  })
+
+  it("never fetches when twin grounding is disabled or unconfigured", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const fetchTwin = jest.fn()
+    const session = twinSession({ fetchTwin, capture, twin: { enabled: true } })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(fetchTwin).not.toHaveBeenCalled()
+  })
+})

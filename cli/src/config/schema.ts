@@ -282,6 +282,21 @@ export const mascotSchema = z
 export type MascotConfig = z.infer<typeof mascotSchema>
 
 /**
+ * Digital-twin retrieval config. The CLI has no local twin data — retrieval
+ * round-trips through the running desktop app's CLI bridge and returns
+ * REDACTED prompt segments. `characterId` names the twin-bound GUI
+ * character whose twin should ground the CLI's turns.
+ */
+export const twinCliSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    characterId: z.string().optional(),
+  })
+  .strict()
+
+export type TwinCliConfig = z.infer<typeof twinCliSchema>
+
+/**
  * Transcript rendering preferences — how tool/file output is shown in the
  * transcript and the full-output pager. Every field is optional; absent values
  * fall back to {@link RENDER_DEFAULTS}, which reproduces the historic look.
@@ -507,6 +522,13 @@ export const cliConfigFileSchema = z
      * provider configured (otherwise it returns a clean "no provider" error).
      */
     webTools: z.boolean().optional(),
+    /**
+     * Opt-in automatic tier routing (default off). When on, a one-shot/headless
+     * `run` scores the prompt's difficulty and routes it to the cheapest capable
+     * tier alias (fast/balanced/powerful), seeded from the enabled providers.
+     * See `lib/routing/auto-tier.ts`; toggle via `/route auto on|off`.
+     */
+    autoRoute: z.boolean().optional(),
     /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
     skillTool: z.boolean().optional(),
     /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
@@ -523,6 +545,8 @@ export const cliConfigFileSchema = z
     statusBar: statusBarSchema.optional(),
     /** Terminal mascot (enabled + style). Absent ⇒ shown in the `clawd` style. */
     mascot: mascotSchema.optional(),
+    /** Digital-twin retrieval over the desktop CLI bridge. Absent ⇒ off. */
+    twin: twinCliSchema.optional(),
     /** Output style ("response mode"). Appends a style instruction to the system
      * prompt. Absent / `default` ⇒ no change. */
     outputStyle: z.enum(OUTPUT_STYLES).optional(),
@@ -711,6 +735,8 @@ export interface ResolvedConfig {
   devPluginsDir?: string
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
+  /** Opt-in automatic tier routing for one-shot/headless runs. Default off. */
+  autoRoute?: boolean
   /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
   skillTool?: boolean
   /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
@@ -779,6 +805,12 @@ export interface ResolvedConfig {
   /** Overridable copy/clipboard notice strings. Absent ⇒ {@link NOTICE_DEFAULTS};
    * resolved per-use via {@link resolveNotices}. */
   notices?: NoticesConfig
+  /** Digital-twin retrieval over the desktop CLI bridge. When `enabled` and
+   * the desktop app is running, each turn fetches the REDACTED twin context
+   * for `characterId` and injects it into the prompt; when the desktop is
+   * unreachable the turn proceeds without twin context (one notice per
+   * session). Absent ⇒ off. */
+  twin?: TwinCliConfig
   /** Idle (read) timeout for a streaming turn, in ms. Absent ⇒ 60000; `0`
    * disables. Guards against a provider stream that stalls mid-turn. */
   streamIdleTimeoutMs?: number

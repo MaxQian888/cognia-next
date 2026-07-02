@@ -40,6 +40,7 @@ import { type PermissionResponder } from "./permission-gate"
 import { makeCliPluginToolHandle } from "./subagent-dispatch"
 import { buildLoadSkillManifestEntry } from "./skill-load-tool"
 import { appendTranscript, type TranscriptFs } from "./transcript"
+import { fetchTwinContext as defaultFetchTwinContext } from "../twin/context-client"
 
 /** Mint a session id matching the desktop's `s_<base36ts><rand>` convention. */
 export function mintSessionId(now: number = Date.now(), rand: number = Math.random()): string {
@@ -88,6 +89,10 @@ export interface RunHeadlessParams {
    * requires) before resolving options — only when a skill is enabled, the lone
    * build-options read that routes through Dexie. Defaults to {@link ensureCliDb}. */
   ensureDb?: () => Promise<unknown>
+  /** Fetch the twin context from the running desktop (only when `config.twin`
+   * is enabled). Resolves `null` on any failure — the turn then proceeds
+   * without twin grounding. Injected in tests. */
+  fetchTwin?: typeof defaultFetchTwinContext
   now?: number
 }
 
@@ -143,6 +148,9 @@ export async function runHeadlessTurn(params: RunHeadlessParams): Promise<RunHea
     config: params.config,
     mcpServers: resolveMcpServers(),
     ephemeralSkillIds,
+    // One-shot run: the prompt is known up front, so opt-in auto routing can
+    // score it and pick a tier alias when resolving this invocation's options.
+    routingPromptText: params.prompt,
     now,
   })
   const resolveOptions = params.resolveOptions ?? defaultResolveSendOptions
@@ -153,6 +161,26 @@ export async function runHeadlessTurn(params: RunHeadlessParams): Promise<RunHea
   // `aiSdkMaxSteps` override the caller folds into `config`. Patched here (not in
   // `toBuildContext`) to keep the shared desktop assembly untouched.
   if (params.maxTurns != null) options.maxTurns = params.maxTurns
+
+  // Digital-twin grounding (opt-in): the CLI has no local twin data, so the
+  // REDACTED context comes from the running desktop over the CLI bridge.
+  // APPENDED to the CLI's own system prompt (which carries cwd/tool guidance
+  // the desktop replace-at-base semantics would drop). Unreachable desktop /
+  // any failure → the turn proceeds ungrounded.
+  if (params.config.twin?.enabled && params.config.twin.characterId) {
+    const twin = await (params.fetchTwin ?? defaultFetchTwinContext)({
+      characterId: params.config.twin.characterId,
+      message: params.prompt,
+      sessionId,
+    })
+    if (twin?.applied) {
+      const segments = [twin.applied.stable, twin.applied.dynamic].filter(Boolean)
+      const twinBlock = segments.length > 0 ? segments.join("\n\n") : twin.applied.systemPrompt
+      options.systemPrompt = options.systemPrompt
+        ? `${options.systemPrompt}\n\n${twinBlock}`
+        : twinBlock
+    }
+  }
 
   // Name-only skill loading: when skills are enabled AND the load mode is "name",
   // the prompt carries only the catalog, so the model needs the `load_skill` tool

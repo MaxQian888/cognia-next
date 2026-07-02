@@ -168,6 +168,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
       ? { ...acc.statusBar, ...stripUndefined(layer.statusBar) }
       : acc.statusBar,
     mascot: layer.mascot ? { ...acc.mascot, ...stripUndefined(layer.mascot) } : acc.mascot,
+    twin: layer.twin ? { ...acc.twin, ...stripUndefined(layer.twin) } : acc.twin,
     outputStyle: layer.outputStyle ?? acc.outputStyle,
     thinkingLevel: layer.thinkingLevel ?? acc.thinkingLevel,
     agentMode: layer.agentMode ?? acc.agentMode,

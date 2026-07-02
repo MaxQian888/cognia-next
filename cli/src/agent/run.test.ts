@@ -117,6 +117,58 @@ describe("runHeadlessTurn", () => {
     expect(capture.mock.calls[0][2]).toMatchObject({ maxTurns: 5 })
   })
 
+  it("appends the twin stable+dynamic segments to the system prompt when configured", async () => {
+    const fb = fakeBoot()
+    const capture = jest.fn().mockResolvedValue(captureResult())
+    const fetchTwin = jest.fn().mockResolvedValue({
+      ok: true,
+      applied: { systemPrompt: "SP-FULL", stable: "TWIN-STABLE", dynamic: "TWIN-DYN" },
+      degraded: false,
+      sources: [],
+      styleSampleCount: 0,
+    })
+    await runHeadlessTurn({
+      config: cfg({ twin: { enabled: true, characterId: "char-1" } }),
+      prompt: "ground me",
+      sessionId: "s_twin",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions: async () =>
+        ({ model: "m", provider: "anthropic", systemPrompt: "BASE" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+      fetchTwin: fetchTwin as never,
+    })
+    expect(fetchTwin).toHaveBeenCalledWith({
+      characterId: "char-1",
+      message: "ground me",
+      sessionId: "s_twin",
+    })
+    expect(capture.mock.calls[0][2]).toMatchObject({
+      systemPrompt: "BASE\n\nTWIN-STABLE\n\nTWIN-DYN",
+    })
+  })
+
+  it("proceeds ungrounded when the twin fetch fails", async () => {
+    const fb = fakeBoot()
+    const capture = jest.fn().mockResolvedValue(captureResult())
+    await runHeadlessTurn({
+      config: cfg({ twin: { enabled: true, characterId: "char-1" } }),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions: async () =>
+        ({ model: "m", provider: "anthropic", systemPrompt: "BASE" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+      fetchTwin: (async () => null) as never,
+    })
+    expect(capture.mock.calls[0][2]).toMatchObject({ systemPrompt: "BASE" })
+  })
+
   it("hydrates the plugin runtime when devPlugins is on (even without pluginTools)", async () => {
     const fb = fakeBoot()
     const loadPluginRuntime = jest.fn(async () => undefined)

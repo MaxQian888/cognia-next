@@ -203,6 +203,9 @@ export async function runTurn(
         const message = formatAttachmentNotice(summary)
         if (message) opts.dispatch({ type: "NOTICE", message })
       },
+      onTwinNotice: (message) => {
+        opts.dispatch({ type: "NOTICE", message })
+      },
       signal: opts.signal,
       timeoutMs: opts.timeoutMs,
     })
