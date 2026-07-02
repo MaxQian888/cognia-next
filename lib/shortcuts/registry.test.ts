@@ -8,14 +8,25 @@ jest.mock("@/lib/tauri", () => ({
   TAURI_EVENTS: {},
   onTauriEvent: () => Promise.resolve(() => {}),
 }))
+jest.mock("@/lib/tauri/store", () => ({
+  getPref: jest.fn(),
+  setPref: jest.fn(),
+}))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { invoke } = require("@tauri-apps/api/core") as {
   invoke: jest.Mock
 }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { getPref, setPref } = require("@/lib/tauri/store") as {
+  getPref: jest.Mock
+  setPref: jest.Mock
+}
 
 afterEach(() => {
   invoke.mockReset()
+  getPref.mockReset()
+  setPref.mockReset()
   __resetShortcutStoreForTesting()
 })
 
@@ -111,5 +122,81 @@ describe("useShortcutStore", () => {
     invoke.mockRejectedValueOnce(new Error("ipc down"))
     const chord = await useShortcutStore.getState().chordFor("tray.show")
     expect(chord).toBeNull()
+  })
+
+  describe("custom-binding persistence (survives a Rust restart)", () => {
+    it("bind persists a non-built-in id to the pref store", async () => {
+      getPref.mockResolvedValueOnce(null) // no prior persisted map
+      invoke.mockResolvedValueOnce(undefined) // shortcut_bind
+      await useShortcutStore
+        .getState()
+        .bind({ id: "pet.toggle-window", chord: "Ctrl+Alt+P", scope: "global" })
+      expect(setPref).toHaveBeenCalledWith("shortcuts.custom.v1", {
+        "pet.toggle-window": "ctrl+alt+p",
+      })
+    })
+
+    it("bind merges with an existing persisted map rather than overwriting it", async () => {
+      getPref.mockResolvedValueOnce({ "other.id": "ctrl+1" })
+      invoke.mockResolvedValueOnce(undefined)
+      await useShortcutStore
+        .getState()
+        .bind({ id: "pet.toggle-window", chord: "Ctrl+2", scope: "global" })
+      expect(setPref).toHaveBeenCalledWith("shortcuts.custom.v1", {
+        "other.id": "ctrl+1",
+        "pet.toggle-window": "ctrl+2",
+      })
+    })
+
+    it("bind does NOT persist a built-in id — Rust reseeds those on boot", async () => {
+      invoke.mockResolvedValueOnce(undefined)
+      await useShortcutStore
+        .getState()
+        .bind({ id: "tray.show", chord: "Ctrl+Space", scope: "global" })
+      expect(setPref).not.toHaveBeenCalled()
+      expect(getPref).not.toHaveBeenCalled()
+    })
+
+    it("unbind removes a custom id from the persisted map", async () => {
+      getPref.mockResolvedValueOnce({ "pet.toggle-window": "ctrl+alt+p", "other.id": "ctrl+1" })
+      invoke.mockResolvedValueOnce(undefined) // shortcut_unbind
+      await useShortcutStore.getState().unbind("pet.toggle-window")
+      expect(setPref).toHaveBeenCalledWith("shortcuts.custom.v1", { "other.id": "ctrl+1" })
+    })
+
+    it("unbind does not touch the pref store for a built-in id", async () => {
+      invoke.mockResolvedValueOnce(undefined)
+      await useShortcutStore.getState().unbind("tray.show")
+      expect(getPref).not.toHaveBeenCalled()
+      expect(setPref).not.toHaveBeenCalled()
+    })
+
+    it("hydrate re-binds a persisted custom id that Rust doesn't report", async () => {
+      invoke.mockResolvedValueOnce([{ id: "tray.show", chord: "ctrl+shift+space" }]) // shortcut_list
+      getPref.mockResolvedValueOnce({ "pet.toggle-window": "ctrl+alt+p" })
+      invoke.mockResolvedValueOnce(undefined) // shortcut_bind re-apply
+      await useShortcutStore.getState().hydrate()
+      expect(invoke).toHaveBeenCalledWith("shortcut_bind", {
+        id: "pet.toggle-window",
+        chord: "ctrl+alt+p",
+      })
+      expect(useShortcutStore.getState().bindings["pet.toggle-window"]).toBe("ctrl+alt+p")
+    })
+
+    it("hydrate skips re-binding when Rust already reports the id", async () => {
+      invoke.mockResolvedValueOnce([{ id: "pet.toggle-window", chord: "ctrl+alt+p" }])
+      getPref.mockResolvedValueOnce({ "pet.toggle-window": "ctrl+alt+p" })
+      await useShortcutStore.getState().hydrate()
+      expect(invoke).toHaveBeenCalledTimes(1) // only shortcut_list — no re-bind call
+    })
+
+    it("hydrate tolerates a re-bind failure without breaking the rest of hydration", async () => {
+      invoke.mockResolvedValueOnce([])
+      getPref.mockResolvedValueOnce({ "pet.toggle-window": "ctrl+alt+p" })
+      invoke.mockRejectedValueOnce(new Error("os register failed"))
+      await useShortcutStore.getState().hydrate()
+      expect(useShortcutStore.getState().hydrated).toBe(true)
+      expect(useShortcutStore.getState().bindings["pet.toggle-window"]).toBeUndefined()
+    })
   })
 })
