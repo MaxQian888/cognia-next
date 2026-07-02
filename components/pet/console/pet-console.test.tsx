@@ -37,6 +37,7 @@ jest.mock("@/lib/pet/runtime/rename-pet", () => ({
   MAX_PET_NAME: 24,
 }))
 jest.mock("./dex-tab", () => ({ DexTab: () => <div data-testid="tab-dex" /> }))
+jest.mock("./shop-tab", () => ({ ShopTab: () => <div data-testid="tab-shop" /> }))
 jest.mock("./achievements-tab", () => ({ AchievementsTab: () => <div data-testid="tab-ach" /> }))
 jest.mock("./binding-tab", () => ({ BindingTab: () => <div data-testid="tab-bind" /> }))
 
@@ -100,6 +101,8 @@ describe("PetConsole", () => {
     expect(screen.getByTestId("pet-nurture-tab")).toBeInTheDocument()
     const clickTab = (id: string) =>
       fireEvent.click(document.querySelector(`[data-tab="${id}"]`) as Element)
+    clickTab("shop")
+    expect(screen.getByTestId("tab-shop")).toBeInTheDocument()
     clickTab("dex")
     expect(screen.getByTestId("tab-dex")).toBeInTheDocument()
     clickTab("achievements")

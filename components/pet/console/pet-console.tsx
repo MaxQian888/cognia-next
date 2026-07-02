@@ -23,13 +23,14 @@ import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
 import { PetRenderer } from "../pet-renderer"
 import { PetNameEditor } from "../pet-name-editor"
 import { NurtureTab } from "./nurture-tab"
+import { ShopTab } from "./shop-tab"
 import { CustomizeTab } from "./customize-tab"
 import { DexTab } from "./dex-tab"
 import { AchievementsTab } from "./achievements-tab"
 import { BindingTab } from "./binding-tab"
 
-type ConsoleTab = "nurture" | "customize" | "dex" | "achievements" | "binding"
-const TABS: ConsoleTab[] = ["nurture", "customize", "dex", "achievements", "binding"]
+type ConsoleTab = "nurture" | "shop" | "customize" | "dex" | "achievements" | "binding"
+const TABS: ConsoleTab[] = ["nurture", "shop", "customize", "dex", "achievements", "binding"]
 
 export function PetConsole() {
   const t = useTranslations("pet")
@@ -133,6 +134,7 @@ export function PetConsole() {
               <Button onClick={() => void hatch()}>{t("console.hatch")}</Button>
             </div>
           ))}
+        {tab === "shop" && <ShopTab />}
         {tab === "customize" && <CustomizeTab />}
         {tab === "dex" && <DexTab bones={view.bones} />}
         {tab === "achievements" && <AchievementsTab />}

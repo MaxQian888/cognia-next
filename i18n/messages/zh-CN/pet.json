@@ -144,7 +144,8 @@
       "binding": "角色",
       "customize": "自定义",
       "dex": "图鉴",
-      "nurture": "养育"
+      "nurture": "养育",
+      "shop": "商店"
     },
     "title": "你的宠物"
   },
@@ -258,6 +259,42 @@
     "edit": "重命名",
     "label": "宠物名字",
     "save": "保存名字"
+  },
+  "shop": {
+    "apply": "装扮",
+    "balance": "{coins} 金币",
+    "buy": "购买",
+    "categories": {
+      "decor": "装饰",
+      "food": "食物",
+      "toy": "玩具"
+    },
+    "insufficient": "金币不足",
+    "items": {
+      "berry": {
+        "description": "小零嘴——恢复少量精力。",
+        "title": "浆果"
+      },
+      "puzzleCube": {
+        "description": "安静的益智玩具，加深羁绊。",
+        "title": "解谜方块"
+      },
+      "royalFeast": {
+        "description": "丰盛大餐——大幅恢复精力。",
+        "title": "皇家盛宴"
+      },
+      "starCharm": {
+        "description": "一顶小小的王冠饰品，让宠物戴上。",
+        "title": "星星挂饰"
+      },
+      "yarnBall": {
+        "description": "弹跳毛线球，尽情玩耍。",
+        "title": "毛线球"
+      }
+    },
+    "owned": "×{qty}",
+    "streak": "连续照顾 {days} 天",
+    "use": "使用"
   },
   "species": {
     "axolotl": "六角恐龙",

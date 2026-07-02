@@ -7,9 +7,11 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   BugIcon,
+  CalendarHeartIcon,
   CookieIcon,
   CrownIcon,
   EggIcon,
+  FlameIcon,
   Gamepad2Icon,
   GemIcon,
   HandHeartIcon,
@@ -45,6 +47,8 @@ const ICONS: Record<string, LucideIcon> = {
   Zap: ZapIcon,
   HeartPulse: HeartPulseIcon,
   HandHeart: HandHeartIcon,
+  Flame: FlameIcon,
+  CalendarHeart: CalendarHeartIcon,
 }
 
 export function AchievementsTab() {

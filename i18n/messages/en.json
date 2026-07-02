@@ -9345,7 +9345,8 @@
         "binding": "Characters",
         "customize": "Customize",
         "dex": "Dex",
-        "nurture": "Nurture"
+        "nurture": "Nurture",
+        "shop": "Shop"
       },
       "title": "Your Pet"
     },
@@ -9459,6 +9460,42 @@
       "edit": "Rename",
       "label": "Pet name",
       "save": "Save name"
+    },
+    "shop": {
+      "apply": "Apply",
+      "balance": "{coins} coins",
+      "buy": "Buy",
+      "categories": {
+        "decor": "Decor",
+        "food": "Food",
+        "toy": "Toys"
+      },
+      "insufficient": "Not enough coins",
+      "items": {
+        "berry": {
+          "description": "A quick snack — restores a little energy.",
+          "title": "Berry"
+        },
+        "puzzleCube": {
+          "description": "A calm brain-teaser that deepens your bond.",
+          "title": "Puzzle Cube"
+        },
+        "royalFeast": {
+          "description": "A lavish meal — deeply restores energy.",
+          "title": "Royal Feast"
+        },
+        "starCharm": {
+          "description": "A tiny crown charm your pet can wear.",
+          "title": "Star Charm"
+        },
+        "yarnBall": {
+          "description": "A bouncy toy for a big burst of fun.",
+          "title": "Yarn Ball"
+        }
+      },
+      "owned": "×{qty}",
+      "streak": "{days}-day care streak",
+      "use": "Use"
     },
     "species": {
       "axolotl": "Axolotl",
