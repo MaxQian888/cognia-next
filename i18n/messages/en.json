@@ -9177,6 +9177,14 @@
         "description": "You own a shiny pet.",
         "title": "Shiny!"
       },
+      "streakMonth": {
+        "description": "Cared for your pet 30 days in a row.",
+        "title": "Month of Devotion"
+      },
+      "streakWeek": {
+        "description": "Cared for your pet 7 days in a row.",
+        "title": "Week of Care"
+      },
       "wellFed": {
         "description": "Fed your pet 50 times.",
         "title": "Well Fed"

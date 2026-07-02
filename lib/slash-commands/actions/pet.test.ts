@@ -76,6 +76,18 @@ describe("dispatchPetSubcommand", () => {
     expect(result.system).toContain("well")
   })
 
+  it("includes coins and streak lines only when present on the profile", async () => {
+    await seedProfile()
+    const withoutEconomy = await dispatchPetSubcommand("status", 0)
+    expect(withoutEconomy.system).not.toContain("Coins")
+    expect(withoutEconomy.system).not.toContain("streak")
+
+    await seedProfile({ coins: 42, streak: { days: 3, lastDay: "2026-07-01" } })
+    const withEconomy = await dispatchPetSubcommand("status", 0)
+    expect(withEconomy.system).toContain("**Coins**: 42")
+    expect(withEconomy.system).toContain("3 day(s)")
+  })
+
   it.each([
     ["feed", "fed"],
     ["play", "played"],

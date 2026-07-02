@@ -72,6 +72,12 @@ async function commandStatus(now: number): Promise<PetCommandResult> {
     `- **Needs**: energy ${Math.round(view.needs.energy)} · mood ${Math.round(view.needs.mood)} · bond ${Math.round(view.needs.bond)}`,
     `- **Condition**: ${view.condition === "unwell" ? "🤒 unwell — needs care" : "✅ well"}`,
   ]
+  if (typeof profile.coins === "number") {
+    lines.push(`- **Coins**: ${Math.floor(profile.coins)}`)
+  }
+  if (profile.streak && profile.streak.days > 0) {
+    lines.push(`- **Care streak**: ${profile.streak.days} day(s)`)
+  }
   return { system: lines.join("\n") }
 }
 

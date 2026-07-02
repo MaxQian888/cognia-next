@@ -159,6 +159,42 @@ describe("handlePetEvent", () => {
     expect(usePetStore.getState().visualState).toBe("happy")
   })
 
+  it("persists coins and the care streak after a user interaction", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    await handlePetEvent({ source: "user", kind: "fed", at: Date.now() })
+    await whenPetEventsSettled()
+
+    const profile = await getPetProfile()
+    expect(profile?.coins).toBeGreaterThan(0)
+    expect(profile?.streak?.days).toBe(1)
+  })
+
+  it("backfills the streak once from the ledger for legacy profiles", async () => {
+    const yesterdayNoon = (() => {
+      const d = new Date()
+      d.setDate(d.getDate() - 1)
+      d.setHours(12, 0, 0, 0)
+      return d.getTime()
+    })()
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    // Legacy ledger row from yesterday; profile has no streak cache yet.
+    await getDb().petActivityLog.add({ kind: "fed", source: "user", xp: 3, ts: yesterdayNoon })
+
+    await handlePetEvent({ source: "user", kind: "played", at: Date.now() })
+    await whenPetEventsSettled()
+
+    // Backfill found yesterday's day-1 streak; today's interaction extends it.
+    expect((await getPetProfile())?.streak?.days).toBe(2)
+  })
+
   it("serializes concurrent events without losing XP", async () => {
     await upsertPetProfile({
       ...createDefaultProfile("acct-1", 0),

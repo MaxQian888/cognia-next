@@ -5,6 +5,7 @@
 
 import type { PetCosmeticOverride } from "./bones"
 import type { PetCareState } from "./care"
+import type { PetStreak } from "./economy"
 import type { PetNeeds } from "./needs"
 import type { ProactiveState } from "./proactive"
 import type { PetSoul } from "./soul"
@@ -54,6 +55,17 @@ export interface PetProfile {
    * overridden — see `PetCosmeticOverride`.
    */
   cosmetic?: PetCosmeticOverride
+  /**
+   * Coin balance earned alongside XP (non-indexed; absent = 0). Advanced by
+   * `applyPetEvent`; spent via `lib/pet/economy/shop.ts`.
+   */
+  coins?: number
+  /**
+   * Daily-care streak cache (non-indexed; absent until the first counted
+   * interaction). Advanced by `applyPetEvent`; backfilled once from the
+   * activity ledger for legacy profiles.
+   */
+  streak?: PetStreak
   createdAt: string
   updatedAt: string
 }

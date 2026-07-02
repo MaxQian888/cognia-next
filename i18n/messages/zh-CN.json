@@ -9177,6 +9177,14 @@
         "description": "你拥有一只闪光宠物。",
         "title": "闪光！"
       },
+      "streakMonth": {
+        "description": "连续 30 天照顾你的宠物。",
+        "title": "三十日守护"
+      },
+      "streakWeek": {
+        "description": "连续 7 天照顾你的宠物。",
+        "title": "七日相伴"
+      },
       "wellFed": {
         "description": "喂食 50 次。",
         "title": "吃得好"

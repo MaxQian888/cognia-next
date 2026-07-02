@@ -20,7 +20,8 @@ import {
 } from "@/lib/db/pet"
 import { generateBones } from "@/lib/pet/bones/generate"
 import { reducePetVisualState, restingWithCare } from "@/lib/pet/state/reducer"
-import { applyPetEvent } from "@/lib/pet/runtime/apply-event"
+import { applyPetEvent, INTERACTION_KINDS } from "@/lib/pet/runtime/apply-event"
+import { computeStreakFromLedger } from "@/lib/pet/economy/streak"
 import { CHAOS_BURST_COUNT } from "@/lib/pet/stats/growth-table"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
 import { checkAchievements } from "@/lib/pet/achievements/check"
@@ -40,10 +41,18 @@ const PASSIVE_KINDS = new Set<PetEventKind>(["idle", "inboundMessage", "schedule
 let lastEventKind: PetEventKind | null = null
 
 async function process(event: PetEvent): Promise<void> {
-  const profile = await getPetProfile()
+  let profile = await getPetProfile()
   if (!profile) return // not initialized yet; init flow seeds the profile
 
   const now = event.at || Date.now()
+
+  // One-time streak backfill for profiles that predate the economy: derive the
+  // cached streak from the interaction ledger. Runs inside the serialized
+  // chain, so it can't race the read-modify-write below.
+  if (profile.streak === undefined) {
+    const ledger = await listPetActivity(2000)
+    profile = { ...profile, streak: computeStreakFromLedger(ledger, INTERACTION_KINDS) }
+  }
 
   // Pure signals for the stat-growth step: a flurry of recent XP-bearing events
   // (chaos) and an error→success recovery (debugging).

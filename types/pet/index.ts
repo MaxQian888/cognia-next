@@ -18,6 +18,8 @@ export { STAT_KEYS, ZERO_STAT_PROGRESS, effectiveStats, normalizeStatProgress } 
 export type { PetCondition, PetCareState } from "./care"
 export { DEFAULT_CARE_STATE, normalizeCareState } from "./care"
 export type { PetStage, PetProfile, PetActivityRow } from "./profile"
+export type { PetStreak, PetInventoryRow, PetItemCategory, PetShopItem } from "./economy"
+export { DEFAULT_STREAK, normalizeStreak, normalizeCoins } from "./economy"
 export type { PetVisualState, PetOneShot, PetMood } from "./visual-state"
 export type { PetEventSource, PetEventKind, PetEvent } from "./events"
 export type { PetConversationRow } from "./conversation"

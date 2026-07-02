@@ -102,6 +102,18 @@ export const PET_ACHIEVEMENTS: PetAchievement[] = [
     icon: "HandHeart",
     isUnlocked: (ctx) => ctx.care.careQuality >= 80,
   },
+  {
+    id: "streak-week",
+    i18nKey: "streakWeek",
+    icon: "Flame",
+    isUnlocked: (ctx) => (ctx.profile.streak?.days ?? 0) >= 7,
+  },
+  {
+    id: "streak-month",
+    i18nKey: "streakMonth",
+    icon: "CalendarHeart",
+    isUnlocked: (ctx) => (ctx.profile.streak?.days ?? 0) >= 30,
+  },
 ]
 
 export function getAchievement(id: string): PetAchievement | undefined {

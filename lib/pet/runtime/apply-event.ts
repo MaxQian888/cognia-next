@@ -12,16 +12,19 @@ import type {
   PetStage,
   PetStatKey,
   PetStatProgress,
+  PetStreak,
 } from "@/types/pet"
-import { normalizeStatProgress } from "@/types/pet"
+import { normalizeCoins, normalizeStatProgress, normalizeStreak } from "@/types/pet"
 import { applyDecay, applyInteraction, type PetInteractionKind } from "@/lib/pet/needs/decay"
 import { levelForXp, stageForLevel } from "@/lib/pet/xp/leveling"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
+import { coinsForEvent } from "@/lib/pet/economy/coin-table"
+import { advanceStreak, coinMultiplier } from "@/lib/pet/economy/streak"
 import { statDeltaForEvent } from "@/lib/pet/stats/growth-table"
 import { applyStatGrowth, statsGrewKeys } from "@/lib/pet/stats/apply-growth"
 import { deriveCareState } from "@/lib/pet/care/condition"
 
-const INTERACTION_KINDS = new Set<string>([
+export const INTERACTION_KINDS: ReadonlySet<string> = new Set<string>([
   "fed",
   "played",
   "petted",
@@ -68,6 +71,8 @@ export interface ApplyEventResult {
   becameUnwell: boolean
   /** True on the unwell → well transition. */
   recovered: boolean
+  /** Coins minted by this event (already added into `profile.coins`). */
+  coinsEarned: number
 }
 
 export function applyPetEvent(
@@ -92,6 +97,20 @@ export function applyPetEvent(
   const level = levelForXp(xp)
   // FUTURE: care.careQuality could bias evolution flavor / branch here.
   const stage: PetStage = profile.soul ? stageForLevel(level) : "egg"
+
+  // 2a) Coins + streak. Only direct user interactions advance the streak;
+  // everything coin-bearing still mints (with the streak multiplier applied),
+  // and an explicit `meta.coins` (plugin rewards, pre-clamped) wins the table.
+  const prevStreak: PetStreak = normalizeStreak(profile.streak)
+  const streak =
+    INTERACTION_KINDS.has(event.kind) && event.source === "user"
+      ? advanceStreak(prevStreak, now)
+      : prevStreak
+  const explicitCoins = typeof event.meta?.coins === "number" ? event.meta.coins : undefined
+  const coinsEarned = Math.floor(
+    coinsForEvent(event.kind, explicitCoins) * coinMultiplier(streak.days)
+  )
+  const coins = normalizeCoins(profile.coins) + coinsEarned
 
   // 2b) Stat growth (additive on top of the deterministic base bones stats) +
   // care condition derived from the freshly-settled needs.
@@ -128,6 +147,8 @@ export function applyPetEvent(
       needs,
       statProgress,
       care,
+      coins,
+      streak,
       updatedAt: new Date(now).toISOString(),
     },
     oneShots,
@@ -138,5 +159,6 @@ export function applyPetEvent(
     care,
     becameUnwell,
     recovered,
+    coinsEarned,
   }
 }

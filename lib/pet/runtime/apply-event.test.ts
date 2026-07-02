@@ -157,4 +157,61 @@ describe("applyPetEvent", () => {
     expect(res.becameUnwell).toBe(true)
     expect(res.care.condition).toBe("unwell")
   })
+
+  describe("coins + streak", () => {
+    const DAY = new Date("2026-07-02T12:00:00").getTime()
+    const YESTERDAY_KEY = "2026-07-01"
+
+    it("mints table coins for a user interaction and starts the streak", () => {
+      const res = applyPetEvent(profile(), event("fed"), DAY)
+      expect(res.coinsEarned).toBe(2) // COIN_AWARD.fed × 1
+      expect(res.profile.coins).toBe(2)
+      expect(res.profile.streak).toEqual({ days: 1, lastDay: "2026-07-02" })
+    })
+
+    it("applies the streak multiplier reached by this event", () => {
+      const p = profile({ coins: 10, streak: { days: 6, lastDay: YESTERDAY_KEY } })
+      const res = applyPetEvent(p, event("played"), DAY)
+      // Advancing to day 7 → ×1.5 on played's 3 coins = 4 (floored).
+      expect(res.profile.streak).toEqual({ days: 7, lastDay: "2026-07-02" })
+      expect(res.coinsEarned).toBe(4)
+      expect(res.profile.coins).toBe(14)
+    })
+
+    it("does not re-increment the streak on a same-day repeat", () => {
+      const p = profile({ streak: { days: 3, lastDay: "2026-07-02" } })
+      const res = applyPetEvent(p, event("fed"), DAY)
+      expect(res.profile.streak).toEqual({ days: 3, lastDay: "2026-07-02" })
+    })
+
+    it("mints coins for milestones without advancing the streak", () => {
+      const p = profile({ streak: { days: 3, lastDay: YESTERDAY_KEY } })
+      const res = applyPetEvent(p, { source: "goal", kind: "goalComplete", at: DAY }, DAY)
+      expect(res.profile.streak).toEqual({ days: 3, lastDay: YESTERDAY_KEY })
+      // 12 × 1.25 (3-day streak) = 15.
+      expect(res.coinsEarned).toBe(15)
+    })
+
+    it("never advances the streak for non-user interaction sources", () => {
+      const res = applyPetEvent(profile(), { source: "workflow", kind: "fed", at: DAY }, DAY)
+      expect(res.profile.streak).toEqual({ days: 0, lastDay: null })
+      expect(res.coinsEarned).toBe(2)
+    })
+
+    it("honors an explicit meta.coins amount over the table", () => {
+      const res = applyPetEvent(
+        profile(),
+        { source: "workflow", kind: "workflowRun", meta: { coins: 9 }, at: DAY },
+        DAY
+      )
+      expect(res.coinsEarned).toBe(9)
+    })
+
+    it("earns nothing on passive kinds and normalizes a legacy coin-less profile", () => {
+      const res = applyPetEvent(profile(), event("idle"), DAY)
+      expect(res.coinsEarned).toBe(0)
+      expect(res.profile.coins).toBe(0)
+      expect(res.profile.streak).toEqual({ days: 0, lastDay: null })
+    })
+  })
 })

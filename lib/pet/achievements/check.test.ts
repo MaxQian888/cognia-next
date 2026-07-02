@@ -113,4 +113,15 @@ describe("checkAchievements", () => {
       "devoted-caretaker"
     )
   })
+
+  it("unlocks streak achievements at their day thresholds", () => {
+    const at = (days: number) =>
+      checkAchievements(ctx({ profile: { streak: { days, lastDay: "2026-07-02" } } }), [])
+    expect(at(6)).not.toContain("streak-week")
+    expect(at(7)).toContain("streak-week")
+    expect(at(29)).not.toContain("streak-month")
+    expect(at(30)).toEqual(expect.arrayContaining(["streak-week", "streak-month"]))
+    // Legacy profile without a streak cache stays locked.
+    expect(checkAchievements(ctx({}), [])).not.toContain("streak-week")
+  })
 })
