@@ -38,6 +38,39 @@ import { createDoomLoopGuard } from "./doom-loop.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
 
+/**
+ * Plugin tools that MUST remain callable in plan mode: subagent dispatch
+ * (`dispatch_agent` / its `Task` alias) and `load_skill`. Plan mode's
+ * `PLAN_MODE_PROMPT_SECTION` explicitly tells the model to dispatch the
+ * read-only `Explore` / `Plan` subagents, so blocking these would break the
+ * explore→plan flow on every non-Anthropic provider. Permitting the dispatch
+ * CALL does not widen the read-only guarantee: the dispatched child inherits
+ * `permissionMode: "plan"` (its own gate stays read-only) and the built-in
+ * Explore/Plan agents additionally carry a read-only tool allowlist. `load_skill`
+ * only reads a skill's instructions. Kept as a set so the plan gate reads
+ * declaratively and stays in sync with the CLI's `DISPATCH_AGENT_TOOL_NAME` /
+ * `TASK_TOOL_NAME`. */
+const PLAN_ALLOWED_PLUGIN_TOOLS = new Set(["dispatch_agent", "Task", "load_skill"])
+
+/**
+ * Built-in file-edit-class tools auto-approved in `acceptEdits` mode — the
+ * write/edit family a user who "accepted edits" implicitly trusts. Mirrors the
+ * Anthropic SDK's native `acceptEdits` and the ACP client's edit auto-approval
+ * (`lib/ai/agent/external/acp-client.ts`) so the AI-SDK path stops prompting for
+ * every edit. DELIBERATELY excludes exec/process/git-mutation tools (bash,
+ * shell, start_process, git_commit, …) and directory/rename/move ops — those
+ * still route through the normal approval policy. Read-only tools are already
+ * auto-approved upstream, so they aren't listed here. */
+const ACCEPT_EDITS_TOOL_NAMES = new Set([
+  "write",
+  "edit",
+  "multi_edit",
+  "apply_patch",
+  "NotebookEdit",
+  "file_append",
+  "file_binary_write",
+])
+
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
 // constant, the read-only gate, and the recoverable message all live in
 // `../builtin-tools/read-only-timeout.mjs` so this channel and the Anthropic
@@ -181,8 +214,10 @@ export function createToolPermissionGate({
 
     // Plan mode: enforce read-only here on the AI-SDK path (the Anthropic path
     // gets this from the SDK). Only read-only built-in tools — plus the
-    // `exit_plan_mode` signal tool the model uses to submit its final plan and
-    // the side-effect-free `ask_user` elicitation tool — may run; every
+    // `exit_plan_mode` signal tool the model uses to submit its final plan, the
+    // read-only-safe subagent-dispatch / `load_skill` plugin tools the plan
+    // prompt instructs the model to use (see PLAN_ALLOWED_PLUGIN_TOOLS), and the
+    // side-effect-free `ask_user` elicitation tool — may run; every
     // mutating/exec built-in, other plugin tool, or unknown tool is denied, so a
     // non-Anthropic provider in plan mode can't write/edit/bash.
     if (mode === "plan") {
@@ -192,6 +227,7 @@ export function createToolPermissionGate({
       const allowed =
         (server === SERVER_NAME &&
           (READ_ONLY_TOOL_NAMES.has(bare) || bare === EXIT_PLAN_TOOL_NAME)) ||
+        (server === PLUGIN_TOOLS_SERVER_NAME && PLAN_ALLOWED_PLUGIN_TOOLS.has(bare)) ||
         bare === ASK_USER_TOOL_NAME
       if (!allowed) {
         throw new Error(`plan mode: tool "${toolName}" is not permitted (read-only tools only)`)
@@ -199,8 +235,57 @@ export function createToolPermissionGate({
       return input
     }
 
+    // dontAsk: never prompt. Only pre-approved tools run — read-only built-ins
+    // (auto-allowed in every mode), suppress/alwaysAllow entries, and ruleset
+    // `allow` verdicts. Everything else is DENIED without prompting, surfaced
+    // as a recoverable tool-error the model can react to (same mechanism as the
+    // plan gate above). The Anthropic path gets these semantics natively from
+    // the Agent SDK. `ask_user` stays allowed — it is short-circuited before
+    // the mode read (it IS the user interaction, not an escalation). A doomed
+    // Nth identical call is denied outright: we cannot prompt in dontAsk.
+    if (mode === "dontAsk") {
+      if (!doomed) {
+        const parts = String(toolName).split("__")
+        const server = parts.length >= 3 ? parts[1] : null
+        const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
+        if (server === SERVER_NAME && READ_ONLY_TOOL_NAMES.has(bare)) return input
+        if (suppress && suppress.includes(toolName)) return input
+        if (alwaysAllow && alwaysAllow.includes(toolName)) return input
+        if (ruleset) {
+          let verdict
+          try {
+            verdict = resolveForToolCall(ruleset, toolName, input)
+          } catch {
+            verdict = undefined
+          }
+          if (verdict === "allow") return input
+        }
+      }
+      throw new Error(
+        `dontAsk mode: tool "${toolName}" is not pre-approved (no allow rule), so it was denied without prompting. Proceed without it, or ask the user to add an allow rule or switch permission modes.`
+      )
+    }
+
+    // "auto" mode is deliberately NOT special-cased here: it falls through to
+    // suppress/alwaysAllow/ruleset and then emits a `permission_request`, which
+    // the RENDERER answers via the Layer-B auto-mode runner (command judge /
+    // safety classifier) instead of a human prompt (ADR-0041).
+
     // bypassPermissions skips approvals — but NOT the doom guard above.
     if (mode === "bypassPermissions" && !doomed) return input
+
+    // acceptEdits: auto-approve the file-edit-class built-ins (see
+    // ACCEPT_EDITS_TOOL_NAMES) so the AI-SDK path matches the Anthropic SDK's
+    // native acceptEdits — a user who accepted edits isn't re-prompted per
+    // write/edit. Also what lets `/agents run` in acceptEdits actually write
+    // (its headless gate has no interactive prompt). Exec/process/git/unknown
+    // tools fall through to the normal policy; the doom guard still fires.
+    if (mode === "acceptEdits" && !doomed) {
+      const parts = String(toolName).split("__")
+      const server = parts.length >= 3 ? parts[1] : null
+      const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
+      if (server === SERVER_NAME && ACCEPT_EDITS_TOOL_NAMES.has(bare)) return input
+    }
 
     if (!doomed) {
       if (suppress && suppress.includes(toolName)) return input

@@ -191,6 +191,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     // the ai-sdk bridge). `undefined` ⇒ buildCogniaToolsServer's 120s default;
     // `0` disables.
     toolExecutionTimeoutMs: sendOptions.toolExecutionTimeoutMs,
+    // Cap oversized built-in tool-result bodies (parity with the ai-sdk
+    // compaction cap). Undefined ⇒ no cap. See builtin-tools/result-cap.mjs.
+    maxToolResultTokens: sendOptions.compaction?.maxToolResultTokens,
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).

@@ -20,8 +20,43 @@ test("emits a system init message before the first content event", () => {
   assert.equal(out[0].subtype, "init")
   assert.equal(out[0].session_id, "sdk-sess-1")
   assert.equal(out[0].model, "gpt-4o-mini")
-  // The text-delta produces an assistant snapshot right after.
-  assert.equal(out[1].type, "assistant")
+  // The text-delta streams incremental frames right after (message_start first).
+  assert.equal(out[1].type, "stream_event")
+  assert.equal(out[1].event.type, "message_start")
+})
+
+test("text/reasoning deltas stream as message_start + content_block_delta frames", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const first = adapter.handle({ type: "text-delta", text: "Hel" })
+  // No full assistant snapshot per delta — only incremental stream frames.
+  assert.ok(!first.some((m) => m.type === "assistant"))
+  const kinds = first.map((m) => m.event?.type).filter(Boolean)
+  assert.ok(kinds.includes("message_start"))
+  assert.ok(kinds.includes("content_block_delta"))
+  const delta = first.find((m) => m.event?.type === "content_block_delta").event.delta
+  assert.deepEqual(delta, { type: "text_delta", text: "Hel" })
+  // Second delta: content_block_delta only (message_start is once-per-message id).
+  const second = adapter.handle({ type: "text-delta", text: "lo" })
+  assert.ok(second.every((m) => m.type === "stream_event"))
+  assert.ok(!second.some((m) => m.event?.type === "message_start"))
+  // Reasoning streams as a thinking_delta.
+  const r = adapter.handle({ type: "reasoning-delta", text: "hmm" })
+  const rDelta = r.find((m) => m.event?.type === "content_block_delta").event.delta
+  assert.deepEqual(rDelta, { type: "thinking_delta", thinking: "hmm" })
+})
+
+test("sealAssistant() returns [] when nothing is buffered", () => {
+  const adapter = createEventAdapter(baseCtx())
+  assert.deepEqual(adapter.sealAssistant(), [])
+})
+
+test("sealAssistant() seals streamed text into a canonical assistant sharing the stream id", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const start = adapter.handle({ type: "text-delta", text: "hi" })
+  const streamId = start.find((m) => m.event?.type === "message_start").event.message.id
+  const sealed = adapter.sealAssistant().find((m) => m.type === "assistant")
+  assert.equal(sealed.message.id, streamId)
+  assert.equal(sealed.message.content[0].text, "hi")
 })
 
 test("setModel retags subsequent assistant snapshots without touching the init message", () => {
@@ -29,16 +64,19 @@ test("setModel retags subsequent assistant snapshots without touching the init m
   // First turn streams under the original model.
   const first = adapter.handle({ type: "text-delta", id: "1", text: "hi" })
   assert.equal(first[0].model, "gpt-4o-mini", "init keeps the original model")
-  assert.equal(first.find((m) => m.type === "assistant").message.model, "gpt-4o-mini")
+  assert.equal(
+    adapter.sealAssistant().find((m) => m.type === "assistant").message.model,
+    "gpt-4o-mini"
+  )
 
   // Live switch, then a fresh turn (reset clears per-turn buffers).
   adapter.setModel("gpt-4o")
   adapter.reset()
   const second = adapter.handle({ type: "text-delta", id: "2", text: "again" })
-  // The once-per-session init is NOT re-emitted, so the new turn is just the
-  // assistant snapshot — now tagged with the switched model.
+  // The once-per-session init is NOT re-emitted; the sealed snapshot for the new
+  // turn is tagged with the switched model.
   assert.ok(!second.some((m) => m.type === "system"), "init stays once-per-session")
-  assert.equal(second.find((m) => m.type === "assistant").message.model, "gpt-4o")
+  assert.equal(adapter.sealAssistant().find((m) => m.type === "assistant").message.model, "gpt-4o")
 })
 
 test("setModel ignores empty / non-string values (can't blank the model)", () => {
@@ -46,8 +84,11 @@ test("setModel ignores empty / non-string values (can't blank the model)", () =>
   adapter.setModel("")
   adapter.setModel(undefined)
   adapter.setModel(42)
-  const out = adapter.handle({ type: "text-delta", id: "1", text: "x" })
-  assert.equal(out.find((m) => m.type === "assistant").message.model, "gpt-4o-mini")
+  adapter.handle({ type: "text-delta", id: "1", text: "x" })
+  assert.equal(
+    adapter.sealAssistant().find((m) => m.type === "assistant").message.model,
+    "gpt-4o-mini"
+  )
 })
 
 // ── AI SDK v6 field shapes (ai@6) ──────────────────────────────────────────
@@ -57,16 +98,16 @@ test("setModel ignores empty / non-string values (can't blank the model)", () =>
 
 test("v6 text-delta uses `text` and accumulates non-empty assistant text", () => {
   const adapter = createEventAdapter(baseCtx())
-  const out = adapter.handle({ type: "text-delta", id: "1", text: "Hello" })
-  const assistant = out.find((m) => m.type === "assistant")
+  adapter.handle({ type: "text-delta", id: "1", text: "Hello" })
+  const assistant = adapter.sealAssistant().find((m) => m.type === "assistant")
   assert.equal(assistant.message.content[0].type, "text")
   assert.equal(assistant.message.content[0].text, "Hello")
 })
 
 test("v6 reasoning-delta uses `text`", () => {
   const adapter = createEventAdapter(baseCtx())
-  const out = adapter.handle({ type: "reasoning-delta", id: "1", text: "thinking..." })
-  const assistant = out.find((m) => m.type === "assistant")
+  adapter.handle({ type: "reasoning-delta", id: "1", text: "thinking..." })
+  const assistant = adapter.sealAssistant().find((m) => m.type === "assistant")
   const thinking = assistant.message.content.find((b) => b.type === "thinking")
   assert.equal(thinking.thinking, "thinking...")
 })
@@ -134,8 +175,8 @@ test("text-delta accumulates into a single text content block", () => {
   const adapter = createEventAdapter(baseCtx())
   adapter.handle({ type: "text-delta", textDelta: "Hello, " })
   adapter.handle({ type: "text-delta", textDelta: "world" })
-  const out = adapter.handle({ type: "text-delta", textDelta: "!" })
-  const last = out[out.length - 1]
+  adapter.handle({ type: "text-delta", textDelta: "!" })
+  const last = adapter.sealAssistant().find((m) => m.type === "assistant")
   assert.equal(last.type, "assistant")
   assert.equal(last.message.content.length, 1)
   assert.equal(last.message.content[0].type, "text")
@@ -145,8 +186,8 @@ test("text-delta accumulates into a single text content block", () => {
 test("reasoning events go to a thinking content block", () => {
   const adapter = createEventAdapter(baseCtx())
   adapter.handle({ type: "reasoning-delta", textDelta: "I should " })
-  const out = adapter.handle({ type: "reasoning-delta", textDelta: "think first." })
-  const last = out[out.length - 1]
+  adapter.handle({ type: "reasoning-delta", textDelta: "think first." })
+  const last = adapter.sealAssistant().find((m) => m.type === "assistant")
   const thinking = last.message.content.find((b) => b.type === "thinking")
   assert.ok(thinking, "thinking block present")
   assert.equal(thinking.thinking, "I should think first.")
@@ -299,7 +340,7 @@ test("unknown event types are ignored after init", () => {
 test("text after a tool_use starts a fresh message id", () => {
   const adapter = createEventAdapter(baseCtx())
   const a = adapter.handle({ type: "text-delta", textDelta: "before" })
-  const lastA = a[a.length - 1]
+  const idA = a.find((m) => m.event?.type === "message_start").event.message.id
   adapter.handle({
     type: "tool-call",
     toolCallId: "call-1",
@@ -307,10 +348,10 @@ test("text after a tool_use starts a fresh message id", () => {
     args: {},
   })
   const c = adapter.handle({ type: "text-delta", textDelta: "after" })
-  const lastC = c[c.length - 1]
+  const idC = c.find((m) => m.event?.type === "message_start").event.message.id
   // Different message ids signal the renderer's id-keyed dedup that this is
   // a new assistant message.
-  assert.notEqual(lastA.message.id, lastC.message.id)
+  assert.notEqual(idA, idC)
 })
 
 // ── Multi-turn reset (duplicate-output regression) ─────────────────────────
@@ -325,8 +366,9 @@ test("reset() clears turn-scoped text so a new turn does not duplicate the old r
   adapter.finish({ usage: { inputTokens: 5, outputTokens: 4 } })
   // Turn 2 begins — the head-of-turn reset clears the accumulator.
   adapter.reset()
-  const out = adapter.handle({ type: "text-delta", text: "Reply for turn two." })
-  const textBlock = out
+  adapter.handle({ type: "text-delta", text: "Reply for turn two." })
+  const textBlock = adapter
+    .sealAssistant()
     .find((m) => m.type === "assistant")
     .message.content.find((b) => b.type === "text")
   assert.equal(textBlock.text, "Reply for turn two.")
@@ -339,8 +381,8 @@ test("reset() drops a prior turn's tool_use, reasoning, and citations", () => {
   adapter.handle({ type: "text-delta", text: "done" })
   adapter.handle({ type: "source-url", url: "https://a.dev", title: "A" })
   adapter.reset()
-  const out = adapter.handle({ type: "text-delta", text: "fresh" })
-  const assistant = out.find((m) => m.type === "assistant")
+  adapter.handle({ type: "text-delta", text: "fresh" })
+  const assistant = adapter.sealAssistant().find((m) => m.type === "assistant")
   // Only the new text — no carried-over tool_use / thinking / citations.
   assert.equal(assistant.message.content.length, 1)
   assert.equal(assistant.message.content[0].type, "text")
@@ -351,10 +393,10 @@ test("reset() drops a prior turn's tool_use, reasoning, and citations", () => {
 test("reset() assigns a fresh message id so turns are not merged by dedup", () => {
   const adapter = createEventAdapter(baseCtx())
   const a = adapter.handle({ type: "text-delta", text: "turn one" })
-  const idA = a[a.length - 1].message.id
+  const idA = a.find((m) => m.event?.type === "message_start").event.message.id
   adapter.reset()
   const b = adapter.handle({ type: "text-delta", text: "turn two" })
-  const idB = b[b.length - 1].message.id
+  const idB = b.find((m) => m.event?.type === "message_start").event.message.id
   assert.notEqual(idA, idB)
 })
 
@@ -443,8 +485,9 @@ test("a citation with no url and no title is ignored", () => {
 
 test("text blocks without sources carry no citations field", () => {
   const adapter = createEventAdapter(baseCtx())
-  const out = adapter.handle({ type: "text-delta", text: "plain" })
-  const textBlock = out
+  adapter.handle({ type: "text-delta", text: "plain" })
+  const textBlock = adapter
+    .sealAssistant()
     .find((m) => m.type === "assistant")
     .message.content.find((b) => b.type === "text")
   assert.equal(textBlock.citations, undefined)

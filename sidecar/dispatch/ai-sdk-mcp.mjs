@@ -64,6 +64,14 @@ function isMcpToolPermitted(namespaced, server, allowSet, disallowedSet) {
  * clients. A server that can't be built/connected, or whose `tools()` rejects,
  * is logged and skipped — one bad server never breaks the turn.
  *
+ * Servers are connected CONCURRENTLY (previously serial), so a slow or cold
+ * remote MCP endpoint no longer blocks the others from being ready for the turn.
+ * Each connection gets ONE retry with a short backoff — remote MCP endpoints are
+ * frequently cold on first hit. Results merge in input order for a deterministic
+ * tool map. OAuth is already applied upstream: `resolveSendOptions`
+ * (`build-options.ts`) injects the bearer token into each server's
+ * `headers.Authorization`, which `toMcpTransport` forwards verbatim.
+ *
  * @param {{
  *   mcpServers: Record<string, Record<string, any>> | undefined,
  *   gate?: (toolName: string, input: any) => Promise<any>,
@@ -72,6 +80,7 @@ function isMcpToolPermitted(namespaced, server, allowSet, disallowedSet) {
  *   log?: (level: "info"|"warn"|"error", message: string) => void,
  *   createClient?: (config: any) => Promise<any>,   // injected in tests
  *   StdioTransport?: any,                            // injected in tests
+ *   retryDelayMs?: number,                           // backoff before the 1 retry
  * }} params
  * @returns {Promise<{ tools: Record<string, any>, close: () => Promise<void> }>}
  */
@@ -83,6 +92,7 @@ export async function buildAiSdkMcpTools({
   log,
   createClient,
   StdioTransport,
+  retryDelayMs = 200,
 }) {
   /** @type {Record<string, any>} */
   const tools = {}
@@ -103,33 +113,61 @@ export async function buildAiSdkMcpTools({
   const allowSet =
     Array.isArray(allowedTools) && allowedTools.length > 0 ? new Set(allowedTools) : null
   const disallowedSet = new Set(Array.isArray(disallowedTools) ? disallowedTools : [])
+  const buildTransport = (entry) =>
+    toMcpTransport(entry, StdioTransport ? { StdioTransport } : undefined)
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-  for (const [server, entry] of Object.entries(mcpServers)) {
-    const transport = toMcpTransport(entry, StdioTransport ? { StdioTransport } : undefined)
-    if (!transport) {
+  /**
+   * Connect one server (one retry on connect failure), returning its client and
+   * namespaced/gated tools, or `null` when the server can't be reached / has an
+   * unsupported transport. A fresh transport is built per attempt — a spawned
+   * stdio transport that failed to connect can't be reused.
+   */
+  const connectServer = async (server, entry) => {
+    if (!buildTransport(entry)) {
       log?.("warn", `mcp "${server}": unsupported or incomplete transport config, skipped`)
-      continue
+      return null
     }
-    let client
-    try {
-      client = await make({ transport })
-    } catch (err) {
-      log?.("warn", `mcp "${server}" failed to connect: ${err?.message ?? err}`)
-      continue
+    let client = null
+    for (let attempt = 0; attempt < 2 && !client; attempt++) {
+      if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs)
+      try {
+        client = await make({ transport: buildTransport(entry) })
+      } catch (err) {
+        if (attempt === 1) {
+          log?.("warn", `mcp "${server}" failed to connect: ${err?.message ?? err}`)
+          return null
+        }
+      }
     }
-    clients.push(client)
     let serverTools
     try {
       serverTools = await client.tools()
     } catch (err) {
       log?.("warn", `mcp "${server}" tools() failed: ${err?.message ?? err}`)
-      continue
+      // Keep the client so `close()` still disconnects it.
+      return { client, tools: {} }
     }
+    /** @type {Record<string, any>} */
+    const collected = {}
     for (const [toolName, toolDef] of Object.entries(serverTools ?? {})) {
       const namespaced = `mcp__${server}__${toolName}`
       if (!isMcpToolPermitted(namespaced, server, allowSet, disallowedSet)) continue
-      tools[namespaced] = wrapMcpToolWithGate(toolDef, namespaced, gate)
+      collected[namespaced] = wrapMcpToolWithGate(toolDef, namespaced, gate)
     }
+    return { client, tools: collected }
+  }
+
+  // Connect every server concurrently; merge in input order so the tool map is
+  // deterministic. `allSettled` + null-skip keeps one bad server from breaking
+  // the turn.
+  const settled = await Promise.allSettled(
+    Object.entries(mcpServers).map(([server, entry]) => connectServer(server, entry))
+  )
+  for (const r of settled) {
+    if (r.status !== "fulfilled" || !r.value) continue
+    if (r.value.client) clients.push(r.value.client)
+    Object.assign(tools, r.value.tools)
   }
 
   return { tools, close }

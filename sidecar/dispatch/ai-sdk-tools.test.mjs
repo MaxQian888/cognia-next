@@ -176,6 +176,157 @@ test("createToolPermissionGate: plan mode allows the side-effect-free ask_user t
   await assert.rejects(gate("mcp__cognia-plugin-tools__grep", {}), /plan mode/)
 })
 
+test("createToolPermissionGate: plan mode allows subagent dispatch + load_skill plugin tools", async () => {
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "plan" },
+  })
+  // Plan mode instructs the model to dispatch the read-only Explore/Plan
+  // subagents; the dispatch tools live on the plugin-tools server, so they must
+  // be allowlisted here or the explore→plan flow breaks off-Anthropic. The
+  // dispatched child inherits permissionMode:"plan", so read-only is preserved.
+  await gate("mcp__cognia-plugin-tools__dispatch_agent", {
+    subagentId: "Explore",
+    prompt: "survey",
+  })
+  await gate("mcp__cognia-plugin-tools__Task", { subagentId: "Plan", prompt: "design" })
+  await gate("mcp__cognia-plugin-tools__load_skill", { name: "some-skill" })
+  // A mutating plugin tool stays denied even though dispatch is now permitted.
+  await assert.rejects(gate("mcp__cognia-plugin-tools__file_write", {}), /plan mode/)
+})
+
+test("createToolPermissionGate: acceptEdits auto-approves file-edit tools, still prompts for exec", async () => {
+  let emitted = 0
+  const pending = new Map()
+  const gate = createToolPermissionGate({
+    emit: (ev) => {
+      emitted++
+      queueMicrotask(() => pending.get(ev.requestId)?.resolve({ behavior: "deny", message: "no" }))
+    },
+    sessionId: "s1",
+    pendingApprovals: pending,
+    sendOptions: { permissionMode: "acceptEdits" },
+  })
+  // Edit-class built-ins run without a permission_request (parity with the
+  // Anthropic SDK's acceptEdits).
+  await gate("mcp__cognia-tools__write", { path: "a", content: "x" })
+  await gate("mcp__cognia-tools__edit", {})
+  await gate("mcp__cognia-tools__multi_edit", {})
+  assert.equal(emitted, 0, "edit-class tools must not prompt in acceptEdits")
+  // Exec/process tools are NOT edit-class → still gated (here denied by the stub).
+  await assert.rejects(gate("mcp__cognia-tools__bash", { command: "ls" }))
+  assert.ok(emitted >= 1, "a non-edit tool must still round-trip through approval")
+})
+
+test("createToolPermissionGate: dontAsk allows read-only builtins, denies the rest without prompting", async () => {
+  const events = []
+  const gate = createToolPermissionGate({
+    emit: (m) => events.push(m),
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "dontAsk" },
+  })
+  // Read-only built-in → allowed silently.
+  await gate("mcp__cognia-tools__git_status", {})
+  // Mutating built-in and plugin tool → denied WITHOUT a permission_request.
+  await assert.rejects(gate("mcp__cognia-tools__bash", { command: "ls" }), /dontAsk mode/)
+  await assert.rejects(gate("mcp__cognia-plugin-tools__file_write", {}), /dontAsk mode/)
+  assert.equal(
+    events.some((e) => e.type === "permission_request"),
+    false,
+    "dontAsk must never emit a permission_request"
+  )
+})
+
+test("createToolPermissionGate: dontAsk honours ruleset allow but denies (not prompts) on no verdict", async () => {
+  const events = []
+  const gate = createToolPermissionGate({
+    emit: (m) => events.push(m),
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: {
+      permissionMode: "dontAsk",
+      permissionRuleset: { "mcp__cognia-tools__write": "allow" },
+    },
+  })
+  // Pre-approved by an allow rule → runs.
+  await gate("mcp__cognia-tools__write", { path: "a", content: "x" })
+  // No verdict for bash → denied without prompting (default mode would prompt here).
+  await assert.rejects(gate("mcp__cognia-tools__bash", { command: "ls" }), /dontAsk mode/)
+  assert.equal(events.length, 0, "no permission_request in dontAsk")
+})
+
+test("createToolPermissionGate: dontAsk honours suppress/alwaysAllow entries and ask_user", async () => {
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: {
+      permissionMode: "dontAsk",
+      suppressApprovalForTools: ["mcp__cognia-tools__edit"],
+      alwaysAllowTools: ["mcp__cognia-plugin-tools__web_search"],
+    },
+  })
+  await gate("mcp__cognia-tools__edit", {})
+  await gate("mcp__cognia-plugin-tools__web_search", { q: "x" })
+  // ask_user is the user interaction itself — allowed in every mode.
+  await gate("mcp__cognia-plugin-tools__ask_user", { question: "?" })
+  await assert.rejects(gate("mcp__cognia-tools__multi_edit", {}), /dontAsk mode/)
+})
+
+test("createToolPermissionGate: dontAsk denies a doomed repeat even for a read-only tool", async () => {
+  // We cannot round-trip through the user in dontAsk, so a doomed (Nth
+  // identical) call is denied outright rather than silently allowed.
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "dontAsk" },
+    doomGuard: { check: () => "ask" },
+  })
+  await assert.rejects(gate("mcp__cognia-tools__git_status", {}), /dontAsk mode/)
+})
+
+test("createToolPermissionGate: live set_mode into dontAsk takes effect on the next call", async () => {
+  const sendOptions = { permissionMode: "bypassPermissions" }
+  const events = []
+  const gate = createToolPermissionGate({
+    emit: (m) => events.push(m),
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions,
+  })
+  // bypass: write allowed.
+  await gate("mcp__cognia-tools__write", { path: "a", content: "b" })
+  // Switch the live session to dontAsk (as claude_set_mode does).
+  sendOptions.permissionMode = "dontAsk"
+  await assert.rejects(
+    gate("mcp__cognia-tools__write", { path: "a", content: "b" }),
+    /dontAsk mode/
+  )
+  assert.equal(events.length, 0)
+})
+
+test("createToolPermissionGate: auto mode emits a permission_request (renderer Layer-B answers it)", async () => {
+  // Regression: "auto" must neither silently allow nor deny in the gate — the
+  // round-trip is how the renderer's auto-mode runner gets to classify the call.
+  const events = []
+  const pendingApprovals = new Map()
+  const gate = createToolPermissionGate({
+    emit: (m) => {
+      events.push(m)
+      queueMicrotask(() => pendingApprovals.get(m.requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s1",
+    pendingApprovals,
+    sendOptions: { permissionMode: "auto" },
+  })
+  await gate("mcp__cognia-tools__bash", { command: "ls" })
+  assert.equal(events.filter((e) => e.type === "permission_request").length, 1)
+})
+
 test("createToolPermissionGate: ask_user is allowed without prompting in default mode", async () => {
   // Regression: ask_user IS the user interaction (the renderer's AskUserDialog
   // blocks until answered), so it must never round-trip through the generic

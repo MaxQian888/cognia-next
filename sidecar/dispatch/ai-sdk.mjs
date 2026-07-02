@@ -271,6 +271,19 @@ function chargeLegSteps({ legStepsRead, legStepsRun, perLegCap }) {
 }
 
 /**
+ * Resolve the per-leg agentic step cap (STEP_CHUNK). A caller-supplied
+ * `aiSdkStepChunk` (≥ 1, floored) raises/lowers how many sequential tool-use
+ * steps run per `streamText` leg; anything invalid falls back to the default 16.
+ * Exported via `__testing__`.
+ *
+ * @param {unknown} aiSdkStepChunk
+ * @returns {number}
+ */
+function resolveStepChunk(aiSdkStepChunk) {
+  return typeof aiSdkStepChunk === "number" && aiSdkStepChunk >= 1 ? Math.floor(aiSdkStepChunk) : 16
+}
+
+/**
  * @param {{
  *   provider: string,
  *   sessionId: string,
@@ -512,7 +525,15 @@ export function dispatchAiSdk({
   // otherwise 256. This replaces a hard 16-step single leg that silently stopped
   // any multi-tool task on every non-Anthropic provider — the Anthropic Agent
   // SDK loops unbounded, so the two channels were badly asymmetric.
-  const STEP_CHUNK = 16
+  // Per-leg agentic step cap. Each `streamText` leg re-sends the whole growing
+  // conversation, so a LARGER chunk means fewer legs → fewer full re-sends for a
+  // long tool-using turn (less prompt-token overhead). The trade-off: a larger
+  // chunk runs more steps between the per-leg `maybeCompact` check, so the window
+  // is inspected less often within a turn — keep the default modest (16) and let
+  // callers opt into a larger chunk via `aiSdkStepChunk`. Parallel tool calls
+  // within a single step are handled natively by AI SDK (multiple tool-calls per
+  // step execute concurrently), so this only bounds sequential tool-use depth.
+  const STEP_CHUNK = resolveStepChunk(sendOptions.aiSdkStepChunk)
   const baseStepsBudget =
     typeof sendOptions.maxTurns === "number" && sendOptions.maxTurns > 0
       ? sendOptions.maxTurns
@@ -1085,6 +1106,11 @@ export function dispatchAiSdk({
             legText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
           }
         }
+        // Seal this leg's streamed text/reasoning deltas into the canonical full
+        // `assistant` snapshot (the deltas above are `stream_event` previews). The
+        // renderer replaces the in-progress preview by id. No-op for a leg that
+        // produced only tool results (its boundary snapshots already sealed it).
+        flushAdapter(adapter.sealAssistant())
         assistantText += legText
 
         // A streamed error before ANY text in the whole turn is a failed turn —
@@ -1208,6 +1234,9 @@ export function dispatchAiSdk({
         // safety cap and that another message resumes the same accumulated context.
         const note = `\n\n_(Reached the ${maxStepsBudget}-step agentic safety cap for this turn — send another message to continue.)_`
         flushAdapter(adapter.handle({ type: "text-delta", text: note }))
+        // Seal the appended note as the canonical assistant snapshot (the line
+        // above only streamed it as a `stream_event` delta).
+        flushAdapter(adapter.sealAssistant())
         assistantText += note
       }
 
@@ -1427,4 +1456,5 @@ export const __testing__ = {
   projectToolResultImages,
   sanitizeToolMessagePairs,
   chargeLegSteps,
+  resolveStepChunk,
 }

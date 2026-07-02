@@ -88,6 +88,11 @@ export function createEventAdapter(ctx) {
   const sourceKeys = new Set()
   let initEmitted = false
   let lastUsage = null
+  // The messageId a `stream_event` `message_start` was already emitted for. Lets
+  // the delta path seed the renderer's in-progress assistant preview exactly once
+  // per assistant message (idempotent on the renderer, but avoids redundant
+  // frames). Reset whenever `messageId` rotates (turn boundary / tool_use split).
+  let streamStartId = null
 
   /**
    * Convert an AI SDK source stream part into an Anthropic-shaped citation.
@@ -154,6 +159,43 @@ export function createEventAdapter(ctx) {
     }
   }
 
+  // --- Incremental stream frames --------------------------------------------
+  // Text / reasoning deltas are emitted as `stream_event` partial-message frames
+  // (the same shape the Anthropic `includePartialMessages` path uses) instead of
+  // a full assistant snapshot per delta. The renderer's `applyStreamEvent`
+  // (`lib/claude/adapter.ts`) seeds an in-progress assistant message on
+  // `message_start` and grows it on each `content_block_delta`; a later full
+  // `assistant` snapshot (block boundary or `sealAssistant()` at leg end) replaces
+  // it by id. This turns the previous O(n²) "re-serialize the whole textBuf per
+  // delta" into O(n) — each frame carries only the new chunk.
+  function streamEnvelope(streamEvent) {
+    return {
+      type: "stream_event",
+      session_id: ctx.sdkSessionId,
+      uuid: randomUUID(),
+      parent_tool_use_id: null,
+      event: streamEvent,
+    }
+  }
+
+  /** Emit `message_start` once per assistant messageId (idempotent downstream). */
+  function emitStreamStartIfNeeded(out) {
+    if (streamStartId === messageId) return
+    streamStartId = messageId
+    out.push(streamEnvelope({ type: "message_start", message: { id: messageId } }))
+  }
+
+  /** A `content_block_delta` for a text or thinking chunk. */
+  function streamDelta(kind, chunk) {
+    return streamEnvelope({
+      type: "content_block_delta",
+      delta:
+        kind === "thinking_delta"
+          ? { type: "thinking_delta", thinking: chunk }
+          : { type: "text_delta", text: chunk },
+    })
+  }
+
   function buildAssistantSnapshot() {
     const content = []
     // Emit a text block when there is text OR accumulated citations to carry
@@ -204,6 +246,31 @@ export function createEventAdapter(ctx) {
       sourceCitations.length = 0
       sourceKeys.clear()
       lastUsage = null
+      streamStartId = null
+    },
+
+    /**
+     * Emit the canonical full `assistant` snapshot for the current in-progress
+     * block, sealing the `stream_event` deltas streamed since the last boundary.
+     * Text / reasoning deltas no longer each emit a full snapshot, so the leg's
+     * final assistant message would otherwise never reach the renderer as a
+     * replace-by-id canonical. The caller invokes this once per agent-loop leg
+     * (after the leg's `fullStream` drains) and after any post-loop text append.
+     * Returns `[]` when there's nothing buffered (a leg that emitted only
+     * tool-results, whose boundary snapshots already sealed the content).
+     *
+     * @returns {Array<any>}
+     */
+    sealAssistant() {
+      if (
+        !textBuf &&
+        !reasoningBuf &&
+        completedToolUses.length === 0 &&
+        sourceCitations.length === 0
+      ) {
+        return []
+      }
+      return [buildAssistantSnapshot()]
     },
 
     /**
@@ -233,19 +300,24 @@ export function createEventAdapter(ctx) {
             // Boundary change — start a new message id so the renderer
             // doesn't merge text after a tool_use into the same block.
             messageId = randomUUID()
+            streamStartId = null
           }
           activeBlockKind = "text"
           // v6 high-level fullStream uses `text`; v4 used `textDelta`; the
           // low-level model stream uses `delta`. Accept all three.
-          textBuf += event.text ?? event.textDelta ?? event.delta ?? ""
-          out.push(buildAssistantSnapshot())
+          const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
+          textBuf += chunk
+          emitStreamStartIfNeeded(out)
+          if (chunk) out.push(streamDelta("text_delta", chunk))
           return out
         }
         case "reasoning":
         case "reasoning-delta": {
           activeBlockKind = "reasoning"
-          reasoningBuf += event.text ?? event.textDelta ?? event.delta ?? ""
-          out.push(buildAssistantSnapshot())
+          const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
+          reasoningBuf += chunk
+          emitStreamStartIfNeeded(out)
+          if (chunk) out.push(streamDelta("thinking_delta", chunk))
           return out
         }
         case "tool-call": {

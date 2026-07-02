@@ -39,6 +39,17 @@ test("chargeLegSteps: a successful read uses the real count, clamped to the cap"
   assert.equal(chargeLegSteps({ legStepsRead: true, legStepsRun: 0, perLegCap: 16 }), 16)
 })
 
+test("resolveStepChunk: defaults to 16 and honours a valid override", () => {
+  const { resolveStepChunk } = __testing__
+  assert.equal(resolveStepChunk(undefined), 16, "default when unset")
+  assert.equal(resolveStepChunk(0), 16, "0 is invalid → default")
+  assert.equal(resolveStepChunk(-5), 16, "negative → default")
+  assert.equal(resolveStepChunk("32"), 16, "non-number → default")
+  assert.equal(resolveStepChunk(32), 32, "a larger chunk reduces leg re-sends")
+  assert.equal(resolveStepChunk(1), 1, "minimum of 1")
+  assert.equal(resolveStepChunk(8.9), 8, "floored to an integer")
+})
+
 test("resolveProtocol picks openai for openai/openrouter/groq/deepseek", () => {
   const { resolveProtocol } = __testing__
   assert.equal(resolveProtocol("openai", undefined), "openai")
@@ -1801,6 +1812,58 @@ test("external mcpServers tools are merged into the turn (parity with the Anthro
   session.closeInput()
   await new Promise((r) => setTimeout(r, 0))
   assert.equal(closed, true, "MCP connections closed on teardown")
+})
+
+test("system prefix + tools map stay byte-stable across turns (prompt-cache prefix)", async () => {
+  // Non-Anthropic providers (OpenAI automatic caching, DeepSeek disk caching,
+  // Gemini implicit caching) have NO explicit per-request cache breakpoint — a
+  // cache HIT depends entirely on a byte-identical leading prefix (system + tools)
+  // across turns. This regression guard fails if a future change rebuilds the
+  // tools map unsorted/per-leg or mutates the system head between turns.
+  const { events, emit } = captureEmit()
+  const calls = []
+  const stream = (args) => {
+    calls.push(args)
+    return makeFakeStream([
+      { type: "text-delta", id: "1", text: `reply-${calls.length}` },
+      { type: "finish", finishReason: "stop" },
+    ])()
+  }
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "turn one",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      systemPrompt: "You are a helpful assistant.",
+      builtinTools: { git: true },
+    },
+    emit,
+    log: () => {},
+    streamText: stream,
+  })
+  // Queue turn 2 up front; the loop runs turn 1 then turn 2 on the same session.
+  session.pushUserMessage("turn two")
+  await waitForEvent(
+    events,
+    (e) =>
+      e.type === "event" && e.event?.type === "assistant" && /reply-2/.test(JSON.stringify(e.event))
+  )
+  assert.ok(calls.length >= 2, "two turns streamed")
+
+  const systemHead = (args) => (args.messages ?? []).filter((m) => m.role === "system")
+  assert.ok(systemHead(calls[0]).length > 0, "system prompt present in the prefix")
+  assert.deepEqual(
+    systemHead(calls[1]),
+    systemHead(calls[0]),
+    "system prefix is byte-identical across turns (cache-stable)"
+  )
+  // Tools identity + order is stable turn-over-turn (built once, sorted).
+  const toolKeys = (args) => Object.keys(args.tools ?? {})
+  assert.ok(toolKeys(calls[0]).length > 0, "tools offered")
+  assert.deepEqual(toolKeys(calls[1]), toolKeys(calls[0]), "tools map stable across turns")
+  assert.deepEqual(toolKeys(calls[1]), [...toolKeys(calls[1])].sort(), "tools map sorted")
 })
 
 test("the synthesized dispatch_agent subagent tool is offered AND round-trips on the ai-sdk path", async () => {

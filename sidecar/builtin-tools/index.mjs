@@ -29,6 +29,7 @@ import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   wrapDefsWithReadOnlyTimeout,
 } from "./read-only-timeout.mjs"
+import { wrapDefsWithResultCap } from "./result-cap.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -185,6 +186,7 @@ export function buildCogniaToolsServer({
   model,
   provider,
   toolExecutionTimeoutMs,
+  maxToolResultTokens,
 }) {
   if (!enabled || typeof enabled !== "object") return null
   const tools = collectCogniaToolDefs({
@@ -210,10 +212,14 @@ export function buildCogniaToolsServer({
       ? toolExecutionTimeoutMs
       : DEFAULT_BUILTIN_TOOL_TIMEOUT_MS
   const guarded = wrapDefsWithReadOnlyTimeout(tools, net, READ_ONLY_TOOL_NAMES)
+  // Cap oversized tool-result TEXT bodies so a huge bash/grep/read output can't
+  // bloat the Anthropic context window (parity with the ai-sdk compaction cap).
+  // No-op unless the renderer resolved a `maxToolResultTokens` budget.
+  const capped = wrapDefsWithResultCap(guarded, maxToolResultTokens)
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
-    tools: guarded,
+    tools: capped,
     ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }

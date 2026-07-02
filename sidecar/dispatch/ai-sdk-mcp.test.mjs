@@ -150,10 +150,11 @@ test("buildAiSdkMcpTools honours allow/deny (deny wins, whole-server allow)", as
 test("buildAiSdkMcpTools skips a server that fails to connect, keeps the rest", async () => {
   const warnings = []
   const log = (lvl, msg) => warnings.push(`${lvl}:${msg}`)
-  let i = 0
+  const attempts = {}
+  // Per-url failure so the retry never accidentally rescues the down server.
   const createClient = async ({ transport }) => {
-    i++
-    if (i === 1) throw new Error("ECONNREFUSED")
+    attempts[transport.url] = (attempts[transport.url] ?? 0) + 1
+    if (transport.url === "https://down") throw new Error("ECONNREFUSED")
     return { tools: async () => ({ ok: { execute: async () => "ok" } }), close: async () => {} }
   }
   const { tools } = await buildAiSdkMcpTools({
@@ -163,12 +164,55 @@ test("buildAiSdkMcpTools skips a server that fails to connect, keeps the rest", 
     },
     createClient,
     log,
+    retryDelayMs: 0,
   })
   assert.equal(tools["mcp__good__ok"] !== undefined, true, "healthy server still bridged")
   assert.ok(
     warnings.some((w) => w.includes('mcp "bad" failed to connect')),
-    "bad server logged"
+    "bad server logged after both attempts"
   )
+  // The down server was retried once (two connect attempts) before giving up.
+  assert.equal(attempts["https://down"], 2, "connect retried once")
+  assert.equal(attempts["https://up"], 1, "healthy server connected on the first attempt")
+})
+
+test("buildAiSdkMcpTools recovers a server that fails once then connects (retry)", async () => {
+  let attempts = 0
+  const createClient = async () => {
+    attempts++
+    if (attempts === 1) throw new Error("cold start")
+    return { tools: async () => ({ ping: { execute: async () => "pong" } }), close: async () => {} }
+  }
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: { flaky: { type: "http", url: "https://cold" } },
+    createClient,
+    retryDelayMs: 0,
+  })
+  assert.equal(attempts, 2, "connected on the retry")
+  assert.ok(tools["mcp__flaky__ping"], "transiently-failing server recovered on retry")
+})
+
+test("buildAiSdkMcpTools connects servers concurrently (a slow one does not block)", async () => {
+  const order = []
+  const createClient = async ({ transport }) => {
+    order.push(`start:${transport.url}`)
+    // The "slow" server resolves last; a serial impl would push its start only
+    // after "fast" fully finished — concurrent starts interleave.
+    const delay = transport.url === "https://slow" ? 30 : 0
+    await new Promise((r) => setTimeout(r, delay))
+    order.push(`done:${transport.url}`)
+    return { tools: async () => ({ t: { execute: async () => "x" } }), close: async () => {} }
+  }
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: {
+      slow: { type: "sse", url: "https://slow" },
+      fast: { type: "sse", url: "https://fast" },
+    },
+    createClient,
+  })
+  assert.ok(tools["mcp__slow__t"] && tools["mcp__fast__t"], "both bridged")
+  // Both connects START before either finishes → concurrency (not serial).
+  assert.deepEqual(order.slice(0, 2), ["start:https://slow", "start:https://fast"])
 })
 
 test("buildAiSdkMcpTools skips a server whose tools() rejects", async () => {
