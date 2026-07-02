@@ -491,14 +491,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
 // already does.
 seedBuiltinSlashCommands(BUILTIN_SLASH_COMMANDS)
 
-/**
- * Replace `$ARGUMENTS` and `$1..$9` placeholders in a template body. The
- * `args` string is split on whitespace for positional substitution; whole
- * `args` is used for `$ARGUMENTS`. Unfilled positionals collapse to empty.
- */
-export function applyTemplate(template: string, args: string): string {
-  const positional = args.trim().split(/\s+/).filter(Boolean)
-  let out = template.replace(/\$ARGUMENTS/g, args.trim())
-  out = out.replace(/\$([1-9])/g, (_, n) => positional[Number(n) - 1] ?? "")
-  return out
-}
+// `applyTemplate` moved to the pure sibling `./apply-template` so the CLI can
+// import it without `builtin.ts`'s store/React side effects. Re-exported here to
+// keep the existing `@/lib/slash-commands/builtin` import sites working.
+export { applyTemplate } from "./apply-template"
