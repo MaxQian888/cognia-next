@@ -38,6 +38,7 @@ import { ErrorHandlingSection } from "./inspector/forms/shared/error-handling-se
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
 import { DataTabs } from "./inspector/data/data-tabs"
 import { BulkNodeInspector } from "./bulk-node-inspector"
+import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
 import {
   getNodeConfigComponentForEntry,
   hasDedicatedConfigForEntry,
@@ -152,6 +153,7 @@ function InspectorPanelInner({
     () => (node ? nodeCatalogEntry(node.data.kind as WorkflowNodeKind) : null),
     [node]
   )
+  const capabilityInfo = useMissingNodeCapabilities(entry ?? {})
 
   // Debounce the zod re-validation so keystroke storms don't reparse the
   // whole schema on every character. `shallowEqualValidation` in the
@@ -248,6 +250,16 @@ function InspectorPanelInner({
             <Badge variant="outline" className={cn("font-normal", CATEGORY_BADGE[category])}>
               {t(`categoryBadge.${category}`)}
             </Badge>
+            {capabilityInfo ? (
+              <Badge
+                variant="outline"
+                title={capabilityInfo.tooltip}
+                className="gap-1 font-normal border-wf-status-running/40 text-wf-status-running"
+                data-testid="inspector-capability-badge"
+              >
+                {capabilityInfo.badgeLabel}
+              </Badge>
+            ) : null}
             {errorCount > 0 ? (
               <button
                 type="button"

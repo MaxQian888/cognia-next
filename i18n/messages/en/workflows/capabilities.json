@@ -1,0 +1,24 @@
+{
+  "names": {
+    "always-on": "Always-on listener",
+    "barcode-scan": "Barcode scanning",
+    "biometric": "Biometrics",
+    "camera": "Camera",
+    "connector-runtime": "Connector runtime",
+    "geolocation": "Location",
+    "headless": "Headless runtime",
+    "keyring": "OS keyring",
+    "mcp-runtime": "MCP runtime",
+    "ocr": "OCR",
+    "pty": "Integrated terminal",
+    "push-display": "Notifications",
+    "share-sheet": "Share sheet",
+    "shell": "Shell",
+    "sidecar": "Node sidecar",
+    "uia-automation": "Desktop automation",
+    "voice-record": "Voice recording",
+    "webview": "Interactive UI"
+  },
+  "tooltip": "Needs capabilities this device lacks: {caps}",
+  "unavailable": "Unavailable here"
+}

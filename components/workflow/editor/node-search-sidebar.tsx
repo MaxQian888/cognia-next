@@ -28,6 +28,7 @@ import {
   type NodeCatalogEntry,
 } from "@/lib/workflow/nodes/catalog"
 import { tNodeField } from "@/lib/workflow/i18n/node-translate"
+import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
 import { usePalettePreferencesStore } from "@/stores/workflow"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
@@ -312,6 +313,7 @@ function NodeChip({
   })
   const Icon =
     (LucideIcons as unknown as Record<string, LucideIcon>)[entry.iconName] ?? LucideIcons.Box
+  const capabilityInfo = useMissingNodeCapabilities(entry)
   const isFavorite = usePalettePreferencesStore((s) => s.favoriteNodeKinds.includes(entry.kind))
   const toggleFavorite = usePalettePreferencesStore((s) => s.toggleFavorite)
   const handleDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
@@ -338,12 +340,17 @@ function NodeChip({
               <span className="text-[9px] uppercase tracking-wide text-wf-status-running">
                 {t("desktopOnly")}
               </span>
+            ) : capabilityInfo ? (
+              <CapabilityBadge info={capabilityInfo} />
             ) : null}
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-xs">
           <p className="font-medium">{label}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+          {capabilityInfo ? (
+            <p className="text-xs text-wf-status-running mt-0.5">{capabilityInfo.tooltip}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
       <button
