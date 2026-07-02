@@ -1,0 +1,33 @@
+# Narrow RBAC for the future k8s exec backend (R13 follow-up): the server
+# may create/inspect runner pods and exec into them — nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cognia-server
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cognia-runner-exec
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods/exec, pods/attach]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cognia-runner-exec
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cognia-runner-exec
+subjects:
+  - kind: ServiceAccount
+    name: cognia-server

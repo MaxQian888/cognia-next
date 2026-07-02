@@ -1,0 +1,15 @@
+# Local kind smoke: everything in one namespace, no sandboxed runtime,
+# secrets generated inline (NOT for production).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cognia-kind
+resources:
+  - namespace.yaml
+  - ../../base
+secretGenerator:
+  - name: cognia-secrets
+    literals:
+      - COGNIA_MASTER_KEY=0000000000000000000000000000000000000000000000000000000000000001
+      - SHARE_UPLOAD_SECRET=kind-smoke-secret
+generatorOptions:
+  disableNameSuffixHash: true

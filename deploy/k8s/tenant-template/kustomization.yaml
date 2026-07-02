@@ -1,0 +1,20 @@
+# Per-tenant overlay — copy this directory per tenant:
+#   1. set `namespace:` (one tenant = one namespace)
+#   2. create the secrets:  kubectl -n <ns> create secret generic cognia-secrets \
+#        --from-literal=COGNIA_MASTER_KEY=<64hex> \
+#        --from-literal=SHARE_UPLOAD_SECRET=<random> \
+#        [--from-literal=ANTHROPIC_API_KEY=...]
+#   3. (production) uncomment the gvisor patch below
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cognia-tenant-CHANGE-ME
+resources:
+  - ../base
+# patches:
+#   - target:
+#       kind: StatefulSet
+#       name: cognia-server
+#     patch: |-
+#       - op: add
+#         path: /spec/template/spec/runtimeClassName
+#         value: gvisor
