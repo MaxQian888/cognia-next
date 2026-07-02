@@ -110,6 +110,38 @@ export function setProviderModel(
 }
 
 /**
+ * Set (or clear) a provider's base URL in `config.json`'s
+ * `providers[providerId].baseURL` — the per-provider proxy/self-hosted/
+ * regional endpoint override. Only `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`
+ * get an env-var shortcut; every other provider previously required hand-
+ * editing `config.json` even though the schema field already validated fine.
+ * Passing `null` clears the override (falls back to the catalog default).
+ * Validates the merged file before writing; returns the absolute path.
+ */
+export function setProviderBaseURL(
+  home: string,
+  providerId: string,
+  baseURL: string | null,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!providerId.trim()) throw new Error("provider id is required")
+  const current = readUserConfig(home, fsx)
+  const providers = { ...current.providers }
+  const existing = providers[providerId] ?? {}
+  if (baseURL === null) {
+    const { baseURL: _dropped, ...rest } = existing
+    providers[providerId] = rest
+  } else {
+    providers[providerId] = { ...existing, baseURL }
+  }
+  const merged = cliConfigFileSchema.parse({ ...current, providers })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * Merge a status-bar patch into `config.json`'s `statusBar` object (the footer
  * isn't a scalar so it can't go through {@link setConfigValue}). Validates the
  * merged file before writing. Returns the absolute path written.
@@ -280,6 +312,7 @@ export function setBuiltinTools(
 /** Top-level boolean flags editable from the settings panel. */
 export const BOOLEAN_FLAG_KEYS = [
   "webTools",
+  "autoRoute",
   "skillTool",
   "slashCommandTool",
   "externalSkills",

@@ -456,6 +456,20 @@ describe("tuiReducer", () => {
     expect(s.lastPlan?.seq).toBe(Number((s.cells.at(-1)!.id as string).slice(1)))
   })
 
+  it("COMMIT_PLAN captures a programmatic plan (from /plan explore) as a PlanCell + lastPlan", () => {
+    // Independent of permission mode — the pipeline can be kicked from any mode.
+    const s = reduce(base(), { type: "COMMIT_PLAN", raw: "# Explored Plan\n1. a\n2. b" })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "plan", raw: "# Explored Plan\n1. a\n2. b" })
+    expect(s.lastPlan).toMatchObject({ raw: "# Explored Plan\n1. a\n2. b" })
+    expect(s.planCapturedThisTurn).toBe(true)
+  })
+
+  it("COMMIT_PLAN ignores an empty/whitespace plan body", () => {
+    const s = reduce(base(), { type: "COMMIT_PLAN", raw: "   " })
+    expect(s.lastPlan).toBeUndefined()
+    expect(s.cells.some((c) => c.kind === "plan")).toBe(false)
+  })
+
   it("TURN_COMMIT records the superseded plan as prevRaw on a revision", () => {
     const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
     const first = reduce(
@@ -961,6 +975,28 @@ describe("tuiReducer", () => {
     expect(s.initDraft).toBeUndefined()
   })
 
+  it("SET_COMMIT_DRAFT / CLEAR_COMMIT_DRAFT stage and drop a pending commit message", () => {
+    let s = reduce(base(), { type: "SET_COMMIT_DRAFT", message: "feat: x" })
+    expect(s.commitDraft).toEqual({ message: "feat: x" })
+    s = reduce(s, { type: "CLEAR_COMMIT_DRAFT" })
+    expect(s.commitDraft).toBeUndefined()
+  })
+
+  it("SET_PR_DRAFT / CLEAR_PR_DRAFT stage and drop a pending PR draft", () => {
+    let s = reduce(base(), { type: "SET_PR_DRAFT", title: "feat: x", body: "b", base: "master" })
+    expect(s.prDraft).toEqual({ title: "feat: x", body: "b", base: "master" })
+    s = reduce(s, { type: "CLEAR_PR_DRAFT" })
+    expect(s.prDraft).toBeUndefined()
+  })
+
+  it("RESET clears staged commit + PR drafts", () => {
+    let s = reduce(base(), { type: "SET_COMMIT_DRAFT", message: "feat: x" })
+    s = reduce(s, { type: "SET_PR_DRAFT", title: "t", body: "b", base: "master" })
+    s = reduce(s, { type: "RESET", sessionId: "ses3" })
+    expect(s.commitDraft).toBeUndefined()
+    expect(s.prDraft).toBeUndefined()
+  })
+
   it("SET_MODEL and SET_MODE update config and close the overlay", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
@@ -1197,17 +1233,19 @@ describe("tuiReducer", () => {
     expect(reduce(help, { type: "OVERLAY_MOVE", delta: 1 })).toBe(help)
   })
 
-  it("OVERLAY_MOVE wraps the three-choice plan-approval overlay", () => {
+  it("OVERLAY_MOVE wraps the five-choice plan-approval overlay", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
       overlay: { kind: "plan", raw: "# Plan", index: 0 },
     })
+    // Five choices: approve-auto, approve-confirm, approve-new-session,
+    // edit-then-approve, keep.
+    for (let i = 1; i <= 4; i++) {
+      s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+      expect((s.overlay as { index: number }).index).toBe(i)
+    }
     s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
-    expect((s.overlay as { index: number }).index).toBe(1)
-    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
-    expect((s.overlay as { index: number }).index).toBe(2)
-    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
-    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 3rd choice
+    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 5th choice
     s = reduce(s, { type: "OVERLAY_CLOSE" })
     expect(s.overlay.kind).toBe("none")
   })

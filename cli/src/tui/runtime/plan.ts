@@ -22,31 +22,72 @@ export const PLAN_REFINE_PROMPT =
  * applied without a per-edit prompt (the "auto-edits" approval). */
 export const PLAN_BUILD_MODE = "acceptEdits" as const
 
-/** A plan-approval outcome: build with auto-applied edits, build but confirm
- * each edit, or keep refining the plan. Mirrors OpenCode's multi-mode exit. */
-export type PlanDecision = "approve-auto" | "approve-confirm" | "keep"
+/**
+ * A plan-approval outcome:
+ *   - `approve-auto`    — build in-context with auto-applied edits (acceptEdits).
+ *   - `approve-confirm` — build in-context, confirming each edit (default).
+ *   - `approve-new-session` — execute in a FRESH session (clean context), auto-edits.
+ *   - `edit-then-approve`   — open the plan in `$EDITOR`, then re-decide (overlay stays).
+ *   - `keep`            — stay in plan mode and refine.
+ * Mirrors Claude Code's approval menu (execution mode is chosen at approval time).
+ */
+export type PlanDecision =
+  | "approve-auto"
+  | "approve-confirm"
+  | "approve-new-session"
+  | "edit-then-approve"
+  | "keep"
 
-/** The choices shown in the plan-approval overlay — two approve gears plus keep. */
+/** The choices shown in the plan-approval overlay — the approve options (execute
+ * in place, execute in a fresh session), edit-first, then keep planning. */
 export const PLAN_APPROVAL_CHOICES: Array<SelectItem & { id: PlanDecision }> = [
   {
     id: "approve-auto",
-    label: "✓ Approve & build (auto-edits)",
+    label: "✓ Yes, and auto-accept edits",
     hint: "switch to acceptEdits and implement without a prompt per edit",
   },
   {
     id: "approve-confirm",
-    label: "✓ Approve — confirm each edit",
+    label: "✓ Yes, but confirm each edit",
     hint: "switch to default mode and confirm every change",
   },
-  { id: "keep", label: "✎ Keep planning", hint: "stay in plan mode and refine" },
+  {
+    id: "approve-new-session",
+    label: "✓ Yes, in a fresh session",
+    hint: "start a clean session (no planning context) and execute the saved plan",
+  },
+  {
+    id: "edit-then-approve",
+    label: "✎ Edit plan first",
+    hint: "open the plan in your editor (Ctrl+G), then pick an approve option",
+  },
+  { id: "keep", label: "✗ No, keep planning", hint: "stay in plan mode and refine" },
 ]
 
-/** The permission mode an approval decision switches into, or `null` to stay in
- * plan mode ("keep planning"). Keeps the App's approval handler declarative. */
+/** The IN-CONTEXT build mode an approval decision switches into, or `null` when
+ * the decision is handled specially by the App (fresh-session / edit / keep).
+ * Keeps the App's approval handler declarative for the common two approvals. */
 export function planDecisionMode(d: PlanDecision): "acceptEdits" | "default" | null {
   if (d === "approve-auto") return PLAN_BUILD_MODE
   if (d === "approve-confirm") return "default"
   return null
+}
+
+/**
+ * The synthetic first turn injected when a plan is approved for FRESH-SESSION
+ * execution. Unlike {@link PLAN_APPROVED_PROMPT} (which relies on the plan still
+ * being in context), this EMBEDS the full plan markdown — the new session has no
+ * planning context — and leads with the plan title so the sessions list
+ * ({@link listSessions}'s first-user-message title) auto-names the run from the plan.
+ */
+export function PLAN_EXECUTE_PROMPT(planRaw: string): string {
+  return [
+    `Implement the approved plan: ${planTitle(planRaw)}`,
+    "",
+    "The full plan is below. This is a fresh session with no prior context, so treat the plan as the complete brief: make the changes directly and verify your work when you're done.",
+    "",
+    planRaw,
+  ].join("\n")
 }
 
 /**

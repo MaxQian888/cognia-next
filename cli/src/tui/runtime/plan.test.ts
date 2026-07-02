@@ -5,6 +5,7 @@ import {
   PLAN_APPROVAL_CHOICES,
   PLAN_APPROVED_PROMPT,
   PLAN_BUILD_MODE,
+  PLAN_EXECUTE_PROMPT,
   isExitPlanTool,
   looksLikePlan,
   looksLikeQuestion,
@@ -172,10 +173,12 @@ describe("constants", () => {
     expect(PLAN_BUILD_MODE).toBe("acceptEdits")
   })
 
-  it("offers two approve gears plus keep", () => {
+  it("offers in-context, fresh-session, and edit approve options plus keep", () => {
     expect(PLAN_APPROVAL_CHOICES.map((c) => c.id)).toEqual([
       "approve-auto",
       "approve-confirm",
+      "approve-new-session",
+      "edit-then-approve",
       "keep",
     ])
   })
@@ -237,5 +240,27 @@ describe("planDecisionMode", () => {
 
   it("returns null for keep planning (no mode switch)", () => {
     expect(planDecisionMode("keep")).toBeNull()
+  })
+
+  it("returns null for the specially-handled fresh-session and edit decisions", () => {
+    // These are handled by the App (session reset / editor), not a plain mode switch.
+    expect(planDecisionMode("approve-new-session")).toBeNull()
+    expect(planDecisionMode("edit-then-approve")).toBeNull()
+  })
+})
+
+describe("PLAN_EXECUTE_PROMPT", () => {
+  const PLAN = "# Add retry to the fetch client\n\n1. Wrap fetch\n2. Add backoff"
+
+  it("embeds the full plan for a context-less fresh session", () => {
+    const out = PLAN_EXECUTE_PROMPT(PLAN)
+    expect(out).toContain(PLAN)
+    expect(out).toMatch(/fresh session/i)
+  })
+
+  it("leads with the plan title so the sessions list auto-names the run", () => {
+    const out = PLAN_EXECUTE_PROMPT(PLAN)
+    // The first line carries the plan title (drives listSessions' titleFrom).
+    expect(out.split("\n")[0]).toContain(planTitle(PLAN))
   })
 })

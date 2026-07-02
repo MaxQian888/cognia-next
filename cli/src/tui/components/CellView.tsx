@@ -35,7 +35,7 @@ import {
   toolKind,
 } from "../format/tools"
 import { isSubagentTool, subagentName, subagentTask } from "../format/subagent"
-import { planStats } from "../runtime/plan"
+import { planStats, planTitle } from "../runtime/plan"
 import { fileUri } from "../runtime/editor"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import path from "node:path"
@@ -433,10 +433,14 @@ function TodoView({ cell }: { cell: TodoCell }) {
 }
 
 /** A plan-mode proposal, framed and labelled so it reads as a distinct artifact
- * the user is meant to review and approve (vs. an ordinary reply). */
+ * the user is meant to review and approve (vs. an ordinary reply). Compact by
+ * design: the full plan renders as a scrollable body inside the approval overlay
+ * (see `PlanApprovalOverlay`), so this transcript cell is just a reference line —
+ * the persistent full text stays reachable via `/plan`. */
 function PlanView({ cell }: { cell: PlanCell }) {
   const theme = useTheme()
   const { steps, lines } = planStats(cell.raw)
+  const title = planTitle(cell.raw)
   const size = steps > 0 ? `${steps} step${steps === 1 ? "" : "s"}` : `${lines} lines`
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
@@ -444,9 +448,8 @@ function PlanView({ cell }: { cell: PlanCell }) {
         📋 Plan ready for review
       </Text>
       <Text color={theme.muted} dimColor>
-        {`${size} · review & approve below`}
+        {`${title} · ${size} · review & approve below · full text via /plan`}
       </Text>
-      <Markdown raw={cell.raw} />
     </Box>
   )
 }

@@ -12,6 +12,7 @@ import {
   setKeybindings,
   setMascotConfig,
   setPluginToolsConfig,
+  setProviderBaseURL,
   setProviderModel,
   setRenderConfig,
   setStatusBarConfig,
@@ -167,6 +168,59 @@ describe("setProviderModel", () => {
       provider: "deepseek",
       providers: { deepseek: { model: "deepseek-chat" } },
     })
+  })
+})
+
+describe("setProviderBaseURL", () => {
+  it("writes the base URL under the provider's slot", () => {
+    const m = memFs()
+    const target = setProviderBaseURL(HOME, "deepseek", "https://relay.example.com/v1", m.fsx)
+    expect(target).toBe(userConfigPath(HOME))
+    expect(JSON.parse(m.files.get(target)!)).toEqual({
+      providers: { deepseek: { baseURL: "https://relay.example.com/v1" } },
+    })
+  })
+
+  it("preserves other providers and the provider's other keys", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "deepseek",
+        providers: {
+          deepseek: { apiKey: "k", model: "deepseek-chat" },
+          openai: { model: "gpt-4.1" },
+        },
+      }),
+    })
+    setProviderBaseURL(HOME, "deepseek", "https://relay.example.com/v1", m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "deepseek",
+      providers: {
+        deepseek: { apiKey: "k", model: "deepseek-chat", baseURL: "https://relay.example.com/v1" },
+        openai: { model: "gpt-4.1" },
+      },
+    })
+  })
+
+  it("clears the base URL override when passed null, preserving the rest of the entry", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        providers: { deepseek: { apiKey: "k", baseURL: "https://relay.example.com/v1" } },
+      }),
+    })
+    setProviderBaseURL(HOME, "deepseek", null, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      providers: { deepseek: { apiKey: "k" } },
+    })
+  })
+
+  it("rejects a malformed URL (schema validation)", () => {
+    expect(() => setProviderBaseURL(HOME, "deepseek", "not-a-url", memFs().fsx)).toThrow()
+  })
+
+  it("rejects an empty provider id", () => {
+    expect(() => setProviderBaseURL(HOME, "  ", "https://x/v1", memFs().fsx)).toThrow(
+      /provider id is required/
+    )
   })
 })
 

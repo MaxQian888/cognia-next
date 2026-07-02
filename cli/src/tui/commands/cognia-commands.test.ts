@@ -16,10 +16,12 @@ describe("COGNIA_COMMANDS", () => {
   it("registers the runtime commands", () => {
     expect(COGNIA_COMMANDS.map((c) => c.name).sort()).toEqual([
       "agents",
+      "council",
       "goal",
       "limits",
       "loop",
       "memory",
+      "orchestrate",
       "plan",
       "remember",
       "status",

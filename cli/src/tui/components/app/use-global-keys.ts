@@ -12,6 +12,7 @@ import { absoluteTopLeft } from "../../input/element-position"
 import { segmentAtColumn } from "../../format/status-bar-hit"
 import { footerSegmentCommand } from "../../format/footer-action"
 import { cyclePermissionMode } from "../../input/mode-cycle"
+import { permissionModeMeta } from "../../state/permission-mode-meta"
 import { deriveEffortSliderState } from "../../../config/thinking"
 import { matchAction } from "../../input/keybindings"
 import { lastAssistantText } from "../../state/selectors"
@@ -25,6 +26,7 @@ import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
 import type { StatusSegmentView } from "../../format/status-bar"
+import { agentTreeRowTarget, type AgentTreeHit } from "../BottomStatus"
 import type { resolveKeybindings } from "../../input/keybindings"
 import type { MouseMode, ResolvedNotices, ResolvedRenderConfig } from "../../../config/schema"
 import type { CopyResult } from "../../clipboard"
@@ -65,10 +67,20 @@ export interface GlobalKeysDeps {
   clearScreen: () => void
   composerPopupOpen: MutableRefObject<boolean>
   subagentChipRef: MutableRefObject<DOMElement | null>
+  /** Hit-test state the BottomStatus running-agents tree publishes. */
+  agentTreeRef: MutableRefObject<AgentTreeHit | null>
   footerRowRef: MutableRefObject<DOMElement | null>
   footerSegmentsRef: MutableRefObject<StatusSegmentView[] | null>
   scrollContentRef: MutableRefObject<DOMElement | null>
   backtrackArmedRef: MutableRefObject<boolean>
+}
+
+/** The Shift+Tab / footer-click permission-switch notice: the mode plus its
+ * one-line "what runs without asking" summary, so the user sees the consequence
+ * of the switch, not just the mode name. */
+function permissionModeNotice(mode: TuiState["config"]["permissionMode"]): string {
+  const meta = permissionModeMeta(mode)
+  return `Permission mode: ${mode} — ${meta.runsWithoutAsking}`
 }
 
 /**
@@ -115,6 +127,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       clearScreen,
       composerPopupOpen,
       subagentChipRef,
+      agentTreeRef,
       footerRowRef,
       footerSegmentsRef,
       scrollContentRef,
@@ -306,6 +319,35 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
             else scroll.lineDown()
           }
         } else if (mouse.kind === "click") {
+          // A click inside the running-agents tree: an agent row opens that
+          // agent's live run page directly; the header / overflow line falls
+          // back to the `/agents` panel.
+          const tree = agentTreeRef.current
+          if (tree?.box) {
+            const pos = absoluteTopLeft(tree.box)
+            if (pos) {
+              const height = measureElement(tree.box).height || 0
+              const offset = mouse.row - 1 - pos.top
+              if (offset >= 0 && offset < height) {
+                const target = agentTreeRowTarget(offset, tree.agents.length)
+                const picked = typeof target === "number" ? tree.agents[target] : undefined
+                if (picked) {
+                  dispatch({
+                    type: "OVERLAY_OPEN",
+                    overlay: {
+                      kind: "agentRun",
+                      liveId: picked.liveId,
+                      name: picked.name,
+                      task: picked.task,
+                    },
+                  })
+                } else if (target !== null) {
+                  runCommandLine("/agents")
+                }
+                return
+              }
+            }
+          }
           // A click on the BottomStatus subagent chip opens the `/agents` panel
           // (parity with Ctrl+B). Only acts when an agent chip is actually shown
           // and the click lands on its row.
@@ -332,7 +374,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
                 const next = cyclePermissionMode(state.config.permissionMode)
                 persist("permissionMode", next)
                 void agent.switchMode(next)
-                dispatch({ type: "NOTICE", message: `Permission mode: ${next}` })
+                dispatch({ type: "NOTICE", message: permissionModeNotice(next) })
               } else if (id === "thinking") {
                 dispatch({
                   type: "OVERLAY_OPEN",
@@ -498,7 +540,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       const next = cyclePermissionMode(state.config.permissionMode)
       persist("permissionMode", next)
       void agent.switchMode(next)
-      dispatch({ type: "NOTICE", message: `Permission mode: ${next}` })
+      dispatch({ type: "NOTICE", message: permissionModeNotice(next) })
       return
     }
     // Esc only acts here when no overlay is open (overlays own their Esc).

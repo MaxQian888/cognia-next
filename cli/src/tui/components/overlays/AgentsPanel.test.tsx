@@ -125,6 +125,48 @@ describe("AgentsPanel", () => {
     expect(text).toContain("in-turn")
   })
 
+  it("shows tool-use and token stats in a row's hint", () => {
+    const text =
+      wrap({
+        rows: [
+          {
+            id: "live:l1",
+            kind: "inflight",
+            name: "finder",
+            task: "scan",
+            status: "running",
+            startedAt: NOW - 155_000,
+            liveId: "l1",
+            toolUses: 10,
+            tokens: 115_040,
+          },
+        ],
+      }).container.textContent ?? ""
+    expect(text).toContain("10 tools")
+    expect(text).toContain("↓ 115.0k tok")
+    expect(text).toContain("2m 35s")
+  })
+
+  it("re-reads the rows from the refresher on the 1s tick", () => {
+    jest.useFakeTimers()
+    try {
+      const refreshed: AgentPanelRow[] = [
+        { id: "live:l1", kind: "inflight", name: "finder", task: "", status: "done", liveId: "l1" },
+      ]
+      const refresh = jest.fn(() => refreshed)
+      const { container } = wrap({ refresh })
+      expect(container.textContent).toContain("scout")
+      act(() => {
+        jest.advanceTimersByTime(1000)
+      })
+      expect(refresh).toHaveBeenCalled()
+      expect(container.textContent).toContain("finder")
+      expect(container.textContent).not.toContain("scout")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("shows scroll indicators and windows the list when it overflows maxRows", () => {
     const many: AgentPanelRow[] = Array.from({ length: 6 }, (_, i) => ({
       id: `bg:r${i}`,

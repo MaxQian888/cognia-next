@@ -32,6 +32,7 @@ import {
   planTitle,
   planDecisionMode,
   PLAN_APPROVED_PROMPT,
+  PLAN_EXECUTE_PROMPT,
   type PlanDecision,
 } from "../runtime/plan"
 import { collectModelOptions } from "./model-options"
@@ -40,6 +41,7 @@ import { createMentionProviders, type MentionProviders } from "../mention/provid
 import { preprocessMentions } from "../mention/preprocess"
 import { skillSetEnabled } from "../runtime/skill-controller"
 import { mcpAuthStartupNotices } from "../runtime/mcp-controller"
+import { createMcpProbeCache } from "../runtime/mcp-cache"
 import {
   readEnabled as readEnabledSkills,
   setEnabled as setSkillEnabled,
@@ -56,10 +58,12 @@ import {
 import { registerFeatureCommands } from "../commands"
 import { runGoalStreaming } from "../runtime/goal-run"
 import { runLoopStreaming } from "../runtime/loop-run"
+import { runFixStreaming } from "../runtime/fix-run"
 import { frameSteer } from "../runtime/driven-turns"
 import { copilotCheckProposal } from "../runtime/workflow-copilot-controller"
 import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
 import { initOpenRouterCatalog as defaultInitOpenRouterCatalog } from "../runtime/openrouter-catalog-controller"
+import { registerCustomCommands as defaultRegisterCustomCommands } from "../commands/custom-commands"
 import { resolveActiveModel } from "../../config/active-model"
 import { shouldAutoCompact } from "../../agent/auto-compact"
 import { ensureCliDb } from "../../db/bootstrap"
@@ -99,7 +103,7 @@ import {
   setSubagentModel,
   setEditorConfig,
 } from "../../config/mutate"
-import { openInEditor } from "../runtime/editor"
+import { openInEditor, detectEditor } from "../runtime/editor"
 import { resolveKeybindings } from "../input/keybindings"
 import {
   DEFAULT_MOUSE_MODE,
@@ -133,6 +137,7 @@ import { useTerminalChrome } from "./app/use-terminal-chrome"
 import { TranscriptRegion } from "./app/TranscriptRegion"
 import { AppOverlays } from "./app/AppOverlays"
 import { BottomRegion } from "./app/BottomRegion"
+import type { AgentTreeHit } from "./BottomStatus"
 import { useGlobalKeys } from "./app/use-global-keys"
 import { useApplyEffect } from "./app/use-apply-effect"
 
@@ -208,6 +213,9 @@ export interface AppProps {
   /** Spawn the editor for `/open`; defaults to the real `openInEditor` (injected
    * in tests so they never launch a real editor). */
   openInEditorFn?: typeof openInEditor
+  /** Read a persisted plan file back (for fresh-session execution after an
+   * "Edit plan first"); defaults to a best-effort fs read. Injected in tests. */
+  loadPlanFile?: (file: string) => string | null
   /** Persist the `pluginTools` gate (toggled by the effort slider's `ultracode`
    * tier) to config.json; defaults to the real writer. Injected as a no-op by
    * tests so they never touch the real `~/.cognia/config.json`. */
@@ -226,6 +234,10 @@ export interface AppProps {
    * the `/model` picker reflects the synced real-time list. Defaults to the real
    * controller; injected as a no-op by tests so they don't open the db / network. */
   initOpenRouterCatalog?: (opts?: { apiKey?: string }) => Promise<void>
+  /** Discover + register `.claude/commands` / `.cognia/commands` prompt templates
+   * as slash commands. Defaults to the real disk scanner; injected as a no-op by
+   * tests so they never touch disk. */
+  registerCustomCommands?: (opts: { cwd: string; osHome: string }) => Promise<unknown>
   /** Persist a captured plan to `~/.cognia/plans`; defaults to the real writer.
    * Returns the path written (or null on failure). Injected as a no-op by tests. */
   persistPlan?: (home: string, fileName: string, raw: string) => string | null
@@ -235,6 +247,9 @@ export interface AppProps {
   /** Start a streaming `/loop` run; defaults to {@link runLoopStreaming}. Injected
    * by tests so they don't touch the CLI-local db / loop engine. */
   startLoopRun?: typeof runLoopStreaming
+  /** Start a streaming `/fix` test-fix loop; defaults to {@link runFixStreaming}.
+   * Injected by tests so they don't spawn a real test process. */
+  startFixRun?: typeof runFixStreaming
   /** `@` mention candidate sources for the composer popup + submit-time
    * preprocessing. Defaults to the real disk/db providers; injected by tests so
    * the composer never touches a live db / disk. */
@@ -306,6 +321,13 @@ export function App({
   persistMascot = setMascotConfig,
   persistEditor = setEditorConfig,
   openInEditorFn = openInEditor,
+  loadPlanFile = (file: string) => {
+    try {
+      return fs.readFileSync(file, "utf8")
+    } catch {
+      return null
+    }
+  },
   persistPluginTools = setPluginToolsConfig,
   initialHistory = [],
   persistHistory = (entry) => {
@@ -317,9 +339,11 @@ export function App({
   },
   resolveMeta = resolveModelMeta,
   initOpenRouterCatalog = defaultInitOpenRouterCatalog,
+  registerCustomCommands = defaultRegisterCustomCommands,
   persistPlan = savePlan,
   startGoalRun = runGoalStreaming,
   startLoopRun = runLoopStreaming,
+  startFixRun = runFixStreaming,
   mentionProviders: mentionProvidersProp,
   persistSkillEnabled,
   readClipboardImage = defaultReadClipboardImage,
@@ -390,6 +414,10 @@ export function App({
   // The run-state chip row in the BottomStatus, so a click on the subagent chip
   // opens the `/agents` panel (parity with Ctrl+B).
   const subagentChipRef = useRef<DOMElement | null>(null)
+  // The running-agents tree in the BottomStatus: BottomStatus publishes the
+  // rendered box + agent rows here so a click on a row opens that agent's live
+  // run page directly (Claude Code parity).
+  const agentTreeRef = useRef<AgentTreeHit | null>(null)
   // The persistent status footer row + its rendered segments, so a click on the
   // model/mode/thinking segment opens the matching picker (Claude Code parity).
   const footerRowRef = useRef<DOMElement | null>(null)
@@ -499,20 +527,37 @@ export function App({
   // computed once that's known — see below.)
   const popupRows = Math.max(3, Math.min(10, rows - 6))
 
-  // Minimal MCP deps for the interactive panel's in-place actions (toggle /
-  // reconnect / tools / remove). Built per render so it tracks the live config.
-  const mcpPanelDeps = () => ({ dispatch, roots: [state.config.cwd, home], home })
+  // One shared MCP probe cache for the whole App session: the startup warm seeds
+  // it, and every `/mcp` panel / tool-list / reconnect reuses it, so re-opening
+  // `/mcp` renders instantly instead of re-connecting to every server.
+  const mcpProbeCache = useMemo(() => createMcpProbeCache(), [])
 
-  // One-time boot check: warn (via a NOTICE cell) about any enabled remote MCP
-  // server that needs authorization, so the user isn't surprised at the first
-  // turn. Fires once per session as soon as we enter the chat phase; the probe is
-  // async and never blocks the first frame.
+  // Minimal MCP deps for the interactive panel's in-place actions (toggle /
+  // reconnect / tools / remove). Built per render so it tracks the live config;
+  // carries the shared probe cache so the panel reads cached status.
+  const mcpPanelDeps = () => ({
+    dispatch,
+    roots: [state.config.cwd, home],
+    home,
+    probeCache: mcpProbeCache,
+  })
+
+  // One-time boot warm: probe every enabled MCP server once and seed the shared
+  // cache (so `/mcp` opens instantly), and warn (via a NOTICE cell) about any
+  // enabled remote server that needs authorization. Fires once per session as
+  // soon as we enter the chat phase; the probe is async and never blocks the
+  // first frame.
   const mcpAuthChecked = useRef(false)
   useEffect(() => {
     if (state.phase !== "chat" || mcpAuthChecked.current) return
     mcpAuthChecked.current = true
-    void mcpAuthStartupNotices({ dispatch, roots: [state.config.cwd, home], home })
-  }, [state.phase, state.config.cwd, home, dispatch])
+    void mcpAuthStartupNotices({
+      dispatch,
+      roots: [state.config.cwd, home],
+      home,
+      probeCache: mcpProbeCache,
+    })
+  }, [state.phase, state.config.cwd, home, dispatch, mcpProbeCache])
 
   // Effective layout: the configured preference (default `fullscreen`) gated by
   // terminal capability — a non-TTY / dumb terminal always falls back to the
@@ -626,6 +671,15 @@ export function App({
     if (activeProvider !== "openrouter") return
     void initOpenRouterCatalog({ apiKey: openRouterApiKey })
   }, [activeProvider, initOpenRouterCatalog, openRouterApiKey])
+
+  // Discover user-authored `.claude/commands` / `.cognia/commands` prompt
+  // templates and register them as slash commands. Registration is guarded +
+  // idempotent, so the effect is safe to re-run; `matchSlash` reads the registry
+  // live, so the new commands surface the moment the async scan resolves — same
+  // contract as the OpenRouter catalog init above. Best-effort (swallows errors).
+  useEffect(() => {
+    void registerCustomCommands({ cwd: state.config.cwd, osHome })
+  }, [registerCustomCommands, state.config.cwd, osHome])
 
   // For a dynamic-catalog provider (OpenRouter) the synced live list may not be
   // primed when the `/model` picker opens. Kick off a sync and swap the full
@@ -797,13 +851,57 @@ export function App({
     [home, persistProviderModel]
   )
 
-  // Resolve a plan-approval choice. Either approve gear switches to a build mode
-  // (auto-edits → acceptEdits, confirm-each → default) so edits are allowed,
-  // persists that choice, and injects the synthetic "proceed" turn; "Keep
-  // planning" (mode null) just closes the prompt and stays in plan mode.
+  // Resolve a plan-approval choice (Claude Code parity — the execution mode is
+  // chosen at approval time):
+  //   - approve-auto / approve-confirm: switch to a build mode (acceptEdits /
+  //     default) and implement IN CONTEXT (the plan above is still visible).
+  //   - approve-new-session: mint a FRESH session (clean context), switch to
+  //     acceptEdits, and inject the plan text (reloaded from disk so any
+  //     "Edit plan first" revisions are honoured). The leading plan title
+  //     auto-names the run in the sessions list.
+  //   - edit-then-approve: open the saved plan in $EDITOR and KEEP the overlay
+  //     open so the user can revise, then approve.
+  //   - keep: close and stay in plan mode.
   const onPlanDecision = useCallback(
     (decision: PlanDecision) => {
+      const planOverlay = state.overlay.kind === "plan" ? state.overlay : null
+
+      // Edit-first: launch the editor on the saved plan, leave the overlay up.
+      if (decision === "edit-then-approve") {
+        const file = planOverlay?.savedTo
+        if (!file) {
+          dispatch({ type: "NOTICE", message: "No saved plan file to edit yet." })
+          return
+        }
+        const { editor } = detectEditor(process.env, { config: state.config.editor })
+        void openInEditorFn(file, { editor }).then((ok) =>
+          dispatch({
+            type: "NOTICE",
+            message: ok
+              ? `Editing ${file} in ${editor.displayName} — save it, then pick an approve option to run the edited plan.`
+              : `Couldn't launch an editor — edit ${file} manually, then approve.`,
+          })
+        )
+        return
+      }
+
       dispatch({ type: "OVERLAY_CLOSE" })
+      if (decision === "keep") return
+
+      // Fresh-session execution: clean context, auto-edits, embed the (reloaded)
+      // plan so the new session has the full brief.
+      if (decision === "approve-new-session") {
+        const reloaded = planOverlay?.savedTo ? loadPlanFile(planOverlay.savedTo) : null
+        const raw = reloaded ?? planOverlay?.raw ?? ""
+        persist("permissionMode", "acceptEdits")
+        void (async () => {
+          await agent.clear(mintId())
+          await agent.switchMode("acceptEdits")
+          await agent.send(raw ? PLAN_EXECUTE_PROMPT(raw) : PLAN_APPROVED_PROMPT)
+        })()
+        return
+      }
+
       const mode = planDecisionMode(decision)
       if (mode) {
         persist("permissionMode", mode)
@@ -817,7 +915,7 @@ export function App({
         })()
       }
     },
-    [agent, persist]
+    [agent, persist, state.overlay, state.config.editor, openInEditorFn, loadPlanFile, mintId]
   )
 
   const openSessions = useCallback(() => {
@@ -879,12 +977,14 @@ export function App({
     screen,
     startGoalRun,
     startLoopRun,
+    startFixRun,
     syncAndRefreshModelOverlay,
     takeSteer,
     doExit,
     changeCwd,
     setRuntimeAbort,
     getRuntimeAbort,
+    mcpProbeCache,
   })
 
   const runCommandLine = useCallback(
@@ -1341,6 +1441,7 @@ export function App({
     clearScreen,
     composerPopupOpen,
     subagentChipRef,
+    agentTreeRef,
     footerRowRef,
     footerSegmentsRef,
     scrollContentRef,
@@ -1475,6 +1576,7 @@ export function App({
             footerCopilot={footerCopilot}
             backtrackArmed={backtrackArmed}
             subagentChipRef={subagentChipRef}
+            agentTreeRef={agentTreeRef}
             handleSubmit={handleSubmit}
             handleHistoryPush={handleHistoryPush}
             listDir={listDir}

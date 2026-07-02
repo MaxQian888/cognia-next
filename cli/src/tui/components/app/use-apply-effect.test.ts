@@ -1,8 +1,10 @@
 import { renderHook } from "@testing-library/react"
 import fs from "node:fs"
+import os from "node:os"
 import nodePath from "node:path"
 
 import { useApplyEffect, type ApplyEffectDeps } from "./use-apply-effect"
+import { createMcpProbeCache } from "../../runtime/mcp-cache"
 import { createInitialState } from "../../state/initial"
 import { resolveNotices, DEFAULT_RESOLVED_CONFIG } from "../../../config/schema"
 import type { ResolvedConfig } from "../../../config/schema"
@@ -51,12 +53,14 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     screen: {} as never,
     startGoalRun: jest.fn(() => Promise.resolve()) as never,
     startLoopRun: jest.fn(() => Promise.resolve()) as never,
+    startFixRun: jest.fn(() => Promise.resolve()) as never,
     syncAndRefreshModelOverlay: jest.fn(),
     takeSteer: jest.fn(() => null),
     doExit: jest.fn(),
     changeCwd: jest.fn(),
     setRuntimeAbort: jest.fn(),
     getRuntimeAbort: jest.fn(() => null),
+    mcpProbeCache: createMcpProbeCache(),
     ...over,
   }
 }
@@ -76,10 +80,47 @@ describe("useApplyEffect", () => {
     expect(deps.dispatch).not.toHaveBeenCalled()
   })
 
+  it("persists + live-merges + re-resolves for the flag effect (/route auto on)", () => {
+    const home = fs.mkdtempSync(nodePath.join(os.tmpdir(), "route-flag-"))
+    try {
+      const deps = buildDeps({ home })
+      run(deps)({ kind: "flag", key: "autoRoute", value: true })
+      // Live-merge into config + re-resolve options so the next turn honors it.
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "SET_CONFIG_PATCH",
+        patch: { autoRoute: true },
+      })
+      expect(deps.agent.invalidate).toHaveBeenCalled()
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "NOTICE",
+        message: "autoRoute enabled.",
+      })
+      // Persisted to config.json on disk.
+      const written = JSON.parse(fs.readFileSync(nodePath.join(home, "config.json"), "utf8"))
+      expect(written.autoRoute).toBe(true)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("sends a prompt for the send effect", () => {
     const deps = buildDeps()
     run(deps)({ kind: "send", prompt: "do it" })
     expect(deps.agent.send).toHaveBeenCalledWith("do it")
+  })
+
+  it("does NOT invalidate the session for a read-only /mcp action (panel open)", async () => {
+    const deps = buildDeps()
+    run(deps)({ kind: "runtime", runtime: { feature: "mcp", action: "panel" } })
+    await flush()
+    expect(deps.agent.invalidate).not.toHaveBeenCalled()
+  })
+
+  it("invalidates the session for a mutating /mcp action (toggle)", async () => {
+    const deps = buildDeps()
+    run(deps)({ kind: "runtime", runtime: { feature: "mcp", action: "toggle", arg: "x" } })
+    await flush()
+    expect(deps.agent.invalidate).toHaveBeenCalled()
   })
 
   it("opens an overlay and refreshes the model picker for a model overlay", () => {
@@ -148,6 +189,15 @@ describe("useApplyEffect", () => {
     const deps = buildDeps()
     run(deps)({ kind: "goalRun", objective: "ship it" })
     expect(deps.startGoalRun).toHaveBeenCalled()
+    expect(deps.setRuntimeAbort).toHaveBeenCalledWith(expect.any(AbortController))
+  })
+
+  it("starts a fix run and arms the abort controller", () => {
+    const deps = buildDeps()
+    run(deps)({ kind: "fixRun", testCommand: "pnpm test", maxRounds: 3 })
+    expect(deps.startFixRun).toHaveBeenCalledWith(
+      expect.objectContaining({ testCommand: "pnpm test", maxRounds: 3 })
+    )
     expect(deps.setRuntimeAbort).toHaveBeenCalledWith(expect.any(AbortController))
   })
 

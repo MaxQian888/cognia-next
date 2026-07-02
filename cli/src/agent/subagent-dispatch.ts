@@ -23,6 +23,7 @@ import {
   parseDispatchAgentArgs,
   type NormalizedDispatch,
 } from "@/lib/claude/agents/dispatch-agent-tool"
+import { runDispatchFanout } from "@/lib/claude/agents/dispatch-core"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import {
   handlePluginToolExec,
@@ -43,6 +44,14 @@ import {
   settleLiveSubagent,
 } from "./subagent-live-output"
 import { errorMessage } from "../tui/runtime/shared"
+
+/**
+ * Max concurrent CLI subagent runs in a single `dispatch_agent` fan-out. The CLI
+ * has no token-budget accounting (unlike the renderer, which serializes under a
+ * finite budget), so it bounds concurrency to keep a large sibling batch from
+ * spawning unbounded parallel runs over the one live sidecar.
+ */
+const CLI_MAX_CONCURRENT_SUBAGENTS = 8
 
 /** Per-turn context the `dispatch_agent` handler reads, keyed by chat session id. */
 export interface CliSubagentDispatchContext {
@@ -251,16 +260,15 @@ export async function handleCliDispatchAgent(
     }
   }
 
-  let outcomes: DispatchOutcome[]
-  if (parsed.dispatches.length === 1) {
-    const d = parsed.dispatches[0]
-    outcomes = [await runOne(d, d.subagentId)]
-  } else {
-    // Parallel fan-out: all siblings run concurrently over the live sidecar.
-    outcomes = await Promise.all(
-      parsed.dispatches.map((d, i) => runOne(d, `${d.subagentId}#${i + 1}`))
-    )
-  }
+  // Fan-out via the shared core (unified with the renderer handler). The CLI has
+  // no token-budget accounting, so it bounds CONCURRENCY instead of serializing
+  // under a budget: a large sibling batch no longer spawns unbounded concurrent
+  // subagent runs over the one live sidecar (the old `Promise.all` had no cap).
+  const outcomes = await runDispatchFanout({
+    dispatches: parsed.dispatches,
+    width: CLI_MAX_CONCURRENT_SUBAGENTS,
+    runOne: (d, label) => runOne(d, label),
+  })
   const result = outcomes.map((o) => o.text).join("\n\n---\n\n")
   // Surface the dispatch as a tool ERROR (red ✗, and a recoverable tool-error
   // the model can react to) when EVERY dispatch failed — the common single

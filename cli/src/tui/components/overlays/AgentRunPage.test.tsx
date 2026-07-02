@@ -22,6 +22,9 @@ function entry(over: Partial<SubagentLiveEntry> = {}): SubagentLiveEntry {
     text: "",
     thinking: "",
     tools: [],
+    timeline: [],
+    toolUseCount: 0,
+    approxChars: 0,
     version: 0,
     ...over,
   }
@@ -61,25 +64,61 @@ describe("AgentRunPage", () => {
     expect(text).toContain("waiting for first output")
   })
 
-  it("renders thinking, tools, and reply text once present", () => {
+  it("renders the chronological timeline: thinking, tool calls, reply text", () => {
     const text =
       wrap({
         getEntry: () =>
           entry({
-            thinking: "let me think",
-            tools: [
-              { id: "a", name: "read", status: "done" },
-              { name: "bash", status: "running" },
+            timeline: [
+              { kind: "thinking", text: "let me think" },
+              { kind: "tool", id: "a", name: "read", summary: "lib/foo.ts", status: "done" },
+              { kind: "tool", name: "bash", summary: "npm test", status: "running" },
+              { kind: "text", text: "here is the answer" },
             ],
-            text: "here is the answer",
           }),
       }).container.textContent ?? ""
-    expect(text).toContain("Thinking")
     expect(text).toContain("let me think")
-    expect(text).toContain("Tools")
-    expect(text).toContain("read")
-    expect(text).toContain("bash")
+    expect(text).toContain("read(lib/foo.ts)")
+    expect(text).toContain("bash(npm test)")
     expect(text).toContain("here is the answer")
+    // Chronological: thinking precedes the tools, text comes last.
+    expect(text.indexOf("let me think")).toBeLessThan(text.indexOf("read("))
+    expect(text.indexOf("bash(")).toBeLessThan(text.indexOf("here is the answer"))
+  })
+
+  it("collapses a namespaced tool name and omits an empty summary", () => {
+    const text =
+      wrap({
+        getEntry: () =>
+          entry({
+            timeline: [
+              {
+                kind: "tool",
+                name: "mcp__codegraph__codegraph_search",
+                summary: "",
+                status: "done",
+              },
+            ],
+          }),
+      }).container.textContent ?? ""
+    expect(text).toContain("codegraph:codegraph_search")
+    expect(text).not.toContain("codegraph_search(")
+  })
+
+  it("shows tool-use and token stats in the header (tilde while estimated)", () => {
+    const text =
+      wrap({
+        getEntry: () => entry({ toolUseCount: 10, approxChars: 460_160 }),
+      }).container.textContent ?? ""
+    expect(text).toContain("10 tool uses")
+    expect(text).toContain("~115.0k tokens")
+    const exact =
+      wrap({
+        getEntry: () => entry({ toolUseCount: 1, usageTokens: 2_000 }),
+      }).container.textContent ?? ""
+    expect(exact).toContain("1 tool use")
+    expect(exact).toContain("2.0k tokens")
+    expect(exact).not.toContain("~2.0k tokens")
   })
 
   it("shows a no-output message when the entry is missing (cross-session / evicted)", () => {
@@ -107,7 +146,7 @@ describe("AgentRunPage", () => {
 
   it("re-reads the live store on the poll interval while running", () => {
     jest.useFakeTimers()
-    const live = entry({ text: "first" })
+    const live = entry({ timeline: [{ kind: "text", text: "first" }] })
     const onClose = jest.fn()
     const { container } = render(
       <AgentRunPage
@@ -123,7 +162,7 @@ describe("AgentRunPage", () => {
     )
     expect(container.textContent).toContain("first")
     // Mutate the live entry as a stream would, then let the poll tick fire.
-    live.text = "first second"
+    live.timeline[0] = { kind: "text", text: "first second" }
     act(() => {
       jest.advanceTimersByTime(100)
     })
@@ -138,7 +177,7 @@ describe("AgentRunPage", () => {
         name="reviewer"
         task="t"
         now={NOW}
-        getEntry={() => entry({ text: "hi" })}
+        getEntry={() => entry({ timeline: [{ kind: "text", text: "hi" }] })}
         onClose={onClose}
       />
     )
@@ -155,7 +194,7 @@ describe("AgentRunPage", () => {
         task="t"
         now={NOW}
         viewportRows={5}
-        getEntry={() => entry({ text: body })}
+        getEntry={() => entry({ timeline: [{ kind: "text", text: body }] })}
         onClose={onClose}
       />
     )

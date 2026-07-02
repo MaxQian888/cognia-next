@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { useGlobalKeys, type GlobalKeysDeps } from "./use-global-keys"
+import { absoluteTopLeft } from "../../input/element-position"
 import { createInitialState } from "../../state/initial"
 import { resolveKeybindings } from "../../input/keybindings"
 import {
@@ -17,6 +18,9 @@ import type { ScrollController } from "../../hooks/useScroll"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
+
+jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+const mockPos = absoluteTopLeft as jest.Mock
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -51,9 +55,9 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     cursor: { state: { find: null } } as unknown as TranscriptCursor,
     scroll: {} as unknown as ScrollController,
     clearScreen: jest.fn(),
-    ctrlCTimer: { current: null },
     composerPopupOpen: { current: false },
     subagentChipRef: { current: null },
+    agentTreeRef: { current: null },
     footerRowRef: { current: null },
     footerSegmentsRef: { current: null },
     scrollContentRef: { current: null },
@@ -149,11 +153,95 @@ describe("useGlobalKeys", () => {
     expect(deps.dispatch).toHaveBeenCalledWith({ type: "TOGGLE_COLLAPSE_ALL" })
   })
 
-  it("cycles the permission mode on Shift+Tab", () => {
+  it("cycles the permission mode on Shift+Tab and notices what runs without asking", () => {
     const deps = buildDeps()
     render(<Harness deps={deps} />)
     act(() => __fireInput("", { tab: true, shift: true }))
     expect(deps.persist).toHaveBeenCalledWith("permissionMode", expect.any(String))
     expect(deps.agent.switchMode).toHaveBeenCalled()
+    // The notice carries the mode plus its one-line "runs without asking" summary,
+    // and only ever cycles into a safe-core mode (never a power mode).
+    const notice = (deps.dispatch as jest.Mock).mock.calls
+      .map((c) => c[0])
+      .find((a: { type: string }) => a.type === "NOTICE") as { message: string } | undefined
+    expect(notice?.message).toMatch(/Permission mode: (default|acceptEdits|plan) —/)
+    expect(notice?.message).not.toMatch(/bypassPermissions|dontAsk/)
+  })
+})
+
+describe("running-agents tree clicks", () => {
+  const treeRef = (agents: Array<{ liveId: string; name: string; task: string }>) => ({
+    current: { box: {} as never, agents },
+  })
+
+  beforeEach(() => mockPos.mockReturnValue({ top: 5, left: 0 }))
+  afterEach(() => mockPos.mockReturnValue(null))
+
+  it("opens the clicked agent's run page directly", () => {
+    const deps = buildDeps({
+      fullscreen: true,
+      agentTreeRef: treeRef([{ liveId: "l1", name: "finder", task: "scan the repo" }]),
+    })
+    render(<Harness deps={deps} />)
+    // Tree top at 0-based row 5; SGR row 7 → offset 1 → agent 0's stats line.
+    act(() => __fireInput("[<0;5;7M"))
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "agentRun", liveId: "l1", name: "finder", task: "scan the repo" },
+    })
+    expect(deps.runCommandLine).not.toHaveBeenCalled()
+  })
+
+  it("maps the second agent's activity line to that agent", () => {
+    const deps = buildDeps({
+      fullscreen: true,
+      agentTreeRef: treeRef([
+        { liveId: "l1", name: "a", task: "" },
+        { liveId: "l2", name: "b", task: "" },
+      ]),
+    })
+    render(<Harness deps={deps} />)
+    // offset 4 (SGR row 10) = second agent's activity line.
+    act(() => __fireInput("[<0;5;10M"))
+    expect(deps.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ overlay: expect.objectContaining({ liveId: "l2" }) })
+    )
+  })
+
+  it("falls back to the /agents panel on the header line", () => {
+    const deps = buildDeps({
+      fullscreen: true,
+      agentTreeRef: treeRef([{ liveId: "l1", name: "finder", task: "" }]),
+    })
+    render(<Harness deps={deps} />)
+    // offset 0 (SGR row 6) = the "Running N agents…" header.
+    act(() => __fireInput("[<0;5;6M"))
+    expect(deps.runCommandLine).toHaveBeenCalledWith("/agents")
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "OVERLAY_OPEN" })
+    )
+  })
+
+  it("ignores clicks above the tree box", () => {
+    const deps = buildDeps({
+      fullscreen: true,
+      agentTreeRef: treeRef([{ liveId: "l1", name: "finder", task: "" }]),
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<0;5;3M"))
+    expect(deps.runCommandLine).not.toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "OVERLAY_OPEN" })
+    )
+  })
+
+  it("does nothing when the tree is not on screen (ref null)", () => {
+    const deps = buildDeps({ fullscreen: true })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<0;5;7M"))
+    expect(deps.runCommandLine).not.toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "OVERLAY_OPEN" })
+    )
   })
 })

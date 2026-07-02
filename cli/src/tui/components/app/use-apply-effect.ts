@@ -18,11 +18,14 @@ import {
   setCustomTheme,
   setStringArrayConfig,
   setKeybindings,
+  setBooleanFlag,
 } from "../../../config/mutate"
 import { PLAN_REFINE_PROMPT } from "../../runtime/plan"
+import type { McpProbeCache } from "../../runtime/mcp-cache"
 import { clipboardFailureMessage, type CopyResult } from "../../clipboard"
 import type { runGoalStreaming } from "../../runtime/goal-run"
 import type { runLoopStreaming } from "../../runtime/loop-run"
+import type { runFixStreaming } from "../../runtime/fix-run"
 import type { CommandEffect } from "../../commands/types"
 import type { TuiState, TuiAction } from "../../state/types"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
@@ -36,6 +39,15 @@ import type {
   MascotConfig,
   EditorConfig,
 } from "../../../config/schema"
+
+/**
+ * The `/mcp` actions that change the RESOLVED send options (the server set fed to
+ * the SDK, or the disabled-tool overlay unioned into `disallowedTools`). Only
+ * these justify an `agent.invalidate()` — every other `/mcp` action is read-only
+ * (panel/list/show/tools/resources/prompts/reconnect/auth/logout/presets) and
+ * must leave the live session's cached options (and its MCP connections) intact.
+ */
+const MCP_OPTION_MUTATING_ACTIONS = new Set(["add", "remove", "toggle", "enable", "disable"])
 
 export interface ApplyEffectDeps {
   agent: AgentSessionApi
@@ -65,6 +77,7 @@ export interface ApplyEffectDeps {
   screen: ScreenStream
   startGoalRun: typeof runGoalStreaming
   startLoopRun: typeof runLoopStreaming
+  startFixRun: typeof runFixStreaming
   syncAndRefreshModelOverlay: () => void
   takeSteer: () => string | null
   doExit: () => void
@@ -76,6 +89,9 @@ export interface ApplyEffectDeps {
    * as accessors rather than the raw ref so the hook never mutates a prop. */
   setRuntimeAbort: (controller: AbortController | null) => void
   getRuntimeAbort: () => AbortController | null
+  /** Shared MCP probe cache (App-owned) — threaded to the runtime so command-path
+   * `/mcp` mutators keep it coherent with the panel. */
+  mcpProbeCache: McpProbeCache
 }
 
 /**
@@ -113,12 +129,14 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     screen,
     startGoalRun,
     startLoopRun,
+    startFixRun,
     syncAndRefreshModelOverlay,
     takeSteer,
     doExit,
     changeCwd,
     setRuntimeAbort,
     getRuntimeAbort,
+    mcpProbeCache,
   } = deps
   return useCallback(
     (effect: CommandEffect) => {
@@ -498,6 +516,23 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           dispatch({ type: "NOTICE", message: `Updated ${field}.` })
           break
         }
+        case "flag": {
+          // Toggle a top-level boolean config flag (e.g. `/route auto on|off`
+          // → `autoRoute`). Persist to config.json, live-merge, and re-resolve
+          // SendOptions so the next turn honors it.
+          try {
+            setBooleanFlag(home, effect.key, effect.value)
+          } catch {
+            dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
+          }
+          dispatch({ type: "SET_CONFIG_PATCH", patch: { [effect.key]: effect.value } })
+          agent.invalidate()
+          dispatch({
+            type: "NOTICE",
+            message: `${effect.key} ${effect.value ? "enabled" : "disabled"}.`,
+          })
+          break
+        }
         case "keybind": {
           // Rebind (spec) or reset (empty spec) a keyboard chord. Persisted to
           // config.keybindings and live-merged so the next keypress honours it.
@@ -564,6 +599,27 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           })
           break
         }
+        case "fixRun": {
+          // Bounded test-fix loop: run the tests, feed failures to the agent, and
+          // re-run until green or the round cap (reuses runDrivenTurns). Esc aborts
+          // the controller (killing an in-flight test + ending the loop); `btw`
+          // steers via `takeSteer`.
+          const controller = new AbortController()
+          setRuntimeAbort(controller)
+          void startFixRun({
+            send: agent.send,
+            dispatch,
+            cwd: state.config.cwd,
+            signal: controller.signal,
+            testCommand: effect.testCommand,
+            maxRounds: effect.maxRounds,
+            takeSteer,
+          }).finally(() => {
+            if (getRuntimeAbort() === controller) setRuntimeAbort(null)
+            persistDb()
+          })
+          break
+        }
         case "runtime": {
           const controller = new AbortController()
           setRuntimeAbort(controller)
@@ -583,7 +639,10 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             toolStats: state.toolStats,
             ...(state.rateLimits ? { rateLimits: state.rateLimits } : {}),
             ...(state.initDraft ? { initDraft: state.initDraft } : {}),
+            ...(state.commitDraft ? { commitDraft: state.commitDraft } : {}),
+            ...(state.prDraft ? { prDraft: state.prDraft } : {}),
             inflightTools: state.inflight.tools,
+            mcpProbeCache,
           })
             .catch((err: unknown) =>
               dispatch({
@@ -594,9 +653,18 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             .finally(() => {
               if (getRuntimeAbort() === controller) setRuntimeAbort(null)
               // Config-mutating features (MCP / skill / plugin toggles) must
-              // re-resolve SendOptions so the change reaches the next turn.
+              // re-resolve SendOptions so the change reaches the next turn. But
+              // MCP has many READ-ONLY actions (opening the panel, list, show,
+              // tools, resources, prompts, reconnect, auth, presets) — those must
+              // NOT invalidate, or merely opening `/mcp` would drop the cached
+              // options and force the live session to re-connect its MCP servers
+              // on the next turn (the "opening /mcp triggers a reload" bug). Only
+              // the mutators that change the resolved server / disabled set do.
+              const mcpMutates =
+                effect.runtime.feature === "mcp" &&
+                MCP_OPTION_MUTATING_ACTIONS.has(effect.runtime.action ?? "")
               if (
-                effect.runtime.feature === "mcp" ||
+                mcpMutates ||
                 effect.runtime.feature === "skill" ||
                 effect.runtime.feature === "plugin" ||
                 effect.runtime.feature === "permissions"
@@ -646,6 +714,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       runShell,
       startGoalRun,
       startLoopRun,
+      startFixRun,
       syncAndRefreshModelOverlay,
       takeSteer,
       changeCwd,
@@ -657,6 +726,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       dispatch,
       setRuntimeAbort,
       getRuntimeAbort,
+      mcpProbeCache,
       state.config,
       state.sessionId,
       state.inflight.tools,
@@ -666,6 +736,8 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       state.toolStats,
       state.rateLimits,
       state.initDraft,
+      state.commitDraft,
+      state.prDraft,
       state.cells,
     ]
   )

@@ -94,6 +94,14 @@ describe("SelectList", () => {
     expect(onMove).toHaveBeenNthCalledWith(2, 1)
   })
 
+  it("swallows the wheel without moving the highlight when disableWheel is set", () => {
+    const onMove = jest.fn()
+    render(<SelectList items={items} index={1} onMove={onMove} onSelect={() => {}} disableWheel />)
+    __fireInput("[<64;1;1M", {}) // wheel up
+    __fireInput("[<65;1;1M", {}) // wheel down
+    expect(onMove).not.toHaveBeenCalled()
+  })
+
   it("ignores a click on the border/title without selecting", () => {
     const onSelect = jest.fn()
     render(

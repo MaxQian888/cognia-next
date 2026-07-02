@@ -47,8 +47,8 @@ describe("filterSessionItems", () => {
 
 describe("filterInspectItems", () => {
   const items: InspectItem[] = [
-    { cellId: "x", label: "bash", summary: "pnpm test", lines: 12 },
-    { cellId: "y", label: "read", summary: "src/app.ts", lines: 3 },
+    { cellId: "x", label: "bash", summary: "pnpm test", lines: 12, isError: false },
+    { cellId: "y", label: "read", summary: "src/app.ts", lines: 3, isError: false },
   ]
   it("matches label and summary", () => {
     expect(filterInspectItems(items, "pnpm").map((i) => i.cellId)).toEqual(["x"])
@@ -56,7 +56,13 @@ describe("filterInspectItems", () => {
   })
   it("tolerates a missing summary (matches on label only)", () => {
     const noSummary: InspectItem[] = [
-      { cellId: "z", label: "subagent", summary: undefined as unknown as string, lines: 0 },
+      {
+        cellId: "z",
+        label: "subagent",
+        summary: undefined as unknown as string,
+        lines: 0,
+        isError: false,
+      },
     ]
     expect(filterInspectItems(noSummary, "subagent").map((i) => i.cellId)).toEqual(["z"])
     expect(filterInspectItems(noSummary, "nope")).toEqual([])

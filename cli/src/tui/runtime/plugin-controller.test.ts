@@ -500,7 +500,7 @@ describe("pluginMarketplace", () => {
         errors: [],
       }),
     })
-    const last = actions[actions.length - 1] as {
+    const last = actions[actions.length - 1] as unknown as {
       overlay: { entries: Array<Record<string, unknown>> }
     }
     expect(last.overlay.entries[0]).toMatchObject({

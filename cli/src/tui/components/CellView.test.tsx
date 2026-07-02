@@ -455,11 +455,14 @@ describe("CellView", () => {
     })
   })
 
-  it("renders a plan cell as a labelled card with a step count and markdown body", () => {
+  it("renders a plan cell as a compact reference card (full body lives in the approval overlay / /plan)", () => {
     const text = renderCell({ id: "1", kind: "plan", raw: "# Approach\n- step one\n- step two" })
     expect(text).toContain("Plan ready for review")
     expect(text).toContain("2 steps")
     expect(text).toContain("Approach")
-    expect(text).toContain("step one")
+    expect(text).toContain("full text via /plan")
+    // The full plan body is no longer duplicated in the transcript — it scrolls
+    // inside the approval overlay instead.
+    expect(text).not.toContain("step one")
   })
 })

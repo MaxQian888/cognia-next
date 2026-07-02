@@ -335,6 +335,26 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         ...state,
         inflight: { ...state.inflight, thinking: state.inflight.thinking + action.delta },
       }
+    case "COMMIT_PLAN": {
+      // Programmatic plan capture from the `/plan explore` pipeline: the Plan
+      // subagent's markdown IS the plan (no ExitPlanMode tool call). Route it
+      // through the SAME commit path as the tool signal so it lands in `lastPlan`
+      // and the App opens the approval overlay. Independent of permission mode —
+      // the pipeline can be kicked from any mode.
+      const raw = action.raw.trim()
+      if (!raw) return state
+      const p = commitPlan(state.cells, state.inflight, state.seq, raw, state.lastPlan?.raw, {
+        keepText: true,
+      })
+      return {
+        ...state,
+        cells: p.cells,
+        seq: p.seq,
+        inflight: p.inflight,
+        lastPlan: p.lastPlan,
+        planCapturedThisTurn: true,
+      }
+    }
     case "TOOL_CALL": {
       // Primary plan-ready signal: in plan mode, an `ExitPlanMode` /
       // `exit_plan_mode` tool call means the agent is presenting its final plan
@@ -889,6 +909,14 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return { ...state, initDraft: { target: action.target, content: action.content } }
     case "CLEAR_INIT_DRAFT":
       return { ...state, initDraft: undefined }
+    case "SET_COMMIT_DRAFT":
+      return { ...state, commitDraft: { message: action.message } }
+    case "CLEAR_COMMIT_DRAFT":
+      return { ...state, commitDraft: undefined }
+    case "SET_PR_DRAFT":
+      return { ...state, prDraft: { title: action.title, body: action.body, base: action.base } }
+    case "CLEAR_PR_DRAFT":
+      return { ...state, prDraft: undefined }
     case "RESET":
       return {
         ...state,
@@ -906,6 +934,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         lastPlan: undefined,
         planCapturedThisTurn: false,
         initDraft: undefined,
+        commitDraft: undefined,
+        prDraft: undefined,
         backtrack: undefined,
         editTarget: undefined,
       }

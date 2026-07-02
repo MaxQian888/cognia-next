@@ -158,7 +158,7 @@ export type TurnStatus = "idle" | "streaming" | "aborting"
 // ── Background activity (goal loop, workflow run, subagent dispatch) ───────────
 // These run outside the normal chat turn, so they get their own status pill.
 
-export type ActivityKind = "goal" | "workflow" | "agent" | "team" | "loop"
+export type ActivityKind = "goal" | "workflow" | "agent" | "team" | "loop" | "council"
 
 export interface ActivityState {
   kind: ActivityKind
@@ -596,6 +596,13 @@ export interface TuiState {
    * `content` the proposed body. `/init apply` writes it; the confirm overlay's
    * cancel (or a fresh stage) clears it. Absent when nothing is staged. */
   initDraft?: { target: string; content: string }
+  /** Pending Conventional-Commit message staged by `/commit`, awaiting
+   * confirmation. `/commit apply` creates the commit; the confirm overlay's
+   * cancel clears it. Absent when nothing is staged. */
+  commitDraft?: { message: string }
+  /** Pending PR draft staged by `/pr`, awaiting confirmation. `/pr apply` opens
+   * the draft PR with `gh`; cancel clears it. Absent when nothing is staged. */
+  prDraft?: { title: string; body: string; base: string }
   /** Pending `btw` steer messages typed while a turn or a goal/loop run is in
    * flight. The active driver (or the next plain turn) drains and delivers them
    * at the next turn boundary, so steering never interrupts the running turn. */
@@ -630,6 +637,10 @@ export type TuiAction =
   | { type: "INFLIGHT_TEXT"; delta: string }
   | { type: "INFLIGHT_THINKING"; delta: string }
   | { type: "TOOL_CALL"; callKey: string; toolName: string; input: Record<string, unknown> }
+  // Programmatic plan capture from the `/plan explore` pipeline (the Plan
+  // subagent's output), routed through the same commit path as the ExitPlanMode
+  // tool signal so it surfaces the approval overlay.
+  | { type: "COMMIT_PLAN"; raw: string }
   | {
       type: "TOOL_RESULT"
       toolName: string
@@ -714,6 +725,14 @@ export type TuiAction =
   // pending confirmation, then clear it once applied or cancelled.
   | { type: "SET_INIT_DRAFT"; target: string; content: string }
   | { type: "CLEAR_INIT_DRAFT" }
+  // `/commit` staged-draft lifecycle: stage a generated commit message pending
+  // confirmation, then clear it once the commit is applied or cancelled.
+  | { type: "SET_COMMIT_DRAFT"; message: string }
+  | { type: "CLEAR_COMMIT_DRAFT" }
+  // `/pr` staged-draft lifecycle: stage a generated PR title/body pending
+  // confirmation, then clear it once the PR is opened or cancelled.
+  | { type: "SET_PR_DRAFT"; title: string; body: string; base: string }
+  | { type: "CLEAR_PR_DRAFT" }
   // Config switches
   | { type: "SET_MODEL"; model: string }
   | { type: "SET_MODE"; mode: PermissionMode }

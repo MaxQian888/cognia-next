@@ -32,6 +32,7 @@ export function SelectList({
   onQueryChange,
   searchPlaceholder,
   emptyHint,
+  disableWheel = false,
 }: {
   title?: string
   items: SelectItem[]
@@ -58,6 +59,10 @@ export function SelectList({
   searchPlaceholder?: string
   /** Line shown in place of the list when a search filters everything out. */
   emptyHint?: string
+  /** Stop the wheel from moving the highlight (it's still swallowed, not inserted
+   * as text). Used when the list shares a screen with a taller scrollable body —
+   * e.g. the plan-approval overlay — so the wheel scrolls that body instead. */
+  disableWheel?: boolean
 }) {
   const theme = useTheme()
   const boxRef = useRef<DOMElement | null>(null)
@@ -78,7 +83,7 @@ export function SelectList({
       onMove(target - index)
       onSelect(target)
     },
-    onWheel: (dir) => onMove(dir === "up" ? -1 : 1),
+    onWheel: disableWheel ? undefined : (dir) => onMove(dir === "up" ? -1 : 1),
   })
 
   useInput(

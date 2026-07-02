@@ -8,7 +8,7 @@
 import React from "react"
 import { Box, Text, type DOMElement } from "ink"
 
-import { BottomStatus } from "../BottomStatus"
+import { BottomStatus, type AgentTreeHit } from "../BottomStatus"
 import { FindBar } from "../FindBar"
 import { Input } from "../Input"
 import { Mascot } from "../Mascot"
@@ -42,6 +42,8 @@ export interface BottomRegionProps {
   footerCopilot: { name: string } | undefined
   backtrackArmed: boolean
   subagentChipRef: React.RefObject<DOMElement | null>
+  /** Hit-test state for clicks on the running-agents tree (App mouse handler). */
+  agentTreeRef: React.MutableRefObject<AgentTreeHit | null>
   // Input (composer)
   handleSubmit: (text: string) => void
   handleHistoryPush: (entry: string) => void
@@ -74,6 +76,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     footerCopilot,
     backtrackArmed,
     subagentChipRef,
+    agentTreeRef,
     handleSubmit,
     handleHistoryPush,
     listDir,
@@ -104,6 +107,8 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
         backtrackArmed={backtrackArmed}
         columns={columns}
         chipRowRef={subagentChipRef}
+        sessionId={state.sessionId}
+        agentTreeRef={agentTreeRef}
       />
       {cursor.state.find && (
         <FindBar

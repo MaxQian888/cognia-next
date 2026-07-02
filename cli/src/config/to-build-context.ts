@@ -20,7 +20,12 @@
  */
 
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
-import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  getBuiltInProviderDefaultBaseURL,
+  isBuiltInProviderId,
+} from "@cognia/provider-types/built-in-provider-catalog"
+import { generateDefaultMappings } from "@cognia/provider-routing"
+import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type {
   AppSettings,
@@ -35,7 +40,7 @@ import { resolveActiveModel } from "./active-model"
 import { effectivePermissionMode } from "./agent-mode"
 import { buildDefaultSystemPrompt } from "./default-system-prompt"
 import { composeSystemPrompt } from "./output-style"
-import { RESOLVER_PROTOCOLS, type ResolvedConfig } from "./schema"
+import type { ResolvedConfig } from "./schema"
 import { modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
 
 export interface ToBuildContextParams {
@@ -77,11 +82,17 @@ export interface ToBuildContextParams {
    * sets this; one-shot (`run.ts`, idle disabled) and subagents leave it off.
    */
   interactive?: boolean
+  /**
+   * The outgoing prompt text, threaded to `routingContextHint.promptText` so
+   * opt-in auto routing (`config.autoRoute`) can score the prompt's difficulty
+   * and pick a tier alias. Only the one-shot `run` path knows the prompt up
+   * front; the persistent interactive session resolves options once at session
+   * start (bound to one dispatcher), so it leaves this off.
+   */
+  routingPromptText?: string
   /** Injected clock for deterministic tests; defaults to `Date.now()`. */
   now?: number
 }
-
-const BUILTIN_PROTOCOLS = new Set<string>(RESOLVER_PROTOCOLS)
 
 /** Build the `providerSettings` map the credential resolver reads. */
 function buildProviderSettings(config: ResolvedConfig): Record<string, ProviderSettingsEntry> {
@@ -109,19 +120,31 @@ function buildProviderSettings(config: ResolvedConfig): Record<string, ProviderS
       ...(bearer ? { apiKey: bearer } : {}),
       ...(baseURL ? { baseURL } : {}),
       ...(p.model ? { defaultModel: p.model } : {}),
+      // Wire-protocol override for non-anthropic built-ins — mirrors the
+      // desktop settings' apiProtocol selector (Part 2 of the baseURL fix).
+      // Genuinely custom ids get their `protocol` via `buildCustomProviders`
+      // below instead; the literal "anthropic" id always dispatches through
+      // the native Claude Agent SDK subprocess regardless of this field, so
+      // both are excluded here (matches `sidecar/dispatch/index.mjs`'s
+      // id-based routing).
+      ...(p.protocol && id !== "anthropic" && isBuiltInProviderId(id)
+        ? { apiProtocol: p.protocol }
+        : {}),
     }
   }
   return out
 }
 
 /**
- * Self-hosted / custom providers — any entry carrying an explicit `protocol`.
- * Built-in ids (anthropic/openai/…) derive their protocol downstream and need
- * no custom def.
+ * Self-hosted / custom providers — any entry carrying an explicit `protocol`
+ * whose id is NOT one of the catalog's built-in provider ids (deepseek, groq,
+ * openrouter, … not just the literal protocol-family names). Built-in ids
+ * get their protocol override folded into `providerSettings[id].apiProtocol`
+ * instead (see `buildProviderSettings`), so they need no custom def here.
  */
 function buildCustomProviders(config: ResolvedConfig): AppSettings["customProviders"] {
   const customs = Object.entries(config.providers)
-    .filter(([id, p]) => p.protocol && !BUILTIN_PROTOCOLS.has(id))
+    .filter(([id, p]) => p.protocol && !isBuiltInProviderId(id))
     .map(([id, p]) => ({
       id,
       name: id,
@@ -194,7 +217,7 @@ export function buildCliSession(
     // the model always knows its working directory and prefers `edit` over
     // `write` (see {@link buildDefaultSystemPrompt}).
     systemPrompt: composeSystemPrompt(
-      config.systemPrompt ?? buildDefaultSystemPrompt({ cwd: config.cwd, now }),
+      config.systemPrompt ?? buildDefaultSystemPrompt({ cwd: config.cwd, now, permissionMode }),
       config.outputStyle
     ),
     workingDir: config.cwd,
@@ -214,7 +237,8 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     defaultProvider: config.provider,
     defaultModel: model,
     defaultSystemPrompt: composeSystemPrompt(
-      config.systemPrompt ?? buildDefaultSystemPrompt({ cwd: config.cwd, now }),
+      config.systemPrompt ??
+        buildDefaultSystemPrompt({ cwd: config.cwd, now, permissionMode: config.permissionMode }),
       config.outputStyle
     ),
     permissionMode: config.permissionMode,
@@ -233,6 +257,19 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     // automatic prefix caching — turn after turn. Byte-identical to the legacy
     // assembly when no dynamic section is present, so it's safe to force on.
     cacheOptimizationEnabled: true,
+    // Opt-in auto routing (default off ⇒ this block is skipped and the shim is
+    // byte-identical to before). The interactive CLI otherwise omits
+    // `modelMappings`, so alias/auto routing is dormant there; when the user
+    // turns auto routing on we seed the tier ladder (fast/balanced/powerful)
+    // from the enabled providers and flip `autoRouting.enabled`. The send path
+    // then scores `routingContextHint.promptText` and rewrites the model to a
+    // tier alias — see `resolveSendOptions` + `lib/routing/auto-tier.ts`.
+    ...(config.autoRoute
+      ? {
+          modelMappings: generateDefaultMappings(new Set(Object.keys(config.providers))),
+          autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true },
+        }
+      : {}),
   } as unknown as AppSettings
 
   const session = buildCliSession(sessionId, config, now, params.sessionKind, params.agentMode)
@@ -272,5 +309,9 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     // Live TUI turns opt into token-level partials so the idle watchdog stays
     // fed during a long single generation (see ToBuildContextParams.interactive).
     ...(params.interactive ? { interactive: true } : {}),
+    // Prompt text for opt-in auto routing's difficulty scoring (one-shot `run`).
+    ...(config.autoRoute && params.routingPromptText
+      ? { routingContextHint: { promptText: params.routingPromptText } }
+      : {}),
   }
 }

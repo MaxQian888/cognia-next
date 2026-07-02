@@ -5,7 +5,6 @@ import {
   collectDoctorReport,
   runDoctor,
   type DoctorFacts,
-  type DoctorReportDeps,
 } from "./doctor-controller"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"

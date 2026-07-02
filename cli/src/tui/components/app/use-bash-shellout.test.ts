@@ -26,7 +26,7 @@ describe("useBashShellout", () => {
     await act(async () => {
       result.current.runBash("echo hi")
       // Drive the streamed onChunk callback.
-      run.mock.calls[0][1].onChunk?.("partial")
+      run.mock.calls[0][1].onChunk?.("partial", "stdout")
       await flush()
     })
 

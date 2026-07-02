@@ -229,6 +229,10 @@ function InputImpl({
         : wantsFiles
           ? mentionProviders.files(mentionQuery, listDir)
           : [],
+    // Depend on `bashTok?.token` (the string), not the `bashTok` object, on
+    // purpose: recompute only when the token text changes, not on every new
+    // object identity. Listing `bashTok` would recompute needlessly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [bashMode, bashTok?.token, wantsFiles, mentionQuery, mentionProviders, listDir]
   )
   // Annotate skill rows with their live enabled state so the popup shows a ●/○

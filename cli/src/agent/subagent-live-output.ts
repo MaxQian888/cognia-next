@@ -21,6 +21,8 @@
  */
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
+import { summarizeToolCall } from "../tui/format/tools"
+
 /** A subagent's lifecycle state — same union the panel/journal use. */
 export type SubagentLiveStatus = "running" | "done" | "error" | "interrupted"
 
@@ -31,6 +33,25 @@ export interface SubagentLiveTool {
   name: string
   status: "running" | "done" | "error"
 }
+
+/**
+ * One chronological slice of a subagent's run — the run page renders these in
+ * order so the transcript reads like the conversation actually happened
+ * (thinking → tool call → more thinking → reply), instead of three disjoint
+ * buckets. Consecutive same-kind text/thinking deltas merge into one segment.
+ */
+export type SubagentTimelineSegment =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | {
+      kind: "tool"
+      /** The originating `tool_use` block id, when the SDK supplied one. */
+      id?: string
+      name: string
+      /** One-line input summary (`summarizeToolCall`), truncated for display. */
+      summary: string
+      status: "running" | "done" | "error"
+    }
 
 /** A live (or recently-settled) subagent run's accumulated output. */
 export interface SubagentLiveEntry {
@@ -50,8 +71,30 @@ export interface SubagentLiveEntry {
   /** Accumulated reasoning (bounded — keeps the tail). */
   thinking: string
   tools: SubagentLiveTool[]
+  /** Chronological transcript segments (bounded — keeps the tail). */
+  timeline: SubagentTimelineSegment[]
+  /** Total tool calls seen — monotonic, survives the `tools` array cap. */
+  toolUseCount: number
+  /** Rough character volume streamed through the run (text + thinking + tool
+   * I/O) — the live token estimate before the exact end-of-turn usage lands. */
+  approxChars: number
+  /** Exact token spend from the end-of-turn `usage` event, once seen. */
+  usageTokens?: number
   /** Bumped on every mutation — the run-page poller diffs this to detect change. */
   version: number
+}
+
+/**
+ * The run's token count to display: the exact end-of-turn usage when it has
+ * landed, else a live estimate (~4 chars/token) from the streamed volume so the
+ * number grows while the agent works (Claude Code's live counter).
+ */
+export function liveTokenCount(entry: Pick<SubagentLiveEntry, "approxChars" | "usageTokens">): {
+  tokens: number
+  exact: boolean
+} {
+  if (entry.usageTokens !== undefined) return { tokens: entry.usageTokens, exact: true }
+  return { tokens: Math.round(entry.approxChars / 4), exact: false }
 }
 
 /** What {@link startLiveSubagent} needs to seed an entry. */
@@ -75,6 +118,13 @@ const TOOLS_CAP = 200
 const SETTLED_KEEP = 50
 // Truncate the displayed task to keep rows/headers compact.
 const TASK_CAP = 200
+// Keep at most this many timeline segments per entry (oldest dropped first).
+const TIMELINE_CAP = 400
+// Keep at most this much text across an entry's timeline segments (chars) —
+// bounded independently of the aggregate `text`/`thinking` caps.
+const TIMELINE_TEXT_CAP = 240_000
+// Truncate a tool segment's input summary for display.
+const TOOL_SUMMARY_CAP = 120
 
 const entries = new Map<string, SubagentLiveEntry>()
 
@@ -90,6 +140,47 @@ function mintLiveId(): string {
 function appendBounded(base: string, delta: string): string {
   const next = base + delta
   return next.length > TEXT_CAP ? next.slice(next.length - TEXT_CAP) : next
+}
+
+/** Rough character volume of a tool result, for the live token estimate. */
+function approxResultChars(result: unknown): number {
+  if (typeof result === "string") return result.length
+  if (result == null) return 0
+  try {
+    return JSON.stringify(result)?.length ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Append a text/thinking delta to the timeline: extend the trailing segment
+ * when it has the same kind, else start a new one; then trim the timeline from
+ * the front to its segment/char caps.
+ */
+function appendTimelineDelta(
+  timeline: SubagentTimelineSegment[],
+  kind: "text" | "thinking",
+  delta: string
+): void {
+  const last = timeline[timeline.length - 1]
+  if (last && last.kind === kind) last.text += delta
+  else timeline.push({ kind, text: delta })
+  trimTimeline(timeline)
+}
+
+/** Drop the oldest timeline segments past the segment/char caps. */
+function trimTimeline(timeline: SubagentTimelineSegment[]): void {
+  if (timeline.length > TIMELINE_CAP) timeline.splice(0, timeline.length - TIMELINE_CAP)
+  let chars = 0
+  for (const seg of timeline) if (seg.kind !== "tool") chars += seg.text.length
+  let drop = 0
+  while (chars > TIMELINE_TEXT_CAP && drop < timeline.length - 1) {
+    const seg = timeline[drop]
+    if (seg.kind !== "tool") chars -= seg.text.length
+    drop++
+  }
+  if (drop > 0) timeline.splice(0, drop)
 }
 
 /**
@@ -109,6 +200,9 @@ export function startLiveSubagent(meta: StartLiveSubagentMeta): string {
     text: "",
     thinking: "",
     tools: [],
+    timeline: [],
+    toolUseCount: 0,
+    approxChars: 0,
     version: 0,
   })
   return liveId
@@ -127,10 +221,14 @@ export function applyLiveSubagentEvent(liveId: string, event: CaptureStreamEvent
     case "text-delta":
       if (!event.delta) return
       entry.text = appendBounded(entry.text, event.delta)
+      appendTimelineDelta(entry.timeline, "text", event.delta)
+      entry.approxChars += event.delta.length
       break
     case "thinking-delta":
       if (!event.delta) return
       entry.thinking = appendBounded(entry.thinking, event.delta)
+      appendTimelineDelta(entry.timeline, "thinking", event.delta)
+      entry.approxChars += event.delta.length
       break
     case "tool-call": {
       entry.tools.push({
@@ -140,6 +238,20 @@ export function applyLiveSubagentEvent(liveId: string, event: CaptureStreamEvent
       })
       // Cap from the front so the most recent tools survive.
       if (entry.tools.length > TOOLS_CAP) entry.tools.splice(0, entry.tools.length - TOOLS_CAP)
+      const summary = summarizeToolCall(event.toolName, event.input)
+      entry.timeline.push({
+        kind: "tool",
+        ...(event.id ? { id: event.id } : {}),
+        name: event.toolName,
+        summary:
+          summary.length > TOOL_SUMMARY_CAP
+            ? summary.slice(0, TOOL_SUMMARY_CAP - 1) + "…"
+            : summary,
+        status: "running",
+      })
+      trimTimeline(entry.timeline)
+      entry.toolUseCount++
+      entry.approxChars += summary.length
       break
     }
     case "tool-result": {
@@ -149,11 +261,33 @@ export function applyLiveSubagentEvent(liveId: string, event: CaptureStreamEvent
       const target =
         (event.id ? entry.tools.find((t) => t.id === event.id) : undefined) ??
         [...entry.tools].reverse().find((t) => t.status === "running" && t.name === event.toolName)
-      if (!target) return
-      target.status = next
+      const seg =
+        (event.id
+          ? entry.timeline.find((s) => s.kind === "tool" && s.id === event.id)
+          : undefined) ??
+        [...entry.timeline]
+          .reverse()
+          .find((s) => s.kind === "tool" && s.status === "running" && s.name === event.toolName)
+      if (!target && !seg) return
+      if (target) target.status = next
+      if (seg && seg.kind === "tool") seg.status = next
+      // Count the result volume toward the live token estimate — tool results
+      // dominate a research agent's input tokens, so this is what makes the
+      // live counter track reality instead of the (tiny) reply text.
+      entry.approxChars += approxResultChars(event.result)
       break
     }
-    // `usage` / `compact` carry no run-page state — ignore without a version bump.
+    // Exact end-of-turn token spend — replaces the running estimate.
+    case "usage": {
+      const u = event.usage
+      entry.usageTokens =
+        (u.inputTokens ?? 0) +
+        (u.outputTokens ?? 0) +
+        (u.cacheCreationInputTokens ?? 0) +
+        (u.cacheReadInputTokens ?? 0)
+      break
+    }
+    // `compact` carries no run-page state — ignore without a version bump.
     default:
       return
   }
@@ -172,6 +306,8 @@ export function settleLiveSubagent(liveId: string, status: SubagentLiveStatus): 
   entry.settledAt = Date.now()
   const toolEnd: SubagentLiveTool["status"] = status === "error" ? "error" : "done"
   for (const tool of entry.tools) if (tool.status === "running") tool.status = toolEnd
+  for (const seg of entry.timeline)
+    if (seg.kind === "tool" && seg.status === "running") seg.status = toolEnd
   entry.version++
   evictSettled()
 }

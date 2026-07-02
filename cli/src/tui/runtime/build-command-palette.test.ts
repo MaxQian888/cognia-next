@@ -3,7 +3,7 @@
  */
 import { buildCommandPalette } from "./build-command-palette"
 import { __resetForTesting } from "../commands/registry"
-import type { ResolvedConfig } from "../config/schema"
+import type { ResolvedConfig } from "../../config/schema"
 
 function config(over: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {

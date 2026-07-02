@@ -11,6 +11,8 @@
  * working directory so a runtime `/cd` re-resolves it on the next turn.
  */
 
+import { PLAN_MODE_PROMPT } from "@/lib/claude/plan-mode-prompt"
+
 export interface DefaultSystemPromptInput {
   /** The session working directory (absolute). */
   cwd: string
@@ -18,12 +20,32 @@ export interface DefaultSystemPromptInput {
   now: number
   /** Overridable for tests; defaults to {@link process.platform}. */
   platform?: string
+  /**
+   * The effective session permission mode. When `"plan"`, a Plan-mode section is
+   * appended that turns the base prompt into an explore→analyze→plan workflow
+   * (Claude Code parity): the model researches read-only via `Explore`/`Plan`
+   * subagents and presents a plan instead of editing. Any other value (or
+   * omitted) leaves the prompt unchanged.
+   */
+  permissionMode?: string
 }
+
+/**
+ * The Plan-mode workflow guidance appended when the session is read-only
+ * (`permissionMode === "plan"`). Re-exported from the shared single source
+ * (`lib/claude/plan-mode-prompt.ts`) that the GUI's `PLAN_MODE_SNIPPET` also
+ * re-exports — the two surfaces must not drift. Kept as a named constant so
+ * the `/plan explore` pipeline and tests can reference the exact contract.
+ * Names the built-in read-only `Explore` / `Plan` subagents and both
+ * exit-plan tool names.
+ */
+export const PLAN_MODE_PROMPT_SECTION = PLAN_MODE_PROMPT
 
 /** Build the default CLI base system prompt for the given environment. */
 export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): string {
   const platform = input.platform ?? process.platform
   const date = new Date(input.now).toISOString().slice(0, 10)
+  const planSection = input.permissionMode === "plan" ? ["", PLAN_MODE_PROMPT_SECTION] : []
   return [
     "You are Cognia's command-line coding agent. You help with software-engineering tasks in the user's project, using the available tools to read, search, edit, and run code.",
     "",
@@ -54,5 +76,6 @@ export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): strin
     "Verifying your work:",
     "- After a change, verify it: run the project's tests, type-check, lint, or build when they're available, and read the output. Don't claim something works or is done without checking.",
     "- If a command or test fails, report the failure and its output plainly rather than asserting success.",
+    ...planSection,
   ].join("\n")
 }

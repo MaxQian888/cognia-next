@@ -53,6 +53,7 @@ function baseProps(over: Partial<BottomRegionProps> = {}): BottomRegionProps {
     footerCopilot: undefined,
     backtrackArmed: false,
     subagentChipRef: { current: null },
+    agentTreeRef: { current: null },
     handleSubmit: jest.fn(),
     handleHistoryPush: jest.fn(),
     listDir: undefined,

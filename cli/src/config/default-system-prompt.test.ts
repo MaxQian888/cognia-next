@@ -1,4 +1,4 @@
-import { buildDefaultSystemPrompt } from "./default-system-prompt"
+import { buildDefaultSystemPrompt, PLAN_MODE_PROMPT_SECTION } from "./default-system-prompt"
 
 describe("buildDefaultSystemPrompt", () => {
   const NOW = Date.UTC(2026, 5, 30, 12, 0, 0) // 2026-06-30
@@ -58,5 +58,36 @@ describe("buildDefaultSystemPrompt", () => {
     const out = buildDefaultSystemPrompt({ cwd: "/x", now: NOW, platform: "linux" })
     expect(out).toMatch(/concise and direct/i)
     expect(out).toMatch(/`path:line`/)
+  })
+
+  it("appends the explore→plan workflow section only in plan mode", () => {
+    const base = buildDefaultSystemPrompt({ cwd: "/x", now: NOW, platform: "linux" })
+    expect(base).not.toContain(PLAN_MODE_PROMPT_SECTION)
+
+    const planned = buildDefaultSystemPrompt({
+      cwd: "/x",
+      now: NOW,
+      platform: "linux",
+      permissionMode: "plan",
+    })
+    expect(planned).toContain(PLAN_MODE_PROMPT_SECTION)
+    // Names the read-only subagents and the plan-ready signal.
+    expect(planned).toMatch(/`Explore` subagent/)
+    expect(planned).toMatch(/`Plan` subagent/)
+    expect(planned).toMatch(/exit_plan_mode/)
+    expect(planned).toMatch(/READ-ONLY/)
+  })
+
+  it("leaves the prompt unchanged for non-plan permission modes", () => {
+    const base = buildDefaultSystemPrompt({ cwd: "/x", now: NOW, platform: "linux" })
+    for (const mode of ["default", "acceptEdits", "bypassPermissions", "auto"]) {
+      const out = buildDefaultSystemPrompt({
+        cwd: "/x",
+        now: NOW,
+        platform: "linux",
+        permissionMode: mode,
+      })
+      expect(out).toBe(base)
+    }
   })
 })

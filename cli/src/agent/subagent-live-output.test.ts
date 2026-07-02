@@ -8,6 +8,7 @@ import {
   applyLiveSubagentEvent,
   getLiveSubagent,
   listLiveSubagents,
+  liveTokenCount,
   settleLiveSubagent,
   startLiveSubagent,
 } from "./subagent-live-output"
@@ -66,19 +67,35 @@ describe("applyLiveSubagentEvent", () => {
     expect(entry.version).toBe(3)
   })
 
-  it("ignores empty deltas and usage/compact without bumping version", () => {
+  it("ignores empty deltas and compact without bumping version", () => {
     const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
     applyLiveSubagentEvent(id, ev({ type: "text-delta", delta: "" }))
     applyLiveSubagentEvent(id, ev({ type: "thinking-delta", delta: "" }))
     applyLiveSubagentEvent(
       id,
-      ev({ type: "usage", usage: { inputTokens: 1, outputTokens: 2 } as never })
-    )
-    applyLiveSubagentEvent(
-      id,
       ev({ type: "compact", trigger: "auto", preTokens: 1, postTokens: 0 })
     )
     expect(getLiveSubagent(id)!.version).toBe(0)
+  })
+
+  it("lands exact usage tokens (sum of input/output/cache) and bumps version", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    applyLiveSubagentEvent(
+      id,
+      ev({
+        type: "usage",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationInputTokens: 5,
+          cacheReadInputTokens: 75,
+        } as never,
+      })
+    )
+    const entry = getLiveSubagent(id)!
+    expect(entry.usageTokens).toBe(200)
+    expect(entry.version).toBe(1)
+    expect(liveTokenCount(entry)).toEqual({ tokens: 200, exact: true })
   })
 
   it("is a no-op for an unknown live id", () => {
@@ -135,6 +152,127 @@ describe("applyLiveSubagentEvent", () => {
     expect(tools.length).toBe(200)
     expect(tools[tools.length - 1].name).toBe("t204")
     expect(tools[0].name).toBe("t5")
+  })
+})
+
+describe("timeline + counters", () => {
+  const ev = <T extends CaptureStreamEvent>(e: T): CaptureStreamEvent => e
+
+  it("builds a chronological timeline, merging consecutive same-kind deltas", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    applyLiveSubagentEvent(id, ev({ type: "thinking-delta", delta: "let me " }))
+    applyLiveSubagentEvent(id, ev({ type: "thinking-delta", delta: "look" }))
+    applyLiveSubagentEvent(
+      id,
+      ev({ type: "tool-call", toolName: "grep", input: { pattern: "foo" }, id: "tu1" })
+    )
+    applyLiveSubagentEvent(id, ev({ type: "text-delta", delta: "found " }))
+    applyLiveSubagentEvent(id, ev({ type: "text-delta", delta: "it" }))
+    expect(getLiveSubagent(id)!.timeline).toEqual([
+      { kind: "thinking", text: "let me look" },
+      { kind: "tool", id: "tu1", name: "grep", summary: "foo", status: "running" },
+      { kind: "text", text: "found it" },
+    ])
+  })
+
+  it("resolves a timeline tool segment on its result (by id) and on settle", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    applyLiveSubagentEvent(id, ev({ type: "tool-call", toolName: "read", input: {}, id: "a" }))
+    applyLiveSubagentEvent(id, ev({ type: "tool-call", toolName: "bash", input: {}, id: "b" }))
+    applyLiveSubagentEvent(id, ev({ type: "tool-result", toolName: "read", id: "a", result: "ok" }))
+    const timeline = getLiveSubagent(id)!.timeline
+    expect(timeline).toMatchObject([
+      { kind: "tool", name: "read", status: "done" },
+      { kind: "tool", name: "bash", status: "running" },
+    ])
+    settleLiveSubagent(id, "error")
+    expect(getLiveSubagent(id)!.timeline).toMatchObject([
+      { kind: "tool", name: "read", status: "done" },
+      { kind: "tool", name: "bash", status: "error" },
+    ])
+  })
+
+  it("resolves a timeline tool segment by name when the result has no id", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    applyLiveSubagentEvent(id, ev({ type: "tool-call", toolName: "bash", input: {} }))
+    applyLiveSubagentEvent(
+      id,
+      ev({ type: "tool-result", toolName: "bash", result: "boom", isError: true })
+    )
+    expect(getLiveSubagent(id)!.timeline).toMatchObject([
+      { kind: "tool", name: "bash", status: "error" },
+    ])
+  })
+
+  it("counts tool uses monotonically past the tools-array cap", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    for (let i = 0; i < 205; i++) {
+      applyLiveSubagentEvent(
+        id,
+        ev({ type: "tool-call", toolName: `t${i}`, input: {}, id: `id${i}` })
+      )
+    }
+    expect(getLiveSubagent(id)!.toolUseCount).toBe(205)
+  })
+
+  it("caps the timeline segment count, keeping the tail", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    for (let i = 0; i < 405; i++) {
+      applyLiveSubagentEvent(
+        id,
+        ev({ type: "tool-call", toolName: `t${i}`, input: {}, id: `id${i}` })
+      )
+    }
+    const timeline = getLiveSubagent(id)!.timeline
+    expect(timeline.length).toBe(400)
+    expect(timeline[timeline.length - 1]).toMatchObject({ kind: "tool", name: "t404" })
+  })
+
+  it("drops oldest timeline segments once the char budget is exceeded", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    applyLiveSubagentEvent(id, ev({ type: "text-delta", delta: "a".repeat(200_000) }))
+    applyLiveSubagentEvent(id, ev({ type: "tool-call", toolName: "read", input: {}, id: "tu" }))
+    // A tool call ends the first text segment; the next delta starts a new one
+    // that pushes the total past the 240k budget → the oldest segment drops.
+    applyLiveSubagentEvent(id, ev({ type: "thinking-delta", delta: "b".repeat(100_000) }))
+    const timeline = getLiveSubagent(id)!.timeline
+    expect(timeline).toMatchObject([{ kind: "tool", name: "read" }, { kind: "thinking" }])
+  })
+
+  it("estimates object results via JSON size and survives an unstringifiable one", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    applyLiveSubagentEvent(id, ev({ type: "tool-call", toolName: "a", input: {}, id: "1" }))
+    applyLiveSubagentEvent(
+      id,
+      ev({ type: "tool-result", toolName: "a", id: "1", result: { rows: [1, 2, 3] } })
+    )
+    const afterObject = getLiveSubagent(id)!.approxChars
+    expect(afterObject).toBeGreaterThan(0)
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    applyLiveSubagentEvent(id, ev({ type: "tool-call", toolName: "b", input: {}, id: "2" }))
+    applyLiveSubagentEvent(
+      id,
+      ev({ type: "tool-result", toolName: "b", id: "2", result: circular })
+    )
+    // The circular result contributes nothing rather than throwing.
+    expect(getLiveSubagent(id)!.approxChars).toBe(afterObject)
+  })
+
+  it("accumulates a live token estimate from text, tool input and result volume", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    applyLiveSubagentEvent(id, ev({ type: "text-delta", delta: "a".repeat(40) }))
+    applyLiveSubagentEvent(
+      id,
+      ev({ type: "tool-call", toolName: "bash", input: { command: "b".repeat(20) }, id: "tu" })
+    )
+    applyLiveSubagentEvent(
+      id,
+      ev({ type: "tool-result", toolName: "bash", id: "tu", result: "c".repeat(140) })
+    )
+    const entry = getLiveSubagent(id)!
+    expect(entry.approxChars).toBe(200)
+    expect(liveTokenCount(entry)).toEqual({ tokens: 50, exact: false })
   })
 })
 

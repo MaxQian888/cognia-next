@@ -28,6 +28,9 @@ export interface AgentsPanelProps {
   /** Open a row's output (settled background runs). */
   onView: (row: AgentPanelRow) => void
   onCancel: () => void
+  /** Re-read the rows from the live sources — called on the 1s tick so the
+   * board moves (status / tokens / tool counts) while it is open. */
+  refresh?: () => AgentPanelRow[]
   /** Wall clock for elapsed text; injectable so tests stay deterministic. */
   now?: number
   isActive?: boolean
@@ -36,9 +39,10 @@ export interface AgentsPanelProps {
 }
 
 export function AgentsPanel({
-  rows,
+  rows: rowsProp,
   onView,
   onCancel,
+  refresh,
   now: nowProp,
   isActive = true,
   maxRows = DEFAULT_MAX_ROWS,
@@ -58,6 +62,17 @@ export function AgentsPanel({
     return () => clearInterval(id)
   }, [nowProp])
   const now = nowProp ?? tickNow
+
+  // Live board: re-read the rows alongside the clock tick so a run that settles
+  // (or spends tokens) while the panel is open updates in place. The snapshot
+  // from open time is the fallback when no refresher is supplied.
+  const [liveRows, setLiveRows] = useState<AgentPanelRow[] | null>(null)
+  useEffect(() => {
+    if (!refresh) return
+    const id = setInterval(() => setLiveRows(refresh()), 1000)
+    return () => clearInterval(id)
+  }, [refresh])
+  const rows = liveRows ?? rowsProp
 
   const safeIndex = rows.length > 0 ? Math.min(index, rows.length - 1) : 0
   const current = rows[safeIndex]

@@ -63,7 +63,9 @@ import {
   setEnabled as setSkillEnabled,
   setManyEnabled as setManySkillsEnabled,
 } from "../../../skill/skill-state"
-import { getLiveSubagent } from "../../../agent/subagent-live-output"
+import { getLiveSubagent, listLiveSubagents } from "../../../agent/subagent-live-output"
+import { listCliBackgroundRuns } from "../../../agent/subagent-background-tasks"
+import { refreshAgentPanelRows } from "../../runtime/agents-panel-model"
 import { formatToolResultBody } from "../../commands/expand-command"
 import { cycleEnum } from "../../runtime/settings-sections"
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES } from "../../../config/schema"
@@ -73,6 +75,7 @@ import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ThinkingLevel, SubagentModelOverride } from "../../../config/schema"
 import type { ConfigMenuRow } from "../../commands/config-menu"
 import type { TuiState, TuiAction } from "../../state/types"
+import { permissionModeMeta, permissionRiskMarker } from "../../state/permission-mode-meta"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
 import type { PlanDecision } from "../../runtime/plan"
@@ -129,6 +132,22 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     mcpPanelDeps,
   } = props
 
+  // Live refresher for the open agents panel: re-merge the live-output store +
+  // background registry over the journal-backed snapshot the panel opened with,
+  // so statuses/tokens/tool counts move while it is on screen. Unconditional
+  // hook (overlay kind varies render-to-render); a no-op unless the panel is up.
+  const agentsOverlayRows = state.overlay.kind === "agents" ? state.overlay.rows : null
+  const sessionId = state.sessionId
+  const refreshAgents = React.useCallback(
+    () =>
+      refreshAgentPanelRows(
+        agentsOverlayRows ?? [],
+        listLiveSubagents(sessionId),
+        listCliBackgroundRuns(sessionId)
+      ),
+    [agentsOverlayRows, sessionId]
+  )
+
   return (
     <>
       {state.overlay.kind === "permission" && (
@@ -175,8 +194,14 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         })()}
       {state.overlay.kind === "mode" && (
         <SelectList
-          title="Permission mode"
-          items={state.overlay.options.map((m) => ({ label: m }))}
+          title="Permission mode — Shift+Tab cycles the safe core; ⚠/• = fewer guardrails"
+          items={state.overlay.options.map((m) => {
+            const meta = permissionModeMeta(m)
+            return {
+              label: `${permissionRiskMarker(m)}${meta.label}`,
+              hint: meta.runsWithoutAsking,
+            }
+          })}
           index={state.overlay.index}
           width={columns}
           maxRows={overlayRows}
@@ -593,6 +618,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
       {state.overlay.kind === "agents" && (
         <AgentsPanel
           rows={state.overlay.rows}
+          refresh={refreshAgents}
           width={columns}
           maxRows={overlayRows}
           onView={(row) => {
