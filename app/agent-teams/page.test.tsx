@@ -80,10 +80,19 @@ jest.mock("@/stores/ui/ui-store", () => ({
     selector({ pendingCreateRequest: undefined, clearPendingCreate: jest.fn() }),
 }))
 
+// useTeamLiveStatus derives status from the durable workflowRuns row. Mock it
+// so the card renders a deterministic status without a live Dexie query; an
+// override lets a test simulate the run row diverging from the store value.
+let liveStatusOverride: AgentTeam["status"] | undefined
+jest.mock("@/hooks/agent-runs/use-team-live-status", () => ({
+  useTeamLiveStatus: (t: { status: AgentTeam["status"] }) => liveStatusOverride ?? t.status,
+}))
+
 import AgentTeamsListPage from "./page"
 
 beforeEach(() => {
   pushMock.mockClear()
+  liveStatusOverride = undefined
   storeState = {
     teams: { team_1: team({ status: "executing" }) },
     teammates: {},
@@ -103,6 +112,21 @@ describe("AgentTeamsListPage", () => {
     // StatusBadge translation ran instead of rendering the raw "executing".
     expect(within(card).getByText("Executing")).toBeInTheDocument()
     expect(within(card).queryByText("executing")).toBeNull()
+  })
+
+  it("renders the authoritative live status when it diverges from the store", async () => {
+    // Store still says executing (stale optimistic write), but the workflowRuns
+    // subscription reports the run completed — the card must show completed.
+    liveStatusOverride = "completed"
+    const user = userEvent.setup()
+    render(<AgentTeamsListPage />)
+    const card = screen.getByTestId("team-card-team_1")
+    // agentTeam.status.completed === "Completed"
+    expect(within(card).getByText("Completed")).toBeInTheDocument()
+    expect(within(card).queryByText("Executing")).toBeNull()
+    // And the actions menu offers "Open" (not "View") since the run is terminal.
+    await user.click(within(card).getByRole("button"))
+    expect(await screen.findByRole("menuitem", { name: "Open workspace" })).toBeInTheDocument()
   })
 
   it("keeps the per-card actions menu reachable on touch devices", () => {
