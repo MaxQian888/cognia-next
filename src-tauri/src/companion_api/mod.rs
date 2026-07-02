@@ -28,6 +28,7 @@
 //! layer: the handler emits `companion://device-paired` and the TS side calls
 //! `addPairedDevice` from `lib/db/paired-devices.ts`.
 
+pub mod audit;
 pub mod auth;
 pub mod bridge_transport;
 pub mod control_allow_list;

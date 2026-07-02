@@ -204,10 +204,19 @@ async fn handle_inbound(
         }
     }
 
-    // Route through the existing dispatch table.
-    let result =
-        crate::companion_api::rpc::dispatch(&rpc.method, rpc.params, state, host, device_id, None)
-            .await;
+    // Route through the existing dispatch table. `scope: None` — the
+    // DataChannel is always device-scoped, so service-only (RCE-grade)
+    // commands are unreachable over WebRTC by construction.
+    let result = crate::companion_api::rpc::dispatch(
+        &rpc.method,
+        rpc.params,
+        state,
+        host,
+        device_id,
+        None,
+        None,
+    )
+    .await;
     let outbound = match result {
         Ok(value) => {
             if let Some(key) = rpc.idempotency_key.as_deref() {

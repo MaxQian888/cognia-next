@@ -216,6 +216,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     // through the mobile outbound queue. Both via desktop_writes_bridge.
     "external_agent_list",
     "external_agent_update",
+    // ADR-0059 R11 — headless external-agent execution plane. Service-scope
+    // only (SERVICE_ONLY_COMMANDS) + SpawnPolicy allowlist + audit trail;
+    // a device JWT can never reach these.
+    "spawn_external_agent",
+    "send_to_external_agent",
+    "kill_external_agent",
+    "get_external_agent_status",
     // Mobile outbound-queue RPCs — round-trip through desktop_writes_bridge.
     // Mirror `MOBILE_OUTBOUND_COMMANDS` in `lib/db/mobile-outbound-types.ts`.
     // Spec-parity test (`spec_parity.rs`) asserts these stay in lockstep
@@ -388,6 +395,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "twin_profile_get",
     // ADR-0056 Wave 4 — read-only external-agent list projection.
     "external_agent_list",
+    // ADR-0059 R11 — read-only status probe on the headless exec backend.
+    "get_external_agent_status",
     // Read-only remote-control capability probe (drives the mobile
     // computer-use consent sheet). Pure read of the process-global allow list.
     "companion_can_control",
@@ -532,11 +541,16 @@ fn is_control_command(name: &str) -> bool {
 }
 
 /// RCE-grade commands that ONLY the headless brain's service token may call
-/// (ADR-0059 W4/D6). A device JWT presenting one of these is rejected with 403
-/// `service_scope_required`. Populated with the `*_external_agent` +
-/// `connectors_*_adapter` arms in R11/R12; empty until then, so the gate is a
-/// no-op on today's surface.
-const SERVICE_ONLY_COMMANDS: &[&str] = &[];
+/// (ADR-0059 W4/D6). A device JWT presenting one of these is rejected with
+/// 403. The external-agent arms are remote code execution by construction —
+/// every decision is also written to the audit log. R12 adds the
+/// `connectors_*` management arms.
+const SERVICE_ONLY_COMMANDS: &[&str] = &[
+    "spawn_external_agent",
+    "send_to_external_agent",
+    "kill_external_agent",
+    "get_external_agent_status",
+];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| SERVICE_ONLY_COMMANDS.iter().copied().collect());
@@ -825,6 +839,7 @@ pub async fn rpc_handler(
         &host,
         &ctx.device_id,
         Some(&ctx.account_id),
+        Some(&ctx.scope),
     )
     .await?;
 
@@ -921,6 +936,7 @@ pub(super) async fn dispatch(
     host: &super::dispatch_host::DispatchHost,
     device_id: &str,
     account_id: Option<&str>,
+    scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
 
@@ -931,6 +947,15 @@ pub(super) async fn dispatch(
     if is_control_command(name) && !super::control_allow_list::global().is_allowed(device_id) {
         return Err(RpcError::forbidden(
             "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
+        ));
+    }
+
+    // Service-scope gate, mirrored from `rpc_handler` so the WebRTC
+    // `signaling::dispatch` path (which is always device-scoped — it passes
+    // `scope: None`) can never reach the RCE-grade arms either.
+    if is_service_only_command(name) && scope != Some("service") {
+        return Err(RpcError::forbidden(
+            "this command requires the headless service token",
         ));
     }
 
@@ -1365,6 +1390,122 @@ pub(super) async fn dispatch(
                 )
                 .await
                 .map_err(RpcError::internal)
+        }
+
+        // ── Headless external-agent execution plane (ADR-0059 R11) ───────────
+        // Service-scope only (gated above + in rpc_handler); every decision
+        // is written to the audit log. The spawn request must clear the
+        // SpawnPolicy preset allowlist before it touches the exec backend.
+        "spawn_external_agent" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let config: crate::external_agent::process::ExternalAgentSpawnConfig =
+                required(&args, "config")?;
+            let summary = serde_json::json!({
+                "agent_id": config.id,
+                "command": config.command,
+                "args": config.args,
+            });
+            match services.spawn_policy.validate(config) {
+                Err(violation) => {
+                    let mut fields = summary;
+                    fields["reason"] = Value::String(violation.to_string());
+                    super::audit::record(
+                        "external_agent_spawn",
+                        device_id,
+                        scope.unwrap_or(""),
+                        "deny",
+                        fields,
+                    );
+                    Err(RpcError::forbidden(format!(
+                        "spawn denied by policy: {violation}"
+                    )))
+                }
+                Ok(validated) => {
+                    let mut fields = summary;
+                    fields["cwd"] = Value::String(
+                        validated.config.cwd.clone().unwrap_or_default(),
+                    );
+                    fields["dropped_env_keys"] =
+                        serde_json::to_value(&validated.dropped_env_keys)
+                            .unwrap_or(Value::Null);
+                    super::audit::record(
+                        "external_agent_spawn",
+                        device_id,
+                        scope.unwrap_or(""),
+                        "allow",
+                        fields,
+                    );
+                    let emitter: std::sync::Arc<
+                        dyn crate::external_agent::exec_backend::AgentEventEmitter,
+                    > = std::sync::Arc::new(
+                        crate::external_agent::exec_backend::BusAgentEmitter(
+                            std::sync::Arc::clone(&services.event_bus),
+                        ),
+                    );
+                    crate::external_agent::exec_backend::spawn_with_events(
+                        services.exec.as_ref(),
+                        emitter,
+                        validated.config,
+                    )
+                    .await
+                    .map(Value::String)
+                    .map_err(RpcError::internal)
+                }
+            }
+        }
+
+        "send_to_external_agent" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let agent_id: String = required(&args, "agent_id")?;
+            let message: String = required(&args, "message")?;
+            super::audit::record(
+                "external_agent_send",
+                device_id,
+                scope.unwrap_or(""),
+                "allow",
+                serde_json::json!({ "agent_id": agent_id, "bytes": message.len() }),
+            );
+            services
+                .exec
+                .send(&agent_id, &message)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "kill_external_agent" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let agent_id: String = required(&args, "agent_id")?;
+            super::audit::record(
+                "external_agent_kill",
+                device_id,
+                scope.unwrap_or(""),
+                "allow",
+                serde_json::json!({ "agent_id": agent_id }),
+            );
+            services
+                .exec
+                .kill(&agent_id)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "get_external_agent_status" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let agent_id: String = required(&args, "agent_id")?;
+            match services.exec.status(&agent_id).await {
+                Some(status) => Ok(Value::String(format!("{status:?}"))),
+                None => Err(RpcError::internal(format!("Agent {agent_id} not found"))),
+            }
         }
 
         // Remote Session Control — resolve a host computer-use HITL consent
@@ -2205,6 +2346,7 @@ mod tests {
             &headless_host(),
             "dev1",
             Some(ACCOUNT_ID),
+            Some("service"),
         )
         .await
         .expect("session_list must work on a headless host");
@@ -2225,6 +2367,7 @@ mod tests {
             &headless_host(),
             "dev1",
             Some(ACCOUNT_ID),
+            Some("service"),
         )
         .await
         .expect_err("desktop-only arm must 503 on a headless host");
@@ -2247,6 +2390,7 @@ mod tests {
             &host,
             "dev1",
             Some(ACCOUNT_ID),
+            Some("service"),
         )
         .await
         .expect("claude_sidecar_status must work headless");
@@ -2260,6 +2404,7 @@ mod tests {
             &host,
             "dev1",
             Some(ACCOUNT_ID),
+            Some("service"),
         )
         .await
         .expect("claude_set_api_key must work headless");
@@ -2270,6 +2415,7 @@ mod tests {
             &host,
             "dev1",
             Some(ACCOUNT_ID),
+            Some("service"),
         )
         .await
         .expect("claude_has_api_key must work headless");
@@ -2284,10 +2430,183 @@ mod tests {
             &host,
             "dev1",
             Some(ACCOUNT_ID),
+            Some("service"),
         )
         .await
         .expect_err("no sidecar running");
         assert!(err.1 .0.message.contains("not running"));
+    }
+
+    // ── External-agent arms: scope + policy + audit (ADR-0059 R11) ──────────
+
+    /// A device JWT must never reach the RCE-grade arms — the HTTP handler
+    /// rejects with 403 before dispatch.
+    #[tokio::test]
+    async fn device_scope_cannot_reach_the_external_agent_arms() {
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("phone-1");
+        for name in [
+            "spawn_external_agent",
+            "send_to_external_agent",
+            "kill_external_agent",
+            "get_external_agent_status",
+        ] {
+            let resp = rpc_post(router.clone(), name, json!({}), &jwt, None).await;
+            assert_eq!(resp.status().as_u16(), 403, "{name} must be scope-gated");
+        }
+    }
+
+    /// The mirrored in-dispatch gate covers the WebRTC path (`scope: None`).
+    #[tokio::test]
+    async fn dispatch_without_service_scope_rejects_service_only_commands() {
+        let state = test_state();
+        let err = dispatch(
+            "spawn_external_agent",
+            json!({}),
+            &state,
+            &headless_host(),
+            "dev1",
+            Some(ACCOUNT_ID),
+            None, // the DataChannel path
+        )
+        .await
+        .expect_err("device-scoped channel must be rejected");
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    /// Policy deny → 403 naming the violation, with a `deny` audit line;
+    /// policy allow (smoke stub) → spawn succeeds with an `allow` audit line
+    /// and the frozen events on the bus.
+    #[tokio::test]
+    async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+        let state = test_state();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let audit_path = tmp.path().join("audit.log");
+        crate::companion_api::audit::install_at_for_testing(Some(audit_path.clone()));
+
+        // Headless services with a smoke-enabled policy + temp workspaces.
+        let services = {
+            use crate::claude::host::HeadlessSidecarHost;
+            let event_bus = crate::companion_api::event_bus::EventBus::new();
+            let api_keys = crate::api_key::ApiKeyState::new();
+            let sidecar_host = Arc::new(HeadlessSidecarHost::new(
+                std::path::PathBuf::from("missing.mjs"),
+                Arc::clone(&event_bus),
+                api_keys.clone(),
+            ));
+            crate::headless::HeadlessServices::new(
+                sidecar_host,
+                api_keys,
+                event_bus,
+                crate::external_agent::presets::SpawnPolicy::new(
+                    tmp.path().join("workspaces"),
+                    true,
+                ),
+            )
+        };
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        // Deny: bash is not allowlisted.
+        let err = dispatch(
+            "spawn_external_agent",
+            json!({ "config": { "id": "evil", "command": "bash", "args": ["-c", "id"] } }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("bash must be denied");
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert!(err.1 .0.message.contains("denied by policy"));
+
+        // Allow: the smoke stub via node.
+        let stub = tmp.path().join("stub-acp-agent.mjs");
+        std::fs::write(&stub, "setInterval(() => {}, 60_000);\n").unwrap();
+        let spawned = dispatch(
+            "spawn_external_agent",
+            json!({ "config": {
+                "id": "smoke-1",
+                "command": "node",
+                "args": [stub.display().to_string()],
+                "env": { "ANTHROPIC_API_KEY": "sk", "LD_PRELOAD": "/evil.so" },
+            } }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("smoke stub must be admitted");
+        assert_eq!(spawned, Value::String("smoke-1".into()));
+
+        // Status + kill round-trip through the exec backend.
+        let status = dispatch(
+            "get_external_agent_status",
+            json!({ "agent_id": "smoke-1" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("status");
+        assert_eq!(status, Value::String("Running".into()));
+        dispatch(
+            "kill_external_agent",
+            json!({ "agent_id": "smoke-1" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("kill");
+
+        // Audit trail: a deny line and an allow line (with the dropped
+        // LD_PRELOAD recorded), then the kill.
+        let audit = std::fs::read_to_string(&audit_path).expect("audit written");
+        let lines: Vec<Value> = audit
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("jsonl"))
+            .collect();
+        assert!(lines.iter().any(|l| l["decision"] == "deny"
+            && l["kind"] == "external_agent_spawn"
+            && l["command"] == "bash"));
+        assert!(lines.iter().any(|l| l["decision"] == "allow"
+            && l["kind"] == "external_agent_spawn"
+            && l["dropped_env_keys"][0] == "LD_PRELOAD"));
+        assert!(lines
+            .iter()
+            .any(|l| l["kind"] == "external_agent_kill" && l["scope"] == "service"));
+
+        crate::companion_api::audit::install_at_for_testing(None);
+    }
+
+    #[test]
+    fn service_only_commands_are_known_and_not_control_gated() {
+        for name in [
+            "spawn_external_agent",
+            "send_to_external_agent",
+            "kill_external_agent",
+            "get_external_agent_status",
+        ] {
+            assert!(is_service_only_command(name), "{name} must be service-only");
+            assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
+            assert!(
+                !CONTROL_COMMANDS.contains(&name),
+                "{name} is scope-gated, not device-control-gated"
+            );
+        }
     }
 
     /// `sync_pull` on a headless host routes through the connected brain's
@@ -2309,6 +2628,7 @@ mod tests {
                     &headless_host(),
                     "dev1",
                     Some(ACCOUNT_ID),
+                    Some("service"),
                 )
                 .await
             })

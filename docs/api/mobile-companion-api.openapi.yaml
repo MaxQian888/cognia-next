@@ -2303,6 +2303,167 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/spawn_external_agent:
+    post:
+      operationId: rpcSpawnExternalAgent
+      tags: [rpc-control]
+      summary: Spawn an external agent process on the headless server (service scope only).
+      description: |
+        ADR-0059 R11. RCE-grade by construction, so the arm is triple-gated:
+        the JWT must carry the headless brain's `service` scope (loopback-
+        minted; a device JWT gets 403), the spawn request must clear the
+        preset-only SpawnPolicy allowlist (agent-CLI binaries, allowlisted
+        npx packages, workspace-rooted cwd, default-deny env), and every
+        decision — allow AND deny — is appended to the server audit log.
+        Unavailable on desktop installs.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config]
+              properties:
+                config:
+                  type: object
+                  required: [id, command]
+                  properties:
+                    id: { type: string }
+                    command: { type: string }
+                    args: { type: array, items: { type: string } }
+                    env: { type: object, additionalProperties: { type: string } }
+                    cwd: { type: [string, "null"] }
+      responses:
+        "200":
+          description: The spawned agent id.
+          content:
+            application/json:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token or SpawnPolicy denial,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/send_to_external_agent:
+    post:
+      operationId: rpcSendToExternalAgent
+      tags: [rpc-control]
+      summary: Write one line to a spawned external agent's stdin (service scope only).
+      description: |
+        ADR-0059 R11. Service-scope companion of `spawn_external_agent`;
+        audited. Unavailable on desktop installs.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id, message]
+              properties:
+                agent_id: { type: string }
+                message: { type: string }
+      responses:
+        "200":
+          {
+            description: Line written.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: unknown agent id or write failure,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/kill_external_agent:
+    post:
+      operationId: rpcKillExternalAgent
+      tags: [rpc-control]
+      summary: Kill a spawned external agent process (service scope only).
+      description: |
+        ADR-0059 R11. Service-scope companion of `spawn_external_agent`;
+        audited. The exit event is emitted by the process supervisor.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { type: string }
+      responses:
+        "200":
+          {
+            description: Kill initiated.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: unknown agent id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/get_external_agent_status:
+    post:
+      operationId: rpcGetExternalAgentStatus
+      tags: [rpc-control]
+      summary: Read a spawned external agent's process state (service scope only).
+      description: |
+        ADR-0059 R11. Read-only (skips the idempotency cache); reports the
+        exec backend's process state (Starting/Running/Stopping/Stopped/
+        Failed).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { type: string }
+      responses:
+        "200":
+          description: The process state.
+          content:
+            application/json:
+              schema: { type: string, enum: [Starting, Running, Stopping, Stopped, Failed] }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: unknown agent id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/twin_ingest_source:
     post:
       operationId: rpcTwinIngestSource

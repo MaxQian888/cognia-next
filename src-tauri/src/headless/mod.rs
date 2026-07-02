@@ -29,6 +29,7 @@ use crate::companion_api::event_bus::EventBus;
 pub use crate::api_key::ApiKeyState;
 pub use crate::claude::host::{HeadlessSidecarHost, SidecarHost, SIDECAR_SCRIPT_ENV};
 pub use crate::claude::sidecar::kill_sidecar;
+pub use crate::external_agent::presets::SpawnPolicy;
 pub use crate::secret_store::{
     generate_master_key, init_headless as init_secret_store, parse_master_key,
     resolve_master_key_from_env, rotate_master_key, MASTER_KEY_ENV, MASTER_KEY_FILE_ENV,
@@ -51,6 +52,9 @@ pub struct HeadlessServices {
     /// Execution plane for external agents (ADR-0059 R10). Local processes
     /// in Phase 1; `ExecBackend::Container` swaps in at T2 (R13).
     pub exec: Arc<dyn crate::external_agent::exec_backend::ExecBackend>,
+    /// Preset allowlist gating the RCE-grade `spawn_external_agent` RPC arm
+    /// (ADR-0059 R11).
+    pub spawn_policy: crate::external_agent::presets::SpawnPolicy,
 }
 
 impl HeadlessServices {
@@ -58,6 +62,7 @@ impl HeadlessServices {
         sidecar_host: Arc<dyn SidecarHost>,
         api_keys: ApiKeyState,
         event_bus: Arc<EventBus>,
+        spawn_policy: crate::external_agent::presets::SpawnPolicy,
     ) -> Arc<Self> {
         Arc::new(Self {
             sidecar: SidecarState::new(),
@@ -65,11 +70,14 @@ impl HeadlessServices {
             api_keys,
             event_bus,
             exec: crate::external_agent::exec_backend::LocalProcessBackend::new(),
+            spawn_policy,
         })
     }
 
     /// A registry with a never-resolving sidecar script — for dispatch tests
-    /// that need a headless host but never actually spawn the sidecar.
+    /// that need a headless host but never actually spawn the sidecar. The
+    /// spawn policy points at a per-process temp workspaces dir with the
+    /// smoke stub disabled.
     #[cfg(test)]
     pub fn stub_for_tests() -> Arc<Self> {
         use crate::claude::host::HeadlessSidecarHost;
@@ -80,7 +88,16 @@ impl HeadlessServices {
             Arc::clone(&event_bus),
             api_keys.clone(),
         ));
-        Self::new(sidecar_host, api_keys, event_bus)
+        let workspaces = std::env::temp_dir().join(format!(
+            "cognia-test-workspaces-{}",
+            std::process::id()
+        ));
+        Self::new(
+            sidecar_host,
+            api_keys,
+            event_bus,
+            crate::external_agent::presets::SpawnPolicy::new(workspaces, false),
+        )
     }
 }
 

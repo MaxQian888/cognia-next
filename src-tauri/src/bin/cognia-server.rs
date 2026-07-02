@@ -51,7 +51,7 @@ use app_lib::companion_api::{
 use app_lib::headless::{
     brain, generate_master_key, headless_services, init_secret_store, install_headless_services,
     kill_sidecar, parse_master_key, resolve_master_key_from_env, rotate_master_key, ApiKeyState,
-    HeadlessServices, HeadlessSidecarHost, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
+    HeadlessServices, HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
 };
 use parking_lot::RwLock;
 
@@ -331,7 +331,12 @@ async fn run_serve(
         sidecar_host,
         api_keys,
         Arc::clone(&shared.event_bus),
+        SpawnPolicy::from_env(&data_dir),
     )));
+
+    // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
+    // append-only JSONL beside the SQLite store.
+    app_lib::companion_api::audit::install(&data_dir);
 
     // LAN bind (false) so the headless server is reachable on every
     // interface — the typical deployment puts this behind a reverse proxy
