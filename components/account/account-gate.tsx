@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
+import { getPetWindowRole } from "@/lib/pet/window-role"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
 import { PasswordStrengthMeter } from "./password-strength-meter"
@@ -55,6 +56,18 @@ export function AccountGate({ children }: AccountGateProps) {
   // gate so server + first client render agree (both show the loading shell);
   // `isTauri()` is only evaluated post-hydration. See ADR-0021.
   if (!isTauri()) {
+    return <>{children}</>
+  }
+
+  // The desktop-pet overlay / popup windows load this same root layout but are
+  // presentation-only companions (they read pet state from Dexie and award no
+  // XP). Gating them behind the account lock is both wrong — an opaque
+  // lock/create form fills what must be a transparent paint-through window —
+  // and pointless. Pass through so the sprite always paints. Placed after the
+  // `loaded` gate for the same server/first-client hydration agreement as the
+  // `isTauri()` passthrough above (role reads Tauri internals post-hydration).
+  const petRole = getPetWindowRole()
+  if (petRole === "overlay" || petRole === "popup") {
     return <>{children}</>
   }
 

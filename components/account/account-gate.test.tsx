@@ -19,6 +19,14 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri,
 }))
 
+// The pet overlay / popup windows load the same layout; the gate must pass
+// through there so the transparent sprite window never shows a lock form.
+// Default to "main" so the ordinary gate tests are unaffected.
+let mockPetRole: "main" | "web" | "overlay" | "popup" = "main"
+jest.mock("@/lib/pet/window-role", () => ({
+  getPetWindowRole: () => mockPetRole,
+}))
+
 const mockCreateAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()
 const mockUnlockAccount = jest.fn<Promise<void>, [string, string]>()
 
@@ -78,6 +86,7 @@ function setGateState(overrides: Partial<typeof mockState> = {}) {
 beforeEach(() => {
   jest.clearAllMocks()
   mockIsTauri = true
+  mockPetRole = "main"
   mockCreateAccount.mockResolvedValue(account("acct_first", "First"))
   mockUnlockAccount.mockResolvedValue()
   setGateState()
@@ -138,6 +147,43 @@ describe("AccountGate", () => {
     )
     expect(screen.getByText("child")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "unlockAccount" })).not.toBeInTheDocument()
+  })
+
+  it.each(["overlay", "popup"] as const)(
+    "passes through to children in the %s pet window even when locked on Tauri",
+    (role) => {
+      mockPetRole = role
+      setGateState({
+        accounts: [account("acct_alpha", "Alpha")],
+        activeAccountId: "acct_alpha",
+        locked: true,
+      })
+      render(
+        <AccountGate>
+          <div>child</div>
+        </AccountGate>
+      )
+      // The transparent pet window must paint its sprite, not an opaque lock
+      // form — the gate is a main-window concern.
+      expect(screen.getByText("child")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "unlockAccount" })).not.toBeInTheDocument()
+    }
+  )
+
+  it("still gates the main window on Tauri when locked", () => {
+    mockPetRole = "main"
+    setGateState({
+      accounts: [account("acct_alpha", "Alpha")],
+      activeAccountId: "acct_alpha",
+      locked: true,
+    })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+    expect(screen.getByRole("button", { name: "unlockAccount" })).toBeInTheDocument()
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 
   it("creates the first account from the first-run form", async () => {
