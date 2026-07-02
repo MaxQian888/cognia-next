@@ -155,16 +155,34 @@ pub fn fs_set_allowed_roots(paths: Vec<String>) {
 /// after letting the user pick the path via the dialog plugin — that
 /// user gesture stands in for an fs scope. Shadow-mode containment logs (but
 /// does not yet block) reads outside the registered roots.
+///
+/// `async` + `spawn_blocking`: Tauri dispatches sync commands on the main
+/// (UI) thread, so a large or slow-FS read would freeze the webview. The
+/// blocking work runs on the blocking pool; `read_text_file_impl` holds the
+/// actual sync logic so tests and the companion RPC path can call it directly.
 #[tauri::command]
-pub fn read_text_file(path: String) -> Result<String, String> {
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || read_text_file_impl(path))
+        .await
+        .map_err(|e| format!("read_text_file task failed: {e}"))?
+}
+
+pub(crate) fn read_text_file_impl(path: String) -> Result<String, String> {
     shadow_check_path(&path, "read_text_file");
     std::fs::read_to_string(&path).map_err(|e| format!("read {}: {}", path, e))
 }
 
 /// Write a text file at the given absolute path, creating parent
 /// directories as needed. Shadow-mode containment logs out-of-root writes.
+/// Runs off the UI thread (see [`read_text_file`]).
 #[tauri::command]
-pub fn write_text_file(path: String, content: String) -> Result<(), String> {
+pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || write_text_file_impl(path, content))
+        .await
+        .map_err(|e| format!("write_text_file task failed: {e}"))?
+}
+
+pub(crate) fn write_text_file_impl(path: String, content: String) -> Result<(), String> {
     shadow_check_path(&path, "write_text_file");
     let p = PathBuf::from(&path);
     if let Some(parent) = p.parent() {
@@ -177,9 +195,16 @@ pub fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 /// Ensure a directory exists, creating it (and parents) if needed.
-/// Shadow-mode containment logs out-of-root directory creation.
+/// Shadow-mode containment logs out-of-root directory creation. Runs off the
+/// UI thread (see [`read_text_file`]).
 #[tauri::command]
-pub fn ensure_dir(path: String) -> Result<(), String> {
+pub async fn ensure_dir(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || ensure_dir_impl(path))
+        .await
+        .map_err(|e| format!("ensure_dir task failed: {e}"))?
+}
+
+pub(crate) fn ensure_dir_impl(path: String) -> Result<(), String> {
     shadow_check_path(&path, "ensure_dir");
     std::fs::create_dir_all(&path).map_err(|e| format!("mkdir {}: {}", path, e))
 }
@@ -195,9 +220,17 @@ pub struct DiscoveredSkill {
 }
 
 /// Walk `~/.claude/skills/*/SKILL.md` and return the discoverable skill
-/// files. Returns an empty list when the directory doesn't exist.
+/// files. Returns an empty list when the directory doesn't exist. Runs off the
+/// UI thread — the directory walk + per-skill reads can be slow (see
+/// [`read_text_file`]); `scan_claude_skills_impl` holds the sync logic.
 #[tauri::command]
-pub fn scan_claude_skills() -> Result<Vec<DiscoveredSkill>, String> {
+pub async fn scan_claude_skills() -> Result<Vec<DiscoveredSkill>, String> {
+    tokio::task::spawn_blocking(scan_claude_skills_impl)
+        .await
+        .map_err(|e| format!("scan_claude_skills task failed: {e}"))?
+}
+
+pub(crate) fn scan_claude_skills_impl() -> Result<Vec<DiscoveredSkill>, String> {
     let Some(home) = dirs::home_dir() else {
         return Err("could not resolve home directory".into());
     };
@@ -240,7 +273,13 @@ pub fn scan_claude_skills() -> Result<Vec<DiscoveredSkill>, String> {
 /// import its `mcpServers` block. Returns an empty object when the file
 /// doesn't exist so the UI can show "no servers found" cleanly.
 #[tauri::command]
-pub fn read_claude_user_config() -> Result<serde_json::Value, String> {
+pub async fn read_claude_user_config() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(read_claude_user_config_impl)
+        .await
+        .map_err(|e| format!("read_claude_user_config task failed: {e}"))?
+}
+
+pub(crate) fn read_claude_user_config_impl() -> Result<serde_json::Value, String> {
     let Some(home) = dirs::home_dir() else {
         return Err("could not resolve home directory".into());
     };
@@ -801,8 +840,20 @@ mod tests {
     fn write_and_read_roundtrip() {
         let tmp = std::env::temp_dir().join(format!("cognia-test-{}.txt", std::process::id()));
         let path = tmp.to_string_lossy().to_string();
-        write_text_file(path.clone(), "hello".into()).unwrap();
-        assert_eq!(read_text_file(path.clone()).unwrap(), "hello");
+        write_text_file_impl(path.clone(), "hello".into()).unwrap();
+        assert_eq!(read_text_file_impl(path.clone()).unwrap(), "hello");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    // Exercises the async command wrappers (spawn_blocking path), not just the
+    // sync `_impl`, so the off-UI-thread dispatch is covered end-to-end.
+    #[tokio::test]
+    async fn async_write_and_read_roundtrip() {
+        let tmp =
+            std::env::temp_dir().join(format!("cognia-test-async-{}.txt", std::process::id()));
+        let path = tmp.to_string_lossy().to_string();
+        write_text_file(path.clone(), "world".into()).await.unwrap();
+        assert_eq!(read_text_file(path.clone()).await.unwrap(), "world");
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -814,7 +865,7 @@ mod tests {
             .join("b")
             .join("file.txt");
         let path = tmp.to_string_lossy().to_string();
-        write_text_file(path.clone(), "x".into()).unwrap();
+        write_text_file_impl(path.clone(), "x".into()).unwrap();
         assert!(std::path::Path::new(&path).is_file());
         let _ = std::fs::remove_file(&tmp);
     }
@@ -824,7 +875,7 @@ mod tests {
         // Can't really test the real ~/.claude/skills; just ensure it returns
         // a Vec without panicking. The function's branch for missing dir is
         // already covered by the empty case if the user has no dir.
-        let _ = scan_claude_skills();
+        let _ = scan_claude_skills_impl();
     }
 
     fn make_sandbox(prefix: &str) -> PathBuf {

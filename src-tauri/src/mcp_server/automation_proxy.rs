@@ -597,12 +597,12 @@ mod tests {
 
     fn stub_enf_with(mcp_tier: Tier) -> Enforcement {
         let mut settings = AutomationSettings::default();
-        // The kill switch defaults to off (`enabled = false`), which makes the
-        // gate deny *every* call with `KillSwitchActive` before the tier is
-        // even consulted. Enable it so the MCP-surface tier actually governs the
-        // call — otherwise `Tier::Whitelist` (meant to be allow-all here) never
-        // reaches the worker and the command never gets a chance to report
-        // "unknown automation command".
+        // The engine defaults to disabled (`enabled = false`), which makes the
+        // gate deny *every* driving call (with `PermissionDenied`) before the
+        // tier is even consulted. Enable it so the MCP-surface tier actually
+        // governs the call — otherwise `Tier::Whitelist` (meant to be allow-all
+        // here) never reaches the worker and the command never gets a chance to
+        // report "unknown automation command".
         settings.enabled = true;
         settings.per_surface.mcp.tier = mcp_tier;
         Enforcement {

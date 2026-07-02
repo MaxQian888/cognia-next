@@ -71,6 +71,15 @@ const RESUME_TTL: Duration = Duration::from_secs(5 * 60);
 /// registry GC catches the abandoned session after the consumer drops.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
+/// Depth of the per-consumer fan-out channel. Bounded (was unbounded) so a fast
+/// producer (`cat bigfile`) feeding a slow WAN consumer can't grow the queue
+/// without limit and OOM the desktop. When full, the PTY reader OS thread blocks
+/// on `blocking_send` — natural backpressure that stalls the child instead of
+/// buffering unboundedly. Data is already durable in the 512 KiB ReplayBuffer
+/// (pushed before the sink runs), so nothing is lost. Each queued Data event is
+/// up to 64 KiB, so this bounds the channel to ~16 MiB worst case.
+const CONSUMER_CHANNEL_CAPACITY: usize = 256;
+
 pub struct WsTerminalRegistry {
     inner: Mutex<HashMap<String, WsSessionEntry>>,
 }
@@ -87,7 +96,7 @@ struct WsSessionEntry {
     /// a clone on the entry so reconnects can swap the consumer end.
     /// `None` means "no live consumer" — events still land in the
     /// session's ReplayBuffer because the EventSink writes there first.
-    consumer: Mutex<Option<tokio::sync::mpsc::UnboundedSender<(u64, TerminalEvent)>>>,
+    consumer: Mutex<Option<tokio::sync::mpsc::Sender<(u64, TerminalEvent)>>>,
 }
 
 impl WsTerminalRegistry {
@@ -116,7 +125,7 @@ impl WsTerminalRegistry {
         &self,
         session_id: &str,
         device_id: &str,
-        consumer: tokio::sync::mpsc::UnboundedSender<(u64, TerminalEvent)>,
+        consumer: tokio::sync::mpsc::Sender<(u64, TerminalEvent)>,
     ) -> bool {
         let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let Some(entry) = guard.get(session_id) else {
@@ -291,7 +300,8 @@ async fn handle_terminal_socket(
     let resume_target = params.session_id.clone();
 
     let (session, session_id, resolved_shell): (Arc<PtySession>, String, String);
-    let (consumer_tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u64, TerminalEvent)>();
+    let (consumer_tx, mut rx) =
+        tokio::sync::mpsc::channel::<(u64, TerminalEvent)>(CONSUMER_CHANNEL_CAPACITY);
 
     if is_spawn {
         let req = match build_spawn_request(&params) {
@@ -306,7 +316,11 @@ async fn handle_terminal_socket(
 
         let consumer_for_sink = consumer_tx.clone();
         let sink: EventSink = Arc::new(move |seq, event| {
-            let _ = consumer_for_sink.send((seq, event));
+            // Runs on the PTY reader/waiter OS threads (no tokio runtime), so a
+            // blocking send is safe and gives backpressure when the consumer is
+            // slow. An `Err` means the receiver was dropped (consumer gone) —
+            // ignore it; the event is already durable in the ReplayBuffer.
+            let _ = consumer_for_sink.blocking_send((seq, event));
         });
 
         // Remote sessions fan out through the mpsc sink above; the desktop
@@ -746,12 +760,37 @@ mod tests {
     /// signature.
     #[test]
     fn event_sink_closure_is_send_sync_clonable() {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<(u64, TerminalEvent)>();
+        let (tx, _rx) =
+            tokio::sync::mpsc::channel::<(u64, TerminalEvent)>(CONSUMER_CHANNEL_CAPACITY);
         let sink: EventSink = Arc::new(move |seq, event| {
-            let _ = tx.send((seq, event));
+            // Mirrors the production sink: a dropped receiver makes blocking_send
+            // return Err immediately (no hang), which we swallow.
+            let _ = tx.blocking_send((seq, event));
         });
         let cloned = sink.clone();
         cloned(1, TerminalEvent::Exit { code: Some(0) });
+    }
+
+    #[test]
+    fn consumer_channel_is_bounded_not_unbounded() {
+        // The fan-out channel must be capacity-limited so a slow consumer can't
+        // grow it without bound (the OOM vector this replaced). Fill it to
+        // capacity without draining and assert the next non-blocking send is
+        // rejected as Full — proof the channel is bounded.
+        let (tx, _rx) =
+            tokio::sync::mpsc::channel::<(u64, TerminalEvent)>(CONSUMER_CHANNEL_CAPACITY);
+        for seq in 0..CONSUMER_CHANNEL_CAPACITY as u64 {
+            tx.try_send((seq, TerminalEvent::Data { bytes: vec![b'x'] }))
+                .expect("send within capacity");
+        }
+        let overflow = tx.try_send((
+            CONSUMER_CHANNEL_CAPACITY as u64,
+            TerminalEvent::Data { bytes: vec![b'x'] },
+        ));
+        assert!(
+            matches!(overflow, Err(tokio::sync::mpsc::error::TrySendError::Full(_))),
+            "channel should be full at capacity (bounded)"
+        );
     }
 
     // ── Wave 2 registry behaviour ──────────────────────────────────

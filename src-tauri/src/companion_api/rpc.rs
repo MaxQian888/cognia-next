@@ -1664,7 +1664,7 @@ pub(super) async fn dispatch(
         // and remain the recommended, ungated client path for workspace files.
         "read_text_file" => {
             let path: String = required(&args, "path")?;
-            tokio::task::spawn_blocking(move || crate::files::read_text_file(path))
+            tokio::task::spawn_blocking(move || crate::files::read_text_file_impl(path))
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?
                 .map(Value::String)
@@ -1673,7 +1673,7 @@ pub(super) async fn dispatch(
         "write_text_file" => {
             let path: String = required(&args, "path")?;
             let content: String = required(&args, "content")?;
-            tokio::task::spawn_blocking(move || crate::files::write_text_file(path, content))
+            tokio::task::spawn_blocking(move || crate::files::write_text_file_impl(path, content))
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?
                 .map(|_| Value::Null)
@@ -1693,7 +1693,7 @@ pub(super) async fn dispatch(
         }
         "ensure_dir" => {
             let path: String = required(&args, "path")?;
-            tokio::task::spawn_blocking(move || crate::files::ensure_dir(path))
+            tokio::task::spawn_blocking(move || crate::files::ensure_dir_impl(path))
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?
                 .map(|_| Value::Null)

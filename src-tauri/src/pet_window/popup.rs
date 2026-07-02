@@ -9,9 +9,10 @@
 //! (label `"pet-popup"`) renders the panel at its natural size (never clipped),
 //! and the sprite window stops resizing entirely (the races are gone).
 //!
-//! Stability comes from native blur-to-close: the popup is created `focused`,
-//! and an `on_window_event` handler hides it on `WindowEvent::Focused(false)`,
-//! so clicking anywhere else dismisses it exactly like a system context menu.
+//! Stability comes from native blur-to-close: the renderer focuses the popup
+//! when it reveals it after first paint (`lib/pet/reveal.ts`), and an
+//! `on_window_event` handler hides it on `WindowEvent::Focused(false)`, so
+//! clicking anywhere else dismisses it exactly like a system context menu.
 //!
 //! Placement is computed renderer-side (`lib/pet/popup-geometry.ts`) from the
 //! sprite window position + work area, and passed in as already-physical,
@@ -50,7 +51,9 @@ pub(crate) fn close_pet_popup_inner<R: Runtime>(app: &AppHandle<R>) -> Result<()
 
 /// Open (or show + reposition + focus, if it already exists) the popup window.
 /// On first create it is frameless, transparent, always-on-top, skip-taskbar,
-/// non-resizable, and `focused` (so the blur-to-close handler fires).
+/// non-resizable, and hidden — the renderer reveals + focuses it after its
+/// first painted frame (so the blur-to-close handler can fire without the
+/// window ever flashing an unpainted opaque rectangle).
 #[tauri::command]
 pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(PET_POPUP_LABEL) {
@@ -76,11 +79,15 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     .skip_taskbar(true)
     .resizable(false)
     .shadow(false)
-    .focused(true)
     .visible(false)
     .inner_size(opts.width, opts.height)
     .build()
     .map_err(|e| e.to_string())?;
+
+    // Same as the sprite window (`mod.rs`): the app-wide menu bar attaches to
+    // every new window on Windows/Linux — detach it from this frameless popup
+    // before the first reveal so no File/Edit menubar strip ever paints.
+    let _ = window.remove_menu();
 
     window
         .set_position(PhysicalPosition::new(opts.x, opts.y))
@@ -99,8 +106,15 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
         }
     });
 
-    window.show().map_err(|e| e.to_string())?;
-    let _ = window.set_focus();
+    // Intentionally do NOT `show()` / `set_focus()` here. Like the sprite
+    // window (`mod.rs`), a `transparent(true)` window shown before its WebView
+    // commits a first paint renders an opaque rectangle — here the popup's
+    // pre-hydration page background — until a recomposite. The window is
+    // created `visible(false)`; `PetPopupView` reveals + focuses it after its
+    // first painted frame (`lib/pet/reveal.ts`), which also arms the native
+    // blur-to-close handler above (it needs the window to have held focus).
+    // The re-show branch at the top still shows + focuses directly because an
+    // existing window has already painted, so it can never flash.
     Ok(())
 }
 

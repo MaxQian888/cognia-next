@@ -19,17 +19,15 @@
 //! slot. Keeping one cron engine guarantees the dashboard's "next run" preview
 //! matches what actually fires.
 //!
-//! Design mirrors `cron_daemon.rs`:
-//! - One tokio task, sleeping until the soonest armed instant.
-//! - A `Notify` handle wakes the loop on every `arm`/`disarm` mutation.
-//! - Fires are one-shot (removed on fire); the TS side re-arms.
+//! The generic "sleep until soonest, wake early on mutation" loop mechanics
+//! (shared with `cron_daemon.rs`) live in `crate::timing::alarm_daemon`; this
+//! module is a thin adapter binding that primitive to `TaskDueEvent`.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use parking_lot::Mutex;
-use tokio::sync::Notify;
+
+use crate::timing::{AlarmDaemonCore, DueEmitter};
 
 use super::types::TaskDueEvent;
 
@@ -44,7 +42,7 @@ pub trait TaskDueEmitter: Send + Sync + 'static {
 #[cfg(test)]
 #[derive(Default, Clone)]
 pub struct RecordingEmitter {
-    pub fired: Arc<Mutex<Vec<TaskDueEvent>>>,
+    pub fired: Arc<parking_lot::Mutex<Vec<TaskDueEvent>>>,
 }
 
 #[cfg(test)]
@@ -54,31 +52,20 @@ impl TaskDueEmitter for RecordingEmitter {
     }
 }
 
-/// Mutable shared state behind the daemon: armed `task_id → fire_at`.
-struct DaemonInner {
-    entries: HashMap<String, DateTime<Utc>>,
+/// Binds the generic `DueEmitter<DateTime<Utc>>` core to `TaskDueEmitter`.
+/// Always one-shot — never returns `Some` to re-arm — the TS side re-arms
+/// the next slot explicitly via `arm()`.
+struct SchedulerDueAdapter {
+    inner: Arc<dyn TaskDueEmitter>,
 }
 
-impl DaemonInner {
-    fn new() -> Self {
-        Self {
-            entries: HashMap::new(),
-        }
-    }
-
-    /// Soonest armed fire instant across all entries, or `None` when idle.
-    fn next_fire(&self) -> Option<DateTime<Utc>> {
-        self.entries.values().min().copied()
-    }
-
-    /// Ids whose armed instant is `<= now` — everything that came due during
-    /// the sleep.
-    fn due_ids(&self, now: DateTime<Utc>) -> Vec<String> {
-        self.entries
-            .iter()
-            .filter(|(_, fire_at)| **fire_at <= now)
-            .map(|(id, _)| id.clone())
-            .collect()
+impl DueEmitter<DateTime<Utc>> for SchedulerDueAdapter {
+    fn emit(&self, id: &str, _entry: DateTime<Utc>, fired_at: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        self.inner.emit(TaskDueEvent {
+            task_id: id.to_string(),
+            fired_at_ms: fired_at.timestamp_millis(),
+        });
+        None
     }
 }
 
@@ -86,17 +73,13 @@ impl DaemonInner {
 /// inner state; pass clones into Tauri commands.
 #[derive(Clone)]
 pub struct AlarmDaemon {
-    inner: Arc<Mutex<DaemonInner>>,
-    notify: Arc<Notify>,
-    emitter: Arc<dyn TaskDueEmitter>,
+    core: AlarmDaemonCore<DateTime<Utc>, SchedulerDueAdapter>,
 }
 
 impl AlarmDaemon {
     pub fn new(emitter: Arc<dyn TaskDueEmitter>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(DaemonInner::new())),
-            notify: Arc::new(Notify::new()),
-            emitter,
+            core: AlarmDaemonCore::new(Arc::new(SchedulerDueAdapter { inner: emitter })),
         }
     }
 
@@ -105,27 +88,24 @@ impl AlarmDaemon {
     /// next loop tick (immediately).
     pub fn arm(&self, task_id: String, fire_at_ms: i64) {
         let fire_at = DateTime::<Utc>::from_timestamp_millis(fire_at_ms).unwrap_or_else(Utc::now);
-        self.inner.lock().entries.insert(task_id, fire_at);
-        // Wake the loop so it recomputes the soonest fire including this entry.
-        self.notify.notify_one();
+        self.core.upsert(task_id, fire_at);
     }
 
     /// Cancel a previously-armed task. No-op for unknown ids.
     pub fn disarm(&self, task_id: &str) {
-        self.inner.lock().entries.remove(task_id);
-        self.notify.notify_one();
+        self.core.remove(task_id);
     }
 
     #[allow(dead_code)]
     pub fn entry_count(&self) -> usize {
-        self.inner.lock().entries.len()
+        self.core.entry_count()
     }
 
     /// The next-fire instant the loop is currently waiting on (tests + a
     /// future diagnostics readout).
     #[allow(dead_code)]
     pub fn next_fire_at(&self) -> Option<DateTime<Utc>> {
-        self.inner.lock().next_fire()
+        self.core.next_fire_at()
     }
 
     /// Spawn the long-running tokio task that drives firing. Call once at boot.
@@ -140,48 +120,7 @@ impl AlarmDaemon {
     /// The actual loop body. Public for tests so they can drive it directly; in
     /// production we always call `spawn`.
     pub async fn run_loop(self) {
-        loop {
-            let now = Utc::now();
-            // Drain everything that came due. Each fire is one-shot: remove the
-            // entry first (so a slow emit can't double-fire), then emit.
-            //
-            // NOTE: bind `due_ids` to a local so the `inner` lock guard is
-            // released before the loop body re-locks `inner` for the remove.
-            // Inlining `self.inner.lock().due_ids(now)` into the `for` header
-            // keeps the guard alive for the whole loop → self-deadlock on the
-            // non-reentrant parking_lot mutex (this fires on every due task).
-            let due_ids = self.inner.lock().due_ids(now);
-            for task_id in due_ids {
-                let removed = self.inner.lock().entries.remove(&task_id).is_some();
-                if removed {
-                    self.fire(&task_id, now);
-                }
-            }
-
-            let next = self.inner.lock().next_fire();
-            let sleep_dur = match next {
-                Some(t) => {
-                    let ms = (t - Utc::now()).num_milliseconds().max(0) as u64;
-                    // Floor at 25ms so we don't spin when the cached time is
-                    // already overdue on a heavily loaded host.
-                    std::time::Duration::from_millis(ms.max(25))
-                }
-                // Idle — wait essentially forever; `notify` wakes us on arm.
-                None => std::time::Duration::from_secs(60 * 60),
-            };
-
-            tokio::select! {
-                _ = tokio::time::sleep(sleep_dur) => {}
-                _ = self.notify.notified() => {}
-            }
-        }
-    }
-
-    fn fire(&self, task_id: &str, now: DateTime<Utc>) {
-        self.emitter.emit(TaskDueEvent {
-            task_id: task_id.to_string(),
-            fired_at_ms: now.timestamp_millis(),
-        });
+        self.core.run_loop().await;
     }
 }
 
