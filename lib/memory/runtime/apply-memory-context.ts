@@ -29,6 +29,11 @@ export interface ApplyMemoryContextInput {
   /** Current turn's Twin chunk texts, for overlap dedupe. */
   twinChunkTexts?: string[]
   proceduralMaxTokens?: number
+  /**
+   * Query embedding already computed for this turn (e.g. for twin RAG). Passed
+   * through to the retriever's vector leg so the same query isn't re-embedded.
+   */
+  precomputedQueryEmbedding?: number[]
   deps: ApplyMemoryContextDeps
 }
 
@@ -87,6 +92,7 @@ export async function applyMemoryContext(
               topK: input.topK,
               relevanceFloor: input.relevanceFloor,
               types: RECALLED_TYPES,
+              precomputedQueryEmbedding: input.precomputedQueryEmbedding,
             },
             input.deps
           )

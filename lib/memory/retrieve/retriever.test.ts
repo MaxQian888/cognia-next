@@ -1,5 +1,12 @@
 import type { Memory } from "@/types/memory/memory"
-import { retrieveMemories, type MemoryRetrieverDeps } from "./retriever"
+import { retrieveMemories, __resetMemoryBm25Cache, type MemoryRetrieverDeps } from "./retriever"
+
+// The BM25 index is cached by corpus signature at module scope; reset between
+// cases so a shared cache key (e.g. `global::`) can't return another test's
+// corpus.
+beforeEach(() => {
+  __resetMemoryBm25Cache()
+})
 
 let seq = 0
 function mem(text: string, over: Partial<Memory> = {}): Memory {
@@ -141,6 +148,69 @@ describe("retrieveMemories", () => {
       deps
     )
     expect(out.map((r) => r.memory.id)).toEqual(["sem"])
+  })
+
+  it("reuses the BM25 index for an unchanged corpus (rebuilds when it changes)", async () => {
+    const corpus = [mem("The user prefers pnpm", { id: "a", updatedAt: 100 })]
+    const loadCandidates = jest.fn(async () => corpus)
+    const deps: MemoryRetrieverDeps = { loadCandidates }
+    // Two retrievals over the same corpus (same characterId + types + signature).
+    await retrieveMemories({ queryText: "pnpm", ...base, characterId: "c1" }, deps)
+    await retrieveMemories({ queryText: "pnpm", ...base, characterId: "c1" }, deps)
+    // Candidates are loaded each turn, but the index is cached — both still work.
+    const out = await retrieveMemories({ queryText: "pnpm", ...base, characterId: "c1" }, deps)
+    expect(out.map((r) => r.memory.id)).toContain("a")
+    // A corpus change (new updatedAt) invalidates the cache and still resolves.
+    const corpus2 = [mem("The user prefers yarn now", { id: "a", updatedAt: 200 })]
+    const deps2: MemoryRetrieverDeps = { loadCandidates: async () => corpus2 }
+    const out2 = await retrieveMemories({ queryText: "yarn", ...base, characterId: "c1" }, deps2)
+    expect(out2.map((r) => r.memory.id)).toContain("a")
+  })
+
+  it("reuses precomputedQueryEmbedding and skips deps.embed", async () => {
+    const embed = jest.fn(async () => [0.1, 0.2])
+    const vectorSearch = jest.fn(async () => [{ id: "vsem", score: 0.88 }])
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The customer churned last quarter", { id: "sem", vectorDocId: "vsem" }),
+      ],
+      embed,
+      vectorSearch,
+    }
+    const out = await retrieveMemories(
+      {
+        queryText: "retention numbers",
+        topK: 5,
+        relevanceFloor: 0,
+        precomputedQueryEmbedding: [0.9, 0.8],
+      },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["sem"])
+    expect(embed).not.toHaveBeenCalled()
+    // The vector leg ran with the caller-supplied vector.
+    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number))
+  })
+
+  it("runs the vector leg from a precomputed embedding even without deps.embed", async () => {
+    const vectorSearch = jest.fn(async () => [{ id: "vsem", score: 0.88 }])
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The customer churned last quarter", { id: "sem", vectorDocId: "vsem" }),
+      ],
+      vectorSearch,
+    }
+    const out = await retrieveMemories(
+      {
+        queryText: "retention numbers",
+        topK: 5,
+        relevanceFloor: 0,
+        precomputedQueryEmbedding: [0.9, 0.8],
+      },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["sem"])
+    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number))
   })
 
   it("applies the relevance floor (drops weak matches)", async () => {

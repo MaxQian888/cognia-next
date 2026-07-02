@@ -178,6 +178,13 @@ export interface RetrieveMemoriesInput {
   relevanceFloor: number
   /** Restrict to these types (e.g. semantic+episodic for injection). */
   types?: MemoryType[]
+  /**
+   * Query embedding computed once by the caller for this turn. When provided,
+   * the vector leg reuses it instead of calling `deps.embed(query)` — avoids a
+   * redundant embed on paths that already embedded the same query for twin RAG
+   * (and, per team turn, avoids re-embedding once per member).
+   */
+  precomputedQueryEmbedding?: number[]
 }
 
 export interface RetrievedMemory {
@@ -189,6 +196,52 @@ export interface RetrievedMemory {
 }
 
 const OVERFETCH = 4
+
+// Signature-cached BM25 index over the candidate corpus. Mirrors the twin
+// runtime's per-twin cache (`lib/twin/runtime/bm25-index.ts`): rebuild only when
+// the corpus changes (cheap `{count}:{latestUpdatedAt}` signal), so we tokenise
+// once per corpus change instead of on every retrieval — and, in a team turn,
+// once instead of per member. `updatedAt` is used (not `lastAccessedAt`, which
+// `touch()` bumps every turn and would defeat the cache).
+// TODO(retrieval): fold this + the twin cache into a shared
+// `lib/ai/retrieval/` helper when the two hybrid pipelines are unified.
+interface CachedMemoryBm25 {
+  index: BM25Index
+  signature: string
+}
+const memoryBm25Cache = new Map<string, CachedMemoryBm25>()
+const MAX_CACHED_CORPORA = 4
+
+function corpusSignature(candidates: Memory[]): string {
+  let latest = 0
+  for (const m of candidates) if (m.updatedAt > latest) latest = m.updatedAt
+  return `${candidates.length}:${latest}`
+}
+
+function getMemoryBm25Index(cacheKey: string, candidates: Memory[]): BM25Index {
+  const signature = corpusSignature(candidates)
+  const cached = memoryBm25Cache.get(cacheKey)
+  if (cached && cached.signature === signature) {
+    // Refresh LRU recency (most-recently-used moves to the end).
+    memoryBm25Cache.delete(cacheKey)
+    memoryBm25Cache.set(cacheKey, cached)
+    return cached.index
+  }
+  const index = new BM25Index()
+  index.addDocuments(candidates.map((m) => ({ id: m.id, content: m.text })))
+  memoryBm25Cache.set(cacheKey, { index, signature })
+  while (memoryBm25Cache.size > MAX_CACHED_CORPORA) {
+    const oldest = memoryBm25Cache.keys().next().value
+    if (oldest === undefined) break
+    memoryBm25Cache.delete(oldest)
+  }
+  return index
+}
+
+/** Test hook — drop cached indexes so cases don't leak corpus state. */
+export function __resetMemoryBm25Cache(): void {
+  memoryBm25Cache.clear()
+}
 
 export async function retrieveMemories(
   input: RetrieveMemoriesInput,
@@ -210,9 +263,10 @@ export async function retrieveMemories(
     if (m.vectorDocId) byVectorDocId.set(m.vectorDocId, m)
   }
 
-  // Keyword leg — always available.
-  const bm25 = new BM25Index()
-  bm25.addDocuments(candidates.map((m) => ({ id: m.id, content: m.text })))
+  // Keyword leg — always available. Index is cached by corpus signature so an
+  // unchanged candidate set (same reader + type filter) isn't re-tokenised.
+  const cacheKey = `${input.characterId ?? "global"}::${(input.types ?? []).slice().sort().join(",")}`
+  const bm25 = getMemoryBm25Index(cacheKey, candidates)
   const rawKeywordHits = bm25.search(query, input.topK * OVERFETCH)
 
   // Stopword gate: drop keyword hits that overlap the query only on stopwords.
@@ -232,11 +286,12 @@ export async function retrieveMemories(
           return false
         })
 
-  // Vector leg — best effort; any failure degrades to BM25-only.
+  // Vector leg — best effort; any failure degrades to BM25-only. A caller-
+  // supplied embedding lets the leg run even when `deps.embed` is absent.
   let vectorHits: { id: string; score: number }[] = []
-  if (deps.embed && deps.vectorSearch) {
+  if (deps.vectorSearch && (input.precomputedQueryEmbedding || deps.embed)) {
     try {
-      const embedding = await deps.embed(query)
+      const embedding = input.precomputedQueryEmbedding ?? (await deps.embed!(query))
       const raw = await deps.vectorSearch(embedding, input.topK * OVERFETCH)
       vectorHits = raw
         .map((h) => {
