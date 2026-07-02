@@ -327,6 +327,7 @@
       "ultracode": "Ultracode"
     },
     "autoShutdown": "Auto-shutdown on completion",
+    "awaitingExternalPickup": "Awaiting external pickup",
     "cancel": "Cancel",
     "confirm": {
       "cancelLabel": "Cancel",
@@ -353,6 +354,7 @@
     "deleteAction": "Delete permanently",
     "deleteWarning": "This permanently removes the team, all members, tasks, and messages.",
     "description": "Description",
+    "dispatchDecisionLabel": "Dispatch decision",
     "enableMessaging": "Inter-agent messaging",
     "executionMode": "Execution mode",
     "executionModeOption": {
@@ -368,6 +370,7 @@
       "parallelSpecialists": "Parallel specialists",
       "singleAgent": "Single agent (recommended)"
     },
+    "externalClaimedBy": "Claimed by {claimer}",
     "governance": {
       "adaptiveReplan": {
         "description": "Between waves of a run, the lead reviews results and can inject, cancel, reorder, or finish the remaining tasks.",

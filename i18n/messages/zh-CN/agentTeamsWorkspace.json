@@ -327,6 +327,7 @@
       "ultracode": "Ultracode"
     },
     "autoShutdown": "完成后自动关闭",
+    "awaitingExternalPickup": "等待外部认领",
     "cancel": "取消",
     "confirm": {
       "cancelLabel": "取消",
@@ -353,6 +354,7 @@
     "deleteAction": "永久删除",
     "deleteWarning": "将永久删除该团队及其所有成员、任务和消息。",
     "description": "描述",
+    "dispatchDecisionLabel": "调度决策",
     "enableMessaging": "智能体间消息",
     "executionMode": "执行模式",
     "executionModeOption": {
@@ -368,6 +370,7 @@
       "parallelSpecialists": "并行专家",
       "singleAgent": "单一智能体（推荐）"
     },
+    "externalClaimedBy": "已由 {claimer} 认领",
     "governance": {
       "adaptiveReplan": {
         "description": "在每一波运行之间，组长会复盘结果，并可对剩余任务进行新增、取消、重排或提前结束。",

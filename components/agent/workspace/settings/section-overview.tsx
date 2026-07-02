@@ -10,6 +10,7 @@
 
 import { useTranslations } from "next-intl"
 
+import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -48,6 +49,7 @@ export function OverviewSection({ team }: OverviewSectionProps) {
   const t = useTranslations("agentTeamsWorkspace.settings")
   const tMode = useTranslations("agentTeamsWorkspace.settings.executionModeOption")
   const tPattern = useTranslations("agentTeamsWorkspace.settings.executionPatternOption")
+  const tExecutors = useTranslations("agentTeamsWorkspace.autoCompose.executors")
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
   const updateTeamConfig = useAgentTeamStore((s) => s.updateTeamConfig)
 
@@ -94,6 +96,30 @@ export function OverviewSection({ team }: OverviewSectionProps) {
       {/* Execution */}
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium">{t("sectionExecution")}</p>
+        {team.dispatchDecision || team.externalPickup ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {team.dispatchDecision ? (
+              <div
+                className="flex items-center gap-2"
+                data-testid="overview-dispatch-decision"
+                title={team.dispatchDecision.reason}
+              >
+                <span className="text-muted-foreground text-xs">{t("dispatchDecisionLabel")}</span>
+                <Badge variant="outline">{tExecutors(team.dispatchDecision.kind)}</Badge>
+              </div>
+            ) : null}
+            {team.externalPickup && !team.externalPickup.claimedAt ? (
+              <Badge variant="secondary" data-testid="overview-awaiting-external">
+                {t("awaitingExternalPickup")}
+              </Badge>
+            ) : null}
+            {team.externalPickup?.claimedAt && team.externalPickup.claimedBy ? (
+              <Badge variant="secondary" data-testid="overview-external-claimed">
+                {t("externalClaimedBy", { claimer: team.externalPickup.claimedBy })}
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <EditableSettingRow<string>
             label={t("executionMode")}

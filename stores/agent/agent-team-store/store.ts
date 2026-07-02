@@ -40,6 +40,16 @@ import type { AgentTeamState } from "./types"
  *   - Any team persisted mid-run (`planning` / `executing` / `paused`) has no
  *     live controller after restart, so its status is reset to `idle` to avoid
  *     a phantom "live" run in the UI.
+ *
+ * v4 → v5 (Task comment threads):
+ *   - `AgentTeamTask.comments` (new) is backfilled to `[]` on every persisted
+ *     task so the UI / selectors can treat it as always-present.
+ *
+ * Additive optional fields (NO version bump): `AgentTeam.dispatchDecision`
+ * and `AgentTeam.externalPickup` (dispatch-completion work) stay `undefined`
+ * on older rows; every consumer guards for absence, so no migration branch
+ * is needed. `externalPickup` Dates round-trip as ISO strings through the
+ * JSON storage — same as `routingAssessment.createdAt`.
  */
 const PERSIST_VERSION = 5
 const AGENT_TEAM_STORAGE_KEY = "cognia-agent-teams"

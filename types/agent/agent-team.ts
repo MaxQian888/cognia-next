@@ -121,6 +121,47 @@ export interface TeamRoutingAssessment {
 }
 
 /**
+ * The concrete executor an auto-orchestration proposal should run through.
+ * Inferred ABOVE {@link TeamExecutionPattern} — council/ensemble are not team
+ * shapes (no roster/DAG/store team) and the pattern union is woven through
+ * exhaustive switches, so it must never be widened to carry these. The
+ * mapping logic lives in `lib/ai/agent/team/auto/dispatch-executor.ts`; the
+ * types live here so `AgentTeam` can persist the decision without `types/`
+ * importing from `lib/`.
+ */
+export type TeamExecutorKind =
+  | "single-send"
+  | "council"
+  | "ensemble"
+  | "team-flat"
+  | "team-ultracode"
+  | "background-handoff"
+  | "external-handoff"
+
+/** Executor decision stamped on a team at materialization (provenance). */
+export interface TeamDispatchDecision {
+  kind: TeamExecutorKind
+  /** The team pattern this decision was derived from (provenance). */
+  fromPattern: TeamExecutionPattern
+  /** Echoes the assessment confidence for the preview badge. */
+  confidence: number
+  /** Human-readable rationale for the chosen executor. */
+  reason: string
+}
+
+/**
+ * External-handoff pickup state. Set when a proposal materializes with the
+ * `external-handoff` executor; cleared semantics are additive — an external
+ * agent claims the team through the bridge's `team_run`, which stamps
+ * `claimedBy`/`claimedAt` (idempotently — a second run never overwrites).
+ */
+export interface TeamExternalPickup {
+  requestedAt: Date
+  claimedBy?: string
+  claimedAt?: Date
+}
+
+/**
  * Budget escalation behavior when usage crosses thresholds
  */
 export type TeamBudgetEscalationAction =
@@ -1042,6 +1083,18 @@ export interface AgentTeam {
   routingAssessment?: TeamRoutingAssessment
   /** Operator-selected execution intent for the team */
   selectedExecutionPattern?: TeamExecutionPattern
+  /**
+   * Executor decision stamped at materialization (auto-orchestration
+   * provenance). Optional and absent on pre-existing teams — consumers must
+   * guard. Additive field, no persist version bump (see store header).
+   */
+  dispatchDecision?: TeamDispatchDecision
+  /**
+   * External-handoff pickup state. Present only on teams materialized with
+   * the `external-handoff` executor. Dates serialize to ISO strings through
+   * the JSON persist layer — consumers tolerate string-or-Date.
+   */
+  externalPickup?: TeamExternalPickup
   /** Lead teammate ID */
   leadId: string
   /** All teammate IDs (including lead) */
