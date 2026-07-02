@@ -36,6 +36,12 @@ export const DEFAULTS: AppSettings = {
   canvasCodeSandboxEnabled: true,
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   routingFallbackEnabled: true,
+  // Cache-friendly prompt assembly is on by default: volatile per-turn sections
+  // (twin RAG, style few-shot, memory recall) are routed to the appended tail so
+  // the stable system prefix stays byte-identical across turns and provider
+  // prompt caches (Anthropic cache_control, DeepSeek/OpenAI auto-cache) keep
+  // hitting. Explicit `false` opts out (mirrors routingFallbackEnabled).
+  cacheOptimizationEnabled: true,
   apiKey: undefined,
   apiBaseUrl: undefined,
   activeProviderId: undefined,
