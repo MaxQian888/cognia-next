@@ -1,8 +1,28 @@
 import { render, screen, fireEvent, act } from "@testing-library/react"
 
 jest.mock("@/hooks/pet/use-pet")
+let settingsValue: unknown = {}
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (s: (x: unknown) => unknown) => s({ settings: {} }),
+  useSettingsStore: (s: (x: unknown) => unknown) => s({ settings: settingsValue }),
+}))
+
+// Live2D model probe — default: no model, core not ready → effective skin "svg".
+const useActiveLive2dModel = jest.fn(() => ({
+  modelId: undefined as string | undefined,
+  row: undefined,
+  coreReady: false as boolean | undefined,
+}))
+jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
+  useActiveLive2dModel: () => useActiveLive2dModel(),
+}))
+
+// Capture renderer props (also intercepts NurtureTab's hero renderer — same module).
+const rendererProps = jest.fn()
+jest.mock("../pet-renderer", () => ({
+  PetRenderer: (props: unknown) => {
+    rendererProps(props)
+    return <div data-testid="pet-renderer-stub" />
+  },
 }))
 jest.mock("@/lib/ai/generation/utility-client", () => ({ buildUtilityLlmClient: () => null }))
 const hatchPet = jest.fn().mockResolvedValue(undefined)
@@ -50,6 +70,10 @@ beforeEach(() => {
   hatchPet.mockClear()
   emitPetEvent.mockClear()
   renamePet.mockClear()
+  rendererProps.mockClear()
+  settingsValue = {}
+  useActiveLive2dModel.mockReset()
+  useActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
 })
 
 describe("PetConsole", () => {
@@ -82,6 +106,23 @@ describe("PetConsole", () => {
     expect(screen.getByTestId("tab-ach")).toBeInTheDocument()
     clickTab("binding")
     expect(screen.getByTestId("tab-bind")).toBeInTheDocument()
+  })
+
+  it("resolves the effective skin and passes it to the header renderer and nurture tab", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    useActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
+    settingsValue = { petSettings: { skinId: "live2d" } }
+    render(<PetConsole />)
+    // Header hero + nurture-tab hero both go through the mocked renderer.
+    expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ skinId: "live2d" }))
+    expect(rendererProps).not.toHaveBeenCalledWith(expect.objectContaining({ skinId: "svg" }))
+  })
+
+  it("falls back to the svg skin when the Live2D core is not ready", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    settingsValue = { petSettings: { skinId: "live2d" } }
+    render(<PetConsole />)
+    expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ skinId: "svg" }))
   })
 
   it("renames the pet from the header editor", () => {

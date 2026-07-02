@@ -17,6 +17,9 @@ import { hatchPet } from "@/lib/pet/runtime/init-pet"
 import { renamePet } from "@/lib/pet/runtime/rename-pet"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
 import { PetRenderer } from "../pet-renderer"
 import { PetNameEditor } from "../pet-name-editor"
 import { NurtureTab } from "./nurture-tab"
@@ -33,6 +36,16 @@ export function PetConsole() {
   const appSettings = useSettingsStore((s) => s.settings)
   const { profile, view, feed, play, petStroke, talk, sleep, clean, treat } = usePet()
   const [tab, setTab] = useState<ConsoleTab>("nurture")
+
+  // Resolve the effective skin so the console previews match the floating
+  // sprite (Live2D when picked + ready, otherwise SVG) — same resolution as
+  // the popup's stat-card avatar.
+  const pet = appSettings?.petSettings ?? DEFAULT_PET_SETTINGS
+  const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
+    coreReady,
+    hasActiveModel: Boolean(modelId),
+  })
 
   if (!profile || !view) {
     return (
@@ -51,7 +64,13 @@ export function PetConsole() {
   return (
     <div data-testid="pet-console" className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-3 px-4 pt-4">
-        <PetRenderer bones={view.effectiveBones} stage={profile.stage} state="idle" size={48} />
+        <PetRenderer
+          bones={view.effectiveBones}
+          stage={profile.stage}
+          state="idle"
+          size={48}
+          skinId={effectiveSkin}
+        />
         <div className="min-w-0">
           {profile.soul ? (
             <PetNameEditor
@@ -92,6 +111,7 @@ export function PetConsole() {
             <NurtureTab
               profile={profile}
               view={view}
+              skinId={effectiveSkin}
               onFeed={feed}
               onPlay={play}
               onPet={petStroke}
@@ -102,7 +122,13 @@ export function PetConsole() {
             />
           ) : (
             <div data-testid="pet-hatch" className="flex flex-col items-center gap-3 py-8">
-              <PetRenderer bones={view.effectiveBones} stage="egg" state="idle" size={120} />
+              <PetRenderer
+                bones={view.effectiveBones}
+                stage="egg"
+                state="idle"
+                size={120}
+                skinId={effectiveSkin}
+              />
               <p className="text-sm text-muted-foreground">{t("console.hatchPrompt")}</p>
               <Button onClick={() => void hatch()}>{t("console.hatch")}</Button>
             </div>

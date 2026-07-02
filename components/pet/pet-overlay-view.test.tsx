@@ -16,9 +16,10 @@ jest.mock("motion/react", () => ({
 const mockUsePet = jest.fn()
 jest.mock("@/hooks/pet/use-pet", () => ({ usePet: (id?: string | null) => mockUsePet(id) }))
 
-// One-shot animation hook → static state for the renderer.
+// One-shot animation hook → controllable state for the renderer.
+let animationStateValue = "idle"
 jest.mock("@/hooks/pet/use-pet-animation-state", () => ({
-  usePetAnimationState: () => ({ state: "idle", oneShot: null }),
+  usePetAnimationState: () => ({ state: animationStateValue, oneShot: null }),
 }))
 
 // PetRenderer / PetBubble stubs so we assert props, not SVG internals.
@@ -145,10 +146,10 @@ import {
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 
 const PROFILE = { stage: "baby" }
-const VIEW = { effectiveBones: { eyes: "dot" } }
+const VIEW = { effectiveBones: { eyes: "dot" }, condition: "well" }
 
-function withPet() {
-  mockUsePet.mockReturnValue({ profile: PROFILE, view: VIEW, loading: false })
+function withPet(view: Record<string, unknown> = VIEW) {
+  mockUsePet.mockReturnValue({ profile: PROFILE, view, loading: false })
 }
 
 let rafSpy: jest.SpyInstance
@@ -157,6 +158,7 @@ const rafCallbacks: FrameRequestCallback[] = []
 
 beforeEach(() => {
   mockIsTauri = false
+  animationStateValue = "idle"
   revealShowMock.mockClear()
   revealInnerSizeMock.mockClear()
   revealInnerSizeMock.mockResolvedValue({ width: 200, height: 240 })
@@ -324,6 +326,25 @@ describe("PetOverlayView", () => {
     }
     render(<PetOverlayView />)
     expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ reducedMotion: true }))
+  })
+
+  it("overlays 'unwell' onto a resting state when the care condition is unwell", () => {
+    withPet({ ...VIEW, condition: "unwell" })
+    render(<PetOverlayView />)
+    expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ state: "unwell" }))
+  })
+
+  it("keeps the resting state when the care condition is well", () => {
+    withPet()
+    render(<PetOverlayView />)
+    expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ state: "idle" }))
+  })
+
+  it("keeps an expressive state even while unwell", () => {
+    animationStateValue = "thinking"
+    withPet({ ...VIEW, condition: "unwell" })
+    render(<PetOverlayView />)
+    expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ state: "thinking" }))
   })
 
   it("renders the bubble when present", () => {

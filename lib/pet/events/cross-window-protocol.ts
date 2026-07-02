@@ -48,6 +48,7 @@ const VISUAL_STATES: ReadonlySet<string> = new Set<PetVisualState>([
   "greeting",
   "evolving",
   "interacting",
+  "unwell",
 ])
 
 const ONE_SHOTS: ReadonlySet<string> = new Set<PetOneShot>([

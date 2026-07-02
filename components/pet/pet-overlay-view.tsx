@@ -49,6 +49,7 @@ import {
   resolvePopupPlacement,
 } from "@/lib/pet/popup-geometry"
 import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
+import { withCareCondition } from "@/lib/pet/state/reducer"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
@@ -309,7 +310,7 @@ export function PetOverlayView() {
           <PetRenderer
             bones={view.effectiveBones}
             stage={profile.stage}
-            state={state}
+            state={withCareCondition(state, view.condition)}
             oneShot={oneShot}
             reducedMotion={reduced}
             size={size}
