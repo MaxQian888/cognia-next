@@ -521,6 +521,21 @@ fn is_control_command(name: &str) -> bool {
     CONTROL_COMMANDS_SET.contains(name)
 }
 
+/// RCE-grade commands that ONLY the headless brain's service token may call
+/// (ADR-0059 W4/D6). A device JWT presenting one of these is rejected with 403
+/// `service_scope_required`. Populated with the `*_external_agent` +
+/// `connectors_*_adapter` arms in R11/R12; empty until then, so the gate is a
+/// no-op on today's surface.
+const SERVICE_ONLY_COMMANDS: &[&str] = &[];
+
+static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| SERVICE_ONLY_COMMANDS.iter().copied().collect());
+
+/// True when `name` may be invoked only with a `"service"`-scope JWT.
+fn is_service_only_command(name: &str) -> bool {
+    SERVICE_ONLY_COMMANDS_SET.contains(name)
+}
+
 /// Public read-only accessor for the remote-control command set. Used by
 /// in-file tests to assert the gate covers the intended surfaces.
 #[allow(dead_code)] // referenced from tests only.
@@ -743,6 +758,16 @@ pub async fn rpc_handler(
     {
         return Err(RpcError::forbidden(
             "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
+        ));
+    }
+
+    // Service-scope gate (ADR-0059 W4): RCE-grade commands are reachable only
+    // with the headless brain's `"service"` token, never a device JWT. No-op
+    // until R11/R12 populate SERVICE_ONLY_COMMANDS; the `signaling::dispatch`
+    // path gets the mirrored gate when the arms land (they thread the scope).
+    if is_service_only_command(&name) && ctx.scope != "service" {
+        return Err(RpcError::forbidden(
+            "this command requires the headless service token",
         ));
     }
 
