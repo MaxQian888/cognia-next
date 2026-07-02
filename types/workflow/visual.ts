@@ -734,6 +734,13 @@ export interface WorkflowTriggeredFrom {
   adapterId?: string
   conversationKey?: string
   sessionId?: string
+  /**
+   * Paired-device id of the companion caller (ADR-0060). Stamped server-side
+   * from the verified device JWT — never client-supplied — so run history and
+   * audit surfaces can answer "which device triggered this". Absent for runs
+   * originating on the desktop itself.
+   */
+  deviceId?: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

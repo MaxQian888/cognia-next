@@ -5,6 +5,7 @@ import {
   getPairedDevice,
   listPairedDevices,
   pausePairedDevice,
+  recordDeviceCapabilities,
   resumePairedDevice,
   revokePairedDevice,
   setServerFingerprint,
@@ -462,5 +463,43 @@ describe("setRemoteControlAllowed", () => {
 
   it("returns false for an unknown deviceId", async () => {
     expect(await setRemoteControlAllowed("does-not-exist", true)).toBe(false)
+  })
+})
+
+describe("recordDeviceCapabilities", () => {
+  it("persists the manifest and its report timestamp", async () => {
+    await addPairedDevice({
+      deviceId: "dev-cap1",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    const ok = await recordDeviceCapabilities("dev-cap1", ["camera", "geolocation"], 42)
+    expect(ok).toBe(true)
+    const row = await getPairedDevice("dev-cap1")
+    expect(row?.capabilities).toEqual(["camera", "geolocation"])
+    expect(row?.capabilitiesReportedAt).toBe(42)
+  })
+
+  it("overwrites the previous manifest wholesale (snapshot, not delta)", async () => {
+    await addPairedDevice({
+      deviceId: "dev-cap2",
+      label: "x",
+      platform: "android",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await recordDeviceCapabilities("dev-cap2", ["camera", "voice-record"], 1)
+    await recordDeviceCapabilities("dev-cap2", ["camera"], 2)
+    const row = await getPairedDevice("dev-cap2")
+    expect(row?.capabilities).toEqual(["camera"])
+    expect(row?.capabilitiesReportedAt).toBe(2)
+  })
+
+  it("returns false for an unknown deviceId", async () => {
+    expect(await recordDeviceCapabilities("does-not-exist", ["camera"])).toBe(false)
   })
 })

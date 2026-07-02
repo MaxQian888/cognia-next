@@ -29,6 +29,11 @@ import {
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import { transport } from "@/lib/tauri/transport-instance"
+import {
+  installCapabilityReporter,
+  type CapabilityReporterTransport,
+} from "@/lib/companion/capability-reporter"
 import { getSettings } from "@/lib/db/settings"
 import { loggers } from "@/lib/logging"
 
@@ -179,6 +184,20 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       // `installForegroundSync` / `installEventDrivenSync` shape.
       cleanup.push(await installNetworkSync())
       cleanup.push(await installResumeSync())
+
+      // ── Capability report (ADR-0060) ──────────────────────────────────
+      // Report this device's platform capability manifest on each connect so
+      // the desktop's capability-aware workflow surfaces know what this
+      // phone can run. Duck-typed: only the CompanionTransport exposes the
+      // connection-state surface (the CLI's stdio transport does not).
+      const reporterTransport = transport as Partial<CapabilityReporterTransport>
+      if (
+        typeof reporterTransport.call === "function" &&
+        typeof reporterTransport.getConnectionState === "function" &&
+        typeof reporterTransport.onConnectionStateChange === "function"
+      ) {
+        cleanup.push(installCapabilityReporter(reporterTransport as CapabilityReporterTransport))
+      }
 
       // ── Push notifications ────────────────────────────────────────────
       const push = await registerPushNotifications()

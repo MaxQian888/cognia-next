@@ -27,6 +27,8 @@ import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { AppSettings, StoredMessage } from "@/lib/claude/types"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
+import { isCapabilityId } from "@/lib/platform/capabilities"
+import { recordDeviceCapabilities } from "@/lib/db/paired-devices"
 import {
   createWorkflow,
   deleteWorkflow,
@@ -193,6 +195,8 @@ export async function dispatchCommand(
       return connectorRejectDraft(payload)
     case "workflow_trigger_manual":
       return workflowTriggerManual(payload)
+    case "device_capabilities_report":
+      return deviceCapabilitiesReport(payload)
     case "twin_ingest_source":
       return twinIngestSource(payload)
     // Remote Session Control — attach / detach a remote watcher to a host
@@ -645,12 +649,37 @@ async function connectorRejectDraft(payload: Record<string, unknown>): Promise<n
 async function workflowTriggerManual(payload: Record<string, unknown>): Promise<null> {
   const workflowId = payload.workflowId as string | undefined
   if (!workflowId) throw new Error("workflow_trigger_manual.workflowId is required")
-  await dispatchTrigger({
-    workflowId,
-    kind: "trigger.manual",
-    payload: payload.input ?? null,
-    originAt: Date.now(),
-  })
+  // `callerDeviceId` is injected by the Rust RPC layer from the verified
+  // device JWT (ADR-0060) — never trusted from the raw client payload.
+  const deviceId = payload.callerDeviceId as string | undefined
+  await dispatchTrigger(
+    {
+      workflowId,
+      kind: "trigger.manual",
+      payload: payload.input ?? null,
+      originAt: Date.now(),
+    },
+    { triggeredBy: { source: "api", ...(deviceId ? { deviceId } : {}) } }
+  )
+  return null
+}
+
+/** Hard cap on the persisted capability list — well above the core vocabulary
+ *  plus any sane number of `plugin:<id>` tags; bounds a hostile payload. */
+const MAX_REPORTED_CAPABILITIES = 64
+
+/** Persist a paired device's platform capability manifest (ADR-0060) onto its
+ *  `pairedDevices` row. `callerDeviceId` comes from the Rust RPC layer (JWT
+ *  identity, spoof-proof); the capability list is validated + capped here. */
+async function deviceCapabilitiesReport(payload: Record<string, unknown>): Promise<null> {
+  const deviceId = payload.callerDeviceId as string | undefined
+  if (!deviceId) throw new Error("device_capabilities_report.callerDeviceId is required")
+  const raw = payload.capabilities
+  if (!Array.isArray(raw)) {
+    throw new Error("device_capabilities_report.capabilities must be an array")
+  }
+  const capabilities = raw.filter(isCapabilityId).slice(0, MAX_REPORTED_CAPABILITIES)
+  await recordDeviceCapabilities(deviceId, capabilities)
   return null
 }
 

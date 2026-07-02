@@ -78,6 +78,30 @@ describe("dispatchTrigger", () => {
     expect(runs[0].status).toBe("succeeded")
   })
 
+  it("persists opts.triggeredBy onto the run row (ADR-0060)", async () => {
+    const wf = await createWorkflow({
+      name: "x",
+      nodes: [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+      ],
+      edges: [],
+    })
+    await dispatchTrigger(
+      { workflowId: wf.id, kind: "trigger.manual", payload: {}, originAt: Date.now() },
+      { triggeredBy: { source: "api", deviceId: "dev-42" } }
+    )
+    const runs = await getDb().workflowRuns.toArray()
+    expect(runs.length).toBe(1)
+    expect(runs[0].triggeredBy).toEqual({ source: "api", deviceId: "dev-42" })
+    expect(runs[0].triggeredBySource).toBe("api")
+  })
+
   it("fires the onWorkflowTriggerFired plugin hook before running", async () => {
     const wf = await createWorkflow({
       name: "x",

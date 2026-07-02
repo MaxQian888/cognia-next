@@ -182,7 +182,7 @@ describe("dispatchCommand: connector_reject_draft", () => {
 })
 
 describe("dispatchCommand: workflow_trigger_manual", () => {
-  it("invokes the trigger bridge with kind=trigger.manual", async () => {
+  it("invokes the trigger bridge with kind=trigger.manual and an api origin", async () => {
     await dispatchCommand("workflow_trigger_manual", { workflowId: "wf1" })
     expect(dispatchTrigger).toHaveBeenCalledTimes(1)
     expect(dispatchTrigger).toHaveBeenCalledWith(
@@ -190,8 +190,19 @@ describe("dispatchCommand: workflow_trigger_manual", () => {
         workflowId: "wf1",
         kind: "trigger.manual",
         originAt: expect.any(Number),
-      })
+      }),
+      { triggeredBy: { source: "api" } }
     )
+  })
+
+  it("threads the Rust-injected callerDeviceId into triggeredBy (ADR-0060)", async () => {
+    await dispatchCommand("workflow_trigger_manual", {
+      workflowId: "wf1",
+      callerDeviceId: "dev-42",
+    })
+    expect(dispatchTrigger).toHaveBeenCalledWith(expect.anything(), {
+      triggeredBy: { source: "api", deviceId: "dev-42" },
+    })
   })
 
   it("forwards an optional input payload", async () => {
@@ -202,7 +213,8 @@ describe("dispatchCommand: workflow_trigger_manual", () => {
     expect(dispatchTrigger).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: { reason: "mobile" },
-      })
+      }),
+      expect.anything()
     )
   })
 
@@ -217,6 +229,63 @@ describe("dispatchCommand: workflow_trigger_manual", () => {
     await expect(dispatchCommand("workflow_trigger_manual", { workflowId: "wf1" })).rejects.toThrow(
       /orchestrator boom/
     )
+  })
+})
+
+describe("dispatchCommand: device_capabilities_report", () => {
+  const seedDevice = async (deviceId: string) => {
+    await getDb().pairedDevices.put({
+      deviceId,
+      label: "Test phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "1.0.0",
+      pairedAt: 1,
+      lastSeenAt: 1,
+    })
+  }
+
+  beforeEach(async () => {
+    await getDb()
+      .pairedDevices.clear()
+      .catch(() => undefined)
+  })
+
+  it("persists a validated capability manifest onto the caller's row", async () => {
+    await seedDevice("dev-cap")
+    const result = await dispatchCommand("device_capabilities_report", {
+      callerDeviceId: "dev-cap",
+      capabilities: ["camera", "geolocation", "not-a-real-cap", 42],
+    })
+    expect(result).toBeNull()
+    const row = await getDb().pairedDevices.get("dev-cap")
+    expect(row?.capabilities).toEqual(["camera", "geolocation"])
+    expect(row?.capabilitiesReportedAt).toEqual(expect.any(Number))
+  })
+
+  it("accepts plugin-scoped capability ids", async () => {
+    await seedDevice("dev-plug")
+    await dispatchCommand("device_capabilities_report", {
+      callerDeviceId: "dev-plug",
+      capabilities: ["plugin:demo"],
+    })
+    const row = await getDb().pairedDevices.get("dev-plug")
+    expect(row?.capabilities).toEqual(["plugin:demo"])
+  })
+
+  it("rejects without the Rust-injected callerDeviceId", async () => {
+    await expect(
+      dispatchCommand("device_capabilities_report", { capabilities: ["camera"] })
+    ).rejects.toThrow(/callerDeviceId is required/)
+  })
+
+  it("rejects a non-array capabilities payload", async () => {
+    await expect(
+      dispatchCommand("device_capabilities_report", {
+        callerDeviceId: "dev-cap",
+        capabilities: "camera",
+      })
+    ).rejects.toThrow(/must be an array/)
   })
 })
 

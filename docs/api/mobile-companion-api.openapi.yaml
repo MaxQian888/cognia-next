@@ -2777,6 +2777,50 @@ paths:
           }
 
   # ─────────────────────────────────────────────────────────────────────────
+  # rpc — devices
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/device_capabilities_report:
+    post:
+      operationId: rpcDeviceCapabilitiesReport
+      tags: [rpc-devices]
+      summary: Report the calling device's platform capability manifest (ADR-0060).
+      description: |
+        Sent by a paired device on each (re)connect. The server injects the
+        authenticated `callerDeviceId` from the JWT (any client-sent value is
+        overwritten) and the desktop persists the manifest onto the device's
+        `pairedDevices` row for capability-aware workflow surfaces.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [capabilities]
+              properties:
+                capabilities:
+                  type: array
+                  maxItems: 64
+                  items: { type: string }
+                  description: "Capability ids from lib/platform/capabilities.ts (core ids or plugin:<id>)."
+      responses:
+        "200":
+          { description: Recorded., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: malformed capabilities list,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
   # WebSocket — events
   # ─────────────────────────────────────────────────────────────────────────
 
