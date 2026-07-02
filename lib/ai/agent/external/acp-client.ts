@@ -9,9 +9,15 @@
  */
 
 import { isTauri } from "@/lib/utils"
-import { invoke } from "@tauri-apps/api/core"
-import { listen } from "@tauri-apps/api/event"
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"
+import {
+  agentInvoke,
+  agentListen,
+  agentReadTextFile,
+  agentWriteTextFile,
+  supportsAgentFs,
+  supportsAgentTerminal,
+  supportsExternalAgents,
+} from "./agent-transport"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { loggers } from "@/lib/logging"
 import {
@@ -426,9 +432,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async teardownTransport(): Promise<void> {
     this.cleanupListeners()
 
-    if (this.processId && isTauri()) {
+    if (this.processId && supportsExternalAgents()) {
       try {
-        await invoke("kill_external_agent", { agentId: this.processId })
+        await agentInvoke("kill_external_agent", { agentId: this.processId })
       } catch (error) {
         log.warn("Error killing process", { error })
       }
@@ -474,11 +480,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   /**
-   * Connect via stdio (local process) using Tauri
+   * Connect via stdio (local process) — Tauri desktop or the headless brain
+   * (ADR-0059 T-A10; the brain routes through the service-scope RPC arms).
    */
   private async connectViaStdio(config: ExternalAgentConfig): Promise<void> {
-    if (!isTauri()) {
-      throw new Error("stdio transport requires Tauri desktop environment")
+    if (!supportsExternalAgents()) {
+      throw new Error("stdio transport requires the Tauri desktop or a headless host")
     }
 
     // Defensive: a prior connect that errored after the early-return guard may
@@ -491,8 +498,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       throw new Error("Process configuration required for stdio transport")
     }
 
-    // invoke and listen are statically imported from @tauri-apps/api
-
     const finalArgs = buildSpawnArgs(config.process)
 
     // Compose the child-process env. `buildAgentEnv` reuses the Codex
@@ -502,7 +507,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const finalEnv = await buildAgentEnv(config, config.process.env || {})
 
     // Spawn the external agent process
-    this.processId = await invoke<string>("spawn_external_agent", {
+    this.processId = await agentInvoke<string>("spawn_external_agent", {
       config: {
         id: config.id,
         command: config.process.command,
@@ -515,34 +520,34 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     log.info("Spawned process", { processId: this.processId })
 
     // Listen for stdout messages
-    const unlistenStdout = await listen<{ agentId: string; data: string }>(
+    const unlistenStdout = await agentListen<{ agentId: string; data: string }>(
       "external-agent://stdout",
-      (event) => {
-        if (event.payload.agentId === this.processId) {
-          this.peer?.ingest(event.payload.data)
+      (payload) => {
+        if (payload.agentId === this.processId) {
+          this.peer?.ingest(payload.data)
         }
       }
     )
     this.unsubscribeFunctions.push(unlistenStdout)
 
     // Listen for stderr messages
-    const unlistenStderr = await listen<{ agentId: string; data: string }>(
+    const unlistenStderr = await agentListen<{ agentId: string; data: string }>(
       "external-agent://stderr",
-      (event) => {
-        if (event.payload.agentId === this.processId) {
-          log.warn("stderr", { data: event.payload.data })
+      (payload) => {
+        if (payload.agentId === this.processId) {
+          log.warn("stderr", { data: payload.data })
         }
       }
     )
     this.unsubscribeFunctions.push(unlistenStderr)
 
     // Listen for process exit
-    const unlistenExit = await listen<{ agentId: string; code: number }>(
+    const unlistenExit = await agentListen<{ agentId: string; code: number }>(
       "external-agent://exit",
-      (event) => {
-        if (event.payload.agentId === this.processId) {
-          log.info("Process exited", { code: event.payload.code })
-          this.handleProcessExit(event.payload.code)
+      (payload) => {
+        if (payload.agentId === this.processId) {
+          log.info("Process exited", { code: payload.code })
+          this.handleProcessExit(payload.code)
         }
       }
     )
@@ -808,14 +813,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/initialization
    */
   private async initialize(): Promise<AcpInitializeResult> {
-    const supportsNative = isTauri()
-    const clientCapabilities: AcpClientCapabilities = supportsNative
+    // fs is host-backed on desktop AND the headless brain; the terminal
+    // capability stays desktop-only (no headless acp_terminal_* arms).
+    const clientCapabilities: AcpClientCapabilities = supportsAgentFs()
       ? {
           fs: {
             readTextFile: true,
             writeTextFile: true,
           },
-          terminal: true,
+          ...(supportsAgentTerminal() ? { terminal: true } : {}),
         }
       : {}
     const params: AcpInitializeParams = {
@@ -1821,8 +1827,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Send a message to the agent
    */
   private async sendMessage(message: string): Promise<void> {
-    if (this._config?.transport === "stdio" && this.processId && isTauri()) {
-      await invoke("send_to_external_agent", {
+    if (this._config?.transport === "stdio" && this.processId && supportsExternalAgents()) {
+      await agentInvoke("send_to_external_agent", {
         agentId: this.processId,
         message,
       })
@@ -1915,23 +1921,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/file-system
    */
   private async handleReadTextFile(params: AcpReadTextFileParams): Promise<{ content: string }> {
-    if (isTauri()) {
-      const fullContent = await readTextFile(params.path)
-      const hasLineParams = typeof params.line === "number" || typeof params.limit === "number"
-      if (!hasLineParams) {
-        return { content: fullContent }
-      }
-
-      const lines = fullContent.split(/\r?\n/)
-      const start = Math.max((params.line ?? 1) - 1, 0)
-      const limit = params.limit !== undefined ? Math.max(params.limit, 0) : undefined
-      const end = limit !== undefined ? start + limit : lines.length
-      const content = lines.slice(start, end).join("\n")
-      return { content }
-    } else {
-      // In browser, use fetch for local files (limited)
-      throw new Error("File system access not available in browser")
+    // Host-backed on desktop (plugin-fs) and the headless brain (node:fs);
+    // throws in a plain browser — agent-transport owns the branching.
+    const fullContent = await agentReadTextFile(params.path)
+    const hasLineParams = typeof params.line === "number" || typeof params.limit === "number"
+    if (!hasLineParams) {
+      return { content: fullContent }
     }
+
+    const lines = fullContent.split(/\r?\n/)
+    const start = Math.max((params.line ?? 1) - 1, 0)
+    const limit = params.limit !== undefined ? Math.max(params.limit, 0) : undefined
+    const end = limit !== undefined ? start + limit : lines.length
+    const content = lines.slice(start, end).join("\n")
+    return { content }
   }
 
   /**
@@ -1939,11 +1942,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/file-system
    */
   private async handleWriteTextFile(params: { path: string; content: string }): Promise<void> {
-    if (isTauri()) {
-      await writeTextFile(params.path, params.content)
-    } else {
-      throw new Error("File system access not available in browser")
-    }
+    await agentWriteTextFile(params.path, params.content)
   }
 
   /**
@@ -2096,8 +2095,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async handleTerminalCreate(
     params: AcpTerminalCreateParams
   ): Promise<{ terminalId: string }> {
-    if (!isTauri()) {
-      throw new Error("Terminal support requires Tauri desktop environment")
+    if (!supportsAgentTerminal()) {
+      throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     const terminalId = await acpTerminalCreate(
@@ -2119,8 +2118,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async handleTerminalOutput(
     params: AcpTerminalOutputParams
   ): Promise<AcpTerminalOutputResult> {
-    if (!isTauri()) {
-      throw new Error("Terminal support requires Tauri desktop environment")
+    if (!supportsAgentTerminal()) {
+      throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     const result = await acpTerminalOutput(params.terminalId, params.outputByteLimit)
@@ -2132,8 +2131,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/terminals
    */
   private async handleTerminalKill(params: { terminalId: string }): Promise<void> {
-    if (!isTauri()) {
-      throw new Error("Terminal support requires Tauri desktop environment")
+    if (!supportsAgentTerminal()) {
+      throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     await acpTerminalKill(params.terminalId)
@@ -2144,8 +2143,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/terminals
    */
   private async handleTerminalRelease(params: { terminalId: string }): Promise<void> {
-    if (!isTauri()) {
-      throw new Error("Terminal support requires Tauri desktop environment")
+    if (!supportsAgentTerminal()) {
+      throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     await acpTerminalRelease(params.terminalId)
@@ -2157,8 +2156,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/terminals
    */
   private async handleTerminalWrite(params: { terminalId: string; data: string }): Promise<void> {
-    if (!isTauri()) {
-      throw new Error("Terminal support requires Tauri desktop environment")
+    if (!supportsAgentTerminal()) {
+      throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     await acpTerminalWrite(params.terminalId, params.data)
@@ -2175,8 +2174,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     exitCode: number | null
     exitStatus: { exitCode: number | null; signal: string | null }
   }> {
-    if (!isTauri()) {
-      throw new Error("Terminal support requires Tauri desktop environment")
+    if (!supportsAgentTerminal()) {
+      throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     const waitResult = await acpTerminalWaitForExit(params.terminalId, params.timeout)

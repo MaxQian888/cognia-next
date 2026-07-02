@@ -57,6 +57,17 @@ export function isCapacitor(): boolean {
 }
 
 /**
+ * True inside the headless brain process (`cognia-agent serve`, ADR-0059
+ * T-A10). The serve boot sets the `__COGNIA_HEADLESS__` marker before any
+ * lib module runs; browsers/WebViews never have it. Distinct from
+ * {@link detectPlatform} — headless is a HOST property, not a webview kind
+ * (there is no webview at all).
+ */
+export function isHeadlessHost(): boolean {
+  return (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ === true
+}
+
+/**
  * True when the resolved runtime is native mobile. Uses {@link detectPlatform}
  * precedence (so a stray Tauri marker downgrades it to non-mobile). This is the
  * predicate viewport hooks use to pin themselves to the mobile layout.
