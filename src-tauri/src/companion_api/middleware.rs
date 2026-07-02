@@ -230,6 +230,7 @@ pub async fn require_device_jwt(
 
 /// Wave 3.1: unified flat envelope `{ code, message, details? }`.
 fn error_response(code: &str, message: &str) -> Response {
+    super::metrics::record_auth_failure();
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({

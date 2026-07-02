@@ -871,7 +871,7 @@ pub async fn rpc_handler(
     })?;
 
     // Dispatch.
-    let result = dispatch(
+    let dispatched = dispatch(
         &name,
         args,
         &state,
@@ -880,7 +880,9 @@ pub async fn rpc_handler(
         Some(&ctx.account_id),
         Some(&ctx.scope),
     )
-    .await?;
+    .await;
+    super::metrics::record_rpc_call(dispatched.is_ok());
+    let result = dispatched?;
 
     // Cache the result (non-read-only + idempotency key present).
     if !is_read_only {

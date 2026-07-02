@@ -390,6 +390,9 @@ async fn run_serve(
     // append-only JSONL beside the SQLite store.
     app_lib::companion_api::audit::install(&data_dir);
 
+    // /metrics uptime baseline (D9) — anchor before the server starts.
+    app_lib::companion_api::metrics::init();
+
     // LAN bind (false) so the headless server is reachable on every
     // interface — the typical deployment puts this behind a reverse proxy
     // or VPN; binding to loopback in a server context defeats the purpose.
