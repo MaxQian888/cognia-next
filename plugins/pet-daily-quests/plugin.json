@@ -1,0 +1,26 @@
+{
+  "id": "pet-daily-quests",
+  "name": "Pet Daily Quests",
+  "version": "0.1.0",
+  "description": "A daily quest board for the desktop pet: three rotating care quests per day, with coin and XP rewards granted through the budget-capped pet API.",
+  "type": "frontend",
+  "capabilities": ["pet", "hooks"],
+  "permissions": ["pet:read", "pet:interact"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "degradation": "The pet subsystem is desktop/web-only; quests track nothing on mobile."
+    }
+  }
+}

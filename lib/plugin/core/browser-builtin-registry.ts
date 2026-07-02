@@ -33,6 +33,7 @@ import stagehandMcpManifest from "@/plugins/stagehand-mcp/plugin.json"
 import ripgrepToolsManifest from "@/plugins/ripgrep-tools/plugin.json"
 import skillRecorderManifest from "@/plugins/skill-recorder/plugin.json"
 import browserToolsManifest from "@/plugins/browser-tools/plugin.json"
+import petDailyQuestsManifest from "@/plugins/pet-daily-quests/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -64,6 +65,7 @@ import stagehandMcpModule from "@/plugins/stagehand-mcp/src/index"
 import ripgrepToolsModule from "@/plugins/ripgrep-tools/src/index"
 import skillRecorderModule from "@/plugins/skill-recorder/src/index"
 import browserToolsModule from "@/plugins/browser-tools/src/index"
+import petDailyQuestsModule from "@/plugins/pet-daily-quests/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -317,6 +319,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-browser-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(browserToolsModule),
+  },
+  {
+    manifest: builtinManifest(petDailyQuestsManifest, petDailyQuestsModule),
+    path: "builtin://pet-daily-quests",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(petDailyQuestsModule),
   },
 ]
 
