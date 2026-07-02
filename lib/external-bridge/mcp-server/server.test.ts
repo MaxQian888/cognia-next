@@ -73,11 +73,21 @@ describe("buildMcpServer — orchestration tools (Thread D)", () => {
   it.each([
     ["agent_dispatch", { subagentId: "x", prompt: "hi" }],
     ["team_run", { teamId: "t1" }],
+    ["team_list", {}],
     ["plugin_tool_invoke", { pluginId: "p", toolName: "t" }],
   ])("registers %s and denies it when the scope is OFF", async (toolName, args) => {
     const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
     const result = await client.callTool({ name: toolName, arguments: args })
     expect(result.isError).toBe(true)
+    await client.close()
+  })
+
+  it("allows team_list when the agent:team scope is ON", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["agent:team"] }))
+    const result = await client.callTool({ name: "team_list", arguments: {} })
+    // Gate passed → handler ran (non-Tauri env returns the structured
+    // "requires desktop renderer" payload, not a gate error).
+    expect(result.isError).not.toBe(true)
     await client.close()
   })
 

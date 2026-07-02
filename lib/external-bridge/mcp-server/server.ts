@@ -25,7 +25,7 @@ import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
 import { checkRagCall, checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
 import { computerUse } from "../handlers/computer-use"
-import { agentDispatch, teamRun, pluginToolInvoke } from "../handlers/orchestration"
+import { agentDispatch, teamRun, teamList, pluginToolInvoke } from "../handlers/orchestration"
 import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "../handlers/resources"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
@@ -362,6 +362,37 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         scope: "agent:team",
         check: checkToolCall(await settingsGetter(), "team_run"),
         body: () => teamRun(args as Parameters<typeof teamRun>[0]),
+      })
+  )
+
+  server.registerTool(
+    "team_list",
+    {
+      title: "List Cognia agent teams",
+      description:
+        "List configured Agent Teams (id, status, redacted objective), including " +
+        "teams marked 'awaiting external pickup' by an external-handoff dispatch — " +
+        "claim one by starting it with `team_run`. Read-only. Denied by default " +
+        "until the `agent:team` scope is enabled in Settings → External Bridge.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        awaitingExternalOnly: z
+          .boolean()
+          .optional()
+          .describe("Only unclaimed external-pickup teams."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "team_list",
+        scope: "agent:team",
+        check: checkToolCall(await settingsGetter(), "team_list"),
+        body: () => teamList(args as Parameters<typeof teamList>[0]),
       })
   )
 

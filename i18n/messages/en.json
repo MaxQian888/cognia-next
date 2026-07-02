@@ -667,6 +667,7 @@
     "allCategories": "All",
     "autoCompose": {
       "approve": "Create team",
+      "awaitingExternal": "Team created and marked for external pickup — an external agent can claim it via the Cognia bridge.",
       "cancel": "Cancel",
       "compose": "Compose",
       "composing": "Composing…",
@@ -693,6 +694,8 @@
       "objectiveRequired": "Enter an objective first.",
       "openButton": "Auto-compose",
       "piiRefused": "Refused: the objective still contains sensitive data after redaction.",
+      "queuedBackground": "Team created and queued to run in the background — you'll be notified when it finishes.",
+      "queuedBackgroundNoScheduler": "Team created. Background scheduling is unavailable here — start it from the team workspace.",
       "reject": "Back",
       "resultDone": "Done",
       "rosterLabel": "Roster ({count})",

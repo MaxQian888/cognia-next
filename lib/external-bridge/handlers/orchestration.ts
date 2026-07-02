@@ -160,11 +160,92 @@ export async function teamRunCore(input: TeamRunInput): Promise<TeamRunOutput> {
   if (!input.teamId) return { ok: false, error: "team_run requires a teamId" }
 
   try {
+    // External-handoff pickup: stamp the claim idempotently BEFORE dispatch so
+    // `team_list` stops advertising the team. A second run never overwrites
+    // an existing claim.
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const store = useAgentTeamStore.getState()
+    const team = store.teams[input.teamId]
+    if (team?.externalPickup && !team.externalPickup.claimedAt) {
+      store.updateTeam(input.teamId, {
+        externalPickup: {
+          ...team.externalPickup,
+          claimedBy: "external-bridge",
+          claimedAt: new Date(),
+        },
+      })
+    }
+
     const { runTeam } = await import("@/lib/plugin/agent-sdk/dispatch")
     const result = await runTeam(input.teamId, {
       ...(input.ultracode !== undefined ? { ultracode: input.ultracode } : {}),
     })
     return { ok: true, teamId: result.teamId, status: result.status }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// team_list
+// ---------------------------------------------------------------------------
+
+export interface TeamListInput {
+  /** Only teams marked for external pickup that no agent has claimed yet. */
+  awaitingExternalOnly?: boolean
+}
+
+export interface TeamListOutput {
+  ok: boolean
+  teams?: Array<{
+    id: string
+    name: string
+    status: string
+    /** PII-redacted objective (the team's `task`). */
+    objective: string
+    awaitingExternalPickup: boolean
+    requestedAt?: string
+    claimedBy?: string
+  }>
+  error?: string
+}
+
+export async function teamList(input: TeamListInput = {}): Promise<TeamListOutput> {
+  if (isTauri()) return teamListCore(input)
+  return proxyToRenderer<TeamListOutput>("team_list", { ...input })
+}
+
+/**
+ * Renderer-side `team_list` execution. Reads the AGENT-TEAM store (the
+ * runnable entity `team_run` accepts) — NOT the Dexie `teams` table, which
+ * holds character chat-teams. Name + objective are PII-redacted before they
+ * cross the boundary, mirroring {@link agentDispatchCore}'s outward gate.
+ */
+export async function teamListCore(input: TeamListInput = {}): Promise<TeamListOutput> {
+  try {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const { redactText } = await import("@/lib/twin/ingest/redact")
+    const teams = Object.values(useAgentTeamStore.getState().teams)
+    const rows = teams
+      .filter(
+        (team) =>
+          !input.awaitingExternalOnly ||
+          Boolean(team.externalPickup && !team.externalPickup.claimedAt)
+      )
+      .map((team) => {
+        // Persist layer round-trips Dates as ISO strings — tolerate both.
+        const requestedAt = team.externalPickup?.requestedAt
+        return {
+          id: team.id,
+          name: redactText(team.name ?? "").redacted,
+          status: team.status,
+          objective: redactText(team.task ?? "").redacted,
+          awaitingExternalPickup: Boolean(team.externalPickup && !team.externalPickup.claimedAt),
+          ...(requestedAt ? { requestedAt: new Date(requestedAt).toISOString() } : {}),
+          ...(team.externalPickup?.claimedBy ? { claimedBy: team.externalPickup.claimedBy } : {}),
+        }
+      })
+    return { ok: true, teams: rows }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
@@ -235,12 +316,14 @@ export async function pluginToolInvokeCore(
 export async function runOrchestrationExec(
   command: string,
   args: Record<string, unknown>
-): Promise<AgentDispatchOutput | TeamRunOutput | PluginToolInvokeOutput> {
+): Promise<AgentDispatchOutput | TeamRunOutput | TeamListOutput | PluginToolInvokeOutput> {
   switch (command) {
     case "agent_dispatch":
       return agentDispatchCore(args as unknown as AgentDispatchInput)
     case "team_run":
       return teamRunCore(args as unknown as TeamRunInput)
+    case "team_list":
+      return teamListCore(args as unknown as TeamListInput)
     case "plugin_tool_invoke":
       return pluginToolInvokeCore(args as unknown as PluginToolInvokeInput)
     default:

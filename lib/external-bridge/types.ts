@@ -51,6 +51,7 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   // PII-gated and plugin tools keep their own consent gate.
   agent_dispatch: "agent:dispatch",
   team_run: "agent:team",
+  team_list: "agent:team",
   plugin_tool_invoke: "plugin:tools",
 }
 
