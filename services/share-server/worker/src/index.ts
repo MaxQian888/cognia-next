@@ -42,14 +42,16 @@ interface ShareMeta {
   ownerToken?: string
 }
 
-const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
-const KV_MIN_TTL_SECONDS = 60
+// Exported for the constants-parity test against ../../share-constants.json
+// (kept in lockstep with the Rust axum server — see that file's _comment).
+export const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
+export const KV_MIN_TTL_SECONDS = 60
 /** Hard ceiling on share lifetime so every object eventually self-expires from
  * KV even when the creator omits a TTL — bounds storage growth on a shared
  * deployment. 30 days. Overridable via the `MAX_TTL_SECONDS` env var. */
-const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60
-const CODE_LENGTH = 12
-const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+export const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60
+export const CODE_LENGTH = 12
+export const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 const OWNER_TOKEN_BYTES = 32
 
 const CORS_HEADERS: Record<string, string> = {

@@ -13,7 +13,7 @@ name: Share Server
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
     paths:
       - "services/share-server/**"
       - ".github/workflows/share-server.yml"
