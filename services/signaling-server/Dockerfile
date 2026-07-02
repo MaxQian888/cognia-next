@@ -1,6 +1,9 @@
 FROM rust:1.82-bookworm AS builder
 WORKDIR /build
-COPY Cargo.toml ./
+# Copy the workspace manifests + sources. `core/` is a workspace member and the
+# binary depends on it via `path = "core"`; Cargo.lock is required by `--locked`.
+COPY Cargo.toml Cargo.lock ./
+COPY core ./core
 COPY src ./src
 COPY tests ./tests
 RUN cargo build --release --locked

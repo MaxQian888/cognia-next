@@ -11,7 +11,10 @@
 ## The container expects `/data` to be a writable volume so the SQLite store
 ## and the self-signed TLS cert persist across restarts.
 
-FROM rust:1.84-bookworm AS builder
+# Base tracks the `rust-toolchain.toml` pin (1.93.0). rustup still honours the
+# toolchain file, but matching the base avoids re-downloading a second channel
+# at build time and keeps the image's advertised version honest.
+FROM rust:1.93-bookworm AS builder
 WORKDIR /work
 # Workspace root files first — Cargo.toml declares members, rust-toolchain.toml
 # pins the MSRV (rustup auto-installs the pinned channel), and .cargo/config.toml
