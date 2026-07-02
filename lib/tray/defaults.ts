@@ -46,6 +46,48 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
     payload: { kind: "native", action: "pet-disable-click-through" },
   },
   {
+    // Quick interactions without opening the widget panel — dispatch through
+    // the same `pet.feed`/`pet.play`/`pet.pet` commands the global hotkey
+    // and the widget itself use (`lib/pet/commands.ts`), so there's exactly
+    // one place that owns the underlying logic. Hidden while the pet
+    // subsystem is off (`evaluateWhen` reads `snapshot.pet.enabled`).
+    kind: "submenu",
+    id: "tray.pet",
+    label: "tray.pet.title",
+    when: "pet.enabled",
+    items: [
+      {
+        kind: "action",
+        id: "tray.pet.feed",
+        label: "tray.pet.feed",
+        iconHint: "pet",
+        payload: { kind: "command", commandId: "pet.feed" },
+      },
+      {
+        kind: "action",
+        id: "tray.pet.play",
+        label: "tray.pet.play",
+        iconHint: "pet",
+        payload: { kind: "command", commandId: "pet.play" },
+      },
+      {
+        kind: "action",
+        id: "tray.pet.pet",
+        label: "tray.pet.pet",
+        iconHint: "pet",
+        payload: { kind: "command", commandId: "pet.pet" },
+      },
+      { kind: "separator", id: "tray.pet.sep-0" },
+      {
+        kind: "action",
+        id: "tray.pet.settings",
+        label: "tray.pet.openSettings",
+        iconHint: "settings",
+        payload: { kind: "native", action: "settings" },
+      },
+    ],
+  },
+  {
     kind: "action",
     id: "tray.new-chat",
     label: "tray.newChat",

@@ -8,6 +8,7 @@ const T: Record<string, string> = {
   "tray.status.goalRunning": "Goal running",
   "tray.status.goalPaused": "Goal paused",
   "tray.status.streaming": "Responding",
+  "tray.status.petNeedsAttention": "Pet needs attention",
 }
 const t = (key: string) => T[key] ?? key
 
@@ -59,5 +60,21 @@ describe("deriveTrayTooltip", () => {
     expect(deriveTrayTooltip(snap({ automation: { running: true, armed: true } }), t)).toBe(
       "Cognia — Automation running"
     )
+  })
+
+  it("surfaces the pet needing attention as the lowest-priority status", () => {
+    const out = deriveTrayTooltip(snap({ pet: { enabled: true, energy: 5, mood: 5, bond: 50 } }), t)
+    expect(out).toBe("Cognia — Pet needs attention")
+  })
+
+  it("still lets streaming outrank a needy pet", () => {
+    const out = deriveTrayTooltip(
+      snap({
+        pet: { enabled: true, energy: 5, mood: 5, bond: 50 },
+        chat: { streaming: true, hasActiveSession: true },
+      }),
+      t
+    )
+    expect(out).toBe("Cognia — Responding")
   })
 })

@@ -1,6 +1,7 @@
 import {
   buildStatusSection,
   deriveStatusKey,
+  petMoodEmoji,
   truncateTitle,
   GOAL_TITLE_MAX,
 } from "./status-section"
@@ -53,6 +54,35 @@ describe("deriveStatusKey", () => {
     expect(deriveStatusKey(snap({ chat: { streaming: true, hasActiveSession: true } }))).toBe(
       "tray.status.streaming"
     )
+  })
+
+  it("reports the pet needing attention only when nothing else outranks it", () => {
+    const needy = { enabled: true, energy: 10, mood: 80, bond: 50 }
+    expect(deriveStatusKey(snap({ pet: needy }))).toBe("tray.status.petNeedsAttention")
+    // Streaming still outranks it.
+    expect(
+      deriveStatusKey(snap({ pet: needy, chat: { streaming: true, hasActiveSession: true } }))
+    ).toBe("tray.status.streaming")
+  })
+
+  it("ignores a needy pet when the subsystem is disabled", () => {
+    expect(deriveStatusKey(snap({ pet: { enabled: false, energy: 5, mood: 5, bond: 5 } }))).toBe(
+      "tray.status.idle"
+    )
+  })
+
+  it("stays idle when the pet is enabled but doing fine", () => {
+    expect(deriveStatusKey(snap({ pet: { enabled: true, energy: 80, mood: 80, bond: 80 } }))).toBe(
+      "tray.status.idle"
+    )
+  })
+})
+
+describe("petMoodEmoji", () => {
+  it("bands by the worse of energy/mood", () => {
+    expect(petMoodEmoji({ enabled: true, energy: 10, mood: 90, bond: 50 })).toBe("😟")
+    expect(petMoodEmoji({ enabled: true, energy: 40, mood: 90, bond: 50 })).toBe("😐")
+    expect(petMoodEmoji({ enabled: true, energy: 80, mood: 90, bond: 50 })).toBe("😊")
   })
 })
 
@@ -111,5 +141,20 @@ describe("buildStatusSection", () => {
       "tray.status.primary",
       "tray.status.goal",
     ])
+  })
+
+  it("appends a mood row when the pet subsystem is enabled", () => {
+    const rows = buildStatusSection(
+      snap({ pet: { enabled: true, energy: 80, mood: 80, bond: 80 } })
+    )
+    expect(rows).toHaveLength(2)
+    expect(rows[1]).toMatchObject({ id: "tray.status.pet", label: "😊", disabled: true })
+  })
+
+  it("omits the mood row when the pet subsystem is disabled or absent", () => {
+    expect(
+      buildStatusSection(snap({ pet: { enabled: false, energy: 0, mood: 0, bond: 0 } }))
+    ).toHaveLength(1)
+    expect(buildStatusSection(snap())).toHaveLength(1)
   })
 })

@@ -17,14 +17,19 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { getOpenGoalForSession } from "@/lib/db/goals"
+import { getDb } from "@/lib/db/schema"
+import { computePetView } from "@/lib/pet/runtime/pet-view"
 import { APP_VERSION } from "@/lib/app-version"
 import { isAutostartEnabled } from "@/lib/tauri/autostart"
 import { isTauri } from "@/lib/tauri"
+import { isMainAppWindow } from "@/lib/pet/window-role"
+import type { PetProfile } from "@/types/pet"
 
 import { onAutostartChanged } from "./autostart-control"
 import type { TrayStateSnapshot } from "./types"
@@ -38,6 +43,17 @@ function detectOs(): TrayStateSnapshot["platform"]["os"] {
   if (p.includes("mac")) return "macos"
   if (p.includes("linux")) return "linux"
   return "unknown"
+}
+
+/** Lazily decay the profile's needs against the current wall clock. */
+function snapshotPetStats(profile: PetProfile): NonNullable<TrayStateSnapshot["pet"]> {
+  const view = computePetView(profile, null, Date.now())
+  return {
+    enabled: true,
+    energy: view.needs.energy,
+    mood: view.needs.mood,
+    bond: view.needs.bond,
+  }
 }
 
 interface AutomationState {
@@ -66,11 +82,23 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     title: openGoal?.safeObjective,
   }
 
+  // Desktop-pet quick-glance stats, gated on `PetSettings.enabled` the same
+  // way the widget itself is. `computePetView` lazily decays needs — same
+  // values `hooks/pet/use-pet.ts` shows — so the tray never disagrees.
+  const petEnabled = useSettingsStore((s) => s.settings?.petSettings?.enabled ?? false)
+  const petProfile = useLiveQuery(() => getDb().petProfile.get("global"), [])
+  const pet = useMemo(
+    () => (petEnabled && petProfile ? snapshotPetStats(petProfile) : null),
+    [petEnabled, petProfile]
+  )
+
   // OS launch-at-login state. Read once on mount, then kept fresh by the
   // `toggle-autostart` tray action's broadcast (`lib/tray/autostart-control`).
   const [autostart, setAutostart] = useState(false)
   useEffect(() => {
-    if (!isTauri()) return
+    // Least-privilege pet windows are not granted `autostart:allow-is-enabled`
+    // (see `src-tauri/capabilities/pet.json`); reading it there only warns.
+    if (!isTauri() || !isMainAppWindow()) return
     let cancelled = false
     void isAutostartEnabled().then((on) => {
       if (!cancelled) setAutostart(on)
@@ -142,5 +170,6 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     },
     platform: { os: detectOs() },
     app: { autostart, version: APP_VERSION },
+    pet,
   }
 }

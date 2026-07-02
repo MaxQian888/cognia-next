@@ -9,6 +9,7 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "tray.show",
       "tray.pet-toggle",
       "tray.pet-disable-click-through",
+      "tray.pet",
       "tray.new-chat",
       "tray.quick-goal",
       "tray.sep-1",
@@ -80,6 +81,27 @@ describe("DEFAULT_TRAY_ITEMS", () => {
     })
     // The recovery item is unconditional (no `when` gate) so it's always reachable.
     expect((recover as { when?: string }).when).toBeUndefined()
+  })
+
+  it("gates the pet quick-actions submenu on pet.enabled and dispatches through the shared commands", () => {
+    const submenu = DEFAULT_TRAY_ITEMS.find((it) => it.kind === "submenu" && it.id === "tray.pet")
+    expect(submenu).toBeDefined()
+    if (!submenu || submenu.kind !== "submenu") return
+    expect(submenu.when).toBe("pet.enabled")
+    const ids = submenu.items.map((it) => it.id)
+    expect(ids).toEqual([
+      "tray.pet.feed",
+      "tray.pet.play",
+      "tray.pet.pet",
+      "tray.pet.sep-0",
+      "tray.pet.settings",
+    ])
+    const commandIds = submenu.items
+      .filter((it) => it.kind === "action" && it.payload.kind === "command")
+      .map((it) =>
+        it.kind === "action" && it.payload.kind === "command" ? it.payload.commandId : ""
+      )
+    expect(commandIds).toEqual(["pet.feed", "pet.play", "pet.pet"])
   })
 
   it("attaches the documented accelerators to the built-in shortcut ids", () => {

@@ -114,4 +114,13 @@ export interface TrayStateSnapshot {
     /** Running app version (`APP_VERSION`), shown in the About submenu. */
     version: string
   }
+  /**
+   * Desktop-pet quick-glance stats. Optional (added after the original DTO
+   * shape shipped) so existing synthetic snapshots in tests don't need
+   * updating; absent/`null` when the pet subsystem is disabled
+   * (`PetSettings.enabled === false`) or its profile hasn't hatched yet, so
+   * tray items gated on `pet.enabled` (see `evaluateWhen`) hide cleanly.
+   * Needs are already lazily-decayed (same values the widget shows).
+   */
+  pet?: { enabled: boolean; energy: number; mood: number; bond: number } | null
 }
