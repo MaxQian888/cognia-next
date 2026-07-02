@@ -178,11 +178,19 @@ foundation.
 
 ## Phase plan (P2+)
 
-- **P2 — visibility + human-in-the-loop:** workflow lifecycle channels on
-  the companion event bus (replace `workflow_run_list` polling), push
-  notifications for run completion/failure, and `action.approval.request`
-  — push → mobile approval card → approve/reject as a `decision` branch
-  (all plumbing exists: `push.rs`, approval-card, `flow.wait`).
+- **P2 — visibility + human-in-the-loop (implemented):**
+  - `workflow://run-status` live frames + `sync://invalidate` publishing
+    (first publisher for the channel the mobile event-driven sync has
+    subscribed to since ADR-0027) + `workflow://run-terminal` push, all
+    riding the `persistRunState` funnel
+    (`lib/workflow/runtime/companion-run-events.ts`). Push policy: failed
+    always; succeeded/cancelled only when device-triggered; ids+status only.
+  - `action.approval.request` node: wake-bus blocking executor with
+    event-log checkpoint resume (no duplicate notify, original timeout
+    budget), approved/rejected decision handles, notification-center
+    Approve/Reject actions, `workflow_approval_list` /
+    `workflow_approval_respond` RPCs (control-gated, JWT-injected responder
+    identity), and the mobile PendingApprovalsCard.
 - **P3 — reverse execution:** `step_execute` RPC with the
   `desktop_writes_bridge` `{requestId, command, payload}` shape; the phone
   serves it over the symmetric WebRTC DataChannel (no listening ports, same
