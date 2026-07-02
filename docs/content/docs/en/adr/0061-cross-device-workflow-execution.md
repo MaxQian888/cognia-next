@@ -206,12 +206,24 @@ foundation.
   want a blob relay, not chunked JSON), an OS background-runner path, and
   serving requests over the symmetric WebRTC DataChannel when HTTP/WS is
   down.
-- **P4 — run lease & handoff unification:** structured `PickupTicket`
-  (`claimedBy: { kind, id }`, `targetDevice`, `leaseExpiresAt`) replacing
-  `TeamExternalPickup`'s string claimant; the same lease on
-  `WorkflowRunRow` so two devices can't double-resume; cross-device cancel
-  over the event bus; symmetric session-handoff envelope with
-  share-server blob relay for artifacts.
+- **P4 — run lease & claim contention (implemented):**
+  - `WorkflowRunRow.lease` (`lib/workflow/runtime/run-lease.ts`): claimed
+    before the first step through one Dexie transaction, heartbeat-renewed
+    (TTL/3), released on every terminal path — a second executor backs off
+    instead of double-executing, and a terminal-row guard stops resume
+    replays from resurrecting soft-cancelled/finished runs.
+  - Shared cancel ladder (`cancel-run.ts`) behind both remote surfaces:
+    local abort → `cancelRequestedAt` lease signal (the owning executor's
+    heartbeat aborts within one beat) → soft-cancel with companion
+    fan-out through the P2 run-state funnel.
+  - `TeamExternalPickup` grew the structured claimant
+    (`{ kind: "external-agent" | "device" | "desktop", id, label }`),
+    `targetId` addressing, and a 10-minute claim lease with the contention
+    rule: expired claim + still-idle team ⇒ the pickup re-advertises.
+  - Deferred with rationale: the symmetric session-handoff envelope +
+    share-server blob relay for artifacts is a chat-session feature with a
+    cross-service dependency (the deployed share-server), not part of the
+    workflow execution core — tracked as its own follow-up.
 - **P5 — cloud node:** the ADR-0059 headless brain registers as an
   `always-on` + `headless` device in the same registry; cron/webhook
   placement falls to it when the desktop is off.
