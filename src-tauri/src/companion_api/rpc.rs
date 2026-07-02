@@ -1178,9 +1178,11 @@ pub(super) async fn dispatch(
                 )));
             }
             let bridge = std::sync::Arc::clone(&state.sync_bridge);
+            let transport =
+                crate::companion_api::bridge_transport::WebViewBridgeTransport(app.clone());
             bridge
                 .pull(
-                    app,
+                    &transport,
                     table,
                     since,
                     account_id.to_string(),
@@ -1309,9 +1311,11 @@ pub(super) async fn dispatch(
         | "external_agent_list"
         | "external_agent_update" => {
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let transport =
+                crate::companion_api::bridge_transport::WebViewBridgeTransport(app.clone());
             bridge
                 .dispatch(
-                    app,
+                    &transport,
                     name,
                     args,
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
@@ -1360,9 +1364,11 @@ pub(super) async fn dispatch(
             // `dispatch` directly) stays guarded too.
             validate_app_settings_update(&args)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let transport =
+                crate::companion_api::bridge_transport::WebViewBridgeTransport(app.clone());
             bridge
                 .dispatch(
-                    app,
+                    &transport,
                     name,
                     args,
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,

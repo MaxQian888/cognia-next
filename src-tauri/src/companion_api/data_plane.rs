@@ -27,9 +27,13 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use serde_json::{json, Value};
-use tauri::AppHandle;
 
-use super::{desktop_messages_bridge::DesktopMessagesBridge, store::AppStore, SharedState};
+use super::{
+    bridge_transport::{BridgeTransport, WebViewBridgeTransport},
+    desktop_messages_bridge::DesktopMessagesBridge,
+    store::AppStore,
+    SharedState,
+};
 
 /// Process-wide store for the headless `AppStore`. When `Some`, every RPC
 /// dispatch picks the `Direct` variant. When `None`, falls back to the
@@ -48,9 +52,12 @@ pub fn headless_store() -> Option<Arc<dyn AppStore>> {
 
 /// Dispatch target for one RPC invocation.
 pub enum DataPlane {
-    TauriBridge {
+    /// Round-trip through a bridge to whichever process hosts the brain. On
+    /// desktop the transport is a [`WebViewBridgeTransport`] (today's flow); a
+    /// later slice swaps in a socket transport for the headless brain.
+    Bridge {
         bridge: Arc<DesktopMessagesBridge>,
-        app: AppHandle,
+        transport: Arc<dyn BridgeTransport>,
     },
     Direct(Arc<dyn AppStore>),
 }
@@ -62,9 +69,9 @@ impl DataPlane {
             return Some(DataPlane::Direct(store));
         }
         if let Some(app) = state.app_handle.as_ref() {
-            return Some(DataPlane::TauriBridge {
+            return Some(DataPlane::Bridge {
                 bridge: Arc::clone(&state.desktop_messages_bridge),
-                app: app.clone(),
+                transport: Arc::new(WebViewBridgeTransport(app.clone())),
             });
         }
         None
@@ -77,9 +84,9 @@ impl DataPlane {
         before: Option<i64>,
     ) -> Result<Value, String> {
         match self {
-            DataPlane::TauriBridge { bridge, app } => {
+            DataPlane::Bridge { bridge, transport } => {
                 Arc::clone(bridge)
-                    .list_sessions(app, limit, offset, before, DEFAULT_TIMEOUT)
+                    .list_sessions(transport.as_ref(), limit, offset, before, DEFAULT_TIMEOUT)
                     .await
             }
             DataPlane::Direct(store) => {
@@ -99,9 +106,15 @@ impl DataPlane {
         offset: Option<u32>,
     ) -> Result<Value, String> {
         match self {
-            DataPlane::TauriBridge { bridge, app } => {
+            DataPlane::Bridge { bridge, transport } => {
                 Arc::clone(bridge)
-                    .get_messages_by_session(app, session_id, limit, offset, DEFAULT_TIMEOUT)
+                    .get_messages_by_session(
+                        transport.as_ref(),
+                        session_id,
+                        limit,
+                        offset,
+                        DEFAULT_TIMEOUT,
+                    )
                     .await
             }
             DataPlane::Direct(store) => {
@@ -121,9 +134,15 @@ impl DataPlane {
         role: Option<String>,
     ) -> Result<Value, String> {
         match self {
-            DataPlane::TauriBridge { bridge, app } => {
+            DataPlane::Bridge { bridge, transport } => {
                 Arc::clone(bridge)
-                    .send_message(app, session_id, content, role, DEFAULT_TIMEOUT)
+                    .send_message(
+                        transport.as_ref(),
+                        session_id,
+                        content,
+                        role,
+                        DEFAULT_TIMEOUT,
+                    )
                     .await
             }
             DataPlane::Direct(store) => {
@@ -149,9 +168,15 @@ impl DataPlane {
         updates: Value,
     ) -> Result<Value, String> {
         match self {
-            DataPlane::TauriBridge { bridge, app } => {
+            DataPlane::Bridge { bridge, transport } => {
                 Arc::clone(bridge)
-                    .update_message(app, session_id, message_id, updates, DEFAULT_TIMEOUT)
+                    .update_message(
+                        transport.as_ref(),
+                        session_id,
+                        message_id,
+                        updates,
+                        DEFAULT_TIMEOUT,
+                    )
                     .await
             }
             DataPlane::Direct(store) => {
@@ -178,8 +203,8 @@ impl DataPlane {
         message_id: String,
     ) -> Result<Value, String> {
         match self {
-            DataPlane::TauriBridge { bridge, app } => Arc::clone(bridge)
-                .delete_message(app, session_id, message_id, DEFAULT_TIMEOUT)
+            DataPlane::Bridge { bridge, transport } => Arc::clone(bridge)
+                .delete_message(transport.as_ref(), session_id, message_id, DEFAULT_TIMEOUT)
                 .await
                 .map(|_| Value::Null),
             DataPlane::Direct(store) => {
