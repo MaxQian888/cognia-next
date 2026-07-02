@@ -4,5 +4,9 @@ declare namespace NodeJS {
     NEXT_PUBLIC_APP_NAME?: string
     /** Base URL for an external API. Optional. */
     NEXT_PUBLIC_API_URL?: string
+    /** WebRTC signaling rendezvous endpoint (ADR-0021). Optional; defaults to wss://signaling.cognia.cn/v1/signaling. */
+    NEXT_PUBLIC_SIGNALING_URL?: string
+    /** Public share-link service endpoint (ADR-0037). Optional; defaults to https://share.cognia.cn. */
+    NEXT_PUBLIC_SHARE_URL?: string
   }
 }
