@@ -20,6 +20,7 @@ pub mod anthropic;
 pub mod errors;
 pub mod ir;
 pub mod openai;
+pub mod responses;
 pub mod stream;
 
 use errors::{InboundFormat, NotTranslatable};

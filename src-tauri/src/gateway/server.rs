@@ -39,12 +39,13 @@ use crate::remote_control::allowlist::ParsedAllowlist;
 use crate::remote_control::rate_limit::FixedWindowRateLimiter;
 
 use super::execute::{
-    candidates_from_entries, resolve_candidates, rewrite_model, should_try_next, upstream_headers,
-    upstream_url, Candidate, SseDeframer,
+    candidates_from_entries, embeddings_url, resolve_candidates, rewrite_model, should_try_next,
+    upstream_headers, upstream_url, Candidate, SseDeframer,
 };
 use super::snapshot::RoutingSnapshot;
 use super::translate::errors::{error_body, InboundFormat};
 use super::translate::stream::{Direction, SseOut, StreamTranscoder};
+use super::translate::responses as responses_translate;
 use super::translate::{request_from_ir, request_to_ir, response_from_ir, response_to_ir};
 use super::types::GatewayError;
 use super::DecisionRegistry;
@@ -124,6 +125,8 @@ pub async fn spawn_server(
         .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(openai_chat))
         .route("/v1/messages", post(anthropic_messages))
+        .route("/v1/embeddings", post(openai_embeddings))
+        .route("/v1/responses", post(openai_responses))
         .layer(from_fn_with_state(state.clone(), middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES));
 
@@ -294,6 +297,236 @@ async fn openai_chat(State(state): State<AppState>, Json(body): Json<Value>) -> 
 
 async fn anthropic_messages(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
     handle_chat(state, InboundFormat::AnthropicMessages, body).await
+}
+
+// ---- embeddings handler -----------------------------------------------------
+
+/// OpenAI-compatible `/v1/embeddings`. Resolves the model against the same
+/// routing snapshot as chat, restricted to OpenAI-protocol providers (Anthropic
+/// has no embeddings endpoint), then proxies the request upstream with failover
+/// on transient errors. The upstream body/response pass through unchanged.
+async fn openai_embeddings(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
+    let _perf = crate::perf::guard("gateway.embeddings");
+    let format = InboundFormat::OpenAiChat;
+    let snapshot = state.snapshot.read().clone();
+    let Some(snapshot) = snapshot else {
+        return no_snapshot_error(format);
+    };
+
+    let Some(model) = body["model"].as_str().map(|s| s.to_string()) else {
+        return format_error(format, StatusCode::BAD_REQUEST, "model is required");
+    };
+    if body.get("input").map(Value::is_null).unwrap_or(true) {
+        return format_error(format, StatusCode::BAD_REQUEST, "input is required");
+    }
+
+    // Only OpenAI-compatible providers expose `/embeddings`.
+    let candidates: Vec<Candidate> = resolve_candidates(&snapshot, &model)
+        .into_iter()
+        .filter(|c| c.provider.protocol == "openai")
+        .collect();
+    if candidates.is_empty() {
+        return format_error(
+            format,
+            StatusCode::NOT_FOUND,
+            &format!(
+                "embeddings model \"{model}\" matches no enabled OpenAI-compatible provider"
+            ),
+        );
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    for candidate in &candidates {
+        let started = Instant::now();
+        let upstream_body = rewrite_model(&body, &candidate.model_id);
+        let url = embeddings_url(&candidate.provider.base_url);
+        let mut req = state.http.post(&url).json(&upstream_body);
+        for (name, value) in upstream_headers("openai", candidate.provider.api_key.as_deref()) {
+            req = req.header(name, value);
+        }
+
+        let resp = match req.send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                failures.push(format!("{}: connect error: {err}", candidate.provider.id));
+                continue;
+            }
+        };
+
+        let status = resp.status().as_u16();
+        if status >= 400 {
+            let text = resp.text().await.unwrap_or_default();
+            let message = format!(
+                "HTTP {status}: {}",
+                text.chars().take(500).collect::<String>()
+            );
+            if should_try_next(status) {
+                failures.push(format!("{}: {message}", candidate.provider.id));
+                continue;
+            }
+            return format_error(
+                format,
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                &message,
+            );
+        }
+
+        let elapsed_ms = started.elapsed().as_millis();
+        log::debug!(
+            "gateway embeddings via {} ({model}) in {elapsed_ms}ms",
+            candidate.provider.id
+        );
+        let upstream: Value = match resp.json().await {
+            Ok(value) => value,
+            Err(err) => {
+                return format_error(
+                    format,
+                    StatusCode::BAD_GATEWAY,
+                    &format!("invalid upstream JSON: {err}"),
+                )
+            }
+        };
+        return Json(upstream).into_response();
+    }
+
+    (
+        StatusCode::BAD_GATEWAY,
+        Json(error_body(
+            format,
+            "api_error",
+            &format!("every candidate failed: {}", failures.join(" | ")),
+        )),
+    )
+        .into_response()
+}
+
+// ---- responses handler ------------------------------------------------------
+
+/// OpenAI **Responses API** `/v1/responses` (non-streaming). Parses the request
+/// into the canonical IR (so it routes to openai AND anthropic providers via
+/// `request_from_ir`), walks the same candidate list as chat with failover,
+/// then renders the upstream response back into a Responses object.
+///
+/// Unsupported features are rejected with an explicit 400 rather than silently
+/// dropped: `stream`, `tools`, and `previous_response_id` (stateful responses).
+async fn openai_responses(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
+    let _perf = crate::perf::guard("gateway.responses");
+    let format = InboundFormat::OpenAiChat;
+
+    if let Some(reason) = responses_translate::unsupported_feature(&body) {
+        return format_error(format, StatusCode::BAD_REQUEST, &reason);
+    }
+
+    let snapshot = state.snapshot.read().clone();
+    let Some(snapshot) = snapshot else {
+        return no_snapshot_error(format);
+    };
+
+    let ir = match responses_translate::request_to_ir(&body) {
+        Ok(ir) => ir,
+        Err(err) => return format_error(format, StatusCode::BAD_REQUEST, &err.reason),
+    };
+    let model = ir.model.clone();
+
+    let candidates = resolve_candidates(&snapshot, &model);
+    if candidates.is_empty() {
+        return format_error(
+            format,
+            StatusCode::NOT_FOUND,
+            &format!(
+                "model \"{model}\" matches no alias, provider:model, or enabled provider model"
+            ),
+        );
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    for candidate in &candidates {
+        let started = Instant::now();
+        let mut candidate_ir = ir.clone();
+        candidate_ir.model = candidate.model_id.clone();
+        let upstream_body = match request_from_ir(&candidate.provider.protocol, &candidate_ir) {
+            Ok(body) => body,
+            Err(err) => {
+                failures.push(format!("{}: {}", candidate.provider.id, err.reason));
+                continue;
+            }
+        };
+
+        let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
+        let mut req = state.http.post(&url).json(&upstream_body);
+        for (name, value) in upstream_headers(
+            &candidate.provider.protocol,
+            candidate.provider.api_key.as_deref(),
+        ) {
+            req = req.header(name, value);
+        }
+
+        let resp = match req.send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                failures.push(format!("{}: connect error: {err}", candidate.provider.id));
+                continue;
+            }
+        };
+
+        let status = resp.status().as_u16();
+        if status >= 400 {
+            let text = resp.text().await.unwrap_or_default();
+            let message = format!(
+                "HTTP {status}: {}",
+                text.chars().take(500).collect::<String>()
+            );
+            if should_try_next(status) {
+                failures.push(format!("{}: {message}", candidate.provider.id));
+                continue;
+            }
+            return format_error(
+                format,
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                &message,
+            );
+        }
+
+        let upstream: Value = match resp.json().await {
+            Ok(value) => value,
+            Err(err) => {
+                return format_error(
+                    format,
+                    StatusCode::BAD_GATEWAY,
+                    &format!("invalid upstream JSON: {err}"),
+                )
+            }
+        };
+        match response_to_ir(&candidate.provider.protocol, &upstream) {
+            Ok(ir_resp) => {
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    true,
+                    started,
+                    Some((Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens))),
+                    None,
+                );
+                let created = chrono::Utc::now().timestamp();
+                return Json(responses_translate::response_from_ir(&ir_resp, &model, created))
+                    .into_response();
+            }
+            Err(err) => {
+                failures.push(format!("{}: {}", candidate.provider.id, err.reason));
+                continue;
+            }
+        }
+    }
+
+    (
+        StatusCode::BAD_GATEWAY,
+        Json(error_body(
+            format,
+            "api_error",
+            &format!("every candidate failed: {}", failures.join(" | ")),
+        )),
+    )
+        .into_response()
 }
 
 fn no_snapshot_error(format: InboundFormat) -> Response {

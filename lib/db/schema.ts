@@ -2191,6 +2191,16 @@ export class CogniaDB extends Dexie {
     this.version(97).stores({
       capturedItems: "&id, capturedAt, kind, sourceApp, fingerprint",
     })
+
+    // v98 — External Bridge inbound-write review queue (ADR-0008 Phase 4).
+    // MCP inbound-write tools land contributions here as `pending` drafts for
+    // operator review; nothing mutates live state. `status` powers the pending
+    // queue read; `createdAt` drives newest-first + cap trimming. Pure
+    // additive — no upgrade hook. See `lib/db/inbound-drafts.ts` +
+    // `lib/external-bridge/handlers/inbound.ts`.
+    this.version(98).stores({
+      inboundDrafts: "&id, kind, status, createdAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2244,6 +2254,8 @@ export class CogniaDB extends Dexie {
   radarReports!: Table<import("@/types/radar").RadarReport, string>
   // v97 — Content capture store. See `lib/db/captured-items.ts`.
   capturedItems!: Table<import("@/types/capture").CapturedItem, string>
+  // v98 — External Bridge inbound-write review queue. See `lib/db/inbound-drafts.ts`.
+  inboundDrafts!: Table<import("./inbound-drafts").InboundDraftRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated

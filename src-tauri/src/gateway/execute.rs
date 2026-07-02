@@ -103,6 +103,13 @@ pub fn upstream_url(protocol: &str, base_url: &str) -> String {
     }
 }
 
+/// Upstream embeddings endpoint. OpenAI-compatible only (the catalog base URL
+/// already includes `/v1`, matching [`upstream_url`]); Anthropic exposes no
+/// embeddings endpoint in this protocol.
+pub fn embeddings_url(base_url: &str) -> String {
+    format!("{}/embeddings", base_url.trim_end_matches('/'))
+}
+
 /// Auth + protocol headers for an upstream request. Never logged.
 pub fn upstream_headers(protocol: &str, api_key: Option<&str>) -> Vec<(&'static str, String)> {
     let mut headers = vec![("content-type", "application/json".to_string())];
@@ -283,6 +290,19 @@ mod tests {
         let mut d2 = SseDeframer::default();
         d2.push(b"data: tail-no-newline");
         assert_eq!(d2.finish(), Some("tail-no-newline".to_string()));
+    }
+
+    #[test]
+    fn embeddings_url_appends_path() {
+        assert_eq!(
+            embeddings_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/embeddings"
+        );
+        // Trailing slash trimmed.
+        assert_eq!(
+            embeddings_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1/embeddings"
+        );
     }
 
     #[test]

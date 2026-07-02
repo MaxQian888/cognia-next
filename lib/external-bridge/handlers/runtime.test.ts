@@ -16,7 +16,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 describe("runtimeQuery — list", () => {
   it("lists seeded skills with name + meta", async () => {

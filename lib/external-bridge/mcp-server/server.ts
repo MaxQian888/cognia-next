@@ -38,6 +38,7 @@ import {
   connectorsListDrafts,
   connectorsSendMessage,
 } from "../handlers/connectors"
+import { recordLesson, saveSkillDraft, ingestNote } from "../handlers/inbound"
 
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
@@ -68,6 +69,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerComputerUseTool(server, opts.settingsGetter)
   registerOrchestrationTools(server, opts.settingsGetter)
   registerConnectorTools(server, opts.settingsGetter)
+  registerInboundTools(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
   registerPrompts(server, opts.settingsGetter)
 
@@ -601,6 +603,111 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
             prompt: args.prompt,
             characterId: args.characterId,
             sourceTaskId: args.sourceTaskId,
+          }),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// record_lesson / save_skill_draft / ingest_note (inbound write, ADR-0008 P4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter) {
+  const inboundAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  }
+
+  // record_lesson
+  server.registerTool(
+    "record_lesson",
+    {
+      title: "Record a lesson for Cognia to review",
+      description:
+        "Submit a lesson learned / correction worth remembering. Lands in Cognia's inbound review queue as a pending draft (nothing is applied to live memory); the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        title: z.string(),
+        lesson: z.string(),
+        tags: z.array(z.string()).optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "record_lesson",
+        scope: "inbound:write",
+        check: checkToolCall(await settingsGetter(), "record_lesson"),
+        body: () =>
+          recordLesson({
+            title: args.title,
+            lesson: args.lesson,
+            tags: args.tags,
+            source: args.source,
+          }),
+      })
+  )
+
+  // save_skill_draft
+  server.registerTool(
+    "save_skill_draft",
+    {
+      title: "Propose a skill draft for Cognia to review",
+      description:
+        "Submit a proposed skill (name + instructions). Lands in Cognia's inbound review queue as a pending draft (no skill is installed); the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        name: z.string(),
+        instructions: z.string(),
+        description: z.string().optional(),
+        trigger: z.string().optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "save_skill_draft",
+        scope: "inbound:write",
+        check: checkToolCall(await settingsGetter(), "save_skill_draft"),
+        body: () =>
+          saveSkillDraft({
+            name: args.name,
+            instructions: args.instructions,
+            description: args.description,
+            trigger: args.trigger,
+            source: args.source,
+          }),
+      })
+  )
+
+  // ingest_note
+  server.registerTool(
+    "ingest_note",
+    {
+      title: "File a note with Cognia for later review",
+      description:
+        "Submit a free-form note / snippet to file for later. Lands in Cognia's inbound review queue as a pending draft; the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        title: z.string(),
+        note: z.string(),
+        url: z.string().optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "ingest_note",
+        scope: "inbound:write",
+        check: checkToolCall(await settingsGetter(), "ingest_note"),
+        body: () =>
+          ingestNote({
+            title: args.title,
+            note: args.note,
+            url: args.url,
+            source: args.source,
           }),
       })
   )

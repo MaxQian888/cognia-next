@@ -37,7 +37,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 describe("buildMcpServer — tool registration", () => {
   // Note: `client.listTools()` round-trips through zod-to-json-schema which

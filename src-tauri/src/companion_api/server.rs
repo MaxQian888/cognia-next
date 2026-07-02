@@ -34,7 +34,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use super::{acp, healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
+use super::{a2a, acp, healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
 use axum::{
     middleware::{from_fn, from_fn_with_state},
     routing::{any, get, post},
@@ -235,7 +235,14 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/v1/healthz", get(healthz::healthz_handler))
         // Prometheus exposition (ADR-0059 D9) — aggregate counters only,
         // same public trust model as the services' /metrics.
-        .route("/metrics", get(super::metrics::metrics_handler));
+        .route("/metrics", get(super::metrics::metrics_handler))
+        // A2A Agent Card (a2a-protocol.org) — public discovery document. Read
+        // only, discovery-safe fields only; the A2A endpoint itself (`/a2a`)
+        // is device-JWT gated below.
+        .route(
+            "/.well-known/agent-card.json",
+            get(a2a::a2a_agent_card_handler),
+        );
 
     // Authenticated routes — JWT verifier middleware applied.
     //
@@ -257,6 +264,10 @@ pub fn build_router(state: SharedState) -> Router {
         // handler reaches `claude_*` arms through `rpc::dispatch`, whose
         // control/service gates still apply), so a device JWT suffices.
         .route("/ws/v1/acp", any(acp::acp_handler))
+        // A2A server (Agent2Agent, a2a-protocol.org) — external agents drive
+        // cognia over JSON-RPC. Same baseline-chat trust model as ACP: reaches
+        // `claude_*` arms through `rpc::dispatch`, so a device JWT suffices.
+        .route("/a2a", post(a2a::a2a_rpc_handler))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,
@@ -519,6 +530,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status().as_u16(), 401, "no token → 401 before upgrade");
+    }
+
+    /// `/a2a` sits in the protected block: without a device JWT the middleware
+    /// rejects the request before the handler runs.
+    #[tokio::test]
+    async fn a2a_route_requires_device_jwt() {
+        use tower::ServiceExt as _;
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 401, "no token → 401");
+    }
+
+    /// The A2A Agent Card is a public discovery document — no JWT required.
+    #[tokio::test]
+    async fn a2a_agent_card_is_public() {
+        use tower::ServiceExt as _;
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/.well-known/agent-card.json")
+                    .header("host", "example.com:7890")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200, "agent card is public");
     }
 
     #[test]
