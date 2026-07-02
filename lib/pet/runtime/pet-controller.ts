@@ -26,6 +26,7 @@ import { CHAOS_BURST_COUNT } from "@/lib/pet/stats/growth-table"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
 import { checkAchievements } from "@/lib/pet/achievements/check"
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { usePetStore } from "@/stores/pet/pet-store"
 
 /**
@@ -89,6 +90,23 @@ async function process(event: PetEvent): Promise<void> {
     await appendPetActivity({ kind: event.kind, source: event.source, xp, ts: now })
   }
 
+  // Plugin hooks — fire-and-forget so a slow plugin can never delay the pet.
+  // Interactions only (radar/passive kinds fire continuously); payloads carry
+  // NO event meta (talked events' meta.userText is PII).
+  const hooks = getPluginEventHooks()
+  if (INTERACTION_KINDS.has(event.kind)) {
+    void hooks.dispatchPetInteract({ kind: event.kind, source: event.source, xp, at: now })
+  }
+  if (leveledUpTo !== null) {
+    void hooks.dispatchPetLevelUp({ level: leveledUpTo, stage: persistProfile.stage, at: now })
+  }
+  if (evolvedTo !== null) {
+    void hooks.dispatchPetEvolved({ stage: evolvedTo, level: persistProfile.level, at: now })
+  }
+  if (becameUnwell) {
+    void hooks.dispatchPetUnwell({ condition: persistProfile.care.condition, at: now })
+  }
+
   // Drive the renderer. Passive/idle events honor a persistent unwell condition;
   // interactions and milestones keep their expressive states.
   const store = usePetStore.getState()
@@ -118,7 +136,10 @@ async function process(event: PetEvent): Promise<void> {
     },
     unlocked
   )
-  for (const id of newly) await recordPetAchievement(id, now)
+  for (const id of newly) {
+    await recordPetAchievement(id, now)
+    void hooks.dispatchPetAchievementUnlocked({ achievementId: id, at: now })
+  }
 
   // Announce unlocks on the bus so bubble/proactive subscribers can celebrate.
   // Guarded against feedback: achievementUnlocked itself never unlocks anything

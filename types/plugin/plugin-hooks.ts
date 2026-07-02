@@ -82,6 +82,68 @@ export interface GoalHookEvents {
 }
 
 // =============================================================================
+// Pet Hooks
+// =============================================================================
+
+/**
+ * Pet interaction snapshot handed to pet hook listeners. Deliberately carries
+ * NO event meta at all — `talked` events' meta.userText is PII and must never
+ * reach plugin hooks. Fired by `lib/pet/runtime/pet-controller.ts` for the 7
+ * direct interaction kinds only (radar/passive kinds are excluded for perf).
+ */
+export interface PetInteractHookPayload {
+  /** fed | played | petted | talked | slept | cleaned | treated */
+  kind: string
+  /** user | plugin | workflow | system */
+  source: string
+  /** Resolved XP award for this interaction (0 if none). */
+  xp: number
+  /** Epoch ms. */
+  at: number
+}
+
+export interface PetLevelUpHookPayload {
+  level: number
+  stage: string
+  at: number
+}
+
+export interface PetEvolvedHookPayload {
+  stage: string
+  level: number
+  at: number
+}
+
+export interface PetAchievementUnlockedHookPayload {
+  achievementId: string
+  at: number
+}
+
+export interface PetUnwellHookPayload {
+  /** Always "unwell" today; kept for forward-compat with richer conditions. */
+  condition: string
+  at: number
+}
+
+/**
+ * Pet lifecycle hooks (desktop-pet nurture wave). Fired by
+ * `lib/pet/runtime/pet-controller.ts` — interactions on every direct care
+ * action, the rest on controller-detected transitions.
+ */
+export interface PetHookEvents {
+  /** A direct care interaction was processed (feed/play/pet/talk/sleep/clean/treat). */
+  onPetInteract?: (payload: PetInteractHookPayload) => void | Promise<void>
+  /** The pet leveled up. */
+  onPetLevelUp?: (payload: PetLevelUpHookPayload) => void | Promise<void>
+  /** The pet evolved into a new stage. */
+  onPetEvolved?: (payload: PetEvolvedHookPayload) => void | Promise<void>
+  /** An achievement unlocked. */
+  onPetAchievementUnlocked?: (payload: PetAchievementUnlockedHookPayload) => void | Promise<void>
+  /** The pet crossed the well → unwell care edge. */
+  onPetUnwell?: (payload: PetUnwellHookPayload) => void | Promise<void>
+}
+
+// =============================================================================
 // Share-link Hooks
 // =============================================================================
 
@@ -635,6 +697,13 @@ export interface PluginHooksAll extends PluginHooks {
   onGoalProgress?: GoalHookEvents["onGoalProgress"]
   onGoalComplete?: GoalHookEvents["onGoalComplete"]
   onGoalDelete?: GoalHookEvents["onGoalDelete"]
+
+  // Pet hooks
+  onPetInteract?: PetHookEvents["onPetInteract"]
+  onPetLevelUp?: PetHookEvents["onPetLevelUp"]
+  onPetEvolved?: PetHookEvents["onPetEvolved"]
+  onPetAchievementUnlocked?: PetHookEvents["onPetAchievementUnlocked"]
+  onPetUnwell?: PetHookEvents["onPetUnwell"]
 
   // Share-link hooks
   onShareLinkCreate?: ShareHookEvents["onShareLinkCreate"]

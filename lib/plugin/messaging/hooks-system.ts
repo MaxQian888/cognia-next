@@ -44,6 +44,11 @@ import type {
   ConnectorHookDecision,
   ConnectorInboundHookPayload,
   ConnectorOutboundHookPayload,
+  PetInteractHookPayload,
+  PetLevelUpHookPayload,
+  PetEvolvedHookPayload,
+  PetAchievementUnlockedHookPayload,
+  PetUnwellHookPayload,
 } from "@/types/plugin/plugin-hooks"
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
@@ -1087,6 +1092,28 @@ export class PluginEventHooks {
 
   async dispatchGoalDelete(goalId: string) {
     return this.executeHook("onGoalDelete", (hooks) => hooks.onGoalDelete?.(goalId))
+  }
+
+  async dispatchPetInteract(payload: PetInteractHookPayload) {
+    return this.executeHook("onPetInteract", (hooks) => hooks.onPetInteract?.(payload))
+  }
+
+  async dispatchPetLevelUp(payload: PetLevelUpHookPayload) {
+    return this.executeHook("onPetLevelUp", (hooks) => hooks.onPetLevelUp?.(payload))
+  }
+
+  async dispatchPetEvolved(payload: PetEvolvedHookPayload) {
+    return this.executeHook("onPetEvolved", (hooks) => hooks.onPetEvolved?.(payload))
+  }
+
+  async dispatchPetAchievementUnlocked(payload: PetAchievementUnlockedHookPayload) {
+    return this.executeHook("onPetAchievementUnlocked", (hooks) =>
+      hooks.onPetAchievementUnlocked?.(payload)
+    )
+  }
+
+  async dispatchPetUnwell(payload: PetUnwellHookPayload) {
+    return this.executeHook("onPetUnwell", (hooks) => hooks.onPetUnwell?.(payload))
   }
 
   async dispatchShareLinkCreate(link: ShareLinkHookPayload) {

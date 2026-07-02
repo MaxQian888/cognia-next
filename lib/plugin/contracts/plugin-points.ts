@@ -412,6 +412,15 @@ export const CANONICAL_HOOK_POINTS = [
   "onGoalProgress",
   "onGoalComplete",
   "onGoalDelete",
+  // Desktop-pet lifecycle. Dispatched by lib/pet/runtime/pet-controller.ts —
+  // onPetInteract fires only for the 7 direct care kinds (radar/passive kinds
+  // are deliberately excluded: they fire continuously), the rest fire on
+  // controller-detected transitions. Payloads carry NO event meta (PII).
+  "onPetInteract",
+  "onPetLevelUp",
+  "onPetEvolved",
+  "onPetAchievementUnlocked",
+  "onPetUnwell",
   // Public share-link lifecycle (ADR-0037). Dispatched by lib/share/client.ts.
   // Owner-observable transitions only — no onShareLinkAccess (reads happen on
   // the worker/viewer, not the owner). URL payload is fragment-stripped.

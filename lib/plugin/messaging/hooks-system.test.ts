@@ -675,6 +675,52 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
   })
 
+  describe("Pet dispatchers", () => {
+    function withHooks(hooks: Record<string, unknown>) {
+      usePluginStore.getState.mockReturnValue({
+        plugins: { "pet-plugin": { status: "enabled", hooks } },
+      })
+    }
+
+    it("dispatches all five pet hooks with their payloads", async () => {
+      const onPetInteract = jest.fn()
+      const onPetLevelUp = jest.fn()
+      const onPetEvolved = jest.fn()
+      const onPetAchievementUnlocked = jest.fn()
+      const onPetUnwell = jest.fn()
+      withHooks({
+        onPetInteract,
+        onPetLevelUp,
+        onPetEvolved,
+        onPetAchievementUnlocked,
+        onPetUnwell,
+      })
+
+      await eventHooks.dispatchPetInteract({ kind: "fed", source: "user", xp: 3, at: 1 })
+      await eventHooks.dispatchPetLevelUp({ level: 5, stage: "juvenile", at: 2 })
+      await eventHooks.dispatchPetEvolved({ stage: "juvenile", level: 5, at: 3 })
+      await eventHooks.dispatchPetAchievementUnlocked({ achievementId: "well-fed", at: 4 })
+      await eventHooks.dispatchPetUnwell({ condition: "unwell", at: 5 })
+
+      expect(onPetInteract).toHaveBeenCalledWith({ kind: "fed", source: "user", xp: 3, at: 1 })
+      expect(onPetLevelUp).toHaveBeenCalledWith({ level: 5, stage: "juvenile", at: 2 })
+      expect(onPetEvolved).toHaveBeenCalledWith({ stage: "juvenile", level: 5, at: 3 })
+      expect(onPetAchievementUnlocked).toHaveBeenCalledWith({ achievementId: "well-fed", at: 4 })
+      expect(onPetUnwell).toHaveBeenCalledWith({ condition: "unwell", at: 5 })
+    })
+
+    it("isolates a throwing pet hook", async () => {
+      withHooks({
+        onPetInteract: () => {
+          throw new Error("pet hook crash")
+        },
+      })
+      await expect(
+        eventHooks.dispatchPetInteract({ kind: "fed", source: "user", xp: 3, at: 1 })
+      ).resolves.not.toThrow()
+    })
+  })
+
   describe("Code Execution dispatchers", () => {
     it("should dispatch onCodeExecutionStart", () => {
       const handler = jest.fn()
