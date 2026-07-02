@@ -136,6 +136,10 @@ export async function dispatchSubagent(
   const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
   const result = await executeAgent(prompt, {
     toolsEnabled: options.toolsEnabled ?? true,
+    // Every run dispatched here is a subagent. Without a dispatchContext (leaf,
+    // allowNesting unset) build-options must WITHHOLD dispatch_agent — including
+    // the plan-mode force-offer — instead of treating the child as top-level.
+    isDispatchedSubagent: true,
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     ...(def.model ? { model: def.model } : {}),
     // Cross-provider subagent: route the run to the def's provider (with its own
@@ -271,6 +275,7 @@ export async function runTeam(
   }
 
   await agentTeamManager.start(teamId, {
+    origin: options.origin ?? "plugin",
     ...(options.ultracode !== undefined ? { ultracode: options.ultracode } : {}),
   })
 

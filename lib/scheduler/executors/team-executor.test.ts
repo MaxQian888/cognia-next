@@ -79,7 +79,7 @@ describe("executeAgentTeamTask", () => {
       execution,
       new AbortController().signal
     )
-    expect(startMock).toHaveBeenCalledWith("t1", { ultracode: true })
+    expect(startMock).toHaveBeenCalledWith("t1", { origin: "scheduler", ultracode: true })
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/failed/)
   })

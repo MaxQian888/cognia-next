@@ -550,7 +550,7 @@ describe("delegateToTeam (team → team)", () => {
       expect.objectContaining({ targetType: "team", targetId: "b" })
     )
     const settled = await completionPromise
-    expect(teamStartMock).toHaveBeenCalledWith("b", undefined)
+    expect(teamStartMock).toHaveBeenCalledWith("b", { origin: "delegation" })
     expect(settled.status).toBe("completed")
     expect(settled.result).toBe("team B output")
     expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith(

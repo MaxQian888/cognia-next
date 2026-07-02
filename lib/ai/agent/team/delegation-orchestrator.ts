@@ -460,10 +460,10 @@ export function delegateToTeam(input: DelegateToTeamInput): {
           `target team not found: ${input.targetTeamId}`
         )
       }
-      await agentTeamManager.start(
-        input.targetTeamId,
-        input.ultracode !== undefined ? { ultracode: input.ultracode } : undefined
-      )
+      await agentTeamManager.start(input.targetTeamId, {
+        origin: "delegation",
+        ...(input.ultracode !== undefined ? { ultracode: input.ultracode } : {}),
+      })
       const target = useAgentTeamStore.getState().teams[input.targetTeamId]
       const ok = target?.status === "completed" || target?.status === "idle"
       return settleTeamDelegation(delegation.id, ok ? "completed" : "failed", target?.finalResult)

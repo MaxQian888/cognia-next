@@ -536,6 +536,12 @@
         "title": "Token budget critical"
       },
       "cancel": "Cancel",
+      "capabilityAudit": {
+        "approveLabel": "Run anyway",
+        "body": "Some team capability references no longer resolve (a contributing plugin may be disabled or removed). You can run anyway with the remaining capabilities, or cancel to fix the configuration first.",
+        "rejectLabel": "Cancel run",
+        "title": "Stale capabilities detected"
+      },
       "deadlock": {
         "body": "Every teammate has been quarantined by repeated failures. Choose recovery action.",
         "resetAll": "Reset all teammates",

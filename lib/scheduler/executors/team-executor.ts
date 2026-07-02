@@ -71,10 +71,10 @@ export async function executeAgentTeamTask(
   })
 
   try {
-    await agentTeamManager.start(
-      payload.teamId,
-      typeof payload.ultracode === "boolean" ? { ultracode: payload.ultracode } : undefined
-    )
+    await agentTeamManager.start(payload.teamId, {
+      origin: "scheduler",
+      ...(typeof payload.ultracode === "boolean" ? { ultracode: payload.ultracode } : {}),
+    })
     const status = agentTeamManager.get(payload.teamId)?.status
     const success = status === "completed"
     return {

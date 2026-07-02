@@ -22,6 +22,12 @@ export interface ReplanGateDeps {
   /** The lead's proposed decision; shown in the modal and applied on approve. */
   decision: ReplanDecision
   signal?: AbortSignal
+  /**
+   * Gate behavior from the run's origin policy (see `gate-policy.ts`).
+   * Non-"block" resolves immediately as rejected — which is fail-open here:
+   * the original plan proceeds. Defaults to "block" (interactive).
+   */
+  behavior?: import("./gate-policy").GateBehavior
   /** Injectable waiter for tests; defaults to the approval-bus. */
   waitFn?: (signal?: AbortSignal) => Promise<ApprovalDecision>
 }
@@ -34,6 +40,19 @@ export interface ReplanGateOutcome {
 
 export async function awaitReplanApproval(deps: ReplanGateDeps): Promise<ReplanGateOutcome> {
   const { notifier, runId, teamId, decision } = deps
+  if (deps.behavior !== undefined && deps.behavior !== "block") {
+    // Headless: reject is fail-open (original plan proceeds) — inform, don't
+    // open a modal nobody is watching.
+    notifier.notify({
+      level: "info",
+      title: "Re-plan skipped (headless run)",
+      body: `Approval required but the run is headless — continuing with the original plan. Proposed change: ${decision.reasoning}`,
+      runId,
+      teamId,
+      dedupeKey: `replan:${runId}`,
+    })
+    return { approved: false, decision }
+  }
   notifier.notify({
     level: "critical",
     title: "Re-plan checkpoint awaiting approval",

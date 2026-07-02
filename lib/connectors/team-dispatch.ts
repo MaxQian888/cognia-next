@@ -133,6 +133,9 @@ export async function startTeamRunFromIM(
   const lifecycleDeps: Record<string, unknown> = {
     ...partial,
     triggeredFrom,
+    // Belt-and-braces: the lifecycle also derives "im" from triggeredFrom,
+    // but stating it keeps the headless gate policy explicit.
+    origin: "im",
     storeReader: {
       getTeam: (id: string) => store.getTeam(id),
       getTeammates: (id: string) => store.getTeammates(id),

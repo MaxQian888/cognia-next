@@ -151,6 +151,7 @@ export async function runReplanCheckpoint(
           runId,
           teamId: teamCtx.teamId,
           decision: d,
+          ...(teamCtx.gatePolicy ? { behavior: teamCtx.gatePolicy.replan } : {}),
           ...(signal ? { signal } : {}),
         }))
     const outcome = await gate(decision)

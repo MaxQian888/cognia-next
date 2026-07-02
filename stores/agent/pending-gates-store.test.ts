@@ -82,6 +82,7 @@ describe("PendingGatesStore", () => {
     expect(gateTypeFromScope("agent-team-deadlock")).toBe("deadlock")
     expect(gateTypeFromScope("agent-team-teammate-fix")).toBe("teammate_fix")
     expect(gateTypeFromScope("agent-team-replan")).toBe("replan")
+    expect(gateTypeFromScope("agent-team-capability-audit")).toBe("capability_audit")
     expect(gateTypeFromScope("agent-team")).toBe("plan")
     expect(gateTypeFromScope("unknown")).toBe("plan")
   })

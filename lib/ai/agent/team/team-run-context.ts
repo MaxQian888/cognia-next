@@ -73,6 +73,12 @@ export interface TeamRunContext {
   readonly notifier: TeamNotifier
   readonly concurrency: ConcurrencyController
   readonly modelPref: ModelPreferenceController
+  /**
+   * Per-run HITL gate policy resolved from the trigger origin (see
+   * `gate-policy.ts`). Optional so tests that hand-build a context keep
+   * working — consumers treat absence as the interactive (block) policy.
+   */
+  readonly gatePolicy?: import("./gate-policy").TeamGatePolicy
   readonly storeWriter: TeamStoreWriter
   /**
    * Per-teammate cache of capability resolution. Populated lazily by the

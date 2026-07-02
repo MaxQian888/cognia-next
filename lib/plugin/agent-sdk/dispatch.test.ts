@@ -76,6 +76,7 @@ describe("dispatchSubagent", () => {
     const res = await dispatchSubagent(subagent, "review this PR")
     expect(mockExecute).toHaveBeenCalledWith("review this PR", {
       toolsEnabled: true,
+      isDispatchedSubagent: true,
       systemPrompt: "You review code.",
       model: "sonnet",
       allowedTools: ["Read", "Grep"],
@@ -133,6 +134,20 @@ describe("dispatchSubagent", () => {
   it("omits permissionCeiling when the parent set none", async () => {
     await dispatchSubagent(subagent, "go")
     expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("permissionCeiling")
+  })
+
+  it("always marks the run as a dispatched subagent (leaf-gate signal)", async () => {
+    // Leaf def (no allowNesting): flagged, and no dispatchContext — build-options
+    // withholds dispatch_agent from it instead of treating it as top-level.
+    await dispatchSubagent(subagent, "go")
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({ isDispatchedSubagent: true })
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("dispatchContext")
+    // Nesting def: flagged AND carries a dispatchContext for its own children.
+    await dispatchSubagent({ ...subagent, allowNesting: true }, "go", { _maxDepth: 2 })
+    expect(mockExecute.mock.calls[1][1]).toMatchObject({
+      isDispatchedSubagent: true,
+      dispatchContext: expect.objectContaining({ depth: 1, maxDepth: 2 }),
+    })
   })
 
   it("forwards the live-progress _onEvent sink to executeAgent as onEvent", async () => {
@@ -275,7 +290,7 @@ describe("runTeam", () => {
       status: "completed",
     })
     const res = await runTeam("t1", { ultracode: true })
-    expect(mockTeam.start).toHaveBeenCalledWith("t1", { ultracode: true })
+    expect(mockTeam.start).toHaveBeenCalledWith("t1", { origin: "plugin", ultracode: true })
     expect(res).toEqual({ teamId: "t1", status: "completed" })
   })
 
@@ -290,7 +305,7 @@ describe("runTeam", () => {
     const config = { id: "adhoc", name: "Ad-hoc" } as never
     const res = await runTeam(config)
     expect(mockTeam.create).toHaveBeenCalledWith(config)
-    expect(mockTeam.start).toHaveBeenCalledWith("adhoc", {})
+    expect(mockTeam.start).toHaveBeenCalledWith("adhoc", { origin: "plugin" })
     expect(res.teamId).toBe("adhoc")
   })
 

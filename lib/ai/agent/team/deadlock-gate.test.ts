@@ -55,6 +55,26 @@ describe("createDeadlockHandler", () => {
     expect((abort.mock.calls[0][0] as Error).message).toMatch(/recovery disabled/i)
   })
 
+  it("fast-fails with a headless message when the gate policy is not block", () => {
+    const { deps, notify, reduceTo, abort } = makeDeps({ recovery: true, behavior: "fail-fast" })
+    createDeadlockHandler(deps)()
+    const payload = notify.mock.calls[0][0] as TeamNotifyPayload
+    expect(payload.level).toBe("critical")
+    expect(payload.openApproval).toBeUndefined()
+    expect(payload.body).toMatch(/headless/i)
+    expect(reduceTo).not.toHaveBeenCalled()
+    expect(abort).toHaveBeenCalledTimes(1)
+    expect((abort.mock.calls[0][0] as Error).message).toMatch(/headless/i)
+  })
+
+  it("still opens the gate when behavior is explicitly block", () => {
+    const { deps, notify, abort } = makeDeps({ recovery: true, behavior: "block" })
+    createDeadlockHandler(deps)()
+    const payload = notify.mock.calls[0][0] as TeamNotifyPayload
+    expect(payload.openApproval).toEqual({ scope: "agent-team-deadlock", id: "run-1" })
+    expect(abort).not.toHaveBeenCalled()
+  })
+
   it("opens the HITL gate and freezes concurrency when recovery is enabled", () => {
     const { deps, notify, reduceTo, abort } = makeDeps({ recovery: true })
     createDeadlockHandler(deps)()

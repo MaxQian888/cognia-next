@@ -22,6 +22,13 @@ import type { TeamNotifier } from "./team-notifier"
 export interface DeadlockGateDeps {
   /** `team.config.enableDeadlockRecovery !== false` (default true). */
   recovery: boolean
+  /**
+   * Gate behavior from the run's origin policy (see `gate-policy.ts`).
+   * Anything other than "block" fast-fails like `recovery: false`, with an
+   * origin-appropriate message — a headless run has no operator to
+   * unquarantine teammates. Defaults to "block" (interactive).
+   */
+  behavior?: import("./gate-policy").GateBehavior
   runId: string
   teamId: string
   notifier: TeamNotifier
@@ -42,16 +49,21 @@ export function createDeadlockHandler(deps: DeadlockGateDeps): () => void {
   return () => {
     if (deps.signal.aborted) return
 
-    if (!deps.recovery) {
+    const headless = deps.behavior !== undefined && deps.behavior !== "block"
+    if (!deps.recovery || headless) {
       deps.notifier.notify({
         level: "critical",
         title: "All teammates unavailable",
-        body: "Deadlock recovery is disabled — aborting the run.",
+        body: headless
+          ? "Headless run has no operator for deadlock recovery — aborting."
+          : "Deadlock recovery is disabled — aborting the run.",
         runId: deps.runId,
         teamId: deps.teamId,
         dedupeKey,
       })
-      deps.abort(new Error("Deadlock; recovery disabled"))
+      deps.abort(
+        new Error(headless ? "Deadlock; headless run aborted" : "Deadlock; recovery disabled")
+      )
       return
     }
 

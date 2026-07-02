@@ -138,6 +138,20 @@ export type TeamExecutorKind =
   | "background-handoff"
   | "external-handoff"
 
+/**
+ * Where a team run was triggered from. Anything not "interactive" is
+ * headless — no operator is watching a modal, so the HITL gates resolve
+ * through `lib/ai/agent/team/gate-policy.ts` instead of blocking.
+ */
+export type TeamRunOrigin =
+  | "interactive"
+  | "scheduler"
+  | "remote"
+  | "external"
+  | "plugin"
+  | "im"
+  | "delegation"
+
 /** Executor decision stamped on a team at materialization (provenance). */
 export interface TeamDispatchDecision {
   kind: TeamExecutorKind

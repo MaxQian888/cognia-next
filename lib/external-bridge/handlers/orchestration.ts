@@ -178,6 +178,7 @@ export async function teamRunCore(input: TeamRunInput): Promise<TeamRunOutput> {
 
     const { runTeam } = await import("@/lib/plugin/agent-sdk/dispatch")
     const result = await runTeam(input.teamId, {
+      origin: "external",
       ...(input.ultracode !== undefined ? { ultracode: input.ultracode } : {}),
     })
     return { ok: true, teamId: result.teamId, status: result.status }

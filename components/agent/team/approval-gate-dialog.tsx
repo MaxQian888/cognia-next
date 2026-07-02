@@ -24,7 +24,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 
-export type ApprovalGateType = "budget" | "deadlock" | "plan" | "teammate_fix" | "replan"
+export type ApprovalGateType =
+  | "budget"
+  | "deadlock"
+  | "plan"
+  | "teammate_fix"
+  | "replan"
+  | "capability_audit"
 
 /**
  * Maps a `gateType` to its i18n namespace under `agentTeam.approvalGate`.
@@ -37,6 +43,7 @@ const GATE_I18N_KEY: Record<ApprovalGateType, string> = {
   plan: "plan",
   teammate_fix: "teammateFix",
   replan: "replan",
+  capability_audit: "capabilityAudit",
 }
 
 export interface ApprovalGateDialogProps {
@@ -75,9 +82,10 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
         return
       case "plan":
       case "replan":
-        // Approve applies the lead's proposed re-plan as-is; reject continues
-        // the original plan. No edit payload (the gate keeps the lead decision
-        // when none is supplied).
+      case "capability_audit":
+        // Approve applies the lead's proposed re-plan / runs with the stale
+        // capabilities as-is; reject continues the original plan / cancels
+        // the run. No edit payload.
         props.onApprove()
         return
     }
@@ -139,9 +147,13 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => props.onReject()}>
-            {t("reject")}
+            {props.gateType === "capability_audit" ? t("capabilityAudit.rejectLabel") : t("reject")}
           </Button>
-          <Button onClick={handleApprove}>{t("approve")}</Button>
+          <Button onClick={handleApprove}>
+            {props.gateType === "capability_audit"
+              ? t("capabilityAudit.approveLabel")
+              : t("approve")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

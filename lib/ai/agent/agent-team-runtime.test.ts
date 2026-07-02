@@ -389,6 +389,26 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/runLeadPlanning/)
   })
+
+  it("headless origin fails fast BEFORE running lead planning (no token burn)", async () => {
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/headless \(origin=scheduler\)/)
+    // The whole point: planning must never have been invoked.
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("an IM triggeredFrom implies the headless policy without an explicit origin", async () => {
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/headless \(origin=im\)/)
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
 })
 
 describe("runTeamLifecycle — ultracode orchestration", () => {

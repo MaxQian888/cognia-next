@@ -118,7 +118,7 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     // whole run). Its resolution IS the terminal signal — wire it to `settle`.
     const settle = settleFrom(
       agentTeamManager
-        .start(teamId)
+        .start(teamId, { origin: "remote" })
         .then(() => ({ status: "succeeded" as const, detail: `team ${teamId} finished` }))
     )
     return { ...accept(runId, `team ${teamId}`), settle }

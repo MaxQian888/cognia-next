@@ -2725,6 +2725,9 @@ registerNodeExecutor({
     const deps = {
       ...partial,
       ...(triggeredFrom ? { triggeredFrom } : {}),
+      // IM-originated workflows run headless (gate policy "im"); UI-launched
+      // workflows keep the interactive blocking gates.
+      origin: triggeredFrom ? ("im" as const) : ("interactive" as const),
       storeReader: {
         getTeam: (id: string) => useAgentTeamStore.getState().getTeam(id),
         getTeammates: (id: string) => useAgentTeamStore.getState().getTeammates(id),

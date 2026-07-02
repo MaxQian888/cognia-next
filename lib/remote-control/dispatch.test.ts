@@ -149,7 +149,7 @@ describe("dispatchRemoteCommand", () => {
     const r = await dispatchRemoteCommand(
       cmd({ target: "team.dispatch", args: { teamId: "tm_1" } })
     )
-    expect(teamStart).toHaveBeenCalledWith("tm_1")
+    expect(teamStart).toHaveBeenCalledWith("tm_1", { origin: "remote" })
     expect(r.status).toBe("accepted")
   })
 

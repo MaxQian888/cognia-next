@@ -33,26 +33,52 @@ export interface AgentTeamManager {
   create(config: AgentTeamConfig): AgentTeam
   update(id: string, patch: Partial<AgentTeamConfig>): void
   delete(id: string): void
-  start(id: string, opts?: { ultracode?: boolean }): Promise<void>
+  start(
+    id: string,
+    opts?: {
+      ultracode?: boolean
+      /** Trigger origin; headless origins resolve HITL gates via gate-policy. */
+      origin?: import("./team/gate-policy").TeamRunOrigin
+    }
+  ): Promise<void>
   pause(id: string): Promise<void>
   shutdown(id: string): Promise<void>
 }
 
 /**
- * Pluggable runtime dependencies. Set at app startup via
- * `configureAgentTeamRuntime`. `null` means start() throws a clear error
- * rather than running with no planning support.
+ * Pluggable runtime dependencies. Normally set at app startup via
+ * `configureAgentTeamRuntime` (the React initializer). When that never ran
+ * (headless / CLI / scheduler-triggered runs, SSR, tests), `start()` lazily
+ * builds the side-effect-free defaults instead of dying — an explicit
+ * `configureAgentTeamRuntime` still wins.
  */
-let configuredDeps: Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps"> | null = null
+type ConfiguredDeps = Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps">
+let configuredDeps: ConfiguredDeps | null = null
 
-export function configureAgentTeamRuntime(
-  deps: Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps">
-): void {
+export function configureAgentTeamRuntime(deps: ConfiguredDeps): void {
   configuredDeps = deps
 }
 
 export function __resetAgentTeamRuntimeForTesting(): void {
   configuredDeps = null
+}
+
+/**
+ * Return the configured runtime deps, or lazily build the default deps when
+ * the startup initializer never ran. `buildAgentTeamRuntimeDeps()` is
+ * side-effect-free and produces safe defaults, so dispatch self-heals instead
+ * of throwing "runtime is not configured". Dynamic import keeps the default
+ * notifier/DB graph out of the SSR/test path unless it's actually needed.
+ */
+async function ensureConfiguredDeps(): Promise<ConfiguredDeps> {
+  if (configuredDeps) return configuredDeps
+  const { buildAgentTeamRuntimeDeps } = await import("./agent-team-runtime-deps")
+  configuredDeps = buildAgentTeamRuntimeDeps()
+  console.warn(
+    "[agent-team] runtime auto-configured with defaults — " +
+      "configureAgentTeamRuntime() was never called (initializer not mounted?)."
+  )
+  return configuredDeps
 }
 
 function bindStoreReader(): RunTeamLifecycleDeps["storeReader"] {
@@ -89,17 +115,14 @@ export const agentTeamManager: AgentTeamManager = {
     useAgentTeamStore.getState().deleteTeam(id)
   },
   start: async (id, opts) => {
-    if (!configuredDeps) {
-      throw new Error(
-        "Agent-team runtime is not configured — call configureAgentTeamRuntime(deps) at app startup."
-      )
-    }
+    const deps = await ensureConfiguredDeps()
     useAgentTeamStore.getState().setTeamStatus(id, "executing")
     const result = await runTeamLifecycle(id, {
       storeReader: bindStoreReader(),
       storeWriter: bindStoreWriter(),
-      runLeadPlanning: configuredDeps.runLeadPlanning,
-      notifierDeps: configuredDeps.notifierDeps,
+      runLeadPlanning: deps.runLeadPlanning,
+      notifierDeps: deps.notifierDeps,
+      ...(opts?.origin ? { origin: opts.origin } : {}),
       // Manual "Run with ultracode" forces orchestration; an explicit normal
       // run turns it off. Omitted → the team's autoMode decides.
       ...(opts?.ultracode === true
@@ -108,9 +131,11 @@ export const agentTeamManager: AgentTeamManager = {
           ? { ultracodeOverride: "off" as const }
           : {}),
     })
-    // Mirror the terminal result onto the store team.status so the workspace
-    // page (which currently reads from the store) sees the new state. Long-term
-    // the UI should subscribe to workflowRuns directly (PR 5).
+    // Optimistically mirror the terminal result onto store team.status as an
+    // in-flight bridge. The authoritative source is the workflowRuns
+    // subscription (`useTeamLiveStatus`), which the workspace overview and the
+    // teams-list card both consume; `deriveTeamStatus` only lets this
+    // optimistic write win while it's still non-terminal.
     useAgentTeamStore.getState().setTeamStatus(id, result.status)
     // Emit a scheduler event so event-triggered tasks / forward chains can
     // react to a team finishing. Lazy import + best-effort.

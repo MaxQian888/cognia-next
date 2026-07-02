@@ -70,6 +70,25 @@ describe("awaitReplanApproval", () => {
     expect(out.decision).toEqual(decision)
   })
 
+  it("skips the gate on a headless behavior — info notify, no modal, original plan", async () => {
+    const { notifier, notify } = makeNotifier()
+    const waitFn = jest.fn(async () => ({ outcome: "approve" }) as ApprovalDecision)
+    const out = await awaitReplanApproval({
+      notifier,
+      runId: "run1",
+      teamId: "team1",
+      decision,
+      behavior: "auto-reject",
+      waitFn,
+    })
+    expect(waitFn).not.toHaveBeenCalled()
+    expect(out.approved).toBe(false)
+    expect(out.decision).toEqual(decision)
+    const payload = notify.mock.calls[0][0] as { level: string; openApproval?: unknown }
+    expect(payload.level).toBe("info")
+    expect(payload.openApproval).toBeUndefined()
+  })
+
   it("returns not-approved on reject (proceed with original plan)", async () => {
     const { notifier } = makeNotifier()
     const out = await awaitReplanApproval({
