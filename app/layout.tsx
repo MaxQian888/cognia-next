@@ -44,6 +44,7 @@ import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
 import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
+import { WebCompanionBootProvider } from "@/components/providers/web-companion-boot-provider"
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
 import { DesktopOnlyInitializers } from "@/components/providers/initializers/desktop-only-initializers"
 import { MobileOnlyInitializers } from "@/components/providers/initializers/mobile-only-initializers"
@@ -79,6 +80,7 @@ import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import { PerfHud } from "@/lib/perf"
 import { PetMount } from "@/components/pet/pet-mount"
+import { CaptureMount } from "@/components/capture/capture-mount"
 import { PetWindowShell } from "@/components/pet/pet-window-shell"
 import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
@@ -240,31 +242,33 @@ export default async function RootLayout({
                                             <ConnectorDeepLinkRouter>
                                               <SubscriptionUsageProvider>
                                                 <CompanionBootProvider>
-                                                  <DesktopSyncSourceProvider>
-                                                    <DesktopMessageSourceProvider>
-                                                      {/* Subscribes the renderer to the remote-control axum
+                                                  <WebCompanionBootProvider>
+                                                    <DesktopSyncSourceProvider>
+                                                      <DesktopMessageSourceProvider>
+                                                        {/* Subscribes the renderer to the remote-control axum
                                                     server's Tauri events so inbound HTTP triggers
                                                     actually dispatch. No-op off Tauri. */}
-                                                      <RemoteControlReceiver>
-                                                        {/* id="app" is the scope root for user
+                                                        <RemoteControlReceiver>
+                                                          {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                        <div
-                                                          id="app"
-                                                          data-bg-target="global"
-                                                          className="contents"
-                                                        >
-                                                          <MobileShellWrapper>
-                                                            <DesktopAppShell>
-                                                              {children}
-                                                            </DesktopAppShell>
-                                                          </MobileShellWrapper>
-                                                        </div>
-                                                      </RemoteControlReceiver>
-                                                    </DesktopMessageSourceProvider>
-                                                  </DesktopSyncSourceProvider>
+                                                          <div
+                                                            id="app"
+                                                            data-bg-target="global"
+                                                            className="contents"
+                                                          >
+                                                            <MobileShellWrapper>
+                                                              <DesktopAppShell>
+                                                                {children}
+                                                              </DesktopAppShell>
+                                                            </MobileShellWrapper>
+                                                          </div>
+                                                        </RemoteControlReceiver>
+                                                      </DesktopMessageSourceProvider>
+                                                    </DesktopSyncSourceProvider>
+                                                  </WebCompanionBootProvider>
                                                 </CompanionBootProvider>
                                               </SubscriptionUsageProvider>
                                             </ConnectorDeepLinkRouter>
@@ -311,6 +315,9 @@ export default async function RootLayout({
                         {/* Floating virtual-pet widget — gates itself on the pet
                          * setting and degrades on mobile / reduced motion. */}
                         <PetMount />
+                        {/* Content-capture confirm bubble + clipboard watcher —
+                         * self-gates on the capture setting (disabled by default). */}
+                        <CaptureMount />
                         {/* Global TTS "now playing" bar — self-hides when idle. */}
                         <TtsNowPlayingBar />
                         {/* Modal for the agent's `ask_user` tool — self-hides when

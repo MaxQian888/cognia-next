@@ -57,6 +57,11 @@ export interface CompanionConfig {
    * storage entry on iOS Keychain / Android Keystore.
    */
   rendezvousSecret?: string
+  /**
+   * ADR-0059 C4/F3 — local account the pairing was minted for. Multi-account
+   * cloud servers route by it; absent on rows paired before it shipped.
+   */
+  accountId?: string
 }
 
 export interface CompanionConfigStorage {

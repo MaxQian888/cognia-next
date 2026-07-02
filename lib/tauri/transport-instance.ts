@@ -14,6 +14,7 @@
  */
 
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { CompanionTransport } from "./transport-companion"
 import { TauriTransport } from "./transport-tauri"
 import type { Transport } from "./transport-types"
@@ -22,6 +23,10 @@ import { WebStubTransport } from "./transport-web"
 function pickTransport(): Transport {
   if (isTauri()) return new TauriTransport()
   if (isCapacitor()) return new CompanionTransport()
+  // Cloud companion (ADR-0059 C1): a plain browser with a cognia-server —
+  // build-time NEXT_PUBLIC_COGNIA_SERVER_URL or an existing pairing — talks
+  // the same companion protocol Capacitor does.
+  if (hasWebCompanionTarget()) return new CompanionTransport()
   return new WebStubTransport()
 }
 

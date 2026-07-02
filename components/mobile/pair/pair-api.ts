@@ -21,15 +21,29 @@ import { getDeviceLabel, getDevicePlatform, safeText } from "./pair-helpers"
  * collapse to the same `RedeemResult`.
  */
 
-/** Wire-format response from `/api/v1/auth/pair` and `/redeem-code`. */
+/**
+ * Wire-format response from `/api/v1/auth/pair` and `/redeem-code`.
+ *
+ * The Rust `PairResponse` serializes camelCase (`deviceJwt`, …) — asserted by
+ * `pair_flow_test.rs`. The snake_case variants are kept as tolerated aliases
+ * because this module historically read them; `runRedeem` accepts either.
+ */
 export interface PairResponseBody {
-  device_id: string
-  device_jwt: string
-  server_version: string
+  deviceId?: string
+  deviceJwt?: string
+  serverVersion?: string
   /** ADR-0021 — optional for legacy desktops without WebRTC support. */
-  rendezvous_id?: string
+  rendezvousId?: string
   /** ADR-0021 — 32-byte HMAC secret, URL-safe base64 (unpadded). */
+  rendezvousSecret?: string
+  /** ADR-0059 C4 — local account this pairing routes to. */
+  accountId?: string
+  device_id?: string
+  device_jwt?: string
+  server_version?: string
+  rendezvous_id?: string
   rendezvous_secret?: string
+  account_id?: string
 }
 
 export interface PairCommonOptions {
@@ -154,18 +168,33 @@ async function runRedeem(
   }
 
   const body = (await response.json()) as PairResponseBody
+  const deviceJwt = body.deviceJwt ?? body.device_jwt
+  const deviceId = body.deviceId ?? body.device_id
+  if (!deviceJwt || !deviceId) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      rawBody: "pair response missing deviceJwt/deviceId",
+    }
+  }
   const config: CompanionConfig = {
     baseUrl: trimSlash(common.baseUrl),
-    deviceJwt: body.device_jwt,
-    deviceId: body.device_id,
-    serverVersion: body.server_version,
+    deviceJwt,
+    deviceId,
+    serverVersion: body.serverVersion ?? body.server_version ?? "unknown",
   }
   if (common.serverFingerprint) {
     config.serverFingerprint = common.serverFingerprint
   }
-  if (body.rendezvous_id && body.rendezvous_secret) {
-    config.rendezvousId = body.rendezvous_id
-    config.rendezvousSecret = body.rendezvous_secret
+  const rendezvousId = body.rendezvousId ?? body.rendezvous_id
+  const rendezvousSecret = body.rendezvousSecret ?? body.rendezvous_secret
+  if (rendezvousId && rendezvousSecret) {
+    config.rendezvousId = rendezvousId
+    config.rendezvousSecret = rendezvousSecret
+  }
+  const accountId = body.accountId ?? body.account_id
+  if (accountId) {
+    config.accountId = accountId
   }
   return { kind: "ok", body, config }
 }

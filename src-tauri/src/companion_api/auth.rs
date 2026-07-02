@@ -110,6 +110,10 @@ pub struct PairResponse {
     pub server_version: String,
     pub rendezvous_id: String,
     pub rendezvous_secret: String,
+    /// Local account the pair JWT was minted for (ADR-0059 C4/F3). Clients
+    /// persist it in `CompanionConfig` so multi-account servers can route.
+    /// Additive - older clients ignore it.
+    pub account_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +433,7 @@ fn redeem_with_pair_jwt(
             server_version: env!("CARGO_PKG_VERSION").to_string(),
             rendezvous_id,
             rendezvous_secret,
+            account_id,
         }),
     )
         .into_response()
