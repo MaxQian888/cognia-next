@@ -65,6 +65,67 @@ describe("applyPetEvent", () => {
     expect(res.oneShots).toContain("evolving")
   })
 
+  it("stamps the care-quality flavor at the moment of evolution", () => {
+    const evolve = (careQuality: number) =>
+      applyPetEvent(
+        profile({
+          xp: 990,
+          level: 4,
+          stage: "baby",
+          care: {
+            lowSince: null,
+            condition: "well",
+            notifiedAt: null,
+            everUnwell: false,
+            careQuality,
+          },
+        }),
+        event("goalComplete", 200),
+        0
+      )
+    expect(evolve(90).profile.evolutionFlavor).toBe("radiant")
+    expect(evolve(50).profile.evolutionFlavor).toBe("normal")
+    expect(evolve(10).profile.evolutionFlavor).toBe("plain")
+  })
+
+  it("never changes a stored flavor outside an evolution", () => {
+    const res = applyPetEvent(
+      profile({ evolutionFlavor: "radiant", xp: 10, level: 1 }),
+      event("fed"),
+      0
+    )
+    expect(res.profile.evolutionFlavor).toBe("radiant")
+    expect(res.evolvedTo).toBeNull()
+  })
+
+  it("uses the care state derived from THIS event's needs at evolution (fresh-care regression)", () => {
+    // careQuality EMA moves toward the current needs level on derive; seed a
+    // borderline quality so the fresh derive tips it across the radiant line
+    // only if care is computed BEFORE the stage/flavor step.
+    const start = 1_000_000
+    const res = applyPetEvent(
+      profile({
+        xp: 990,
+        level: 4,
+        stage: "baby",
+        needs: { energy: 100, mood: 100, bond: 100, lastTickAt: new Date(start).toISOString() },
+        care: {
+          lowSince: null,
+          condition: "well",
+          notifiedAt: null,
+          everUnwell: false,
+          careQuality: 75.5, // stale value sits below radiant only pre-derive
+        },
+      }),
+      event("goalComplete", 200),
+      start
+    )
+    // The flavor must match the care the RESULT reports, not the stale input.
+    expect(res.profile.evolutionFlavor).toBe(
+      res.care.careQuality > 75 ? "radiant" : res.care.careQuality < 40 ? "plain" : "normal"
+    )
+  })
+
   it("keeps the egg stage and never evolves while unhatched", () => {
     const res = applyPetEvent(
       profile({ soul: null, stage: "egg", xp: 0 }),

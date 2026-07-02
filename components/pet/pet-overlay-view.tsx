@@ -312,6 +312,7 @@ export function PetOverlayView() {
             stage={profile.stage}
             state={withCareCondition(state, view.condition)}
             oneShot={oneShot}
+            flavor={profile.evolutionFlavor}
             reducedMotion={reduced}
             size={size}
             skinId={skinId}

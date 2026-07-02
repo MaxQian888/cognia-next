@@ -6,7 +6,14 @@
 "use client"
 
 import { useReducedMotion } from "motion/react"
-import type { PetBones, PetLocomotion, PetOneShot, PetStage, PetVisualState } from "@/types/pet"
+import type {
+  PetBones,
+  PetEvolutionFlavor,
+  PetLocomotion,
+  PetOneShot,
+  PetStage,
+  PetVisualState,
+} from "@/types/pet"
 import { getSkin } from "./skins/registry"
 
 export interface PetRendererProps {
@@ -22,6 +29,8 @@ export interface PetRendererProps {
   locomotion?: PetLocomotion | null
   /** Render a still frame (window hidden / widget minimized). */
   paused?: boolean
+  /** Care-quality evolution flavor (cosmetic accent). Absent = normal. */
+  flavor?: PetEvolutionFlavor
 }
 
 export function PetRenderer({
@@ -34,6 +43,7 @@ export function PetRenderer({
   skinId,
   locomotion,
   paused,
+  flavor,
 }: PetRendererProps) {
   const osReduced = useReducedMotion()
   const reduced = reducedMotion ?? osReduced ?? false
@@ -49,6 +59,7 @@ export function PetRenderer({
         size,
         locomotion: locomotion ?? undefined,
         paused,
+        flavor,
       })}
     </>
   )

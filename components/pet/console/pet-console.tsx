@@ -71,6 +71,7 @@ export function PetConsole() {
           state="idle"
           size={48}
           skinId={effectiveSkin}
+          flavor={profile.evolutionFlavor}
         />
         <div className="min-w-0">
           {profile.soul ? (

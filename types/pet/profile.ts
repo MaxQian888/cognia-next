@@ -14,6 +14,13 @@ import type { PetStatProgress } from "./stats"
 /** Growth stages, unlocked by level thresholds. Drives the evolution morph. */
 export type PetStage = "egg" | "baby" | "juvenile" | "adult" | "elder"
 
+/**
+ * Care-quality tier stamped at the moment of an evolution: sustained neglect
+ * yields a muted "plain" look, devoted care a "radiant" accent. Cosmetic layer
+ * only — bones stay deterministic and untouched.
+ */
+export type PetEvolutionFlavor = "plain" | "normal" | "radiant"
+
 export interface PetProfile {
   /** Singleton primary key. */
   id: "global"
@@ -66,6 +73,11 @@ export interface PetProfile {
    * activity ledger for legacy profiles.
    */
   streak?: PetStreak
+  /**
+   * Care-quality flavor stamped at the LAST evolution (non-indexed; absent =
+   * normal). Set by `applyPetEvent` from `flavorForCareQuality`.
+   */
+  evolutionFlavor?: PetEvolutionFlavor
   createdAt: string
   updatedAt: string
 }

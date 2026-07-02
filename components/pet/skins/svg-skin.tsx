@@ -10,6 +10,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveWalkMotion } from "@/lib/pet/animation/walk-spec"
 import { useIdleQuiescence } from "@/hooks/pet/use-idle-quiescence"
 import { stageScale, isEggStage } from "@/lib/pet/skins/stage-visual"
+import { resolveFlavorVfx } from "@/lib/pet/skins/flavor-vfx"
 import { PetBody } from "./svg/pet-body"
 import { PetEyesGroup, PetMouth } from "./svg/pet-face"
 import { PetVfx } from "./svg/pet-vfx"
@@ -22,6 +23,7 @@ function PetSvgContent({
   reducedMotion,
   locomotion,
   paused,
+  flavor,
 }: PetSkinRenderProps) {
   // Low power halves the looping cadence (same settings read as live2d-skin).
   const lowPower = useSettingsStore((s) => Boolean(s.settings?.petSettings?.lowPower))
@@ -37,6 +39,9 @@ function PetSvgContent({
   const spec = walking ? resolveWalkMotion(baseSpec, still) : baseSpec
   const scale = stageScale(stage)
   const egg = isEggStage(stage)
+  // Evolution-flavor accent: plain desaturates the body (static filter,
+  // survives stillness); radiant adds a warm aura via the VFX layer.
+  const flavorVfx = egg ? null : resolveFlavorVfx(flavor, { reducedMotion: still, lowPower })
 
   const bodyAnimate = still
     ? { scale: spec.body.scale[0] * scale }
@@ -82,7 +87,13 @@ function PetSvgContent({
       <motion.g
         animate={bodyAnimate}
         transition={bodyTransition}
-        style={{ transformOrigin: "50px 58px" }}
+        data-pet-flavor={flavorVfx ? (flavor ?? "normal") : "normal"}
+        style={{
+          transformOrigin: "50px 58px",
+          ...(flavorVfx && flavorVfx.saturate !== 1
+            ? { filter: `saturate(${flavorVfx.saturate})` }
+            : {}),
+        }}
       >
         {egg ? (
           <g data-pet-part="egg">
@@ -111,6 +122,7 @@ function PetSvgContent({
           rarity={bones.rarity}
           reducedMotion={still}
           lowPower={lowPower}
+          flavorAuraColor={flavorVfx?.aura ? flavorVfx.auraColor : null}
         />
       )}
     </g>

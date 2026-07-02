@@ -120,4 +120,41 @@ describe("svgSkin", () => {
     )
     expect(container.querySelector('[data-pet-oneshot="wave"]')).not.toBeNull()
   })
+
+  describe("evolution flavor", () => {
+    it("radiant renders the warm flavor aura at full saturation", () => {
+      const { container } = render(<>{svgSkin.render(props({ flavor: "radiant" }))}</>)
+      expect(container.querySelector('[data-pet-vfx="flavor-aura"]')).not.toBeNull()
+      const body = container.querySelector('[data-pet-flavor="radiant"]') as HTMLElement
+      expect(body).not.toBeNull()
+      expect(body.style.filter).toBe("")
+    })
+
+    it("plain desaturates the body without an aura", () => {
+      const { container } = render(<>{svgSkin.render(props({ flavor: "plain" }))}</>)
+      expect(container.querySelector('[data-pet-vfx="flavor-aura"]')).toBeNull()
+      const body = container.querySelector('[data-pet-flavor="plain"]') as HTMLElement
+      expect(body.style.filter).toContain("saturate(0.88)")
+    })
+
+    it("normal / absent flavor renders no flavor layer (determinism guard)", () => {
+      const plainProps = props()
+      const { container } = render(<>{svgSkin.render(plainProps)}</>)
+      expect(container.querySelector('[data-pet-vfx="flavor-aura"]')).toBeNull()
+      expect(container.querySelector('[data-pet-flavor="normal"]')).not.toBeNull()
+      const withNormal = render(<>{svgSkin.render(props({ flavor: "normal" }))}</>)
+      expect(withNormal.container.querySelector('[data-pet-vfx="flavor-aura"]')).toBeNull()
+    })
+
+    it("keeps the plain saturation but drops the radiant aura under reduced motion", () => {
+      const { container } = render(
+        <>{svgSkin.render(props({ flavor: "radiant", reducedMotion: true }))}</>
+      )
+      // Reduced motion removes the whole VFX layer (incl. the flavor aura).
+      expect(container.querySelector('[data-pet-vfx="flavor-aura"]')).toBeNull()
+      const plain = render(<>{svgSkin.render(props({ flavor: "plain", reducedMotion: true }))}</>)
+      const body = plain.container.querySelector('[data-pet-flavor="plain"]') as HTMLElement
+      expect(body.style.filter).toContain("saturate(0.88)")
+    })
+  })
 })

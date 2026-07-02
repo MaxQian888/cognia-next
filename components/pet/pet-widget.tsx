@@ -247,6 +247,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
               // reads as `unwell` from elapsed time without waiting for the next
               // heartbeat/event to settle the store visual state.
               state={withCareCondition(state, view.condition)}
+              flavor={profile.evolutionFlavor}
               oneShot={oneShot}
               reducedMotion={reduced}
               size={settings.size}
