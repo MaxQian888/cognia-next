@@ -60,7 +60,7 @@ import {
   skillShow,
   skillToggle,
 } from "./skill-controller"
-import { teamAuto, teamList, teamRunUnavailable, teamShow } from "./team-controller"
+import { teamAuto, teamList, teamRun, teamShow } from "./team-controller"
 import {
   workflowInspect,
   workflowList,
@@ -85,8 +85,12 @@ import { runLimits } from "./limits-controller"
 import { runContextReport } from "./context-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 import { viewFile } from "./view-controller"
-import { planList, planShow, planDelete, planDiff } from "./plan-controller"
+import { planList, planShow, planDelete, planDiff, planExplore } from "./plan-controller"
 import { hooksList } from "./hooks-controller"
+import { councilRun } from "./council-controller"
+import { orchestrateRun } from "./orchestrate-controller"
+import { runCommit } from "./commit-controller"
+import { runPr } from "./pr-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -114,8 +118,15 @@ export interface RuntimeDeps {
   rateLimits?: import("../format/rate-limits").RateLimitSnapshot
   /** Pending `/init` staged draft (read by `/init apply`). */
   initDraft?: { target: string; content: string }
+  /** Pending `/commit` staged message (read by `/commit apply`). */
+  commitDraft?: { message: string }
+  /** Pending `/pr` staged draft (read by `/pr apply`). */
+  prDraft?: { title: string; body: string; base: string }
   /** Live in-flight tool cells — feeds the `/agents` panel's in-turn rows. */
   inflightTools?: ToolCell[]
+  /** Shared MCP probe cache (App-owned) so command-path `/mcp` mutators keep it
+   * coherent with the panel — clearing a toggled/removed server's stale entry. */
+  mcpProbeCache?: import("./mcp-cache").McpProbeCache
 }
 
 /** The controller surface the router calls — swappable in tests. */
@@ -138,7 +149,7 @@ export interface RuntimeImpl {
   agentModeList: typeof agentModeList
   teamList: typeof teamList
   teamShow: typeof teamShow
-  teamRunUnavailable: typeof teamRunUnavailable
+  teamRun: typeof teamRun
   teamAuto: typeof teamAuto
   memoryList: typeof memoryList
   memoryShow: typeof memoryShow
@@ -208,7 +219,12 @@ export interface RuntimeImpl {
   planShow: typeof planShow
   planDelete: typeof planDelete
   planDiff: typeof planDiff
+  planExplore: typeof planExplore
   hooksList: typeof hooksList
+  councilRun: typeof councilRun
+  orchestrateRun: typeof orchestrateRun
+  runCommit: typeof runCommit
+  runPr: typeof runPr
 }
 
 const REAL: RuntimeImpl = {
@@ -230,7 +246,7 @@ const REAL: RuntimeImpl = {
   agentModeList,
   teamList,
   teamShow,
-  teamRunUnavailable,
+  teamRun,
   teamAuto,
   memoryList,
   memoryShow,
@@ -300,7 +316,12 @@ const REAL: RuntimeImpl = {
   planShow,
   planDelete,
   planDiff,
+  planExplore,
   hooksList,
+  councilRun,
+  orchestrateRun,
+  runCommit,
+  runPr,
 }
 
 export async function runRuntimeRequest(
@@ -373,7 +394,7 @@ export async function runRuntimeRequest(
     case "team": {
       const td = { dispatch }
       if (req.action === "show") return impl.teamShow(arg, td)
-      if (req.action === "run") return impl.teamRunUnavailable(td)
+      if (req.action === "run") return impl.teamRun(arg, { dispatch, signal })
       if (req.action === "auto") {
         return impl.teamAuto(arg, {
           dispatch,
@@ -392,7 +413,12 @@ export async function runRuntimeRequest(
       return impl.memoryList(md)
     }
     case "mcp": {
-      const mc = { dispatch, roots: deps.roots, home: deps.home }
+      const mc = {
+        dispatch,
+        roots: deps.roots,
+        home: deps.home,
+        ...(deps.mcpProbeCache ? { probeCache: deps.mcpProbeCache } : {}),
+      }
       if (req.action === "add") return impl.mcpAdd(arg, mc)
       if (req.action === "enable") return impl.mcpSetEnabled(arg, true, mc)
       if (req.action === "disable") return impl.mcpSetEnabled(arg, false, mc)
@@ -546,6 +572,28 @@ export async function runRuntimeRequest(
     }
     case "hooks":
       return impl.hooksList({ dispatch, home: deps.home, osHome: deps.osHome })
+    case "council":
+      return impl.councilRun(arg, { dispatch, signal })
+    case "orchestrate":
+      return impl.orchestrateRun(arg, { dispatch, config, sessionId, signal })
+    case "commit":
+      return impl.runCommit({
+        dispatch,
+        cwd,
+        action: req.action,
+        config,
+        home: deps.home,
+        ...(deps.commitDraft ? { commitDraft: deps.commitDraft } : {}),
+      })
+    case "pr":
+      return impl.runPr({
+        dispatch,
+        cwd,
+        action: req.action,
+        config,
+        home: deps.home,
+        ...(deps.prDraft ? { prDraft: deps.prDraft } : {}),
+      })
     case "view":
       return impl.viewFile(arg, { dispatch, cwd })
     case "plan": {
@@ -553,6 +601,15 @@ export async function runRuntimeRequest(
       if (req.action === "show") return impl.planShow(arg, pd)
       if (req.action === "delete") return impl.planDelete(arg, pd)
       if (req.action === "diff") return impl.planDiff(arg, pd)
+      if (req.action === "explore") {
+        // The deterministic Explore→Plan pipeline runs the read-only built-in
+        // subagents over the live sidecar (same seam as `/agents run`).
+        return impl.planExplore(arg, {
+          dispatch,
+          dispatchAgent: buildAgentsRunDispatch({ config, home: deps.home, sessionId, signal }),
+          ...(signal ? { signal } : {}),
+        })
+      }
       return impl.planList(pd)
     }
     default:

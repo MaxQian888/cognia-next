@@ -1,8 +1,10 @@
 /**
- * `/team` controller — list and inspect agent teams (read-only) by reusing
- * `lib/db/teams`. Team EXECUTION is deferred: `runTeam` needs the renderer-only
- * `configureAgentTeamRuntime` Zustand binding, so `/team run` explains the
- * boundary instead of silently failing.
+ * `/team` controller — list and inspect chat teams (read-only, `lib/db/teams`)
+ * and RUN desktop AgentTeams by dispatching to the running desktop app over
+ * the CLI bridge. The runnable entity lives in the desktop renderer's store
+ * (never in the CLI's own Dexie), so `/team run` lists the DESKTOP's teams,
+ * starts the run there, and polls its status into the transcript. A stopped
+ * poll (Esc) never stops the desktop run.
  */
 import { getTeam, listTeams } from "@/lib/db/teams"
 import type { AppSettings, ChatSession, Team } from "@/lib/claude/types"
@@ -19,6 +21,11 @@ import { ensureCliDb } from "../../db/bootstrap"
 import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction } from "../state/types"
 import { resolveAppSettings } from "./goal-controller"
+import {
+  fetchDesktopTeamRunStatus,
+  listDesktopTeams,
+  startDesktopTeamRun,
+} from "../../team/desktop-client"
 
 export interface TeamDeps {
   dispatch: (action: TuiAction) => void
@@ -104,11 +111,125 @@ export async function teamShow(id: string, deps: TeamDeps): Promise<void> {
   })
 }
 
-export function teamRunUnavailable(deps: TeamDeps): void {
+const DESKTOP_UNREACHABLE_MESSAGE =
+  "Team execution requires the Cognia desktop app — start Cognia, then retry /team run."
+
+/** Terminal run statuses — polling stops when one is reached. */
+const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"])
+
+const POLL_INTERVAL_MS = 1_500
+/** Polling backstop (poll ticks). At 1.5 s per tick this is ~1 hour; the
+ * desktop run continues regardless — only the CLI's live view stops. */
+const MAX_POLL_TICKS = 2_400
+
+export interface TeamRunDeps {
+  dispatch: (action: TuiAction) => void
+  /** Aborting stops the CLI's polling only — the desktop run continues. */
+  signal?: AbortSignal
+  // ── injectable seams (default to the real impls; faked in tests) ──
+  listDesktop?: typeof listDesktopTeams
+  startRun?: typeof startDesktopTeamRun
+  fetchStatus?: typeof fetchDesktopTeamRunStatus
+  sleep?: (ms: number) => Promise<void>
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * `/team run [teamId]` — run a DESKTOP AgentTeam from the CLI. Without an id,
+ * lists the desktop's teams in a picker (re-entering with the selection).
+ * With an id, dispatches the run on the desktop and streams status/events
+ * into the transcript as NOTICE lines until the run reaches a terminal
+ * status (or the user stops watching).
+ */
+export async function teamRun(teamId: string, deps: TeamRunDeps): Promise<void> {
+  const listDesktop = deps.listDesktop ?? listDesktopTeams
+  const startRun = deps.startRun ?? startDesktopTeamRun
+  const fetchStatus = deps.fetchStatus ?? fetchDesktopTeamRunStatus
+  const sleep = deps.sleep ?? defaultSleep
+
+  const id = teamId.trim()
+  if (!id) {
+    const teams = await listDesktop()
+    if (teams === null) {
+      deps.dispatch({ type: "NOTICE", message: DESKTOP_UNREACHABLE_MESSAGE })
+      return
+    }
+    if (teams.length === 0) {
+      deps.dispatch({
+        type: "NOTICE",
+        message: "No agent teams on the desktop — create one in the Agent Teams workspace first.",
+      })
+      return
+    }
+    deps.dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "select",
+        title: "Run team (on desktop)",
+        items: teams.map((t) => ({
+          id: t.id,
+          label: t.name,
+          hint: `${t.teammateCount} members · ${t.status}`,
+        })),
+        index: 0,
+        onSelectCommand: "team run",
+      },
+    })
+    return
+  }
+
+  const started = await startRun(id)
+  if (!started.ok) {
+    const message =
+      started.error === "desktop unreachable"
+        ? DESKTOP_UNREACHABLE_MESSAGE
+        : `Team run failed to start: ${started.error ?? "unknown error"}`
+    deps.dispatch({ type: "NOTICE", message })
+    return
+  }
   deps.dispatch({
     type: "NOTICE",
-    message:
-      "Team execution isn't available in the CLI yet — use /team list and /team show. Run teams from the desktop app.",
+    message: `Team run dispatched on the desktop (${id}) — watching progress (Esc stops watching; the run continues).`,
+  })
+
+  let sinceTs = 0
+  let lastStatus = ""
+  for (let tick = 0; tick < MAX_POLL_TICKS; tick++) {
+    if (deps.signal?.aborted) {
+      deps.dispatch({
+        type: "NOTICE",
+        message: "Stopped watching — the team run continues on the desktop.",
+      })
+      return
+    }
+    await sleep(POLL_INTERVAL_MS)
+    const status = await fetchStatus(id, sinceTs)
+    if (!status) continue // transient bridge hiccup — keep watching
+    for (const event of status.events ?? []) {
+      sinceTs = Math.max(sinceTs, event.ts)
+      if (event.message) {
+        deps.dispatch({ type: "NOTICE", message: `[team] ${event.message}` })
+      }
+    }
+    const run = status.run
+    if (!run) continue // run row not visible yet
+    if (run.status !== lastStatus) {
+      lastStatus = run.status
+      deps.dispatch({ type: "NOTICE", message: `[team] run ${run.runId}: ${run.status}` })
+    }
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      const suffix = run.error ? ` — ${run.error}` : ""
+      deps.dispatch({
+        type: "NOTICE",
+        message: `Team run finished: ${run.status}${suffix}. Full history in the desktop workspace.`,
+      })
+      return
+    }
+  }
+  deps.dispatch({
+    type: "NOTICE",
+    message: "Stopped watching after the polling limit — the run continues on the desktop.",
   })
 }
 

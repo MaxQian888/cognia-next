@@ -31,7 +31,7 @@ function harness() {
     agentsPanel: make("agentsPanel", false),
     teamList: make("teamList", false),
     teamShow: make("teamShow", true),
-    teamRunUnavailable: make("teamRunUnavailable", false),
+    teamRun: make("teamRun", true),
     memoryList: make("memoryList", false),
     memoryShow: make("memoryShow", true),
     memoryAdd: make("memoryAdd", true),
@@ -89,6 +89,9 @@ function harness() {
     planShow: make("planShow", true),
     planDelete: make("planDelete", true),
     planDiff: make("planDiff", true),
+    councilRun: make("councilRun", true),
+    runCommit: make("runCommit", false),
+    runPr: make("runPr", false),
   } as unknown as RuntimeImpl
   const actions: TuiAction[] = []
   const deps: import("./index").RuntimeDeps = {
@@ -125,7 +128,7 @@ describe("runRuntimeRequest", () => {
     [{ feature: "agents", action: "run", arg: "rev go" }, "agentsDispatch"],
     [{ feature: "team", action: "list" }, "teamList"],
     [{ feature: "team", action: "show", arg: "t1" }, "teamShow"],
-    [{ feature: "team", action: "run" }, "teamRunUnavailable"],
+    [{ feature: "team", action: "run" }, "teamRun"],
     [{ feature: "memory", action: "list" }, "memoryList"],
     [{ feature: "memory", action: "show", arg: "m1" }, "memoryShow"],
     [{ feature: "memory", action: "add", arg: "a fact" }, "memoryAdd"],
@@ -192,6 +195,11 @@ describe("runRuntimeRequest", () => {
     [{ feature: "plan", action: "show", arg: "s-plan-1" }, "planShow"],
     [{ feature: "plan", action: "delete", arg: "s-plan-1" }, "planDelete"],
     [{ feature: "plan", action: "diff" }, "planDiff"],
+    [{ feature: "council", action: "run", arg: "why" }, "councilRun"],
+    [{ feature: "commit", action: "run" }, "runCommit"],
+    [{ feature: "commit", action: "apply" }, "runCommit"],
+    [{ feature: "pr", action: "run" }, "runPr"],
+    [{ feature: "pr", action: "apply" }, "runPr"],
   ] as [RuntimeRequest, string][])("routes %o to %s", async (req, expected) => {
     const h = harness()
     await run(req, h)

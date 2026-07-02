@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { formatTeamDoc, teamAuto, teamList, teamRunUnavailable, teamShow } from "./team-controller"
+import { formatTeamDoc, teamAuto, teamList, teamRun, teamShow } from "./team-controller"
 import type { Team } from "@/lib/claude/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { TuiAction } from "../state/types"
@@ -100,11 +100,82 @@ describe("formatTeamDoc", () => {
   })
 })
 
-describe("teamRunUnavailable", () => {
-  it("explains that team execution is desktop-only", () => {
+describe("teamRun", () => {
+  const noSleep = async () => {}
+
+  it("notices when the desktop is unreachable (no picker, no run)", async () => {
     const { dispatch, actions } = recorder()
-    teamRunUnavailable({ dispatch })
-    expect((actions[0] as { message: string }).message).toContain("desktop")
+    await teamRun("", { dispatch, listDesktop: async () => null })
+    expect((actions[0] as { message: string }).message).toContain("desktop app")
+  })
+
+  it("opens a picker of DESKTOP teams when no id is given", async () => {
+    const { dispatch, actions } = recorder()
+    await teamRun("", {
+      dispatch,
+      listDesktop: async () => [
+        { id: "t1", name: "Alpha", status: "idle", objective: "obj", teammateCount: 3 },
+      ],
+    })
+    const overlay = actions[0] as {
+      type: string
+      overlay: { kind: string; items: Array<{ id: string }>; onSelectCommand: string }
+    }
+    expect(overlay.type).toBe("OVERLAY_OPEN")
+    expect(overlay.overlay.kind).toBe("select")
+    expect(overlay.overlay.items[0].id).toBe("t1")
+    expect(overlay.overlay.onSelectCommand).toBe("team run")
+  })
+
+  it("dispatches the run and streams status + PII-gated log lines to terminal", async () => {
+    const { dispatch, actions } = recorder()
+    const statuses = [
+      {
+        run: { runId: "r1", status: "running", startedAt: 1 },
+        events: [{ ts: 5, type: "run_log", message: "step one done" }],
+      },
+      {
+        run: { runId: "r1", status: "succeeded", startedAt: 1, completedAt: 9 },
+        events: [],
+      },
+    ]
+    let call = 0
+    await teamRun("t1", {
+      dispatch,
+      startRun: async () => ({ ok: true }),
+      fetchStatus: async () => statuses[Math.min(call++, statuses.length - 1)],
+      sleep: noSleep,
+    })
+    const messages = actions.map((a) => (a as { message?: string }).message ?? "")
+    expect(messages[0]).toContain("dispatched")
+    expect(messages).toEqual(expect.arrayContaining([expect.stringContaining("step one done")]))
+    expect(messages.some((m) => m.includes("finished: succeeded"))).toBe(true)
+  })
+
+  it("surfaces a start failure and stops", async () => {
+    const { dispatch, actions } = recorder()
+    await teamRun("t1", {
+      dispatch,
+      startRun: async () => ({ ok: false, error: "team t1 not found" }),
+      sleep: noSleep,
+    })
+    expect((actions[0] as { message: string }).message).toContain("team t1 not found")
+    expect(actions).toHaveLength(1)
+  })
+
+  it("stops watching (run continues) when the signal aborts", async () => {
+    const { dispatch, actions } = recorder()
+    const ac = new AbortController()
+    ac.abort()
+    await teamRun("t1", {
+      dispatch,
+      signal: ac.signal,
+      startRun: async () => ({ ok: true }),
+      fetchStatus: async () => ({ run: { runId: "r1", status: "running", startedAt: 1 } }),
+      sleep: noSleep,
+    })
+    const messages = actions.map((a) => (a as { message?: string }).message ?? "")
+    expect(messages.some((m) => m.includes("continues on the desktop"))).toBe(true)
   })
 })
 
