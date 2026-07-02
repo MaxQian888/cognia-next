@@ -68,6 +68,20 @@ docker run --rm --security-opt seccomp=deploy/compose/seccomp/cognia-userns.json
 `clone3` ERRNO entry, and append the unconditional namespace-syscall allow
 block (see the `_comment` field and the git history of this file).
 
+## Connector webhooks (server profile)
+
+Cloud installs receive platform webhooks (Telegram / Slack / Discord / Lark /
+WeChat OA) **directly on the front door** at
+`/connectors/webhook/<adapter_type>/<adapter_id>` (ADR-0059 F4) — no
+cloudflared tunnel required, unlike desktop installs. The routes sit outside
+JWT auth (each platform's HMAC/signature + replay guard is the auth), inside
+the per-source-IP rate limit and body cap. The brain registers adapters via
+the service-scope `connectors_register` RPC; unregistered adapter ids answer
+a deterministic `404 {"error":"adapter not registered"}` (what the tier-2
+smoke asserts). Point the platform's webhook URL at your public
+`https://<domain>/connectors/webhook/...` (through Caddy when the `tls`
+profile is up).
+
 ## Caddy (tls profile)
 
 Terminates public ACME TLS and reverse-proxies to `cognia-server`'s

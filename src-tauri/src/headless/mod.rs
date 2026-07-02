@@ -29,6 +29,7 @@ use crate::companion_api::event_bus::EventBus;
 pub use crate::api_key::ApiKeyState;
 pub use crate::claude::host::{HeadlessSidecarHost, SidecarHost, SIDECAR_SCRIPT_ENV};
 pub use crate::claude::sidecar::kill_sidecar;
+pub use crate::connectors::state::ConnectorsState;
 pub use crate::external_agent::presets::SpawnPolicy;
 pub use crate::secret_store::{
     generate_master_key, init_headless as init_secret_store, parse_master_key,
@@ -55,6 +56,10 @@ pub struct HeadlessServices {
     /// Preset allowlist gating the RCE-grade `spawn_external_agent` RPC arm
     /// (ADR-0059 R11).
     pub spawn_policy: crate::external_agent::presets::SpawnPolicy,
+    /// Connector adapter registry backing the public `/connectors` webhook
+    /// ingress on the front door (ADR-0059 F4/R12). Adapters are registered
+    /// by the brain via the service-scope `connectors_register` arm.
+    pub connectors: ConnectorsState,
 }
 
 impl HeadlessServices {
@@ -71,6 +76,7 @@ impl HeadlessServices {
             event_bus,
             exec: crate::external_agent::exec_backend::LocalProcessBackend::new(),
             spawn_policy,
+            connectors: ConnectorsState::new(),
         })
     }
 

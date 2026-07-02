@@ -2464,6 +2464,113 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/connectors_register:
+    post:
+      operationId: rpcConnectorsRegister
+      tags: [rpc-control]
+      summary: Register a connector adapter for the public webhook ingress (service scope only).
+      description: |
+        ADR-0059 F4/R12. The headless brain registers its adapters so the
+        front door's public `/connectors/webhook/{type}/{id}` routes can
+        verify (platform HMAC/signature + replay guard) and forward inbound
+        webhooks onto the event bus. Unavailable on desktop installs.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapter_id, adapter_type]
+              properties:
+                adapter_id: { type: string }
+                adapter_type:
+                  type: string
+                  enum: [telegram, slack, discord, lark, wechat-oa]
+      responses:
+        "200":
+          { description: Registered., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_unregister:
+    post:
+      operationId: rpcConnectorsUnregister
+      tags: [rpc-control]
+      summary: Unregister a connector adapter from the public webhook ingress (service scope only).
+      description: |
+        ADR-0059 F4/R12. Idempotent — unregistering an unknown id is a no-op.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapter_id]
+              properties:
+                adapter_id: { type: string }
+      responses:
+        "200":
+          {
+            description: Unregistered.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_list_adapters:
+    post:
+      operationId: rpcConnectorsListAdapters
+      tags: [rpc-control]
+      summary: List the registered webhook-ingress adapters (service scope only).
+      description: |
+        ADR-0059 F4/R12. Read-only projection of the front door's adapter
+        registry (skips the idempotency cache).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: The registered adapters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [adapters]
+                properties:
+                  adapters:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        adapter_id: { type: string }
+                        adapter_type: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/twin_ingest_source:
     post:
       operationId: rpcTwinIngestSource

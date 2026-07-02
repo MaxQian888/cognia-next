@@ -223,6 +223,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "send_to_external_agent",
     "kill_external_agent",
     "get_external_agent_status",
+    // ADR-0059 R12 — service-scope management of the public `/connectors`
+    // webhook ingress registry on the headless front door.
+    "connectors_register",
+    "connectors_unregister",
+    "connectors_list_adapters",
     // Mobile outbound-queue RPCs — round-trip through desktop_writes_bridge.
     // Mirror `MOBILE_OUTBOUND_COMMANDS` in `lib/db/mobile-outbound-types.ts`.
     // Spec-parity test (`spec_parity.rs`) asserts these stay in lockstep
@@ -397,6 +402,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "external_agent_list",
     // ADR-0059 R11 — read-only status probe on the headless exec backend.
     "get_external_agent_status",
+    // ADR-0059 R12 — read-only projection of the webhook ingress registry.
+    "connectors_list_adapters",
     // Read-only remote-control capability probe (drives the mobile
     // computer-use consent sheet). Pure read of the process-global allow list.
     "companion_can_control",
@@ -550,6 +557,10 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "send_to_external_agent",
     "kill_external_agent",
     "get_external_agent_status",
+    // ADR-0059 R12 — the brain manages the public webhook ingress registry.
+    "connectors_register",
+    "connectors_unregister",
+    "connectors_list_adapters",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
@@ -1506,6 +1517,60 @@ pub(super) async fn dispatch(
                 Some(status) => Ok(Value::String(format!("{status:?}"))),
                 None => Err(RpcError::internal(format!("Agent {agent_id} not found"))),
             }
+        }
+
+        // ── Connector webhook ingress registry (ADR-0059 F4 / R12) ───────────
+        // The brain registers its adapters here so the public `/connectors`
+        // routes on the front door can verify + forward platform webhooks.
+        "connectors_register" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required(&args, "adapter_id")?;
+            let adapter_type: String = required(&args, "adapter_type")?;
+            services.connectors.inner.lock().registered_adapters.insert(
+                adapter_id.clone(),
+                crate::connectors::types::AdapterRegistration {
+                    adapter_id,
+                    adapter_type,
+                    webhook_path: None,
+                },
+            );
+            Ok(Value::Null)
+        }
+
+        "connectors_unregister" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required(&args, "adapter_id")?;
+            services
+                .connectors
+                .inner
+                .lock()
+                .registered_adapters
+                .remove(&adapter_id);
+            Ok(Value::Null)
+        }
+
+        "connectors_list_adapters" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapters: Vec<Value> = services
+                .connectors
+                .inner
+                .lock()
+                .registered_adapters
+                .values()
+                .map(|reg| {
+                    serde_json::json!({
+                        "adapter_id": reg.adapter_id,
+                        "adapter_type": reg.adapter_type,
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({ "adapters": adapters }))
         }
 
         // Remote Session Control — resolve a host computer-use HITL consent
@@ -2599,6 +2664,9 @@ mod tests {
             "send_to_external_agent",
             "kill_external_agent",
             "get_external_agent_status",
+            "connectors_register",
+            "connectors_unregister",
+            "connectors_list_adapters",
         ] {
             assert!(is_service_only_command(name), "{name} must be service-only");
             assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
@@ -2607,6 +2675,73 @@ mod tests {
                 "{name} is scope-gated, not device-control-gated"
             );
         }
+    }
+
+    // ── Connector ingress registry arms (ADR-0059 R12) ──────────────────────
+
+    #[tokio::test]
+    async fn connectors_registry_arms_round_trip() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        dispatch(
+            "connectors_register",
+            json!({ "adapter_id": "tg-1", "adapter_type": "telegram" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("register");
+
+        let listed = dispatch(
+            "connectors_list_adapters",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list");
+        assert_eq!(listed["adapters"][0]["adapter_id"], "tg-1");
+        assert_eq!(listed["adapters"][0]["adapter_type"], "telegram");
+        // The registration landed in the shared ConnectorsState the webhook
+        // router verifies against.
+        assert!(services
+            .connectors
+            .inner
+            .lock()
+            .registered_adapters
+            .contains_key("tg-1"));
+
+        dispatch(
+            "connectors_unregister",
+            json!({ "adapter_id": "tg-1" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("unregister");
+        let listed = dispatch(
+            "connectors_list_adapters",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list after unregister");
+        assert_eq!(listed["adapters"].as_array().unwrap().len(), 0);
     }
 
     /// `sync_pull` on a headless host routes through the connected brain's
