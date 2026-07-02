@@ -47,6 +47,8 @@
     "0054-local-multi-account-isolation",
     "0055-agent-browser-loop",
     "0056-mobile-settings-parity",
-    "0057-chat-rendering-completeness"
+    "0057-chat-rendering-completeness",
+    "0058-desktop-pet-subsystem",
+    "0059-cloud-deployment-headless-brain"
   ]
 }
