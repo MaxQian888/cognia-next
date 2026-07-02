@@ -1,10 +1,15 @@
 /**
  * Slack adapter factory — Task 76.
  *
- * Assembles parse + serialize + capability + socket-mode transport into a
- * PlatformAdapter. Supports two transports:
- *   - socket-mode  (default): uses apps.connections.open + WSS
- *   - events-api-webhook: stub in Phase 1
+ * Assembles parse + serialize + capability + transport into a PlatformAdapter.
+ * Supports two transports:
+ *   - socket-mode  (default): uses apps.connections.open + WSS (dials out).
+ *   - events-api-webhook: Rust (axum + `verify_slack`) terminates the HMAC
+ *     signature check and emits the parsed body on `connectors://webhook/<id>`;
+ *     `start()` subscribes via `startSlackWebhookTransport` and routes each
+ *     envelope through the same `parseSlackEventCallback` the socket-mode path
+ *     uses. Requires the adapter to be registered with the Rust server — done
+ *     centrally by `ConnectorBusProvider` for every inbound-server transport.
  */
 
 import type {

@@ -86,4 +86,21 @@ describe("ConversationActivityLog", () => {
     fireEvent.click(screen.getByTestId("activity-log-toggle"))
     expect(screen.getByTestId("activity-row-e9")).toHaveTextContent("some.unmapped.kind")
   })
+
+  it("labels a silent-reply diagnostic kind and appends its reason", () => {
+    mockActivity.mockReturnValue([
+      {
+        id: "e3",
+        kind: "inbound.policy_blocked",
+        reason: "at_mention_required",
+        at: 1_700_000_004_000,
+        adapterId: "a1",
+      },
+    ])
+    render(<ConversationActivityLog conversationKey="ck" />)
+    fireEvent.click(screen.getByTestId("activity-log-toggle"))
+    const row = screen.getByTestId("activity-row-e3")
+    expect(row).toHaveTextContent("Blocked by policy")
+    expect(row).toHaveTextContent("at_mention_required")
+  })
 })

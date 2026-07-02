@@ -16,8 +16,10 @@
  *              segments so adapters can route them through the per-platform
  *              A2UI mappers.
  *
- * Call `installScheduledOutboundHandlers()` once at app startup (after the bus
- * and runner are initialised).
+ * Call `installScheduledOutboundHandlers()` once at app startup — done
+ * synchronously in `ConnectorBusProvider`'s boot effect, before the async
+ * adapter/runner boot, so the executors are registered before any due
+ * `connection:*` scheduler task can fire.
  */
 
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
@@ -231,7 +233,9 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   ])
 
   const inboxPolicy: InboxSendPolicy = {
-    quietHours: adapterRow?.quietHours,
+    // Per-conversation override wins over the adapter-level default — same
+    // precedence as the delivery-time check in outbound-runner.ts.
+    quietHours: overrideRow?.quietHours ?? adapterRow?.quietHours,
     muted: adapterRow?.muted,
     forcedMode: overrideRow?.mode,
   }

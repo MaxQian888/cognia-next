@@ -142,10 +142,16 @@ export async function safeSendPrompt(
   }
 
   // ── 3. Delegate to the existing capture wrapper ────────────────────
+  // Forward the FULL capture surface, not just signal/timeout/onPartial:
+  // the primary inbound ai-run wires `onPermissionRequest` (IM tool-approval
+  // HITL) and `onEvent` (live-activity card). Dropping them here would
+  // silently disable both when the inbound turn is routed through this gate.
   const result = await runAndCaptureAssistantReply(sessionId, prompt, options, {
     signal: opts.signal,
     timeoutMs: opts.timeoutMs,
     onPartial: opts.onPartial,
+    onPermissionRequest: opts.onPermissionRequest,
+    onEvent: opts.onEvent,
     execution: {
       kind: "connector",
       label: `${opts.adapterId} · ${opts.conversationKey}`,

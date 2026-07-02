@@ -5,7 +5,8 @@
  *   - Per-adapter circuit breaker: trips when failure rate in a sliding window
  *     exceeds the threshold; re-opens after cooldown.
  *   - Per-adapter token bucket: rate limits outbound send attempts.
- *   - Exponential back-off with jitter: `min(60 000, 1000 * 2^attempts) + jitter`.
+ *   - Exponential back-off with jitter: `min(60 000, 1000 * 2^attempts) + jitter`,
+ *     backed by the shared `computeBackoffDelay` from `@cognia/primitives`.
  *   - Idempotency LRU: short-circuits retries when the platform already acked.
  *   - Dead-letter after 5 attempts.
  *
@@ -22,7 +23,7 @@
  */
 
 import type { PlatformAdapter } from "@/types/connectors"
-import { createMutex } from "@cognia/primitives"
+import { createMutex, computeBackoffDelay } from "@cognia/primitives"
 import {
   listDueNow,
   peekNextWakeAt,
@@ -607,7 +608,11 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** job.attempts) + jitter()
+      const backoff = computeBackoffDelay(job.attempts, {
+        baseDelayMs: BASE_BACKOFF_MS,
+        maxDelayMs: MAX_BACKOFF_MS,
+        jitter: { kind: "absolute", amountMs: jitter },
+      })
       await markFailed(job.id, "network", msg, now + backoff)
       breaker.recordFailure()
       await appendAudit({
@@ -649,7 +654,11 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       if (err.retryable) {
         const retryAfter = err.retryAfterMs ?? 0
         const backoff =
-          Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** job.attempts) + jitter() + retryAfter
+          computeBackoffDelay(job.attempts, {
+            baseDelayMs: BASE_BACKOFF_MS,
+            maxDelayMs: MAX_BACKOFF_MS,
+            jitter: { kind: "absolute", amountMs: jitter },
+          }) + retryAfter
         await markFailed(job.id, err.code, err.message, now + backoff)
         breaker.recordFailure()
         await appendAudit({

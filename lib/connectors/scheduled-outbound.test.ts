@@ -330,6 +330,76 @@ describe("connection:scheduled:digest executor — full AI loop", () => {
     expect(audit.some((r) => r.kind === "inbound.deferred_quiet_hours")).toBe(true)
   })
 
+  it("prefers the per-conversation override's quietHours over the adapter default", async () => {
+    getAdapterImpl = jest.fn(async () => ({
+      quietHours: { from: "22:00", to: "06:00", tz: "UTC" },
+    }))
+    readOverrideImpl = jest.fn(async () => ({
+      quietHours: { from: "12:00", to: "13:00", tz: "UTC" },
+    }))
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "x",
+      })
+    )
+
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inboxPolicy: expect.objectContaining({
+          quietHours: { from: "12:00", to: "13:00", tz: "UTC" },
+        }),
+      })
+    )
+  })
+
+  it("falls back to the adapter's quietHours when there is no override", async () => {
+    getAdapterImpl = jest.fn(async () => ({
+      quietHours: { from: "22:00", to: "06:00", tz: "UTC" },
+    }))
+    readOverrideImpl = jest.fn(async () => undefined)
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "x",
+      })
+    )
+
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inboxPolicy: expect.objectContaining({
+          quietHours: { from: "22:00", to: "06:00", tz: "UTC" },
+        }),
+      })
+    )
+  })
+
   it("audits + fails when the PII gate blocks the prompt", async () => {
     __setDigestSendPromptForTesting(
       jest.fn(async () => {

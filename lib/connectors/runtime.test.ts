@@ -246,9 +246,15 @@ describe("installRuntime — ai-run (happy path)", () => {
     const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
       onPermissionRequest?: unknown
       timeoutMs?: number
+      adapterId?: string
+      conversationKey?: string
     }
     expect(typeof cap.onPermissionRequest).toBe("function")
     expect(cap.timeoutMs).toBeGreaterThan(5 * 60 * 1000)
+    // Connector context rides on `cap` so the injected PII gate can attribute
+    // blocks + usage to the right conversation.
+    expect(cap.adapterId).toBe("adapter_1")
+    expect(cap.conversationKey).toBe("telegram:adapter_1:chat_ai")
   })
 
   it("enqueues an outbound job with the captured assistant text projected as markdown", async () => {
@@ -556,6 +562,27 @@ describe("installRuntime — ai-run (capture failure)", () => {
     expect(errAudits[0].reason).toBe("ai_run_capture_failed")
     expect(errAudits[0].message).toContain("sidecar died")
   })
+
+  it("does NOT write a duplicate ai_run_capture_failed audit when the PII gate blocks", async () => {
+    // The PII gate (`safeSendPrompt`) throws `PiiGateBlocked` and has already
+    // written the precise `pii_blocked` audit. The runtime must detect it by
+    // name and skip the generic capture-failure row (no double-audit, no
+    // mislabel), while still skipping outbound enqueue.
+    const piiErr = new Error("PII gate blocked auto-mode send")
+    piiErr.name = "PiiGateBlocked"
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(piiErr)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_pii" })
+    await callHandler(event, "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    const nonActivity = jobs.filter(
+      (j) => !j.request.metadata?.idempotencyKey?.startsWith("activity:")
+    )
+    expect(nonActivity).toHaveLength(0)
+    const audits = await getDb().connectorAudit.toArray()
+    expect(audits.some((a) => a.reason === "ai_run_capture_failed")).toBe(false)
+    expect(audits.some((a) => a.kind === "outbound.ai_run_enqueued")).toBe(false)
+  })
 })
 
 describe("installRuntime — ai-run (plugin IM rate-source gate)", () => {
@@ -776,6 +803,82 @@ describe("installRuntime — draft-prepare", () => {
     expect(drafts[0].conversationKey).toBe("telegram:adapter_1:chat_draft")
     expect(drafts[0].sourceMessageId).toBe(messages[0].id)
   })
+
+  it("runs a REAL capture and stores the generated reply (not a placeholder)", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_draft_real" })
+    await callHandler(event, "draft-prepare")
+
+    // The draft-prepare branch now drives the same capture the ai-run path
+    // uses, so the drafted reply is the model's actual output.
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+    const drafts = await getDb().connectorDrafts.toArray()
+    // `assistantReplyToSegments` projects plain assistant text as a markdown
+    // segment (same projection the ai-run outbound path uses).
+    expect(drafts[0].segments).toEqual([{ type: "markdown", md: "Hello back from Claude!" }])
+
+    // No reply is sent — a draft awaits human approval — and the prepare is audited.
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(0)
+    const audits = await getDb().connectorAudit.toArray()
+    const prepared = audits.find((a) => a.kind === "draft.prepared")
+    expect(prepared?.fields?.draftId).toBe(drafts[0].id)
+  })
+
+  it("denies ask-tier tool permissions by default (no human in the loop at draft time)", async () => {
+    let seenPermission: unknown
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _prompt, _opts, cap) => {
+      seenPermission = cap?.onPermissionRequest?.({ toolName: "bash" } as never)
+      return { text: "drafted", messageId: "asst-draft-perm" }
+    })
+    installRuntime(getBus(), { runAndCapture: capturing })
+
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_draft_perm" })
+    await callHandler(event, "draft-prepare")
+
+    await expect(Promise.resolve(seenPermission)).resolves.toEqual({ decision: "deny" })
+  })
+
+  it("does NOT persist a draft when the capture rejects (real error → adapter.error)", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(new Error("sidecar died"))
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_draft_err" })
+    await callHandler(event, "draft-prepare")
+
+    const drafts = await getDb().connectorDrafts.toArray()
+    expect(drafts).toHaveLength(0)
+    const audits = await getDb().connectorAudit.toArray()
+    const err = audits.find((a) => a.kind === "adapter.error")
+    expect(err?.reason).toBe("draft_prepare_capture_failed")
+    expect(err?.message).toContain("sidecar died")
+  })
+
+  it("stores an explicit text mirror when the reply projects to no segments", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValueOnce({
+      text: "",
+      messageId: "empty-1",
+    })
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_draft_empty" })
+    await callHandler(event, "draft-prepare")
+
+    const drafts = await getDb().connectorDrafts.toArray()
+    expect(drafts).toHaveLength(1)
+    // Empty text + no surfaces → keep the draft non-empty via a text mirror.
+    expect(drafts[0].segments).toEqual([{ type: "text", text: "" }])
+  })
+
+  it("does NOT persist a draft (or double-audit) when the PII gate blocks", async () => {
+    const piiErr = new Error("PII gate blocked draft send")
+    piiErr.name = "PiiGateBlocked"
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(piiErr)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_draft_pii" })
+    await callHandler(event, "draft-prepare")
+
+    const drafts = await getDb().connectorDrafts.toArray()
+    expect(drafts).toHaveLength(0)
+    const audits = await getDb().connectorAudit.toArray()
+    // The PII gate already wrote its own row; the runtime must not add a
+    // duplicate draft_prepare_capture_failed audit.
+    expect(audits.some((a) => a.reason === "draft_prepare_capture_failed")).toBe(false)
+  })
 })
 
 describe("installRuntime — store-only", () => {
@@ -977,7 +1080,11 @@ describe("installRuntime — ai-run (agent-trace root span)", () => {
     expect(sendOptions.spanId).toMatch(HEX16)
   })
 
-  it("ends the root span with the captured token usage + cost on success", async () => {
+  it("delegates cost/usage to the provider child span (no double-book) when a provider is set", async () => {
+    // With a provider override configured (the default here), `safeSendPrompt`
+    // records a `recordProviderOutcome` child span under this root that already
+    // carries the LLM cost/usage. To avoid double-booking in the trace, the
+    // root span closes with metadata only — NOT usage/cost.
     ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValueOnce({
       text: "hi",
       messageId: "m-usage",
@@ -991,19 +1098,15 @@ describe("installRuntime — ai-run (agent-trace root span)", () => {
     })
     await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" }), "ai-run")
 
-    expect(endSpanMock).toHaveBeenCalledWith(
-      expect.stringMatching(HEX16),
-      expect.objectContaining({
-        usage: {
-          inputTokens: 100,
-          outputTokens: 20,
-          cacheCreationTokens: 2,
-          cacheReadTokens: 5,
-        },
-        costUsdEstimate: 0.003,
-        metadata: { assistantMessageId: "m-usage" },
-      })
+    const successCall = endSpanMock.mock.calls.find(
+      ([, payload]) =>
+        (payload as { metadata?: { assistantMessageId?: string } })?.metadata
+          ?.assistantMessageId === "m-usage"
     )
+    expect(successCall).toBeDefined()
+    const payload = successCall![1] as { usage?: unknown; costUsdEstimate?: unknown }
+    expect(payload.usage).toBeUndefined()
+    expect(payload.costUsdEstimate).toBeUndefined()
   })
 
   it("ends the root span with an error when the capture throws", async () => {

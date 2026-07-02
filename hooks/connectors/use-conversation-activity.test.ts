@@ -23,14 +23,27 @@ describe("isActivityKind", () => {
     expect(isActivityKind("override.computer_use_changed")).toBe(true)
   })
 
+  it("accepts the silent-reply diagnostic kinds (why no reply)", () => {
+    expect(isActivityKind("inbound.policy_blocked")).toBe(true)
+    expect(isActivityKind("inbound.deferred_manual_mode")).toBe(true)
+    expect(isActivityKind("delivery.error")).toBe(true)
+    expect(isActivityKind("delivery.deadlettered")).toBe(true)
+    expect(isActivityKind("plugin.inbound_blocked")).toBe(true)
+    expect(isActivityKind("plugin.rate_blocked")).toBe(true)
+    expect(isActivityKind("plugin.transform_pii_blocked")).toBe(true)
+    expect(isActivityKind("notify.im_pii_blocked")).toBe(true)
+    expect(isActivityKind("workflow.dispatched")).toBe(true)
+    expect(isActivityKind("team.dispatched")).toBe(true)
+  })
+
   it("rejects non-activity kinds", () => {
     expect(isActivityKind("inbound.received")).toBe(false)
     expect(isActivityKind("delivery.success")).toBe(false)
     expect(isActivityKind("adapter.heartbeat")).toBe(false)
   })
 
-  it("covers exactly the 12 curated kinds", () => {
-    expect(ACTIVITY_KINDS.size).toBe(12)
+  it("covers exactly the 22 curated kinds", () => {
+    expect(ACTIVITY_KINDS.size).toBe(22)
   })
 })
 

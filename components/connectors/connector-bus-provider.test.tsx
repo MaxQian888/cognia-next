@@ -13,6 +13,7 @@
 import { render, waitFor } from "@testing-library/react"
 import { ConnectorBusProvider } from "./connector-bus-provider"
 import { isTauri } from "@/lib/tauri"
+import { hasTaskExecutor, unregisterTaskExecutor } from "@/lib/scheduler"
 
 // ── Mock isTauri ─────────────────────────────────────────────────────────────
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
@@ -53,10 +54,18 @@ jest.mock("@/lib/connectors/adapter-registry", () => ({
   buildAdapterFromRow: (...args: unknown[]) => mockBuildAdapterFromRow(...args),
 }))
 
-// ── Mock Tauri keyring / http (not used directly in provider) ────────────────
+// ── Mock Tauri keyring / http / server lifecycle ─────────────────────────────
+const mockStartServer = jest.fn().mockResolvedValue("127.0.0.1:7842")
+const mockStopServer = jest.fn().mockResolvedValue(undefined)
+const mockRegisterAdapterCmd = jest.fn().mockResolvedValue(undefined)
+const mockUnregisterAdapterCmd = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringGet: jest.fn().mockResolvedValue(null),
   connectorsHttpRequest: jest.fn().mockResolvedValue({ status: 200, body: "{}", headers: {} }),
+  connectorsStartServer: (...args: unknown[]) => mockStartServer(...args),
+  connectorsStopServer: (...args: unknown[]) => mockStopServer(...args),
+  connectorsRegisterAdapter: (...args: unknown[]) => mockRegisterAdapterCmd(...args),
+  connectorsUnregisterAdapter: (...args: unknown[]) => mockUnregisterAdapterCmd(...args),
 }))
 
 // ── Mock the AdapterContext factory (no IndexedDB needed for unit test) ──
@@ -175,6 +184,14 @@ beforeEach(() => {
   mockStartHeartbeatSweep.mockImplementation(() => ({ dispose: mockSweepDispose }))
 })
 
+afterEach(() => {
+  // Registration goes through the real (unmocked) scheduler executor Map —
+  // clear it between tests so one test's registration doesn't leak into the
+  // next via the shared module singleton.
+  unregisterTaskExecutor("connection:outbound:send")
+  unregisterTaskExecutor("connection:scheduled:digest")
+})
+
 describe("ConnectorBusProvider", () => {
   it("does nothing in web mode", async () => {
     mockedIsTauri.mockReturnValue(false)
@@ -189,6 +206,36 @@ describe("ConnectorBusProvider", () => {
     expect(mockRegisterAdapter).not.toHaveBeenCalled()
     expect(mockInstallRuntime).not.toHaveBeenCalled()
     expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+  })
+
+  it("registers the connector scheduler-task executors when booting in Tauri mode", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockListEnabled.mockResolvedValue([])
+
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+
+    await waitFor(() => {
+      expect(hasTaskExecutor("connection:outbound:send")).toBe(true)
+      expect(hasTaskExecutor("connection:scheduled:digest")).toBe(true)
+    })
+  })
+
+  it("does not register the connector scheduler-task executors in web mode", async () => {
+    mockedIsTauri.mockReturnValue(false)
+
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(hasTaskExecutor("connection:outbound:send")).toBe(false)
+    expect(hasTaskExecutor("connection:scheduled:digest")).toBe(false)
   })
 
   it("registers one adapter per enabled row in Tauri mode", async () => {
@@ -525,6 +572,195 @@ describe("ConnectorBusProvider", () => {
     expect(mockRegisterRunning).not.toHaveBeenCalled()
     // A failed start short-circuits before the register/audit/heartbeat tail.
     expect(mockRecordHeartbeatNow).not.toHaveBeenCalled()
+    errSpy.mockRestore()
+  })
+
+  // WS3 — inbound axum server lifecycle (webhook / reverse-WS transports).
+
+  const makeWebhookAdapter = (id: string) => ({
+    ...makeFakeAdapter(id),
+    meta: {
+      type: "lark" as const,
+      displayName: "Lark",
+      version: "0.1.0",
+      capabilities: [],
+      transportModes: ["webhook"] as const,
+      configSchema: {},
+    },
+  })
+  const makeWebhookRow = (id: string) => ({
+    ...makeTelegramRow(id),
+    type: "lark" as const,
+    transportMode: "webhook" as const,
+  })
+
+  it("starts the inbound server once (loopback) when a webhook adapter is enabled", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeWebhookRow("cai_wh_start")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(mockStartServer).toHaveBeenCalledTimes(1))
+    expect(mockStartServer).toHaveBeenCalledWith(7842, true)
+  })
+
+  it("does not start the inbound server for outbound-only (longpoll) adapters", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_lp_nostart")
+    const adapter = makeFakeAdapter(row.id) // transportModes ["longpoll"]
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1))
+    expect(mockStartServer).not.toHaveBeenCalled()
+  })
+
+  it("treats an 'already running' server as success (no failure audit)", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockStartServer.mockRejectedValueOnce(new Error("connectors server already running"))
+    const row = makeWebhookRow("cai_wh_running")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(mockStartServer).toHaveBeenCalledTimes(1))
+    expect(mockAppendAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "server_start_failed" })
+    )
+  })
+
+  it("audits server_start_failed on a real start error", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockStartServer.mockRejectedValueOnce(new Error("bind refused"))
+    const row = makeWebhookRow("cai_wh_fail")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() =>
+      expect(mockAppendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "adapter.error", reason: "server_start_failed" })
+      )
+    )
+    errSpy.mockRestore()
+  })
+
+  it("stops the inbound server on unmount", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeWebhookRow("cai_wh_stop")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const { unmount } = render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(mockStartServer).toHaveBeenCalledTimes(1))
+    unmount()
+    await waitFor(() => expect(mockStopServer).toHaveBeenCalledTimes(1))
+  })
+
+  // WS4 — webhook adapters must register with the Rust axum server before
+  // their transport starts, else the webhook handler 404s every inbound POST.
+
+  it("registers a webhook adapter with the Rust server using its platform type", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeWebhookRow("cai_wh_register")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() =>
+      expect(mockRegisterAdapterCmd).toHaveBeenCalledWith({
+        adapterId: row.id,
+        adapterType: "lark",
+      })
+    )
+    // Registration must precede the transport start (route resolves first).
+    const registerOrder = mockRegisterAdapterCmd.mock.invocationCallOrder[0]
+    const startOrder = adapter.start.mock.invocationCallOrder[0]
+    expect(registerOrder).toBeLessThan(startOrder)
+  })
+
+  it("does not register outbound-only (longpoll) adapters with the Rust server", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_lp_noregister")
+    const adapter = makeFakeAdapter(row.id) // transportModes ["longpoll"]
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1))
+    expect(mockRegisterAdapterCmd).not.toHaveBeenCalled()
+  })
+
+  it("unregisters webhook adapters from the Rust server on unmount", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeWebhookRow("cai_wh_unregister")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const { unmount } = render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(mockRegisterAdapterCmd).toHaveBeenCalledTimes(1))
+    unmount()
+    await waitFor(() => expect(mockUnregisterAdapterCmd).toHaveBeenCalledWith(row.id))
+  })
+
+  it("keeps booting when webhook registration throws (best-effort)", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockRegisterAdapterCmd.mockRejectedValueOnce(new Error("register bombed"))
+    const row = makeWebhookRow("cai_wh_register_fail")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    // A register failure must not block the transport start or the server boot.
+    await waitFor(() => expect(adapter.start).toHaveBeenCalledTimes(1))
+    expect(mockStartServer).toHaveBeenCalledTimes(1)
     errSpy.mockRestore()
   })
 })

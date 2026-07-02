@@ -60,6 +60,9 @@ class DingTalkApiError extends Error {
 export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAdapter {
   let abortController: AbortController | null = null
   let healthState: AdapterHealthState = "starting"
+  // Stable machine code for a non-running state; localized in the renderer
+  // by `healthReasonLabel` (see the Lark adapter for the shared pattern).
+  let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined
   let stopCalled = false
   let selfId = opts.selfId ?? ""
@@ -91,6 +94,7 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
     abortController = new AbortController()
     const signal = abortController.signal
     healthState = "running"
+    healthReason = undefined
     if (!selfId) selfId = opts.selfId ?? ""
 
     const client = startDingTalkStream({
@@ -113,9 +117,15 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
           lastActivityAt = Date.now()
           await ctx.emit(normalized)
         }
-        if (!stopCalled) healthState = "down"
+        if (!stopCalled) {
+          healthState = "down"
+          healthReason = "no_data"
+        }
       } catch {
-        if (!stopCalled) healthState = "degraded"
+        if (!stopCalled) {
+          healthState = "degraded"
+          healthReason = "transport_error"
+        }
       }
     })()
   }
@@ -125,10 +135,11 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
     abortController?.abort()
     abortController = null
     healthState = "down"
+    healthReason = undefined
   }
 
   function health(): AdapterHealth {
-    return { state: healthState, lastActivityAt }
+    return { state: healthState, reason: healthReason, lastActivityAt }
   }
 
   function errorToResult(err: unknown): OutboundResult {

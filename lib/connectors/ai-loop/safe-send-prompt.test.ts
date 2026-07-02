@@ -182,6 +182,22 @@ describe("safeSendPrompt", () => {
     )
   })
 
+  it("forwards onPermissionRequest + onEvent so IM HITL and live-activity survive the gate", async () => {
+    const onPermissionRequest = jest.fn()
+    const onEvent = jest.fn()
+    await safeSendPrompt("sess_1", "clean", undefined, {
+      ...auditCtx,
+      onPermissionRequest,
+      onEvent,
+    })
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      undefined,
+      expect.objectContaining({ onPermissionRequest, onEvent })
+    )
+  })
+
   it("records connector usage and provider telemetry when the captured result includes usage", async () => {
     const usage = {
       inputTokens: 100,

@@ -262,6 +262,24 @@ describe("start — inbound", () => {
     await a.start(ctx)
     await new Promise((r) => setTimeout(r, 10))
     expect(a.health().state).toBe("degraded")
+    expect(a.health().reason).toBe("transport_error")
+  })
+
+  it("sets health to down with 'no_data' when the stream ends without frames", async () => {
+    framesImpl = async function* () {
+      /* completes immediately — no frames */
+    }
+    const ctx = {
+      emit: async () => {},
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      signal: new AbortController().signal,
+      adapterId: "ad_1",
+    } as unknown as AdapterContext
+    const a = makeAdapter()
+    await a.start(ctx)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(a.health().state).toBe("down")
+    expect(a.health().reason).toBe("no_data")
   })
 
   it("is idempotent on double start (second start is a no-op)", async () => {

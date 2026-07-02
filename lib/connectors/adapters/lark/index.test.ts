@@ -152,6 +152,8 @@ describe("createLarkAdapter", () => {
     const { ctx } = makeCtx()
     await adapter.start(ctx)
     expect(adapter.health().state).toBe("running")
+    // A healthy adapter carries no reason code.
+    expect(adapter.health().reason).toBeUndefined()
     await adapter.stop()
   })
 
@@ -179,6 +181,8 @@ describe("createLarkAdapter", () => {
     await new Promise((r) => setTimeout(r, 20))
     // Skipped cleanly: health is 'down' and the Rust WS open command never ran.
     expect(adapter.health().state).toBe("down")
+    // The reason is surfaced to the UI so a "silent bot" is diagnosable.
+    expect(adapter.health().reason).toBe("credentials_missing")
     const openCalls = mockInvoke.mock.calls.filter(
       ([cmd]: [string]) => cmd === "connectors_lark_ws_open"
     )
@@ -209,6 +213,7 @@ describe("createLarkAdapter", () => {
       await expect(adapter.start(ctx)).resolves.toBeUndefined()
       await new Promise((r) => setTimeout(r, 20))
       expect(adapter.health().state).toBe("down")
+      expect(adapter.health().reason).toBe("credentials_unavailable")
       const openCalls = mockInvoke.mock.calls.filter(
         ([cmd]: [string]) => cmd === "connectors_lark_ws_open"
       )
