@@ -47,6 +47,13 @@ For each ADDED module/export, trace reachability from a real runtime root.
 10. **New event/listener pair** — emitter and subscriber both exist and the
     subscriber is mounted; an emit with no listener (or vice versa) is
     dormant.
+11. **New runtime side-effect (ADR-0059 hard rule)** — any long-running
+    non-UI runtime (sync source, scheduler, sweeper, connector runtime,
+    initializer body) must be registered in the headless runtime roster
+    (`lib/headless/runtimes/index.ts`) so the cloud brain boots it too, OR
+    carry an explicit desktop/mobile-UI-only annotation in that file's
+    "NOT registered" list. A raw React provider effect with neither is
+    DORMANT-on-cloud — flag it.
 
 ## Method
 

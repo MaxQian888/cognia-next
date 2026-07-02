@@ -14,9 +14,10 @@ import os from "node:os"
 import path from "node:path"
 import fs from "node:fs"
 
-import Dexie from "dexie"
-
 import { getDb, whenSeeded } from "@/lib/db/schema"
+// Canonical home moved to lib/headless (ADR-0059 T-A1) so the headless brain
+// shares the exact shim; re-exported for the existing CLI import sites.
+import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 
 import { resolveHome } from "../config/load"
 import {
@@ -27,34 +28,7 @@ import {
   type DbLike,
 } from "./snapshot"
 
-/**
- * Install `fake-indexeddb` + a minimal `window` shim onto a global so the
- * desktop `getDb()` (which refuses to run when `window` is undefined) works in
- * Node. Idempotent and non-clobbering — a real jsdom window / indexedDB (tests)
- * is left untouched.
- */
-export async function installFakeIndexedDb(
-  g: Record<string, unknown> = globalThis as unknown as Record<string, unknown>
-): Promise<void> {
-  if (typeof g.window === "undefined") g.window = g
-  if (!g.indexedDB) {
-    const fake = await import("fake-indexeddb")
-    g.indexedDB = new fake.IDBFactory()
-    g.IDBKeyRange = fake.IDBKeyRange
-  }
-  // Dexie 4 snapshots `globalThis.indexedDB` into `Dexie.dependencies` exactly
-  // once, at the moment the `dexie` module is first evaluated. This module
-  // imports the db layer (which imports Dexie), so that snapshot already ran —
-  // with `indexedDB` still undefined in Node — long before the global is set
-  // above. Re-point `Dexie.dependencies` explicitly so every `getDb()` open
-  // finds the API; without this, the first real DB read/write rejects with a
-  // `MissingAPIError` that surfaces as an unhandled rejection and crashes the
-  // process (e.g. the `/memory` command).
-  if (!Dexie.dependencies.indexedDB) {
-    Dexie.dependencies.indexedDB = g.indexedDB as IDBFactory
-    Dexie.dependencies.IDBKeyRange = g.IDBKeyRange as typeof IDBKeyRange
-  }
-}
+export { installFakeIndexedDb }
 
 export interface EnsureCliDbOptions {
   /** Config home (`~/.cognia`). */
