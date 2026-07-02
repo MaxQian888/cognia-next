@@ -48,13 +48,9 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// trigger.manual — static intro copy, no fields.
+// trigger.manual — intro copy + declared input schema editor.
 export const ManualTrigger: Story = {
-  render: () => (
-    <div className="w-[380px]">
-      <ManualTriggerConfig />
-    </div>
-  ),
+  render: () => <Controlled Form={ManualTriggerConfig} />,
 }
 
 // trigger.cron — cron builder + timezone.

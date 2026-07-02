@@ -47,7 +47,8 @@ import { runStep } from "./step-executor"
 import { runLoopContainer } from "./loop-container"
 import { buildErrorOutput, resolveNodeFailure } from "./node-failure"
 import { isJoinCancel, JoinCancelError, losingBranchScope } from "./branch-scope"
-import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
+import { type SecretResolver } from "./secret-resolver"
+import { getDefaultSecretResolver } from "./secret-resolver-keyring"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
 import { registerRun, unregisterRun } from "./run-cancel-registry"
 import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
@@ -231,7 +232,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       if (!cache.has(id)) cache.set(id, value)
     }
   }
-  const secretResolver = input.secretResolver ?? NoopSecretResolver
+  const secretResolver = input.secretResolver ?? getDefaultSecretResolver()
 
   // Dynamic concurrency cap (ADR-0022 §3.7). Defaults to settings.maxConcurrency
   // or 1, preserving sequential behavior for existing callers.

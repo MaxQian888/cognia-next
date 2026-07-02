@@ -13,13 +13,13 @@ jest.mock("@cognia/vector/embedding", () => ({
 }))
 
 // Mock createLlmClient (real-LLM path) while keeping the real extractJson.
-const completeMock = jest.fn(async () => "stub")
+const completeMock = jest.fn(async (..._args: unknown[]) => "stub")
 jest.mock("@/lib/twin/distill/llm", () => {
   const actual = jest.requireActual("@/lib/twin/distill/llm")
   return {
     ...actual,
     createLlmClient: jest.fn(() => ({
-      complete: (...args: unknown[]) => completeMock(...(args as [])),
+      complete: (...args: unknown[]) => completeMock(...args),
       getUsageSnapshot: () => ({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
     })),
   }

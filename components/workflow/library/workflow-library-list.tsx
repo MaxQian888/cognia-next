@@ -45,6 +45,9 @@ export function WorkflowLibraryList({
     })),
   ]
 
+  // TanStack Virtual's useVirtualizer returns non-memoizable functions; the
+  // React Compiler correctly skips it. Nothing to fix on our side.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,

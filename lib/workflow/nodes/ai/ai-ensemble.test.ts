@@ -100,7 +100,9 @@ describe("executeAiEnsemble", () => {
   })
 
   it("applies a lens by prepending it to each sample prompt", async () => {
-    const runAgent = jest.fn(async () => ({ object: { v: "x" } }))
+    const runAgent = jest.fn(async (_input: Parameters<AiEnsembleDeps["runAgent"]>[0]) => ({
+      object: { v: "x" },
+    }))
     await executeAiEnsemble(
       makeCtx({
         prompt: "claim",
@@ -115,7 +117,9 @@ describe("executeAiEnsemble", () => {
   })
 
   it("runs a subworkflow target with the prompt in the payload", async () => {
-    const runSubworkflow = jest.fn(async () => ({ object: { score: 5 } }))
+    const runSubworkflow = jest.fn(
+      async (_input: Parameters<AiEnsembleDeps["runSubworkflow"]>[0]) => ({ object: { score: 5 } })
+    )
     const result = await executeAiEnsemble(
       makeCtx({
         prompt: "task",
@@ -171,7 +175,9 @@ describe("executeAiEnsemble", () => {
   })
 
   it("redacts the prompt and flags piiRedacted", async () => {
-    const runAgent = jest.fn(async () => ({ object: { v: "x" } }))
+    const runAgent = jest.fn(async (_input: Parameters<AiEnsembleDeps["runAgent"]>[0]) => ({
+      object: { v: "x" },
+    }))
     const result = await executeAiEnsemble(
       makeCtx({
         prompt: "email me at alice@example.com",
