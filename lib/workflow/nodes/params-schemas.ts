@@ -86,6 +86,13 @@ const GoalCompletedTriggerParams = z.object({
   status: optionalString,
 })
 
+const TeamTriggerParams = z.object({
+  // All optional — an unscoped node fires for every team run that reaches a
+  // terminal status. Scope by team and/or terminal status.
+  teamId: optionalString,
+  status: z.enum(["completed", "failed", "cancelled"]).optional(),
+})
+
 const WebhookTriggerParams = z.object({
   path: requiredString("required").regex(/^[a-z0-9][a-z0-9-_/]*$/i, "webhookPath"),
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "*"]).optional(),
@@ -944,6 +951,9 @@ const AiPromptParams = z.object({
   apiKey: optionalString,
   baseURL: optionalString,
   systemPrompt: optionalString,
+  // Optional twin-bound character — injects the twin's retrieved context into
+  // the system prompt when the character has a twinId (see ai-prompt-v2.ts).
+  characterId: optionalString,
   userPrompt: requiredString("required"),
   temperature: numberRange(0, 2).optional(),
   // Structured output (B1): "json" parses the completion into output.structured.
@@ -1390,7 +1400,7 @@ export const PARAMS_SCHEMAS = {
   "trigger.goal.completed": GoalCompletedTriggerParams,
   "trigger.webhook": WebhookTriggerParams,
   "trigger.github.webhook": WebhookTriggerParams,
-  "trigger.team": z.object({}),
+  "trigger.team": TeamTriggerParams,
   // Actions: characters
   "action.character.send": CharacterSendParams,
   "action.character.create": CharacterCreateParams,

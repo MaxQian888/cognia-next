@@ -31,6 +31,13 @@ export interface NodeCatalogEntry {
   /** True if the node only fires on Tauri (web-mode hides them). */
   desktopOnly?: boolean
   /**
+   * True if the node is authored but not yet driven by a real runtime
+   * producer — authors can drop it on a canvas but it will only fire in
+   * manual mode, never from the real event it advertises. The editor should
+   * badge these so users aren't misled into building workflows that never run.
+   */
+  experimental?: boolean
+  /**
    * Set on plugin-contributed entries; absent for built-ins. Used by the
    * sidebar to render a per-plugin sub-group inside the "Plugin nodes"
    * section.
@@ -99,11 +106,11 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     desktopOnly: true,
   },
   "trigger.team": {
-    label: "On team run start",
+    label: "On team finished",
     description:
-      "Internal trigger fired by the agent-team synthesizer when runTeamLifecycle starts a run. Not hand-authored.",
+      "Fires when an agent-team run reaches a terminal status (completed / failed / cancelled). Optionally scope by team and status. The kind doubles as the internal marker the team synthesizer stamps on its own runs.",
     iconName: "Users",
-    keywords: ["team", "synthesized", "internal"],
+    keywords: ["team", "finished", "completed", "agent team"],
   },
   // ── Actions ───────────────────────────────────────────────────────────────
   "action.character.send": {
@@ -720,9 +727,12 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   },
   "trigger.desktop.event": {
     label: "On UIA event",
-    description: "Fire when a UIA focus / structure / property event matches.",
+    description:
+      "Fire when a UIA focus / structure / property event matches. Experimental: not yet wired to real UIA events — only fires in manual runs.",
     iconName: "Bell",
     keywords: ["desktop", "trigger", "event", "uia", "focus"],
+    desktopOnly: true,
+    experimental: true,
   },
   // ── System: integrated terminal ───────────────────────────────────────────
   "action.system.terminal": {

@@ -5689,11 +5689,43 @@ export function CatchConfig({ params, onChange }: ConfigProps) {
 // live in `./shared/entity-picker` as searchable comboboxes — imported above.
 
 // ── trigger.team ──────────────────────────────────────────────────────────
-// Synthesizer-internal: fired by the agent-team runtime, not hand-authored.
-// Informational panel only — params schema is empty (`z.object({})`).
-export function TeamTriggerConfig() {
+// "On team finished" — fires from runTeamLifecycle's terminal fan-out.
+// Optional scoping by team and terminal status; unscoped fires for every
+// team run. (The kind doubles as the synthesizer's internal run marker,
+// which carries no `event` field and never matches user workflows.)
+export function TeamTriggerConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.teamTrigger")
-  return <p className="text-xs text-muted-foreground">{t("intro")}</p>
+  const teamId = readString(params, "teamId")
+  const status = readString(params, "status")
+  const ANY = "__any__"
+  return (
+    <FieldGroup>
+      <p className="text-xs text-muted-foreground">{t("intro")}</p>
+      <Field label={t("teamId.label")} htmlFor="tt-team" hint={t("teamId.hint")} name="teamId">
+        <TeamPicker
+          id="tt-team"
+          value={teamId}
+          onChange={(v) => onChange(patchParam(params, "teamId", v))}
+        />
+      </Field>
+      <Field label={t("status.label")} htmlFor="tt-status" hint={t("status.hint")} name="status">
+        <Select
+          value={status || ANY}
+          onValueChange={(v) => onChange(patchParam(params, "status", v === ANY ? "" : v))}
+        >
+          <SelectTrigger id="tt-status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ANY}>{t("status.options.any")}</SelectItem>
+            <SelectItem value="completed">{t("status.options.completed")}</SelectItem>
+            <SelectItem value="failed">{t("status.options.failed")}</SelectItem>
+            <SelectItem value="cancelled">{t("status.options.cancelled")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+    </FieldGroup>
+  )
 }
 
 // ── action.team.task.dispatch ─────────────────────────────────────────────

@@ -34,6 +34,7 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.chat.message",
   "trigger.goal.completed",
   "trigger.terminal.command",
+  "trigger.team",
 ]
 
 interface SubscriptionState {
@@ -125,6 +126,8 @@ export interface TriggerMatchContext {
   status?: string
   /** Project id (terminal.command) — optional equality match. */
   projectId?: string
+  /** Team id (trigger.team) — optional; unspecified node matches any team. */
+  teamId?: string
   /**
    * Command line (terminal.command) — matched as a *substring* against the
    * node's `commandContains` param. Already PII-gated by the dispatcher;
@@ -169,6 +172,9 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   }
   if (typeof p.projectId === "string" && p.projectId.length > 0) {
     if (ctx.projectId !== p.projectId) return false
+  }
+  if (typeof p.teamId === "string" && p.teamId.length > 0) {
+    if (ctx.teamId !== p.teamId) return false
   }
   if (typeof p.commandContains === "string" && p.commandContains.length > 0) {
     if (typeof ctx.command !== "string" || !ctx.command.includes(p.commandContains)) return false

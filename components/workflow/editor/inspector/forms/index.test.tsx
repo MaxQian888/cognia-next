@@ -74,7 +74,20 @@ const messages = {
         usePicker: "Pick from list",
         none: "None",
       },
-      teamTrigger: { intro: "Fired internally by the agent-team runtime." },
+      teamTrigger: {
+        intro: "Fires when an agent-team run finishes.",
+        teamId: { label: "Team", hint: "Leave empty to fire for every team." },
+        status: {
+          label: "Status",
+          hint: "Only fire on this terminal status.",
+          options: {
+            any: "Any terminal status",
+            completed: "Completed",
+            failed: "Failed",
+            cancelled: "Cancelled",
+          },
+        },
+      },
       teamTaskDispatch: {
         teamId: { label: "Team" },
         taskId: { label: "Task id", hint: "Stable id", placeholder: "task_" },
@@ -415,9 +428,19 @@ function wrap(ui: React.ReactNode) {
 }
 
 describe("TeamTriggerConfig", () => {
-  it("renders the informational intro", () => {
-    wrap(<TeamTriggerConfig />)
-    expect(screen.getByText(/agent-team runtime/i)).toBeInTheDocument()
+  it("renders the scoping fields (team picker + terminal-status select)", () => {
+    const onChange = jest.fn()
+    wrap(<TeamTriggerConfig params={{}} onChange={onChange} />)
+    expect(screen.getByText(/finishes/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Team/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Status/i)).toBeInTheDocument()
+    // Unscoped default shows the any-status option in the closed trigger.
+    expect(screen.getByText(/Any terminal status/i)).toBeInTheDocument()
+  })
+
+  it("shows the persisted status filter", () => {
+    wrap(<TeamTriggerConfig params={{ status: "failed" }} onChange={jest.fn()} />)
+    expect(screen.getByText("Failed")).toBeInTheDocument()
   })
 })
 

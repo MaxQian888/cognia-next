@@ -100,6 +100,13 @@ export interface RunTeamLifecycleDeps {
    * letting the caller assemble the run via `queryByTrace`.
    */
   traceId?: string
+  /**
+   * Depth of the team-completion → workflow → team chain that produced this
+   * run (0 = root). Threaded by the `action.team.run` executor from the
+   * outer run's `trigger.payload.chainDepth`; the terminal `trigger.team`
+   * fan-out stops past MAX_TEAM_TRIGGER_CHAIN_DEPTH (loop guard).
+   */
+  triggerChainDepth?: number
 }
 
 export interface RunTeamLifecycleResult {
@@ -663,6 +670,28 @@ export async function runTeamLifecycle(
         status: finalStatus,
         reason: finalReason,
       })
+      // "On team finished" workflow fan-out (trigger.team). Fire-and-forget:
+      // the linkage module PII-gates reason/finalResult and enforces the
+      // chain-depth loop guard. This terminal block is the single point every
+      // start surface funnels through, so no per-trigger wiring is needed.
+      void import("./team-completion-linkage")
+        .then(({ dispatchTeamCompletedTriggers }) =>
+          dispatchTeamCompletedTriggers({
+            teamId,
+            teamName: team.name,
+            runId,
+            status: finalStatus,
+            ...(finalReason ? { reason: finalReason } : {}),
+            ...(() => {
+              const finalResult = deps.storeReader.getTeam(teamId)?.finalResult
+              return finalResult ? { finalResult } : {}
+            })(),
+            chainDepth: deps.triggerChainDepth ?? 0,
+          })
+        )
+        .catch(() => {
+          // Best-effort — fan-out failures must not affect the run result.
+        })
       for (const u of subs) {
         try {
           u()

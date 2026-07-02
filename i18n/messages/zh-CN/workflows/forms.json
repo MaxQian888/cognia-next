@@ -2007,7 +2007,21 @@
     }
   },
   "teamTrigger": {
-    "intro": "由智能体团队运行时在内部触发，此触发器无需配置。"
+    "intro": "当智能体团队运行结束时触发。留空则对所有团队和所有终态生效。",
+    "status": {
+      "hint": "仅在运行以该状态结束时触发。",
+      "label": "状态",
+      "options": {
+        "any": "任意终态",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "failed": "已失败"
+      }
+    },
+    "teamId": {
+      "hint": "留空则对所有团队生效。",
+      "label": "团队"
+    }
   },
   "teamUpdate": {
     "patchJson": {

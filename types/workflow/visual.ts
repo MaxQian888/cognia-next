@@ -704,6 +704,8 @@ export interface WorkflowTriggerBinding {
   characterId?: string
   /** Scopes a `trigger.goal.completed` subscription to a specific goal id. */
   goalId?: string
+  /** Scopes a `trigger.team` subscription to a specific team id. */
+  teamId?: string
 }
 
 /**

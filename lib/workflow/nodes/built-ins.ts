@@ -2721,10 +2721,18 @@ registerNodeExecutor({
           }
         : undefined
 
+    // Loop guard: when THIS workflow was itself started by a team-completion
+    // fan-out (trigger.team payload carries chainDepth), thread the depth
+    // into the nested lifecycle so its own fan-out can stop at the cap.
+    const triggerPayload = ctx.trigger.payload as { chainDepth?: unknown } | undefined
+    const triggerChainDepth =
+      typeof triggerPayload?.chainDepth === "number" ? triggerPayload.chainDepth : 0
+
     const partial = buildAgentTeamRuntimeDeps()
     const deps = {
       ...partial,
       ...(triggeredFrom ? { triggeredFrom } : {}),
+      triggerChainDepth,
       // IM-originated workflows run headless (gate policy "im"); UI-launched
       // workflows keep the interactive blocking gates.
       origin: triggeredFrom ? ("im" as const) : ("interactive" as const),

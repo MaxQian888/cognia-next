@@ -110,6 +110,33 @@ describe("trigger-subscriptions", () => {
     expect(otherStopped.map((m) => m.workflowId)).toEqual(["wf_any"])
   })
 
+  it("indexes trigger.team and matches by teamId / status (unscoped matches any)", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_any", [trigger("n", "trigger.team", {})]),
+      wf("wf_team", [trigger("n", "trigger.team", { teamId: "team_1" })]),
+      wf("wf_failed", [trigger("n", "trigger.team", { status: "failed" })]),
+    ])
+    expect(_peekTriggerSubscriptions().get("trigger.team")).toHaveLength(3)
+
+    const t1Completed = findMatchingWorkflows("trigger.team", {
+      teamId: "team_1",
+      status: "completed",
+    })
+    expect(t1Completed.map((m) => m.workflowId)).toEqual(
+      expect.arrayContaining(["wf_any", "wf_team"])
+    )
+    expect(t1Completed.map((m) => m.workflowId)).not.toContain("wf_failed")
+
+    const otherFailed = findMatchingWorkflows("trigger.team", {
+      teamId: "team_2",
+      status: "failed",
+    })
+    expect(otherFailed.map((m) => m.workflowId)).toEqual(
+      expect.arrayContaining(["wf_any", "wf_failed"])
+    )
+    expect(otherFailed.map((m) => m.workflowId)).not.toContain("wf_team")
+  })
+
   it("indexes terminal.command and matches by session / project / status / substring", () => {
     _seedTriggerSubscriptionsForTest([
       wf("wf_any", [trigger("n", "trigger.terminal.command", {})]),

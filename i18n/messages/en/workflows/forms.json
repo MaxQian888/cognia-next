@@ -2007,7 +2007,21 @@
     }
   },
   "teamTrigger": {
-    "intro": "Fired internally by the agent-team runtime. This trigger has no configuration."
+    "intro": "Fires when an agent-team run finishes. Leave the fields empty to fire for every team and every terminal status.",
+    "status": {
+      "hint": "Only fire when the run ends with this status.",
+      "label": "Status",
+      "options": {
+        "any": "Any terminal status",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "failed": "Failed"
+      }
+    },
+    "teamId": {
+      "hint": "Leave empty to fire for every team.",
+      "label": "Team"
+    }
   },
   "teamUpdate": {
     "patchJson": {
