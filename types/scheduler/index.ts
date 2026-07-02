@@ -50,6 +50,12 @@ export type ScheduledTaskType =
   // `registerTaskExecutor` in `lib/scheduler/executors/wiki-rebuild-executor.ts`.
   // Listed here so cron-driven Wiki rebuild rows are typed properly.
   | "wiki-rebuild"
+  // Wiki-lint (orphan / broken-link check) — registered in
+  // `lib/scheduler/executors/wiki-lint-executor.ts`.
+  | "wiki-lint"
+  // Attention Radar report — registered in
+  // `lib/scheduler/executors/radar-report-executor.ts`.
+  | "radar-report"
 
 // Task execution status
 export type TaskExecutionStatus =

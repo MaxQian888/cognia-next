@@ -139,6 +139,10 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 | Rust performance dashboard | `src-tauri/src/perf/`, `lib/perf/backend/`, `hooks/perf/use-perf-stream.ts`, `components/performance/`, `app/performance/`                                     | —                      | 0035             |
 | Public share links         | `lib/share/`, `lib/db/shared-links.ts`, `components/share/`, `app/share/view/`, `services/share-server/worker/`, `services/share-server/pages/`                | v54                    | 0037             |
 | Desktop pet                | `components/pet/`, `lib/pet/`, `hooks/pet/`, `stores/pet/`, `types/pet/`, `src-tauri/src/pet_window/`                                                          | Dexie (no schema bump) | 0058             |
+| Web reader                 | `lib/web/reader/`, `lib/web/web-tools-core.ts`, `packages/document/.../html-parser.ts`, `lib/twin/ingest/url-fetcher.ts`                                       | —                      | 0060             |
+| Wiki lint                  | `lib/wiki/lint/`, `lib/db/wiki-lint-results.ts`, `components/settings/external-bridge/wiki-lint-card.tsx`                                                      | Dexie v95              | 0060             |
+| Attention Radar            | `lib/radar/`, `types/radar/`, `lib/db/radar-reports.ts`, `components/pet/console/radar-panel.tsx`, `hooks/pet/use-pet-insight.ts`                              | Dexie v96              | 0060             |
+| Content capture            | `lib/capture/`, `types/capture/`, `components/capture/`, `stores/capture/`, `hooks/capture/`, `lib/db/captured-items.ts`, `src-tauri/src/capture/`             | Dexie v97              | 0060             |
 
 ### Cross-cutting hooks (reuse, don't reinvent)
 

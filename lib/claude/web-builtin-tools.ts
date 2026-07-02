@@ -112,6 +112,7 @@ export async function runWebBuiltinTool(
       summarize: deps.summarize,
       signal: deps.signal,
       cache: deps.cache,
+      jinaFallback: deps.jinaFallback,
     })
   }
   if (name === WEB_SEARCH_TOOL_NAME) {

@@ -13,6 +13,8 @@ import {
   Database,
   Archive,
   BookOpen,
+  Radar,
+  SearchCheck,
   Cog,
   Plug,
   FileCode,
@@ -147,6 +149,16 @@ const taskTypeConfig: Record<
     icon: <BookOpen className="h-3.5 w-3.5" />,
     bg: "bg-indigo-500/10",
     color: "text-indigo-500",
+  },
+  "wiki-lint": {
+    icon: <SearchCheck className="h-3.5 w-3.5" />,
+    bg: "bg-teal-500/10",
+    color: "text-teal-500",
+  },
+  "radar-report": {
+    icon: <Radar className="h-3.5 w-3.5" />,
+    bg: "bg-amber-500/10",
+    color: "text-amber-500",
   },
 }
 

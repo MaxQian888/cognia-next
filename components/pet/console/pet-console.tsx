@@ -32,12 +32,23 @@ import { CustomizeTab } from "./customize-tab"
 import { DexTab } from "./dex-tab"
 import { AchievementsTab } from "./achievements-tab"
 import { BindingTab } from "./binding-tab"
+import { RadarPanel } from "./radar-panel"
+import { CaptureSettingsCard } from "@/components/capture/capture-settings-card"
 
-type ConsoleTab = "nurture" | "shop" | "customize" | "dex" | "achievements" | "binding" | "plugins"
+type ConsoleTab =
+  | "nurture"
+  | "shop"
+  | "customize"
+  | "insights"
+  | "dex"
+  | "achievements"
+  | "binding"
+  | "plugins"
 const TABS: ConsoleTab[] = [
   "nurture",
   "shop",
   "customize",
+  "insights",
   "dex",
   "achievements",
   "binding",
@@ -154,6 +165,12 @@ export function PetConsole() {
           ))}
         {tab === "shop" && <ShopTab />}
         {tab === "customize" && <CustomizeTab />}
+        {tab === "insights" && (
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+            <RadarPanel />
+            <CaptureSettingsCard />
+          </div>
+        )}
         {tab === "dex" && <DexTab bones={view.bones} />}
         {tab === "achievements" && <AchievementsTab />}
         {tab === "binding" && <BindingTab />}

@@ -1738,6 +1738,18 @@ export interface AppSettings {
    */
   conversationTitle?: UtilityModelConfig
   /**
+   * Attention Radar — periodic AI "info-diet" analysis over recent memories +
+   * captured items, surfaced in the pet console. See `lib/radar/` and
+   * `types/radar`. Absent → defaults (disabled). Off by default.
+   */
+  attentionRadar?: import("@/types/radar").RadarSettings
+  /**
+   * Content capture (confirm-bubble flow) — clipboard watching + save +
+   * enrichment; captured items feed the Attention Radar. See `lib/capture/`
+   * and `types/capture`. Absent → defaults (disabled). Desktop-only.
+   */
+  capture?: import("@/types/capture").CaptureSettings
+  /**
    * LLM input assistance for the main chat composer: prompt enhancement
    * (rewrite / variants), inline ghost-text autocomplete, and AI starter /
    * follow-up suggestions. Renderer-side via `buildUtilityLlmClient`, gated

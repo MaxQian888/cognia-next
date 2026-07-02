@@ -5,6 +5,7 @@ mod api_key;
 mod automation;
 mod browser;
 mod canvas;
+mod capture;
 mod ccswitch;
 mod claude;
 mod cli_bridge;
@@ -443,6 +444,7 @@ pub fn run() {
             pet_window::pet_window_get_work_area,
             pet_window::pet_window_get_surfaces,
             pet_window::is_pet_window_open,
+            capture::get_foreground_app,
             pet_window::show_main_window,
             pet_window::open_pet_popup,
             pet_window::close_pet_popup,

@@ -174,4 +174,19 @@ describe("htmlToMarkdown", () => {
       `)
     ).resolves.toContain("# Title")
   })
+
+  it("preserves links nested inside block elements", async () => {
+    const md = await htmlToMarkdown(
+      `<p>See <a href="https://example.com">the docs</a> for more.</p>`
+    )
+    expect(md).toContain("[the docs](https://example.com)")
+  })
+
+  it("renders blockquotes and images", async () => {
+    const md = await htmlToMarkdown(
+      `<blockquote>quoted</blockquote><img alt="pic" src="https://img/1.png">`
+    )
+    expect(md).toContain("> quoted")
+    expect(md).toContain("![pic](https://img/1.png)")
+  })
 })

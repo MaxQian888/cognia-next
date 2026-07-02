@@ -29,6 +29,8 @@ import { optimizeSearchQuery } from "@/lib/search/search-query-optimizer"
 import { verifySource, sortByCredibility } from "@/lib/search/source-verification"
 import { parseHTML } from "@cognia/document/parsers/html-parser"
 import { fetchCacheKey, type FetchCacheLike } from "@/lib/web/fetch-cache"
+import { scrapePlatform } from "@/lib/web/reader/dispatch"
+import { fetchViaJina } from "@/lib/web/reader/jina"
 
 /** How `web_fetch` should present the response body. */
 export type FetchFormat = "auto" | "text" | "raw"
@@ -78,6 +80,13 @@ export interface WebFetchDeps {
   signal?: AbortSignal
   /** Optional TTL/LRU cache for repeated GETs (host passes `getFetchCache()`). */
   cache?: FetchCacheLike
+  /**
+   * Enable the Jina Reader fallback (`r.jina.ai`) for pages the local cheerio
+   * parser can't read (JS-rendered SPAs). Off by default so the pure core /
+   * tests never reach a third party; the renderer host turns it on. Platform
+   * scrapers (WeChat/X/YouTube) run regardless of this flag.
+   */
+  jinaFallback?: boolean
 }
 
 /** Distill page text down to just the content relevant to `prompt`. */
@@ -175,6 +184,38 @@ const DEFAULT_MAX = 64 * 1024
 const DEFAULT_EXTRACT_MAX = 40 * 1024
 /** Per-result snippet cap in `web_search` results. */
 const SNIPPET_MAX = 300
+/**
+ * Below this many chars of local extraction, treat the page as "unreadable"
+ * locally (a JS-rendered SPA) and — when enabled — try the Jina fallback.
+ */
+const MIN_LOCAL_EXTRACT = 200
+
+/** Distill (when `prompt`+`summarize`) then truncate extracted text to `cap`. */
+async function shapeExtracted(
+  rawText: string,
+  title: string | undefined,
+  args: WebFetchArgs,
+  deps: WebFetchDeps,
+  cap: number
+): Promise<{ text: string; truncated: boolean; title?: string }> {
+  let text = rawText.trim()
+  // Query-focused distillation (Claude-Code-style): collapse the page to just
+  // what `prompt` asked for. Never throws — falls back to truncation.
+  if (text && args.prompt && deps.summarize) {
+    try {
+      const focused = (await deps.summarize(text, args.prompt, deps.signal))?.trim()
+      if (focused) text = focused
+    } catch {
+      // Keep the extracted text.
+    }
+  }
+  const truncated = text.length > cap
+  return {
+    text: truncated ? text.slice(0, cap) : text,
+    truncated,
+    ...(title ? { title } : {}),
+  }
+}
 
 /**
  * Perform an HTTP request and return readable content for the model.
@@ -213,39 +254,95 @@ export async function webFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Pro
   const fetchImpl = deps.fetchImpl ?? fetch
   const headers: Record<string, string> = { ...(args.headers ?? {}) }
   if (deps.userAgent && !headers["User-Agent"]) headers["User-Agent"] = deps.userAgent
+
+  const cap = args.maxBytes && args.maxBytes > 0 ? args.maxBytes : DEFAULT_MAX
+  const extractCap = args.maxBytes && args.maxBytes > 0 ? cap : DEFAULT_EXTRACT_MAX
+  const mayExtract = format !== "raw"
+  const isGet = method.toUpperCase() === "GET"
+
   try {
+    // ── 1. Platform scrapers (WeChat / X / YouTube) ────────────────────────
+    // Hostname-keyed and tried before the generic fetch because a bespoke
+    // scraper beats generic extraction for those sites. Returns null (no
+    // network) for every other host, so this is a no-op for normal pages.
+    if (mayExtract && isGet && !args.body) {
+      try {
+        const scraped = await scrapePlatform(args.url, fetchImpl, deps.signal)
+        if (scraped && scraped.markdown.trim()) {
+          const shaped = await shapeExtracted(
+            scraped.markdown,
+            scraped.title,
+            args,
+            deps,
+            extractCap
+          )
+          const result = {
+            ok: true as const,
+            status: 200,
+            url: args.url,
+            contentType: "text/markdown",
+            source: scraped.source,
+            text: shaped.text,
+            truncated: shaped.truncated,
+            ...(shaped.title ? { title: shaped.title } : {}),
+          }
+          if (deps.cache && cacheable) deps.cache.set(cacheKey, result)
+          return result
+        }
+      } catch {
+        // Fall through to the generic path.
+      }
+    }
+
+    // ── 2. Generic fetch + local (cheerio) extraction ──────────────────────
     const res = await fetchImpl(args.url, { method, headers, body: args.body })
-    const cap = args.maxBytes && args.maxBytes > 0 ? args.maxBytes : DEFAULT_MAX
-    const extractCap = args.maxBytes && args.maxBytes > 0 ? cap : DEFAULT_EXTRACT_MAX
     const raw = await res.text()
     const contentType = res.headers.get?.("content-type") ?? ""
-    const wantsExtract = format !== "raw" && (format === "text" || /html/i.test(contentType))
+    const wantsExtract = mayExtract && (format === "text" || /html/i.test(contentType))
 
     let extracted: { text: string; truncated: boolean; title?: string } | undefined
     if (wantsExtract && res.ok && raw) {
       try {
         const parsed = await parseHTML(raw, { includeLinks: false, includeImages: false })
-        let text = parsed.text?.trim() ?? ""
+        const text = parsed.text?.trim() ?? ""
         if (text) {
-          // Query-focused distillation (Claude-Code-style): collapse the page to
-          // just what `prompt` asked for. Never throws — falls back to truncation.
-          if (args.prompt && deps.summarize) {
-            try {
-              const focused = (await deps.summarize(text, args.prompt, deps.signal))?.trim()
-              if (focused) text = focused
-            } catch {
-              // Keep the extracted page text.
-            }
-          }
-          const truncated = text.length > extractCap
-          extracted = {
-            text: truncated ? text.slice(0, extractCap) : text,
-            truncated,
-            ...(parsed.title ? { title: parsed.title } : {}),
-          }
+          extracted = await shapeExtracted(text, parsed.title, args, deps, extractCap)
         }
       } catch {
         // Malformed HTML — fall through to the raw body below.
+      }
+    }
+
+    // ── 3. Jina Reader fallback ────────────────────────────────────────────
+    // Only when local extraction came back empty/too thin (a JS-rendered page
+    // cheerio can't see) AND the host opted in. Off by default in the pure
+    // core; the renderer host enables it.
+    if (
+      mayExtract &&
+      isGet &&
+      !args.body &&
+      (deps.jinaFallback ?? false) &&
+      (!extracted || extracted.text.length < MIN_LOCAL_EXTRACT)
+    ) {
+      try {
+        const jina = await fetchViaJina(args.url, fetchImpl, deps.signal)
+        if (jina && jina.markdown.trim().length > (extracted?.text.length ?? 0)) {
+          const shaped = await shapeExtracted(jina.markdown, jina.title, args, deps, extractCap)
+          const result = {
+            ok: res.ok,
+            status: res.status,
+            url: args.url,
+            contentType: "text/markdown",
+            source: jina.source,
+            text: shaped.text,
+            truncated: shaped.truncated,
+            ...(shaped.title ? { title: shaped.title } : {}),
+          }
+          if (deps.cache && cacheable && res.ok) deps.cache.set(cacheKey, result)
+          return result
+        }
+      } catch {
+        // Keep local extraction / raw body.
       }
     }
 

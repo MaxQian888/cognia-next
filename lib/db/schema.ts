@@ -2167,6 +2167,30 @@ export class CogniaDB extends Dexie {
     this.version(94).stores({
       petInventory: "&id",
     })
+
+    // v95 — Wiki Lint results (one singleton row per scope, mirrors
+    // `wikiManifest`). Detects orphan pages + dangling `[[slug]]` links from a
+    // no-AI local pass. Pure additive — no upgrade hook. See
+    // `lib/db/wiki-lint-results.ts` and `lib/wiki/lint/`.
+    this.version(95).stores({
+      wikiLintResults: "&scope, lastRunAt",
+    })
+
+    // v96 — Attention Radar reports (info-diet analysis). Newest-first by
+    // `generatedAt`; `[scope+generatedAt]` powers the "latest for scope" read.
+    // Pure additive — no upgrade hook. See `lib/db/radar-reports.ts` +
+    // `lib/radar/`.
+    this.version(96).stores({
+      radarReports: "&id, generatedAt, [scope+generatedAt]",
+    })
+
+    // v97 — Content capture store (confirm-bubble flow). `fingerprint` is the
+    // SHA-256 dedup key; `capturedAt` drives the radar's "last N days" query.
+    // Pure additive — no upgrade hook. See `lib/db/captured-items.ts` +
+    // `lib/capture/`.
+    this.version(97).stores({
+      capturedItems: "&id, capturedAt, kind, sourceApp, fingerprint",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2214,6 +2238,12 @@ export class CogniaDB extends Dexie {
   toolRoutes!: Table<import("@/types/routing/tool-route").ToolRouteRecord, string>
   // v77 — Pet conversation history. See `lib/db/pet-conversation.ts`.
   petConversation!: Table<PetConversationRow, number>
+  // v95 — Wiki Lint results (singleton per scope). See `lib/db/wiki-lint-results.ts`.
+  wikiLintResults!: Table<import("@/types/wiki").WikiLintResult, import("@/types/wiki").WikiScope>
+  // v96 — Attention Radar reports. See `lib/db/radar-reports.ts`.
+  radarReports!: Table<import("@/types/radar").RadarReport, string>
+  // v97 — Content capture store. See `lib/db/captured-items.ts`.
+  capturedItems!: Table<import("@/types/capture").CapturedItem, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated

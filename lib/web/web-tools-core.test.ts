@@ -62,6 +62,57 @@ describe("webFetch", () => {
     expect(mockParseHTML).not.toHaveBeenCalled()
   })
 
+  it("uses the X/Twitter platform scraper for x.com status URLs", async () => {
+    const fetchImpl = jest.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          text: async () => "",
+          json: async () => ({
+            tweet: { text: "a tweet", author: { name: "Jane", screen_name: "jane" } },
+          }),
+        }) as unknown as Response
+    )
+    const out = (await webFetch(
+      { url: "https://x.com/jane/status/1" },
+      { fetchImpl: fetchImpl as unknown as typeof fetch }
+    )) as Record<string, unknown>
+    expect(out.source).toBe("x")
+    expect(out.text).toContain("a tweet")
+    expect(fetchImpl).toHaveBeenCalledWith("https://api.fxtwitter.com/status/1", expect.anything())
+    // Generic extraction is bypassed for the scraper path.
+    expect(mockParseHTML).not.toHaveBeenCalled()
+  })
+
+  it("falls back to Jina when local extraction is thin and jinaFallback is on", async () => {
+    mockParseHTML.mockResolvedValue({ text: "", title: undefined })
+    const fetchImpl = jest.fn(async (url: string) =>
+      url.startsWith("https://r.jina.ai/")
+        ? res("Title: JT\nMarkdown Content:\n" + "x".repeat(300), "text/plain")
+        : res("<html><body></body></html>")
+    )
+    const out = (await webFetch(
+      { url: "https://spa.test" },
+      { fetchImpl: fetchImpl as unknown as typeof fetch, jinaFallback: true }
+    )) as Record<string, unknown>
+    expect(out.source).toBe("jina")
+    expect(out.title).toBe("JT")
+    expect(String(out.text).length).toBe(300)
+  })
+
+  it("does not reach Jina by default (privacy)", async () => {
+    mockParseHTML.mockResolvedValue({ text: "short", title: "T" })
+    const fetchImpl = jest.fn(async () => res("<html><body>hi</body></html>"))
+    await webFetch({ url: "https://x.test" }, { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      expect.stringContaining("r.jina.ai"),
+      expect.anything()
+    )
+  })
+
   it("returns the raw body for non-HTML responses", async () => {
     const fetchImpl = jest.fn(async () => res('{"a":1}', "application/json"))
     const out = (await webFetch({ url: "https://x.test/api" }, { fetchImpl })) as Record<
