@@ -100,6 +100,7 @@ function makeCtx(
     setTaskStatus: jest.fn(),
     updateTeammate: jest.fn(),
   }
+  const notifier = { notify: jest.fn() }
   const ctx = {
     runId: "run1",
     teamId: "team1",
@@ -116,14 +117,14 @@ function makeCtx(
     },
     pool,
     budget: { add: jest.fn() },
-    notifier: {},
+    notifier,
     concurrency: { get: () => 3 },
     modelPref: { get: () => ({ modelHint: undefined }) },
     storeWriter,
     resolvedCapabilities: new Map(),
     externalAgentInstances: new Map(),
   } as unknown as TeamRunContext
-  return { ctx, pool, storeWriter }
+  return { ctx, pool, storeWriter, notifier }
 }
 
 beforeEach(() => {
@@ -200,6 +201,59 @@ describe("dispatchTeammate — text-only fallback", () => {
     const { ctx } = makeCtx(makeTeammate())
     await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
     expect(executeAgentMock.mock.calls[0][1]).not.toHaveProperty("maxSteps")
+  })
+})
+
+describe("dispatchTeammate — degraded text-channel diagnostic", () => {
+  it("warns once when a tool-capable claude teammate falls back to text", async () => {
+    isTauriMock.mockReturnValue(false) // sidecar unavailable
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx, notifier } = makeCtx(makeTeammate())
+
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(result.channel).toBe("text")
+    expect(notifier.notify).toHaveBeenCalledTimes(1)
+    expect(notifier.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        dedupeKey: "text-fallback:run1:tm1",
+        teamId: "team1",
+        taskId: "t1",
+      })
+    )
+  })
+
+  it("does not warn on the sidecar path (desktop)", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "tool result" })
+    const { ctx, notifier } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit" })
+
+    expect(notifier.notify).not.toHaveBeenCalled()
+  })
+
+  it("does not warn when text is intentional (preferToolEnabled false)", async () => {
+    isTauriMock.mockReturnValue(false)
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx, notifier } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "reason", preferToolEnabled: false })
+
+    expect(notifier.notify).not.toHaveBeenCalled()
+  })
+
+  it("does not warn for an external-backed teammate", async () => {
+    resolveExternalMock.mockResolvedValue("ext-agent-1")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "external result" })
+    const { ctx, notifier } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(notifier.notify).not.toHaveBeenCalled()
   })
 })
 

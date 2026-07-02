@@ -162,4 +162,35 @@ describe("planAutoOrchestration", () => {
     // …and reaches the roster-composition prompt.
     expect(rosterPrompt).toContain("pattern=ultracode_orchestration")
   })
+
+  it("populates proposal.executor from the assessed pattern", async () => {
+    const proposal = await planAutoOrchestration({
+      objective: "ship it",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      now: () => NOW,
+      client: stagedClient({ assess: '{"recommendedPattern":"single_agent_recommended"}' }),
+    })
+    expect(proposal.executor?.kind).toBe("single-send")
+    expect(proposal.executor?.fromPattern).toBe("single_agent_recommended")
+  })
+
+  it("routes to council/ensemble when the operator passes a consensus signal", async () => {
+    const council = await planAutoOrchestration({
+      objective: "decide the architecture",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      now: () => NOW,
+      consensusSignal: { consensusNeeded: true },
+      client: stagedClient({ assess: '{"recommendedPattern":"manager_worker"}' }),
+    })
+    expect(council.executor?.kind).toBe("council")
+
+    const ensemble = await planAutoOrchestration({
+      objective: "verify this proof",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      now: () => NOW,
+      consensusSignal: { verificationNeeded: true },
+      client: stagedClient({ assess: '{"recommendedPattern":"manager_worker"}' }),
+    })
+    expect(ensemble.executor?.kind).toBe("ensemble")
+  })
 })

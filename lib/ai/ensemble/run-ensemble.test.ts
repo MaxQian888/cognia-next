@@ -1,4 +1,4 @@
-import { runEnsemble, type RunEnsembleDeps } from "./run-ensemble"
+import { runEnsemble, type RunEnsembleDeps, type RunEnsembleSampleInput } from "./run-ensemble"
 
 function depsReturning(
   outputs: Array<{ text?: string; object?: unknown } | Error>,
@@ -123,7 +123,7 @@ describe("runEnsemble", () => {
   })
 
   it("cycles lenses across samples", async () => {
-    const runSample = jest.fn(async () => ({ text: "x" }))
+    const runSample = jest.fn(async (_input: RunEnsembleSampleInput) => ({ text: "x" }))
     await runEnsemble(
       { n: 4, lens: ["refute", "support"], aggregation: { kind: "majority-vote-on-field" } },
       { runSample }

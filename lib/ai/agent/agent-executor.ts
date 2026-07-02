@@ -181,6 +181,14 @@ export interface ExecuteAgentConfig {
    */
   dispatchContext?: DispatchContext
   /**
+   * True when this run is a dispatched subagent (set unconditionally by
+   * `dispatchSubagent`). A dispatched run WITHOUT a `dispatchContext` is a
+   * LEAF (its def never opted into nesting): `resolveDispatchAgentGate` must
+   * withhold `dispatch_agent` from it — including the plan-mode force-offer —
+   * instead of treating it as a top-level chat (CLI leaf parity).
+   */
+  isDispatchedSubagent?: boolean
+  /**
    * Parent permission ceiling for this dispatched run. Threaded into
    * `resolveSendOptions` so the child's resolved tool surface is intersected /
    * unioned / mode-clamped against the parent (fail-closed). Set by the
@@ -375,6 +383,7 @@ async function runToolEnabledStandalone(
       character,
       appSettings: appSettings ?? null,
       ...(config.dispatchContext ? { dispatchContext: config.dispatchContext } : {}),
+      ...(config.isDispatchedSubagent ? { isDispatchedSubagent: true } : {}),
       ...(config.permissionCeiling ? { permissionCeiling: config.permissionCeiling } : {}),
     })
     // Append-style system extension + structured-output instruction ride

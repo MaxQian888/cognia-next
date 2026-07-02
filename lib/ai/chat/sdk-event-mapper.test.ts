@@ -18,6 +18,7 @@ type AnyMsg = {
   subtype?: string
   message?: { id?: string; content?: Array<Record<string, unknown>>; role?: string }
   usage?: Record<string, number>
+  event?: { type?: string; delta?: Record<string, unknown>; message?: { id?: string } }
 }
 
 const ctx = {
@@ -54,23 +55,56 @@ describe("createSdkEventMapper", () => {
     expect(second.some((x) => x.type === "system")).toBe(false)
   })
 
-  it("accumulates text-delta into one assistant text block with a stable id", () => {
+  it("streams text as message_start + content_block_delta frames (no snapshot per delta)", () => {
     const m = createSdkEventMapper(ctx)
-    m.handle({ type: "text-delta", text: "Hello" })
-    const out = m.handle({ type: "text-delta", text: ", world" }) as AnyMsg[]
-    const asst = out.find((x) => x.type === "assistant")!
-    expect(asst.message?.content?.[0]).toEqual({ type: "text", text: "Hello, world" })
-    // id stays stable across deltas within the same block
-    const firstId = (m.handle({ type: "text-delta", text: "!" }) as AnyMsg[]).find(
-      (x) => x.type === "assistant"
-    )!.message!.id
-    expect(asst.message!.id).toBe(firstId)
+    const first = m.handle({ type: "text-delta", text: "Hel" }) as AnyMsg[]
+    // The delta path emits incremental stream frames, not a full assistant snapshot.
+    expect(first.some((x) => x.type === "assistant")).toBe(false)
+    const kinds = first.map((x) => x.event?.type).filter(Boolean)
+    expect(kinds).toContain("message_start")
+    expect(kinds).toContain("content_block_delta")
+    const delta = first.find((x) => x.event?.type === "content_block_delta")!.event!.delta
+    expect(delta).toEqual({ type: "text_delta", text: "Hel" })
+    // A second delta emits only content_block_delta — message_start is once-per-id.
+    const second = m.handle({ type: "text-delta", text: "lo" }) as AnyMsg[]
+    expect(second.every((x) => x.type === "stream_event")).toBe(true)
+    expect(second.some((x) => x.event?.type === "message_start")).toBe(false)
   })
 
-  it("maps reasoning-delta to a thinking block", () => {
+  it("reasoning streams as thinking_delta content_block_delta frames", () => {
     const m = createSdkEventMapper(ctx)
-    const out = m.handle({ type: "reasoning-delta", text: "thinking…" }) as AnyMsg[]
-    expect(assistantContent(out)).toContainEqual({ type: "thinking", thinking: "thinking…" })
+    const out = m.handle({ type: "reasoning-delta", text: "hmm" }) as AnyMsg[]
+    const delta = out.find((x) => x.event?.type === "content_block_delta")!.event!.delta
+    expect(delta).toEqual({ type: "thinking_delta", thinking: "hmm" })
+  })
+
+  it("sealAssistant() returns [] when nothing is buffered", () => {
+    const m = createSdkEventMapper(ctx)
+    expect(m.sealAssistant()).toEqual([])
+  })
+
+  it("accumulates text-delta and seals one assistant text block with a stable id", () => {
+    const m = createSdkEventMapper(ctx)
+    const start = m.handle({ type: "text-delta", text: "Hello" }) as AnyMsg[]
+    const streamId = start.find((x) => x.event?.type === "message_start")!.event!.message!.id
+    m.handle({ type: "text-delta", text: ", world" })
+    const asst = (m.sealAssistant() as AnyMsg[]).find((x) => x.type === "assistant")!
+    expect(asst.message?.content?.[0]).toEqual({ type: "text", text: "Hello, world" })
+    // The sealed snapshot shares the streamed message_start id (replace-by-id).
+    expect(asst.message!.id).toBe(streamId)
+    // id stays stable across further deltas within the same block
+    m.handle({ type: "text-delta", text: "!" })
+    const asst2 = (m.sealAssistant() as AnyMsg[]).find((x) => x.type === "assistant")!
+    expect(asst2.message!.id).toBe(asst.message!.id)
+  })
+
+  it("maps reasoning-delta to a thinking block once sealed", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({ type: "reasoning-delta", text: "thinking…" })
+    expect(assistantContent(m.sealAssistant() as AnyMsg[])).toContainEqual({
+      type: "thinking",
+      thinking: "thinking…",
+    })
   })
 
   it("maps tool-call to a tool_use block and starts a fresh text block after it", () => {
@@ -91,7 +125,13 @@ describe("createSdkEventMapper", () => {
     // text after a tool_use gets a new message id (boundary change)
     const beforeId = callOut.find((x) => x.type === "assistant")!.message!.id
     const afterText = m.handle({ type: "text-delta", text: "after" }) as AnyMsg[]
-    expect(afterText.find((x) => x.type === "assistant")!.message!.id).not.toBe(beforeId)
+    // The boundary text-delta re-seeds the stream with a fresh message_start id.
+    expect(afterText.find((x) => x.event?.type === "message_start")!.event!.message!.id).not.toBe(
+      beforeId
+    )
+    expect(
+      (m.sealAssistant() as AnyMsg[]).find((x) => x.type === "assistant")!.message!.id
+    ).not.toBe(beforeId)
   })
 
   it("maps tool-result to a synthetic user tool_result message (v6 `output`)", () => {
@@ -151,7 +191,8 @@ describe("createSdkEventMapper", () => {
   it("setModel updates subsequent assistant snapshots", () => {
     const m = createSdkEventMapper(ctx)
     m.setModel("gpt-5")
-    const out = m.handle({ type: "text-delta", text: "y" }) as AnyMsg[]
+    m.handle({ type: "text-delta", text: "y" })
+    const out = m.sealAssistant() as AnyMsg[]
     expect((out.find((x) => x.type === "assistant")!.message as { model?: string }).model).toBe(
       "gpt-5"
     )
@@ -169,14 +210,18 @@ describe("createSdkEventMapper", () => {
   it("accepts v4 `textDelta` and low-level `delta` field names", () => {
     const m = createSdkEventMapper(ctx)
     m.handle({ type: "text-delta", textDelta: "a" })
-    const out = m.handle({ type: "text-delta", delta: "b" }) as AnyMsg[]
+    m.handle({ type: "text-delta", delta: "b" })
+    const out = m.sealAssistant() as AnyMsg[]
     expect(assistantContent(out)[0]).toEqual({ type: "text", text: "ab" })
   })
 
   it("maps reasoning deltas from textDelta/delta too", () => {
     const m = createSdkEventMapper(ctx)
-    const out = m.handle({ type: "reasoning", textDelta: "r" }) as AnyMsg[]
-    expect(assistantContent(out)).toContainEqual({ type: "thinking", thinking: "r" })
+    m.handle({ type: "reasoning", textDelta: "r" })
+    expect(assistantContent(m.sealAssistant() as AnyMsg[])).toContainEqual({
+      type: "thinking",
+      thinking: "r",
+    })
   })
 
   it("defaults tool-call id/name/input when missing", () => {
@@ -279,8 +324,10 @@ describe("createSdkEventMapper", () => {
     m.handle({ type: "text-delta", text: "turn-one" })
     m.finish()
     m.reset()
-    const out = m.handle({ type: "text-delta", text: "turn-two" }) as AnyMsg[]
-    const textBlock = assistantContent(out).find((b) => b.type === "text")!
+    m.handle({ type: "text-delta", text: "turn-two" })
+    const textBlock = assistantContent(m.sealAssistant() as AnyMsg[]).find(
+      (b) => b.type === "text"
+    )!
     expect(textBlock.text).toBe("turn-two")
   })
 })

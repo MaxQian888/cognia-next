@@ -174,6 +174,76 @@ export function catalogModelIds(providerId: string): string[] {
 }
 
 /**
+ * Model ids a provider can plausibly serve, from the same synchronous sources
+ * the picker uses: the user's whitelist/default/discovery for built-ins (plus
+ * the synced OpenRouter catalog and the curated static catalog), or the custom
+ * provider's own model list.
+ */
+function servableModelIds(
+  providerId: string,
+  providerSettings: Record<string, UserProviderSettings> | undefined,
+  customProviders: CustomProviderSettings[] | undefined
+): Set<string> {
+  const ids = new Set<string>()
+  const cp = customProviders?.find((c) => c.id === providerId)
+  if (cp) {
+    if (cp.defaultModel) ids.add(cp.defaultModel)
+    for (const mid of cp.customModels ?? []) ids.add(mid)
+    for (const m of cp.models ?? []) {
+      const mid = typeof m === "string" ? m : (m as { id?: string }).id
+      if (mid) ids.add(mid)
+    }
+    return ids
+  }
+  const settings = providerSettings?.[providerId]
+  for (const mid of settings?.enabledModels ?? []) ids.add(mid)
+  if (settings?.defaultModel) ids.add(settings.defaultModel)
+  for (const m of settings?.discoveredModels ?? []) {
+    if (m?.id) ids.add(m.id)
+  }
+  if (providerId === "openrouter") {
+    for (const m of openRouterCatalogModels()) {
+      if (m?.id) ids.add(m.id)
+    }
+  }
+  for (const mid of catalogModelIds(providerId)) ids.add(mid)
+  return ids
+}
+
+/**
+ * The `defaultModel` that should accompany a `defaultProvider` switch, keeping
+ * the (model, provider) pair coherent: switching the default provider while a
+ * foreign `defaultModel` sticks around sends that model to the new provider's
+ * base URL (or, worse, keeps routing turns to the OLD provider's endpoint).
+ *
+ * Returns `undefined` when the current default model is already servable by
+ * the new provider (keep it — never clobber a deliberate choice), or when the
+ * provider is unknown and no replacement can be derived. Otherwise returns
+ * the provider's own configured default → catalog default → first known model.
+ */
+export function resolveDefaultModelForProvider(
+  providerId: string,
+  currentDefaultModel: string | undefined,
+  providerSettings: Record<string, UserProviderSettings> | undefined,
+  customProviders: CustomProviderSettings[] | undefined
+): string | undefined {
+  const servable = servableModelIds(providerId, providerSettings, customProviders)
+  if (currentDefaultModel && servable.has(currentDefaultModel)) return undefined
+  const cp = customProviders?.find((c) => c.id === providerId)
+  if (cp) {
+    if (cp.defaultModel) return cp.defaultModel
+    const first = servable.values().next()
+    return first.done ? undefined : first.value
+  }
+  const configured = providerSettings?.[providerId]?.defaultModel
+  if (configured) return configured
+  const catalogDefault = PROVIDERS[providerId]?.defaultModel
+  if (catalogDefault) return catalogDefault
+  const first = servable.values().next()
+  return first.done ? undefined : first.value
+}
+
+/**
  * Flatten the user's enabled providers + their model whitelists into a
  * single list the picker can render. Custom providers come last so the
  * built-ins lead the dropdown.

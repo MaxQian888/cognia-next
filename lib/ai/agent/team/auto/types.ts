@@ -65,4 +65,11 @@ export interface AutoOrchestrationProposal {
   assessment: TeamRoutingAssessment
   roster: ProposedTeammate[]
   tasks: ProposedTask[]
+  /**
+   * The chosen executor (single-send / council / ensemble / team-* / handoff),
+   * derived from the assessment + operator consensus signal. Optional so
+   * materialize-only callers and older proposals are unaffected; consumers
+   * recompute via `chooseExecutor` when absent. See `dispatch-executor.ts`.
+   */
+  executor?: import("./dispatch-executor").DispatchDecision
 }

@@ -92,6 +92,8 @@ export interface SdkEventMapper {
   setModel(model: string): void
   /** Translate one AI SDK fullStream event into zero or more SDKMessages. */
   handle(event: unknown): SDKMessage[]
+  /** Emit the canonical full `assistant` snapshot sealing the streamed deltas. */
+  sealAssistant(): SDKMessage[]
   /** Emit the trailing `result` SDKMessage once the stream completes cleanly. */
   finish(info?: { totalCostUsd?: number; usage?: AiSdkUsage }): SDKMessage[]
 }
@@ -144,6 +146,10 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
   const sourceKeys = new Set<string>()
   let initEmitted = false
   let lastUsage: AiSdkUsage | null = null
+  // The messageId a `stream_event` `message_start` was already emitted for — the
+  // delta path seeds the renderer's in-progress preview once per assistant
+  // message. Reset whenever `messageId` rotates.
+  let streamStartId: string | null = null
 
   function sourceToCitation(event: AiSdkStreamPart): Citation | null {
     const isUrl =
@@ -209,6 +215,40 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
     } as unknown as SDKMessage
   }
 
+  // --- Incremental stream frames --------------------------------------------
+  // Text / reasoning deltas emit `stream_event` partial-message frames (the same
+  // shape the Anthropic `includePartialMessages` path uses) rather than a full
+  // assistant snapshot per delta. The renderer's `applyStreamEvent` seeds an
+  // in-progress assistant message on `message_start` and grows it per
+  // `content_block_delta`; a later full `assistant` snapshot (block boundary or
+  // `sealAssistant()`) replaces it by id. O(n²) → O(n). Kept behaviourally in
+  // lockstep with `sidecar/dispatch/event-adapter.mjs`.
+  function streamEnvelope(streamEvent: Record<string, unknown>): SDKMessage {
+    return {
+      type: "stream_event",
+      session_id: ctx.sdkSessionId,
+      uuid: randomUUID(),
+      parent_tool_use_id: null,
+      event: streamEvent,
+    } as unknown as SDKMessage
+  }
+
+  function emitStreamStartIfNeeded(out: SDKMessage[]): void {
+    if (streamStartId === messageId) return
+    streamStartId = messageId
+    out.push(streamEnvelope({ type: "message_start", message: { id: messageId } }))
+  }
+
+  function streamDelta(kind: "text_delta" | "thinking_delta", chunk: string): SDKMessage {
+    return streamEnvelope({
+      type: "content_block_delta",
+      delta:
+        kind === "thinking_delta"
+          ? { type: "thinking_delta", thinking: chunk }
+          : { type: "text_delta", text: chunk },
+    })
+  }
+
   function buildAssistantSnapshot(): SDKMessage {
     const content: Array<Record<string, unknown>> = []
     // Emit a text block when there is text OR accumulated citations to carry.
@@ -255,10 +295,30 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
       sourceCitations.length = 0
       sourceKeys.clear()
       lastUsage = null
+      streamStartId = null
     },
 
     setModel(nextModel: string): void {
       if (typeof nextModel === "string" && nextModel) ctx.model = nextModel
+    },
+
+    /**
+     * Emit the canonical full `assistant` snapshot sealing the `stream_event`
+     * deltas streamed since the last boundary. The caller invokes this after the
+     * `fullStream` drains (and after any post-loop text append) so the final
+     * assistant message reaches the renderer as a replace-by-id canonical.
+     * Returns `[]` when nothing is buffered. Lockstep with `event-adapter.mjs`.
+     */
+    sealAssistant(): SDKMessage[] {
+      if (
+        !textBuf &&
+        !reasoningBuf &&
+        completedToolUses.length === 0 &&
+        sourceCitations.length === 0
+      ) {
+        return []
+      }
+      return [buildAssistantSnapshot()]
     },
 
     handle(rawEvent: unknown): SDKMessage[] {
@@ -272,19 +332,24 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
             // Boundary change — start a new message id so the renderer doesn't
             // merge text after a tool_use into the same block.
             messageId = randomUUID()
+            streamStartId = null
           }
           activeBlockKind = "text"
           // v6 high-level fullStream uses `text`; v4 used `textDelta`; the
           // low-level model stream uses `delta`. Accept all three.
-          textBuf += event.text ?? event.textDelta ?? event.delta ?? ""
-          out.push(buildAssistantSnapshot())
+          const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
+          textBuf += chunk
+          emitStreamStartIfNeeded(out)
+          if (chunk) out.push(streamDelta("text_delta", chunk))
           return out
         }
         case "reasoning":
         case "reasoning-delta": {
           activeBlockKind = "reasoning"
-          reasoningBuf += event.text ?? event.textDelta ?? event.delta ?? ""
-          out.push(buildAssistantSnapshot())
+          const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
+          reasoningBuf += chunk
+          emitStreamStartIfNeeded(out)
+          if (chunk) out.push(streamDelta("thinking_delta", chunk))
           return out
         }
         case "tool-call": {

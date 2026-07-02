@@ -83,6 +83,12 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
         emit({ type: "event", sessionId, event: env })
       }
     }
+    // Seal the streamed text/reasoning deltas into the canonical full `assistant`
+    // snapshot (the deltas above are `stream_event` previews the renderer grows,
+    // then replaces by id). Single-leg engine → one seal before the result.
+    for (const env of mapper.sealAssistant()) {
+      emit({ type: "event", sessionId, event: env })
+    }
 
     const usage = await Promise.resolve(result.usage).catch(() => undefined)
     for (const env of mapper.finish(usage ? { usage } : undefined)) {

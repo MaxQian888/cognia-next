@@ -391,6 +391,22 @@ export async function dispatchTeammate(
     const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) channel = "sidecar"
   }
+  if (channel === "text" && runtime === "claude" && args.preferToolEnabled !== false) {
+    // Reached only when a tool-capable `claude` teammate could not get the
+    // desktop sidecar (isTauri() was false). On a desktop target this "should
+    // never happen"; when it does the teammate silently loses tools + sub-agent
+    // nesting, so surface it instead of degrading quietly. Excludes external,
+    // intentional text (preferToolEnabled === false), and non-claude runtimes.
+    teamCtx.notifier.notify({
+      level: "warn",
+      title: "Teammate degraded to text channel",
+      body: `${teammate.name} is running without tools or sub-agent nesting — the desktop sidecar was unavailable.`,
+      runId: teamCtx.runId,
+      teamId: teamCtx.teamId,
+      taskId: args.taskId,
+      dedupeKey: `text-fallback:${teamCtx.runId}:${teammate.id}`,
+    })
+  }
 
   // Live progress streaming → workspace activity panel. Built only when the
   // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).

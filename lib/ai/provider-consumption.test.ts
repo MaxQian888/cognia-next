@@ -121,6 +121,36 @@ describe("resolveFeatureProvider — explicit provider", () => {
     expect(r.apiFlavor).toBe("responses")
   })
 
+  it("honors a built-in provider's apiProtocol override over the catalog-derived protocol", () => {
+    const overridden: ProviderSettingsSnapshot = {
+      defaultProvider: "deepseek",
+      providers: {
+        // deepseek's catalog protocol is "openai" — the user has pointed it
+        // at a relay that actually speaks the native Anthropic format.
+        deepseek: {
+          enabled: true,
+          apiKey: "sk-deepseek",
+          baseURL: "https://relay.test",
+          defaultModel: "deepseek-v4-flash",
+          apiProtocol: "anthropic",
+        },
+      },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "deepseek",
+        fallbackMode: "none",
+      },
+      overridden
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.protocol).toBe("anthropic")
+  })
+
   it("forwards a custom provider's apiFlavor onto the resolution", () => {
     const flavored: ProviderSettingsSnapshot = {
       defaultProvider: "az",
@@ -308,6 +338,77 @@ describe("resolveFeatureProvider — built-in cloud aggregator base URL defaults
   })
 })
 
+describe("resolveFeatureProvider — custom provider vs providerSettings shadow", () => {
+  const customRow = {
+    id: "gateway",
+    name: "Gateway",
+    protocol: "openai" as const,
+    baseURL: "https://gateway.test/v1",
+    apiKey: "gw-key",
+    defaultModel: "gw-model",
+  }
+  const explicitArgs = {
+    featureId: "f",
+    routeProfile: "general-text" as const,
+    selectionMode: "explicit-provider" as const,
+    providerId: "gateway",
+    fallbackMode: "none" as const,
+  }
+
+  it("custom row wins over a stale providerSettings shadow with blank fields", () => {
+    // A parameter edit / legacy write can mint providerSettings["gateway"]
+    // with empty strings — those must NOT blank out the real base URL, or an
+    // openai-protocol turn silently falls back to api.openai.com.
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "gateway",
+      providers: { gateway: { enabled: true, apiKey: "", baseURL: "", defaultModel: "" } },
+      customProviders: [customRow],
+    }
+    const r = resolveFeatureProvider(explicitArgs, snap) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.baseURL).toBe("https://gateway.test/v1")
+    expect(r.apiKey).toBe("gw-key")
+    expect(r.model).toBe("gw-model")
+    expect(r.isCustomProvider).toBe(true)
+  })
+
+  it("a disabled custom provider is skipped even when a shadow entry is enabled", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "gateway",
+      providers: { gateway: { enabled: true, apiKey: "shadow-key" } },
+      customProviders: [{ ...customRow, enabled: false }],
+    }
+    const r = resolveFeatureProvider(explicitArgs, snap)
+    expect(r.kind).toBe("unresolved")
+    if (r.kind !== "resolved") expect(r.nextAction).toBe("enable_provider")
+  })
+
+  it("a shadow entry's enabled:false does not disable the custom provider", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "gateway",
+      providers: { gateway: { enabled: false } },
+      customProviders: [customRow],
+    }
+    const r = resolveFeatureProvider(explicitArgs, snap) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.baseURL).toBe("https://gateway.test/v1")
+  })
+
+  it("treats a whitespace-only built-in base URL as unset and falls back to the catalog default", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "openrouter",
+      providers: { openrouter: { enabled: true, apiKey: "sk-or-1", baseURL: "  " } },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      { ...explicitArgs, providerId: "openrouter" },
+      snap
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.baseURL).toBe("https://openrouter.ai/api/v1")
+  })
+})
+
 describe("resolveFeatureProvider — selection + fallback modes", () => {
   const snap: ProviderSettingsSnapshot = {
     defaultProvider: "google",
@@ -368,6 +469,58 @@ describe("resolveFeatureProvider — selection + fallback modes", () => {
       snap
     )
     expect((r as ResolvedProvider).kind).toBe("resolved")
+  })
+
+  it("'any' mode can settle on a custom provider when nothing else is configured", () => {
+    const onlyCustom: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: {},
+      customProviders: [
+        {
+          id: "gw",
+          name: "GW",
+          protocol: "openai",
+          baseURL: "https://gw.test/v1",
+          apiKey: "k",
+          defaultModel: "m",
+        },
+      ],
+    }
+    const r = resolveFeatureProvider(
+      { featureId: "f", routeProfile: "general-text", selectionMode: "any", fallbackMode: "none" },
+      onlyCustom
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.providerId).toBe("gw")
+    expect(r.isCustomProvider).toBe(true)
+  })
+
+  it("first-eligible fallback also scans custom providers", () => {
+    const onlyCustom: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: { broken: { enabled: true } },
+      customProviders: [
+        {
+          id: "gw",
+          name: "GW",
+          protocol: "openai",
+          baseURL: "https://gw.test/v1",
+          apiKey: "k",
+        },
+      ],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "broken",
+        fallbackMode: "first-eligible",
+      },
+      onlyCustom
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.providerId).toBe("gw")
   })
 
   it("returns the last failure reason when no candidate resolves", () => {

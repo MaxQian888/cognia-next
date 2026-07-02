@@ -23,6 +23,7 @@ import { assessRouting } from "./assess-routing"
 import { composeRoster } from "./compose-roster"
 import { decomposeTasks } from "./decompose-tasks"
 import { gatherCapabilityCatalog, EMPTY_CAPABILITY_CATALOG } from "./capability-catalog"
+import { chooseExecutor, type ConsensusSignal } from "./dispatch-executor"
 import type { AutoOrchestrationProposal, CapabilityCatalog } from "./types"
 
 export class AutoOrchestrationPiiError extends Error {
@@ -63,6 +64,12 @@ export interface PlanAutoOrchestrationInput {
   now?: () => Date
   /** Injectable PII gate (default {@link defaultPiiGate}). */
   piiGate?: (objective: string) => PiiGateResult
+  /**
+   * Operator consensus/verification signal. Opts into a council/ensemble
+   * executor, which the router can't recommend on its own. Threaded into
+   * `chooseExecutor` to populate `proposal.executor`.
+   */
+  consensusSignal?: ConsensusSignal
 }
 
 /**
@@ -118,5 +125,9 @@ export async function planAutoOrchestration(
     signal: input.signal,
   })
 
-  return { objective, assessment, roster, tasks }
+  // Choose the concrete executor from the (possibly operator-overridden)
+  // assessment + consensus signal. Pure — no model call.
+  const executor = chooseExecutor(assessment, input.consensusSignal)
+
+  return { objective, assessment, roster, tasks, executor }
 }

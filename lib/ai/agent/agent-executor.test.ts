@@ -224,6 +224,16 @@ describe("executeAgent", () => {
       expect(ctx).not.toHaveProperty("permissionCeiling")
     })
 
+    it("threads isDispatchedSubagent into resolveSendOptions (leaf-gate signal)", async () => {
+      await executeAgent("x", { toolsEnabled: true, isDispatchedSubagent: true })
+      expect(mockResolveSendOptions.mock.calls[0][0]).toMatchObject({
+        isDispatchedSubagent: true,
+      })
+      // Absent for a plain (non-dispatched) plugin run.
+      await executeAgent("x", { toolsEnabled: true })
+      expect(mockResolveSendOptions.mock.calls[1][0]).not.toHaveProperty("isDispatchedSubagent")
+    })
+
     it("routes a cross-provider run via the session's providerOverride", async () => {
       await executeAgent("x", { toolsEnabled: true, provider: "anthropic" })
       const ctx = mockResolveSendOptions.mock.calls[0][0]

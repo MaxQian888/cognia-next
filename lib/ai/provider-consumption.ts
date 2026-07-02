@@ -27,7 +27,7 @@ import {
   type LocalProviderName,
 } from "@cognia/provider-types/local-provider"
 import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
-import type { ApiFlavor, ResolverProtocol } from "@cognia/provider-types"
+import type { ApiFlavor, ApiProtocol, ResolverProtocol } from "@cognia/provider-types"
 // Single source of truth for provider→protocol (shared with the sidecar; the
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
 // it — see sidecar/dispatch/protocol-adapters/provider-protocol.mjs).
@@ -51,6 +51,13 @@ export interface ProviderSettingsEntry {
   baseURL?: string
   /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
   apiFlavor?: ApiFlavor
+  /**
+   * Wire protocol override for built-in providers other than `"anthropic"`
+   * (which always dispatches through the native Claude Agent SDK subprocess
+   * regardless of this field). Undefined = use the catalog's fixed protocol
+   * for this provider id.
+   */
+  apiProtocol?: ApiProtocol
   defaultModel?: string
   /** Free-form per-provider config consumed by the AI SDK constructors. */
   options?: Record<string, unknown>
@@ -75,6 +82,8 @@ export type { ResolverProtocol }
 export interface CustomProviderDefinition {
   id: string
   name: string
+  /** `false` = the user disabled this provider; undefined counts as enabled. */
+  enabled?: boolean
   protocol?: ResolverProtocol
   /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
   apiFlavor?: ApiFlavor
@@ -101,6 +110,7 @@ function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefiniti
   return {
     id: rich.id,
     name: (rich as { name?: string }).name ?? rich.id,
+    enabled: rich.enabled,
     protocol,
     apiFlavor: rich.apiFlavor,
     baseURL: rich.baseURL,
@@ -118,6 +128,8 @@ function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefiniti
  */
 export interface RichCustomProviderEntry {
   id: string
+  /** `false` = disabled in Settings; undefined counts as enabled. */
+  enabled?: boolean
   /** Either form of the protocol field — converted in `resolveOne`. */
   protocol?: ResolverProtocol
   apiProtocol?: "openai" | "anthropic" | "gemini" | (string & {})
@@ -254,6 +266,20 @@ export function createProviderSettingsSnapshot(
 // Resolution
 // =============================================================================
 
+/**
+ * First non-empty string among `vals`. The settings UI persists cleared
+ * fields as `""` (controlled inputs), and a stale `providerSettings` entry
+ * can shadow a custom provider's real values through plain `??` — an empty
+ * base URL that shadows the configured one silently re-routes an
+ * openai-protocol turn to api.openai.com. Treat blank as unset everywhere.
+ */
+function pickNonEmpty(...vals: Array<string | undefined>): string | undefined {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim().length > 0) return v
+  }
+  return undefined
+}
+
 function resolveOne(
   providerId: string,
   snapshot: ProviderSettingsSnapshot
@@ -270,7 +296,11 @@ function resolveOne(
     }
   }
 
-  if (builtin && builtin.enabled === false) {
+  // The enabled toggle for a custom provider lives on the custom row itself;
+  // a same-id `providerSettings` shadow entry (parameter edits, legacy data)
+  // must not override it — and vice versa a disabled custom provider must
+  // actually be skipped (the Settings toggle was previously ignored here).
+  if (custom ? custom.enabled === false : builtin && builtin.enabled === false) {
     return {
       kind: "unresolved",
       reason: `Provider "${providerId}" is disabled.`,
@@ -279,16 +309,28 @@ function resolveOne(
     }
   }
 
+  // When a custom definition exists it is the source of truth for its own id
+  // (the Settings UI writes custom credentials to `customProviders`); the
+  // `providerSettings` entry is only a fallback shadow. Built-ins keep the
+  // `providerSettings`-first order. Blank strings never win (see pickNonEmpty).
   const protocol: ResolvedProvider["protocol"] = normalizeProtocol(
-    custom?.protocol ?? resolveProviderProtocol(providerId) ?? "openai"
+    (custom ? (custom.protocol ?? builtin?.apiProtocol) : builtin?.apiProtocol) ??
+      resolveProviderProtocol(providerId) ??
+      "openai"
   ) as ResolvedProvider["protocol"]
 
-  const apiKey = builtin?.apiKey ?? custom?.apiKey
-  let baseURL = builtin?.baseURL ?? custom?.baseURL
-  const model = builtin?.defaultModel ?? custom?.defaultModel
+  const apiKey = custom
+    ? pickNonEmpty(custom.apiKey, builtin?.apiKey)
+    : pickNonEmpty(builtin?.apiKey)
+  let baseURL = custom
+    ? pickNonEmpty(custom.baseURL, builtin?.baseURL)
+    : pickNonEmpty(builtin?.baseURL)
+  const model = custom
+    ? pickNonEmpty(custom.defaultModel, builtin?.defaultModel)
+    : pickNonEmpty(builtin?.defaultModel)
   // Explicit Responses/Chat override (built-in or custom), forwarded to the
   // sidecar so the user can opt a gateway / Azure / custom URL into /responses.
-  const apiFlavor = builtin?.apiFlavor ?? custom?.apiFlavor
+  const apiFlavor = custom ? (custom.apiFlavor ?? builtin?.apiFlavor) : builtin?.apiFlavor
 
   // Local inference engines (Ollama, LM Studio, llama.cpp, vLLM, …) listen on
   // a well-known localhost port and need no API key. When the user enabled a
@@ -349,6 +391,10 @@ export function resolveFeatureProvider(
     case "any":
       if (snapshot.defaultProvider) candidates.push(snapshot.defaultProvider)
       candidates.push(...Object.keys(snapshot.providers))
+      // Custom providers are configured exclusively in `customProviders` —
+      // without this they could never be picked implicitly, so a user whose
+      // ONLY configured provider is a custom gateway resolved to nothing.
+      candidates.push(...snapshot.customProviders.map((p) => p.id))
       break
   }
 
@@ -356,6 +402,7 @@ export function resolveFeatureProvider(
     candidates.push(...args.fallbackProviderOrder)
   } else if (args.fallbackMode === "first-eligible") {
     candidates.push(...Object.keys(snapshot.providers))
+    candidates.push(...snapshot.customProviders.map((p) => p.id))
   }
 
   // De-dupe while preserving order.
