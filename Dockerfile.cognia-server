@@ -36,6 +36,8 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
 COPY src-tauri ./src-tauri
 COPY crates ./crates
+# Out-of-workspace path dependency of src-tauri (cognia-signaling-core).
+COPY services/signaling-server/core ./services/signaling-server/core
 RUN cargo chef prepare --recipe-path recipe.json
 
 # The cook layer compiles every dependency of the workspace (tauri, wasmtime,
@@ -43,6 +45,8 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS deps
 COPY rust-toolchain.toml ./
 COPY .cargo ./.cargo
+# The recipe skeleton still resolves the path dep at cook time.
+COPY services/signaling-server/core ./services/signaling-server/core
 COPY --from=planner /work/recipe.json .
 RUN cargo chef cook --release --recipe-path recipe.json
 
@@ -50,6 +54,7 @@ FROM deps AS builder
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
+COPY services/signaling-server/core ./services/signaling-server/core
 RUN cargo build --release --locked --bin cognia-server
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
@@ -57,6 +62,7 @@ FROM deps AS check
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
+COPY services/signaling-server/core ./services/signaling-server/core
 RUN cargo check --release --locked --bin cognia-server
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
@@ -91,6 +97,9 @@ RUN apt-get update \
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
+# Smoke stub agent (ADR-0059 D6): admitted by SpawnPolicy ONLY when
+# COGNIA_SMOKE_AGENT=1 is set on the server — inert otherwise.
+COPY scripts/smoke/stub-acp-agent.mjs /opt/cognia/smoke/stub-acp-agent.mjs
 
 ENV COGNIA_DATA_DIR=/data \
     COGNIA_BRAIN_ENTRY=/app/brain/cli.mjs \

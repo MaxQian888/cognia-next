@@ -159,6 +159,20 @@ const stubNextPlugin = {
 
 const ASSET_LOADERS = { ".ttf": "empty", ".css": "empty", ".svg": "empty", ".woff": "empty", ".woff2": "empty" }
 
+// Load the i18n aggregate messages as DEFAULT-ONLY JSON modules — same fix as
+// build-cli.mjs: the messages contain an `eval` top-level namespace, and
+// esbuild's json loader otherwise emits `var eval = …` named exports, a
+// strict-mode SyntaxError in ESM output (crashed `cognia-agent serve`).
+const jsonDefaultOnlyPlugin = {
+  name: "json-default-only-messages",
+  setup(build) {
+    build.onLoad({ filter: /i18n[\\/]messages[\\/][^\\/]+\.json$/ }, async (args) => {
+      const raw = await fs.promises.readFile(args.path, "utf8")
+      return { contents: `export default ${raw}`, loader: "js" }
+    })
+  },
+}
+
 // Best-effort recursive remove. On Windows a dist subdir can be locked because a
 // terminal is parked in it (cwd lock) — that blocks deleting the DIR but not
 // rewriting files inside it, so we tolerate the failure and carry on.
@@ -194,7 +208,7 @@ await esbuild.build({
   // TUI_EXTERNALS); those resolve from the adjacent node_modules at runtime.
   external: TUI_EXTERNALS,
   loader: ASSET_LOADERS,
-  plugins: [stubNextPlugin],
+  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "info",
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, cliBundle)}`)

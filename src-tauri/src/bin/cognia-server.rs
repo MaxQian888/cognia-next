@@ -106,6 +106,11 @@ enum CliCommand {
         #[arg(long)]
         new_key: Option<String>,
     },
+    /// Print a service-scope JWT (24h) for the local account. Service tokens
+    /// are honored ONLY from loopback, so the value is useless off-host;
+    /// still treat it as a secret. Used by the tier-2 smoke to drive the
+    /// service-only external-agent arms from inside the container.
+    IssueServiceToken,
 }
 
 /// Resolve the advertised base URL: explicit flag → `COGNIA_PUBLIC_URL` →
@@ -208,6 +213,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             port,
             advertise_url,
         } => run_serve(&store, &tls_material, port, advertise_url).await,
+        CliCommand::IssueServiceToken => {
+            let signing_secret = secret::load_or_generate()?;
+            let (token, exp) = app_lib::companion_api::jwt::issue_service_jwt(
+                &signing_secret,
+                HEADLESS_LOCAL_ACCOUNT_ID,
+            )?;
+            // Token on stdout (script-friendly), metadata on stderr.
+            println!("{token}");
+            eprintln!("[cognia-server] service token expires_at={exp} (loopback-only)");
+            Ok(())
+        }
         CliCommand::RotateMasterKey { .. } => unreachable!("handled above"),
     }
 }

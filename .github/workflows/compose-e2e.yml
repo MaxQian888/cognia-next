@@ -2,8 +2,11 @@ name: Compose E2E
 
 # ============================================================================
 # Brings up the self-host compose suite and runs the tiered smoke (ADR-0059
-# P0.4). Tier 1 (signaling + share) runs on every relevant PR and nightly;
-# it needs no secrets. Tier 2 (cognia-server) lands with W6 (D6).
+# P0.4 / W6). Tier 1 (signaling + share) runs on every relevant PR and
+# nightly; it needs no secrets. Tier 2 (cognia-server) builds the full image
+# (heavy — cargo cook) so it runs nightly + on dispatch only; the stub ACP
+# agent keeps it vendor-secret-free (the sidecar chat leg SKIPs without
+# ANTHROPIC_API_KEY).
 # ============================================================================
 
 on:
@@ -65,3 +68,58 @@ jobs:
         env:
           SHARE_UPLOAD_SECRET: ci-smoke-secret
         run: docker compose down -v
+
+  tier2:
+    name: Tier 2 (cognia-server)
+    # The cargo-chef cook makes this a long job — keep it off the PR path.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SHARE_UPLOAD_SECRET: ci-smoke-secret
+      COGNIA_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
+      COGNIA_SMOKE_AGENT: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build service images
+        run: |
+          docker build -t cognia-signaling:ci services/signaling-server
+          docker build -t cognia-share:ci services/share-server
+
+      - name: Build cognia-server (runtime-full, registry cache)
+        working-directory: deploy/compose
+        env:
+          SIGNALING_IMAGE: cognia-signaling:ci
+          SHARE_IMAGE: cognia-share:ci
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: docker compose --profile server build cognia-server
+
+      - name: Up + wait (server profile)
+        working-directory: deploy/compose
+        env:
+          SIGNALING_IMAGE: cognia-signaling:ci
+          SHARE_IMAGE: cognia-share:ci
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: docker compose --profile server up -d --wait
+
+      - name: Smoke (tier server)
+        env:
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: node scripts/smoke/compose-smoke.mjs --tier server
+
+      - name: Logs on failure
+        if: failure()
+        working-directory: deploy/compose
+        env:
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: docker compose --profile server logs --no-color
+
+      - name: Down
+        if: always()
+        working-directory: deploy/compose
+        env:
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: docker compose --profile server down -v
