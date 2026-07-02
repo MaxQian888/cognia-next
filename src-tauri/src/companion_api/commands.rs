@@ -345,6 +345,16 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     register_tauri_event(app, Arc::clone(&bus), "automation:consent-request");
     // Pairing-lifecycle events — useful for multi-device observation.
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
+    // ADR-0061 P2 — live workflow run-status frames (every transition incl.
+    // per-step lastStepId advances). Emitted by the TS
+    // `lib/workflow/runtime/companion-run-events.ts` funnel.
+    register_tauri_event(app, Arc::clone(&bus), "workflow://run-status");
+    // ADR-0061 P2 — sync invalidation. The mobile `installEventDrivenSync`
+    // has subscribed to this channel since ADR-0027; the desktop now emits
+    // it (terminal workflow runs → { table: "workflowRuns" }) so the phone
+    // re-pulls exactly when data changed instead of waiting for the next
+    // foreground/resume/network trigger.
+    register_tauri_event(app, Arc::clone(&bus), "sync://invalidate");
     // Heartbeat / presence signal emitted by the JWT middleware on each request.
     register_tauri_event(app, bus, "companion://device-seen");
     // Phase B4 — push fan-out for events worth notifying about while the
@@ -355,6 +365,20 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // out the renderer-side backstop. Emitted by
     // `lib/companion/needs-input-notifier.ts`.
     register_push_trigger(app, "companion://needs-input");
+    // ADR-0061 P2 — terminal workflow runs (failed always; succeeded /
+    // cancelled only when a paired device triggered the run — policy lives
+    // in `companion-run-events.ts`). Payload carries ids + status only.
+    register_push_trigger(app, "workflow://run-terminal");
+}
+
+/// Human-ish push body for a channel name: strip any `scheme://` prefix so
+/// e.g. `workflow://run-terminal` renders as `run-terminal`. The phone
+/// resolves real display text from its synced mirror via `data`.
+fn push_body_for_channel(channel: &str) -> String {
+    match channel.split_once("://") {
+        Some((_, rest)) => rest.to_string(),
+        None => channel.to_string(),
+    }
 }
 
 /// Subscribe to `channel` and, on each emit, broadcast a push payload to
@@ -381,11 +405,7 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
                 .unwrap_or_default();
             let payload = super::push::PushPayload {
                 title: Some("cognia".into()),
-                body: Some(
-                    channel_name
-                        .replace("claude://", "")
-                        .replace("companion://", ""),
-                ),
+                body: Some(push_body_for_channel(&channel_name)),
                 data,
             };
 
@@ -945,6 +965,14 @@ mod tests {
 
     #[test]
     fn commands_module_compiles() {}
+
+    #[test]
+    fn push_body_strips_any_scheme_prefix() {
+        assert_eq!(push_body_for_channel("claude://message-added"), "message-added");
+        assert_eq!(push_body_for_channel("companion://needs-input"), "needs-input");
+        assert_eq!(push_body_for_channel("workflow://run-terminal"), "run-terminal");
+        assert_eq!(push_body_for_channel("no-scheme"), "no-scheme");
+    }
 
     #[test]
     fn detect_lan_ip_returns_string_or_none() {
