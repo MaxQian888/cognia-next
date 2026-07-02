@@ -34,7 +34,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use super::{healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
+use super::{acp, healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
 use axum::{
     middleware::{from_fn, from_fn_with_state},
     routing::{any, get, post},
@@ -232,7 +232,10 @@ pub fn build_router(state: SharedState) -> Router {
         // stable installation identifier so mobile clients can detect
         // cert rotation and confirm they're talking to the right
         // desktop. See `healthz` module docs.
-        .route("/api/v1/healthz", get(healthz::healthz_handler));
+        .route("/api/v1/healthz", get(healthz::healthz_handler))
+        // Prometheus exposition (ADR-0059 D9) — aggregate counters only,
+        // same public trust model as the services' /metrics.
+        .route("/metrics", get(super::metrics::metrics_handler));
 
     // Authenticated routes — JWT verifier middleware applied.
     //
@@ -249,6 +252,11 @@ pub fn build_router(state: SharedState) -> Router {
         // rejects non-service scopes before the upgrade.
         .route("/ws/v1/bridge", any(ws_bridge::ws_bridge_handler))
         .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
+        // ACP server (Agent Client Protocol) — external editors drive cognia
+        // Claude sessions over JSON-RPC. Baseline-chat surface only (the
+        // handler reaches `claude_*` arms through `rpc::dispatch`, whose
+        // control/service gates still apply), so a device JWT suffices.
+        .route("/ws/v1/acp", any(acp::acp_handler))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,
@@ -493,6 +501,24 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 404, "unregistered adapter → 404");
 
         crate::headless::install_headless_services(None);
+    }
+
+    /// `/ws/v1/acp` sits in the protected block: without a device JWT the
+    /// middleware rejects the upgrade before the handler runs.
+    #[tokio::test]
+    async fn acp_route_requires_device_jwt() {
+        use tower::ServiceExt as _;
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/ws/v1/acp")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 401, "no token → 401 before upgrade");
     }
 
     #[test]
