@@ -27,7 +27,13 @@ import { checkAchievements } from "@/lib/pet/achievements/check"
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { usePetStore } from "@/stores/pet/pet-store"
 
-/** Event kinds whose resting state should honor a persistent care condition. */
+/**
+ * Event kinds whose resting state should honor a persistent care condition.
+ * Only low-signal ambient kinds with no expressive state of their own belong
+ * here — kinds that map to an expressive state in `reducePetVisualState`
+ * (e.g. `twinBusy` → thinking, `twinMilestone` → happy) must NOT be listed, or
+ * `restingWithCare` would suppress those states and make the reducer cases dead.
+ */
 const PASSIVE_KINDS = new Set<PetEventKind>(["idle", "inboundMessage", "scheduledRun"])
 
 /** Last processed event kind — drives the error→success "recovered" signal. */

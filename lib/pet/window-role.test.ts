@@ -1,7 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { getPetWindowRole, PET_POPUP_WINDOW_LABEL, PET_WINDOW_LABEL } from "./window-role"
+import {
+  getPetWindowRole,
+  isMainAppWindow,
+  PET_POPUP_WINDOW_LABEL,
+  PET_WINDOW_LABEL,
+} from "./window-role"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
 
@@ -67,5 +72,30 @@ describe("getPetWindowRole", () => {
   it("exposes the canonical pet window labels", () => {
     expect(PET_WINDOW_LABEL).toBe("pet")
     expect(PET_POPUP_WINDOW_LABEL).toBe("pet-popup")
+  })
+})
+
+describe("isMainAppWindow", () => {
+  afterEach(() => setTauri(false))
+
+  it("is true on the web (single browsing context)", () => {
+    setTauri(false)
+    expect(isMainAppWindow(() => PET_WINDOW_LABEL)).toBe(true)
+  })
+
+  it("is true for the main Tauri window", () => {
+    setTauri(true)
+    expect(isMainAppWindow(() => "main")).toBe(true)
+    expect(isMainAppWindow(() => undefined)).toBe(true)
+  })
+
+  it("is false for the least-privilege pet overlay window", () => {
+    setTauri(true)
+    expect(isMainAppWindow(() => PET_WINDOW_LABEL)).toBe(false)
+  })
+
+  it("is false for the pet click popup window", () => {
+    setTauri(true)
+    expect(isMainAppWindow(() => PET_POPUP_WINDOW_LABEL)).toBe(false)
   })
 })

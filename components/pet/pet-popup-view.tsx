@@ -23,6 +23,7 @@ import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { startOverlayPetBridge, type OverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
+import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import {
   closePetPopup,
   closePetWindow,
@@ -61,6 +62,13 @@ export function PetPopupView() {
       delete root.dataset.petOverlay
     }
   }, [])
+
+  // Reveal the popup only AFTER the first painted frame. Rust creates it
+  // `visible(false)` and no longer shows it on the create path, so the user
+  // never sees the pre-hydration opaque page background flash inside what must
+  // be a transparent window (see `lib/pet/reveal.ts`). Focus after showing so
+  // the native blur-to-close behaves exactly like a system context menu.
+  useEffect(() => schedulePetWindowReveal({ focus: true }), [])
 
   // Cross-window bridge: post interactions back to the main window. Held in a
   // ref so the panel callbacks don't re-bind every render.

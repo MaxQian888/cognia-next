@@ -53,6 +53,14 @@ jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
   startOverlayPetBridge: () => startOverlayPetBridge(),
 }))
 
+// First-paint reveal — deep-tested in lib/pet/reveal.test.ts; here we assert
+// the popup schedules it (with focus for blur-to-close) and cancels on unmount.
+const revealCancel = jest.fn()
+const schedulePetWindowReveal = jest.fn((_opts?: unknown) => revealCancel)
+jest.mock("@/lib/pet/reveal", () => ({
+  schedulePetWindowReveal: (opts?: unknown) => schedulePetWindowReveal(opts),
+}))
+
 // Tauri window wrappers.
 const closePetPopup = jest.fn().mockResolvedValue(true)
 const closePetWindow = jest.fn().mockResolvedValue(true)
@@ -104,6 +112,8 @@ beforeEach(() => {
   bridgeDispose.mockReset()
   bridgeSendInteraction.mockReset()
   startOverlayPetBridge.mockClear()
+  revealCancel.mockClear()
+  schedulePetWindowReveal.mockClear()
   closePetPopup.mockClear()
   closePetWindow.mockClear()
   resizePetPopup.mockClear()
@@ -139,6 +149,15 @@ describe("PetPopupView", () => {
     expect(document.documentElement.dataset.petOverlay).toBe("1")
     unmount()
     expect(document.documentElement.dataset.petOverlay).toBeUndefined()
+  })
+
+  it("schedules the focused first-paint reveal on mount and cancels on unmount", () => {
+    const { unmount } = render(<PetPopupView />)
+    expect(schedulePetWindowReveal).toHaveBeenCalledTimes(1)
+    expect(schedulePetWindowReveal).toHaveBeenCalledWith({ focus: true })
+    expect(revealCancel).not.toHaveBeenCalled()
+    unmount()
+    expect(revealCancel).toHaveBeenCalledTimes(1)
   })
 
   it("starts the bridge on mount and disposes on unmount", () => {

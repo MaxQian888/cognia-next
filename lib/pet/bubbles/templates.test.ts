@@ -39,6 +39,8 @@ describe("pickBubbleKey", () => {
       "greeting",
       "inboundMessage",
       "achievementUnlocked",
+      "twinBusy",
+      "twinMilestone",
     ]
     for (const k of kinds) expect(pickBubbleKey(k, 3)).not.toBeNull()
   })

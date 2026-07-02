@@ -69,6 +69,37 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   openPetPopup: (opts: unknown) => openPetPopup(opts),
 }))
 
+// Platform probe — the post-paint window reveal is Tauri-only. Default false so
+// the existing suite (which asserts no window ops fire on mount) is unchanged;
+// the reveal test flips it. Preserve the module's other exports.
+let mockIsTauri = false
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: () => mockIsTauri,
+}))
+
+// Tauri window API used by the post-paint reveal effect (dynamic import).
+const revealShowMock = jest.fn().mockResolvedValue(undefined)
+const revealInnerSizeMock = jest.fn().mockResolvedValue({ width: 200, height: 240 })
+const revealSetSizeMock = jest.fn().mockResolvedValue(undefined)
+const revealSetResizableMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    show: revealShowMock,
+    innerSize: revealInnerSizeMock,
+    setSize: revealSetSizeMock,
+    setResizable: revealSetResizableMock,
+  }),
+}))
+jest.mock("@tauri-apps/api/dpi", () => ({
+  PhysicalSize: class {
+    constructor(
+      public width: number,
+      public height: number
+    ) {}
+  },
+}))
+
 // Locomotion hook — deep-tested on its own; here we record the wiring args and
 // surface a controllable beginThrow.
 const locomotionArgs = jest.fn()
@@ -125,6 +156,12 @@ let cancelRafSpy: jest.SpyInstance
 const rafCallbacks: FrameRequestCallback[] = []
 
 beforeEach(() => {
+  mockIsTauri = false
+  revealShowMock.mockClear()
+  revealInnerSizeMock.mockClear()
+  revealInnerSizeMock.mockResolvedValue({ width: 200, height: 240 })
+  revealSetSizeMock.mockClear()
+  revealSetResizableMock.mockClear()
   mockUsePet.mockReset()
   rendererProps.mockReset()
   bridgeDispose.mockReset()
@@ -179,6 +216,45 @@ describe("PetOverlayView", () => {
     expect(document.documentElement.dataset.petOverlay).toBe("1")
     unmount()
     expect(document.documentElement.dataset.petOverlay).toBeUndefined()
+  })
+
+  it("does not reveal the window off Tauri (web/tests never open it)", async () => {
+    mockIsTauri = false
+    withPet()
+    await act(async () => {
+      render(<PetOverlayView />)
+    })
+    await act(async () => {
+      flushRaf()
+      flushRaf()
+    })
+    expect(revealShowMock).not.toHaveBeenCalled()
+  })
+
+  it("reveals the sprite window only after the first painted frame on Tauri", async () => {
+    mockIsTauri = true
+    withPet()
+    await act(async () => {
+      render(<PetOverlayView />)
+    })
+    // Not shown until BOTH rAFs (layout + post-commit) have run.
+    expect(revealShowMock).not.toHaveBeenCalled()
+    await act(async () => {
+      flushRaf() // rAF #1 schedules rAF #2
+    })
+    expect(revealShowMock).not.toHaveBeenCalled()
+    await act(async () => {
+      flushRaf() // rAF #2 runs reveal (dynamic import + show)
+    })
+    expect(revealShowMock).toHaveBeenCalledTimes(1)
+    // Nudge the physical size by 1px then restore it, to force the transparent
+    // surface to recomposite (the Windows black-until-resize quirk). Resizing is
+    // briefly enabled so the non-resizable window doesn't clamp the nudge.
+    expect(revealSetResizableMock).toHaveBeenNthCalledWith(1, true)
+    expect(revealSetSizeMock).toHaveBeenCalledTimes(2)
+    expect(revealSetSizeMock.mock.calls[0][0]).toMatchObject({ width: 200, height: 241 })
+    expect(revealSetSizeMock.mock.calls[1][0]).toMatchObject({ width: 200, height: 240 })
+    expect(revealSetResizableMock).toHaveBeenNthCalledWith(2, false)
   })
 
   it("starts the overlay bridge on mount and disposes on unmount", () => {

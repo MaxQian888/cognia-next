@@ -6,11 +6,15 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import Link from "next/link"
+import { ArrowRightIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
+import { Button } from "@/components/ui/button"
 import { destroyPetWindow, openPetWindow, setPetClickThrough } from "@/lib/tauri/pet-window"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
+import { isLinuxPlatform } from "@/lib/tauri/os"
 import {
   DEFAULT_PET_DESKTOP_OVERLAY,
   DEFAULT_PET_WANDER,
@@ -34,6 +38,10 @@ export function PetDesktopControls({ pet, patch }: PetControlsProps) {
   const wander: PetWanderSettings = desktopPet.wander ?? DEFAULT_PET_WANDER
   const patchWander = (next: Partial<PetWanderSettings>) =>
     patchDesktop({ wander: { ...wander, ...next } })
+
+  // Window-climbing needs cross-app window enumeration — available on
+  // Windows and macOS, not on Linux (see `PetWanderSettings.climbWindows`).
+  const climbWindowsSupported = !isLinuxPlatform()
 
   // Toggle the overlay window alongside the persisted flag. Enabling opens the
   // transparent window at the saved size/position; disabling destroys it (which
@@ -75,6 +83,13 @@ export function PetDesktopControls({ pet, patch }: PetControlsProps) {
           onCheckedChange={handleDesktopEnabled}
         />
       </div>
+
+      <Button asChild size="sm" variant="link" className="h-auto p-0">
+        <Link href="/settings?section=desktop">
+          {t("desktopPet.hotkeyLink")}
+          <ArrowRightIcon className="ml-1.5 size-3.5" />
+        </Link>
+      </Button>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-4">
@@ -177,12 +192,15 @@ export function PetDesktopControls({ pet, patch }: PetControlsProps) {
             <div className="space-y-0.5">
               <Label htmlFor="pet-wander-climb">{t("desktopPet.wander.climbWindows.label")}</Label>
               <p className="text-sm text-muted-foreground">
-                {t("desktopPet.wander.climbWindows.description")}
+                {climbWindowsSupported
+                  ? t("desktopPet.wander.climbWindows.description")
+                  : t("desktopPet.wander.climbWindows.unsupportedPlatform")}
               </p>
             </div>
             <Switch
               id="pet-wander-climb"
-              checked={wander.climbWindows ?? false}
+              checked={climbWindowsSupported && (wander.climbWindows ?? false)}
+              disabled={!climbWindowsSupported}
               onCheckedChange={(v) => patchWander({ climbWindows: v })}
             />
           </div>

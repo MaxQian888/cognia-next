@@ -83,6 +83,11 @@ describe("reducePetVisualState", () => {
     expect(reducePetVisualState(event("inboundMessage"), needs())).toBe("idle")
     expect(reducePetVisualState(event("scheduledRun"), needs())).toBe("idle")
   })
+
+  it("reflects ambient twin activity: busy reads as thinking, a milestone as happy", () => {
+    expect(reducePetVisualState(event("twinBusy"), needs())).toBe("thinking")
+    expect(reducePetVisualState(event("twinMilestone"), needs())).toBe("happy")
+  })
 })
 
 describe("restingWithCare", () => {

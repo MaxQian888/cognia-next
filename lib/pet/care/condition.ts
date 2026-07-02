@@ -11,6 +11,13 @@ import { normalizeCareState } from "@/types/pet"
 
 /** Energy/mood at or below this counts as "low". */
 export const UNWELL_NEED_THRESHOLD = 25
+/**
+ * Upper bound of the "neutral" mood band. At/above this the pet reads as happy;
+ * in `[UNWELL_NEED_THRESHOLD, NEUTRAL_MOOD_CEILING)` it's neutral. Centralised
+ * here so the tray's coarse 3-band emoji (`lib/tray/status-section.ts`) can't
+ * drift from the care thresholds it sits beside.
+ */
+export const NEUTRAL_MOOD_CEILING = 60
 /** A need must stay low this long before the pet actually becomes unwell. */
 export const UNWELL_SUSTAIN_MS = 6 * 3_600_000
 /** Both energy and mood must rise to this to clear unwell (hysteresis). */

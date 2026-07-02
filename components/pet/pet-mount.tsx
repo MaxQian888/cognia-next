@@ -14,6 +14,7 @@ import { useActivityTracker } from "@/hooks/pet/use-activity-tracker"
 import { usePetCareAlert } from "@/hooks/pet/use-pet-care-alert"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
+import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 import { isTauri } from "@/lib/platform/detect"
 import { usePlatform } from "@/hooks/use-platform"
@@ -43,8 +44,12 @@ export function PetMount() {
   // untappable. Exclude the whole subsystem on mobile, mirroring the Perf HUD.
   const isMobile = usePlatform() === "mobile"
   const widgetEnabled = enabled && !secondary && !isMobile
+  // The main desktop window — where the global-hotkey → command dispatch lives.
+  // Independent of `enabled`: the toggle-window hotkey must summon the pet even
+  // when the widget is currently off.
+  const isMainDesktopWindow = !secondary && !isMobile && isTauri()
 
-  usePetEventBus(widgetEnabled)
+  usePetEventBus(widgetEnabled, pet.twinAwareness)
   // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
   // pings the overlay's wander gate over the bridge (throttled).
   useActivityTracker(widgetEnabled)
@@ -71,6 +76,20 @@ export function PetMount() {
     if (!widgetEnabled || !isTauri()) return
     const dispose = startMainPetBridge()
     return dispose
+  }, [widgetEnabled])
+
+  // The desktop-pet toggle command backs a global hotkey / tray quick action.
+  // Register it on the main desktop window regardless of `enabled` so a chord
+  // the user bound stays live (and isn't reserved-but-dead) when the pet is off.
+  useEffect(() => {
+    if (!isMainDesktopWindow) return
+    return registerPetWindowCommand()
+  }, [isMainDesktopWindow])
+
+  // Feed/play/pet need the running controller, so gate them on the widget.
+  useEffect(() => {
+    if (!widgetEnabled) return
+    return registerPetInteractionCommands()
   }, [widgetEnabled])
 
   if (!widgetEnabled) return null

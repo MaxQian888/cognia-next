@@ -143,6 +143,22 @@ describe("handlePetEvent", () => {
     expect(usePetStore.getState().visualState).toBe("unwell")
   })
 
+  it("shows the expressive thinking/happy states for twin activity", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-2", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    // twinBusy is expressive (not a PASSIVE_KIND) so it reaches the reducer.
+    await handlePetEvent({ source: "twin", kind: "twinBusy", at: 1000 })
+    await whenPetEventsSettled()
+    expect(usePetStore.getState().visualState).toBe("thinking")
+
+    await handlePetEvent({ source: "twin", kind: "twinMilestone", at: 1001 })
+    await whenPetEventsSettled()
+    expect(usePetStore.getState().visualState).toBe("happy")
+  })
+
   it("serializes concurrent events without losing XP", async () => {
     await upsertPetProfile({
       ...createDefaultProfile("acct-1", 0),
