@@ -27,6 +27,7 @@ import { seedBuiltinSlashCommands } from "./registry"
 import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-blocks"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
+import { dispatchPetSubcommand } from "./actions/pet"
 import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
@@ -432,6 +433,17 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
           `_Objective change prompt staged — the model will be told on the next turn._`
         )
       }
+    },
+  },
+  {
+    name: "pet",
+    description: "Check on or care for your desktop pet (feed, play, clean, …).",
+    scope: "builtin",
+    category: "system",
+    argumentHint: "<status | feed | play | pet | sleep | clean | treat>",
+    handler: async (ctx) => {
+      const result = await dispatchPetSubcommand(ctx.args)
+      ctx.pushSystemMessage(result.system)
     },
   },
   {
