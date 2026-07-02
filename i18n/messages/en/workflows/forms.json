@@ -37,6 +37,23 @@
       "label": "Enable tools"
     }
   },
+  "approvalRequest": {
+    "message": {
+      "label": "Message (optional)"
+    },
+    "onTimeout": {
+      "fail": "Fail the step",
+      "label": "On timeout",
+      "reject": "Route as rejected"
+    },
+    "timeoutMs": {
+      "hint": "How long to wait for a decision. Default 1 hour.",
+      "label": "Timeout (ms)"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
   "aiClassify": {
     "apiKey": {
       "label": "API key"

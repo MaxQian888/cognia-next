@@ -6,6 +6,12 @@
         "label": "Agent turn"
       }
     },
+    "approval": {
+      "request": {
+        "description": "Pause until a human approves or rejects — from the desktop notification center or a paired phone. Routes downstream via Approved / Rejected handles.",
+        "label": "Request approval"
+      }
+    },
     "character": {
       "create": {
         "description": "Creates a new character (employee) row.",

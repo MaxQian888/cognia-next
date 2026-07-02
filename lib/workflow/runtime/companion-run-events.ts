@@ -45,7 +45,13 @@ export interface WorkflowRunStatusFrame {
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed", "cancelled"])
 
-async function tauriEmit(event: string, payload: unknown): Promise<void> {
+/**
+ * Emit a Tauri event destined for companion fan-out (event bus / push
+ * trigger). Shared by the run-state funnel below and the approval notifier.
+ * Throws off-Tauri — callers gate on `isTauri()` and treat delivery as
+ * best-effort.
+ */
+export async function emitCompanionEvent(event: string, payload: unknown): Promise<void> {
   const moduleId = "@tauri-apps/api/event"
   const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
     emit: (event: string, payload: unknown) => Promise<void>
@@ -73,7 +79,7 @@ export async function notifyCompanionsOfRunState(
   deps: CompanionRunEventDeps = {}
 ): Promise<void> {
   if (!(deps.isTauriFn ?? isTauri)()) return
-  const emit = deps.emit ?? tauriEmit
+  const emit = deps.emit ?? emitCompanionEvent
   try {
     const frame: WorkflowRunStatusFrame = {
       runId: input.runId,

@@ -2776,6 +2776,94 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/workflow_approval_list:
+    post:
+      operationId: rpcWorkflowApprovalList
+      tags: [rpc-workflows]
+      summary: List pending workflow approval requests (ADR-0061 P2).
+      description: |
+        Read-only projection of the desktop's in-memory pending-approval
+        registry (`action.approval.request` steps currently blocked on a
+        human decision).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        "200":
+          description: Pending approvals, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approvals:
+                    type: array
+                    items:
+                      type: object
+                      required: [approvalId, runId, workflowId, stepId, title, requestedAt]
+                      properties:
+                        approvalId: { type: string }
+                        runId: { type: string }
+                        workflowId: { type: string }
+                        stepId: { type: string }
+                        title: { type: string }
+                        message: { type: string }
+                        requestedAt: { type: integer, format: int64 }
+                        timeoutAt: { type: integer, format: int64 }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/workflow_approval_respond:
+    post:
+      operationId: rpcWorkflowApprovalRespond
+      tags: [rpc-workflows]
+      summary: Resolve a pending workflow approval (ADR-0061 P2, control-gated).
+      description: |
+        Approves or rejects a blocked `action.approval.request` step.
+        Requires the remote-control capability. The responder identity is
+        the JWT-verified `callerDeviceId` injected server-side — any
+        client-sent value is overwritten.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approvalId, decision]
+              properties:
+                approvalId: { type: string }
+                decision: { type: string, enum: [approved, rejected] }
+      responses:
+        "200":
+          description: Resolution outcome — ok=false means no longer pending.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  reason: { type: string, enum: [not-found] }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device lacks the remote-control capability,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   # ─────────────────────────────────────────────────────────────────────────
   # rpc — devices
   # ─────────────────────────────────────────────────────────────────────────

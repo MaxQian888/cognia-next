@@ -340,6 +340,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     "workflow_cancel_run",
     "workflow_schedule_pause",
     "workflow_schedule_resume",
+    // ── Workflow approval gate (ADR-0061 P2) ────────────────────────────────
+    // Pending `action.approval.request` entries live in the renderer's
+    // in-memory registry — round-trip through desktop_writes_bridge.
+    // `workflow_approval_respond` resolves a run's HITL gate, so it is
+    // control-gated; the caller device id is injected server-side.
+    "workflow_approval_list",
+    "workflow_approval_respond",
     // ── Twin source CRUD + job control (ADR-0003) ───────────────────────────
     "twin_delete",
     "twin_source_list",
@@ -437,8 +444,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Plugin registry reads.
     "plugin_list",
     "plugin_runtime_snapshot",
-    // Workflow run listing.
+    // Workflow run listing + pending-approval projection.
     "workflow_run_list",
+    "workflow_approval_list",
     // Twin reads.
     "twin_source_list",
     "twin_job_status",
@@ -518,9 +526,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     "plugin_backup_create",
     "plugin_backup_restore",
     "plugin_backup_delete",
-    // Workflow destructive ops.
+    // Workflow destructive ops + the HITL approval gate (approving a
+    // workflow decision steers execution — same elevation as goal_*).
     "workflow_delete",
     "workflow_cancel_run",
+    "workflow_approval_respond",
     // Twin destructive ops.
     "twin_delete",
     "twin_source_delete",
@@ -556,7 +566,11 @@ fn is_control_command(name: &str) -> bool {
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
-const CALLER_DEVICE_ID_COMMANDS: &[&str] = &["workflow_trigger_manual", "device_capabilities_report"];
+const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
+    "workflow_trigger_manual",
+    "device_capabilities_report",
+    "workflow_approval_respond",
+];
 
 /// Inject (and overwrite) `callerDeviceId` into `args` for the commands in
 /// [`CALLER_DEVICE_ID_COMMANDS`]. Overwriting is the point: the value comes
@@ -1414,6 +1428,10 @@ pub(super) async fn dispatch(
         | "workflow_cancel_run"
         | "workflow_schedule_pause"
         | "workflow_schedule_resume"
+        // ADR-0061 P2 — HITL approval gate; respond gets callerDeviceId
+        // injected below so the responder identity is spoof-proof.
+        | "workflow_approval_list"
+        | "workflow_approval_respond"
         | "twin_delete"
         | "twin_source_list"
         | "twin_source_update"
@@ -3431,6 +3449,19 @@ mod tests {
         assert!(!READ_ONLY_COMMANDS.contains(&"device_capabilities_report"));
         // Baseline paired capability — not remote-control gated.
         assert!(!CONTROL_COMMANDS.contains(&"device_capabilities_report"));
+    }
+
+    #[test]
+    fn workflow_approval_commands_are_classified() {
+        assert!(KNOWN_COMMANDS.contains(&"workflow_approval_list"));
+        assert!(KNOWN_COMMANDS.contains(&"workflow_approval_respond"));
+        // Listing is a pure read; responding steers execution (control-gated,
+        // mutating, caller identity injected).
+        assert!(READ_ONLY_COMMANDS.contains(&"workflow_approval_list"));
+        assert!(!READ_ONLY_COMMANDS.contains(&"workflow_approval_respond"));
+        assert!(CONTROL_COMMANDS.contains(&"workflow_approval_respond"));
+        assert!(!CONTROL_COMMANDS.contains(&"workflow_approval_list"));
+        assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_approval_respond"));
     }
 
     #[test]

@@ -195,6 +195,10 @@ export async function dispatchCommand(
       return connectorRejectDraft(payload)
     case "workflow_trigger_manual":
       return workflowTriggerManual(payload)
+    case "workflow_approval_list":
+      return workflowApprovalList()
+    case "workflow_approval_respond":
+      return workflowApprovalRespond(payload)
     case "device_capabilities_report":
       return deviceCapabilitiesReport(payload)
     case "twin_ingest_source":
@@ -662,6 +666,33 @@ async function workflowTriggerManual(payload: Record<string, unknown>): Promise<
     { triggeredBy: { source: "api", ...(deviceId ? { deviceId } : {}) } }
   )
   return null
+}
+
+/** Read-only projection of the pending workflow-approval registry (ADR-0061). */
+async function workflowApprovalList(): Promise<{ approvals: unknown[] }> {
+  const { listPendingApprovals } = await import("@/lib/workflow/runtime/approval-registry")
+  return { approvals: listPendingApprovals() }
+}
+
+/** Resolve a pending `action.approval.request` gate from a paired device.
+ *  Control-gated in Rust; the responder identity is the JWT-verified
+ *  `callerDeviceId` injected by the RPC layer (spoof-proof). */
+async function workflowApprovalRespond(
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; reason?: string }> {
+  const approvalIdArg = payload.approvalId as string | undefined
+  if (!approvalIdArg) throw new Error("workflow_approval_respond.approvalId is required")
+  const decision = payload.decision
+  if (decision !== "approved" && decision !== "rejected") {
+    throw new Error("workflow_approval_respond.decision must be 'approved' or 'rejected'")
+  }
+  const deviceId = payload.callerDeviceId as string | undefined
+  const { respondToApproval } = await import("@/lib/workflow/runtime/approval-registry")
+  const result = respondToApproval(approvalIdArg, {
+    decision,
+    respondedBy: deviceId ? `device:${deviceId}` : "companion",
+  })
+  return result.ok ? { ok: true } : { ok: false, reason: result.reason }
 }
 
 /** Hard cap on the persisted capability list — well above the core vocabulary

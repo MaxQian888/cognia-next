@@ -119,6 +119,10 @@ export type WorkflowNodeKind =
   | "action.memory.store"
   | "action.connector.send"
   | "action.connector.draft"
+  // Human-in-the-loop gate (ADR 0061 P2): blocks until a human approves or
+  // rejects — desktop notification action, or a paired device via the
+  // `workflow_approval_respond` RPC. Routes downstream via decision handles.
+  | "action.approval.request"
   | "action.mcp.invokeTool"
   | "action.plugin.invoke"
   // GitHub Delivery (provided by the github-delivery plugin)
@@ -345,6 +349,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.memory.store",
   "action.connector.send",
   "action.connector.draft",
+  "action.approval.request",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
   "action.github.openPr",

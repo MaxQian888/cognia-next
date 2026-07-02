@@ -37,6 +37,23 @@
       "label": "启用工具"
     }
   },
+  "approvalRequest": {
+    "message": {
+      "label": "说明（可选）"
+    },
+    "onTimeout": {
+      "fail": "步骤失败",
+      "label": "超时处理",
+      "reject": "按已拒绝路由"
+    },
+    "timeoutMs": {
+      "hint": "等待决定的时长。默认 1 小时。",
+      "label": "超时（毫秒）"
+    },
+    "title": {
+      "label": "标题"
+    }
+  },
   "aiClassify": {
     "apiKey": {
       "label": "API Key"

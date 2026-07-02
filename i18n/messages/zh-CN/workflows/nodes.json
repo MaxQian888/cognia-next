@@ -6,6 +6,12 @@
         "label": "智能体回合"
       }
     },
+    "approval": {
+      "request": {
+        "description": "暂停执行，等待人工批准或拒绝——可在桌面通知中心或已配对手机上处理。按「已批准 / 已拒绝」端口路由下游。",
+        "label": "请求审批"
+      }
+    },
     "character": {
       "create": {
         "description": "新建一个角色（员工）。",

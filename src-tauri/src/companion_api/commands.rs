@@ -349,6 +349,12 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // per-step lastStepId advances). Emitted by the TS
     // `lib/workflow/runtime/companion-run-events.ts` funnel.
     register_tauri_event(app, Arc::clone(&bus), "workflow://run-status");
+    // ADR-0061 P2 — HITL approval gate lifecycle: full request frames for
+    // foreground devices (title/message ride the authenticated WS only) and
+    // resolution frames so pending lists clear immediately. Emitted by
+    // `lib/workflow/runtime/approval-notify.ts`.
+    register_tauri_event(app, Arc::clone(&bus), "workflow://approval-request");
+    register_tauri_event(app, Arc::clone(&bus), "workflow://approval-resolved");
     // ADR-0061 P2 — sync invalidation. The mobile `installEventDrivenSync`
     // has subscribed to this channel since ADR-0027; the desktop now emits
     // it (terminal workflow runs → { table: "workflowRuns" }) so the phone
@@ -369,6 +375,10 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // cancelled only when a paired device triggered the run — policy lives
     // in `companion-run-events.ts`). Payload carries ids + status only.
     register_push_trigger(app, "workflow://run-terminal");
+    // ADR-0061 P2 — a workflow is blocked on a human approval; wake
+    // backgrounded devices. Ids only (transits APNs/FCM) — the phone
+    // fetches the request text via `workflow_approval_list` on open.
+    register_push_trigger(app, "workflow://approval-pending");
 }
 
 /// Human-ish push body for a channel name: strip any `scheme://` prefix so

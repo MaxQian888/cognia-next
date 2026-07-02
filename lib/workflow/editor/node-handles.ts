@@ -27,7 +27,7 @@ export interface OutputHandleSpec {
    * the executor's `decision`. */
   id: string
   /** Render intent: fixed kinds translate via i18n; `case` uses `label`. */
-  kind: "true" | "false" | "case" | "default"
+  kind: "true" | "false" | "case" | "default" | "approved" | "rejected"
   /** Author-supplied display label (case handles only). */
   label?: string
 }
@@ -49,6 +49,14 @@ interface SwitchCaseShape {
  * single unlabeled output handle (all v1 nodes, and every non-routing kind).
  */
 export function outputHandlesFor(node: NodeShapeForHandles): OutputHandleSpec[] | null {
+  // The approval gate routes via fixed decision handles from v1 — it has no
+  // single-output legacy shape to stay compatible with (ADR 0061 P2).
+  if (node.kind === "action.approval.request") {
+    return [
+      { id: "approved", kind: "approved" },
+      { id: "rejected", kind: "rejected" },
+    ]
+  }
   if (node.typeVersion < 2) return null
   if (node.kind === "flow.branch") {
     return [

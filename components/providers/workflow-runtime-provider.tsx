@@ -14,6 +14,7 @@ import {
   initPetEventTrigger,
   disposePetEventTrigger,
 } from "@/lib/workflow/runtime/pet-event-trigger"
+import { installApprovalNotificationActions } from "@/lib/workflow/runtime/approval-notify"
 import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
@@ -98,6 +99,19 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
         log.info?.("workflow runtime: pet-event trigger initialised")
       } catch (err) {
         log.warn?.("workflow runtime: initPetEventTrigger failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // Approval-gate notification actions (ADR 0061 P2) — the Approve /
+      // Reject buttons on `action.approval.request` notification rows.
+      // Not Tauri-gated: the notification center resolves approvals on web
+      // too (companion fan-out inside the notifier is Tauri-gated itself).
+      try {
+        disposers.push(installApprovalNotificationActions())
+        log.info?.("workflow runtime: approval notification actions installed")
+      } catch (err) {
+        log.warn?.("workflow runtime: installApprovalNotificationActions failed", {
           error: err instanceof Error ? err.message : String(err),
         })
       }

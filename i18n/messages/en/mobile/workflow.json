@@ -1,6 +1,15 @@
 {
   "activeBadge": "Active",
   "all": "All",
+  "approvals": {
+    "approve": "Approve",
+    "approvedToast": "Approved.",
+    "goneToast": "This approval is no longer pending.",
+    "heading": "{count, plural, one {# approval waiting} other {# approvals waiting}}",
+    "reject": "Reject",
+    "rejectedToast": "Rejected.",
+    "respondFailedToast": "Couldn't reach the desktop — try again."
+  },
   "density": {
     "comfortable": "Comfortable rows",
     "compact": "Compact rows"

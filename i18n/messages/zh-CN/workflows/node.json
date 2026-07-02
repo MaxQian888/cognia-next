@@ -20,8 +20,10 @@
     }
   },
   "outputHandles": {
+    "approved": "已批准",
     "default": "默认",
     "false": "假",
+    "rejected": "已拒绝",
     "true": "真"
   },
   "pinnedTitle": "已固定测试数据"

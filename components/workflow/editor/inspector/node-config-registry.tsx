@@ -54,6 +54,7 @@ import {
 import { EvalRunConfig, EvalGateConfig } from "./forms/eval-forms"
 import {
   AgentTurnConfig,
+  ApprovalRequestConfig,
   AiClassifyConfig,
   AiEmbedConfig,
   AiExtractConfig,
@@ -173,6 +174,8 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.character.update": CharacterUpdateConfig,
   // Actions: agent
   "action.agent.turn": AgentTurnConfig,
+  // Actions: human-in-the-loop (ADR 0061 P2)
+  "action.approval.request": ApprovalRequestConfig,
   // Actions: goals
   "action.goal.create": GoalCreateConfig,
   "action.goal.get": GoalTransitionConfig,

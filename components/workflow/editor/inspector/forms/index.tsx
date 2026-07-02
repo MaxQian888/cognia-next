@@ -4500,6 +4500,66 @@ export function ConnectorDraftConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── action.approval.request ───────────────────────────────────────────────
+export function ApprovalRequestConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.approvalRequest")
+  const title = readString(params, "title")
+  const message = readString(params, "message")
+  const timeoutMs = readNumber(params, "timeoutMs", 3_600_000)
+  const onTimeout = readString(params, "onTimeout", "reject")
+  return (
+    <FieldGroup>
+      <Field label={t("title.label")} htmlFor="apr-title" name="title" required>
+        <Input
+          id="apr-title"
+          value={title}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+        />
+      </Field>
+      <Field label={t("message.label")} htmlFor="apr-message" name="message">
+        <Textarea
+          id="apr-message"
+          value={message}
+          onChange={(e) => onChange(patchParam(params, "message", e.target.value))}
+          rows={3}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("timeoutMs.label")}
+          htmlFor="apr-timeout"
+          hint={t("timeoutMs.hint")}
+          name="timeoutMs"
+        >
+          <Input
+            id="apr-timeout"
+            type="number"
+            min={1000}
+            value={timeoutMs}
+            onChange={(e) =>
+              onChange(patchParam(params, "timeoutMs", Number(e.target.value) || 3_600_000))
+            }
+          />
+        </Field>
+        <Field label={t("onTimeout.label")} htmlFor="apr-ontimeout" name="onTimeout">
+          <Select
+            value={onTimeout}
+            onValueChange={(v) => onChange(patchParam(params, "onTimeout", v))}
+          >
+            <SelectTrigger id="apr-ontimeout">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="reject">{t("onTimeout.reject")}</SelectItem>
+              <SelectItem value="fail">{t("onTimeout.fail")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
 // ── ai.classify ───────────────────────────────────────────────────────────
 export function AiClassifyConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.aiClassify")

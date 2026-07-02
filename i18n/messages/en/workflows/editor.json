@@ -86,10 +86,12 @@
   },
   "edge": {
     "edgeKind": {
+      "approved": "approved",
       "default": "default",
       "else": "else",
       "error": "on error",
       "false": "false",
+      "rejected": "rejected",
       "then": "then",
       "true": "true"
     },

@@ -1,6 +1,15 @@
 {
   "activeBadge": "活跃",
   "all": "全部",
+  "approvals": {
+    "approve": "批准",
+    "approvedToast": "已批准。",
+    "goneToast": "该审批已不在等待中。",
+    "heading": "{count, plural, one {# 项审批等待处理} other {# 项审批等待处理}}",
+    "reject": "拒绝",
+    "rejectedToast": "已拒绝。",
+    "respondFailedToast": "无法连接桌面端——请重试。"
+  },
   "density": {
     "comfortable": "宽松行距",
     "compact": "紧凑行距"

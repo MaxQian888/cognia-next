@@ -550,6 +550,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "PencilLine",
     keywords: ["draft", "review", "inbox"],
   },
+  "action.approval.request": {
+    label: "Request approval",
+    description:
+      "Pause until a human approves or rejects — from the desktop notification center or a paired phone. Routes downstream via Approved / Rejected handles.",
+    iconName: "UserCheck",
+    keywords: ["approval", "approve", "reject", "human", "hitl", "gate", "review", "phone"],
+  },
   "action.mcp.invokeTool": {
     label: "Invoke MCP tool",
     description: "Calls a tool on a configured MCP server.",

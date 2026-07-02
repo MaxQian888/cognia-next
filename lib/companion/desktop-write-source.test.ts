@@ -232,6 +232,68 @@ describe("dispatchCommand: workflow_trigger_manual", () => {
   })
 })
 
+describe("dispatchCommand: workflow approvals", () => {
+  afterEach(async () => {
+    const { __resetApprovalRegistryForTesting } =
+      await import("@/lib/workflow/runtime/approval-registry")
+    __resetApprovalRegistryForTesting()
+  })
+
+  it("lists pending approvals oldest first", async () => {
+    const { registerPendingApproval } = await import("@/lib/workflow/runtime/approval-registry")
+    registerPendingApproval({
+      approvalId: "apr_1",
+      runId: "run_1",
+      workflowId: "wf_1",
+      stepId: "n_gate",
+      title: "Ship?",
+      requestedAt: 5,
+    })
+    const result = (await dispatchCommand("workflow_approval_list", {})) as {
+      approvals: Array<{ approvalId: string }>
+    }
+    expect(result.approvals.map((a) => a.approvalId)).toEqual(["apr_1"])
+  })
+
+  it("resolves a pending approval with the caller device identity", async () => {
+    const { registerPendingApproval, approvalWakeKey } =
+      await import("@/lib/workflow/runtime/approval-registry")
+    const { subscribeWake } = await import("@/lib/workflow/runtime/wake-bus")
+    registerPendingApproval({
+      approvalId: "apr_2",
+      runId: "run_2",
+      workflowId: "wf_2",
+      stepId: "n_gate",
+      title: "Ship?",
+      requestedAt: 5,
+    })
+    const wait = subscribeWake(approvalWakeKey("run_2", "n_gate"))
+    const result = await dispatchCommand("workflow_approval_respond", {
+      approvalId: "apr_2",
+      decision: "approved",
+      callerDeviceId: "dev-9",
+    })
+    expect(result).toEqual({ ok: true })
+    await expect(wait).resolves.toMatchObject({
+      data: { decision: "approved", respondedBy: "device:dev-9" },
+    })
+  })
+
+  it("reports not-found for unknown approvals", async () => {
+    const result = await dispatchCommand("workflow_approval_respond", {
+      approvalId: "apr_gone",
+      decision: "rejected",
+    })
+    expect(result).toEqual({ ok: false, reason: "not-found" })
+  })
+
+  it("rejects malformed decisions", async () => {
+    await expect(
+      dispatchCommand("workflow_approval_respond", { approvalId: "apr_x", decision: "maybe" })
+    ).rejects.toThrow(/decision must be/)
+  })
+})
+
 describe("dispatchCommand: device_capabilities_report", () => {
   const seedDevice = async (deviceId: string) => {
     await getDb().pairedDevices.put({

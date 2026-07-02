@@ -2165,6 +2165,18 @@ registerNodeExecutor({
   execute: async (ctx) => (await import("./actions/agent-turn")).runAgentTurn(ctx),
 })
 
+// ── action.approval.request ───────────────────────────────────────────────
+// Human-in-the-loop gate (ADR 0061 P2): blocks on the wake bus until a
+// desktop notification action or a paired device resolves it, then routes
+// via `approved` / `rejected` decision handles. Logic in ./actions/approval.
+// Not retryable — a retry would re-ask an already-answered question.
+registerNodeExecutor({
+  kind: "action.approval.request",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/approval")).runApprovalRequest(ctx),
+})
+
 // ── action.memory.recall / action.memory.store ───────────────────────────
 // Long-term memory access (lib/memory). Recall is read-only and best-effort
 // (degrades, never throws on a missing backend); store mirrors /remember's

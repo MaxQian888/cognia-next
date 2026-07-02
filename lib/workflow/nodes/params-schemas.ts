@@ -690,6 +690,15 @@ const ConnectorDraftParams = z.object({
   ttlMs: numberRange(0).optional(),
 })
 
+const ApprovalRequestParams = z.object({
+  title: requiredString("required"),
+  message: optionalString,
+  /** How long to wait before the onTimeout policy applies. Default 1 h. */
+  timeoutMs: numberRange(1_000).optional(),
+  /** What a timeout means: route down "rejected" (default) or fail the step. */
+  onTimeout: z.enum(["reject", "fail"]).optional(),
+})
+
 const McpInvokeToolParams = z.object({
   serverId: requiredString("required"),
   toolName: requiredString("required"),
@@ -1500,6 +1509,8 @@ export const PARAMS_SCHEMAS = {
   // Actions: connectors
   "action.connector.send": ConnectorSendParams,
   "action.connector.draft": ConnectorDraftParams,
+  // Actions: human-in-the-loop (ADR 0061 P2)
+  "action.approval.request": ApprovalRequestParams,
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,

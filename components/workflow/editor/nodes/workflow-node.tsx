@@ -521,8 +521,8 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
                     onClick={(e) => armConnectFromHandle(e, h.id)}
                     className={cn(
                       "!h-3 !w-3 !rounded-full !border-2 !bg-background",
-                      h.kind === "true" && "!border-emerald-500",
-                      h.kind === "false" && "!border-rose-500",
+                      (h.kind === "true" || h.kind === "approved") && "!border-emerald-500",
+                      (h.kind === "false" || h.kind === "rejected") && "!border-rose-500",
                       (h.kind === "case" || h.kind === "default") && "!border-current"
                     )}
                     data-testid={`wf-node-handle-out-${id}-${h.id}`}
