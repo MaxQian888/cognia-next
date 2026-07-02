@@ -41,6 +41,7 @@ mod settings;
 mod shell;
 mod skills;
 mod subscription;
+mod supervision_backoff;
 mod terminal;
 mod timing;
 mod tts;

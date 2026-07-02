@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
+use super::host::{SidecarHost, TauriSidecarHost};
 use super::sidecar::{emit_hook_fire, spawn as spawn_sidecar, SidecarState};
 use crate::hooks;
 
@@ -201,8 +204,28 @@ pub async fn claude_send(
     prompt: Value,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
+    claude_send_with_host(
+        Arc::new(TauriSidecarHost(app)),
+        state.inner().clone(),
+        session_id,
+        prompt,
+        options,
+    )
+    .await
+}
+
+/// Host-generic body of [`claude_send`] (ADR-0059 R6). The desktop command
+/// wraps the `AppHandle` in a [`TauriSidecarHost`]; the headless RPC arm (R7)
+/// passes the `HeadlessSidecarHost` from the services registry.
+pub async fn claude_send_with_host(
+    host: Arc<dyn SidecarHost>,
+    state: SidecarState,
+    session_id: String,
+    prompt: Value,
+    options: Option<SendOptions>,
+) -> Result<(), String> {
     let _perf = crate::perf::guard("claude.send");
-    spawn_sidecar(app.clone(), state.inner().clone()).await?;
+    spawn_sidecar(Arc::clone(&host), state.clone()).await?;
     let opts_value = match options {
         Some(o) => {
             o.validate()?;
@@ -242,7 +265,7 @@ pub async fn claude_send(
         // decision fields are consumed below (block short-circuits the turn,
         // additional_context is folded into the prompt).
         emit_hook_fire(
-            &app,
+            host.as_ref(),
             &session_id,
             &hooks::hook_event_name(hooks::HookEvent::UserPromptSubmit),
             None,

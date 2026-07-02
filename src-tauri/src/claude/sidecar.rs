@@ -5,13 +5,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
-use crate::api_key::ApiKeyState;
+use super::host::SidecarHost;
 use crate::hooks;
+use crate::supervision_backoff::CrashBackoff;
 
 /// Tauri event channel name. The frontend subscribes via
 /// `listen("claude://message", ...)`.
@@ -28,23 +29,6 @@ pub const A2UI_EVENT: &str = "a2ui://dispatch";
 /// kill a healthy-but-slow cold start (large `node_modules`, cold disk) — the
 /// same false-positive class that ruled out a blanket reader-inactivity timeout.
 const SIDECAR_READY_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Crash-backoff delay table (ms), indexed by `consecutive_failures - 1` and
-/// saturating at the last entry. Mirrors the jittered-table idiom in
-/// `companion_api/signaling/client.rs`. The first failure maps to `0` so a
-/// single transient death (or an intentional `kill_sidecar` restart) respawns
-/// immediately; only a genuine crash loop (failures climbing because the child
-/// keeps dying *before* announcing ready) escalates the delay.
-const SPAWN_BACKOFF_MS: &[u64] = &[0, 250, 1_000, 4_000, 16_000, 30_000];
-
-/// Backoff delay for the Nth consecutive failure. Pure — unit-tested.
-fn backoff_delay(consecutive_failures: u32) -> Duration {
-    if consecutive_failures == 0 {
-        return Duration::ZERO;
-    }
-    let idx = ((consecutive_failures - 1) as usize).min(SPAWN_BACKOFF_MS.len() - 1);
-    Duration::from_millis(SPAWN_BACKOFF_MS[idx])
-}
 
 /// Shared, mutable state. Cloned cheaply via `Arc`.
 #[derive(Clone, Default)]
@@ -76,12 +60,10 @@ pub struct SidecarState {
 struct Inner {
     child: Option<Child>,
     ready: bool,
-    /// Consecutive deaths-before-ready, for crash-loop backoff. Reset to 0 the
-    /// moment the sidecar announces `ready`, incremented on every reader exit.
-    consecutive_failures: u32,
-    /// When the most recent exit was observed — paired with `consecutive_failures`
-    /// to compute the remaining backoff window.
-    last_failure_at: Option<Instant>,
+    /// Crash-loop backoff counters (shared shape with the brain supervisor —
+    /// `supervision_backoff.rs`). Reset the moment the sidecar announces
+    /// `ready`, advanced on every reader exit.
+    backoff: CrashBackoff,
     /// Per-session hook context: the send-time cwd (for project/local scope
     /// resolution) and the in-flight tool_use map used to correlate a
     /// `tool_result` back to the tool name/input that produced it (PostToolUse).
@@ -153,7 +135,7 @@ impl SidecarState {
     async fn note_ready(&self) {
         let mut guard = self.inner.lock().await;
         guard.ready = true;
-        guard.consecutive_failures = 0;
+        guard.backoff.reset();
     }
 
     /// Single sink for everything that must happen when the sidecar exits
@@ -167,25 +149,14 @@ impl SidecarState {
         guard.child = None;
         guard.ready = false;
         guard.sessions.clear();
-        guard.consecutive_failures = guard.consecutive_failures.saturating_add(1);
-        guard.last_failure_at = Some(now);
+        guard.backoff.note_failure(now);
     }
 
     /// Remaining crash-backoff window at `now`, or `None` if a respawn may
     /// proceed immediately. Pure over the stored counters — unit-tested by
     /// injecting `now`.
     async fn backoff_remaining(&self, now: Instant) -> Option<Duration> {
-        let guard = self.inner.lock().await;
-        if guard.consecutive_failures == 0 {
-            return None;
-        }
-        let last = guard.last_failure_at?;
-        let delay = backoff_delay(guard.consecutive_failures);
-        if delay.is_zero() {
-            return None;
-        }
-        let elapsed = now.saturating_duration_since(last);
-        (elapsed < delay).then(|| delay - elapsed)
+        self.inner.lock().await.backoff.remaining(now)
     }
 
     pub async fn is_ready(&self) -> bool {
@@ -284,8 +255,8 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Resolve the absolute path to `sidecar/claude-host.mjs`, in both dev and
-/// release builds.
-fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
+/// release builds. `pub(crate)` so `host::TauriSidecarHost` can delegate.
+pub(crate) fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = sidecar_dir(app)?;
     let candidate = dir.join("claude-host.mjs");
     if candidate.exists() {
@@ -297,11 +268,13 @@ fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
     ))
 }
 
-/// Spawn the Node sidecar and start pumping its stdout into Tauri events.
+/// Spawn the Node sidecar and start pumping its stdout into host events
+/// (Tauri events on desktop, the companion EventBus headless — see
+/// [`super::host`]).
 ///
 /// Safe to call multiple times — subsequent calls become no-ops while the
 /// child is alive.
-pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
+pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<(), String> {
     // Serialize concurrent spawns (mirrors `plugin_api/python` materialize_lock):
     // a second caller blocks here, then sees the live child below and no-ops,
     // so we can never start two Node processes for one slot.
@@ -321,7 +294,7 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         ));
     }
 
-    let script = resolve_sidecar_script(&app)?;
+    let script = host.resolve_script()?;
     let cwd = script
         .parent()
         .ok_or_else(|| "sidecar script has no parent dir".to_string())?
@@ -336,28 +309,10 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    // Inject the user-supplied Anthropic provider env, if any. Auth precedence:
-    //   1. OAuth bearer (CLAUDE_CODE_OAUTH_TOKEN) — when the user has signed in
-    //      with their Pro/Max subscription. The `@anthropic-ai/claude-agent-sdk`
-    //      reads this var and sends `Authorization: Bearer ...` plus the
-    //      `oauth-2025-04-20` beta header automatically. We deliberately do
-    //      not also send ANTHROPIC_API_KEY in this case — mixing modes is
-    //      undefined behavior on the SDK side.
-    //   2. ANTHROPIC_API_KEY — legacy + CCSwitch flow.
-    // ANTHROPIC_BASE_URL is orthogonal to auth mode and forwarded whenever set.
-    if let Some(api_key_state) = app.try_state::<ApiKeyState>() {
-        if let Some(token) = api_key_state.get_oauth_bearer().await {
-            cmd.env("CLAUDE_CODE_OAUTH_TOKEN", token);
-            // Defensive: ensure no stale API key from the parent process leaks
-            // through to the sidecar when OAuth is the chosen mode.
-            cmd.env_remove("ANTHROPIC_API_KEY");
-        } else if let Some(key) = api_key_state.get().await {
-            cmd.env("ANTHROPIC_API_KEY", key);
-        }
-        if let Some(url) = api_key_state.get_base_url().await {
-            cmd.env("ANTHROPIC_BASE_URL", url);
-        }
-    }
+    // Inject the host-resolved provider credentials (OAuth bearer → API key;
+    // base URL orthogonal). See `host::inject_provider_env` for the precedence
+    // rationale.
+    host.inject_env(&mut cmd).await;
 
     // Inject the user's network proxy config so the Node sidecar's outbound
     // HTTP (Anthropic SDK + any provider relays) routes through the same
@@ -426,9 +381,9 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
     // "Sidecar restarted N times this session".
     state.bump_restart_count();
 
-    // Pipe stdout: each line is one JSON event we forward to the frontend.
+    // Pipe stdout: each line is one JSON event we forward through the host.
     {
-        let app = app.clone();
+        let host = Arc::clone(&host);
         let state = state.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -455,10 +410,10 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                 if value.get("type").and_then(|t| t.as_str())
                                     == Some("permission_request")
                                 {
-                                    let app = app.clone();
+                                    let host = Arc::clone(&host);
                                     let state = state.clone();
                                     tokio::spawn(async move {
-                                        handle_permission_request(app, state, value).await;
+                                        handle_permission_request(host, state, value).await;
                                     });
                                     continue;
                                 }
@@ -467,9 +422,7 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                 if value.get("type").and_then(|t| t.as_str())
                                     == Some("a2ui_dispatch")
                                 {
-                                    if let Err(e) = app.emit(A2UI_EVENT, &value) {
-                                        log::error!("failed to emit a2ui dispatch: {e}");
-                                    }
+                                    host.emit(A2UI_EVENT, &value);
                                     continue;
                                 }
                                 // Lifecycle hooks: observe the SDK event stream
@@ -482,16 +435,14 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                     // later tool_result observer can always
                                     // resolve the tool name despite task concurrency.
                                     state.record_tool_uses_from_message(&value).await;
-                                    let app = app.clone();
+                                    let host = Arc::clone(&host);
                                     let state = state.clone();
                                     let observed = value.clone();
                                     tokio::spawn(async move {
-                                        observe_hooks(app, state, observed).await;
+                                        observe_hooks(host, state, observed).await;
                                     });
                                 }
-                                if let Err(e) = app.emit(SIDECAR_EVENT, &value) {
-                                    log::error!("failed to emit sidecar event: {e}");
-                                }
+                                host.emit(SIDECAR_EVENT, &value);
                             }
                             Err(e) => {
                                 log::warn!("sidecar emitted non-JSON line: {e}: {trimmed}");
@@ -510,9 +461,9 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
             // crash loop. `note_exit` is the single sink for all of that.
             state.note_exit(Instant::now()).await;
             log::warn!("sidecar process ended");
-            let _ = app.emit(
+            host.emit(
                 SIDECAR_EVENT,
-                serde_json::json!({ "type": "sidecar_exited" }),
+                &serde_json::json!({ "type": "sidecar_exited" }),
             );
         });
     }
@@ -531,7 +482,7 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
     // kill_sidecar) and kill it if it never boots, so the failure surfaces and
     // the next spawn can back off.
     {
-        let app = app.clone();
+        let host = Arc::clone(&host);
         let state = state.clone();
         tokio::spawn(async move {
             let outcome = tokio::time::timeout(SIDECAR_READY_TIMEOUT, async {
@@ -562,9 +513,9 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                 // `sidecar_exited` event; we add a `log` line so the user sees
                 // *why* (avoids a duplicate `sidecar_exited`).
                 kill_sidecar(state.clone()).await;
-                let _ = app.emit(
+                host.emit(
                     SIDECAR_EVENT,
-                    serde_json::json!({
+                    &serde_json::json!({
                         "type": "log",
                         "level": "error",
                         "message": format!(
@@ -584,7 +535,11 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
 /// sidecar. If any hook blocks, write a `permission_response` (deny) back to
 /// the sidecar without involving the frontend. Otherwise forward the event
 /// onward as usual so the user / approval store handles it.
-async fn handle_permission_request(app: AppHandle, state: SidecarState, value: Value) {
+///
+/// The forward at the bottom is load-bearing on headless hosts: it MUST reach
+/// the EventBus (→ `/ws/v1/events`) or every gated tool call deadlocks
+/// waiting for an approval nobody saw.
+async fn handle_permission_request(host: Arc<dyn SidecarHost>, state: SidecarState, value: Value) {
     let session_id = value
         .get("sessionId")
         .and_then(|v| v.as_str())
@@ -621,7 +576,7 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
     )
     .await;
     emit_hook_diagnostics(
-        &app,
+        host.as_ref(),
         hooks::HookEvent::PermissionRequest,
         &session_id,
         Some(tool_name.as_str()),
@@ -639,7 +594,7 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
     // block reason is moved out below. Blocked fires render in place of the
     // dropped `type:"log"` deny line that used to be the only signal.
     emit_hook_fire(
-        &app,
+        host.as_ref(),
         &session_id,
         &hooks::hook_event_name(hooks::HookEvent::PreToolUse),
         Some(tool_name.as_str()),
@@ -673,7 +628,7 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
         )
         .await;
         emit_hook_diagnostics(
-            &app,
+            host.as_ref(),
             hooks::HookEvent::PermissionDenied,
             &session_id,
             Some(tool_name.as_str()),
@@ -682,10 +637,9 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
         return;
     }
 
-    // No block — forward to the frontend so the normal approval flow can run.
-    if let Err(e) = app.emit(SIDECAR_EVENT, &value) {
-        log::error!("failed to emit permission_request: {e}");
-    }
+    // No block — forward so the normal approval flow can run (WebView
+    // approval store on desktop; `/ws/v1/events` subscribers headless).
+    host.emit(SIDECAR_EVENT, &value);
 }
 
 /// Status of a consequential hook fire, by precedence: block > context >
@@ -739,14 +693,14 @@ pub(crate) fn build_hook_fire_payload(
 /// pick a status colour; the full decision still travels so the expanded row can
 /// show the reason, injected-context summary, and every warning.
 pub(crate) fn emit_hook_fire(
-    app: &AppHandle,
+    host: &dyn SidecarHost,
     session_id: &str,
     event_name: &str,
     tool_name: Option<&str>,
     decision: &hooks::HookDecision,
 ) {
     if let Some(payload) = build_hook_fire_payload(session_id, event_name, tool_name, decision) {
-        let _ = app.emit(SIDECAR_EVENT, &payload);
+        host.emit(SIDECAR_EVENT, &payload);
     }
 }
 
@@ -755,7 +709,7 @@ pub(crate) fn emit_hook_fire(
 /// re-inject context mid-stream, so this row is how the user sees a hook did
 /// something.
 fn emit_hook_diagnostics(
-    app: &AppHandle,
+    host: &dyn SidecarHost,
     event: hooks::HookEvent,
     session_id: &str,
     tool_name: Option<&str>,
@@ -765,7 +719,7 @@ fn emit_hook_diagnostics(
     for w in &decision.warnings {
         log::warn!("{name}: {w}");
     }
-    emit_hook_fire(app, session_id, &name, tool_name, decision);
+    emit_hook_fire(host, session_id, &name, tool_name, decision);
 }
 
 /// Observe one SDK-stream message and fire the matching settings.json lifecycle
@@ -773,7 +727,7 @@ fn emit_hook_diagnostics(
 /// tool_result → PostToolUse(/Failure), then fires the stateless lifecycle
 /// hooks (SessionStart/End, Stop, SubagentStop, Notification, PostCompact,
 /// Task*). All firing is observational — blocking stays on the permission path.
-async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
+async fn observe_hooks(host: Arc<dyn SidecarHost>, state: SidecarState, value: Value) {
     let session_id = value
         .get("sessionId")
         .and_then(|v| v.as_str())
@@ -815,7 +769,13 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
                 fields,
             )
             .await;
-            emit_hook_diagnostics(&app, event, &session_id, Some(tool_name.as_str()), &decision);
+            emit_hook_diagnostics(
+                host.as_ref(),
+                event,
+                &session_id,
+                Some(tool_name.as_str()),
+                &decision,
+            );
         }
     }
 
@@ -832,7 +792,7 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
                 ch.fields,
             )
             .await;
-            emit_hook_diagnostics(&app, ch.event, &session_id, None, &decision);
+            emit_hook_diagnostics(host.as_ref(), ch.event, &session_id, None, &decision);
         }
     }
 
@@ -865,19 +825,9 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    #[test]
-    fn backoff_delay_escalates_and_saturates() {
-        // No failures and the first failure both respawn immediately.
-        assert_eq!(backoff_delay(0), Duration::ZERO);
-        assert_eq!(backoff_delay(1), Duration::ZERO);
-        // Subsequent crashes escalate per the table.
-        assert_eq!(backoff_delay(2), Duration::from_millis(250));
-        assert_eq!(backoff_delay(3), Duration::from_millis(1_000));
-        assert_eq!(backoff_delay(4), Duration::from_millis(4_000));
-        // Saturates at the last table entry.
-        assert_eq!(backoff_delay(6), Duration::from_millis(30_000));
-        assert_eq!(backoff_delay(99), Duration::from_millis(30_000));
-    }
+    // The pure backoff-table tests moved to `supervision_backoff.rs` with the
+    // extraction (R6); the state-level tests below still exercise the
+    // SidecarState wiring around `CrashBackoff`.
 
     #[tokio::test]
     async fn backoff_remaining_none_before_any_failure() {
