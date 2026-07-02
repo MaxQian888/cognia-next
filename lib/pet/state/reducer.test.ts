@@ -88,6 +88,10 @@ describe("reducePetVisualState", () => {
     expect(reducePetVisualState(event("twinBusy"), needs())).toBe("thinking")
     expect(reducePetVisualState(event("twinMilestone"), needs())).toBe("happy")
   })
+
+  it("maps the controller-emitted unwell edge to the unwell state", () => {
+    expect(reducePetVisualState(event("unwell"), needs())).toBe("unwell")
+  })
 })
 
 describe("restingWithCare", () => {

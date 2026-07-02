@@ -143,6 +143,7 @@ export type PluginCapability =
   | "webview" // Contributes sandboxed HTML webview panels (B3) mounted into a view container
   | "auth-provider" // Contributes a native auth/OAuth provider (C1) — ctx.auth.registerProvider
   | "uri-handler" // Handles cognia://plugin/<id>/... deep-links (C2) — ctx.uri.registerHandler
+  | "pet" // Reads + nurtures the desktop pet — gates ctx.pet (rate-limited, budget-clamped)
 
 /**
  * Plugin status in the lifecycle
@@ -392,6 +393,9 @@ export type PluginPermission =
   // Sandboxed core tools (ADR-0028; declared by cognia-sandboxed-tools).
   | "native:filesystem" // Read/write the host filesystem through the sandboxed-tools backend
   | "native:process" // Run host processes through the sandboxed-tools backend
+  // Desktop pet (gated by the "pet" capability; see lib/plugin/api/pet-api.ts).
+  | "pet:read" // Read the pet's public view (level/stage/needs/mood) + subscribe to sanitized events
+  | "pet:interact" // Emit nurture interactions and budget-capped XP/coin rewards
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"

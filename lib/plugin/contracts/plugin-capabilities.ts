@@ -1483,6 +1483,23 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/api/uri-api.test.ts",
     ],
   },
+  {
+    id: "pet",
+    support: "supported",
+    manifestFields: [],
+    runtimeBinding: "context.pet (createPetAPI — rate-limited, daily reward budget)",
+    hostBindings: [
+      "lib/plugin/api/pet-api.ts",
+      "lib/plugin/api/pet-budget.ts",
+      "lib/plugin/core/context.ts",
+      "lib/pet/events/pet-event-bus.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/manifest/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
+    builtinContributionPaths: ["plugins/pet-daily-quests/src/index.ts"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: ["lib/plugin/api/pet-api.test.ts", "lib/plugin/api/pet-budget.test.ts"],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

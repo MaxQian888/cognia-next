@@ -37,6 +37,9 @@ import { usePetStore } from "@/stores/pet/pet-store"
  */
 const PASSIVE_KINDS = new Set<PetEventKind>(["idle", "inboundMessage", "scheduledRun"])
 
+/** Lifecycle kinds the controller re-emits — never re-emit while handling one. */
+const LIFECYCLE_EMIT_KINDS = new Set<PetEventKind>(["levelUp", "evolved", "unwell"])
+
 /** Last processed event kind — drives the error→success "recovered" signal. */
 let lastEventKind: PetEventKind | null = null
 
@@ -66,6 +69,8 @@ async function process(event: PetEvent): Promise<void> {
     grewStats,
     becameUnwell,
     recovered,
+    leveledUpTo,
+    evolvedTo,
   } = applyPetEvent(profile, event, now, {
     recentEventTs: recent.map((r) => r.ts),
     recoveredFromError,
@@ -127,6 +132,25 @@ async function process(event: PetEvent): Promise<void> {
         at: now,
         meta: { achievementId: id },
       })
+    }
+  }
+
+  // Announce lifecycle transitions so bus consumers (bubbles/proactive/the
+  // workflow pet-event trigger) see level-ups, evolutions, and the well →
+  // unwell edge as real events. Same feedback shape as achievementUnlocked:
+  // all three kinds award 0 XP, and a re-entrant handling can't re-fire its
+  // own transition (no level/stage delta, no fresh becameUnwell edge), so the
+  // serialized chain terminates naturally. Guarded anyway for hygiene.
+  if (!LIFECYCLE_EMIT_KINDS.has(event.kind)) {
+    const bus = getPetEventBus()
+    if (leveledUpTo !== null) {
+      bus.emit({ source: "system", kind: "levelUp", at: now, meta: { level: leveledUpTo } })
+    }
+    if (evolvedTo !== null) {
+      bus.emit({ source: "system", kind: "evolved", at: now, meta: { stage: evolvedTo } })
+    }
+    if (becameUnwell) {
+      bus.emit({ source: "system", kind: "unwell", at: now })
     }
   }
 }

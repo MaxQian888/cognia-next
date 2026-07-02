@@ -126,6 +126,8 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "native:screen",
   "native:filesystem",
   "native:process",
+  "pet:read",
+  "pet:interact",
 ]
 
 const VALID_PLUGIN_TYPES: PluginType[] = [

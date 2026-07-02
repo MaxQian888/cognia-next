@@ -89,6 +89,8 @@ const VALID_PERMISSIONS: &[&str] = &[
     "native:screen",
     "native:filesystem",
     "native:process",
+    "pet:read",
+    "pet:interact",
 ];
 
 /// Canonical plugin capabilities. MUST stay in lockstep with
@@ -169,6 +171,7 @@ const VALID_CAPABILITIES: &[&str] = &[
     "auth-provider",
     // C2 — deep-link handler (ctx.uri + onUri activation; no manifest field).
     "uri-handler",
+    "pet",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] = &["frontend", "python", "hybrid", "wasm", "vscode-extension"];

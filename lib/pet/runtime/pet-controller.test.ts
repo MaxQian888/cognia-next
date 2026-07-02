@@ -195,6 +195,66 @@ describe("handlePetEvent", () => {
     expect((await getPetProfile())?.streak?.days).toBe(2)
   })
 
+  it("re-emits levelUp/evolved lifecycle events on the bus after transitions", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+      xp: 990,
+      level: 4,
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "levelUp" || e.kind === "evolved") seen.push(e)
+    })
+
+    // +200 XP crosses level 5 → juvenile: both transitions fire once.
+    await handlePetEvent({ source: "user", kind: "goalComplete", xp: 200, at: 1000 })
+    await whenPetEventsSettled()
+
+    expect(seen.map((e) => e.kind)).toEqual(["levelUp", "evolved"])
+    expect(seen[0].meta?.level).toBe(5)
+    expect(seen[1].meta?.stage).toBe("juvenile")
+    expect(seen.every((e) => e.source === "system")).toBe(true)
+
+    // Replaying a lifecycle event never re-fires its own transition.
+    seen.length = 0
+    await handlePetEvent({ source: "system", kind: "levelUp", at: 1001 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(0)
+  })
+
+  it("re-emits an unwell event on the well → unwell edge", async () => {
+    const start = 2_000_000
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+      needs: { energy: 5, mood: 5, bond: 50, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "unwell") seen.push(e)
+    })
+
+    await handlePetEvent({ source: "system", kind: "idle", at: start + 7 * 3_600_000 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
+    expect(seen[0].source).toBe("system")
+
+    // Still unwell on the next tick — no edge, no re-emit.
+    await handlePetEvent({ source: "system", kind: "idle", at: start + 8 * 3_600_000 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
+  })
+
   it("serializes concurrent events without losing XP", async () => {
     await upsertPetProfile({
       ...createDefaultProfile("acct-1", 0),

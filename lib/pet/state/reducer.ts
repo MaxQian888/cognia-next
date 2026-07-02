@@ -90,6 +90,8 @@ export function reducePetVisualState(event: PetEvent, needs: PetNeeds): PetVisua
     case "inboundMessage":
     case "scheduledRun":
       return restingFromNeeds(needs)
+    case "unwell":
+      return "unwell"
     case "idle":
       return restingFromNeeds(needs)
   }
