@@ -84,29 +84,41 @@ export interface DurabilityHandle {
 /**
  * Open the snapshot-backed db for the account and arm the durability
  * ladder's v1 rungs.
+ *
+ * The write-flush middleware MUST attach before Dexie opens: `db.use()`
+ * only records the middleware, and the dbcore stack is generated at open
+ * time (`generateMiddlewareStacks`) — a post-open `use()` is inert until a
+ * reopen, which is exactly the silent-persistence-loss bug the T-B3
+ * hand-run surfaced. The `getDatabase` seam runs pre-open, so the hook
+ * lands in the stack.
  */
 export async function startDurability(opts: DurabilityOptions): Promise<DurabilityHandle> {
   const proc = opts.proc ?? process
   let lastFlushAt = 0
 
+  // scheduleFlush becomes available only after ensureCliDb resolves; the
+  // middleware (installed during ensureCliDb's open) reaches it via this ref.
+  const handleRef: { current: CliDbHandle | null } = { current: null }
+  const notifyDbWrite = (): void => {
+    handleRef.current?.scheduleFlush()
+  }
+
   const db = await ensureCliDb({
     home: opts.home,
     fileName: `db-${opts.accountId}.json`,
     debounceMs: opts.debounceMs,
+    getDatabase: () => {
+      const dexie = getDb()
+      installWriteFlush(dexie as unknown as DexieLike, notifyDbWrite)
+      return dexie as unknown as ReturnType<typeof getDb>
+    },
   })
+  handleRef.current = db
 
   const flushAndStamp = async (): Promise<void> => {
     await db.flush()
     lastFlushAt = Date.now()
   }
-
-  const notifyDbWrite = (): void => {
-    // The handle's debounced flush; stamping rides the next real flush.
-    db.scheduleFlush()
-    lastFlushAt = Date.now()
-  }
-
-  installWriteFlush(getDb() as unknown as DexieLike, notifyDbWrite)
 
   const onSignal = (): void => {
     void dispose().then(() => proc.off?.("SIGINT", onSignal))

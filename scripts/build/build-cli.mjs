@@ -58,6 +58,22 @@ const stubNextPlugin = {
   },
 }
 
+// Load the i18n aggregate messages as DEFAULT-ONLY JSON modules. esbuild's
+// json loader also emits a named export per top-level key, and the messages
+// contain an `eval` namespace — `var eval = ...` is a SyntaxError in the
+// strict-mode ESM chunk, which crashed `cognia-agent serve` at the runtimes
+// import (ADR-0059 T-B3 hand-run). Default-only sidesteps the reserved names.
+const jsonDefaultOnlyPlugin = {
+  name: "json-default-only-messages",
+  setup(build) {
+    build.onLoad({ filter: /i18n[\\/]messages[\\/][^\\/]+\.json$/ }, async (args) => {
+      const { readFile } = await import("node:fs/promises")
+      const raw = await readFile(args.path, "utf8")
+      return { contents: `export default ${raw}`, loader: "js" }
+    })
+  },
+}
+
 await esbuild.build({
   entryPoints: [entry],
   outdir,
@@ -87,7 +103,7 @@ await esbuild.build({
     ".woff": "empty",
     ".woff2": "empty",
   },
-  plugins: [stubNextPlugin],
+  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "info",
 })
 

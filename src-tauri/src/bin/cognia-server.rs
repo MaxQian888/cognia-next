@@ -133,8 +133,44 @@ fn store_data_dir() -> PathBuf {
     data_dir()
 }
 
+/// Minimal stderr logger. Without an installed `log` backend every
+/// supervisor line — including the piped brain/sidecar output — is silently
+/// dropped, which makes a headless install undebuggable. `COGNIA_LOG`
+/// (error|warn|info|debug) tunes the level; default info.
+struct StderrLogger;
+
+impl log::Log for StderrLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] {}", record.level(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+static STDERR_LOGGER: StderrLogger = StderrLogger;
+
+fn init_logger() {
+    let level = match std::env::var("COGNIA_LOG").as_deref() {
+        Ok("error") => log::LevelFilter::Error,
+        Ok("warn") => log::LevelFilter::Warn,
+        Ok("debug") => log::LevelFilter::Debug,
+        Ok("trace") => log::LevelFilter::Trace,
+        _ => log::LevelFilter::Info,
+    };
+    if log::set_logger(&STDERR_LOGGER).is_ok() {
+        log::set_max_level(level);
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_logger();
     let cli = Cli::parse();
 
     let dir = data_dir();
