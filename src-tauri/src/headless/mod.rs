@@ -48,6 +48,9 @@ pub struct HeadlessServices {
     /// The companion event bus — every host-emitted event rides
     /// `/ws/v1/events` from here.
     pub event_bus: Arc<EventBus>,
+    /// Execution plane for external agents (ADR-0059 R10). Local processes
+    /// in Phase 1; `ExecBackend::Container` swaps in at T2 (R13).
+    pub exec: Arc<dyn crate::external_agent::exec_backend::ExecBackend>,
 }
 
 impl HeadlessServices {
@@ -61,6 +64,7 @@ impl HeadlessServices {
             sidecar_host,
             api_keys,
             event_bus,
+            exec: crate::external_agent::exec_backend::LocalProcessBackend::new(),
         })
     }
 
