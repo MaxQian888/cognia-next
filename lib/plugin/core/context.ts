@@ -145,6 +145,7 @@ import { createShareAPI, type PluginShareAPI } from "../api/share-api"
 import { createBackupAPI, type PluginBackupAPI } from "../api/backup-api"
 import { createAutomationAPI, type PluginAutomationAPI } from "../api/automation-api"
 import { createCompanionAPI, type PluginCompanionAPI } from "../api/companion-api"
+import { createPetAPI, type PluginPetAPI } from "../api/pet-api"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
@@ -224,6 +225,8 @@ export type FullPluginContext = Omit<PluginContext, "storage"> &
     automation: PluginAutomationAPI
     /** Paired-device + remote-control + host goal-loop steering (gated `companion:*`). */
     companion: PluginCompanionAPI
+    /** Desktop pet nurture surface (capability "pet"; gated `pet:read`/`pet:interact`). */
+    pet: PluginPetAPI
   }
 
 // =============================================================================
@@ -387,6 +390,7 @@ export function createFullPluginContext(
     backup: createBackupAPI(pluginId),
     automation: createAutomationAPI(pluginId),
     companion: createCompanionAPI(pluginId),
+    pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
   }
 }
 

@@ -43,6 +43,8 @@ export const DEFAULT_RATE_LIMITS: Record<string, RateLimitConfig> = {
   "python:eval": { capacity: 10, refillPerSecond: 0.2 },
   "python:import": { capacity: 10, refillPerSecond: 0.2 },
   "ui:notification": { capacity: 30, refillPerSecond: 0.5 },
+  "pet:interact": { capacity: 10, refillPerSecond: 0.5 },
+  "pet:emit": { capacity: 20, refillPerSecond: 0.5 },
 }
 
 export class PluginRateLimiter {

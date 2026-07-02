@@ -2056,6 +2056,9 @@ export interface PluginContext {
 
   /** Platform-capability flags (ADR-0026 §5 §C). */
   capabilities?: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
+
+  /** Desktop pet — available only with the "pet" capability; warn-once no-op otherwise. */
+  pet?: import("@/lib/plugin/api/pet-api").PluginPetAPI
 }
 
 /**
