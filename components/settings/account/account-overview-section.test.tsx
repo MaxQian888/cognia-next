@@ -14,6 +14,20 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
 }))
 
+const toastSuccessMock = jest.fn()
+const toastErrorMock = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+  },
+}))
+
+const writeClipboardTextMock = jest.fn<Promise<void>, [string]>()
+jest.mock("@/lib/tauri/clipboard", () => ({
+  writeClipboardText: (text: string) => writeClipboardTextMock(text),
+}))
+
 const useUserProfileMock = jest.fn()
 jest.mock("@/lib/profile/use-user-profile", () => ({
   useUserProfile: () => useUserProfileMock(),
@@ -46,11 +60,24 @@ interface MockAccount {
 }
 let mockAccounts: MockAccount[] = []
 let mockActiveAccountId: string | null = null
+let mockUnlockedAccountId: string | null = null
+const lockMock = jest.fn()
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: (selector: (s: unknown) => unknown) =>
-    selector({ accounts: mockAccounts, activeAccountId: mockActiveAccountId }),
+    selector({
+      accounts: mockAccounts,
+      activeAccountId: mockActiveAccountId,
+      unlockedAccountId: mockUnlockedAccountId,
+      lock: lockMock,
+    }),
   selectActiveAccount: (s: { accounts: MockAccount[]; activeAccountId: string | null }) =>
     s.accounts.find((a) => a.id === s.activeAccountId) ?? null,
+}))
+
+let mockAutoLockMinutes = 0
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (s: unknown) => unknown) =>
+    selector({ settings: { accountAutoLockMinutes: mockAutoLockMinutes } }),
 }))
 
 jest.mock("@/components/account/account-manage-dialog", () => ({
@@ -62,9 +89,16 @@ import { AccountOverviewSection } from "./account-overview-section"
 
 beforeEach(() => {
   pushMock.mockReset()
+  toastSuccessMock.mockReset()
+  toastErrorMock.mockReset()
+  writeClipboardTextMock.mockReset()
+  writeClipboardTextMock.mockResolvedValue(undefined)
+  lockMock.mockReset()
   mockIsTauri = false
   mockAccounts = []
   mockActiveAccountId = null
+  mockUnlockedAccountId = null
+  mockAutoLockMinutes = 0
   useUserProfileMock.mockReturnValue({
     profile: {},
     resolvedDisplayName: null,
@@ -76,13 +110,22 @@ beforeEach(() => {
 })
 
 describe("AccountOverviewSection", () => {
-  it("renders signed-out identity with initials and no usage", () => {
+  it("renders signed-out identity with a connect CTA and no usage", () => {
     render(<AccountOverviewSection />)
     expect(screen.getByTestId("account-overview-section")).toBeInTheDocument()
     expect(screen.getByTestId("stub-profile-section")).toBeInTheDocument()
     expect(screen.getByText("notSignedIn")).toBeInTheDocument()
+    expect(screen.getByTestId("account-overview-connect")).toBeInTheDocument()
+    expect(screen.queryByTestId("account-overview-copy-email")).not.toBeInTheDocument()
     expect(screen.queryByTestId("account-overview-avatar-img")).not.toBeInTheDocument()
     expect(screen.queryByLabelText("usageFiveHour")).not.toBeInTheDocument()
+  })
+
+  it("routes the connect CTA to the subscription section", async () => {
+    const user = userEvent.setup()
+    render(<AccountOverviewSection />)
+    await user.click(screen.getByTestId("account-overview-connect"))
+    expect(pushMock).toHaveBeenCalledWith("/settings?section=subscription")
   })
 
   it("renders signed-in identity with avatar, email, pronouns, status and usage", () => {
@@ -111,6 +154,32 @@ describe("AccountOverviewSection", () => {
     expect(screen.getAllByText("PRO").length).toBeGreaterThanOrEqual(2)
     expect(screen.getByLabelText("usageFiveHour")).toBeInTheDocument()
     expect(screen.getByLabelText("usageSevenDay")).toBeInTheDocument()
+    // Signed in → no connect CTA.
+    expect(screen.queryByTestId("account-overview-connect")).not.toBeInTheDocument()
+  })
+
+  it("copies the email to the clipboard and toasts on success", async () => {
+    useCredentialMock.mockReturnValue({
+      credential: { email: "max@example.com", plan: "pro" },
+      loading: false,
+    })
+    const user = userEvent.setup()
+    render(<AccountOverviewSection />)
+    await user.click(screen.getByTestId("account-overview-copy-email"))
+    expect(writeClipboardTextMock).toHaveBeenCalledWith("max@example.com")
+    expect(toastSuccessMock).toHaveBeenCalledWith("emailCopied")
+  })
+
+  it("toasts an error when the clipboard write fails", async () => {
+    useCredentialMock.mockReturnValue({
+      credential: { email: "max@example.com", plan: "pro" },
+      loading: false,
+    })
+    writeClipboardTextMock.mockRejectedValue(new Error("denied"))
+    const user = userEvent.setup()
+    render(<AccountOverviewSection />)
+    await user.click(screen.getByTestId("account-overview-copy-email"))
+    expect(toastErrorMock).toHaveBeenCalledWith("emailCopyFailed")
   })
 
   it("renders a usage row without a reset hint and skips the missing window", () => {
@@ -155,12 +224,13 @@ describe("AccountOverviewSection", () => {
     expect(pushMock).toHaveBeenCalledWith("/settings?section=companion")
   })
 
-  it("hides the local accounts card off Tauri", async () => {
+  it("hides the local accounts and security cards off Tauri", async () => {
     mockIsTauri = false
     render(<AccountOverviewSection />)
-    // Give the post-hydration effect a tick; the card must stay hidden.
+    // Give the post-hydration effect a tick; the cards must stay hidden.
     await Promise.resolve()
     expect(screen.queryByTestId("account-overview-manage-local")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("account-overview-manage-security")).not.toBeInTheDocument()
   })
 
   it("shows the local accounts card on Tauri and opens the manage dialog", async () => {
@@ -180,5 +250,53 @@ describe("AccountOverviewSection", () => {
     expect(screen.queryByTestId("stub-manage-dialog")).not.toBeInTheDocument()
     await user.click(manage)
     expect(screen.getByTestId("stub-manage-dialog")).toBeInTheDocument()
+  })
+
+  it("shows a lock-now action only when an account is unlocked", async () => {
+    mockIsTauri = true
+    mockAccounts = [{ id: "acct_alpha", displayName: "Alpha" }]
+    mockActiveAccountId = "acct_alpha"
+    mockUnlockedAccountId = "acct_alpha"
+    const user = userEvent.setup()
+    render(<AccountOverviewSection />)
+
+    const lock = await screen.findByTestId("account-overview-lock-now")
+    await user.click(lock)
+    expect(lockMock).toHaveBeenCalledTimes(1)
+    expect(toastSuccessMock).toHaveBeenCalledWith("lockedNow")
+  })
+
+  it("hides the lock-now action when no account is unlocked", async () => {
+    mockIsTauri = true
+    mockAccounts = [{ id: "acct_alpha", displayName: "Alpha" }]
+    mockActiveAccountId = "acct_alpha"
+    mockUnlockedAccountId = null
+    render(<AccountOverviewSection />)
+    await screen.findByTestId("account-overview-manage-local")
+    expect(screen.queryByTestId("account-overview-lock-now")).not.toBeInTheDocument()
+  })
+
+  it("surfaces the auto-lock state and jumps to the security section", async () => {
+    mockIsTauri = true
+    mockAutoLockMinutes = 15
+    const user = userEvent.setup()
+    render(<AccountOverviewSection />)
+
+    const manage = await screen.findByTestId("account-overview-manage-security")
+    expect(screen.getByTestId("account-overview-security-summary")).toHaveTextContent(
+      'securityAutoLockOn:{"minutes":15}'
+    )
+    await user.click(manage)
+    expect(pushMock).toHaveBeenCalledWith("/settings?section=security")
+  })
+
+  it("shows the auto-lock-off summary when auto-lock is disabled", async () => {
+    mockIsTauri = true
+    mockAutoLockMinutes = 0
+    render(<AccountOverviewSection />)
+    await screen.findByTestId("account-overview-manage-security")
+    expect(screen.getByTestId("account-overview-security-summary")).toHaveTextContent(
+      "securityAutoLockOff"
+    )
   })
 })
