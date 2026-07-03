@@ -508,10 +508,26 @@ describe("LogPanel — resizable detail panel", () => {
     expect(detail.dataset.maxSize).toMatch(percent)
   })
 
-  it("renders main pane alone (no resizable group) when detail closed", () => {
-    render(<LogPanel />)
-    expect(screen.queryByTestId("log-panel-resizable-group")).not.toBeInTheDocument()
+  it("keeps the group mounted but hides handle + detail panel when detail closed", () => {
+    const { container } = render(<LogPanel />)
+    // The group stays mounted so toggling the detail panel never remounts the
+    // main pane (remounting dropped scroll position and re-created every row).
+    expect(screen.getByTestId("log-panel-resizable-group")).toBeInTheDocument()
     expect(screen.getByTestId("log-panel-main-pane")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="resizable-handle"]')).not.toBeInTheDocument()
+    expect(screen.queryByTestId("resizable-panel-log-panel-detail")).not.toBeInTheDocument()
+  })
+
+  it("preserves the main pane DOM node when the detail panel opens", () => {
+    const selected = { id: "l-1", message: "x", level: "info", module: "m", timestamp: "" } as never
+    const { rerender } = render(<LogPanel />)
+    const mainBefore = screen.getByTestId("log-panel-main-pane")
+    mockUseLogPanelFilters.mockReturnValue(
+      defaultFilterState({ selectedLog: selected, showDetailPanel: true })
+    )
+    rerender(<LogPanel />)
+    expect(screen.getByTestId("stub-detail-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("log-panel-main-pane")).toBe(mainBefore)
   })
 })
 

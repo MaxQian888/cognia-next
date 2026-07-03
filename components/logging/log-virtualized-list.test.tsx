@@ -36,8 +36,16 @@ jest.mock("@tanstack/react-virtual", () => ({
 }))
 
 jest.mock("./log-entry", () => ({
-  MemoizedLogEntry: ({ log }: { log: { id: string; message: string } }) => (
-    <div data-testid={`memoized-log-${log.id}`}>{log.message}</div>
+  MemoizedLogEntry: ({
+    log,
+    isSelected,
+  }: {
+    log: { id: string; message: string }
+    isSelected?: boolean
+  }) => (
+    <div data-testid={`memoized-log-${log.id}`} data-selected={isSelected || undefined}>
+      {log.message}
+    </div>
   ),
   TraceGroup: ({ traceId, logs }: { traceId: string; logs: Array<{ id: string }> }) => (
     <div data-testid={`trace-group-${traceId}`}>{logs.length} logs</div>
@@ -72,6 +80,7 @@ function Harness(props: {
   }
   onRetry?: () => void
   bookmarkedIds?: Set<string>
+  selectedLogId?: string | null
 }) {
   const t = useTranslations("logging")
   const scrollRef = createRef<HTMLDivElement>()
@@ -94,6 +103,7 @@ function Harness(props: {
       handleSelectLog={jest.fn()}
       handleFocusTrace={jest.fn()}
       handleFocusSession={jest.fn()}
+      selectedLogId={props.selectedLogId}
       t={t}
       onRetry={props.onRetry}
       emptyStateContext={props.emptyContext}
@@ -237,5 +247,15 @@ describe("VirtualizedLogList", () => {
       expect(screen.queryByTestId("trace-group-t")).not.toBeInTheDocument()
       expect(screen.getByTestId("memoized-log-only")).toBeInTheDocument()
     })
+  })
+})
+
+describe("VirtualizedLogList — selected row", () => {
+  it("marks only the row matching selectedLogId as selected", () => {
+    const logs = [makeLog("a"), makeLog("b"), makeLog("c")]
+    render(<Harness filteredLogs={logs} selectedLogId="b" />)
+    expect(screen.getByTestId("memoized-log-b")).toHaveAttribute("data-selected", "true")
+    expect(screen.getByTestId("memoized-log-a")).not.toHaveAttribute("data-selected")
+    expect(screen.getByTestId("memoized-log-c")).not.toHaveAttribute("data-selected")
   })
 })

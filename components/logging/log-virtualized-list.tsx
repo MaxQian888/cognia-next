@@ -51,6 +51,8 @@ export interface VirtualizedLogListProps {
   handleSelectLog: (log: StructuredLogEntry) => void
   handleFocusTrace: (traceId: string, log: StructuredLogEntry) => void
   handleFocusSession: (sessionId: string, log: StructuredLogEntry) => void
+  /** Id of the log whose detail panel is open — highlights the matching row. */
+  selectedLogId?: string | null
   t: ReturnType<typeof useTranslations>
   /** Retries the current query when the list fails to load. */
   onRetry?: () => void
@@ -77,6 +79,7 @@ export function VirtualizedLogList({
   handleSelectLog,
   handleFocusTrace,
   handleFocusSession,
+  selectedLogId = null,
   t,
   onRetry,
   emptyStateContext,
@@ -216,6 +219,7 @@ export function VirtualizedLogList({
               useRegex={useRegex}
               bookmarkedIds={bookmarkedIds}
               onToggleBookmark={toggleBookmark}
+              selectedLogId={selectedLogId}
               density={density}
               t={t}
             />
@@ -254,6 +258,7 @@ export function VirtualizedLogList({
                 useRegex={useRegex}
                 isBookmarked={bookmarkedIds.has(log.id)}
                 onToggleBookmark={toggleBookmark}
+                isSelected={log.id === selectedLogId}
                 density={density}
                 t={t}
               />
