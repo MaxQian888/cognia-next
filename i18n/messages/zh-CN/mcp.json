@@ -204,9 +204,13 @@
   "importLabel": "导入",
   "list": {
     "clearFilters": "清空筛选",
+    "clearSelection": "清除选择",
     "empty": "暂无 MCP 服务器，添加一个让 Claude 可以使用外部工具。",
+    "emptyBrowsePresets": "浏览预设",
     "noMatch": "没有匹配当前筛选的服务器。",
-    "searchPlaceholder": "按名称、命令或 URL 筛选服务器…"
+    "searchPlaceholder": "按名称、命令或 URL 筛选服务器…",
+    "selectAll": "全选（{count}）",
+    "selectAllAria": "全选服务器"
   },
   "liveSession": {
     "disable": "停用",

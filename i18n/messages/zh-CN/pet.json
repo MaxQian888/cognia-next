@@ -345,5 +345,21 @@
     "minimize": "最小化宠物",
     "restore": "显示宠物",
     "toggle": "打开宠物"
+  },
+  "mood": {
+    "content": "满足",
+    "happy": "开心",
+    "tired": "疲惫",
+    "lonely": "孤单",
+    "grumpy": "暴躁"
+  },
+  "condition": {
+    "unwell": "需要照顾"
+  },
+  "wallet": {
+    "multiplier": "金币 ×{multiplier}"
+  },
+  "inventory": {
+    "title": "道具"
   }
 }

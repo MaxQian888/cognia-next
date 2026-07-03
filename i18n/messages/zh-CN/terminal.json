@@ -1,11 +1,21 @@
 {
   "dock": {
+    "clear": "清屏（Ctrl+L）",
+    "closeConfirm": {
+      "body": "该标签页正在运行命令，现在关闭会终止该命令。仍要关闭吗？",
+      "cancel": "保持运行",
+      "confirm": "关闭标签页",
+      "title": "关闭正在运行的终端？"
+    },
     "closePane": "关闭分屏",
     "closePanel": "关闭面板",
+    "maximize": "最大化终端面板",
     "newSession": "新建终端",
     "resize": "拖动调整终端 dock 高度（方向键亦可）",
+    "restore": "还原终端面板大小",
     "spawnDenied": "终端被插件拦截",
-    "spawnError": "无法打开终端：{message}"
+    "spawnError": "无法打开终端：{message}",
+    "splitRight": "向右分屏（Ctrl+\\）"
   },
   "emptyState": {
     "desktop": {

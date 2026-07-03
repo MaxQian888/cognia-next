@@ -77,6 +77,12 @@
     "activeEmpty": "No active goals. Start one with the /goal command in a chat.",
     "newGoal": "New goal",
     "openGoalsHeading": "Open goals",
+    "prefs": {
+      "defaultTab": "Default tab",
+      "description": "Choose where the console opens and how open goals sort.",
+      "openGoalsSort": "Open-goals sort",
+      "title": "Console preferences"
+    },
     "statActive": "{count} active",
     "statDone": "{count} done",
     "statPaused": "{count} paused",
@@ -84,6 +90,10 @@
       "active": "Active",
       "avgTurns": "Avg turns",
       "done": "Completed",
+      "filterActive": "Show only active goals",
+      "filterPaused": "Show only paused goals",
+      "openAnalytics": "Open the Analytics tab",
+      "openHistory": "Open the History tab",
       "paused": "Paused",
       "tokenSpend": "Token spend"
     },
@@ -103,12 +113,19 @@
     }
   },
   "defaults": {
+    "budgetHeading": "Budget & limits",
+    "completionHeading": "Completion gate",
+    "maxBudgetUsd": "Default max cost per turn (USD)",
+    "maxBudgetUsdHint": "Hard USD ceiling for a single turn of a new goal. 0 = no cost ceiling (turn + token budgets still apply).",
     "maxJudgeFailures": "Default max judge failures",
     "maxJudgeFailuresHint": "Consecutive JSON parse failures before auto-pause.",
+    "maxPromiseDenials": "Default max promise denials",
+    "maxPromiseDenialsHint": "Failed verification turns before the completion gate is overridden and the goal completes anyway.",
     "maxTokens": "Default max tokens",
     "maxTokensHint": "Cumulative input + output tokens billed against the goal.",
     "maxTurns": "Default max turns",
     "maxTurnsHint": "Hard cap on continuation turns for a new goal.",
+    "reset": "Reset to defaults",
     "save": "Save defaults",
     "saving": "Saving…",
     "startPaused": "Start new goals paused",
@@ -155,6 +172,9 @@
     "maxTokensHint": "Cap on the judge's reply. The judge answers in one line — 200 is plenty.",
     "model": "Judge model",
     "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
+    "provider": "Judge provider",
+    "providerHint": "Provider id paired with the judge model. Leave blank to reuse the session / app provider.",
+    "providerPlaceholder": "Session provider",
     "promptOverride": "Judge prompt override",
     "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
     "temperature": "Judge temperature",
@@ -180,6 +200,8 @@
     "turns": "Turns"
   },
   "pacing": {
+    "adaptivePacing": "Adaptive pacing",
+    "adaptivePacingHint": "New goals let the model suggest the next continuation delay (1–60 min); it can only slow the loop, never speed it below the minimum interval.",
     "heading": "Pacing",
     "interval": "Min seconds between turns",
     "intervalHint": "Throttle auto-continuation. 0 means no delay.",

@@ -111,6 +111,8 @@
     "copyTraceId": "Copy trace ID",
     "message": "Message",
     "module": "Module",
+    "nextLog": "Next log",
+    "prevLog": "Previous log",
     "relatedLogs": "Related Logs",
     "removeBookmark": "Remove bookmark",
     "sessionId": "Session ID",

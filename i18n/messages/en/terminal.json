@@ -1,11 +1,21 @@
 {
   "dock": {
+    "clear": "Clear terminal (Ctrl+L)",
+    "closeConfirm": {
+      "body": "This tab is still running a command. Closing it now will terminate the command. Close it anyway?",
+      "cancel": "Keep running",
+      "confirm": "Close tab",
+      "title": "Close running terminal?"
+    },
     "closePane": "Close pane",
     "closePanel": "Close panel",
+    "maximize": "Maximize terminal panel",
     "newSession": "New terminal",
     "resize": "Drag to resize the terminal dock (arrow keys also work)",
+    "restore": "Restore terminal panel size",
     "spawnDenied": "Terminal blocked by a plugin",
-    "spawnError": "Couldn't open terminal: {message}"
+    "spawnError": "Couldn't open terminal: {message}",
+    "splitRight": "Split terminal right (Ctrl+\\)"
   },
   "emptyState": {
     "desktop": {

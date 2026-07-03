@@ -1,11 +1,14 @@
 {
   "title": "Browser",
   "url": {
-    "placeholder": "http://localhost:3000",
-    "go": "Go"
+    "placeholder": "http://localhost:3000"
   },
   "actions": {
+    "back": "Back",
+    "forward": "Forward",
     "reload": "Reload",
+    "screenshot": "Send screenshot to chat",
+    "openExternal": "Open in external browser",
     "selectElement": "Select element",
     "cancelSelect": "Cancel selection"
   },
@@ -16,7 +19,12 @@
     "cancel": "Cancel",
     "sent": "Sent to chat",
     "noSession": "Open a chat session first",
-    "failed": "Could not send the comment"
+    "failed": "Could not send the comment",
+    "hint": "Esc to dismiss · Ctrl+Enter to send"
+  },
+  "screenshot": {
+    "sent": "Screenshot sent to chat",
+    "failed": "Could not capture the preview"
   },
   "selection": {
     "selector": "Selector"
@@ -28,7 +36,8 @@
   },
   "empty": {
     "title": "Preview a local dev server",
-    "hint": "Enter a localhost URL to render it here, then select an element to comment on it."
+    "hint": "Enter a localhost URL to render it here, then select an element to comment on it.",
+    "quickOpen": "Quick open:"
   },
   "errors": {
     "navigate": "Could not navigate to that URL"

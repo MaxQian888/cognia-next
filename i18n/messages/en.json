@@ -675,6 +675,8 @@
       "approve": "Create team",
       "awaitingExternal": "Team created and marked for external pickup — an external agent can claim it via the Cognia bridge.",
       "cancel": "Cancel",
+      "clarifyContinue": "Continue",
+      "clarifySkip": "Skip",
       "compose": "Compose",
       "composing": "Composing…",
       "confidence": "{pct}% confidence",
@@ -702,6 +704,7 @@
       "piiRefused": "Refused: the objective still contains sensitive data after redaction.",
       "queuedBackground": "Team created and queued to run in the background — you'll be notified when it finishes.",
       "queuedBackgroundNoScheduler": "Team created. Background scheduling is unavailable here — start it from the team workspace.",
+      "quickCreate": "Quick create",
       "reject": "Back",
       "resultDone": "Done",
       "rosterLabel": "Roster ({count})",
@@ -1656,8 +1659,12 @@
   },
   "browser": {
     "actions": {
+      "back": "Back",
       "cancelSelect": "Cancel selection",
+      "forward": "Forward",
+      "openExternal": "Open in external browser",
       "reload": "Reload",
+      "screenshot": "Send screenshot to chat",
       "selectElement": "Select element"
     },
     "agent": {
@@ -1668,6 +1675,7 @@
     "comment": {
       "cancel": "Cancel",
       "failed": "Could not send the comment",
+      "hint": "Esc to dismiss · Ctrl+Enter to send",
       "noSession": "Open a chat session first",
       "placeholder": "Describe the change you want…",
       "send": "Send to chat",
@@ -1676,17 +1684,21 @@
     },
     "empty": {
       "hint": "Enter a localhost URL to render it here, then select an element to comment on it.",
+      "quickOpen": "Quick open:",
       "title": "Preview a local dev server"
     },
     "errors": {
       "navigate": "Could not navigate to that URL"
+    },
+    "screenshot": {
+      "failed": "Could not capture the preview",
+      "sent": "Screenshot sent to chat"
     },
     "selection": {
       "selector": "Selector"
     },
     "title": "Browser",
     "url": {
-      "go": "Go",
       "placeholder": "http://localhost:3000"
     }
   },
@@ -3433,9 +3445,12 @@
       "newFolderName": "New folder",
       "openSessions": "Open sessions",
       "renameFolder": "Rename folder",
+      "resizeHandle": "Resize sidebar",
       "searchAria": "Search conversations",
       "searchPlaceholder": "Search conversations…",
+      "searchTruncated": "Some results may be hidden — refine your search.",
       "sectionPinned": "Pinned",
+      "sectionRecent": "Recent",
       "teamFallback": "Team",
       "viewActive": "Show active conversations",
       "viewArchived": "Show archived conversations"
@@ -3813,6 +3828,7 @@
       "archive": "Archive",
       "branchedFrom": "Branched conversation — open parent",
       "delete": "Delete",
+      "dragHandle": "Drag to reorder or move to a folder",
       "moveToFolder": "Move to folder",
       "openInTerminal": "Open in terminal",
       "openInTerminalFailed": "Could not export this session for the terminal",
@@ -3893,6 +3909,12 @@
     }
   },
   "discover": {
+    "activeFilters": {
+      "clearFilter": "Clear filter",
+      "clearSort": "Clear sort",
+      "filterChip": "Filter: {value}",
+      "sortChip": "Sort: {value}"
+    },
     "builtInBadge": "Built-in",
     "card": {
       "twinDraftFallbackName": "{kind} draft",
@@ -4048,6 +4070,17 @@
       "specialist": "Specialist"
     },
     "pluginBadge": "Plugin",
+    "preferences": {
+      "description": "Set where Discover opens and how it looks by default.",
+      "landingAuto": "Auto (first visible)",
+      "landingHint": "The category Discover opens on when no link specifies one. Auto uses your first visible category.",
+      "landingLabel": "Default category",
+      "reset": "Reset",
+      "title": "Preferences",
+      "viewHint": "Fallback layout for categories that don't have their own view choice.",
+      "viewLabel": "Default view"
+    },
+    "resultCount": "{count, plural, =0 {No results} =1 {1 result} other {# results}}",
     "search": "Search discover…",
     "searchAria": "Search discover",
     "searchScope": "Search {category}…",
@@ -4433,7 +4466,22 @@
   "execution": {
     "cancelAll": "Cancel all",
     "cancelLeg": "Cancel {label}",
+    "clearFilters": "Clear filters",
+    "controls": {
+      "filterKinds": "Filter by kind",
+      "groupByKind": "Group by kind",
+      "label": "View settings",
+      "reset": "Reset to defaults",
+      "showElapsed": "Show elapsed time",
+      "sort": "Sort"
+    },
+    "elapsed": {
+      "hoursMinutes": "{hours}h {minutes}m",
+      "minutesSeconds": "{minutes}m {seconds}s",
+      "seconds": "{seconds}s"
+    },
     "empty": "Nothing is running right now.",
+    "filteredEmpty": "No executions match your filters.",
     "kind": {
       "chat": "Chat",
       "connector": "Connector",
@@ -4445,6 +4493,11 @@
       "workflowStep": "Workflow step"
     },
     "runningCount": "{count, plural, =0 {Idle} other {# running}}",
+    "sort": {
+      "kind": "By kind",
+      "recent": "Recent",
+      "status": "By status"
+    },
     "status": {
       "cancelled": "Cancelled",
       "done": "Done",
@@ -4878,6 +4931,12 @@
       "activeEmpty": "No active goals. Start one with the /goal command in a chat.",
       "newGoal": "New goal",
       "openGoalsHeading": "Open goals",
+      "prefs": {
+        "defaultTab": "Default tab",
+        "description": "Choose where the console opens and how open goals sort.",
+        "openGoalsSort": "Open-goals sort",
+        "title": "Console preferences"
+      },
       "statActive": "{count} active",
       "statDone": "{count} done",
       "statPaused": "{count} paused",
@@ -4885,6 +4944,10 @@
         "active": "Active",
         "avgTurns": "Avg turns",
         "done": "Completed",
+        "filterActive": "Show only active goals",
+        "filterPaused": "Show only paused goals",
+        "openAnalytics": "Open the Analytics tab",
+        "openHistory": "Open the History tab",
         "paused": "Paused",
         "tokenSpend": "Token spend"
       },
@@ -4904,12 +4967,19 @@
       }
     },
     "defaults": {
+      "budgetHeading": "Budget & limits",
+      "completionHeading": "Completion gate",
+      "maxBudgetUsd": "Default max cost per turn (USD)",
+      "maxBudgetUsdHint": "Hard USD ceiling for a single turn of a new goal. 0 = no cost ceiling (turn + token budgets still apply).",
       "maxJudgeFailures": "Default max judge failures",
       "maxJudgeFailuresHint": "Consecutive JSON parse failures before auto-pause.",
+      "maxPromiseDenials": "Default max promise denials",
+      "maxPromiseDenialsHint": "Failed verification turns before the completion gate is overridden and the goal completes anyway.",
       "maxTokens": "Default max tokens",
       "maxTokensHint": "Cumulative input + output tokens billed against the goal.",
       "maxTurns": "Default max turns",
       "maxTurnsHint": "Hard cap on continuation turns for a new goal.",
+      "reset": "Reset to defaults",
       "save": "Save defaults",
       "saving": "Saving…",
       "startPaused": "Start new goals paused",
@@ -4958,6 +5028,9 @@
       "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
       "promptOverride": "Judge prompt override",
       "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
+      "provider": "Judge provider",
+      "providerHint": "Provider id paired with the judge model. Leave blank to reuse the session / app provider.",
+      "providerPlaceholder": "Session provider",
       "temperature": "Judge temperature",
       "temperatureHint": "0 is deterministic (recommended). Higher loosens the verdict.",
       "useChatModel": "Use chat model"
@@ -4981,6 +5054,8 @@
       "turns": "Turns"
     },
     "pacing": {
+      "adaptivePacing": "Adaptive pacing",
+      "adaptivePacingHint": "New goals let the model suggest the next continuation delay (1–60 min); it can only slow the loop, never speed it below the minimum interval.",
       "heading": "Pacing",
       "interval": "Min seconds between turns",
       "intervalHint": "Throttle auto-continuation. 0 means no delay.",
@@ -5812,6 +5887,8 @@
       "copyTraceId": "Copy trace ID",
       "message": "Message",
       "module": "Module",
+      "nextLog": "Next log",
+      "prevLog": "Previous log",
       "relatedLogs": "Related Logs",
       "removeBookmark": "Remove bookmark",
       "sessionId": "Session ID",
@@ -6540,9 +6617,13 @@
     "importLabel": "Import",
     "list": {
       "clearFilters": "Clear filters",
+      "clearSelection": "Clear selection",
       "empty": "No MCP servers yet. Add one to expose external tools to Claude.",
+      "emptyBrowsePresets": "Browse presets",
       "noMatch": "No servers match these filters.",
-      "searchPlaceholder": "Filter servers by name, command, or URL…"
+      "searchPlaceholder": "Filter servers by name, command, or URL…",
+      "selectAll": "Select all ({count})",
+      "selectAllAria": "Select all servers"
     },
     "liveSession": {
       "disable": "Disable",
@@ -6606,10 +6687,74 @@
     }
   },
   "memory": {
+    "add": {
+      "cancel": "Cancel",
+      "description": "Manually save a durable fact. Stored in global scope with explicit provenance.",
+      "importanceLabel": "Importance",
+      "submit": "Add memory",
+      "tagsLabel": "Tags",
+      "tagsPlaceholder": "comma, separated, tags",
+      "textLabel": "Memory",
+      "textPlaceholder": "e.g. The user prefers pnpm and TypeScript strict mode.",
+      "title": "Add memory",
+      "typeLabel": "Type"
+    },
+    "bulk": {
+      "clear": "Clear selection",
+      "delete": "Delete",
+      "deleteConfirm": {
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "description": "This permanently removes {count} memories. This can't be undone.",
+        "title": "Delete selected memories?"
+      },
+      "pin": "Pin",
+      "selectAll": "Select all",
+      "selected": "{count} selected",
+      "unpin": "Unpin"
+    },
+    "detail": {
+      "cancel": "Cancel",
+      "close": "Close",
+      "deleteConfirm": {
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "description": "This permanently removes the memory. This can't be undone.",
+        "title": "Delete this memory?"
+      },
+      "fields": {
+        "accessCount": "Recalled",
+        "archivedAt": "Archived",
+        "created": "Created",
+        "importance": "Importance",
+        "indexed": "Indexed",
+        "key": "Key",
+        "lastUsed": "Last used",
+        "updated": "Updated",
+        "version": "Version"
+      },
+      "importanceLabel": "Importance",
+      "next": "Next memory",
+      "no": "No",
+      "previous": "Previous memory",
+      "replacedBy": "Replaced by",
+      "replacedByGone": "The replacement was deleted.",
+      "save": "Save",
+      "source": "Source",
+      "tagsLabel": "Tags",
+      "tagsPlaceholder": "comma, separated, tags",
+      "textLabel": "Text",
+      "yes": "Yes"
+    },
     "panel": {
       "accessedRelative": "used {time}",
+      "add": "Add",
+      "addFirst": "Add your first memory",
       "cancelEdit": "Cancel",
+      "clearFilters": "Clear filters",
+      "clearTags": "Clear tags",
       "delete": "Delete",
+      "detailTitle": "Memory details",
       "edit": "Edit",
       "editLabel": "Edit memory text",
       "empty": {
@@ -6617,13 +6762,21 @@
         "title": "No memories yet"
       },
       "invalidated": "archived",
+      "noResults": {
+        "description": "No memory matches the current filters.",
+        "title": "No matching memories"
+      },
       "pin": "Pin",
+      "provenanceLabel": "Source type",
       "saveEdit": "Save",
+      "scopeLabel": "Scope",
       "searchLabel": "Search memories",
       "searchPlaceholder": "Search memories…",
+      "selectRow": "Select memory",
       "showInvalidated": "Show archived",
       "sort": {
         "accessed": "Recently used",
+        "created": "Recently created",
         "importance": "Importance",
         "recent": "Recently updated"
       },
@@ -6632,9 +6785,26 @@
         "active": "Active"
       },
       "subtitle": "What the assistant remembers about you.",
+      "tabs": {
+        "app": "App memory",
+        "external": "External agent memory"
+      },
+      "tagFilterLabel": "Tags:",
       "title": "Memory",
       "unpin": "Unpin",
       "viewSource": "View source"
+    },
+    "provenance": {
+      "all": "All sources",
+      "explicit": "Explicit",
+      "inbound": "Inbound",
+      "system": "System",
+      "user": "Auto (chat)"
+    },
+    "scopes": {
+      "all": "All scopes",
+      "character": "Character",
+      "global": "Global"
     },
     "types": {
       "episodic": "Event",
@@ -7183,6 +7353,18 @@
       "sectionTitle": "Conversation",
       "sendOnEnter": "Send on Enter",
       "sendOnEnterHelp": "Plain Enter sends; off makes Enter insert a newline and ⌘/Ctrl+Enter send.",
+      "sidebarCompact": "Compact rows",
+      "sidebarCompactHelp": "Tighten row spacing to fit more conversations.",
+      "sidebarContentSearch": "Search message content",
+      "sidebarContentSearchHelp": "Also match text inside messages, not just titles (slower).",
+      "sidebarGroupByDate": "Group by date",
+      "sidebarGroupByDateHelp": "Group conversations into Today / Yesterday / Previous buckets.",
+      "sidebarPreview": "Message preview",
+      "sidebarPreviewHelp": "Show a second line with the latest message under each conversation.",
+      "sidebarSection": "Conversation list",
+      "sidebarSectionHelp": "How the conversation list looks and searches.",
+      "sidebarUnread": "Unread badges",
+      "sidebarUnreadHelp": "Show a dot on conversations with unread messages.",
       "streamPartial": "Stream partial replies",
       "streamPartialHelp": "Show replies token-by-token as they arrive instead of all at once.",
       "streamSection": "Message stream",
@@ -7284,6 +7466,7 @@
       "renameAria": "Rename conversation",
       "search": "Search chats…",
       "searchAria": "Search chats",
+      "searchTruncated": "Some results may be hidden — refine your search.",
       "sections": {
         "activeRuns": "Active runs",
         "recents": "Recent chats"
@@ -8263,6 +8446,10 @@
         "connect": "Connect",
         "connectFrom": "Connecting from {label} — tap a target",
         "connectTarget": "Tap a node to connect",
+        "copilot": "AI copilot",
+        "copilotClose": "Close copilot",
+        "copilotOffline": "Connect to your desktop to use the AI copilot.",
+        "copilotTitle": "Workflow copilot",
         "deleteConnection": "Delete connection",
         "dirty": "Unsaved",
         "errorOutput": "Error",
@@ -8432,6 +8619,22 @@
     }
   },
   "observability": {
+    "empty": {
+      "hint": "Agent runs, tool calls, chats and workflows record spans here. Start a conversation or run an agent, or widen the time range to see older telemetry.",
+      "title": "No telemetry in this window",
+      "widen": "Widen to last 30d"
+    },
+    "export": {
+      "dashboardJson": "Dashboard as JSON",
+      "importDashboard": "Import dashboard…",
+      "importFailed": "Could not import: invalid dashboard file",
+      "imported": "Dashboard config imported",
+      "label": "Export",
+      "noTraces": "No traces to export in this window",
+      "saveFailed": "Export failed: {message}",
+      "saved": "Saved to {location}",
+      "tracesCsv": "Traces as CSV"
+    },
     "filters": {
       "clear": "Clear",
       "dims": {
@@ -8443,6 +8646,12 @@
       },
       "empty": "No options",
       "search": "Search…"
+    },
+    "metricToggle": {
+      "cost": "Cost",
+      "errors": "Errors",
+      "label": "Measure",
+      "spans": "Spans"
     },
     "noData": "No data in this window",
     "panels": {
@@ -8478,8 +8687,13 @@
       "to": "To"
     },
     "refresh": {
+      "hoursAgo": "{count}h ago",
+      "justNow": "just now",
       "label": "Auto-refresh",
-      "off": "Off"
+      "minutesAgo": "{count}m ago",
+      "off": "Off",
+      "refreshNow": "Refresh now",
+      "secondsAgo": "{count}s ago"
     },
     "series": {
       "cacheCreation": "Cache write",
@@ -8493,12 +8707,55 @@
       "p99": "p99",
       "perSec": "Requests/s"
     },
+    "settings": {
+      "data": {
+        "clearAll": "Clear all telemetry",
+        "clearCancel": "Cancel",
+        "clearConfirm": "Clear all",
+        "clearConfirmBody": "This permanently deletes every stored span. Dashboards will be empty until new telemetry is recorded. This cannot be undone.",
+        "clearConfirmTitle": "Clear all telemetry?",
+        "cleared": "Cleared {count} traces",
+        "olderThan": "Older than {days}d",
+        "prune": "Prune",
+        "pruneDone": "Pruned {count} traces",
+        "stored": "{count} spans stored",
+        "title": "Data"
+      },
+      "defaults": {
+        "range": "Default time range",
+        "refresh": "Auto-refresh",
+        "title": "Defaults"
+      },
+      "description": "Tune thresholds, panels and retention for the observability dashboard.",
+      "metrics": {
+        "cacheHitRate": "Cache hit rate",
+        "cost": "Window cost",
+        "errorRate": "Error rate",
+        "latencyP95": "Latency p95"
+      },
+      "panels": {
+        "description": "Hide panels you don't need — layout stays intact.",
+        "title": "Panels"
+      },
+      "thresholds": {
+        "crit": "Critical",
+        "description": "When a metric crosses these, its stat/chart turns amber then red.",
+        "reset": "Reset",
+        "title": "Thresholds",
+        "warn": "Warning"
+      },
+      "title": "Dashboard settings",
+      "unitFraction": "0–1 fraction",
+      "unitMs": "milliseconds",
+      "unitUsd": "USD"
+    },
     "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
     "title": "Observability",
     "toolbar": {
       "edit": "Edit layout",
       "lock": "Lock layout",
-      "resetLayout": "Reset layout"
+      "resetLayout": "Reset layout",
+      "settings": "Dashboard settings"
     },
     "traces": {
       "cost": "Cost",
@@ -9416,6 +9673,9 @@
         "title": "Your pet isn't feeling great"
       }
     },
+    "condition": {
+      "unwell": "Needs care"
+    },
     "console": {
       "hatch": "Hatch",
       "hatchPrompt": "Your egg is ready to hatch.",
@@ -9502,8 +9762,18 @@
         "title": "Sound"
       }
     },
+    "inventory": {
+      "title": "Items"
+    },
     "live2d": {
       "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."
+    },
+    "mood": {
+      "content": "Content",
+      "grumpy": "Grumpy",
+      "happy": "Happy",
+      "lonely": "Lonely",
+      "tired": "Tired"
     },
     "needs": {
       "bond": "Bond",
@@ -9615,6 +9885,9 @@
     "talkInput": {
       "placeholder": "Say something to your pet…",
       "send": "Send"
+    },
+    "wallet": {
+      "multiplier": "×{multiplier} coins"
     },
     "widget": {
       "minimize": "Minimize pet",
@@ -10338,7 +10611,9 @@
       "browseMarketplace": "Browse marketplace",
       "emptyAll": "No plugins installed yet.",
       "emptyFiltered": "No plugins match the current filters.",
-      "loading": "Loading plugins…"
+      "loading": "Loading plugins…",
+      "selectAll": "Select all ({count})",
+      "selectAllAria": "Select all visible plugins"
     },
     "import": {
       "cancel": "Cancel",
@@ -10662,6 +10937,8 @@
       "groupWasm": "WASM bundle",
       "install": "Install",
       "loadUnpacked": "Load unpacked…",
+      "syncDone": "Registry synced — {count, plural, =0 {no updates available} one {# update available} other {# updates available}}",
+      "syncFailed": "Registry sync failed: {message}",
       "syncRegistry": "Sync registry",
       "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates"
     },
@@ -13602,15 +13879,28 @@
       }
     },
     "account": {
+      "connect": "Connect account",
       "description": "Your identity, plan usage, profile, subscription and paired devices.",
       "devicePaired": "Paired · {id}",
       "deviceUnpaired": "No device paired",
       "devicesManage": "Manage",
       "devicesTitle": "Companion devices",
+      "emailCopied": "Email copied",
+      "emailCopyAria": "Copy email address",
+      "emailCopyFailed": "Couldn't copy email",
       "fallbackName": "Signed-out",
       "fallbackPlan": "Free",
+      "localAccountsManage": "Manage",
+      "localAccountsSummary": "{name} · {count, plural, one {# local account} other {# local accounts}}",
+      "localAccountsTitle": "Local accounts",
+      "lockNow": "Lock now",
+      "lockedNow": "Account locked",
       "notSignedIn": "Not signed in",
       "pair": "Pair a device",
+      "securityAutoLockOff": "Auto-lock is off",
+      "securityAutoLockOn": "Auto-locks after {minutes} min idle",
+      "securityManage": "Manage",
+      "securityTitle": "Security & auto-lock",
       "subscriptionManage": "Manage",
       "subscriptionTitle": "Subscription",
       "title": "Account",
@@ -14205,6 +14495,19 @@
       "description": "Tune the look and feel of the app. Changes are saved instantly.",
       "fontScaleHint": "Scales the entire UI. Defaults to 16px.",
       "fontScaleLabel": "Font size",
+      "io": {
+        "confirm": {
+          "body": "This replaces your current theme, fonts, colors, and custom CSS with the imported ones ({count, plural, one {# setting} other {# settings}}). Your uploaded wallpapers are kept.",
+          "cancel": "Cancel",
+          "confirm": "Apply",
+          "title": "Apply imported appearance?"
+        },
+        "export": "Export",
+        "exportSuccess": "Appearance exported.",
+        "import": "Import",
+        "importInvalid": "Couldn't read that file: {message}",
+        "importSuccess": "Applied {count, plural, one {# appearance setting} other {# appearance settings}}."
+      },
       "languageLabel": "Language",
       "layoutType": {
         "agentFlow": {
@@ -14267,6 +14570,31 @@
         "styleRich": "Rich",
         "title": "Personalization"
       },
+      "preview": {
+        "assistant": "Here's a preview of your theme.",
+        "badge": "Sample",
+        "buttons": {
+          "destructive": "Delete",
+          "ghost": "Ghost",
+          "outline": "Outline",
+          "primary": "Primary",
+          "secondary": "Secondary"
+        },
+        "code": "const theme = \"cognia\"",
+        "hint": "Reflects your current theme, density, spacing, and fonts.",
+        "inputAria": "Sample input",
+        "inputSample": "Sample text",
+        "switchAria": "Sample toggle",
+        "table": {
+          "col1": "Item",
+          "col2": "Value",
+          "row1": "Messages",
+          "row2": "Tokens"
+        },
+        "title": "Live preview",
+        "user": "Looks great!",
+        "windowTitle": "Preview"
+      },
       "reduceMotionHint": "Disables non-essential animations and transitions.",
       "reduceMotionLabel": "Reduce motion",
       "reset": {
@@ -14276,6 +14604,7 @@
         "confirm": "Reset",
         "title": "Reset appearance settings?"
       },
+      "resetToDefault": "Reset {name} to default",
       "tabs": {
         "a11y": "Accessibility",
         "advanced": "Advanced",
@@ -14283,6 +14612,7 @@
         "components": "Components",
         "custom": "Custom theme",
         "import": "Import",
+        "layout": "Layout",
         "theme": "Theme",
         "themePack": "Theme packs",
         "typography": "Typography",
@@ -14496,10 +14826,15 @@
     "canvas": {
       "a11y": {
         "announceErrors": "Announce errors",
+        "announceErrorsDesc": "Speak AI-action failures aloud via an assistive-tech alert region.",
         "focusIndicator": "Focus indicator",
+        "focusIndicatorDesc": "Draw a ring around the editor whenever focus is inside it.",
         "highContrast": "High contrast",
+        "highContrastDesc": "Force Monaco's maximal-contrast high-contrast theme.",
         "reducedMotion": "Reduced motion",
-        "screenReaderOptimized": "Screen reader optimised"
+        "reducedMotionDesc": "Disable caret animation, smooth scrolling, and cursor blink.",
+        "screenReaderOptimized": "Screen reader optimised",
+        "screenReaderOptimizedDesc": "Force Monaco's accessible DOM tree for screen readers."
       },
       "ai": {
         "autoSuggestions": "Auto suggestions",
@@ -14541,12 +14876,19 @@
           "smooth": "Smooth",
           "solid": "Solid"
         },
+        "cursorSmoothCaretAnimation": "Smooth caret animation",
+        "cursorSmoothCaretAnimationOptions": {
+          "explicit": "On explicit moves",
+          "off": "Off",
+          "on": "Always"
+        },
         "cursorStyle": "Cursor style",
         "cursorStyleOptions": {
           "block": "Block",
           "line": "Line",
           "underline": "Underline"
         },
+        "folding": "Code folding",
         "fontFamily": "Font family",
         "fontFamilyOptions": {
           "cascadiaCode": "Cascadia Code",
@@ -14556,11 +14898,14 @@
           "sourceCodePro": "Source Code Pro",
           "systemMonospace": "System monospace"
         },
+        "fontLigatures": "Font ligatures",
         "fontSize": "Font size",
         "formatOnPaste": "Format on paste",
         "formatOnType": "Format on type",
         "indentationGuides": "Indentation guides",
+        "inlineSuggest": "Inline completions (ghost text)",
         "insertSpaces": "Insert spaces (vs. tabs)",
+        "letterSpacing": "Letter spacing",
         "lineHeight": "Line height",
         "lineNumbers": "Line numbers",
         "lineNumbersOptions": {
@@ -14569,7 +14914,17 @@
           "relative": "Relative"
         },
         "minimap": "Minimap",
+        "minimapScale": "Minimap scale",
         "mouseWheelZoom": "Mouse-wheel zoom",
+        "paddingBottom": "Bottom padding",
+        "paddingTop": "Top padding",
+        "renderLineHighlight": "Current line highlight",
+        "renderLineHighlightOptions": {
+          "all": "Line & gutter",
+          "gutter": "Gutter",
+          "line": "Line",
+          "none": "None"
+        },
         "renderWhitespace": "Render whitespace",
         "renderWhitespaceOptions": {
           "all": "All",
@@ -14579,7 +14934,14 @@
           "trailing": "Trailing"
         },
         "scrollBeyondLastLine": "Scroll beyond last line",
+        "showFoldingControls": "Folding controls",
+        "showFoldingControlsOptions": {
+          "always": "Always visible",
+          "mouseover": "On hover"
+        },
         "smoothScrolling": "Smooth scrolling",
+        "stickyScroll": "Sticky scroll",
+        "stickyScrollMaxLines": "Sticky scroll max lines",
         "tabSize": "Tab size",
         "wordWrap": "Word wrap"
       },
@@ -16201,6 +16563,40 @@
       },
       "model": "Model",
       "provider": "Provider",
+      "sidebar": {
+        "contentSearch": {
+          "description": "Also match text inside messages, not just conversation titles (slower).",
+          "heading": "Search message content",
+          "label": "Search inside messages"
+        },
+        "density": {
+          "description": "Tighten row spacing to fit more conversations.",
+          "heading": "Compact rows",
+          "label": "Use compact conversation rows"
+        },
+        "description": "Tune how the chat sidebar lists and searches conversations.",
+        "groupByDate": {
+          "description": "Group conversations into Today / Yesterday / Previous buckets.",
+          "heading": "Group by date",
+          "label": "Group conversations by date"
+        },
+        "preview": {
+          "description": "Show a second line with the latest message under each conversation.",
+          "heading": "Message preview",
+          "label": "Show message preview"
+        },
+        "resetWidth": {
+          "button": "Reset width",
+          "description": "Reset the draggable sidebar back to its default width.",
+          "heading": "Sidebar width"
+        },
+        "title": "Conversation sidebar",
+        "unread": {
+          "description": "Show a count badge on conversations with unread messages.",
+          "heading": "Unread badges",
+          "label": "Show unread badges"
+        }
+      },
       "streaming": {
         "description": "Stream assistant replies token-by-token as they are generated. Off shows each reply only when complete.",
         "heading": "Token-level streaming",
@@ -17154,35 +17550,102 @@
     },
     "gateway": {
       "allowlist": "IP allowlist",
-      "allowlistHelp": "Only these IPv4 addresses (CIDR) may connect. The server binds 127.0.0.1 — this is defence-in-depth.",
-      "allowlistPlaceholder": "127.0.0.1/32, then Enter",
+      "allowlistHelp": "Only these IPv4 addresses (CIDR) may connect. Defaults to loopback-only; widen it for LAN peers.",
+      "allowlistPlaceholder": "192.168.1.0/24, then Enter",
       "anthropicSnippet": "Anthropic clients (Claude Code)",
-      "authNote": "Use the gateway token as the API key — Authorization: Bearer <token> or x-api-key: <token>.",
+      "authNote": "Use an API key as the credential — Authorization: Bearer '<key>' or x-api-key: '<key>'.",
+      "bindHelp": "Loopback keeps the gateway to this machine. LAN lets other devices on your network reach it — you must widen the IP allowlist below for that to take effect.",
+      "bindInterface": "Bind interface",
+      "bindLan": "Local network (0.0.0.0)",
+      "bindLoopback": "Loopback (127.0.0.1)",
+      "clearLog": "Clear log",
+      "colKey": "Key",
+      "colLatency": "Latency",
+      "colModel": "Model",
+      "colProvider": "Provider",
+      "colStatus": "Status",
+      "colTime": "Time",
+      "colTokens": "Tokens",
       "connectHeading": "Connect external tools",
       "connectHelp": "Point any OpenAI- or Anthropic-compatible client at the gateway by setting one of these environment variables.",
+      "connectTimeout": "Connect timeout (s)",
+      "connectTimeoutHelp": "Bounds a hung upstream connection on every request, streaming included.",
       "copied": "Copied",
       "copy": "Copy",
-      "copyToken": "Copy token",
+      "copyKey": "Copy key",
+      "createKey": "Create key",
+      "deleteKey": "Delete key",
+      "deleteKeyConfirm": "Delete this key? Tools using it will stop working immediately.",
       "description": "Expose your configured providers as a local OpenAI- and Anthropic-compatible endpoint so external tools can borrow Cognia's routing and credentials.",
       "desktopOnlyNotice": "The gateway needs an HTTP listener and is available only in the desktop app.",
+      "disable": "Disable",
+      "enable": "Enable",
       "enabled": "Enable gateway",
-      "enabledHelp": "Run the local HTTP server. Off by default; requires a token.",
-      "generateToken": "Generate token",
-      "hide": "Hide token",
+      "enabledHelp": "Run the local HTTP server. Off by default; requires an API key.",
+      "exposedModels": "Exposed models",
+      "exposedModelsAll": "All configured models are exposed.",
+      "exposedModelsHelp": "Only these model or alias ids are listed and served. Empty = expose everything configured.",
+      "exposedModelsPlaceholder": "fast, gpt-4o, then Enter",
+      "exposureHeading": "Model exposure",
+      "exposureHelp": "Control which models this gateway advertises and serves.",
+      "hide": "Hide",
+      "hideRawModels": "List aliases only",
+      "hideRawModelsHelp": "Hide raw provider model ids from /v1/models — advertise routing aliases only. Direct provider:model calls still work.",
+      "keyCopied": "Key copied",
+      "keyCreated": "Created",
+      "keyExpired": "Expired",
+      "keyExpiry": "Expires",
+      "keyExpiryHelp": "Leave blank for a key that never expires.",
+      "keyLastUsed": "Last used",
+      "keyModels": "Allowed models",
+      "keyModelsAll": "All models",
+      "keyModelsHelp": "Comma-separated model or alias ids this key may call. Empty = every exposed model.",
+      "keyModelsPlaceholder": "fast, gpt-4o (blank = all)",
+      "keyName": "Name",
+      "keyNamePlaceholder": "e.g. Claude Code laptop",
+      "keyNeverExpires": "Never",
+      "keyNeverUsed": "Never used",
+      "keyRateLimit": "Rate limit / min",
+      "keyRateLimitHelp": "Per-key request budget. Blank = only the global limit applies.",
+      "keyRateLimitNone": "—",
+      "keysEmpty": "No keys yet. Create one to authenticate external tools.",
+      "keysHeading": "API keys",
+      "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
+      "lanWarning": "LAN binding exposes the gateway to your local network. Keep the IP allowlist tight and every key scoped — only allow-listed IPs with a valid key get through.",
+      "logCleared": "Log cleared",
       "logEmpty": "No requests yet.",
-      "logHeading": "Recent requests",
-      "logHelp": "The last inbound calls the gateway handled.",
+      "logFilterAll": "All",
+      "logFilterErrors": "Errors",
+      "logFilterModelPlaceholder": "Filter by model…",
+      "logFilterOk": "Success",
+      "logHeading": "Request log",
+      "logHelp": "Every inbound request, kept across restarts.",
+      "maxRetries": "Max attempts",
+      "maxRetriesHelp": "Cap on candidates tried per request. 0 = walk the whole fallback chain.",
+      "newKeyHeading": "Key created",
+      "newKeyReveal": "Copy this key now — for your security it is shown only once.",
       "openaiSnippet": "OpenAI clients",
       "port": "Port",
-      "rateLimit": "Requests / minute",
+      "rateLimit": "Global requests / minute",
+      "reliabilityHeading": "Reliability & access",
+      "reliabilityHelp": "Timeouts, failover retries, and who may connect.",
       "remove": "Remove",
-      "requiresToken": "Generate a token before enabling the gateway.",
-      "reveal": "Reveal token",
-      "rotateToken": "Regenerate token",
-      "title": "Inbound Gateway",
-      "token": "Bearer token",
-      "tokenCopied": "Token copied",
-      "tokenHelp": "External tools authenticate with this token. Stored in the OS keyring; regenerate to revoke."
+      "requestTimeout": "Request timeout (s)",
+      "requestTimeoutHelp": "Total cap for non-streaming requests. 0 disables it; streaming responses are never capped.",
+      "requiresKey": "Create an API key before enabling the gateway.",
+      "restartHint": "Network changes (port, bind interface, allowlist, connect timeout, global rate limit) apply the next time you restart the listener.",
+      "retryStatusCodes": "Retry on statuses",
+      "retryStatusCodesHelp": "Upstream HTTP statuses that fail over to the next provider instead of surfacing.",
+      "retryStatusCodesPlaceholder": "429, 503, then Enter",
+      "reveal": "Reveal",
+      "save": "Save",
+      "saved": "Saved",
+      "serverHeading": "Server",
+      "summaryAvgLatency": "Avg latency",
+      "summaryErrors": "Errors",
+      "summaryRequests": "Requests",
+      "summaryTokens": "Tokens (in/out)",
+      "title": "Inbound Gateway"
     },
     "general": {
       "alwaysAllowedTools": "Always-allowed tools",
@@ -18089,6 +18552,7 @@
           "agentTeamCompleted": "An agent team run reached a terminal status.",
           "backupCompleted": "A backup run finished successfully.",
           "backupNeeded": "Backup interval elapsed and a new backup is due.",
+          "chatCompleted": "A chat conversation finished.",
           "connectionOutboundSend": "An outbound message was sent through a connector.",
           "connectionScheduledDigest": "A scheduled connection digest was published.",
           "custom": "Free-form event — typically posted from external tooling.",
@@ -18115,6 +18579,21 @@
         "capabilityRestartNote": "Changing capability takes effect after you toggle the listener off and on.",
         "capability_read": "Read only",
         "capability_write": "Read + write",
+        "commandGroup_chat": "Chat",
+        "commandGroup_connector": "Connector",
+        "commandGroup_goal": "Goal",
+        "commandGroup_plan": "Plan",
+        "commandGroup_plugin": "Plugin",
+        "commandGroup_scheduler": "Scheduler",
+        "commandGroup_team": "Agent team",
+        "commandGroup_terminal": "Terminal",
+        "commandGroup_workflow": "Workflow",
+        "commandPermissionsDisableAll": "Disable all",
+        "commandPermissionsEnableAll": "Enable all",
+        "commandPermissionsEnabledCount": "{enabled} of {total} targets enabled",
+        "commandPermissionsHeading": "Command permissions",
+        "commandPermissionsHelp": "Least-privilege access control — turn off any target you don't want remote callers to run. A disabled target is rejected with 403 target_disabled even for a write token. Applied on the next listener start.",
+        "commandPermissionsToggleAria": "Allow {target}",
         "commandTargetsHeading": "Command targets",
         "commandTargetsHelp": "Authenticated POSTs to these routes dispatch into the matching subsystem.",
         "copyEndpoint": "Copy URL",
@@ -18134,6 +18613,12 @@
         "nonLoopbackWarning": "Non-loopback entry detected — anything on this network can hit the listener if they have the bearer token.",
         "port": "Port",
         "portHelp": "Loopback port between 1024 and 65535. Default 47821.",
+        "quickstartCommandLabel": "Trigger a scheduler task",
+        "quickstartCopied": "Snippet copied to clipboard.",
+        "quickstartCopy": "Copy snippet",
+        "quickstartHeading": "Quickstart",
+        "quickstartHealthLabel": "Health check",
+        "quickstartHelp": "Copy-paste client snippets. Export your bearer token as COGNIA_RC_TOKEN first.",
         "rateLimit": "Rate limit (req/min)",
         "rateLimitHelp": "Requests above the limit get HTTP 429. Default 60.",
         "rotateToken": "Rotate",
@@ -18159,19 +18644,38 @@
         "clearSecret": "Clear",
         "defaultHeaders": "Default headers",
         "defaultHeadersHelp": "Sent with every outbound webhook delivery. Content-Type is always application/json and cannot be overridden.",
+        "deliveryBaseDelayMs": "Backoff base delay (ms)",
+        "deliveryBaseDelayMsHelp": "Exponential-backoff base delay (100–60000).",
+        "deliveryHeading": "Delivery limits",
+        "deliveryHelp": "Applied to every outbound webhook delivery — per-task URLs and egress endpoints alike.",
+        "deliveryMaxRetries": "Max retries",
+        "deliveryMaxRetriesHelp": "Retry attempts after the first send (0–10).",
+        "deliveryReset": "Reset to defaults",
+        "deliveryResetDone": "Delivery limits reset to defaults.",
+        "deliveryTimeoutMs": "Request timeout (ms)",
+        "deliveryTimeoutMsHelp": "Per-attempt timeout (1000–120000).",
         "description": "Optional HMAC-SHA256 signature added to every outbound webhook delivery. Receivers can verify the request actually came from this cognia install.",
+        "endpointAddHeader": "Add header",
         "endpointEnabled": "Enabled",
+        "endpointHeadersHelp": "Merged onto every delivery to this endpoint, on top of the global default headers.",
+        "endpointHeadersLabel": "Custom headers",
         "endpointName": "Endpoint name",
         "endpointRemove": "Remove endpoint",
         "endpointTest": "Send a test delivery",
         "endpointTestFailed": "Test delivery failed: {error}",
         "endpointTestOk": "Test delivery accepted.",
+        "endpointUrlInvalid": "Enter a valid http(s) URL.",
         "endpointUrlPlaceholder": "https://example.com/webhook",
         "endpointUrlRequired": "Enter a URL before testing.",
         "endpointsEmpty": "No egress endpoints configured.",
         "endpointsHeading": "Egress endpoints",
         "endpointsHelp": "Standalone webhook endpoints any subsystem (scheduler, goals, workflows, team, plans) can publish lifecycle events to. Each delivery is signed with the secret above.",
         "endpointsSchemeNote": "Signature scheme: Standard Webhooks (standardwebhooks.com).",
+        "eventType_auto-paused": "Task auto-paused",
+        "eventType_complete": "Task completed",
+        "eventType_error": "Task error",
+        "eventType_progress": "Task progress",
+        "eventType_start": "Task started",
         "headerName": "Header name",
         "headerValue": "Value",
         "heading": "Outbound webhook signing",
@@ -18187,12 +18691,22 @@
         "secretSet": "A signing secret is configured.",
         "setSecret": "Save secret",
         "signingSecret": "Signing secret",
-        "signingSecretHelp": "Stored in the OS keyring on desktop. Deliveries then carry the Standard Webhooks header trio (webhook-id / webhook-timestamp / webhook-signature)."
+        "signingSecretHelp": "Stored in the OS keyring on desktop. Deliveries then carry the Standard Webhooks header trio (webhook-id / webhook-timestamp / webhook-signature).",
+        "subscriptionAll": "All events",
+        "subscriptionSummary": "{count, plural, =0 {All events} one {# event type} other {# event types}}",
+        "subscriptionsHelp": "Deliver only the selected event types to this endpoint. Select none to receive every event.",
+        "subscriptionsLabel": "Event subscriptions"
       },
       "overview": {
         "endpointUrlLabel": "Endpoint URL",
         "lastCallAt": "Last call",
         "lastCallNever": "No calls yet",
+        "metricErrors": "Errors",
+        "metricNoData": "No calls recorded yet.",
+        "metricSuccess": "Success",
+        "metricSuccessRate": "Success rate",
+        "metricWindowNote": "From the last {count} recorded calls.",
+        "metricsHeading": "Recent traffic",
         "noRecentCalls": "No inbound calls recorded yet.",
         "openSchedulerLink": "Open scheduler",
         "recentCallsHeading": "Recent inbound calls",
@@ -18338,6 +18852,14 @@
       "toast": "Section reset to defaults."
     },
     "security": {
+      "autoLock": {
+        "description": "Lock the account after a period of inactivity, requiring re-authentication to continue.",
+        "help": "After this idle time, the account locks and must be unlocked again.",
+        "label": "Lock after inactivity",
+        "off": "Never",
+        "option": "{minutes} min",
+        "title": "Auto-lock"
+      },
       "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
       "rows": {
         "deletePairing": {
@@ -18465,6 +18987,62 @@
         }
       },
       "description": "AI commit-message generation and other Git panel preferences.",
+      "panel": {
+        "autoFetch": {
+          "description": "Periodically fetch from the remote in the background so ahead/behind stays current.",
+          "interval": "Interval (minutes)",
+          "label": "Auto-fetch"
+        },
+        "branchSort": {
+          "default": "Default",
+          "label": "Branch order",
+          "name": "Name (A–Z)"
+        },
+        "confirmDiscard": {
+          "description": "Ask before throwing away working-tree changes.",
+          "label": "Confirm before discarding"
+        },
+        "confirmForcePush": {
+          "description": "Ask before overwriting a remote branch with a force push.",
+          "label": "Confirm before force push"
+        },
+        "description": "How the panel presents diffs, guards destructive actions, automates commits, and stays in sync.",
+        "diffView": {
+          "inline": "Inline",
+          "label": "Diff view",
+          "sideBySide": "Side by side"
+        },
+        "fetchPrune": {
+          "description": "Remove remote-tracking refs that no longer exist on the remote.",
+          "label": "Prune on fetch"
+        },
+        "ignoreWhitespace": {
+          "description": "Hide whitespace-only differences in the diff viewer.",
+          "label": "Ignore whitespace changes"
+        },
+        "postCommit": {
+          "description": "Action run automatically after the Commit button succeeds.",
+          "label": "After commit",
+          "none": "Do nothing",
+          "push": "Push",
+          "sync": "Sync"
+        },
+        "pullRebase": {
+          "description": "Use --rebase for the default Pull.",
+          "label": "Pull with rebase"
+        },
+        "reset": "Reset panel preferences",
+        "smartCommit": {
+          "description": "When nothing is staged, the Commit button stages all changes first.",
+          "label": "Smart commit"
+        },
+        "timelineView": {
+          "graph": "Graph",
+          "label": "Default timeline view",
+          "list": "List"
+        },
+        "title": "Panel & workflow"
+      },
       "title": "Source Control"
     },
     "speech": {
@@ -18890,6 +19468,10 @@
         "helper": "Make the per-command gutter dots interactive: click one to rerun the command or copy the command and its output, with the exit code and duration.",
         "label": "Command actions"
       },
+      "confirmOnClose": {
+        "helper": "Ask before closing a tab whose shell is still running a command, so an accidental close doesn't kill an in-flight run. Idle tabs always close immediately.",
+        "label": "Confirm before closing a running terminal"
+      },
       "copyOnSelect": {
         "helper": "When on, every text selection in a terminal is auto-copied to the clipboard. Off by default so accidental selection doesn't overwrite your clipboard.",
         "label": "Copy on selection"
@@ -18915,14 +19497,45 @@
       "fontSize": {
         "label": "Font size"
       },
+      "fontWeight": {
+        "bold": "Bold",
+        "label": "Font weight",
+        "normal": "Normal"
+      },
+      "fontWeightBold": {
+        "label": "Bold text weight"
+      },
       "forceUtf8": {
         "helper": "Pin PowerShell / cmd console output to UTF-8 so powerline glyphs and CJK text render correctly on non-UTF-8 system codepages (e.g. GBK on Chinese Windows). Leave on unless you depend on the legacy codepage.",
         "label": "Force UTF-8 output"
       },
+      "groups": {
+        "agents": "Agents & automation",
+        "ai": "AI autocomplete",
+        "appearance": "Appearance",
+        "behavior": "Behavior",
+        "productivity": "Productivity",
+        "shell": "Shell & session"
+      },
       "heading": "Integrated terminal",
+      "letterSpacing": {
+        "label": "Letter spacing (px)"
+      },
       "ligatures": {
         "helper": "Render programming-font ligatures (Cascadia Code, JetBrains Mono, Fira Code). Off by default; toggling reloads the terminal.",
         "label": "Font ligatures"
+      },
+      "lineHeight": {
+        "helper": "Line height multiplies the font size; letter spacing adds horizontal pixels between glyphs. Both re-fit the terminal.",
+        "label": "Line height"
+      },
+      "minContrast": {
+        "aa": "WCAG AA (4.5)",
+        "aaa": "WCAG AAA (7)",
+        "helper": "Force a minimum contrast ratio between text and background for legibility. Off keeps the raw ANSI colors; AA / AAA meet WCAG; Maximum forces black/white.",
+        "label": "Minimum contrast",
+        "max": "Maximum (21)",
+        "off": "Off"
       },
       "profiles": {
         "add": "Add profile",
@@ -18968,6 +19581,10 @@
       "sandboxed": {
         "helper": "Launch dock terminals inside the OS sandbox (bwrap / sandbox-exec): writes are confined to the session working directory, your home stays read-only, network stays on. Experimental; off by default and not yet available on Windows.",
         "label": "Sandboxed terminal"
+      },
+      "scrollSensitivity": {
+        "helper": "Lines scrolled per mouse-wheel notch. Alt-scroll moves 5× faster.",
+        "label": "Scroll speed (lines)"
       },
       "scrollback": {
         "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000.",
@@ -19243,7 +19860,8 @@
       "export": "Export as SKILL.md",
       "open": "Open",
       "openInEditor": "Open in editor",
-      "selectAria": "Select {name}"
+      "selectAria": "Select {name}",
+      "usageCount": "Used {count}×"
     },
     "category": {
       "communication": "Communication",
@@ -19495,6 +20113,33 @@
       "selectSourceAria": "Filter by source",
       "statsBar": "{enabled} enabled · {total} total"
     },
+    "prefs": {
+      "autoEnableNew": "Auto-enable new skills",
+      "autoEnableNewHint": "New or imported skills are enabled and appended to the prompt right away.",
+      "budgetWarning": "{count} skills enabled — over your budget of {threshold}. Each is appended to the system prompt.",
+      "defaultSort": "Default sort",
+      "defaultStatus": "Default status filter",
+      "defaultTab": "Default tab",
+      "density": "List density",
+      "densityComfortable": "Comfortable",
+      "densityCompact": "Compact",
+      "display": "Display",
+      "enabledWarnThreshold": "Enabled-skill warning",
+      "enabledWarnThresholdHint": "Warn when more than this many skills are enabled. 0 turns the warning off.",
+      "injection": "Injection",
+      "openAria": "Skill panel preferences",
+      "panel": "Panel",
+      "rememberLastView": "Remember last view",
+      "rememberLastViewHint": "Restore the tab, sort, and filters from your last visit.",
+      "showDescription": "Show description",
+      "showSource": "Show source badge",
+      "showTags": "Show tags",
+      "showUsage": "Show usage count",
+      "title": "Preferences",
+      "viewGrid": "Grid",
+      "viewList": "List",
+      "viewMode": "Layout"
+    },
     "recorder": {
       "attachScreenshots": "Attach screenshots as resources",
       "cancel": "Cancel",
@@ -19682,15 +20327,19 @@
     "actions": {
       "abortMerge": "Abort Merge",
       "addToGitignore": "Add to .gitignore",
+      "cancel": "Cancel",
       "copyPath": "Copy Path",
       "discard": "Discard Changes",
       "discardAll": "Discard All Changes",
       "discardHunk": "Discard Hunk",
       "fetch": "Fetch",
+      "fetchPrune": "Fetch (Prune)",
+      "forcePush": "Force Push (with lease)",
       "more": "More actions",
       "openChanges": "Open Changes",
       "publish": "Publish Branch",
       "pull": "Pull",
+      "pullRebase": "Pull (Rebase)",
       "push": "Push",
       "refresh": "Refresh",
       "restore": "Restore (to HEAD)",
@@ -19774,6 +20423,12 @@
       "loading": "Loading diff…",
       "selectFile": "Select a file to view its changes"
     },
+    "discard": {
+      "confirmAction": "Discard",
+      "confirmAll": "Discard all changes in the working tree? This permanently throws away every uncommitted edit and cannot be undone.",
+      "confirmFile": "Discard changes to {file}? This permanently throws away the uncommitted edits and cannot be undone.",
+      "confirmTitle": "Discard changes?"
+    },
     "emptyState": {
       "initRepo": "Initialize Repository",
       "noChanges": "No changes",
@@ -19788,6 +20443,11 @@
       "noRepo": "No repository is bound — open a folder first",
       "pullFailed": "Pull failed: {message}",
       "pushFailed": "Push failed: {message}"
+    },
+    "forcePush": {
+      "confirmAction": "Force push",
+      "confirmDescription": "This overwrites the remote branch with your local history using --force-with-lease. It is rejected if someone else has pushed since your last fetch.",
+      "confirmTitle": "Force push with lease?"
     },
     "groups": {
       "changes": "Changes",
@@ -19917,7 +20577,27 @@
       "viewGraph": "Graph view",
       "viewList": "List view"
     },
-    "title": "Source Control"
+    "title": "Source Control",
+    "viewSettings": {
+      "branchSort": "Branch order",
+      "branchSortMode": {
+        "default": "Default",
+        "name": "Name (A–Z)"
+      },
+      "diffMode": {
+        "inline": "Inline",
+        "sideBySide": "Side by side"
+      },
+      "diffView": "Diff view",
+      "ignoreWhitespace": "Ignore whitespace",
+      "label": "View settings",
+      "reset": "Reset to defaults",
+      "timelineMode": {
+        "graph": "Graph",
+        "list": "List"
+      },
+      "timelineView": "Timeline view"
+    }
   },
   "sourceVerification": {
     "autoFilterLow": "Auto-filter low credibility",
@@ -20549,12 +21229,22 @@
       "trigger": "Command actions"
     },
     "dock": {
+      "clear": "Clear terminal (Ctrl+L)",
+      "closeConfirm": {
+        "body": "This tab is still running a command. Closing it now will terminate the command. Close it anyway?",
+        "cancel": "Keep running",
+        "confirm": "Close tab",
+        "title": "Close running terminal?"
+      },
       "closePane": "Close pane",
       "closePanel": "Close panel",
+      "maximize": "Maximize terminal panel",
       "newSession": "New terminal",
       "resize": "Drag to resize the terminal dock (arrow keys also work)",
+      "restore": "Restore terminal panel size",
       "spawnDenied": "Terminal blocked by a plugin",
-      "spawnError": "Couldn't open terminal: {message}"
+      "spawnError": "Couldn't open terminal: {message}",
+      "splitRight": "Split terminal right (Ctrl+\\)"
     },
     "emptyState": {
       "desktop": {
@@ -20947,6 +21637,9 @@
       "edit": "Edit",
       "emptyBody": "(empty body)",
       "emptyHint": "No drafts yet. Queue a distill run from the Jobs tab once at least one source has been parsed into chunks.",
+      "filterAll": "All",
+      "filterEmpty": "No drafts match this filter.",
+      "filterLabel": "Filter drafts by status",
       "headerCount": "Drafts ({count})",
       "piiInDraft": "Edit blocked — PII detected in: {fields}. Replace with placeholders or remove.",
       "qualityHigh": "high",
@@ -21259,8 +21952,15 @@
       "cancelAdd": "Cancel",
       "chunks": "{count, plural, =0 {0 chunks} =1 {1 chunk} other {# chunks}}",
       "delete": "Delete",
+      "deleteConfirmAction": "Delete",
+      "deleteConfirmCancel": "Cancel",
+      "deleteConfirmDescription": "This permanently removes \"{title}\" and its ingested chunks. This cannot be undone.",
+      "deleteConfirmTitle": "Delete source?",
       "emptyHint": "No sources yet. Click Add source to paste in some text or import a file.",
       "errorPrefix": "⚠",
+      "filterAll": "All",
+      "filterEmpty": "No sources match this filter.",
+      "filterLabel": "Filter sources by status",
       "headerCount": "Sources ({count})",
       "imported": "imported {when}",
       "pendingIngestBusy": "Queuing…",
@@ -21296,6 +21996,10 @@
     "tooltipDisabled": "Enable in Settings → Web search and configure a provider",
     "tooltipOff": "Web search off",
     "tooltipOn": "Web search on — using {provider}"
+  },
+  "whiteScreenRecovery": {
+    "recoveredDescription": "The app detected a blank screen and reloaded automatically.",
+    "recoveredTitle": "Recovered from a blank screen"
   },
   "workflowEditor": {
     "chat": {
@@ -25574,6 +26278,8 @@
         "save": "Save",
         "selectAll": "Select all nodes",
         "shortcuts": "Show keyboard shortcuts",
+        "togglePalette": "Toggle node palette",
+        "toggleSidebar": "Toggle right sidebar",
         "undo": "Undo"
       },
       "title": "Keyboard shortcuts"
@@ -25634,6 +26340,8 @@
         "more": "More",
         "redo": "Redo (Ctrl+Shift+Z)",
         "shortcuts": "Keyboard shortcuts (Ctrl+/)",
+        "togglePalette": "Toggle node palette (Ctrl+B)",
+        "toggleSidebar": "Toggle sidebar (Ctrl+J)",
         "undo": "Undo (Ctrl+Z)"
       },
       "unsavedChanges": "Unsaved changes"

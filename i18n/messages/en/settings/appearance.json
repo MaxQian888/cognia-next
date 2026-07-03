@@ -278,6 +278,19 @@
   "description": "Tune the look and feel of the app. Changes are saved instantly.",
   "fontScaleHint": "Scales the entire UI. Defaults to 16px.",
   "fontScaleLabel": "Font size",
+  "io": {
+    "confirm": {
+      "body": "This replaces your current theme, fonts, colors, and custom CSS with the imported ones ({count, plural, one {# setting} other {# settings}}). Your uploaded wallpapers are kept.",
+      "cancel": "Cancel",
+      "confirm": "Apply",
+      "title": "Apply imported appearance?"
+    },
+    "export": "Export",
+    "exportSuccess": "Appearance exported.",
+    "import": "Import",
+    "importInvalid": "Couldn't read that file: {message}",
+    "importSuccess": "Applied {count, plural, one {# appearance setting} other {# appearance settings}}."
+  },
   "languageLabel": "Language",
   "layoutType": {
     "agentFlow": {
@@ -340,6 +353,31 @@
     "styleRich": "Rich",
     "title": "Personalization"
   },
+  "preview": {
+    "assistant": "Here's a preview of your theme.",
+    "badge": "Sample",
+    "buttons": {
+      "destructive": "Delete",
+      "ghost": "Ghost",
+      "outline": "Outline",
+      "primary": "Primary",
+      "secondary": "Secondary"
+    },
+    "code": "const theme = \"cognia\"",
+    "hint": "Reflects your current theme, density, spacing, and fonts.",
+    "inputAria": "Sample input",
+    "inputSample": "Sample text",
+    "switchAria": "Sample toggle",
+    "table": {
+      "col1": "Item",
+      "col2": "Value",
+      "row1": "Messages",
+      "row2": "Tokens"
+    },
+    "title": "Live preview",
+    "user": "Looks great!",
+    "windowTitle": "Preview"
+  },
   "reduceMotionHint": "Disables non-essential animations and transitions.",
   "reduceMotionLabel": "Reduce motion",
   "reset": {
@@ -349,6 +387,7 @@
     "confirm": "Reset",
     "title": "Reset appearance settings?"
   },
+  "resetToDefault": "Reset {name} to default",
   "tabs": {
     "a11y": "Accessibility",
     "advanced": "Advanced",
@@ -356,6 +395,7 @@
     "components": "Components",
     "custom": "Custom theme",
     "import": "Import",
+    "layout": "Layout",
     "theme": "Theme",
     "themePack": "Theme packs",
     "typography": "Typography",

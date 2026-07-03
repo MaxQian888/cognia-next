@@ -152,5 +152,44 @@
   "stickyScroll": {
     "label": "Sticky scroll",
     "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output."
+  },
+  "groups": {
+    "agents": "Agents & automation",
+    "ai": "AI autocomplete",
+    "appearance": "Appearance",
+    "behavior": "Behavior",
+    "productivity": "Productivity",
+    "shell": "Shell & session"
+  },
+  "fontWeight": {
+    "bold": "Bold",
+    "label": "Font weight",
+    "normal": "Normal"
+  },
+  "fontWeightBold": {
+    "label": "Bold text weight"
+  },
+  "lineHeight": {
+    "helper": "Line height multiplies the font size; letter spacing adds horizontal pixels between glyphs. Both re-fit the terminal.",
+    "label": "Line height"
+  },
+  "letterSpacing": {
+    "label": "Letter spacing (px)"
+  },
+  "scrollSensitivity": {
+    "helper": "Lines scrolled per mouse-wheel notch. Alt-scroll moves 5× faster.",
+    "label": "Scroll speed (lines)"
+  },
+  "minContrast": {
+    "aa": "WCAG AA (4.5)",
+    "aaa": "WCAG AAA (7)",
+    "helper": "Force a minimum contrast ratio between text and background for legibility. Off keeps the raw ANSI colors; AA / AAA meet WCAG; Maximum forces black/white.",
+    "label": "Minimum contrast",
+    "max": "Maximum (21)",
+    "off": "Off"
+  },
+  "confirmOnClose": {
+    "helper": "Ask before closing a tab whose shell is still running a command, so an accidental close doesn't kill an in-flight run. Idle tabs always close immediately.",
+    "label": "Confirm before closing a running terminal"
   }
 }

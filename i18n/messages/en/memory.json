@@ -1,8 +1,72 @@
 {
+  "add": {
+    "cancel": "Cancel",
+    "description": "Manually save a durable fact. Stored in global scope with explicit provenance.",
+    "importanceLabel": "Importance",
+    "submit": "Add memory",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "comma, separated, tags",
+    "textLabel": "Memory",
+    "textPlaceholder": "e.g. The user prefers pnpm and TypeScript strict mode.",
+    "title": "Add memory",
+    "typeLabel": "Type"
+  },
+  "bulk": {
+    "clear": "Clear selection",
+    "delete": "Delete",
+    "deleteConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "description": "This permanently removes {count} memories. This can't be undone.",
+      "title": "Delete selected memories?"
+    },
+    "pin": "Pin",
+    "selectAll": "Select all",
+    "selected": "{count} selected",
+    "unpin": "Unpin"
+  },
+  "detail": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "deleteConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "description": "This permanently removes the memory. This can't be undone.",
+      "title": "Delete this memory?"
+    },
+    "fields": {
+      "accessCount": "Recalled",
+      "archivedAt": "Archived",
+      "created": "Created",
+      "importance": "Importance",
+      "indexed": "Indexed",
+      "key": "Key",
+      "lastUsed": "Last used",
+      "updated": "Updated",
+      "version": "Version"
+    },
+    "importanceLabel": "Importance",
+    "next": "Next memory",
+    "no": "No",
+    "previous": "Previous memory",
+    "replacedBy": "Replaced by",
+    "replacedByGone": "The replacement was deleted.",
+    "save": "Save",
+    "source": "Source",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "comma, separated, tags",
+    "textLabel": "Text",
+    "yes": "Yes"
+  },
   "panel": {
     "accessedRelative": "used {time}",
+    "add": "Add",
+    "addFirst": "Add your first memory",
     "cancelEdit": "Cancel",
+    "clearFilters": "Clear filters",
+    "clearTags": "Clear tags",
     "delete": "Delete",
+    "detailTitle": "Memory details",
     "edit": "Edit",
     "editLabel": "Edit memory text",
     "empty": {
@@ -10,13 +74,21 @@
       "title": "No memories yet"
     },
     "invalidated": "archived",
+    "noResults": {
+      "description": "No memory matches the current filters.",
+      "title": "No matching memories"
+    },
     "pin": "Pin",
+    "provenanceLabel": "Source type",
     "saveEdit": "Save",
+    "scopeLabel": "Scope",
     "searchLabel": "Search memories",
     "searchPlaceholder": "Search memories…",
+    "selectRow": "Select memory",
     "showInvalidated": "Show archived",
     "sort": {
       "accessed": "Recently used",
+      "created": "Recently created",
       "importance": "Importance",
       "recent": "Recently updated"
     },
@@ -25,9 +97,26 @@
       "active": "Active"
     },
     "subtitle": "What the assistant remembers about you.",
+    "tabs": {
+      "app": "App memory",
+      "external": "External agent memory"
+    },
+    "tagFilterLabel": "Tags:",
     "title": "Memory",
     "unpin": "Unpin",
     "viewSource": "View source"
+  },
+  "provenance": {
+    "all": "All sources",
+    "explicit": "Explicit",
+    "inbound": "Inbound",
+    "system": "System",
+    "user": "Auto (chat)"
+  },
+  "scopes": {
+    "all": "All scopes",
+    "character": "Character",
+    "global": "Global"
   },
   "types": {
     "episodic": "Event",

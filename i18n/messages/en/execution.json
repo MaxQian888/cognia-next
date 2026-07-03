@@ -2,9 +2,29 @@
   "title": "Execution Monitor",
   "runningCount": "{count, plural, =0 {Idle} other {# running}}",
   "empty": "Nothing is running right now.",
+  "filteredEmpty": "No executions match your filters.",
+  "clearFilters": "Clear filters",
   "cancelAll": "Cancel all",
   "cancelLeg": "Cancel {label}",
   "watchLeg": "Watch {label}",
+  "controls": {
+    "label": "View settings",
+    "filterKinds": "Filter by kind",
+    "sort": "Sort",
+    "groupByKind": "Group by kind",
+    "showElapsed": "Show elapsed time",
+    "reset": "Reset to defaults"
+  },
+  "sort": {
+    "recent": "Recent",
+    "kind": "By kind",
+    "status": "By status"
+  },
+  "elapsed": {
+    "hoursMinutes": "{hours}h {minutes}m",
+    "minutesSeconds": "{minutes}m {seconds}s",
+    "seconds": "{seconds}s"
+  },
   "kind": {
     "chat": "Chat",
     "workflowStep": "Workflow step",

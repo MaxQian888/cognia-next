@@ -77,6 +77,12 @@
     "activeEmpty": "暂无活跃目标。在聊天里用 /goal 命令开始一个。",
     "newGoal": "新建目标",
     "openGoalsHeading": "进行中的目标",
+    "prefs": {
+      "defaultTab": "默认标签",
+      "description": "选择控制台打开时的默认标签，以及进行中目标的排序方式。",
+      "openGoalsSort": "进行中目标排序",
+      "title": "控制台偏好"
+    },
     "statActive": "{count} 进行中",
     "statDone": "{count} 已完成",
     "statPaused": "{count} 已暂停",
@@ -84,6 +90,10 @@
       "active": "进行中",
       "avgTurns": "平均轮数",
       "done": "已完成",
+      "filterActive": "只看进行中的目标",
+      "filterPaused": "只看已暂停的目标",
+      "openAnalytics": "打开“分析”标签",
+      "openHistory": "打开“历史”标签",
       "paused": "已暂停",
       "tokenSpend": "Token 花费"
     },
@@ -103,12 +113,19 @@
     }
   },
   "defaults": {
+    "budgetHeading": "预算与限制",
+    "completionHeading": "完成门",
+    "maxBudgetUsd": "默认每轮最大成本（USD）",
+    "maxBudgetUsdHint": "新目标单轮的硬性美元上限。0 = 无成本上限（仍受轮数与 token 预算约束）。",
     "maxJudgeFailures": "默认最大判定失败次数",
     "maxJudgeFailuresHint": "连续 JSON 解析失败多少次后自动暂停。",
+    "maxPromiseDenials": "默认最大承诺拒绝次数",
+    "maxPromiseDenialsHint": "验证回合失败多少次后覆盖完成门，目标照常完成。",
     "maxTokens": "默认最大 token 数",
     "maxTokensHint": "记到目标账上的累计输入 + 输出 token。",
     "maxTurns": "默认最大回合数",
     "maxTurnsHint": "新目标的续跑回合硬上限。",
+    "reset": "恢复默认值",
     "save": "保存默认值",
     "saving": "保存中…",
     "startPaused": "新目标默认暂停",
@@ -155,6 +172,9 @@
     "maxTokensHint": "判定回复的上限。判定只回一行——200 足够。",
     "model": "判定模型",
     "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
+    "provider": "判定提供商",
+    "providerHint": "与判定模型配对的提供商 id。留空则复用会话 / 应用的提供商。",
+    "providerPlaceholder": "会话提供商",
     "promptOverride": "判定提示覆盖",
     "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
     "temperature": "判定温度",
@@ -180,6 +200,8 @@
     "turns": "回合"
   },
   "pacing": {
+    "adaptivePacing": "自适应节奏",
+    "adaptivePacingHint": "新目标允许模型建议下次继续的延迟（1–60 分钟）；只能放慢循环，不能快于最小间隔。",
     "heading": "节奏",
     "interval": "回合最小间隔（秒）",
     "intervalHint": "限制自动续跑速度。0 表示不延迟。",

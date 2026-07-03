@@ -20,6 +20,8 @@
     "save": "Save",
     "selectAll": "Select all nodes",
     "shortcuts": "Show keyboard shortcuts",
+    "togglePalette": "Toggle node palette",
+    "toggleSidebar": "Toggle right sidebar",
     "undo": "Undo"
   },
   "title": "Keyboard shortcuts"

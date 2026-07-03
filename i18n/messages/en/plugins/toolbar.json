@@ -23,6 +23,8 @@
   "groupWasm": "WASM bundle",
   "install": "Install",
   "loadUnpacked": "Load unpacked…",
+  "syncDone": "Registry synced — {count, plural, =0 {no updates available} one {# update available} other {# updates available}}",
+  "syncFailed": "Registry sync failed: {message}",
   "syncRegistry": "Sync registry",
   "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates"
 }

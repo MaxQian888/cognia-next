@@ -111,6 +111,8 @@
     "copyTraceId": "复制追踪 ID",
     "message": "消息",
     "module": "模块",
+    "nextLog": "下一条日志",
+    "prevLog": "上一条日志",
     "relatedLogs": "关联日志",
     "removeBookmark": "取消收藏",
     "sessionId": "会话 ID",

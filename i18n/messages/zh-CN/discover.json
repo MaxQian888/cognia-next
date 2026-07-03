@@ -1,4 +1,10 @@
 {
+  "activeFilters": {
+    "clearFilter": "清除筛选",
+    "clearSort": "清除排序",
+    "filterChip": "筛选：{value}",
+    "sortChip": "排序：{value}"
+  },
   "builtInBadge": "内置",
   "card": {
     "twinDraftFallbackName": "{kind} 草稿",
@@ -154,6 +160,17 @@
     "specialist": "专用"
   },
   "pluginBadge": "插件",
+  "preferences": {
+    "description": "设置「发现」页默认打开哪个分类以及默认外观。",
+    "landingAuto": "自动（第一个可见分类）",
+    "landingHint": "当链接未指定分类时，「发现」页默认打开的分类。「自动」会使用第一个可见分类。",
+    "landingLabel": "默认分类",
+    "reset": "重置",
+    "title": "偏好设置",
+    "viewHint": "没有单独视图选择的分类所使用的默认布局。",
+    "viewLabel": "默认视图"
+  },
+  "resultCount": "{count, plural, =0 {无结果} =1 {1 个结果} other {# 个结果}}",
   "search": "搜索…",
   "searchAria": "搜索发现内容",
   "searchScope": "搜索{category}…",

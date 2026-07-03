@@ -20,6 +20,8 @@
     "more": "More",
     "redo": "Redo (Ctrl+Shift+Z)",
     "shortcuts": "Keyboard shortcuts (Ctrl+/)",
+    "togglePalette": "Toggle node palette (Ctrl+B)",
+    "toggleSidebar": "Toggle sidebar (Ctrl+J)",
     "undo": "Undo (Ctrl+Z)"
   },
   "unsavedChanges": "Unsaved changes"

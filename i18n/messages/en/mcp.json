@@ -204,9 +204,13 @@
   "importLabel": "Import",
   "list": {
     "clearFilters": "Clear filters",
+    "clearSelection": "Clear selection",
     "empty": "No MCP servers yet. Add one to expose external tools to Claude.",
+    "emptyBrowsePresets": "Browse presets",
     "noMatch": "No servers match these filters.",
-    "searchPlaceholder": "Filter servers by name, command, or URL…"
+    "searchPlaceholder": "Filter servers by name, command, or URL…",
+    "selectAll": "Select all ({count})",
+    "selectAllAria": "Select all servers"
   },
   "liveSession": {
     "disable": "Disable",

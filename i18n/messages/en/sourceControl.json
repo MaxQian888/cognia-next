@@ -2,15 +2,19 @@
   "actions": {
     "abortMerge": "Abort Merge",
     "addToGitignore": "Add to .gitignore",
+    "cancel": "Cancel",
     "copyPath": "Copy Path",
     "discard": "Discard Changes",
     "discardAll": "Discard All Changes",
     "discardHunk": "Discard Hunk",
     "fetch": "Fetch",
+    "fetchPrune": "Fetch (Prune)",
+    "forcePush": "Force Push (with lease)",
     "more": "More actions",
     "openChanges": "Open Changes",
     "publish": "Publish Branch",
     "pull": "Pull",
+    "pullRebase": "Pull (Rebase)",
     "push": "Push",
     "refresh": "Refresh",
     "restore": "Restore (to HEAD)",
@@ -94,6 +98,12 @@
     "loading": "Loading diff…",
     "selectFile": "Select a file to view its changes"
   },
+  "discard": {
+    "confirmAction": "Discard",
+    "confirmAll": "Discard all changes in the working tree? This permanently throws away every uncommitted edit and cannot be undone.",
+    "confirmFile": "Discard changes to {file}? This permanently throws away the uncommitted edits and cannot be undone.",
+    "confirmTitle": "Discard changes?"
+  },
   "emptyState": {
     "initRepo": "Initialize Repository",
     "noChanges": "No changes",
@@ -108,6 +118,11 @@
     "noRepo": "No repository is bound — open a folder first",
     "pullFailed": "Pull failed: {message}",
     "pushFailed": "Push failed: {message}"
+  },
+  "forcePush": {
+    "confirmAction": "Force push",
+    "confirmDescription": "This overwrites the remote branch with your local history using --force-with-lease. It is rejected if someone else has pushed since your last fetch.",
+    "confirmTitle": "Force push with lease?"
   },
   "groups": {
     "changes": "Changes",
@@ -237,5 +252,25 @@
     "viewGraph": "Graph view",
     "viewList": "List view"
   },
-  "title": "Source Control"
+  "title": "Source Control",
+  "viewSettings": {
+    "branchSort": "Branch order",
+    "branchSortMode": {
+      "default": "Default",
+      "name": "Name (A–Z)"
+    },
+    "diffMode": {
+      "inline": "Inline",
+      "sideBySide": "Side by side"
+    },
+    "diffView": "Diff view",
+    "ignoreWhitespace": "Ignore whitespace",
+    "label": "View settings",
+    "reset": "Reset to defaults",
+    "timelineMode": {
+      "graph": "Graph",
+      "list": "List"
+    },
+    "timelineView": "Timeline view"
+  }
 }

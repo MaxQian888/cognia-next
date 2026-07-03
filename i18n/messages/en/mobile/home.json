@@ -43,6 +43,7 @@
   "renameAria": "Rename conversation",
   "search": "Search chats…",
   "searchAria": "Search chats",
+  "searchTruncated": "Some results may be hidden — refine your search.",
   "sections": {
     "activeRuns": "Active runs",
     "recents": "Recent chats"

@@ -17,5 +17,61 @@
     }
   },
   "description": "AI commit-message generation and other Git panel preferences.",
+  "panel": {
+    "autoFetch": {
+      "description": "Periodically fetch from the remote in the background so ahead/behind stays current.",
+      "interval": "Interval (minutes)",
+      "label": "Auto-fetch"
+    },
+    "branchSort": {
+      "default": "Default",
+      "label": "Branch order",
+      "name": "Name (A–Z)"
+    },
+    "confirmDiscard": {
+      "description": "Ask before throwing away working-tree changes.",
+      "label": "Confirm before discarding"
+    },
+    "confirmForcePush": {
+      "description": "Ask before overwriting a remote branch with a force push.",
+      "label": "Confirm before force push"
+    },
+    "description": "How the panel presents diffs, guards destructive actions, automates commits, and stays in sync.",
+    "diffView": {
+      "inline": "Inline",
+      "label": "Diff view",
+      "sideBySide": "Side by side"
+    },
+    "fetchPrune": {
+      "description": "Remove remote-tracking refs that no longer exist on the remote.",
+      "label": "Prune on fetch"
+    },
+    "ignoreWhitespace": {
+      "description": "Hide whitespace-only differences in the diff viewer.",
+      "label": "Ignore whitespace changes"
+    },
+    "postCommit": {
+      "description": "Action run automatically after the Commit button succeeds.",
+      "label": "After commit",
+      "none": "Do nothing",
+      "push": "Push",
+      "sync": "Sync"
+    },
+    "pullRebase": {
+      "description": "Use --rebase for the default Pull.",
+      "label": "Pull with rebase"
+    },
+    "reset": "Reset panel preferences",
+    "smartCommit": {
+      "description": "When nothing is staged, the Commit button stages all changes first.",
+      "label": "Smart commit"
+    },
+    "timelineView": {
+      "graph": "Graph",
+      "label": "Default timeline view",
+      "list": "List"
+    },
+    "title": "Panel & workflow"
+  },
   "title": "Source Control"
 }
