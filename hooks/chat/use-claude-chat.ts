@@ -148,6 +148,8 @@ import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { routeAiRevision } from "@/lib/artifacts/route-ai-revision"
 import { isTauri } from "@/lib/tauri"
+import { isCapacitor } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { mark as perfMark } from "@/lib/perf"
 import type { UIMessage } from "ai"
 
@@ -684,9 +686,13 @@ export function useClaudeChat() {
     [registry]
   )
 
-  // Subscribe to sidecar events once.
+  // Subscribe to sidecar events once. Desktop gets them via Tauri events;
+  // Capacitor / web-companion renderers get the same `claude://message`
+  // channel mirrored over the companion events WebSocket (event_bus.rs), which
+  // is what carries the mobile workflow copilot's streamed turns. Plain web
+  // (WebStubTransport) has no event source — skip the subscription.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() && !isCapacitor() && !hasWebCompanionTarget()) return
     let unlisten: UnlistenFn | null = null
     let cancelled = false
 

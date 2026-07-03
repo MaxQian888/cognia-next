@@ -8,10 +8,21 @@ import {
   clearMessages,
   listMessages,
   persistMessages,
+  searchSessionsByContent,
   truncateAfter,
   updateMessageMetadata,
 } from "./messages"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+
+async function putSession(id: string, projectId = "proj-A"): Promise<void> {
+  await getDb().sessions.put({
+    id,
+    projectId,
+    title: id,
+    updatedAt: 1,
+    createdAt: 1,
+  } as never)
+}
 
 beforeEach(async () => {
   await getDb().delete()
@@ -19,7 +30,9 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await getDb().messages.clear()
-})
+  // The first cold open builds the full Dexie schema (now v99) which can exceed
+  // the default 5s hook budget under fake-indexeddb — give it room.
+}, 30_000)
 
 function msg(
   id: string,
@@ -232,5 +245,84 @@ describe("workspace (project) scoping", () => {
     } as never)
     await persistMessages("s-scoped", [msg("m1", "user", "hi")])
     expect((await getDb().messages.get("m1"))?.projectId).toBe("proj-A")
+  })
+})
+
+describe("searchSessionsByContent", () => {
+  it("returns distinct session ids whose message text matches (case-insensitive)", async () => {
+    await putSession("s1")
+    await putSession("s2")
+    await putSession("s3")
+    await persistMessages("s1", [
+      msg("a", "user", "Plan a Trip to Rome"),
+      msg("b", "assistant", "ok"),
+    ])
+    await persistMessages("s2", [msg("c", "user", "grocery list")])
+    await persistMessages("s3", [msg("d", "user", "another TRIP idea")])
+    const { ids, truncated } = await searchSessionsByContent("trip")
+    expect([...ids].sort()).toEqual(["s1", "s3"])
+    expect(truncated).toBe(false)
+  })
+
+  it("scopes the scan to a projectId when given", async () => {
+    await putSession("sA", "proj-A")
+    await putSession("sB", "proj-B")
+    await persistMessages("sA", [msg("a", "user", "shared keyword")])
+    await persistMessages("sB", [msg("b", "user", "shared keyword")])
+    const { ids } = await searchSessionsByContent("keyword", { projectId: "proj-A" })
+    expect([...ids]).toEqual(["sA"])
+  })
+
+  it("returns an empty result for a blank needle without scanning", async () => {
+    await putSession("s1")
+    await persistMessages("s1", [msg("a", "user", "anything")])
+    const { ids, truncated } = await searchSessionsByContent("   ")
+    expect(ids.size).toBe(0)
+    expect(truncated).toBe(false)
+  })
+
+  it("flags truncated when the scan hits the limit", async () => {
+    await putSession("s1")
+    await persistMessages("s1", [
+      msg("a", "user", "match one"),
+      msg("b", "assistant", "nope"),
+      msg("c", "user", "match two"),
+    ])
+    // limit=2 scans only the first two rows → cannot see "match two", truncated.
+    const { truncated } = await searchSessionsByContent("match", { limit: 2 })
+    expect(truncated).toBe(true)
+  })
+})
+
+describe("last-message preview denormalization", () => {
+  it("writes a capped preview + timestamp onto the session row", async () => {
+    await putSession("s-prev")
+    await persistMessages("s-prev", [msg("a", "user", "hello world")])
+    const row = await getDb().sessions.get("s-prev")
+    expect(row?.lastMessagePreview).toBe("hello world")
+    expect(typeof row?.lastMessageAt).toBe("number")
+  })
+
+  it("updates the preview on a new message boundary but not on in-place growth", async () => {
+    await putSession("s-prev")
+    await persistMessages("s-prev", [msg("a", "user", "hello")])
+    await persistMessages("s-prev", [msg("a", "user", "hello"), msg("b", "assistant", "wor")])
+    const afterBoundary = await getDb().sessions.get("s-prev")
+    expect(afterBoundary?.lastMessagePreview).toBe("wor")
+    const atBoundary = afterBoundary?.lastMessageAt
+
+    // Same last message id "b", grown text → boundary unchanged → preview frozen.
+    await persistMessages("s-prev", [
+      msg("a", "user", "hello"),
+      msg("b", "assistant", "wor... a much longer streamed reply"),
+    ])
+    const afterGrowth = await getDb().sessions.get("s-prev")
+    expect(afterGrowth?.lastMessagePreview).toBe("wor")
+    expect(afterGrowth?.lastMessageAt).toBe(atBoundary)
+  })
+
+  it("skips denormalization when no session row exists", async () => {
+    await persistMessages("s-orphan", [msg("a", "user", "hi")])
+    expect(await getDb().sessions.get("s-orphan")).toBeUndefined()
   })
 })

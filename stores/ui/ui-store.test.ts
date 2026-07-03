@@ -13,6 +13,9 @@ const RESET = {
   guildRailCollapsed: false,
   statusBarCollapsed: false,
   sidebarCollapsed: false,
+  sidebarWidth: 256,
+  channelListView: "active" as const,
+  collapsedFolderIds: [] as string[],
 }
 
 describe("useUIStore", () => {
@@ -213,6 +216,9 @@ describe("useUIStore", () => {
         showMemberList: false,
         scratchpadCollapsed: { ts1: true },
         sidebarCollapsed: false,
+        sidebarWidth: 256,
+        channelListView: "active",
+        collapsedFolderIds: [],
         guildRailCollapsed: true,
         statusBarCollapsed: true,
       })
@@ -258,6 +264,59 @@ describe("useUIStore", () => {
       expect(result.current.statusBarCollapsed).toBe(true)
       act(() => result.current.setStatusBarCollapsed(false))
       expect(result.current.statusBarCollapsed).toBe(false)
+    })
+  })
+
+  describe("sidebarWidth", () => {
+    it("defaults to 256 and clamps into [220, 420]", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.sidebarWidth).toBe(256)
+      act(() => result.current.setSidebarWidth(300))
+      expect(result.current.sidebarWidth).toBe(300)
+      act(() => result.current.setSidebarWidth(9999))
+      expect(result.current.sidebarWidth).toBe(420)
+      act(() => result.current.setSidebarWidth(10))
+      expect(result.current.sidebarWidth).toBe(220)
+    })
+
+    it("rounds fractional widths and rejects non-finite values", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setSidebarWidth(301.6))
+      expect(result.current.sidebarWidth).toBe(302)
+      act(() => result.current.setSidebarWidth(Number.NaN))
+      expect(result.current.sidebarWidth).toBe(256)
+    })
+  })
+
+  describe("channelListView", () => {
+    it("defaults to active and switches", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.channelListView).toBe("active")
+      act(() => result.current.setChannelListView("archived"))
+      expect(result.current.channelListView).toBe("archived")
+      act(() => result.current.setChannelListView("active"))
+      expect(result.current.channelListView).toBe("active")
+    })
+  })
+
+  describe("collapsedFolderIds", () => {
+    it("toggleCollapsedFolder adds then removes an id", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.collapsedFolderIds).toEqual([])
+      act(() => result.current.toggleCollapsedFolder("f1"))
+      expect(result.current.collapsedFolderIds).toEqual(["f1"])
+      act(() => result.current.toggleCollapsedFolder("f2"))
+      expect(result.current.collapsedFolderIds).toEqual(["f1", "f2"])
+      act(() => result.current.toggleCollapsedFolder("f1"))
+      expect(result.current.collapsedFolderIds).toEqual(["f2"])
+    })
+
+    it("setCollapsedFolders replaces the whole set", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setCollapsedFolders(["a", "b"]))
+      expect(result.current.collapsedFolderIds).toEqual(["a", "b"])
+      act(() => result.current.setCollapsedFolders([]))
+      expect(result.current.collapsedFolderIds).toEqual([])
     })
   })
 

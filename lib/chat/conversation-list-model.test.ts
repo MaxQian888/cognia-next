@@ -212,4 +212,68 @@ describe("buildConversationSections", () => {
   it("exposes a stable bucket order constant", () => {
     expect(DATE_BUCKET_ORDER).toEqual(["today", "yesterday", "prev7", "prev30", "older"])
   })
+
+  it("collapses date buckets into a single recent section when groupByDate is off", () => {
+    const sessions = [
+      session("today1", { updatedAt: NOW }),
+      session("old", { updatedAt: NOW - 40 * DAY }),
+      session("pin", { pinned: true, updatedAt: NOW - 5 * DAY }),
+    ]
+    const { sections, orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      opts({ groupByDate: false })
+    )
+    // Pinned still floats; loose sessions merge into one flat "recent" list.
+    expect(sections.map((s) => s.kind)).toEqual(["pinned", "recent"])
+    const recent = sections.find((s) => s.kind === "recent")
+    expect(recent?.sessions.map((s) => s.id)).toEqual(["today1", "old"])
+    expect(orderedIds).toEqual(["pin", "today1", "old"])
+  })
+
+  it("matches sessions by message content via contentMatchIds in search mode", () => {
+    const sessions = [
+      session("titleHit", { title: "Trip planning", updatedAt: NOW }),
+      session("contentHit", { title: "Unrelated", updatedAt: NOW - DAY }),
+      session("noHit", { title: "Nothing", updatedAt: NOW }),
+    ]
+    const { sections, filteredCount } = buildConversationSections(
+      sessions,
+      [],
+      opts({ query: "trip", contentMatchIds: new Set(["contentHit"]) })
+    )
+    expect(sections[0].kind).toBe("search")
+    // Title hit + content hit, newest-first; noHit excluded.
+    expect(sections[0].sessions.map((s) => s.id)).toEqual(["titleHit", "contentHit"])
+    expect(filteredCount).toBe(2)
+  })
+
+  it("orders the pinned section by pinnedOrder, un-ordered pins fall to the end by recency", () => {
+    const sessions = [
+      session("p-none-new", { pinned: true, updatedAt: NOW }),
+      session("p2", { pinned: true, pinnedOrder: 2, updatedAt: NOW - 10 * DAY }),
+      session("p0", { pinned: true, pinnedOrder: 0, updatedAt: NOW - 40 * DAY }),
+      session("p-none-old", { pinned: true, updatedAt: NOW - 20 * DAY }),
+    ]
+    const { sections } = buildConversationSections(sessions, [], opts())
+    const pinnedSec = sections.find((s) => s.kind === "pinned")
+    expect(pinnedSec?.sessions.map((s) => s.id)).toEqual(["p0", "p2", "p-none-new", "p-none-old"])
+  })
+
+  it("excludes collapsed-folder sessions from orderedIds", () => {
+    const f = folder("f1", { order: 1 })
+    const sessions = [
+      session("foldered", { folderId: "f1", updatedAt: NOW }),
+      session("loose", { updatedAt: NOW }),
+    ]
+    const expanded = buildConversationSections(sessions, [f], opts())
+    expect(expanded.orderedIds).toEqual(["foldered", "loose"])
+    const collapsed = buildConversationSections(
+      sessions,
+      [f],
+      opts({ collapsedFolderIds: new Set(["f1"]) })
+    )
+    // "foldered" is hidden under the collapsed folder → not navigable.
+    expect(collapsed.orderedIds).toEqual(["loose"])
+  })
 })

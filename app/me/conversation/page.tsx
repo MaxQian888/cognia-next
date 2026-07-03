@@ -26,6 +26,7 @@ import type {
 import { useSettingsStore } from "@/stores/settings"
 
 type ComposerBehavior = NonNullable<AppSettings["composerBehavior"]>
+type ConversationSidebar = NonNullable<AppSettings["conversationSidebar"]>
 
 export default function MobileConversationPage() {
   const t = useTranslations("mobile.conversation")
@@ -46,6 +47,10 @@ export default function MobileConversationPage() {
 
   const setComposer = (patch: Partial<ComposerBehavior>) =>
     update({ composerBehavior: { ...composer, ...patch } })
+
+  const sidebar: ConversationSidebar = settings?.conversationSidebar ?? {}
+  const setSidebar = (patch: Partial<ConversationSidebar>) =>
+    update({ conversationSidebar: { ...sidebar, ...patch } })
 
   return (
     <SubPageShell title={t("title")} backAria={t("backAria")} testid="mobile-conversation-page">
@@ -124,6 +129,48 @@ export default function MobileConversationPage() {
             checked={streamPartial}
             onChange={(v) => void update({ streamPartialMessages: v })}
             testid="conversation-stream-partial"
+          />
+        </MeSection>
+
+        <MeSection
+          title={t("sidebarSection")}
+          description={t("sidebarSectionHelp")}
+          testid="me-section-conversation-sidebar"
+        >
+          <BiometricRow
+            label={t("sidebarCompact")}
+            help={t("sidebarCompactHelp")}
+            checked={sidebar.density === "compact"}
+            onChange={(v) => void setSidebar({ density: v ? "compact" : "comfortable" })}
+            testid="conversation-sidebar-compact"
+          />
+          <BiometricRow
+            label={t("sidebarPreview")}
+            help={t("sidebarPreviewHelp")}
+            checked={sidebar.showPreview === true}
+            onChange={(v) => void setSidebar({ showPreview: v })}
+            testid="conversation-sidebar-preview"
+          />
+          <BiometricRow
+            label={t("sidebarGroupByDate")}
+            help={t("sidebarGroupByDateHelp")}
+            checked={sidebar.groupByDate !== false}
+            onChange={(v) => void setSidebar({ groupByDate: v })}
+            testid="conversation-sidebar-group-by-date"
+          />
+          <BiometricRow
+            label={t("sidebarUnread")}
+            help={t("sidebarUnreadHelp")}
+            checked={sidebar.showUnreadBadges !== false}
+            onChange={(v) => void setSidebar({ showUnreadBadges: v })}
+            testid="conversation-sidebar-unread"
+          />
+          <BiometricRow
+            label={t("sidebarContentSearch")}
+            help={t("sidebarContentSearchHelp")}
+            checked={sidebar.searchScope === "titleAndContent"}
+            onChange={(v) => void setSidebar({ searchScope: v ? "titleAndContent" : "title" })}
+            testid="conversation-sidebar-content-search"
           />
         </MeSection>
       </div>

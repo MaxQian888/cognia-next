@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ArchiveIcon,
@@ -26,11 +26,19 @@ import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { updateSession } from "@/lib/db/sessions"
+import { searchSessionsByContent } from "@/lib/db/messages"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
+import { useUIStore, type ChannelListView } from "@/stores/ui"
+import { useSettingsStore } from "@/stores/settings"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
-import type { Character, ChatSession, SessionFolder } from "@/lib/claude/types"
+import type {
+  Character,
+  ChatSession,
+  ConversationSidebarDensity,
+  SessionFolder,
+} from "@/lib/claude/types"
 
 import { SwipeRow } from "@/components/interactions/swipe-row"
 import { LongPress } from "@/components/interactions/long-press"
@@ -107,9 +115,24 @@ export function MobileChannelList({
     cancelDebouncedQuery()
     setQuery("")
   }, [cancelDebouncedQuery])
-  const [view, setView] = useState<"active" | "archived">("active")
+  // Active ⇄ Archived view + folder collapse — seeded from and written back to
+  // the persisted UI store (shared with the desktop sidebar) so the choice
+  // survives reloads. Local state keeps re-render cheap on a phone.
+  const persistedView = useUIStore((s) => s.channelListView)
+  const setPersistedView = useUIStore((s) => s.setChannelListView)
+  const [view, setViewState] = useState<ChannelListView>(persistedView)
+  const setView = useCallback(
+    (next: ChannelListView) => {
+      setViewState(next)
+      setPersistedView(next)
+    },
+    [setPersistedView]
+  )
+
+  const persistedCollapsed = useUIStore((s) => s.collapsedFolderIds)
+  const setPersistedCollapsed = useUIStore((s) => s.setCollapsedFolders)
   const [collapsedFolderIds, setCollapsedFolderIds] = useState<ReadonlySet<string>>(
-    () => new Set<string>()
+    () => new Set(persistedCollapsed)
   )
   const toggleFolder = useCallback((id: string) => {
     setCollapsedFolderIds((prev) => {
@@ -119,6 +142,43 @@ export function MobileChannelList({
       return next
     })
   }, [])
+  useEffect(() => {
+    setPersistedCollapsed([...collapsedFolderIds])
+  }, [collapsedFolderIds, setPersistedCollapsed])
+
+  // Behavior preferences (Settings → Conversation → sidebar), shared with the
+  // desktop sidebar. Absent settings fall back to today's defaults.
+  const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
+  const showPreview = sidebarSettings?.showPreview ?? false
+  const groupByDate = sidebarSettings?.groupByDate !== false
+  const showUnreadBadges = sidebarSettings?.showUnreadBadges !== false
+  const contentScope = sidebarSettings?.searchScope === "titleAndContent"
+
+  // Opt-in message-content search (mirrors the desktop sidebar): resolve the
+  // set of session ids whose message text matches the debounced query.
+  const scopeProjectId = sessions.find((s) => s.projectId)?.projectId
+  const [contentMatchIds, setContentMatchIds] = useState<ReadonlySet<string> | undefined>(undefined)
+  const [contentTruncated, setContentTruncated] = useState(false)
+  useEffect(() => {
+    if (!contentScope || query.trim().length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setContentMatchIds(undefined)
+      setContentTruncated(false)
+      return
+    }
+    let cancelled = false
+    void searchSessionsByContent(query, { projectId: scopeProjectId })
+      .then((res) => {
+        if (cancelled) return
+        setContentMatchIds(res.ids)
+        setContentTruncated(res.truncated)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [contentScope, query, scopeProjectId])
 
   // Wave 4 / ADR-0026 — Dexie-first read so the chip list survives a
   // server drop; `table: "characters"` kicks the sync orchestrator on
@@ -138,11 +198,12 @@ export function MobileChannelList({
   const sessionStates = useClientLiveQuery(() => listSessionStates(), [], [])
   const unreadById = useMemo(() => {
     const map = new Map<string, number>()
+    if (!showUnreadBadges) return map
     for (const s of sessionStates ?? []) {
       if (s.unreadCount > 0) map.set(s.sessionId, s.unreadCount)
     }
     return map
-  }, [sessionStates])
+  }, [sessionStates, showUnreadBadges])
 
   // Shared grouping model: pinned → date buckets, or a flat result list while
   // searching (mirrors the desktop sidebar via the same headless hook).
@@ -152,6 +213,8 @@ export function MobileChannelList({
     query,
     view,
     collapsedFolderIds,
+    groupByDate,
+    contentMatchIds: contentScope ? contentMatchIds : undefined,
   })
   const archived = view === "archived"
 
@@ -183,6 +246,8 @@ export function MobileChannelList({
           resolved={r}
           active={s.id === activeSessionId}
           archived={archived}
+          density={density}
+          showPreview={showPreview}
           onSelect={() => onSelect(s.id)}
           onTogglePin={() => void togglePin(s)}
           onDelete={() => void onDelete(s.id)}
@@ -232,7 +297,7 @@ export function MobileChannelList({
           type="button"
           size="icon"
           variant="ghost"
-          onClick={() => setView((v) => (v === "active" ? "archived" : "active"))}
+          onClick={() => setView(view === "active" ? "archived" : "active")}
           aria-label={archived ? t("viewActive") : t("viewArchived")}
           aria-pressed={archived}
           data-testid="mobile-channel-view-toggle"
@@ -253,6 +318,15 @@ export function MobileChannelList({
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {contentTruncated && query.trim().length > 0 ? (
+          <p
+            className="px-4 pt-2 text-center text-[11px] text-muted-foreground"
+            role="status"
+            data-testid="mobile-channel-search-truncated"
+          >
+            {t("searchTruncated")}
+          </p>
+        ) : null}
         {filteredCount === 0 ? (
           <p
             className="px-4 py-8 text-center text-xs text-muted-foreground"
@@ -312,6 +386,12 @@ export function MobileChannelList({
                   )}
                 </section>
               )
+            case "recent":
+              return (
+                <Section key="recent" testId="mobile-channel-recent">
+                  {renderRows(section.sessions)}
+                </Section>
+              )
             case "search":
               return (
                 <Section key="search" testId="mobile-channel-results">
@@ -358,6 +438,8 @@ function ChannelRow({
   resolved,
   active,
   archived,
+  density,
+  showPreview,
   onSelect,
   onTogglePin,
   onDelete,
@@ -373,6 +455,8 @@ function ChannelRow({
   resolved: ResolvedSession
   active: boolean
   archived: boolean
+  density: ConversationSidebarDensity
+  showPreview: boolean
   onSelect: () => void
   onTogglePin: () => void
   onDelete: () => void
@@ -386,6 +470,7 @@ function ChannelRow({
   unreadLabel: string
 }) {
   const { session, unread, glyph, color } = resolved
+  const preview = showPreview ? session.lastMessagePreview : undefined
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(session.title)
 
@@ -471,12 +556,13 @@ function ChannelRow({
             data-testid={`mobile-channel-row-${session.id}`}
             data-active={active ? "true" : "false"}
             className={cn(
-              "h-auto w-full justify-start gap-3 rounded-none px-3 py-2 text-left font-normal",
+              "h-auto w-full justify-start gap-3 rounded-none px-3 text-left font-normal",
+              density === "compact" ? "py-1.5" : "py-2",
               active && "bg-muted/60"
             )}
           >
             <span className="relative shrink-0">
-              <Avatar className="size-9">
+              <Avatar className={density === "compact" ? "size-8" : "size-9"}>
                 <AvatarFallback
                   style={{ backgroundColor: color }}
                   className="text-xs"
@@ -499,9 +585,17 @@ function ChannelRow({
                 {session.pinned ? (
                   <PinIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
                 ) : null}
+                {preview ? (
+                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                    {relativeTime(session.lastMessageAt ?? session.updatedAt)}
+                  </span>
+                ) : null}
               </span>
-              <span className="truncate text-[11px] text-muted-foreground">
-                {relativeTime(session.updatedAt)}
+              <span
+                className="truncate text-[11px] text-muted-foreground"
+                data-testid={`mobile-channel-subtitle-${session.id}`}
+              >
+                {preview ?? relativeTime(session.updatedAt)}
               </span>
             </span>
           </Button>

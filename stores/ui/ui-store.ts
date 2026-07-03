@@ -5,6 +5,21 @@ import { persist, createJSONStorage } from "zustand/middleware"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 
+/** Conversation-sidebar (ChannelList) width bounds, in px. Shared by the
+ *  edge-resize handle and the "reset width" settings action. */
+export const SIDEBAR_WIDTH_DEFAULT = 256
+export const SIDEBAR_WIDTH_MIN = 220
+export const SIDEBAR_WIDTH_MAX = 420
+
+/** Clamp a candidate ChannelList width into the allowed range. */
+export function clampSidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return SIDEBAR_WIDTH_DEFAULT
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
+}
+
+/** Which slice of conversations the ChannelList shows. */
+export type ChannelListView = "active" | "archived"
+
 /**
  * Which "guild" the user is currently looking at — either the synthetic
  * direct-messages bucket, a specific team, or the Canvas workspace.
@@ -57,6 +72,30 @@ interface UIState {
   sidebarCollapsed: boolean
   toggleSidebar: () => void
   setSidebarCollapsed: (collapsed: boolean) => void
+
+  /**
+   * Draggable width (px) of the conversation sidebar (ChannelList). Clamped to
+   * [{@link SIDEBAR_WIDTH_MIN}, {@link SIDEBAR_WIDTH_MAX}]. Persisted so the
+   * choice sticks across reloads.
+   */
+  sidebarWidth: number
+  setSidebarWidth: (width: number) => void
+
+  /**
+   * Active ⇄ Archived slice shown in the ChannelList. Persisted so the choice
+   * survives reloads (previously an ephemeral component `useState`).
+   */
+  channelListView: ChannelListView
+  setChannelListView: (view: ChannelListView) => void
+
+  /**
+   * Ids of conversation folders the user has collapsed in the ChannelList.
+   * Stored as an array (Sets don't survive JSON) and persisted so folder
+   * collapse state sticks across reloads (previously ephemeral).
+   */
+  collapsedFolderIds: string[]
+  toggleCollapsedFolder: (id: string) => void
+  setCollapsedFolders: (ids: string[]) => void
 
   /**
    * Desktop left guild rail (feature switcher) collapse. Persisted across
@@ -167,6 +206,21 @@ export const useUIStore = create<UIState>()(
         getPluginEventHooks().dispatchSidebarToggle(!collapsed)
       },
 
+      sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+      setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
+
+      channelListView: "active",
+      setChannelListView: (view) => set({ channelListView: view }),
+
+      collapsedFolderIds: [],
+      toggleCollapsedFolder: (id) =>
+        set((s) => ({
+          collapsedFolderIds: s.collapsedFolderIds.includes(id)
+            ? s.collapsedFolderIds.filter((f) => f !== id)
+            : [...s.collapsedFolderIds, id],
+        })),
+      setCollapsedFolders: (ids) => set({ collapsedFolderIds: ids }),
+
       guildRailCollapsed: false,
       toggleGuildRail: () => set((s) => ({ guildRailCollapsed: !s.guildRailCollapsed })),
       setGuildRailCollapsed: (collapsed) => set({ guildRailCollapsed: collapsed }),
@@ -241,6 +295,13 @@ export const useUIStore = create<UIState>()(
     {
       name: "cognia-ui",
       storage: createJSONStorage(() => localStorage),
+      // Bumped from unversioned (0 → 1) when the conversation-sidebar layout
+      // fields (width / view / collapsed folders) were added. Missing keys in a
+      // pre-v1 snapshot fall back to the store's initial defaults on merge, so
+      // the migration is a passthrough — the version simply gives future
+      // migrations a stable baseline.
+      version: 1,
+      migrate: (persisted) => persisted as UIState,
       // Don't persist member statuses (tied to in-flight requests that died)
       // or stop requests (one-shot, transient).
       partialize: (s) => ({
@@ -248,6 +309,9 @@ export const useUIStore = create<UIState>()(
         showMemberList: s.showMemberList,
         scratchpadCollapsed: s.scratchpadCollapsed,
         sidebarCollapsed: s.sidebarCollapsed,
+        sidebarWidth: s.sidebarWidth,
+        channelListView: s.channelListView,
+        collapsedFolderIds: s.collapsedFolderIds,
         guildRailCollapsed: s.guildRailCollapsed,
         statusBarCollapsed: s.statusBarCollapsed,
       }),

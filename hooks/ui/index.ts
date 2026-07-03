@@ -16,3 +16,8 @@ export {
   type Layout as ResizableLayout,
   type UseResizableLayoutResult,
 } from "./use-resizable-layout"
+export {
+  useEdgeResize,
+  type UseEdgeResizeOptions,
+  type UseEdgeResizeResult,
+} from "./use-edge-resize"

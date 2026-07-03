@@ -17,6 +17,7 @@ import {
   unarchiveSession,
   bulkArchiveSessions,
   bulkUnarchiveSessions,
+  setPinnedOrder,
 } from "./sessions"
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
@@ -37,7 +38,9 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await getDb().promptPresets.clear()
-})
+  // Cold open builds the full Dexie schema (now v99); can exceed the default 5s
+  // hook budget under fake-indexeddb on the first test.
+}, 30_000)
 
 describe("createSession — without default preset", () => {
   it("creates a row with caller-supplied fields", async () => {
@@ -46,6 +49,25 @@ describe("createSession — without default preset", () => {
     expect(session.title).toBe("Test")
     expect(session.model).toBe("claude-y")
     expect(session.systemPrompt).toBeUndefined()
+  })
+})
+
+describe("setPinnedOrder", () => {
+  it("writes each id's index into pinnedOrder without bumping updatedAt", async () => {
+    const a = await createSession({ title: "A", pinned: true })
+    const b = await createSession({ title: "B", pinned: true })
+    const c = await createSession({ title: "C", pinned: true })
+    const beforeA = (await getSession(a.id))!.updatedAt
+    await setPinnedOrder([c.id, a.id, b.id])
+    expect((await getSession(c.id))?.pinnedOrder).toBe(0)
+    expect((await getSession(a.id))?.pinnedOrder).toBe(1)
+    expect((await getSession(b.id))?.pinnedOrder).toBe(2)
+    // Ordering is organizational — recency is intentionally left untouched.
+    expect((await getSession(a.id))?.updatedAt).toBe(beforeA)
+  })
+
+  it("is a no-op for an empty id list", async () => {
+    await expect(setPinnedOrder([])).resolves.toBeUndefined()
   })
 })
 

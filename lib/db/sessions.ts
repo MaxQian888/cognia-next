@@ -254,6 +254,24 @@ export async function assignSessionToFolder(
 }
 
 /**
+ * Persist manual ordering of the Pinned section (ChannelList drag-reorder).
+ * Writes each id's array index into its non-indexed `pinnedOrder`; the
+ * conversation-list model then sorts pinned rows by it. Ordering is
+ * organizational, so `updatedAt` is left untouched (like folder assignment).
+ * Runs in one `rw` transaction so a mid-batch failure rolls back atomically;
+ * missing ids are skipped (Dexie `update` is a no-op on a stale id).
+ */
+export async function setPinnedOrder(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return
+  const db = getDb()
+  await db.transaction("rw", db.sessions, async () => {
+    for (let i = 0; i < ids.length; i++) {
+      await db.sessions.update(ids[i], { pinnedOrder: i })
+    }
+  })
+}
+
+/**
  * Fork an existing chat session: creates a new ChatSession that inherits the
  * parent's character / team / per-session overrides, with `forkedFromSdkSessionId`
  * set to the parent's `sdkSessionId`. The next send on the new session will

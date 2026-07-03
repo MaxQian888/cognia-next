@@ -723,6 +723,10 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "composerBehavior",
     "streamPartialMessages",
     "compaction",
+    // Conversation-list (sidebar) render prefs edited from `/me/conversation`
+    // — density / preview / grouping / unread badges / search scope. Pure UI
+    // presentation config, no credentials.
+    "conversationSidebar",
     // ADR-0056 (Wave 3) — project instruction loading config (CLAUDE.md /
     // AGENTS.md discovery on the paired desktop). Remote-edited from
     // `/me/instructions`. The globalPath / extraPaths it carries are desktop
@@ -3671,7 +3675,12 @@ mod tests {
     fn mobile_allowlist_includes_conversation_keys() {
         // ADR-0056 (Wave 2) — the phone's conversation page + `/me/agent`
         // compaction toggle write these. Missing any → 400 on save.
-        for key in ["composerBehavior", "streamPartialMessages", "compaction"] {
+        for key in [
+            "composerBehavior",
+            "streamPartialMessages",
+            "compaction",
+            "conversationSidebar",
+        ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "conversation key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"

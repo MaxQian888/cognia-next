@@ -41,7 +41,7 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
-import { updateSession } from "@/lib/db/sessions"
+import { updateSession, setPinnedOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@/lib/logging"
@@ -343,6 +343,10 @@ export function DesktopChatWorkspace() {
     [rename]
   )
 
+  const handleReorderPinned = useCallback((ids: string[]) => {
+    void setPinnedOrder(ids)
+  }, [])
+
   // `useTranslations` returns a fresh function reference on each render. Hold
   // it in a ref so the bulk callbacks (consumed by ChannelList) stay
   // referentially stable across renders and don't churn React Memo / effects.
@@ -487,6 +491,7 @@ export function DesktopChatWorkspace() {
               onRenameFolder={renameFolder}
               onDeleteFolder={deleteFolder}
               onAssignToFolder={assignToFolder}
+              onReorderPinned={handleReorderPinned}
             />
           )}
 

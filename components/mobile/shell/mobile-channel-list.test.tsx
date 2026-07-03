@@ -64,6 +64,7 @@ jest.mock("next-intl", () => ({
       viewActive: "Show active",
       viewArchived: "Show archived",
       emptyArchived: "No archived",
+      searchTruncated: "Some results hidden",
       unreadCount: `${vars?.count ?? 0} unread`,
     }
     return map[key] ?? key
@@ -73,6 +74,32 @@ jest.mock("next-intl", () => ({
 jest.mock("@/lib/capacitor/haptics", () => ({
   impact: () => Promise.resolve({ kind: "ok" }),
   selectionFeedback: () => Promise.resolve({ kind: "ok" }),
+}))
+
+// Static UI-store mock: view/collapse are mirrored to local state in the
+// component, so no-op setters are enough (spies let us assert persistence).
+const setChannelListView = jest.fn()
+const setCollapsedFolders = jest.fn()
+jest.mock("@/stores/ui", () => ({
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
+    selector({
+      channelListView: "active",
+      setChannelListView,
+      collapsedFolderIds: [],
+      setCollapsedFolders,
+    }),
+}))
+
+// Behavior prefs default to today's behavior; tests override as needed.
+let conversationSidebar: Record<string, unknown> | null = null
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
+    selector({ settings: conversationSidebar ? { conversationSidebar } : null }),
+}))
+
+const searchSessionsByContent = jest.fn()
+jest.mock("@/lib/db/messages", () => ({
+  searchSessionsByContent: (...args: unknown[]) => searchSessionsByContent(...args),
 }))
 
 const baseSession = (id: string, overrides: Partial<ChatSession> = {}): ChatSession => ({
@@ -96,6 +123,11 @@ describe("<MobileChannelList />", () => {
     updateSessionMock.mockResolvedValue(undefined)
     charactersRef.value = []
     sessionStatesRef.value = []
+    setChannelListView.mockReset()
+    setCollapsedFolders.mockReset()
+    conversationSidebar = null
+    searchSessionsByContent.mockReset()
+    searchSessionsByContent.mockResolvedValue({ ids: new Set<string>(), truncated: false })
   })
 
   it("groups pinned sessions and buckets the rest by date", () => {
@@ -430,5 +462,86 @@ describe("<MobileChannelList />", () => {
     expect(screen.getByTestId("mobile-channel-row-a1")).toBeInTheDocument()
     await user.click(screen.getAllByTestId("swipe-action-archive")[0])
     expect(onUnarchive).toHaveBeenCalledWith("a1")
+  })
+
+  it("persists the archived-view choice to the shared UI store", async () => {
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    await user.click(screen.getByTestId("mobile-channel-view-toggle"))
+    expect(setChannelListView).toHaveBeenCalledWith("archived")
+  })
+
+  it("hides the unread dot when showUnreadBadges is off", () => {
+    conversationSidebar = { showUnreadBadges: false }
+    sessionStatesRef.value = [{ sessionId: "s2", lastReadAt: 0, unreadCount: 3 }]
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("mobile-channel-unread-s2")).not.toBeInTheDocument()
+  })
+
+  it("shows the message preview subtitle when showPreview is on", () => {
+    conversationSidebar = { showPreview: true }
+    const withPreview: ChatSession[] = [
+      baseSession("s1", { title: "Daily standup", lastMessagePreview: "see you at 9", updatedAt: 100 }),
+    ]
+    render(
+      <MobileChannelList
+        sessions={withPreview}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("mobile-channel-subtitle-s1")).toHaveTextContent("see you at 9")
+  })
+
+  it("surfaces content-only matches when searchScope is titleAndContent", async () => {
+    conversationSidebar = { searchScope: "titleAndContent" }
+    searchSessionsByContent.mockResolvedValue({ ids: new Set(["s3"]), truncated: false })
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    // "zzz" matches no title; only the content set contains s3 (Side note).
+    await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+    await waitFor(() => expect(searchSessionsByContent).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(screen.getByTestId("mobile-channel-row-s3")).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId("mobile-channel-row-s2")).not.toBeInTheDocument()
   })
 })
