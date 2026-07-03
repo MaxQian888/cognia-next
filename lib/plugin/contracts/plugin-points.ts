@@ -998,10 +998,14 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   "cli.tool": "cli:execute",
 }
 
-const RUNTIME_POINT_STABILITY: Partial<Record<CanonicalRuntimePoint, PluginPointStability>> = {
-  "lsp.server": "experimental",
-  "cli.tool": "experimental",
-}
+// Runtime points that are NOT yet stable (everything else defaults to
+// "stable" below). Currently empty: `lsp.server` and `cli.tool` graduated
+// experimental→stable alongside their capability promotions in
+// plugin-capabilities.ts — the host runtime is fully wired (lsp-registry /
+// cli-tools exec pipeline), the typed SDK helpers `defineLspServer()` /
+// `defineCliTool()` ship, and their required tests are in place. Add a point
+// here only while its wiring or plugin-facing API surface is still landing.
+const RUNTIME_POINT_STABILITY: Partial<Record<CanonicalRuntimePoint, PluginPointStability>> = {}
 
 const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> =
   Object.fromEntries(
