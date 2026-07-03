@@ -47,8 +47,31 @@ describe("UnifiedTaskSidebarItem", () => {
       capabilities: { runNow: false, pause: false, edit: false, delete: false },
     })
     render(<UnifiedTaskSidebarItem item={item} isActive={false} onClick={() => {}} />)
-    // Row still renders, but no dropdown trigger / chevron etc.
+    // Row still renders, but no actions-menu button.
     expect(screen.getByTestId(`unified-sidebar-item-${item.unifiedId}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`unified-row-menu-${item.unifiedId}`)).toBeNull()
+  })
+
+  it("exposes the actions menu behind a hover-revealed button, not the row itself", () => {
+    const item = makeItem()
+    render(
+      <UnifiedTaskSidebarItem item={item} isActive={false} onClick={() => {}} onRunNow={() => {}} />
+    )
+    const menuButton = screen.getByTestId(`unified-row-menu-${item.unifiedId}`)
+    expect(menuButton).toBeInTheDocument()
+    // Hover-revealed on pointer devices, forced visible on touch.
+    expect(menuButton.className).toContain("group-hover:opacity-100")
+    expect(menuButton.className).toContain("[@media(hover:none)]:opacity-100")
+  })
+
+  it("does not fire the row's onClick when the menu button is clicked", () => {
+    const item = makeItem()
+    const onClick = jest.fn()
+    render(
+      <UnifiedTaskSidebarItem item={item} isActive={false} onClick={onClick} onRunNow={() => {}} />
+    )
+    fireEvent.click(screen.getByTestId(`unified-row-menu-${item.unifiedId}`))
+    expect(onClick).not.toHaveBeenCalled()
   })
 
   it("renders pause action when item is active and onPause is supplied", () => {

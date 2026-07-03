@@ -110,6 +110,22 @@ describe("TaskSidebarItem", () => {
     expect(cbs.onDelete).toHaveBeenCalledWith("t1")
   })
 
+  it("renders the actions behind a hover-revealed menu button that doesn't select the row", () => {
+    const onClick = jest.fn()
+    render(
+      <TaskSidebarItem task={buildTask()} isActive={false} onClick={onClick} onRunNow={jest.fn()} />
+    )
+    const menuButton = screen.getByTestId("task-row-menu-t1")
+    expect(menuButton.className).toContain("group-hover:opacity-100")
+    fireEvent.click(menuButton)
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it("omits the menu button when no action callbacks are supplied", () => {
+    render(<TaskSidebarItem task={buildTask()} isActive={false} onClick={jest.fn()} />)
+    expect(screen.queryByTestId("task-row-menu-t1")).toBeNull()
+  })
+
   it("dispatches onResume instead of onPause when status is paused", () => {
     const onResume = jest.fn()
     const onPause = jest.fn()

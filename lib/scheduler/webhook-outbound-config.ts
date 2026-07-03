@@ -20,12 +20,15 @@ import { useEffect, useState } from "react"
 import { isTauri } from "@/lib/tauri"
 import { remoteControlGetSigningSecret } from "@/lib/tauri/remote-control"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
+import type { WebhookDeliveryConfig } from "@/types/remote-control"
 
 export interface WebhookOutboundConfig {
   /** Lowercase-hex secret used for the `X-Cognia-Signature` HMAC header. */
   signingSecret?: string
   /** Headers merged on top of the default Content-Type. */
   headers?: Record<string, string>
+  /** User-tunable retry / timeout / backoff limits, if configured. */
+  delivery?: WebhookDeliveryConfig
 }
 
 export async function getWebhookOutboundConfig(): Promise<WebhookOutboundConfig> {
@@ -34,6 +37,15 @@ export async function getWebhookOutboundConfig(): Promise<WebhookOutboundConfig>
   return {
     headers: Object.keys(headers).length > 0 ? headers : undefined,
     signingSecret: signingSecret ?? undefined,
+    delivery: deliveryFromStore(),
+  }
+}
+
+function deliveryFromStore(): WebhookDeliveryConfig | undefined {
+  try {
+    return useRemoteControlStore.getState().config.outbound.delivery
+  } catch {
+    return undefined
   }
 }
 
