@@ -57,6 +57,55 @@ describe("filterAndSortMemories", () => {
     ).toEqual(["e", "p"])
   })
 
+  it("filters by scope", () => {
+    const rows = [
+      mem({ id: "g", scope: "global" }),
+      mem({ id: "c", scope: "character", characterId: "charA" }),
+    ]
+    expect(filterAndSortMemories(rows, { scopes: ["character"] }).map((m) => m.id)).toEqual(["c"])
+    // Empty scopes array is treated as "no filter".
+    expect(
+      filterAndSortMemories(rows, { scopes: [] })
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["c", "g"])
+  })
+
+  it("filters by provenance", () => {
+    const rows = [
+      mem({ id: "u", provenance: "user" }),
+      mem({ id: "x", provenance: "explicit" }),
+      mem({ id: "i", provenance: "inbound" }),
+    ]
+    expect(
+      filterAndSortMemories(rows, { provenances: ["explicit", "inbound"] })
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["i", "x"])
+  })
+
+  it("filters by tags (AND semantics, case-insensitive)", () => {
+    const rows = [
+      mem({ id: "a", tags: ["Work", "urgent"] }),
+      mem({ id: "b", tags: ["work"] }),
+      mem({ id: "c", tags: ["home"] }),
+    ]
+    // Requires every listed tag.
+    expect(
+      filterAndSortMemories(rows, { tags: ["work"] })
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["a", "b"])
+    expect(filterAndSortMemories(rows, { tags: ["work", "URGENT"] }).map((m) => m.id)).toEqual([
+      "a",
+    ])
+  })
+
+  it("matches the query against the stable key", () => {
+    const rows = [mem({ id: "a", text: "x", key: "always-uses-pnpm" })]
+    expect(filterAndSortMemories(rows, { query: "pnpm" }).map((m) => m.id)).toEqual(["a"])
+  })
+
   it("pins float to the top regardless of sort", () => {
     const rows = [
       mem({ id: "hi", importance: 10, updatedAt: 1 }),
@@ -65,14 +114,15 @@ describe("filterAndSortMemories", () => {
     expect(filterAndSortMemories(rows, { sort: "importance" })[0].id).toBe("pin")
   })
 
-  it("sorts by importance / accessed / recent", () => {
+  it("sorts by importance / accessed / recent / created", () => {
     const rows = [
-      mem({ id: "a", importance: 3, lastAccessedAt: 100, updatedAt: 100 }),
-      mem({ id: "b", importance: 8, lastAccessedAt: 50, updatedAt: 200 }),
+      mem({ id: "a", importance: 3, lastAccessedAt: 100, updatedAt: 100, createdAt: 300 }),
+      mem({ id: "b", importance: 8, lastAccessedAt: 50, updatedAt: 200, createdAt: 100 }),
     ]
     expect(filterAndSortMemories(rows, { sort: "importance" })[0].id).toBe("b")
     expect(filterAndSortMemories(rows, { sort: "accessed" })[0].id).toBe("a")
     expect(filterAndSortMemories(rows, { sort: "recent" })[0].id).toBe("b")
+    expect(filterAndSortMemories(rows, { sort: "created" })[0].id).toBe("a")
   })
 })
 
@@ -88,5 +138,15 @@ describe("computeMemoryStats", () => {
     expect(stats.total).toBe(4)
     expect(stats.active).toBe(3)
     expect(stats.byType).toEqual({ semantic: 2, episodic: 1, procedural: 0 })
+  })
+
+  it("counts pinned among active rows only", () => {
+    const rows = [
+      mem({ pinned: true }),
+      mem({ pinned: true }),
+      mem({ pinned: true, status: "invalidated" }), // pinned but not active → excluded
+      mem({ pinned: false }),
+    ]
+    expect(computeMemoryStats(rows).pinned).toBe(2)
   })
 })

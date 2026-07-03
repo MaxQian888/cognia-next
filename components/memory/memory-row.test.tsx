@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { Memory } from "@/types/memory/memory"
 import { MemoryRow } from "./memory-row"
 
@@ -26,12 +26,18 @@ function mem(over: Partial<Memory> = {}): Memory {
   }
 }
 
-function setup(over: Partial<Memory> = {}) {
+function setup(over: Partial<Memory> = {}, extra: Partial<Parameters<typeof MemoryRow>[0]> = {}) {
   const onPinToggle = jest.fn()
   const onSave = jest.fn()
   const onDelete = jest.fn()
   render(
-    <MemoryRow memory={mem(over)} onPinToggle={onPinToggle} onSave={onSave} onDelete={onDelete} />
+    <MemoryRow
+      memory={mem(over)}
+      onPinToggle={onPinToggle}
+      onSave={onSave}
+      onDelete={onDelete}
+      {...extra}
+    />
   )
   return { onPinToggle, onSave, onDelete }
 }
@@ -100,5 +106,52 @@ describe("MemoryRow", () => {
     // backgrounds (the page opts in via data-bg-target="chat").
     expect(row.className).toContain("bg-card/80")
     expect(row.className).toContain("backdrop-blur-sm")
+  })
+
+  it("opens the detail view on row click and Enter when onOpenDetail is set", () => {
+    const onOpenDetail = jest.fn()
+    setup({ id: "m1" }, { onOpenDetail })
+    fireEvent.click(screen.getByTestId("memory-row"))
+    expect(onOpenDetail).toHaveBeenCalledWith("m1")
+    fireEvent.keyDown(screen.getByTestId("memory-row"), { key: "Enter" })
+    expect(onOpenDetail).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not open the detail view when an action button is clicked", () => {
+    const onOpenDetail = jest.fn()
+    const { onDelete } = setup({ id: "m1" }, { onOpenDetail })
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }))
+    expect(onDelete).toHaveBeenCalledWith("m1")
+    expect(onOpenDetail).not.toHaveBeenCalled()
+  })
+
+  it("renders a selection checkbox and reports toggles", () => {
+    const onSelectToggle = jest.fn()
+    setup({ id: "m1" }, { selectable: true, selected: false, onSelectToggle })
+    fireEvent.click(screen.getByTestId("memory-select"))
+    expect(onSelectToggle).toHaveBeenCalledWith("m1", true)
+  })
+
+  it("renders clickable tag chips that filter and never open detail", () => {
+    const onTagClick = jest.fn()
+    const onOpenDetail = jest.fn()
+    setup({ tags: ["work"] }, { onTagClick, onOpenDetail, activeTags: new Set(["work"]) })
+    const chip = screen.getByRole("button", { name: "#work" })
+    expect(chip.getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(chip)
+    expect(onTagClick).toHaveBeenCalledWith("work")
+    expect(onOpenDetail).not.toHaveBeenCalled()
+  })
+
+  it("renders plain tag chips when no tag handler is provided", () => {
+    setup({ tags: ["home"] })
+    const tags = screen.getByTestId("memory-tags")
+    expect(within(tags).getByText("#home")).toBeTruthy()
+    expect(within(tags).queryByRole("button")).toBeNull()
+  })
+
+  it("highlights the active row", () => {
+    setup({}, { active: true })
+    expect(screen.getByTestId("memory-row").className).toContain("ring-primary/50")
   })
 })
