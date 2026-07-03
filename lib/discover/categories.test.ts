@@ -13,6 +13,7 @@ import {
   isValidView,
   isValidViewMode,
   resolveDiscoverLayout,
+  resolveLandingCategory,
   type DiscoverCategoryId,
 } from "./categories"
 
@@ -147,6 +148,35 @@ describe("lib/discover/categories", () => {
       const result = firstVisibleCategory({ pinned: [], hidden: [first] })
       expect(result).not.toBe(first)
       expect(isValidCategoryId(result)).toBe(true)
+    })
+  })
+
+  describe("resolveLandingCategory", () => {
+    it("falls back to the first visible category when preference is unset", () => {
+      expect(resolveLandingCategory(null, DEFAULT_DISCOVER_LAYOUT)).toBe(DEFAULT_DISCOVER_CATEGORY)
+      expect(resolveLandingCategory(undefined, { pinned: ["plugins"], hidden: [] })).toBe("plugins")
+    })
+
+    it("always honours the favorites pseudo-category", () => {
+      expect(resolveLandingCategory(FAVORITES_CATEGORY, DEFAULT_DISCOVER_LAYOUT)).toBe(
+        FAVORITES_CATEGORY
+      )
+    })
+
+    it("honours a visible category preference", () => {
+      expect(resolveLandingCategory("skills", DEFAULT_DISCOVER_LAYOUT)).toBe("skills")
+    })
+
+    it("ignores a hidden category preference and falls back", () => {
+      const result = resolveLandingCategory("skills", { pinned: [], hidden: ["skills"] })
+      expect(result).not.toBe("skills")
+      expect(isValidCategoryId(result)).toBe(true)
+    })
+
+    it("ignores an invalid preference", () => {
+      expect(resolveLandingCategory("nonsense" as never, DEFAULT_DISCOVER_LAYOUT)).toBe(
+        DEFAULT_DISCOVER_CATEGORY
+      )
     })
   })
 })

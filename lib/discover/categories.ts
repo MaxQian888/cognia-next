@@ -140,3 +140,26 @@ export function firstVisibleCategory(layout: SidebarLayout): DiscoverCategoryId 
   const { pinned, overflow } = resolveDiscoverLayout(layout)
   return pinned[0]?.id ?? overflow[0]?.id ?? DEFAULT_DISCOVER_CATEGORY
 }
+
+/**
+ * Resolve the category the page should land on when `?category=` is absent,
+ * honouring the user's `discoverDefaults.landingCategory` preference:
+ *
+ *  - The `favorites` pseudo-category is always a valid landing (never hidden).
+ *  - A real category id is honoured only while it is currently visible (not
+ *    hidden in the layout) — a hidden preference silently falls back.
+ *  - Anything else (unset / invalid / hidden) falls back to the first visible
+ *    category.
+ */
+export function resolveLandingCategory(
+  preferred: DiscoverView | null | undefined,
+  layout: SidebarLayout
+): DiscoverView {
+  if (isFavoritesView(preferred)) return FAVORITES_CATEGORY
+  if (isValidCategoryId(preferred)) {
+    const { pinned, overflow } = resolveDiscoverLayout(layout)
+    const visible = new Set([...pinned, ...overflow].map((c) => c.id))
+    if (visible.has(preferred)) return preferred
+  }
+  return firstVisibleCategory(layout)
+}
