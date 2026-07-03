@@ -116,6 +116,43 @@ describe("TwinDraftsTab", () => {
     expect(pendingIdx).toBeLessThan(acceptedIdx)
   })
 
+  it("filters drafts by status via the filter chips", async () => {
+    await createTwinDraft({
+      twinId: "twin_alice",
+      jobId: "j1",
+      kind: "skill",
+      payload: {
+        kind: "skill",
+        data: { name: "Accepted draft", description: "", content: "x" },
+      },
+      provenance: { chunkIds: [], rationale: "" },
+      status: "accepted",
+    })
+    await createTwinDraft({
+      twinId: "twin_alice",
+      jobId: "j2",
+      kind: "skill",
+      payload: {
+        kind: "skill",
+        data: { name: "Pending draft", description: "", content: "y" },
+      },
+      provenance: { chunkIds: [], rationale: "" },
+    })
+    render(<TwinDraftsTab twinId="twin_alice" />)
+    await screen.findByText("Pending draft")
+    await screen.findByText("Accepted draft")
+
+    await userEvent.click(await screen.findByTestId("twin-drafts-filter-accepted"))
+    await waitFor(() => {
+      expect(screen.queryByText("Pending draft")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Accepted draft")).toBeInTheDocument()
+
+    // Clicking the active chip again resets back to "all".
+    await userEvent.click(screen.getByTestId("twin-drafts-filter-accepted"))
+    await screen.findByText("Pending draft")
+  })
+
   it("accepts directly without the unredact dialog when there is no restorable PII", async () => {
     const draft = await createTwinDraft({
       twinId: "twin_alice",

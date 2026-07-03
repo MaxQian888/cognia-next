@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { memo, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
@@ -46,25 +46,78 @@ function qualityKey(score?: number): QualityKey {
   return "qualityLow"
 }
 
+/** Chip order for the status filter row; "all" is prepended in the UI. */
+const FILTERABLE_STATUSES: TwinDraft["status"][] = ["pending", "accepted", "rejected", "edited"]
+
 export function TwinDraftsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.drafts")
-  const tKind = useTranslations("twin.kind")
+  const tStatus = useTranslations("twin.status")
   const prefersReducedMotion = useReducedMotion()
+  const [statusFilter, setStatusFilter] = useState<TwinDraft["status"] | "all">("all")
   const drafts = useLiveQuery(() => listTwinDraftsByTwin(twinId), [twinId], [])
-  const sorted = [...drafts].sort((a, b) => {
-    // Pending first; among pending, lowest qualityScore first.
-    if (a.status !== b.status) return a.status === "pending" ? -1 : 1
-    const sa = a.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
-    const sb = b.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
-    return sa - sb
-  })
+
+  const statusCounts = useMemo(() => {
+    const counts = new Map<TwinDraft["status"], number>()
+    for (const d of drafts) counts.set(d.status, (counts.get(d.status) ?? 0) + 1)
+    return counts
+  }, [drafts])
+
+  const sorted = useMemo(() => {
+    const base = statusFilter === "all" ? drafts : drafts.filter((d) => d.status === statusFilter)
+    return [...base].sort((a, b) => {
+      // Pending first; among pending, lowest qualityScore first.
+      if (a.status !== b.status) return a.status === "pending" ? -1 : 1
+      const sa = a.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
+      const sb = b.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
+      return sa - sb
+    })
+  }, [drafts, statusFilter])
+
+  const visibleFilters = FILTERABLE_STATUSES.filter((s) => (statusCounts.get(s) ?? 0) > 0)
 
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-medium">{t("headerCount", { count: drafts.length })}</h2>
+
+      {visibleFilters.length > 1 ? (
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label={t("filterLabel")}
+          data-testid="twin-drafts-filter"
+        >
+          <Button
+            size="sm"
+            variant={statusFilter === "all" ? "secondary" : "ghost"}
+            className="h-7 px-2 text-xs"
+            onClick={() => setStatusFilter("all")}
+            aria-pressed={statusFilter === "all"}
+          >
+            {t("filterAll")} ({drafts.length})
+          </Button>
+          {visibleFilters.map((status) => (
+            <Button
+              key={status}
+              size="sm"
+              variant={statusFilter === status ? "secondary" : "ghost"}
+              className="h-7 px-2 text-xs"
+              onClick={() => setStatusFilter((prev) => (prev === status ? "all" : status))}
+              aria-pressed={statusFilter === status}
+              data-testid={`twin-drafts-filter-${status}`}
+            >
+              {tStatus(status)} ({statusCounts.get(status) ?? 0})
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
       {drafts.length === 0 ? (
         <Card className="p-6 text-center">
           <p className="text-muted-foreground text-sm">{t("emptyHint")}</p>
+        </Card>
+      ) : sorted.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-muted-foreground text-sm">{t("filterEmpty")}</p>
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -80,7 +133,7 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
               }}
               className="list-none"
             >
-              <DraftRow draft={draft} t={t} tKind={tKind} />
+              <DraftRow draft={draft} />
             </motion.li>
           ))}
         </ul>
@@ -89,15 +142,13 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
   )
 }
 
-function DraftRow({
-  draft,
-  t,
-  tKind,
-}: {
-  draft: TwinDraft
-  t: ReturnType<typeof useTranslations>
-  tKind: ReturnType<typeof useTranslations>
-}) {
+/**
+ * A single draft card. Memoised — live-query refreshes replace only changed
+ * drafts' objects, so unrelated cards skip re-rendering.
+ */
+const DraftRow = memo(function DraftRow({ draft }: { draft: TwinDraft }) {
+  const t = useTranslations("twin.drafts")
+  const tKind = useTranslations("twin.kind")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -291,4 +342,4 @@ function DraftRow({
       />
     </Card>
   )
-}
+})

@@ -11,7 +11,7 @@
 
 import "fake-indexeddb/auto"
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // Radix Select is tricky in jsdom because of pointer-event/scroll APIs.
@@ -190,6 +190,9 @@ describe("TwinPanel", () => {
     expect(screen.getAllByText(/Sources/i).length).toBeGreaterThan(0)
     const deleteBtn = screen.getByRole("button", { name: /delete/i })
     await userEvent.click(deleteBtn)
+    // Deleting now requires confirming in an alert dialog.
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Delete$/i }))
     await waitFor(() => {
       expect(screen.queryByText("Onboarding notes")).toBeNull()
     })
