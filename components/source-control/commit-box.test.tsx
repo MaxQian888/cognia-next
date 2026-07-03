@@ -14,6 +14,7 @@ function makeActions() {
     commit: jest.fn().mockResolvedValue(undefined),
     push: jest.fn().mockResolvedValue(undefined),
     sync: jest.fn().mockResolvedValue(undefined),
+    stage: jest.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -25,6 +26,17 @@ function setAiEnabled(enabled: boolean) {
             gitSettings: { commitMessageAI: { enabled: true, conventionalCommits: true } },
           } as never)
         : null,
+    })
+  })
+}
+
+/** Seed the panel prefs (smart commit / post-commit) on the settings singleton. */
+function setPanelPrefs(panel: Record<string, unknown>) {
+  act(() => {
+    useSettingsStore.setState({
+      settings: {
+        gitSettings: { commitMessageAI: { enabled: false, conventionalCommits: true }, panel },
+      } as never,
     })
   })
 }
@@ -134,5 +146,58 @@ describe("CommitBox", () => {
       </TooltipProvider>
     )
     expect(screen.getByTestId("commit-ai-generate")).toBeDisabled()
+  })
+
+  it("chains the configured post-commit push after a plain commit", async () => {
+    setPanelPrefs({ postCommit: "push" })
+    const actions = makeActions()
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: x" } })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("commit-button"))
+    })
+    expect(actions.commit).toHaveBeenCalled()
+    expect(actions.push).toHaveBeenCalledWith({ setUpstream: true })
+  })
+
+  it("does not chain a post-commit action by default", async () => {
+    const actions = makeActions()
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: x" } })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("commit-button"))
+    })
+    expect(actions.push).not.toHaveBeenCalled()
+    expect(actions.sync).not.toHaveBeenCalled()
+  })
+
+  it("smart commit stages all changes when nothing is staged, then commits", async () => {
+    setPanelPrefs({ smartCommit: true })
+    act(() => {
+      useGitStore.getState().setStatus({
+        branch: "main",
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        staged: [],
+        changes: [
+          { path: "a.ts", status: "modified" },
+          { path: "b.ts", status: "modified" },
+        ],
+        merge: [],
+        isRebasing: false,
+        isMerging: false,
+      } as never)
+    })
+    const actions = makeActions()
+    // stagedCount is 0, but smart commit + unstaged changes → commit is enabled.
+    render(<CommitBox rootDir="/r" stagedCount={0} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: all" } })
+    expect(screen.getByTestId("commit-button")).not.toBeDisabled()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("commit-button"))
+    })
+    expect(actions.stage).toHaveBeenCalledWith(["a.ts", "b.ts"])
+    expect(actions.commit).toHaveBeenCalledWith("feat: all", { amend: false, signoff: false })
   })
 })

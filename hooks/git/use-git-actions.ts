@@ -68,9 +68,9 @@ export interface UseGitActionsResult {
   createBranch: (name: string, checkout: boolean, from?: string) => Promise<void>
   deleteBranch: (name: string, force: boolean) => Promise<void>
   renameBranch: (newName: string, old?: string) => Promise<void>
-  fetch: () => Promise<void>
-  pull: () => Promise<void>
-  push: (setUpstream?: boolean) => Promise<void>
+  fetch: (options?: { prune?: boolean }) => Promise<void>
+  pull: (options?: { rebase?: boolean }) => Promise<void>
+  push: (options?: { setUpstream?: boolean; forceWithLease?: boolean }) => Promise<void>
   sync: () => Promise<void>
   stashPush: (options?: {
     message?: string
@@ -152,13 +152,14 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
         run("branch", (rp) => gitCreateBranch(rp, name, checkout, from)),
       deleteBranch: (name, force) => run("branch", (rp) => gitDeleteBranch(rp, name, force)),
       renameBranch: (newName, old) => run("branch", (rp) => gitRenameBranch(rp, newName, old)),
-      fetch: () => run("fetch", (rp) => gitFetch(rp)),
-      pull: () => run("pull", (rp) => gitPull(rp)),
-      push: (setUpstream) =>
+      fetch: (options) => run("fetch", (rp) => gitFetch(rp, undefined, options?.prune ?? false)),
+      pull: (options) => run("pull", (rp) => gitPull(rp, { rebase: options?.rebase ?? false })),
+      push: (options) =>
         run("push", (rp) =>
           gitPush(rp, {
-            setUpstream,
-            branch: setUpstream ? (currentBranch ?? undefined) : undefined,
+            setUpstream: options?.setUpstream,
+            forceWithLease: options?.forceWithLease,
+            branch: options?.setUpstream ? (currentBranch ?? undefined) : undefined,
             // No remote: the backend resolves the publish target from the
             // repo's configured remotes instead of assuming "origin".
           })

@@ -75,6 +75,7 @@ jest.mock("./branch-header", () => ({
 jest.mock("./sync-toolbar", () => ({ SyncToolbar: () => <div data-testid="sync-toolbar-stub" /> }))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { gitInit } from "@/lib/git/commands"
 import { SourceControlPanel } from "./source-control-panel"
 import { useGitStore } from "@/stores/git/git-store"
@@ -219,5 +220,14 @@ describe("SourceControlPanel", () => {
     act(() => useGitStore.getState().selectCommit("abc123"))
     render(<SourceControlPanel />)
     expect(screen.getByTestId("commit-detail-stub")).toBeInTheDocument()
+  })
+
+  it("opens the view-settings gear popover from the header", async () => {
+    const user = userEvent.setup()
+    render(<SourceControlPanel />)
+    const trigger = screen.getByTestId("sc-view-settings-trigger")
+    expect(trigger).toBeInTheDocument()
+    await user.click(trigger)
+    expect(await screen.findByTestId("sc-view-settings")).toBeInTheDocument()
   })
 })

@@ -22,15 +22,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Spinner } from "@/components/ui/spinner"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { useAiCommitMessage } from "@/hooks/git/use-ai-commit-message"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 import { useCommandHistory, handleHistoryArrowKey } from "@/hooks/use-command-history"
 import { GIT_DEFAULTS, useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import type { PostCommitAction } from "@/lib/git/panel-prefs"
 
 interface CommitBoxProps {
   rootDir: string
   stagedCount: number
   committing: boolean
-  actions: Pick<UseGitActionsResult, "commit" | "push" | "sync">
+  actions: Pick<UseGitActionsResult, "commit" | "push" | "sync" | "stage">
 }
 
 export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitBoxProps) {
@@ -44,24 +46,53 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
     (s) => s.settings?.gitSettings?.commitMessageAI?.enabled ?? false
   )
   const ai = useAiCommitMessage(rootDir)
+  const { prefs } = useSourceControlPrefs()
+  const unstagedCount = useGitStore((s) => s.status?.changes.length ?? 0)
+  // Smart commit (VSCode parity): when nothing is staged but there are
+  // working-tree changes, the primary Commit stages them all first.
+  const smartWillStage = prefs.smartCommit && stagedCount === 0 && unstagedCount > 0
   // ↑/↓ recall of prior commit messages for THIS repo (multi-line aware: the
   // arrows only step history on the first/last line, leaving normal caret
   // movement inside a multi-line message intact). Persisted per repo root.
   const history = useCommandHistory({ persistKey: `cmdhist:commit:${rootDir}` })
 
-  const canCommit = (draft.trim().length > 0 || amend) && (stagedCount > 0 || amend) && !committing
+  const canCommit =
+    (draft.trim().length > 0 || amend) &&
+    (stagedCount > 0 || amend || smartWillStage) &&
+    !committing
 
   const doCommit = useCallback(
-    async (after?: "push" | "sync") => {
+    async (afterOverride?: PostCommitAction) => {
       if (!canCommit) return
       history.record(draft)
+      if (smartWillStage) {
+        // Read the paths fresh so this callback needn't depend on a new array
+        // each render.
+        const paths = useGitStore.getState().status?.changes.map((c) => c.path) ?? []
+        if (paths.length > 0) await actions.stage(paths)
+      }
       await actions.commit(draft, { amend, signoff })
       setCommitDraft(rootDir, "")
       setAmend(false)
-      if (after === "push") await actions.push(true)
+      // The default button chains the configured post-commit action; the split
+      // menu items pass an explicit override.
+      const after = afterOverride ?? prefs.postCommit
+      if (after === "push") await actions.push({ setUpstream: true })
       else if (after === "sync") await actions.sync()
     },
-    [canCommit, actions, draft, amend, signoff, setCommitDraft, rootDir, setAmend, history]
+    [
+      canCommit,
+      actions,
+      draft,
+      amend,
+      signoff,
+      setCommitDraft,
+      rootDir,
+      setAmend,
+      history,
+      smartWillStage,
+      prefs.postCommit,
+    ]
   )
 
   return (

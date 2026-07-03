@@ -2,10 +2,11 @@
 
 /**
  * Network + overflow actions: fetch / pull / push / sync icon buttons (with
- * per-op spinners) plus an overflow menu for stash, timeline, refresh, and
- * discard-all.
+ * per-op spinners) plus an overflow menu for pull-rebase, fetch-prune, force
+ * push, stash, timeline, refresh, and discard-all.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ArchiveIcon,
@@ -18,13 +19,25 @@ import {
   Undo2Icon,
   MoreHorizontalIcon,
   RefreshCwIcon,
+  ScissorsIcon,
   TagIcon,
   Trash2Icon,
+  TriangleAlertIcon,
   UploadCloudIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +46,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useGitBranchInfo, useGitStore } from "@/stores/git/git-store"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { DiscardConfirmDialog } from "./discard-confirm-dialog"
 
 interface SyncToolbarProps {
   actions: Pick<
@@ -90,10 +105,27 @@ export function SyncToolbar({
   const ops = useGitStore((s) => s.ops)
   const isMerging = useGitStore((s) => s.status?.isMerging ?? false)
   const { branch, upstream } = useGitBranchInfo()
+  const { prefs } = useSourceControlPrefs()
   // A checked-out branch with no upstream pushes nowhere — offer publish instead.
   const needsPublish = branch !== null && upstream === null
+  // Force push needs an existing upstream to overwrite; disable it otherwise.
+  const canForcePush = branch !== null && upstream !== null
   // Undoing a commit mid-merge/rebase would corrupt the sequencer state.
   const sequencerBusy = useGitStore((s) => s.repoState?.operationInProgress != null)
+
+  const [confirmForcePush, setConfirmForcePush] = useState(false)
+  const [confirmDiscardAll, setConfirmDiscardAll] = useState(false)
+
+  const runForcePush = () => void actions.push({ forceWithLease: true })
+  const requestForcePush = () => {
+    if (prefs.confirmForcePush) setConfirmForcePush(true)
+    else runForcePush()
+  }
+  const runDiscardAll = () => void actions.discardAll(false)
+  const requestDiscardAll = () => {
+    if (prefs.confirmDiscard) setConfirmDiscardAll(true)
+    else runDiscardAll()
+  }
 
   return (
     <div className="flex items-center gap-0.5" data-testid="sync-toolbar">
@@ -108,7 +140,7 @@ export function SyncToolbar({
       <IconBtn
         label={t("actions.pull")}
         busy={ops.pull}
-        onClick={() => void actions.pull()}
+        onClick={() => void actions.pull({ rebase: prefs.pullRebase })}
         testId="sync-pull"
       >
         <ArrowDownToLineIcon className="size-3.5" />
@@ -117,7 +149,7 @@ export function SyncToolbar({
         <IconBtn
           label={t("actions.publish")}
           busy={ops.push}
-          onClick={() => void actions.push(true)}
+          onClick={() => void actions.push({ setUpstream: true })}
           testId="sync-publish"
         >
           <UploadCloudIcon className="size-3.5" />
@@ -135,7 +167,7 @@ export function SyncToolbar({
       <IconBtn
         label={t("actions.fetch")}
         busy={ops.fetch}
-        onClick={() => void actions.fetch()}
+        onClick={() => void actions.fetch({ prune: prefs.fetchPrune })}
         testId="sync-fetch"
       >
         <ArrowDownToLineIcon className="size-3.5 rotate-180" />
@@ -153,11 +185,41 @@ export function SyncToolbar({
             <MoreHorizontalIcon className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuItem onSelect={onRefresh} data-testid="more-refresh">
             <RefreshCwIcon className="size-3.5" />
             {t("actions.refresh")}
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => void actions.pull({ rebase: true })}
+            data-testid="more-pull-rebase"
+          >
+            <ArrowDownToLineIcon className="size-3.5" />
+            {t("actions.pullRebase")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void actions.fetch({ prune: true })}
+            data-testid="more-fetch-prune"
+          >
+            <ScissorsIcon className="size-3.5" />
+            {t("actions.fetchPrune")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-destructive"
+            disabled={!canForcePush}
+            onSelect={(e) => {
+              // preventDefault: opening the confirm dialog from a closing menu
+              // races Radix focus restore (sticky body[pointer-events:none]).
+              e.preventDefault()
+              requestForcePush()
+            }}
+            data-testid="more-force-push"
+          >
+            <TriangleAlertIcon className="size-3.5" />
+            {t("actions.forcePush")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           {/* preventDefault on overlay-opening items: opening a Sheet from a
               closing menu races Radix focus restore (sticky pointer-events). */}
           <DropdownMenuItem
@@ -230,7 +292,10 @@ export function SyncToolbar({
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive"
-            onSelect={() => void actions.discardAll(false)}
+            onSelect={(e) => {
+              e.preventDefault()
+              requestDiscardAll()
+            }}
             data-testid="more-discard-all"
           >
             <Trash2Icon className="size-3.5" />
@@ -238,6 +303,34 @@ export function SyncToolbar({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <AlertDialog open={confirmForcePush} onOpenChange={setConfirmForcePush}>
+        <AlertDialogContent data-testid="force-push-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("forcePush.confirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("forcePush.confirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("actions.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={runForcePush}
+              data-testid="force-push-confirm-action"
+            >
+              {t("forcePush.confirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <DiscardConfirmDialog
+        open={confirmDiscardAll}
+        onOpenChange={setConfirmDiscardAll}
+        onConfirm={() => {
+          runDiscardAll()
+          setConfirmDiscardAll(false)
+        }}
+      />
     </div>
   )
 }

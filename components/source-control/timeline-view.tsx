@@ -16,6 +16,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { gitFileHistory, gitLog, gitRefs } from "@/lib/git/commands"
 import { useGitStore, type TimelineScope } from "@/stores/git/git-store"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 import { cn } from "@/lib/utils"
 import type { GitRef } from "@/types/git"
 import { CommitGraphView } from "./commit-graph-view"
@@ -41,11 +42,20 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
   const setTimeline = useGitStore((s) => s.setTimeline)
   const selectCommit = useGitStore((s) => s.selectCommit)
   const selectedCommit = useGitStore((s) => s.selectedCommit)
+  const { prefs } = useSourceControlPrefs()
 
-  const [viewMode, setViewMode] = useState<TimelineViewMode>("list")
+  const [viewMode, setViewMode] = useState<TimelineViewMode>(prefs.defaultTimelineView)
   const [refs, setRefs] = useState<GitRef[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
   const [filter, setFilter] = useState("")
+
+  // Reset to the preferred view each time the Sheet opens (render-phase guard,
+  // not a set-state effect) so it always honors the configured default.
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (prevOpen !== open) {
+    setPrevOpen(open)
+    if (open) setViewMode(prefs.defaultTimelineView)
+  }
 
   const effectiveScope: TimelineScope = filePath ? scope : "repo"
   // The graph only makes sense for the full repo history; a single file's

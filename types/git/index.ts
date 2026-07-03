@@ -252,6 +252,13 @@ export interface GitCommitAiSettings {
 /** Source Control feature preferences persisted on `AppSettings.gitSettings`. */
 export interface GitUiSettings {
   commitMessageAI: GitCommitAiSettings
+  /**
+   * Panel view/workflow preferences. Stored as an all-optional partial and
+   * resolved at read time by `resolveSourceControlPanelPrefs` (leaf module —
+   * imported type-only to avoid a cycle), so older installs pick up new fields
+   * without a Dexie migration.
+   */
+  panel?: import("@/lib/git/panel-prefs").PartialSourceControlPanelPrefs
 }
 
 /** Forward-compat defaults merged by `lib/db/settings.ts:getSettings()`. */
