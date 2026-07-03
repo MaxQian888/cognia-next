@@ -11,7 +11,9 @@
  */
 
 import dynamic from "next/dynamic"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import type { editor as MonacoEditorNS } from "monaco-editor"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { Maximize2, Minimize2, MoreHorizontal, Pencil, Save, X, FileCode } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -133,6 +135,22 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
   const workbenchHandleRef = useRef<MonacoWorkbenchHandle | null>(null)
   // Live monaco + editor for the diagnostics bar (state so it re-renders on mount).
   const [diag, setDiag] = useState<{ monaco: MonacoLike; editor: EditorLike } | null>(null)
+  // Share the app's code-editor settings (Settings → Canvas → Editor) with the
+  // artifact Monaco surface, so font/tab/wrap/etc. are consistent instead of
+  // hardcoded. Artifact-specific bits (fullscreen minimap/sticky, always
+  // editable) override the shared options.
+  const getEditorOptions = useCanvasSettingsStore((s) => s.getEditorOptions)
+  const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
+  const monacoOptions = useMemo(() => {
+    void editorSettings // re-derive when any editor setting changes
+    return {
+      ...getEditorOptions(),
+      minimap: { enabled: isFullscreen },
+      stickyScroll: { enabled: isFullscreen },
+      readOnly: false,
+      automaticLayout: true,
+    } as MonacoEditorNS.IStandaloneEditorConstructionOptions
+  }, [getEditorOptions, editorSettings, isFullscreen])
   const activeArtifactId = activeArtifact?.id ?? null
   useEffect(() => {
     return () => {
@@ -379,6 +397,12 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
           )}
           aria-label={activeArtifact.title}
           className="px-3"
+          fontSize={editorSettings.fontSize}
+          fontFamily={editorSettings.fontFamily}
+          lineHeight={editorSettings.lineHeight}
+          tabSize={editorSettings.tabSize}
+          wordWrap={editorSettings.wordWrap}
+          lineNumbers={editorSettings.lineNumbers !== "off"}
         />
       ) : (
         <div className="flex h-full flex-col">
@@ -406,17 +430,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
                   }
                 )
               }}
-              options={{
-                minimap: { enabled: isFullscreen },
-                wordWrap: "on",
-                readOnly: false,
-                stickyScroll: { enabled: isFullscreen },
-                bracketPairColorization: { enabled: true },
-                guides: { indentation: true, bracketPairs: true },
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                fontSize: 13,
-              }}
+              options={monacoOptions}
             />
           </div>
           <MonacoDiagnosticsBar monaco={diag?.monaco ?? null} editor={diag?.editor ?? null} />

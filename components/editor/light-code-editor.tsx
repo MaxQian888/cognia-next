@@ -34,7 +34,12 @@ import {
   drawSelection,
   type Command,
 } from "@codemirror/view"
-import { defaultHighlightStyle, syntaxHighlighting, bracketMatching } from "@codemirror/language"
+import {
+  defaultHighlightStyle,
+  syntaxHighlighting,
+  bracketMatching,
+  indentUnit,
+} from "@codemirror/language"
 import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands"
 import { search, searchKeymap } from "@codemirror/search"
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete"
@@ -71,12 +76,68 @@ export interface LightCodeEditorProps {
   statusBar?: boolean
   /** Notified whenever the diagnostic counts change. */
   onDiagnosticsChange?: (summary: DiagnosticSummary) => void
+  /** Editor font size in px (default 13). Reconfigures live. */
+  fontSize?: number
+  /** Editor font family (default a monospace stack). Reconfigures live. */
+  fontFamily?: string
+  /** Line-height multiplier (default 1.6). Reconfigures live. */
+  lineHeight?: number
+  /** Tab width in spaces (default 2). Reconfigures live. */
+  tabSize?: number
+  /** Soft-wrap long lines (default true). Reconfigures live. */
+  wordWrap?: boolean
   className?: string
   "aria-label"?: string
   "data-testid"?: string
 }
 
 const EMPTY_SUMMARY: DiagnosticSummary = { errors: 0, warnings: 0, infos: 0 }
+
+const DEFAULT_FONT_FAMILY =
+  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
+
+/**
+ * Build the appearance theme from the editor settings. Extracted so it can be
+ * swapped live through a `Compartment` (font size / family / line height are no
+ * longer baked in at mount — they follow the Canvas editor settings on mobile).
+ */
+function appearanceTheme(fontSize: number, fontFamily: string, lineHeight: number) {
+  return EditorView.theme({
+    "&": {
+      height: "100%",
+      fontSize: `${fontSize}px`,
+      backgroundColor: "transparent",
+      fontFamily,
+    },
+    ".cm-content": { padding: "8px 0" },
+    ".cm-focused": { outline: "none" },
+    ".cm-scroller": { lineHeight: String(lineHeight) },
+    ".cm-gutters": {
+      backgroundColor: "transparent",
+      border: "none",
+      color: "var(--muted-foreground, #888)",
+    },
+    ".cm-activeLine": {
+      backgroundColor: "color-mix(in oklab, currentColor 4%, transparent)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "color-mix(in oklab, currentColor 6%, transparent)",
+    },
+    // Diagnostics panel follows the app surface instead of CM's defaults.
+    ".cm-panel.cm-panel-lint": {
+      backgroundColor: "var(--background)",
+      color: "var(--foreground)",
+      borderTop: "1px solid var(--border)",
+    },
+    ".cm-panel.cm-panel-lint ul [aria-selected]": {
+      backgroundColor: "color-mix(in oklab, currentColor 10%, transparent)",
+    },
+  })
+}
+
+function lineNumberExtension(on: boolean) {
+  return on ? [lineNumbers(), highlightActiveLine(), highlightActiveLineGutter()] : []
+}
 
 export function LightCodeEditor({
   value,
@@ -89,6 +150,11 @@ export function LightCodeEditor({
   closeBrackets: enableCloseBrackets = true,
   statusBar: showStatusBar = true,
   onDiagnosticsChange,
+  fontSize = 13,
+  fontFamily = DEFAULT_FONT_FAMILY,
+  lineHeight = 1.6,
+  tabSize = 2,
+  wordWrap = true,
   className,
   ...rest
 }: LightCodeEditorProps) {
@@ -111,14 +177,21 @@ export function LightCodeEditor({
   const languageCompartment = useMemo(() => new Compartment(), [])
   const readOnlyCompartment = useMemo(() => new Compartment(), [])
   const lintCompartment = useMemo(() => new Compartment(), [])
+  // Settings-driven compartments — reconfigured live so font/tab/wrap/line-number
+  // changes apply without remounting the editor.
+  const appearanceCompartment = useMemo(() => new Compartment(), [])
+  const lineNumberCompartment = useMemo(() => new Compartment(), [])
+  const wrapCompartment = useMemo(() => new Compartment(), [])
+  const tabCompartment = useMemo(() => new Compartment(), [])
 
   // Diagnostics only mount for languages with an in-browser producer — no empty
   // lint gutter on plaintext/markdown/etc. (The external LSP seam is a future
   // broadening of this gate.)
   const diagnosticsActive = enableDiagnostics && getDiagnosticsProducer(language) !== null
 
-  // Mount the EditorView once. Feature toggles (lineNumbers/search/closeBrackets)
-  // are mount-time options — surfaces don't flip them live.
+  // Mount the EditorView once. `search`/`closeBrackets` are mount-time; the
+  // appearance/line-number/wrap/tab settings ride Compartments and reconfigure
+  // live via the effects below.
   useEffect(() => {
     if (!hostRef.current) return
     const startState = EditorState.create({
@@ -138,10 +211,9 @@ export function LightCodeEditor({
           ...(enableDiagnostics ? lintKeymap : []),
         ]),
         ...(enableSearch ? [search({ top: true })] : []),
-        ...(showLineNumbers
-          ? [lineNumbers(), highlightActiveLine(), highlightActiveLineGutter()]
-          : []),
-        EditorView.lineWrapping,
+        lineNumberCompartment.of(lineNumberExtension(showLineNumbers)),
+        wrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
+        tabCompartment.of([EditorState.tabSize.of(tabSize), indentUnit.of(" ".repeat(tabSize))]),
         languageCompartment.of([]),
         lintCompartment.of([]),
         readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
@@ -151,38 +223,7 @@ export function LightCodeEditor({
           autocorrect: "off",
           spellcheck: "false",
         }),
-        EditorView.theme({
-          "&": {
-            height: "100%",
-            fontSize: "13px",
-            backgroundColor: "transparent",
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-          },
-          ".cm-content": { padding: "8px 0" },
-          ".cm-focused": { outline: "none" },
-          ".cm-scroller": { lineHeight: "1.6" },
-          ".cm-gutters": {
-            backgroundColor: "transparent",
-            border: "none",
-            color: "var(--muted-foreground, #888)",
-          },
-          ".cm-activeLine": {
-            backgroundColor: "color-mix(in oklab, currentColor 4%, transparent)",
-          },
-          ".cm-activeLineGutter": {
-            backgroundColor: "color-mix(in oklab, currentColor 6%, transparent)",
-          },
-          // Diagnostics panel follows the app surface instead of CM's defaults.
-          ".cm-panel.cm-panel-lint": {
-            backgroundColor: "var(--background)",
-            color: "var(--foreground)",
-            borderTop: "1px solid var(--border)",
-          },
-          ".cm-panel.cm-panel-lint ul [aria-selected]": {
-            backgroundColor: "color-mix(in oklab, currentColor 10%, transparent)",
-          },
-        }),
+        appearanceCompartment.of(appearanceTheme(fontSize, fontFamily, lineHeight)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString())
@@ -242,6 +283,37 @@ export function LightCodeEditor({
       effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnly)),
     })
   }, [readOnly, readOnlyCompartment])
+
+  // Live appearance (font size / family / line height) from the editor settings.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: appearanceCompartment.reconfigure(appearanceTheme(fontSize, fontFamily, lineHeight)),
+    })
+  }, [fontSize, fontFamily, lineHeight, appearanceCompartment])
+
+  // Live line-number gutter.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: lineNumberCompartment.reconfigure(lineNumberExtension(showLineNumbers)),
+    })
+  }, [showLineNumbers, lineNumberCompartment])
+
+  // Live soft-wrap toggle.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: wrapCompartment.reconfigure(wordWrap ? EditorView.lineWrapping : []),
+    })
+  }, [wordWrap, wrapCompartment])
+
+  // Live tab width (display + indent unit).
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: tabCompartment.reconfigure([
+        EditorState.tabSize.of(tabSize),
+        indentUnit.of(" ".repeat(tabSize)),
+      ]),
+    })
+  }, [tabSize, tabCompartment])
 
   // Sync the doc when `value` changes externally (file switch, undo, revert).
   useEffect(() => {

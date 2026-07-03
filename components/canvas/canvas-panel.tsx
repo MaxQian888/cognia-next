@@ -132,6 +132,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const aiWorkbenchEnabled = useCanvasFeatureFlag("canvas.aiWorkbench.v1")
   const { resolvedTheme } = useTheme()
   const accessibility = useCanvasSettingsStore((s) => s.settings.accessibility)
+  const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
   const monacoLink = useSettingsStore((s) => s.monacoLink)
   // Monaco accepts only specific theme ids ("vs", "vs-dark", etc).
   // Resolve "auto" to vs / vs-dark via the next-themes resolved theme
@@ -442,6 +443,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
               onChange={(v) => handleEditorChange(v)}
               aria-label={activeDoc.title}
               className="px-2"
+              fontSize={editorSettings.fontSize}
+              fontFamily={editorSettings.fontFamily}
+              lineHeight={editorSettings.lineHeight}
+              tabSize={editorSettings.tabSize}
+              wordWrap={editorSettings.wordWrap}
+              lineNumbers={editorSettings.lineNumbers !== "off"}
             />
           ) : (
             <div className="flex h-full flex-col">
