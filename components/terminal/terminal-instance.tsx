@@ -217,6 +217,24 @@ function cursorPixelPosition(term: unknown): { left: number; top: number } | nul
   }
 }
 
+/**
+ * xterm `FontWeight` restricted to the CSS-keyword / numeric-string values the
+ * settings store persists (xterm also accepts raw `number`, which we never
+ * store). Kept in one place so the store reads and the option-apply agree.
+ */
+type TerminalFontWeight =
+  | "normal"
+  | "bold"
+  | "100"
+  | "200"
+  | "300"
+  | "400"
+  | "500"
+  | "600"
+  | "700"
+  | "800"
+  | "900"
+
 const DEFAULT_FONT_FAMILY = '"JetBrains Mono", "Cascadia Code", "Menlo", "Consolas", monospace'
 const DEFAULT_FONT_SIZE = 13
 const DEFAULT_SCROLLBACK = 10000
@@ -350,6 +368,32 @@ function TerminalInstanceImpl(
     (s) =>
       (s.settings?.terminal as { renderer?: "auto" | "webgl" | "canvas" | "dom" } | undefined)
         ?.renderer ?? "auto"
+  )
+  // Font-metric + rendering knobs (all live-mutatable; metric changes re-fit).
+  const lineHeight = useSettingsStore(
+    (s) => (s.settings?.terminal as { lineHeight?: number } | undefined)?.lineHeight ?? 1
+  )
+  const letterSpacing = useSettingsStore(
+    (s) => (s.settings?.terminal as { letterSpacing?: number } | undefined)?.letterSpacing ?? 0
+  )
+  const fontWeight = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { fontWeight?: TerminalFontWeight } | undefined)?.fontWeight ??
+      "normal"
+  )
+  const fontWeightBold = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { fontWeightBold?: TerminalFontWeight } | undefined)
+        ?.fontWeightBold ?? "bold"
+  )
+  const scrollSensitivity = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { scrollSensitivity?: number } | undefined)?.scrollSensitivity ?? 1
+  )
+  const minimumContrastRatio = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { minimumContrastRatio?: number } | undefined)
+        ?.minimumContrastRatio ?? 1
   )
   // VS Code-parity feature switches (all default on). Read inside the xterm
   // setup-effect closures through refs so toggling them never forces a remount
@@ -574,7 +618,14 @@ function TerminalInstanceImpl(
         cursorStyle,
         fontFamily,
         fontSize,
+        fontWeight,
+        fontWeightBold,
+        lineHeight,
+        letterSpacing,
         scrollback,
+        scrollSensitivity,
+        fastScrollSensitivity: scrollSensitivity * 5,
+        minimumContrastRatio,
         allowProposedApi: true,
         theme: makeTheme(isHtmlDark(), colorScheme),
       })
@@ -1196,14 +1247,52 @@ function TerminalInstanceImpl(
         term.options.fontSize = effectiveSize
         fontChanged = true
       }
+      // Font weight + line height + letter spacing all shift the rendered cell
+      // metrics, so a change must also re-fit (grouped under `fontChanged`).
+      if (term.options.fontWeight !== fontWeight) {
+        term.options.fontWeight = fontWeight
+        fontChanged = true
+      }
+      if (term.options.fontWeightBold !== fontWeightBold) {
+        term.options.fontWeightBold = fontWeightBold
+        fontChanged = true
+      }
+      if (term.options.lineHeight !== lineHeight) {
+        term.options.lineHeight = lineHeight
+        fontChanged = true
+      }
+      if (term.options.letterSpacing !== letterSpacing) {
+        term.options.letterSpacing = letterSpacing
+        fontChanged = true
+      }
       if (term.options.scrollback !== scrollback) term.options.scrollback = scrollback
       if (term.options.cursorStyle !== cursorStyle) term.options.cursorStyle = cursorStyle
       if (term.options.cursorBlink !== cursorBlink) term.options.cursorBlink = cursorBlink
+      // Scroll speed + contrast are pure render options — no re-fit needed.
+      if (term.options.scrollSensitivity !== scrollSensitivity) {
+        term.options.scrollSensitivity = scrollSensitivity
+        term.options.fastScrollSensitivity = scrollSensitivity * 5
+      }
+      if (term.options.minimumContrastRatio !== minimumContrastRatio) {
+        term.options.minimumContrastRatio = minimumContrastRatio
+      }
       if (fontChanged) refitRef.current?.()
     } catch {
       /* noop */
     }
-  }, [fontFamily, fontSize, scrollback, cursorStyle, cursorBlink])
+  }, [
+    fontFamily,
+    fontSize,
+    scrollback,
+    cursorStyle,
+    cursorBlink,
+    fontWeight,
+    fontWeightBold,
+    lineHeight,
+    letterSpacing,
+    scrollSensitivity,
+    minimumContrastRatio,
+  ])
 
   // Live color-scheme switch: re-theme in place (no remount). Also keeps the
   // ref the `.dark` observer reads in sync.

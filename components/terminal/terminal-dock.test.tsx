@@ -235,6 +235,49 @@ describe("TerminalDock", () => {
     expect(mockKillFromDock).toHaveBeenCalledWith("s-1", expect.any(Object))
   })
 
+  it("confirms before closing a tab that is running a command", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    useTerminalStore.getState().setSessionStatus("s-1", "running")
+    render(<TerminalDock />)
+    const closeBtn = screen.getAllByLabelText("close")[0]!
+    await act(async () => {
+      fireEvent.click(closeBtn)
+    })
+    // Dialog shown, kill deferred until the user confirms.
+    expect(screen.getByTestId("terminal-dock-close-confirm")).toBeInTheDocument()
+    expect(mockKillFromDock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("terminal-dock-close-confirm-accept"))
+    })
+    expect(mockKillFromDock).toHaveBeenCalledWith("s-1", expect.any(Object))
+  })
+
+  it("closes an idle tab immediately without a confirm dialog", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    const closeBtn = screen.getAllByLabelText("close")[0]!
+    await act(async () => {
+      fireEvent.click(closeBtn)
+    })
+    expect(screen.queryByTestId("terminal-dock-close-confirm")).toBeNull()
+    expect(mockKillFromDock).toHaveBeenCalledWith("s-1", expect.any(Object))
+  })
+
+  it("toggles the maximized dock state from the toolbar button", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    expect(useTerminalStore.getState().maximized).toBe(false)
+    fireEvent.click(screen.getByTestId("terminal-dock-maximize"))
+    expect(useTerminalStore.getState().maximized).toBe(true)
+  })
+
+  it("shows split + clear toolbar buttons on desktop with an active session", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    expect(screen.getByTestId("terminal-dock-split")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-dock-clear")).toBeInTheDocument()
+  })
+
   it("calls setActiveSession when a tab body is clicked", () => {
     const project = seedProjectAndSession({ sessionId: "s-1" })
     useTerminalStore.getState().registerSession({

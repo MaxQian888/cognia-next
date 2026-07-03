@@ -24,10 +24,20 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { XIcon } from "lucide-react"
+import { Columns2Icon, EraserIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
@@ -61,6 +71,8 @@ export function TerminalDock() {
   const addPaneToGroup = useTerminalStore((s) => s.addPaneToGroup)
 
   const setPanelHeight = useTerminalStore((s) => s.setPanelHeight)
+  const maximized = useTerminalStore((s) => s.maximized)
+  const toggleMaximized = useTerminalStore((s) => s.toggleMaximized)
 
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const project = useProjectStore((s) =>
@@ -76,6 +88,12 @@ export function TerminalDock() {
   // ADR-0028 Phase 3 (P4.1) — opt-in sandboxed terminal. Off by default.
   const settingsSandboxed = useSettingsStore(
     (s) => (s.settings?.terminal as { sandboxed?: boolean } | undefined)?.sandboxed ?? false
+  )
+  // Confirm before killing a tab that's still running a command. On by default
+  // (VS Code parity) — guards against an accidental × losing an in-flight run.
+  const confirmOnClose = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { confirmOnClose?: boolean } | undefined)?.confirmOnClose ?? true
   )
   const settingsProfiles = useSettingsStore(
     (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
@@ -112,6 +130,8 @@ export function TerminalDock() {
   )
   const [searchOpen, setSearchOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  // Anchor id of the tab awaiting close confirmation (running-command guard).
+  const [closeConfirmTarget, setCloseConfirmTarget] = useState<string | null>(null)
 
   // Spawn + surface failures. Without this, an `error`/`denied` outcome was
   // dropped silently — the user clicked "+ New" and nothing happened, no
@@ -217,12 +237,32 @@ export function TerminalDock() {
   }, [])
 
   // Close a whole tab — kills every pane in the group.
-  const handleCloseTab = useCallback((anchorId: string) => {
+  const doCloseTab = useCallback((anchorId: string) => {
     const state = useTerminalStore.getState()
     for (const paneId of state.panesForGroup(anchorId)) {
       void killFromDock(paneId, state)
     }
   }, [])
+
+  // True when any pane in the group is mid-command (OSC 633 `C` seen, no `D`).
+  const groupHasRunning = useCallback((anchorId: string) => {
+    const state = useTerminalStore.getState()
+    return state.panesForGroup(anchorId).some((id) => state.sessions[id]?.status === "running")
+  }, [])
+
+  // Close entry point for the × button and the context menu. Routes through a
+  // confirm dialog when `confirmOnClose` is on and the tab is running a
+  // command; idle / exited tabs close immediately.
+  const requestCloseTab = useCallback(
+    (anchorId: string) => {
+      if (confirmOnClose && groupHasRunning(anchorId)) {
+        setCloseConfirmTarget(anchorId)
+      } else {
+        doCloseTab(anchorId)
+      }
+    },
+    [confirmOnClose, groupHasRunning, doCloseTab]
+  )
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -390,7 +430,7 @@ export function TerminalDock() {
         tabs={tabs}
         activeId={activeId}
         onSelect={handleSelect}
-        onClose={handleCloseTab}
+        onClose={requestCloseTab}
         testId="terminal-dock-tabs"
         trailing={
           <>
@@ -406,6 +446,35 @@ export function TerminalDock() {
                 onNewProfile={handleNewFromProfile}
               />
             ) : null}
+            {transport === "tauri-channel" && activeRow ? (
+              <>
+                <DockToolbarButton
+                  label={t("splitRight")}
+                  testId="terminal-dock-split"
+                  onClick={() => void handleSplit("row")}
+                >
+                  <Columns2Icon className="h-3 w-3" />
+                </DockToolbarButton>
+                <DockToolbarButton
+                  label={t("clear")}
+                  testId="terminal-dock-clear"
+                  onClick={() => focusedHandleRef.current?.clearScreen()}
+                >
+                  <EraserIcon className="h-3 w-3" />
+                </DockToolbarButton>
+              </>
+            ) : null}
+            <DockToolbarButton
+              label={maximized ? t("restore") : t("maximize")}
+              testId="terminal-dock-maximize"
+              onClick={toggleMaximized}
+            >
+              {maximized ? (
+                <Minimize2Icon className="h-3 w-3" />
+              ) : (
+                <Maximize2Icon className="h-3 w-3" />
+              )}
+            </DockToolbarButton>
             <Button
               size="sm"
               variant="ghost"
@@ -429,7 +498,7 @@ export function TerminalDock() {
               row={activeRow}
               onRename={handleRename}
               onRestart={handleRestart}
-              onClose={handleCloseTab}
+              onClose={requestCloseTab}
               onCloseOthers={handleCloseOthers}
               onToggleAgentTrust={handleToggleTrust}
               onLocateInChat={handleLocateInChat}
@@ -496,7 +565,67 @@ export function TerminalDock() {
       </div>
       {/* Read-only viewer for clicked terminal file links (1D). */}
       <FileViewerDialog />
+      {/* Confirm before killing a tab that's still running a command. */}
+      <AlertDialog
+        open={closeConfirmTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setCloseConfirmTarget(null)
+        }}
+      >
+        <AlertDialogContent data-testid="terminal-dock-close-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("closeConfirm.title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("closeConfirm.body")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="terminal-dock-close-confirm-cancel">
+              {t("closeConfirm.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="terminal-dock-close-confirm-accept"
+              onClick={() => {
+                if (closeConfirmTarget) doCloseTab(closeConfirmTarget)
+                setCloseConfirmTarget(null)
+              }}
+            >
+              {t("closeConfirm.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  )
+}
+
+/**
+ * Ghost icon button for the dock's trailing toolbar. The label doubles as the
+ * accessible name and the native hover tooltip (which carries the keyboard
+ * shortcut) — no Radix TooltipProvider dependency, so it works everywhere the
+ * dock mounts.
+ */
+function DockToolbarButton({
+  label,
+  testId,
+  onClick,
+  children,
+}: {
+  label: string
+  testId: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      className="h-7 w-7 p-0"
+    >
+      {children}
+    </Button>
   )
 }
 

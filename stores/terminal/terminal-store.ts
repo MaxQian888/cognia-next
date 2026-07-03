@@ -114,6 +114,12 @@ export interface TerminalStoreState {
   panelOpen: boolean
   panelHeightPct: number
 
+  // Maximize toggle (in-memory only). When `maximized` the dock snaps to
+  // `panelMaxPct`; toggling off restores `preMaxHeightPct` (the height the
+  // user last dragged to). A manual drag-resize exits maximize.
+  maximized: boolean
+  preMaxHeightPct: number
+
   // In-memory tab state
   sessions: Record<string, TerminalSessionRow>
   activeSessionIdByProject: Record<string, string | null>
@@ -133,6 +139,8 @@ export interface TerminalStoreState {
   setPanelOpen: (open: boolean) => void
   togglePanel: () => void
   setPanelHeight: (pct: number) => void
+  /** Snap to full height (or restore the pre-maximize height). No-op semantics live in the impl. */
+  toggleMaximized: () => void
 
   registerSession: (info: SessionInfo, opts?: { title?: string; agentSpawner?: string }) => void
   removeSession: (id: string) => void
@@ -213,6 +221,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
   persist(
     (set, get) => ({
       ...TERMINAL_LAYOUT_DEFAULTS,
+      maximized: false,
+      preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
       sessions: {},
       activeSessionIdByProject: {},
       splitPanes: {},
@@ -226,12 +236,26 @@ export const useTerminalStore = create<TerminalStoreState>()(
       setPanelHeight: (pct) => {
         const { panelMinPct, panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
         const clamped = clamp(pct, panelMinPct, panelMaxPct)
-        set({ panelHeightPct: clamped })
+        // A manual resize (drag / arrow keys) exits the maximized state so the
+        // toggle button reads "maximize" again and won't clobber the new size.
+        set({ panelHeightPct: clamped, maximized: false })
         if (pendingFlush) clearTimeout(pendingFlush)
         pendingFlush = setTimeout(() => {
           pendingFlush = null
           set({ panelHeightPct: get().panelHeightPct })
         }, TERMINAL_LAYOUT_PERSIST_DEBOUNCE_MS)
+      },
+
+      toggleMaximized: () => {
+        const { panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
+        const s = get()
+        if (s.maximized) {
+          // Restore the height the user last dragged to (clamped defensively).
+          const restore = clamp(s.preMaxHeightPct, TERMINAL_LAYOUT_BOUNDS.panelMinPct, panelMaxPct)
+          set({ panelHeightPct: restore, maximized: false })
+        } else {
+          set({ preMaxHeightPct: s.panelHeightPct, panelHeightPct: panelMaxPct, maximized: true })
+        }
       },
 
       registerSession: (info, opts = {}) => {
@@ -520,6 +544,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
         pendingFlush = null
         set({
           ...TERMINAL_LAYOUT_DEFAULTS,
+          maximized: false,
+          preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
           sessions: {},
           activeSessionIdByProject: {},
           splitPanes: {},

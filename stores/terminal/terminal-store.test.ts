@@ -71,6 +71,47 @@ describe("dock layout state", () => {
   })
 })
 
+describe("maximize toggle", () => {
+  it("starts unmaximized", () => {
+    expect(useTerminalStore.getState().maximized).toBe(false)
+  })
+
+  it("toggleMaximized snaps to the max height and remembers the previous size", () => {
+    useTerminalStore.getState().setPanelHeight(40)
+    useTerminalStore.getState().toggleMaximized()
+    const s = useTerminalStore.getState()
+    expect(s.maximized).toBe(true)
+    expect(s.panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxPct)
+    expect(s.preMaxHeightPct).toBe(40)
+  })
+
+  it("toggling again restores the pre-maximize height", () => {
+    useTerminalStore.getState().setPanelHeight(40)
+    useTerminalStore.getState().toggleMaximized()
+    useTerminalStore.getState().toggleMaximized()
+    const s = useTerminalStore.getState()
+    expect(s.maximized).toBe(false)
+    expect(s.panelHeightPct).toBe(40)
+  })
+
+  it("a manual resize exits the maximized state", () => {
+    useTerminalStore.getState().toggleMaximized()
+    expect(useTerminalStore.getState().maximized).toBe(true)
+    useTerminalStore.getState().setPanelHeight(30)
+    expect(useTerminalStore.getState().maximized).toBe(false)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(30)
+  })
+
+  it("reset clears the maximized flag", () => {
+    useTerminalStore.getState().toggleMaximized()
+    useTerminalStore.getState().reset()
+    expect(useTerminalStore.getState().maximized).toBe(false)
+    expect(useTerminalStore.getState().preMaxHeightPct).toBe(
+      TERMINAL_LAYOUT_DEFAULTS.panelHeightPct
+    )
+  })
+})
+
 describe("session registry", () => {
   it("registers a new session and makes it active for its project", () => {
     useTerminalStore.getState().registerSession(baseInfo())
