@@ -152,6 +152,15 @@ export function PetPopupView() {
             onClean={() => send("cleaned")}
             onTreat={() => send("treated")}
             skinId={effectiveSkin}
+            // No controller in this window: the consume event would be lost.
+            showInventory={false}
+            // Console navigation happens in the main window (it owns the
+            // router); raise it first, then dismiss like a menu selection.
+            onOpenConsole={(tab) => {
+              void showMainWindow()
+              bridgeRef.current?.sendOpenConsole(tab)
+              void closePetPopup()
+            }}
           />
         ) : null}
         <div className="mt-3 flex flex-col gap-1 border-t pt-3">

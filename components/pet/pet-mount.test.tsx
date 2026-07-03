@@ -8,7 +8,7 @@ const petWidgetProps = jest.fn()
 const getPetWindowRole = jest.fn<"main" | "overlay" | "popup" | "web", []>()
 const isTauri = jest.fn<boolean, []>()
 const usePlatform = jest.fn<"tauri" | "mobile" | "web", []>()
-const startMainPetBridge = jest.fn<() => void, []>()
+const startMainPetBridge = jest.fn<() => void, [unknown?]>()
 const mainBridgeDispose = jest.fn()
 const registerPetWindowCommand = jest.fn<() => void, []>()
 const registerPetInteractionCommands = jest.fn<() => void, []>()
@@ -31,8 +31,10 @@ jest.mock("@/lib/pet/window-role", () => ({ getPetWindowRole: () => getPetWindow
 jest.mock("@/lib/platform/detect", () => ({ isTauri: () => isTauri() }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => usePlatform() }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
-  startMainPetBridge: () => startMainPetBridge(),
+  startMainPetBridge: (deps: unknown) => startMainPetBridge(deps),
 }))
+const routerPush = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }))
 jest.mock("./pet-widget", () => ({
   PetWidget: (props: unknown) => {
     petWidgetProps(props)
@@ -176,6 +178,19 @@ describe("PetMount", () => {
     expect(startMainPetBridge).toHaveBeenCalledTimes(1)
     unmount()
     expect(mainBridgeDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes the popup's open-console request to /pet?tab=…", () => {
+    settingsValue = ENABLED_SETTINGS
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+    render(<PetMount />)
+    const deps = startMainPetBridge.mock.calls[0][0] as {
+      onOpenConsole?: (tab: string) => void
+    }
+    expect(deps.onOpenConsole).toBeDefined()
+    deps.onOpenConsole?.("shop")
+    expect(routerPush).toHaveBeenCalledWith("/pet?tab=shop")
   })
 
   it("registers the window + interaction commands while enabled on the main desktop window, disposing on unmount", () => {

@@ -7,31 +7,14 @@
 
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  BoxIcon,
-  CherryIcon,
-  CoinsIcon,
-  FlameIcon,
-  SparklesIcon,
-  StarIcon,
-  UtensilsCrossedIcon,
-  VolleyballIcon,
-  type LucideIcon,
-} from "lucide-react"
+import { CoinsIcon, FlameIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { getPetProfile, listPetInventory } from "@/lib/db/pet"
 import { PET_ITEMS } from "@/lib/pet/economy/item-catalog"
 import { canAfford, consumeItem, purchaseItem } from "@/lib/pet/economy/shop"
 import { normalizeCoins, normalizeStreak, type PetItemCategory } from "@/types/pet"
-
-const ICONS: Record<string, LucideIcon> = {
-  Cherry: CherryIcon,
-  UtensilsCrossed: UtensilsCrossedIcon,
-  Volleyball: VolleyballIcon,
-  Box: BoxIcon,
-  Star: StarIcon,
-}
+import { petItemIcon } from "../item-icons"
 
 const CATEGORIES: PetItemCategory[] = ["food", "toy", "decor"]
 
@@ -72,7 +55,7 @@ export function ShopTab() {
             </h3>
             <div className="grid gap-2 sm:grid-cols-2">
               {items.map((item) => {
-                const Icon = ICONS[item.icon] ?? SparklesIcon
+                const Icon = petItemIcon(item.icon)
                 const owned = ownedQty.get(item.id) ?? 0
                 const affordable = canAfford(coins, item)
                 return (

@@ -29,7 +29,8 @@ import { useLive2dLipSync, type Live2dLipSyncModel } from "./use-live2d-lip-sync
 
 export interface Live2dCanvasProps extends PetSkinRenderProps {
   modelId: string
-  /** Low-power mode: 30fps ticker cap + antialias off (init-time). */
+  /** Low-power mode: 30fps ticker cap (update + render) plus init-time
+   * antialias off, `powerPreference: "low-power"`, and low-precision masks. */
   lowPower?: boolean
   /** Per-model user transform applied on top of the fit (normalized). */
   transform?: Live2dTransform
@@ -56,7 +57,7 @@ interface PixiAppLike {
   ticker: {
     stop: () => void
     start: () => void
-    add: (fn: () => void) => void
+    add: (fn: () => void, context?: unknown, priority?: number) => void
     remove: (fn: () => void, context?: unknown) => void
     maxFPS?: number
   }
@@ -68,6 +69,18 @@ interface PixiAppLike {
 /** Ticker caps: 60fps default, 30fps in low-power mode. */
 const MAX_FPS_DEFAULT = 60
 const MAX_FPS_LOW_POWER = 30
+
+/**
+ * Cap the render resolution: past 2x the extra pixels are invisible on a
+ * ~100-400px pet but quadruple the fill-rate on 200%-scaled Windows displays.
+ */
+const MAX_RESOLUTION = 2
+
+/** pixi's UPDATE_PRIORITY.LOW — keeps the guarded render AFTER the model's
+ * ticker update (the Automator adds at NORMAL), same slot pixi's own
+ * auto-render uses. Mirrored numerically so pixi stays out of this module's
+ * static graph. */
+const RENDER_PRIORITY_LOW = -25
 
 const useStrictModeSafeInit = () => {
   const [ready, setReady] = useState(false)
@@ -178,8 +191,14 @@ export default function Live2dCanvas({
           height: size,
           backgroundAlpha: 0,
           antialias: !lowPowerRef.current,
-          resolution: typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+          resolution:
+            typeof window !== "undefined"
+              ? Math.min(window.devicePixelRatio || 1, MAX_RESOLUTION)
+              : 1,
           autoDensity: true,
+          // Dual-GPU machines otherwise route the transparent-window WebGL
+          // context to whatever the OS default is; be explicit both ways.
+          powerPreference: lowPowerRef.current ? "low-power" : "high-performance",
         })
         if (cancelled) return
         appRef.current = app
@@ -195,14 +214,18 @@ export default function Live2dCanvas({
         // channel as load failures.
         const guardedApp = app
         guardedApp.ticker.remove(guardedApp.render, guardedApp)
-        guardedApp.ticker.add(() => {
-          try {
-            guardedApp.render()
-          } catch {
-            guardedApp.ticker.stop()
-            onErrorRef.current?.("renderFailed")
-          }
-        })
+        guardedApp.ticker.add(
+          () => {
+            try {
+              guardedApp.render()
+            } catch {
+              guardedApp.ticker.stop()
+              onErrorRef.current?.("renderFailed")
+            }
+          },
+          undefined,
+          RENDER_PRIORITY_LOW
+        )
 
         const entries = await getPetModelEntries(modelId)
         if (cancelled) return
@@ -220,7 +243,32 @@ export default function Live2dCanvas({
         }
 
         const loader = createLive2dLoader()
-        const result = await loader.load({ manifest, entries })
+        const result = await loader.load({
+          manifest,
+          entries,
+          modelOptions: {
+            // Drive the Cubism update off the APP ticker instead of the
+            // engine's default `Ticker.shared`: paused/reducedMotion (ticker
+            // stop) and the low-power 30fps cap then govern the per-frame
+            // CPU work (physics, deformers, parameters) too — on the shared
+            // ticker that work runs uncapped forever, even hidden — and
+            // update+render collapse into a single rAF loop.
+            ticker: app.ticker,
+            // The pet has its own hit-zone system (resolveHitZone); the
+            // engine's global pointer listeners (hit-test per tap, focus
+            // smoothing per pointermove) are pure overhead here.
+            autoHitTest: false,
+            autoFocus: false,
+            // The pet draws at ~100-400px; sample a downscaled atlas instead
+            // of the full-resolution art every frame. Threshold lowered from
+            // the 4096 default so common 2048px atlases benefit too.
+            textureOptions: { lod: "single-auto", lodTextureSizeThreshold: 1024 },
+            // Low-power additionally skips the high-precision mask path
+            // ('auto' can enable it on complex models); artifacts are
+            // invisible at pet size.
+            ...(lowPowerRef.current ? { useHighPrecisionMask: false } : {}),
+          },
+        })
         if (cancelled) {
           if (result.ok) result.dispose()
           return

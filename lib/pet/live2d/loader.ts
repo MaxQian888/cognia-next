@@ -38,6 +38,12 @@ export type LoadResult =
 export interface LoadArgs {
   manifest: Live2DManifest
   entries: ModelFileEntry[]
+  /**
+   * Engine model/factory options forwarded verbatim to `Live2DModel.from`
+   * (ticker, autoHitTest/autoFocus, textureOptions, …). Typed loosely so the
+   * engine's types never enter this module's graph (the DI-seam rule above).
+   */
+  modelOptions?: Record<string, unknown>
 }
 
 /** Directory portion of a POSIX path. */
@@ -106,7 +112,10 @@ export function createLive2dLoader(deps: LoaderDeps = {}): Live2dLoader {
           return resolver.resolve(joinFromSettings(settingsDir, file)) ?? file
         })
 
-        const model = (await engine.Live2DModel.from(settings)) as LoadedModelLike
+        const model = (await engine.Live2DModel.from(
+          settings,
+          args.modelOptions
+        )) as LoadedModelLike
 
         return {
           ok: true,

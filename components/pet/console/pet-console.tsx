@@ -23,6 +23,7 @@ import {
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
 import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import { PET_CONSOLE_TABS, type PetConsoleTab } from "@/lib/pet/console-tabs"
 import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
 import { PetRenderer } from "../pet-renderer"
 import { PetNameEditor } from "../pet-name-editor"
@@ -35,31 +36,28 @@ import { BindingTab } from "./binding-tab"
 import { RadarPanel } from "./radar-panel"
 import { CaptureSettingsCard } from "@/components/capture/capture-settings-card"
 
-type ConsoleTab =
-  | "nurture"
-  | "shop"
-  | "customize"
-  | "insights"
-  | "dex"
-  | "achievements"
-  | "binding"
-  | "plugins"
-const TABS: ConsoleTab[] = [
-  "nurture",
-  "shop",
-  "customize",
-  "insights",
-  "dex",
-  "achievements",
-  "binding",
-  "plugins",
-]
+const TABS: readonly PetConsoleTab[] = PET_CONSOLE_TABS
 
-export function PetConsole() {
+export interface PetConsoleProps {
+  /** Initial tab (deep link `?tab=` / bridge navigation). Default "nurture". */
+  initialTab?: PetConsoleTab
+}
+
+export function PetConsole({ initialTab }: PetConsoleProps = {}) {
   const t = useTranslations("pet")
   const appSettings = useSettingsStore((s) => s.settings)
   const { profile, view, feed, play, petStroke, talk, sleep, clean, treat } = usePet()
-  const [tab, setTab] = useState<ConsoleTab>("nurture")
+  const [tab, setTab] = useState<PetConsoleTab>(initialTab ?? "nurture")
+
+  // Follow later deep links too: navigating /pet?tab=shop while the console is
+  // already mounted only changes the prop, not the mounted state. Adjusted
+  // during render (not in an effect) per the React "derive from prop change"
+  // pattern.
+  const [prevInitialTab, setPrevInitialTab] = useState(initialTab)
+  if (initialTab !== prevInitialTab) {
+    setPrevInitialTab(initialTab)
+    if (initialTab) setTab(initialTab)
+  }
 
   // Resolve the effective skin so the console previews match the floating
   // sprite (Live2D when picked + ready, otherwise SVG) — same resolution as
@@ -149,6 +147,7 @@ export function PetConsole() {
               onSleep={sleep}
               onClean={clean}
               onTreat={treat}
+              onOpenShop={() => setTab("shop")}
             />
           ) : (
             <div data-testid="pet-hatch" className="flex flex-col items-center gap-3 py-8">

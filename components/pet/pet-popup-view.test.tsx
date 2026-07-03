@@ -29,6 +29,8 @@ jest.mock("./pet-interaction-panel", () => ({
     onClean,
     onTreat,
     skinId,
+    onOpenConsole,
+    showInventory,
   }: {
     onFeed: () => void
     onPlay: () => void
@@ -38,8 +40,14 @@ jest.mock("./pet-interaction-panel", () => ({
     onClean: () => void
     onTreat: () => void
     skinId?: string
+    onOpenConsole?: (tab: string) => void
+    showInventory?: boolean
   }) => (
-    <div data-testid="pet-interaction-panel" data-skin={skinId ?? "default"}>
+    <div
+      data-testid="pet-interaction-panel"
+      data-skin={skinId ?? "default"}
+      data-show-inventory={String(showInventory ?? true)}
+    >
       <button onClick={() => onFeed()}>feed</button>
       <button onClick={() => onPlay()}>play</button>
       <button onClick={() => onPet()}>pet</button>
@@ -47,6 +55,7 @@ jest.mock("./pet-interaction-panel", () => ({
       <button onClick={() => onSleep()}>sleep</button>
       <button onClick={() => onClean()}>clean</button>
       <button onClick={() => onTreat()}>treat</button>
+      <button onClick={() => onOpenConsole?.("shop")}>open shop</button>
     </div>
   ),
 }))
@@ -54,9 +63,11 @@ jest.mock("./pet-interaction-panel", () => ({
 // Cross-window bridge.
 const bridgeDispose = jest.fn()
 const bridgeSendInteraction = jest.fn()
+const bridgeSendOpenConsole = jest.fn()
 const startOverlayPetBridge = jest.fn(() => ({
   dispose: bridgeDispose,
   sendInteraction: bridgeSendInteraction,
+  sendOpenConsole: bridgeSendOpenConsole,
 }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
   startOverlayPetBridge: () => startOverlayPetBridge(),
@@ -121,6 +132,7 @@ beforeEach(() => {
   bridgeDispose.mockReset()
   bridgeSendInteraction.mockReset()
   startOverlayPetBridge.mockClear()
+  bridgeSendOpenConsole.mockClear()
   revealCancel.mockClear()
   schedulePetWindowReveal.mockClear()
   closePetPopup.mockClear()
@@ -245,6 +257,19 @@ describe("PetPopupView", () => {
 
     fireEvent.click(screen.getByText("showMainWindow"))
     expect(showMainWindow).toHaveBeenCalledTimes(1)
+    expect(closePetPopup).toHaveBeenCalledTimes(1)
+  })
+
+  it("disables the inventory strip (no controller in this window)", () => {
+    render(<PetPopupView />)
+    expect(screen.getByTestId("pet-interaction-panel").dataset.showInventory).toBe("false")
+  })
+
+  it("quick-nav raises the main window, sends open-console, and closes the popup", () => {
+    render(<PetPopupView />)
+    fireEvent.click(screen.getByText("open shop"))
+    expect(showMainWindow).toHaveBeenCalledTimes(1)
+    expect(bridgeSendOpenConsole).toHaveBeenCalledWith("shop")
     expect(closePetPopup).toHaveBeenCalledTimes(1)
   })
 

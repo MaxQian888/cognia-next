@@ -10,6 +10,7 @@
 // this channel, so there is intentionally no profile-snapshot message.
 
 import type { PetOneShot, PetVisualState } from "@/types/pet"
+import { isPetConsoleTab, type PetConsoleTab } from "@/lib/pet/console-tabs"
 
 /** Bridge wire text for a speech bubble — already localized by the main side. */
 export interface PetBridgeBubble {
@@ -35,6 +36,9 @@ export type PetBridgeMessage =
   | { v: 1; t: "bubble"; bubble: PetBridgeBubble | null }
   | { v: 1; t: "interaction"; kind: PetBridgeInteractionKind; text?: string }
   | { v: 1; t: "request-state" }
+  // Popup → main: open the /pet console at a tab. The main window owns the
+  // router; the popup only shows/raises the main window before sending.
+  | { v: 1; t: "open-console"; tab: PetConsoleTab }
   // Throttled main-window user-activity ping (Smart-Moving). `at` is epoch ms
   // for ordering only — receivers stamp their OWN clock (the overlay's wander
   // gate runs on performance.now(), a different clock domain).
@@ -145,6 +149,8 @@ export function decodePetBridgeMessage(raw: unknown): PetBridgeMessage | null {
     }
     case "request-state":
       return { v: 1, t: "request-state" }
+    case "open-console":
+      return isPetConsoleTab(raw.tab) ? { v: 1, t: "open-console", tab: raw.tab } : null
     case "activity":
       return typeof raw.at === "number" && Number.isFinite(raw.at)
         ? { v: 1, t: "activity", at: raw.at }

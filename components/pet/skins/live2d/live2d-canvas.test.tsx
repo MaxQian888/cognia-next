@@ -243,15 +243,61 @@ describe("Live2dCanvas", () => {
     // The FPS effect lands once the model state commits — wait for the value.
     await waitFor(() => expect(tickerState.maxFPS).toBe(60))
     expect(appInit).toHaveBeenCalledWith(
-      expect.objectContaining({ antialias: true, autoDensity: true, resolution: 1 })
+      expect.objectContaining({
+        antialias: true,
+        autoDensity: true,
+        resolution: 1,
+        powerPreference: "high-performance",
+      })
     )
+  })
+
+  it("caps the render resolution at 2x on high-DPI displays", async () => {
+    const original = window.devicePixelRatio
+    Object.defineProperty(window, "devicePixelRatio", { value: 3, configurable: true })
+    try {
+      load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
+      renderCanvas()
+      await waitFor(() =>
+        expect(appInit).toHaveBeenCalledWith(expect.objectContaining({ resolution: 2 }))
+      )
+    } finally {
+      Object.defineProperty(window, "devicePixelRatio", { value: original, configurable: true })
+    }
   })
 
   it("low-power mode disables antialias at init and caps the ticker at 30fps", async () => {
     load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
     renderCanvas({ lowPower: true })
     await waitFor(() => expect(tickerState.maxFPS).toBe(30))
-    expect(appInit).toHaveBeenCalledWith(expect.objectContaining({ antialias: false }))
+    expect(appInit).toHaveBeenCalledWith(
+      expect.objectContaining({ antialias: false, powerPreference: "low-power" })
+    )
+  })
+
+  it("loads the model on the app ticker with pointer tracking off and texture LOD on", async () => {
+    load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
+    renderCanvas()
+    await waitFor(() => expect(load).toHaveBeenCalled())
+    const args = load.mock.calls[0][0] as { modelOptions: Record<string, unknown> }
+    expect(args.modelOptions).toMatchObject({
+      // The app ticker (not Ticker.shared) must drive the Cubism update so
+      // paused / low-power ticker controls govern the CPU work too.
+      ticker: tickerState,
+      autoHitTest: false,
+      autoFocus: false,
+      textureOptions: { lod: "single-auto", lodTextureSizeThreshold: 1024 },
+    })
+    // High-precision masks stay on 'auto' (engine default) outside low power.
+    expect(args.modelOptions).not.toHaveProperty("useHighPrecisionMask")
+  })
+
+  it("low-power mode additionally forces low-precision masks", async () => {
+    load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
+    renderCanvas({ lowPower: true })
+    await waitFor(() => expect(load).toHaveBeenCalled())
+    const args = load.mock.calls[0][0] as { modelOptions: Record<string, unknown> }
+    expect(args.modelOptions).toMatchObject({ useHighPrecisionMask: false })
   })
 
   it("tolerates a loaded model that lacks anchor/position/scale setters", async () => {
@@ -302,9 +348,11 @@ describe("Live2dCanvas", () => {
     renderCanvas()
     await waitFor(() => expect(addChild).toHaveBeenCalled())
     // pixi auto-renders via ticker.add(app.render, app); the canvas swaps that
-    // for a guarded listener so a render-loop throw can't escape uncaught.
+    // for a guarded listener so a render-loop throw can't escape uncaught. The
+    // listener re-registers at LOW priority (-25) so it still runs AFTER the
+    // model's ticker update (added at NORMAL by the engine's Automator).
     expect(tickerRemove).toHaveBeenCalledWith(appRender, expect.anything())
-    expect(tickerAdd).toHaveBeenCalledWith(expect.any(Function))
+    expect(tickerAdd).toHaveBeenCalledWith(expect.any(Function), undefined, -25)
     // The guarded listener drives a normal frame through app.render().
     runGuardedRender()
     expect(appRender).toHaveBeenCalled()

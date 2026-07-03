@@ -6,6 +6,7 @@
 "use client"
 
 import { useEffect, useMemo } from "react"
+import { useRouter } from "next/navigation"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePetEventBus } from "@/hooks/pet/use-pet-event-bus"
@@ -70,13 +71,18 @@ export function PetMount() {
   }, [widgetEnabled, settings, save])
 
   // Main window owns the cross-window bridge: it broadcasts the controller's
-  // visual-state/bubble/one-shots and replays overlay interactions. Pointless
-  // on the web (single browsing context), so gate on Tauri.
+  // visual-state/bubble/one-shots and replays overlay interactions (including
+  // the popup's "open the /pet console at a tab" request — routed here because
+  // only this window has the app router). Pointless on the web (single
+  // browsing context), so gate on Tauri.
+  const router = useRouter()
   useEffect(() => {
     if (!widgetEnabled || !isTauri()) return
-    const dispose = startMainPetBridge()
+    const dispose = startMainPetBridge({
+      onOpenConsole: (tab) => router.push(`/pet?tab=${tab}`),
+    })
     return dispose
-  }, [widgetEnabled])
+  }, [widgetEnabled, router])
 
   // The desktop-pet toggle command backs a global hotkey / tray quick action.
   // Register it on the main desktop window regardless of `enabled` so a chord

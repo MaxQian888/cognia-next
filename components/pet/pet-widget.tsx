@@ -204,6 +204,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
             onClean={clean}
             onTreat={treat}
             skinId={effectiveSkin}
+            onOpenConsole={(tab) => router.push(`/pet?tab=${tab}`)}
           />
         </div>
       )}

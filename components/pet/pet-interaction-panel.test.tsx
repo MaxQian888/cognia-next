@@ -17,6 +17,12 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   },
 }))
 
+// Inventory strip's reactive read — empty by default, per-test override.
+let inventoryValue: unknown = []
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => inventoryValue,
+}))
+
 import { PetInteractionPanel } from "./pet-interaction-panel"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
@@ -53,6 +59,7 @@ describe("PetInteractionPanel", () => {
   beforeEach(() => {
     window.localStorage.clear()
     usePetStore.setState({ actionCooldowns: {} })
+    inventoryValue = []
   })
 
   it("renders the stat card and the three need bars", () => {
@@ -137,6 +144,63 @@ describe("PetInteractionPanel", () => {
     )
   })
 
+  it("renders the wallet strip and hides quick-nav without onOpenConsole", () => {
+    setup()
+    const wallet = screen.getByTestId("pet-wallet-strip")
+    expect(wallet.tagName).toBe("DIV") // no shop jump without a navigation target
+    expect(screen.queryByTestId("pet-quick-nav")).toBeNull()
+  })
+
+  it("routes wallet + quick-nav through onOpenConsole when provided", () => {
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    }
+    const view = computePetView(profile, null, 0)
+    const onOpenConsole = jest.fn()
+    render(
+      <PetInteractionPanel
+        profile={profile}
+        view={view}
+        {...makeHandlers()}
+        onOpenConsole={onOpenConsole}
+      />
+    )
+    fireEvent.click(screen.getByTestId("pet-wallet-strip"))
+    expect(onOpenConsole).toHaveBeenCalledWith("shop")
+    fireEvent.click(document.querySelector('[data-nav="dex"]') as Element)
+    expect(onOpenConsole).toHaveBeenCalledWith("dex")
+  })
+
+  it("shows the inventory quick-use strip by default and hides it when disabled", () => {
+    inventoryValue = [{ id: "berry", qty: 1 }]
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    }
+    const view = computePetView(profile, null, 0)
+    const { rerender } = render(
+      <PetInteractionPanel profile={profile} view={view} {...makeHandlers()} />
+    )
+    expect(screen.getByTestId("pet-inventory-strip")).toBeInTheDocument()
+    rerender(
+      <PetInteractionPanel
+        profile={profile}
+        view={view}
+        {...makeHandlers()}
+        showInventory={false}
+      />
+    )
+    expect(screen.queryByTestId("pet-inventory-strip")).toBeNull()
+  })
+
+  it("surfaces the derived mood in the vitals card", () => {
+    setup()
+    expect(screen.getByTestId("pet-mood-chip")).toBeInTheDocument()
+  })
+
   it("wires sleep/clean/treat actions", () => {
     const h = setup()
     fireEvent.click(document.querySelector('[data-action="slept"]') as Element)
@@ -156,7 +220,7 @@ describe("PetInteractionPanel", () => {
       expect(h.onSleep).toHaveBeenCalledTimes(1)
       // Cooling: disabled, shows a whole-seconds countdown, clicks ignored.
       expect(sleepBtn).toBeDisabled()
-      expect(sleepBtn.textContent).toMatch(/^\d+$/)
+      expect(screen.getByTestId("pet-cooldown-slept").textContent).toMatch(/^\d+$/)
       fireEvent.click(sleepBtn)
       expect(h.onSleep).toHaveBeenCalledTimes(1)
       // Elapse the 5s sleep cooldown (ticker runs every 250ms).

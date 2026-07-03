@@ -39,6 +39,11 @@ jest.mock("@/lib/pet/runtime/rename-pet", () => ({
 jest.mock("./dex-tab", () => ({ DexTab: () => <div data-testid="tab-dex" /> }))
 jest.mock("./shop-tab", () => ({ ShopTab: () => <div data-testid="tab-shop" /> }))
 
+// Nurture tab's inventory strip reads Dexie reactively — keep it empty here.
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => [],
+}))
+
 // Plugin slot host — controllable "has extensions" flag + a stub mount.
 let hasPluginExtensions = false
 const slotProps = jest.fn()
@@ -122,6 +127,21 @@ describe("PetConsole", () => {
     expect(screen.getByTestId("tab-ach")).toBeInTheDocument()
     clickTab("binding")
     expect(screen.getByTestId("tab-bind")).toBeInTheDocument()
+  })
+
+  it("opens at the deep-linked initial tab and follows later deep links", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    const { rerender } = render(<PetConsole initialTab="dex" />)
+    expect(screen.getByTestId("tab-dex")).toBeInTheDocument()
+    rerender(<PetConsole initialTab="achievements" />)
+    expect(screen.getByTestId("tab-ach")).toBeInTheDocument()
+  })
+
+  it("jumps from the nurture wallet strip to the shop tab", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole />)
+    fireEvent.click(screen.getByTestId("pet-wallet-strip"))
+    expect(screen.getByTestId("tab-shop")).toBeInTheDocument()
   })
 
   it("resolves the effective skin and passes it to the header renderer and nurture tab", () => {
