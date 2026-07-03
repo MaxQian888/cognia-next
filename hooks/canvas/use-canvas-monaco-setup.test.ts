@@ -14,32 +14,34 @@ jest.mock("@/stores/canvas/canvas-settings-store", () => ({
   useCanvasSettingsStore: <T>(selector: (s: typeof settingsRef) => T): T => selector(settingsRef),
 }))
 
+// Cut the heavy `@/stores` barrel (→ artifact/plugin/chat → broker) out of this
+// unit; the hook only needs `useSettingsStore` for the appearance palette.
+jest.mock("@/stores", () => ({
+  useSettingsStore: <T>(
+    selector: (s: {
+      colorTheme: string
+      activeCustomThemeId: string | null
+      customThemes: unknown[]
+    }) => T
+  ): T => selector({ colorTheme: "default", activeCustomThemeId: null, customThemes: [] }),
+}))
+
 jest.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
 }))
 
-const applyToMock = jest.fn()
-jest.mock("@/lib/canvas/themes/theme-registry", () => ({
-  themeRegistry: { applyTo: (m: unknown) => applyToMock(m) },
-}))
+let mockBindings: Record<string, string> = { "canvas.find": "Ctrl+F" }
+jest.mock("@/stores/canvas/keybinding-store", () => {
+  const store = <T>(selector: (s: { bindings: Record<string, string> }) => T): T =>
+    selector({ bindings: mockBindings })
+  store.getState = () => ({ bindings: mockBindings })
+  return { useKeybindingStore: store }
+})
 
-const registerSnippetsMock = jest.fn()
-jest.mock("@/lib/canvas/snippets/snippet-registry", () => ({
-  snippetProvider: { registerWithMonaco: (m: unknown) => registerSnippetsMock(m) },
-}))
-
-const symbolRegisterMock = jest.fn()
-jest.mock("@/lib/canvas/symbols/symbol-parser", () => ({
-  symbolParser: {
-    registerWithMonaco: (m: unknown, lang: string) => symbolRegisterMock(m, lang),
-  },
-}))
-
-const pluginNotifyMock = jest.fn()
-jest.mock("@/lib/canvas/plugins/plugin-manager", () => ({
-  pluginManager: {
-    notifyEditorReady: (ctx: unknown) => pluginNotifyMock(ctx),
-  },
+const disposeMock = jest.fn()
+const registerCanvasEditorActionsMock = jest.fn((..._a: unknown[]) => [{ dispose: disposeMock }])
+jest.mock("@/lib/canvas/register-canvas-editor-actions", () => ({
+  registerCanvasEditorActions: (...a: unknown[]) => registerCanvasEditorActionsMock(...a),
 }))
 
 const registerAllSnippetsMock = jest.fn()
@@ -65,10 +67,9 @@ jest.mock("@/lib/logging", () => ({
 import { useCanvasMonacoSetup } from "./use-canvas-monaco-setup"
 
 beforeEach(() => {
-  applyToMock.mockClear()
-  registerSnippetsMock.mockClear()
-  symbolRegisterMock.mockClear()
-  pluginNotifyMock.mockClear()
+  mockBindings = { "canvas.find": "Ctrl+F" }
+  disposeMock.mockClear()
+  registerCanvasEditorActionsMock.mockClear()
   registerAllSnippetsMock.mockClear()
   registerEmmetMock.mockClear()
   mountWorkbenchMock
@@ -85,7 +86,7 @@ describe("useCanvasMonacoSetup", () => {
     expect(result.current.monacoRef).toBeDefined()
   })
 
-  it("onMount registers snippets, themes, symbols, and mounts the workbench", () => {
+  it("onMount registers snippets, canvas editor keybindings, and mounts the workbench", () => {
     const { result } = renderHook(() =>
       useCanvasMonacoSetup({
         documentId: "doc-1",
@@ -101,10 +102,7 @@ describe("useCanvasMonacoSetup", () => {
     result.current.onMount(editor, monaco)
     expect(registerAllSnippetsMock).toHaveBeenCalledWith(monaco)
     expect(registerEmmetMock).toHaveBeenCalledWith(monaco)
-    expect(applyToMock).toHaveBeenCalledWith(monaco)
-    expect(registerSnippetsMock).toHaveBeenCalledWith(monaco)
-    expect(symbolRegisterMock).toHaveBeenCalledWith(monaco, "ts")
-    expect(pluginNotifyMock).toHaveBeenCalledWith({ editor, monaco })
+    expect(registerCanvasEditorActionsMock).toHaveBeenCalledWith(editor, monaco, mockBindings)
     expect(mountWorkbenchMock).toHaveBeenCalledWith(
       editor,
       monaco,
@@ -136,14 +134,47 @@ describe("useCanvasMonacoSetup", () => {
     expect(() => result.current.onMount(editor, monaco)).not.toThrow()
   })
 
-  it("explicit theme is applied via monaco.editor.setTheme", () => {
+  it("applies the theme via monaco.editor.setTheme when the theme pref changes", () => {
     settingsRef.settings.theme = "vs-dark"
-    const { result } = renderHook(() => useCanvasMonacoSetup())
     const setTheme = jest.fn()
     const monaco = { editor: { setTheme } } as never
+    const { result, rerender } = renderHook(() => useCanvasMonacoSetup())
     result.current.onMount({ getValue: () => "" } as never, monaco)
-    // Effect runs after mount; trigger rerender via second renderHook
-    renderHook(() => useCanvasMonacoSetup())
-    void setTheme
+    // Changing the theme pref + rerender re-runs the theme effect with the
+    // monaco ref now populated by onMount.
+    settingsRef.settings.theme = "monokai"
+    rerender()
+    expect(setTheme).toHaveBeenCalledWith("monokai")
+  })
+
+  it("re-applies editor keybindings when the bindings change", () => {
+    const { result, rerender } = renderHook(() =>
+      useCanvasMonacoSetup({ documentId: "doc-1", language: "ts" })
+    )
+    const editor = { getValue: () => "" } as never
+    const monaco = { editor: { setTheme: jest.fn() } } as never
+    result.current.onMount(editor, monaco)
+    expect(registerCanvasEditorActionsMock).toHaveBeenCalledTimes(1)
+
+    // A rebind changes the bindings object → the effect re-registers.
+    mockBindings = { "canvas.find": "Ctrl+Alt+F" }
+    rerender()
+    expect(registerCanvasEditorActionsMock).toHaveBeenCalledTimes(2)
+    expect(disposeMock).toHaveBeenCalled() // previous batch disposed first
+  })
+
+  it("disposes the registered editor actions on unmount", () => {
+    const { result, unmount } = renderHook(() =>
+      useCanvasMonacoSetup({ documentId: "doc-1", language: "ts" })
+    )
+    result.current.onMount(
+      { getValue: () => "" } as never,
+      {
+        editor: { setTheme: jest.fn() },
+      } as never
+    )
+    disposeMock.mockClear()
+    unmount()
+    expect(disposeMock).toHaveBeenCalled()
   })
 })

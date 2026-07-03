@@ -127,6 +127,16 @@
   "filtered": "已过滤",
   "history": "历史",
   "importKeybindings": "导入快捷键",
+  "inlineCommand": {
+    "description": "在画布编辑器中搜索并运行命令",
+    "empty": "没有匹配的命令",
+    "groupActions": "AI 操作",
+    "groupDocument": "文档",
+    "groupTranslate": "翻译",
+    "newDocument": "新建文档",
+    "placeholder": "输入命令…",
+    "title": "画布命令面板"
+  },
   "join": {
     "documentLabel": "文档",
     "error": "无法加入",

@@ -8,7 +8,6 @@ import {
   CANVAS_ACTIONS,
   FORMAT_ACTION_MAP,
   DESIGNER_SUPPORTED_LANGUAGES,
-  DEFAULT_KEY_ACTION_MAP,
   REACTION_EMOJIS,
   SUGGESTION_TYPE_COLORS,
   KEYBINDING_CATEGORIES,
@@ -112,17 +111,6 @@ describe("Canvas Constants", () => {
     it("should not include non-designer languages", () => {
       expect(DESIGNER_SUPPORTED_LANGUAGES).not.toContain("python")
       expect(DESIGNER_SUPPORTED_LANGUAGES).not.toContain("css")
-    })
-  })
-
-  describe("DEFAULT_KEY_ACTION_MAP", () => {
-    it("should map single keys to action types", () => {
-      expect(DEFAULT_KEY_ACTION_MAP.r).toBe("review")
-      expect(DEFAULT_KEY_ACTION_MAP.f).toBe("fix")
-      expect(DEFAULT_KEY_ACTION_MAP.i).toBe("improve")
-      expect(DEFAULT_KEY_ACTION_MAP.e).toBe("explain")
-      expect(DEFAULT_KEY_ACTION_MAP.s).toBe("simplify")
-      expect(DEFAULT_KEY_ACTION_MAP.x).toBe("expand")
     })
   })
 

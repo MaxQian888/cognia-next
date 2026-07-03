@@ -125,7 +125,6 @@ export interface CanvasSettings {
   collaboration: CanvasCollaborationSettings
   execution: CanvasExecutionSettings
   accessibility: CanvasAccessibilitySettings
-  keybindings: Record<string, string>
   theme: string
 }
 
@@ -213,7 +212,6 @@ export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
     focusIndicator: true,
     announceErrors: true,
   },
-  keybindings: {},
   theme: "vs-dark",
 }
 
@@ -228,7 +226,6 @@ export function mergeSettings(
     collaboration: { ...base.collaboration, ...overrides.collaboration },
     execution: { ...base.execution, ...overrides.execution },
     accessibility: { ...base.accessibility, ...overrides.accessibility },
-    keybindings: { ...base.keybindings, ...overrides.keybindings },
     theme: overrides.theme ?? base.theme,
   }
 }

@@ -127,6 +127,16 @@
   "filtered": "filtered",
   "history": "History",
   "importKeybindings": "Import keybindings",
+  "inlineCommand": {
+    "description": "Search for a command to run in the canvas editor",
+    "empty": "No matching commands",
+    "groupActions": "AI actions",
+    "groupDocument": "Document",
+    "groupTranslate": "Translate",
+    "newDocument": "New document",
+    "placeholder": "Type a command…",
+    "title": "Canvas command palette"
+  },
   "join": {
     "documentLabel": "Document",
     "error": "Couldn't join",

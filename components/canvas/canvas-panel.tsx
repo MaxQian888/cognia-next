@@ -66,6 +66,7 @@ import {
 } from "@/components/document/document-format-toolbar"
 import { FORMAT_ACTION_MAP, TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { CanvasInlineCommand } from "./canvas-inline-command"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { LspServerHint } from "@/components/editor/lsp-server-hint"
 import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
@@ -174,6 +175,21 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     window.addEventListener("canvas-action", handler as EventListener)
     return () => window.removeEventListener("canvas-action", handler as EventListener)
   }, [])
+
+  // Ctrl+S / Ctrl+Shift+S arrive as `canvas-save` from the keybinding handler
+  // (the panel owns the editor buffer, so the save lives here). "manual" flushes
+  // the live buffer into the store; "version" additionally snapshots a version.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      if (!activeId) return
+      const mode = (ev as CustomEvent<{ mode?: string }>).detail?.mode
+      const content = editorRef.current?.getValue()
+      if (typeof content === "string") updateDoc(activeId, { content, updatedAt: new Date() })
+      if (mode === "version") saveVersion(activeId, "manual")
+    }
+    window.addEventListener("canvas-save", handler as EventListener)
+    return () => window.removeEventListener("canvas-save", handler as EventListener)
+  }, [activeId, updateDoc, saveVersion])
 
   // Lightweight auto-save: every `autoSaveInterval` seconds, push the
   // editor's current value into the artifact store and write a snapshot
@@ -461,6 +477,14 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
           {actions.error}
         </div>
       )}
+
+      <CanvasInlineCommand
+        running={actions.running}
+        onAction={runAction}
+        onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
+        onTriggerSuggestions={triggerSuggestions}
+        onCreateDocument={onCreate}
+      />
     </div>
   )
 }
@@ -625,19 +649,7 @@ function CanvasToolbar({
                 size="icon"
                 className="size-7"
                 aria-label={t("commandPalette", { default: "Command palette" })}
-                onClick={() => {
-                  const isMac =
-                    typeof navigator !== "undefined" &&
-                    navigator.platform.toLowerCase().includes("mac")
-                  window.dispatchEvent(
-                    new KeyboardEvent("keydown", {
-                      key: "k",
-                      metaKey: isMac,
-                      ctrlKey: !isMac,
-                      bubbles: true,
-                    })
-                  )
-                }}
+                onClick={() => window.dispatchEvent(new CustomEvent("canvas-inline-command"))}
               >
                 <Search className="size-3.5" />
               </Button>

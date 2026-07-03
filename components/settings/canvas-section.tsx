@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
+import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import type { CanvasSettings } from "@/types/canvas/settings"
 import { isTauri } from "@/lib/tauri"
 import { KeybindingSettings } from "@/components/canvas/keybinding-settings"
@@ -98,7 +99,9 @@ export function CanvasSection() {
         </TabsContent>
         <TabsContent value="keys" className="m-0">
           <KeybindingsTab />
-          <ResetTabFooter onReset={() => resetSection("keybindings")} />
+          {/* Reset the real keybinding store (the settings object has no
+              keybindings field — the live bindings live in useKeybindingStore). */}
+          <ResetTabFooter onReset={() => useKeybindingStore.getState().resetAllBindings()} />
         </TabsContent>
         <TabsContent value="theme" className="m-0">
           <ThemeTab settings={settings} />

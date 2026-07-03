@@ -12,17 +12,18 @@ import { useCallback, useEffect, useMemo, useRef } from "react"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
+import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import { useSettingsStore } from "@/stores"
-import { snippetProvider } from "@/lib/canvas/snippets/snippet-registry"
-import { symbolParser } from "@/lib/canvas/symbols/symbol-parser"
-import { themeRegistry } from "@/lib/canvas/themes/theme-registry"
 import {
   COGNIA_ACTIVE_THEME_ID,
   syncCogniaActiveTheme,
 } from "@/lib/canvas/themes/cognia-active-theme"
 import { resolveActiveThemeColors } from "@/lib/themes"
-import { pluginManager } from "@/lib/canvas/plugins/plugin-manager"
 import { registerAllSnippets, registerEmmetSupport } from "@/lib/monaco/snippets"
+import {
+  registerCanvasEditorActions,
+  type MonacoDisposable,
+} from "@/lib/canvas/register-canvas-editor-actions"
 import {
   mountMonacoWorkbench,
   type IMonacoEditor,
@@ -51,7 +52,11 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof import("monaco-editor") | null>(null)
   const workbenchHandleRef = useRef<MonacoWorkbenchHandle | null>(null)
+  const editorActionsRef = useRef<MonacoDisposable[]>([])
   const settings = useCanvasSettingsStore((s) => s.settings)
+  // Subscribe to the customizable keybindings so a rebind re-registers the
+  // editor actions (the effect below keys off this value).
+  const keybindings = useKeybindingStore((s) => s.bindings)
   const themePref = useCanvasSettingsStore((s) => s.settings.theme)
   const { resolvedTheme } = useTheme()
 
@@ -78,28 +83,21 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
       try {
         registerAllSnippets(monaco)
         registerEmmetSupport(monaco)
-        // The Cognia registry helpers expose richer hooks; cognia-next
-        // calls them defensively via `as any` because we ship a
-        // simplified registry layer.
-        const tr = themeRegistry as unknown as {
-          applyTo?: (m: unknown) => void
-        }
-        tr.applyTo?.(monaco)
-        const sp = snippetProvider as unknown as {
-          registerWithMonaco?: (m: unknown) => void
-        }
-        sp.registerWithMonaco?.(monaco)
-        const sy = symbolParser as unknown as {
-          registerWithMonaco?: (m: unknown, lang?: string) => void
-        }
-        sy.registerWithMonaco?.(monaco, opts.language)
-        const pm = pluginManager as unknown as {
-          notifyEditorReady?: (ctx: { editor: unknown; monaco: unknown }) => void
-        }
-        pm.notifyEditorReady?.({ editor, monaco })
       } catch (err) {
         loggers.canvas.warn("monaco setup hook failed", { err: String(err) })
       }
+
+      // Apply the user's customizable editor keybindings (find/replace/format,
+      // the net-new word-wrap/minimap toggles, folding, …) to this editor.
+      // Registered here (not only in the effect) so a document switch — which
+      // remounts Monaco with a fresh editor — always rebinds against the new
+      // instance. The effect below re-applies them when the user rebinds a key.
+      editorActionsRef.current.forEach((d) => d.dispose())
+      editorActionsRef.current = registerCanvasEditorActions(
+        editor,
+        monaco,
+        useKeybindingStore.getState().bindings
+      )
 
       // Mount the workbench primitive so this editor is visible to the
       // VS Code reuse layer (LSP providers, decorations, diagnostics)
@@ -171,6 +169,25 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
       workbenchHandleRef.current = null
     }
   }, [opts.documentId, opts.sessionId])
+
+  // Re-apply editor keybindings when the user rebinds a key (the editor stays
+  // mounted, so onMount doesn't re-run). Initial mount is handled by onMount;
+  // this fires only when `keybindings` actually changes.
+  useEffect(() => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    if (!editor || !monaco) return
+    editorActionsRef.current.forEach((d) => d.dispose())
+    editorActionsRef.current = registerCanvasEditorActions(editor, monaco, keybindings)
+  }, [keybindings])
+
+  // Dispose the registered editor actions on unmount.
+  useEffect(() => {
+    return () => {
+      editorActionsRef.current.forEach((d) => d.dispose())
+      editorActionsRef.current = []
+    }
+  }, [])
 
   return {
     editorRef,

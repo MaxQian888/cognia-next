@@ -42,14 +42,17 @@ export const TRANSLATE_LANGUAGES = [
 /**
  * Canvas AI action definitions (toolbar items)
  */
+// `shortcut` labels mirror the `action.*` defaults in `keybinding-store.ts`
+// (all Ctrl+Shift+… so they never collide with native editor keys). They are
+// display-only hints; the live bindings come from the keybinding store.
 export const CANVAS_ACTIONS: CanvasActionItem[] = [
-  { type: "review", labelKey: "actionReview", icon: "eye", shortcut: "⌘R" },
-  { type: "fix", labelKey: "actionFix", icon: "bug", shortcut: "⌘F" },
-  { type: "improve", labelKey: "actionImprove", icon: "sparkles", shortcut: "⌘I" },
-  { type: "explain", labelKey: "actionExplain", icon: "help", shortcut: "⌘E" },
-  { type: "simplify", labelKey: "actionSimplify", icon: "minimize", shortcut: "⌘S" },
-  { type: "expand", labelKey: "actionExpand", icon: "maximize", shortcut: "⌘X" },
-  { type: "translate", labelKey: "actionTranslate", icon: "languages" },
+  { type: "review", labelKey: "actionReview", icon: "eye", shortcut: "⇧⌘R" },
+  { type: "fix", labelKey: "actionFix", icon: "bug", shortcut: "⇧⌘F" },
+  { type: "improve", labelKey: "actionImprove", icon: "sparkles", shortcut: "⇧⌘I" },
+  { type: "explain", labelKey: "actionExplain", icon: "help", shortcut: "⇧⌘E" },
+  { type: "simplify", labelKey: "actionSimplify", icon: "minimize", shortcut: "⇧⌘L" },
+  { type: "expand", labelKey: "actionExpand", icon: "maximize", shortcut: "⇧⌘X" },
+  { type: "translate", labelKey: "actionTranslate", icon: "languages", shortcut: "⇧⌘T" },
   { type: "format", labelKey: "actionFormat", icon: "format" },
 ]
 
@@ -76,18 +79,6 @@ export const FORMAT_ACTION_MAP: Record<string, FormatActionMapping> = {
  * Languages that can be opened in the V0 Designer
  */
 export const DESIGNER_SUPPORTED_LANGUAGES = ["jsx", "tsx", "html", "javascript", "typescript"]
-
-/**
- * Default keyboard shortcut key-to-action mapping
- */
-export const DEFAULT_KEY_ACTION_MAP: Record<string, string> = {
-  r: "review",
-  f: "fix",
-  i: "improve",
-  e: "explain",
-  s: "simplify",
-  x: "expand",
-}
 
 /**
  * Reaction emojis available for comments
@@ -129,7 +120,6 @@ export const KEYBINDING_CATEGORIES: Record<string, string[]> = {
     "action.simplify",
     "action.expand",
     "action.translate",
-    "action.run",
   ],
   navigation: [
     "navigation.nextSuggestion",
