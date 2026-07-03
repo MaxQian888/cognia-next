@@ -98,8 +98,16 @@ async fn claude_set_provider_env(
     state: State<'_, ApiKeyState>,
     api_key: Option<String>,
     base_url: Option<String>,
+    // Ordered `[name, value]` pairs forwarded as `ANTHROPIC_CUSTOM_HEADER_*` at
+    // spawn (CCSwitch relays that gate 1M behind `anthropic-beta`, etc.). Only
+    // meaningful for callers that manage headers: `None` leaves the existing
+    // set untouched, `Some([])` explicitly clears it.
+    custom_headers: Option<Vec<(String, String)>>,
 ) -> Result<(), String> {
     state.set_provider(api_key, base_url).await;
+    if let Some(headers) = custom_headers {
+        state.set_custom_headers(headers).await;
+    }
     Ok(())
 }
 

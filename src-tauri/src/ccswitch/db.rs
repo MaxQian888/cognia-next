@@ -11,7 +11,7 @@
 // All connections open with `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX`.
 // CCSwitch is the sole writer of this database; cognia-next never writes.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, Row};
@@ -54,6 +54,25 @@ pub struct CcswitchProvider {
     pub base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Per-tier model overrides Claude Code resolves from the `env` block —
+    /// `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` — so a relay that maps the
+    /// opus/sonnet/haiku aliases to concrete models (Kimi, GLM, …) surfaces its
+    /// real model list to consumers. Absent when the env didn't declare them.
+    #[serde(rename = "opusModel", skip_serializing_if = "Option::is_none")]
+    pub opus_model: Option<String>,
+    #[serde(rename = "sonnetModel", skip_serializing_if = "Option::is_none")]
+    pub sonnet_model: Option<String>,
+    #[serde(rename = "haikuModel", skip_serializing_if = "Option::is_none")]
+    pub haiku_model: Option<String>,
+    /// `ANTHROPIC_SMALL_FAST_MODEL` — the background/haiku-tier model.
+    #[serde(rename = "smallFastModel", skip_serializing_if = "Option::is_none")]
+    pub small_fast_model: Option<String>,
+    /// Forwardable HTTP headers parsed from `ANTHROPIC_CUSTOM_HEADERS` /
+    /// `ANTHROPIC_BETA` in the env block. Carries e.g.
+    /// `anthropic-beta: context-1m-2025-08-07`, which unlocks the 1M context
+    /// window on relays that gate it behind the beta header.
+    #[serde(rename = "customHeaders", skip_serializing_if = "Option::is_none")]
+    pub custom_headers: Option<BTreeMap<String, String>>,
     /// Free-form JSON — `sharedConfig` / `extra` / `meta`. Preserved verbatim.
     #[serde(rename = "sharedConfig", skip_serializing_if = "Option::is_none")]
     pub shared_config: Option<serde_json::Value>,
@@ -236,6 +255,23 @@ fn enrich_from_settings_config(p: &mut CcswitchProvider, raw: &str) {
         if p.model.is_none() {
             p.model = json_pick(env, &["ANTHROPIC_MODEL", "GEMINI_MODEL"]);
         }
+        // Per-tier alias → concrete model mappings + the background model. A
+        // relay that fronts Kimi/GLM/etc. declares these so `claude` resolves
+        // its opus/sonnet/haiku aliases; we surface them as the provider's
+        // real, selectable model list.
+        if p.opus_model.is_none() {
+            p.opus_model = json_pick(env, &["ANTHROPIC_DEFAULT_OPUS_MODEL"]);
+        }
+        if p.sonnet_model.is_none() {
+            p.sonnet_model = json_pick(env, &["ANTHROPIC_DEFAULT_SONNET_MODEL"]);
+        }
+        if p.haiku_model.is_none() {
+            p.haiku_model = json_pick(env, &["ANTHROPIC_DEFAULT_HAIKU_MODEL"]);
+        }
+        if p.small_fast_model.is_none() {
+            p.small_fast_model = json_pick(env, &["ANTHROPIC_SMALL_FAST_MODEL"]);
+        }
+        merge_custom_headers(p, env);
     }
 
     if let Some(auth) = v.get("auth").filter(|a| a.is_object()) {
@@ -255,6 +291,47 @@ fn enrich_from_settings_config(p: &mut CcswitchProvider, raw: &str) {
         if p.base_url.is_none() {
             p.base_url = json_pick(options, &["baseURL", "baseUrl"]);
         }
+    }
+}
+
+/// Parse forwardable custom headers out of a claude `env` block. Two sources,
+/// merged (existing entries win, names de-duplicated verbatim):
+///   - `ANTHROPIC_CUSTOM_HEADERS`: newline-separated `Name: Value` pairs — the
+///     exact shape `claude` accepts in `~/.claude/settings.json`. Only the
+///     first `:` splits, so header values may themselves contain colons/commas.
+///   - `ANTHROPIC_BETA`: comma-separated beta flags, folded into one
+///     `anthropic-beta` header.
+/// The dominant payload here is `anthropic-beta: context-1m-2025-08-07`, which
+/// downstream turns into the 1M context-window capability.
+fn merge_custom_headers(p: &mut CcswitchProvider, env: &serde_json::Value) {
+    let mut headers = p.custom_headers.take().unwrap_or_default();
+
+    if let Some(raw) = json_pick(env, &["ANTHROPIC_CUSTOM_HEADERS"]) {
+        for line in raw.split('\n') {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                let name = name.trim();
+                let value = value.trim();
+                if !name.is_empty() && !value.is_empty() {
+                    headers
+                        .entry(name.to_string())
+                        .or_insert_with(|| value.to_string());
+                }
+            }
+        }
+    }
+
+    if let Some(beta) = json_pick(env, &["ANTHROPIC_BETA"]) {
+        headers
+            .entry("anthropic-beta".to_string())
+            .or_insert_with(|| beta);
+    }
+
+    if !headers.is_empty() {
+        p.custom_headers = Some(headers);
     }
 }
 
@@ -332,6 +409,14 @@ pub fn list_providers(conn: &Connection) -> Result<Vec<CcswitchProvider>, Ccswit
             api_key: pick_str(row, &cols, &["api_key", "apiKey", "key"]),
             base_url: pick_str(row, &cols, &["base_url", "baseUrl", "endpoint", "url"]),
             model: pick_str(row, &cols, &["model", "default_model", "defaultModel"]),
+            // Tier overrides + custom headers only ever live inside the
+            // per-app `settings_config` JSON (filled by
+            // `enrich_from_settings_config` below), never as flat columns.
+            opus_model: None,
+            sonnet_model: None,
+            haiku_model: None,
+            small_fast_model: None,
+            custom_headers: None,
             shared_config: pick_json(
                 row,
                 &cols,
@@ -834,6 +919,64 @@ mod tests {
         assert!(e1.api_key.is_none() && e1.base_url.is_none() && e1.model.is_none());
         let b1 = by_id("b1");
         assert!(b1.api_key.is_none() && b1.base_url.is_none() && b1.model.is_none());
+    }
+
+    #[test]
+    fn tier_models_and_custom_headers_are_extracted_from_env() {
+        // A relay config that maps the opus/sonnet/haiku aliases to concrete
+        // Kimi models and unlocks the 1M window via the beta header.
+        let conn = open_inmem();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE providers (
+                id TEXT NOT NULL, app_type TEXT NOT NULL, name TEXT NOT NULL,
+                settings_config TEXT NOT NULL,
+                PRIMARY KEY (id, app_type)
+            );
+            INSERT INTO providers VALUES
+                ('k1', 'claude', 'Kimi Relay',
+                 '{"env":{"ANTHROPIC_BASE_URL":"https://api.moonshot.cn/anthropic","ANTHROPIC_AUTH_TOKEN":"sk-moon","ANTHROPIC_DEFAULT_OPUS_MODEL":"kimi-k2-thinking","ANTHROPIC_DEFAULT_SONNET_MODEL":"kimi-k2-0905","ANTHROPIC_DEFAULT_HAIKU_MODEL":"kimi-k2-turbo","ANTHROPIC_SMALL_FAST_MODEL":"kimi-k2-turbo","ANTHROPIC_CUSTOM_HEADERS":"anthropic-beta: context-1m-2025-08-07\nX-Relay: kimi"}}'),
+                ('b1', 'claude', 'Beta Only',
+                 '{"env":{"ANTHROPIC_BASE_URL":"https://relay.example","ANTHROPIC_BETA":"context-1m-2025-08-07"}}'),
+                ('p1', 'claude', 'Plain Relay',
+                 '{"env":{"ANTHROPIC_BASE_URL":"https://relay.example","ANTHROPIC_AUTH_TOKEN":"sk-x"}}');
+            "#,
+        )
+        .unwrap();
+
+        let provs = list_providers(&conn).unwrap();
+        let by_id = |id: &str| provs.iter().find(|p| p.id == id).unwrap();
+
+        let k1 = by_id("k1");
+        assert_eq!(k1.opus_model.as_deref(), Some("kimi-k2-thinking"));
+        assert_eq!(k1.sonnet_model.as_deref(), Some("kimi-k2-0905"));
+        assert_eq!(k1.haiku_model.as_deref(), Some("kimi-k2-turbo"));
+        assert_eq!(k1.small_fast_model.as_deref(), Some("kimi-k2-turbo"));
+        let headers = k1.custom_headers.as_ref().unwrap();
+        assert_eq!(
+            headers.get("anthropic-beta").map(String::as_str),
+            Some("context-1m-2025-08-07")
+        );
+        assert_eq!(headers.get("X-Relay").map(String::as_str), Some("kimi"));
+
+        // `ANTHROPIC_BETA` folds into a single `anthropic-beta` header.
+        let b1 = by_id("b1");
+        assert_eq!(
+            b1.custom_headers
+                .as_ref()
+                .and_then(|h| h.get("anthropic-beta"))
+                .map(String::as_str),
+            Some("context-1m-2025-08-07")
+        );
+        assert!(b1.opus_model.is_none());
+
+        // No tier/header env → all new fields stay None.
+        let p1 = by_id("p1");
+        assert!(p1.opus_model.is_none());
+        assert!(p1.sonnet_model.is_none());
+        assert!(p1.haiku_model.is_none());
+        assert!(p1.small_fast_model.is_none());
+        assert!(p1.custom_headers.is_none());
     }
 
     #[test]

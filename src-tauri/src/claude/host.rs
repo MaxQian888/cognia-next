@@ -69,6 +69,12 @@ pub(crate) async fn inject_provider_env(api_keys: &ApiKeyState, cmd: &mut Comman
     if let Some(url) = api_keys.get_base_url().await {
         cmd.env("ANTHROPIC_BASE_URL", url);
     }
+    // Forward any relay-required headers (e.g. `anthropic-beta: context-1m-…`
+    // for the 1M window) as `ANTHROPIC_CUSTOM_HEADER_*`, the shape the Claude
+    // Agent SDK reads. Mirrors the subscription module's header injection.
+    for (name, value) in api_keys.get_custom_headers().await {
+        cmd.env(format!("ANTHROPIC_CUSTOM_HEADER_{name}"), value);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +290,33 @@ mod tests {
             .iter()
             .any(|(k, v)| k == "ANTHROPIC_API_KEY" && v.as_deref() == Some("sk-test")));
         assert!(!envs.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"));
+    }
+
+    #[tokio::test]
+    async fn inject_provider_env_forwards_custom_headers() {
+        let keys = ApiKeyState::new();
+        keys.set_provider(Some("sk-moon".into()), Some("https://api.moonshot.cn/anthropic".into()))
+            .await;
+        keys.set_custom_headers(vec![(
+            "anthropic-beta".into(),
+            "context-1m-2025-08-07".into(),
+        )])
+        .await;
+
+        let mut cmd = Command::new("node");
+        inject_provider_env(&keys, &mut cmd).await;
+        let envs: Vec<(String, Option<String>)> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|v| v.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert!(envs.iter().any(|(k, v)| k == "ANTHROPIC_CUSTOM_HEADER_anthropic-beta"
+            && v.as_deref() == Some("context-1m-2025-08-07")));
     }
 
     #[tokio::test]

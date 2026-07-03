@@ -20,6 +20,24 @@ export interface CcswitchProvider {
   apiKey?: string
   baseUrl?: string
   model?: string
+  /**
+   * Per-tier alias → concrete model mappings the Rust reader extracts from the
+   * provider's `settings_config` env block (`ANTHROPIC_DEFAULT_{OPUS,SONNET,
+   * HAIKU}_MODEL`). A relay that fronts Kimi/GLM/… declares these so cognia can
+   * surface the relay's real, selectable model list instead of a bare endpoint.
+   */
+  opusModel?: string
+  sonnetModel?: string
+  haikuModel?: string
+  /** `ANTHROPIC_SMALL_FAST_MODEL` — the background/haiku-tier model. */
+  smallFastModel?: string
+  /**
+   * Forwardable HTTP headers parsed from `ANTHROPIC_CUSTOM_HEADERS` /
+   * `ANTHROPIC_BETA`. Carries e.g. `anthropic-beta: context-1m-2025-08-07`,
+   * which unlocks the 1M context window on relays that gate it behind the
+   * beta header.
+   */
+  customHeaders?: Record<string, string>
   /** Free-form `sharedConfig` blob CCSwitch preserves across switches. */
   sharedConfig?: unknown
   notes?: string
