@@ -1,33 +1,29 @@
-import { render, screen, act, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { GatewaySection } from "./gateway-section"
-import type { GatewayStatus } from "@/types/gateway"
+import { DEFAULT_GATEWAY_CONFIG, type GatewayConfig, type GatewayStatus } from "@/types/gateway"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 
-let tauri = true
-let subscribeHandler: ((p: unknown) => void) | null = null
-const unsubscribe = jest.fn()
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => tauri,
-  transport: {
-    subscribe: (_e: string, h: (p: unknown) => void) => {
-      subscribeHandler = h
-      return unsubscribe
-    },
-  },
+// Child cards are covered by their own tests — stub them here.
+jest.mock("./gateway-keys-card", () => ({
+  GatewayKeysCard: () => <div data-testid="keys-card" />,
+}))
+jest.mock("./gateway-log-viewer", () => ({
+  GatewayLogViewer: () => <div data-testid="log-viewer" />,
 }))
 
-const mockStatus = jest.fn()
-const mockGetToken = jest.fn()
-const mockRotate = jest.fn()
+let tauri = true
+jest.mock("@/lib/tauri", () => ({ isTauri: () => tauri }))
+
+const mockGetConfig = jest.fn()
+const mockGetStatus = jest.fn()
 const mockStart = jest.fn()
 const mockStop = jest.fn()
 const mockUpdate = jest.fn()
 jest.mock("@/lib/tauri/gateway", () => ({
-  gatewayGetStatus: () => mockStatus(),
-  gatewayGetToken: () => mockGetToken(),
-  gatewayRotateToken: () => mockRotate(),
+  gatewayGetConfig: () => mockGetConfig(),
+  gatewayGetStatus: () => mockGetStatus(),
   gatewayStart: () => mockStart(),
   gatewayStop: () => mockStop(),
   gatewayUpdateConfig: (...a: unknown[]) => mockUpdate(...a),
@@ -39,6 +35,7 @@ const status = (over: Partial<GatewayStatus> = {}): GatewayStatus => ({
   running: false,
   boundPort: null,
   hasToken: true,
+  bindInterface: "loopback",
   callsTotal: 0,
   lastCallAt: null,
   snapshotGeneratedAtMs: null,
@@ -47,13 +44,15 @@ const status = (over: Partial<GatewayStatus> = {}): GatewayStatus => ({
   ...over,
 })
 
+const config = (over: Partial<GatewayConfig> = {}): GatewayConfig => ({
+  ...DEFAULT_GATEWAY_CONFIG,
+  ...over,
+})
+
 beforeEach(() => {
   tauri = true
-  subscribeHandler = null
-  unsubscribe.mockReset()
-  mockStatus.mockReset().mockResolvedValue(status())
-  mockGetToken.mockReset().mockResolvedValue("tok-123")
-  mockRotate.mockReset().mockResolvedValue("tok-new")
+  mockGetConfig.mockReset().mockResolvedValue(config())
+  mockGetStatus.mockReset().mockResolvedValue(status())
   mockStart.mockReset().mockResolvedValue(undefined)
   mockStop.mockReset().mockResolvedValue(undefined)
   mockUpdate.mockReset().mockResolvedValue(undefined)
@@ -70,53 +69,77 @@ describe("GatewaySection", () => {
     expect(screen.getByText("desktopOnlyNotice")).toBeInTheDocument()
   })
 
-  it("hydrates status and renders the base-URL snippets", async () => {
+  it("hydrates config + status and renders the base-URL snippets", async () => {
     render(<GatewaySection />)
-    await waitFor(() => expect(mockStatus).toHaveBeenCalled())
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    expect(mockGetStatus).toHaveBeenCalled()
     expect(screen.getByText(/ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:47823/)).toBeInTheDocument()
     expect(screen.getByText(/OPENAI_BASE_URL=http:\/\/127\.0\.0\.1:47823\/v1/)).toBeInTheDocument()
+    expect(screen.getByTestId("keys-card")).toBeInTheDocument()
+    expect(screen.getByTestId("log-viewer")).toBeInTheDocument()
   })
 
   it("starts the gateway when the enable switch is toggled on", async () => {
     const user = userEvent.setup()
     render(<GatewaySection />)
-    await waitFor(() => expect(mockStatus).toHaveBeenCalled())
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled())
     await user.click(screen.getByRole("switch", { name: "enabled" }))
     expect(mockStart).toHaveBeenCalled()
   })
 
-  it("blocks enabling without a token", async () => {
-    mockStatus.mockResolvedValue(status({ hasToken: false }))
+  it("disables the enable switch without a usable key", async () => {
+    mockGetStatus.mockResolvedValue(status({ hasToken: false }))
+    render(<GatewaySection />)
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled())
+    expect(screen.getByRole("switch", { name: "enabled" })).toBeDisabled()
+    expect(screen.getAllByText("requiresKey").length).toBeGreaterThan(0)
+  })
+
+  it("persists a port change", async () => {
+    render(<GatewaySection />)
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    // fireEvent.change sets the controlled number input in one shot — clear+type
+    // fights the per-keystroke clamp on a controlled <input type=number>.
+    fireEvent.change(screen.getByLabelText("port"), { target: { value: "50001" } })
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ port: 50001 }))
+  })
+
+  it("shows the LAN warning and switches the bind interface", async () => {
     const user = userEvent.setup()
     render(<GatewaySection />)
-    await waitFor(() => expect(mockStatus).toHaveBeenCalled())
-    // switch is disabled; the generate-token button is offered instead
-    expect(screen.getByText("generateToken")).toBeInTheDocument()
-    await user.click(screen.getByText("generateToken"))
-    expect(mockRotate).toHaveBeenCalled()
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    // loopback by default → no warning
+    expect(screen.queryByText("lanWarning")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "bindLan" }))
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ bindInterface: "lan" }))
+    expect(await screen.findByText("lanWarning")).toBeInTheDocument()
   })
 
-  it("appends inbound-call events to the request log", async () => {
+  it("adds a retry status code chip", async () => {
+    const user = userEvent.setup()
     render(<GatewaySection />)
-    await waitFor(() => expect(subscribeHandler).toBeTruthy())
-    act(() => {
-      subscribeHandler?.({
-        id: "1",
-        at: "now",
-        route: "/v1/messages",
-        status: 200,
-        remoteIp: "127.0.0.1",
-      })
-    })
-    const log = await screen.findByTestId("gateway-log")
-    expect(log).toHaveTextContent("/v1/messages")
-    expect(log).toHaveTextContent("200")
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    const input = screen.getByLabelText("retryStatusCodes")
+    await user.type(input, "418{Enter}")
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ retryStatusCodes: expect.arrayContaining([418]) })
+    )
   })
 
-  it("detaches the inbound-call subscription on unmount", async () => {
-    const { unmount } = render(<GatewaySection />)
-    await waitFor(() => expect(subscribeHandler).toBeTruthy())
-    unmount()
-    expect(unsubscribe).toHaveBeenCalled()
+  it("toggles hide-raw-provider-models exposure", async () => {
+    const user = userEvent.setup()
+    render(<GatewaySection />)
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    await user.click(screen.getByRole("switch", { name: "hideRawModels" }))
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ hideRawProviderModels: true })
+    )
+  })
+
+  it("persists a request-timeout change", async () => {
+    render(<GatewaySection />)
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText("requestTimeout"), { target: { value: "0" } })
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ requestTimeoutSecs: 0 }))
   })
 })

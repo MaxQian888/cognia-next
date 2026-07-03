@@ -2201,6 +2201,16 @@ export class CogniaDB extends Dexie {
     this.version(98).stores({
       inboundDrafts: "&id, kind, status, createdAt",
     })
+
+    // v99 — Inbound gateway durable request log (ADR-0043). One row per
+    // inbound request (success, upstream failure, or middleware rejection),
+    // pushed from the `gateway://request-log` Tauri event. `at` drives the
+    // newest-first view + cap trimming; `status`/`model`/`keyId` power the
+    // filters. Pure additive — no upgrade hook. See
+    // `lib/db/gateway-request-log.ts` + `src-tauri/src/gateway/server.rs`.
+    this.version(99).stores({
+      gatewayRequestLog: "&id, at, status, model, keyId",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2256,6 +2266,8 @@ export class CogniaDB extends Dexie {
   capturedItems!: Table<import("@/types/capture").CapturedItem, string>
   // v98 — External Bridge inbound-write review queue. See `lib/db/inbound-drafts.ts`.
   inboundDrafts!: Table<import("./inbound-drafts").InboundDraftRow, string>
+  // v99 — Inbound gateway durable request log. See `lib/db/gateway-request-log.ts`.
+  gatewayRequestLog!: Table<import("@/types/gateway").GatewayRequestLogRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -2316,6 +2328,24 @@ export function getDb(): CogniaDB {
   }
   if (!_db) {
     _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME)
+    // Yield to another connection that needs to upgrade the schema. Plugin
+    // Dexie tables and second tabs open the same DB name at a higher version;
+    // without this handler our connection keeps holding the old version and
+    // the other one logs "Upgrade '…' blocked by other connection holding
+    // version N" and stalls. Closing + dropping the cache lets the upgrade
+    // proceed; the next getDb() re-opens at the new version.
+    _db.on("versionchange", () => {
+      closeCachedDb()
+    })
+    // The mirror case: WE are the connection trying to upgrade and something
+    // else is holding the old version open. Downgrade Dexie's default noisy
+    // console warning to an informative log; the open retries once the other
+    // connection closes (its own versionchange handler above will yield).
+    _db.on("blocked", () => {
+      console.info(
+        "[db] schema upgrade is waiting for another connection (tab or plugin) to close; it will proceed automatically."
+      )
+    })
     const seedTarget = _db
     // Kick off seeding once per process. We import lazily to avoid a circular
     // dependency: seed.ts imports the per-table CRUD modules which import this

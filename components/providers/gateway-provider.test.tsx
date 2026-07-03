@@ -29,6 +29,11 @@ jest.mock("@/lib/gateway/telemetry-forwarder", () => ({
   forwardGatewayOutcome: (...a: unknown[]) => mockForward(...a),
 }))
 
+const mockAppendLog = jest.fn()
+jest.mock("@/lib/db/gateway-request-log", () => ({
+  appendGatewayRequestLog: (...a: unknown[]) => mockAppendLog(...a),
+}))
+
 // Subscription enrich is a no-op pass-through in these tests (returns the
 // base snapshot); the resolver itself is covered in snapshot-publisher.test.
 jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
@@ -57,6 +62,7 @@ describe("GatewayProvider", () => {
     mockPushSnapshot.mockReset().mockResolvedValue(undefined)
     mockForward.mockReset()
     mockUnsubscribe.mockReset()
+    mockAppendLog.mockReset().mockResolvedValue(undefined)
     mockDecisionResponse.mockReset().mockResolvedValue(undefined)
     for (const k of Object.keys(handlers)) delete handlers[k]
   })
@@ -101,6 +107,32 @@ describe("GatewayProvider", () => {
       })
     })
     expect(mockForward).toHaveBeenCalledWith(expect.objectContaining({ providerId: "openai" }))
+  })
+
+  it("persists request-log events into Dexie", () => {
+    render(<GatewayProvider />)
+    expect(handlers["gateway://request-log"]).toBeTruthy()
+    const row = {
+      id: "log-1",
+      at: "2026-07-03T00:00:00Z",
+      route: "/v1/chat/completions",
+      remoteIp: "127.0.0.1",
+      keyId: "k1",
+      model: "fast",
+      providerId: "groq",
+      status: 200,
+      latencyMs: 12,
+      inputTokens: 3,
+      outputTokens: 5,
+      error: null,
+      stream: false,
+    }
+    act(() => {
+      handlers["gateway://request-log"](row)
+    })
+    expect(mockAppendLog).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "log-1", status: 200 })
+    )
   })
 
   it("answers a gateway://decide request via gatewayDecisionResponse", async () => {

@@ -716,12 +716,15 @@ pub fn run() {
             remote_control::commands::remote_control_get_signing_secret,
             remote_control::commands::remote_control_query_response,
             gateway::commands::gateway_get_status,
+            gateway::commands::gateway_get_config,
             gateway::commands::gateway_update_config,
             gateway::commands::gateway_start,
             gateway::commands::gateway_stop,
-            gateway::commands::gateway_get_token,
-            gateway::commands::gateway_rotate_token,
-            gateway::commands::gateway_clear_token,
+            gateway::commands::gateway_list_keys,
+            gateway::commands::gateway_create_key,
+            gateway::commands::gateway_update_key,
+            gateway::commands::gateway_delete_key,
+            gateway::commands::gateway_reveal_key,
             gateway::commands::gateway_push_snapshot,
             gateway::commands::gateway_decision_response,
             workflow::commands::workflow_register_trigger,
@@ -1350,6 +1353,14 @@ pub fn run() {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let gw_state = app.state::<gateway::GatewayState>();
+                    // Load the persisted config (port / allowlist / timeouts /
+                    // retry / model exposure / bind interface / enabled) before
+                    // the auto-start check. A missing / corrupt file leaves the
+                    // in-memory defaults (gateway stays off).
+                    if let Ok(dir) = app.path().app_data_dir() {
+                        gw_state
+                            .hydrate_from_disk(dir.join("cognia").join("gateway-config.json"));
+                    }
                     if gw_state.config().enabled {
                         match gw_state.start(app.clone()).await {
                             Ok(()) => log::info!("inbound gateway listener started"),

@@ -28,10 +28,13 @@ import { forwardGatewayOutcome } from "@/lib/gateway/telemetry-forwarder"
 import { resolveGatewayDecision, type GatewayDecideRequest } from "@/lib/gateway/decide"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { OPENCODE_CHAT_PROVIDER_IDS } from "@/types/subscription/opencode"
+import { appendGatewayRequestLog } from "@/lib/db/gateway-request-log"
 import { useSettingsStore } from "@/stores/settings"
 import {
   GATEWAY_DECIDE_EVENT,
+  GATEWAY_REQUEST_LOG_EVENT,
   GATEWAY_REQUEST_OUTCOME_EVENT,
+  type GatewayRequestLogRow,
   type GatewayRequestOutcome,
 } from "@/types/gateway"
 
@@ -112,6 +115,21 @@ export function GatewayProvider() {
         } catch {
           // Telemetry must never break on a malformed event.
         }
+      }
+    )
+    return unsubscribe
+  }, [])
+
+  // Durable request log: persist every gateway request row into Dexie so the
+  // Settings "Logs" view survives a restart (the newapi Logs page equivalent).
+  useEffect(() => {
+    if (!isTauri()) return
+    const unsubscribe = transport.subscribe<GatewayRequestLogRow>(
+      GATEWAY_REQUEST_LOG_EVENT,
+      (row) => {
+        void appendGatewayRequestLog(row).catch(() => {
+          // A logging failure must never break the gateway.
+        })
       }
     )
     return unsubscribe

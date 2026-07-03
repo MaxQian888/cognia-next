@@ -129,13 +129,6 @@ pub fn upstream_headers(protocol: &str, api_key: Option<&str>) -> Vec<(&'static 
     headers
 }
 
-/// Whether a failed attempt should advance the walk to the next candidate
-/// (transient / upstream-side) instead of surfacing immediately (client
-/// fault).
-pub fn should_try_next(status: u16) -> bool {
-    status == 429 || status == 408 || status >= 500
-}
-
 /// Incremental SSE de-framer: feed raw bytes, get back complete `data:`
 /// payloads. `event:` lines are dropped — every payload the gateway cares
 /// about carries a `type` discriminator in the JSON itself.
@@ -266,16 +259,6 @@ mod tests {
         assert!(an.iter().any(|(n, _)| *n == "anthropic-version"));
         // Keyless local providers get no auth header but keep content-type.
         assert_eq!(upstream_headers("openai", None).len(), 1);
-    }
-
-    #[test]
-    fn transient_statuses_advance_the_walk() {
-        assert!(should_try_next(429));
-        assert!(should_try_next(500));
-        assert!(should_try_next(503));
-        assert!(!should_try_next(400));
-        assert!(!should_try_next(401));
-        assert!(!should_try_next(404));
     }
 
     #[test]
