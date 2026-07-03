@@ -29,8 +29,6 @@ use serde::{Deserialize, Serialize};
 
 pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-/// OpenAI accounts/auth issuer base.
-pub const ISSUER: &str = "https://auth.openai.com";
 /// Device-code step 1 — request the user code. JSON body `{client_id}`.
 pub const DEVICE_USERCODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
 /// Device-code step 2 — poll for the authorization code. JSON body
