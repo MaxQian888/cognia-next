@@ -33,8 +33,9 @@ import {
 } from "@/stores/plugins"
 import { deletePlugin, listPlugins, updatePlugin } from "@/lib/db/plugins"
 import { getDb } from "@/lib/db/schema"
-import { usePluginMarketplace } from "@/hooks/plugins"
+import { usePluginMarketplace, PluginsViewProvider } from "@/hooks/plugins"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
 // Dialog hosts — all driven by store targets, mounted once at the panel root.
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
@@ -179,6 +180,7 @@ export function PluginPanel() {
   // the Library section) doesn't fire a marketplace search. The Discover /
   // marketplace surfaces keep their own auto-loading hook instances.
   const market = usePluginMarketplace({ autoLoad: false })
+  const tToolbar = useTranslations("plugins.toolbar")
   const [syncing, setSyncing] = useState(false)
   // syncRegistry: refresh the marketplace catalog and stamp every installed
   // plugin with `manifest.updateAvailable` if the catalog reports a newer
@@ -210,10 +212,17 @@ export function PluginPanel() {
           })
         })
       )
+      toast.success(tToolbar("syncDone", { count: updateIds.size }))
+    } catch (err) {
+      // The toolbar fires this handler with `void` — surface the failure
+      // here or it becomes an unhandled rejection with a stuck-silent UI.
+      toast.error(
+        tToolbar("syncFailed", { message: err instanceof Error ? err.message : String(err) })
+      )
     } finally {
       setSyncing(false)
     }
-  }, [market])
+  }, [market, tToolbar])
 
   const dialogHosts = (
     <>
@@ -233,14 +242,14 @@ export function PluginPanel() {
   )
 
   return (
-    <>
+    <PluginsViewProvider>
       {dialogHosts}
       <NewShellLayout
         onCheckUpdates={() => setUpdateOpen(true)}
         onSyncRegistry={handleSync}
         syncing={syncing}
       />
-    </>
+    </PluginsViewProvider>
   )
 }
 

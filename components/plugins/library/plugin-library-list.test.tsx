@@ -109,6 +109,32 @@ describe("PluginLibraryList", () => {
     expect(screen.getByTestId("plugin-panel-grid")).toBeInTheDocument()
   })
 
+  it("select-all checkbox selects every filtered plugin, then clears", () => {
+    const rows = [makePlugin("a"), makePlugin("b"), makePlugin("c")]
+    mockState.filtered = rows
+    mockState.all = rows
+    mockState.totals = { total: 3, enabled: 3, errored: 0, loading: 0, updateAvailable: 0 }
+    render(<PluginLibraryList />)
+    const checkbox = screen.getByTestId("plugin-library-select-all")
+    fireEvent.click(checkbox)
+    expect(usePluginsStore.getState().selection).toEqual(new Set(["a", "b", "c"]))
+    fireEvent.click(checkbox)
+    expect(usePluginsStore.getState().selection.size).toBe(0)
+  })
+
+  it("select-all shows indeterminate when only part of the list is selected", () => {
+    const rows = [makePlugin("a"), makePlugin("b")]
+    mockState.filtered = rows
+    mockState.all = rows
+    mockState.totals = { total: 2, enabled: 2, errored: 0, loading: 0, updateAvailable: 0 }
+    usePluginsStore.setState({ selection: new Set(["a"]) })
+    render(<PluginLibraryList />)
+    expect(screen.getByTestId("plugin-library-select-all")).toHaveAttribute(
+      "data-state",
+      "indeterminate"
+    )
+  })
+
   it("highlights the row that matches detailPluginId via data-active=true", () => {
     const rows = [makePlugin("a"), makePlugin("b")]
     mockState.filtered = rows

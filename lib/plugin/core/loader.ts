@@ -231,7 +231,10 @@ export class PluginLoader {
         const definition = await builtinRegistryEntry.load()
         this.loadedModules.set(manifest.id, {
           definition,
-          exports: { default: definition },
+          // Prefer the entry's full export namespace when provided (built-ins
+          // whose manifest declares connectors[] and expose a named factory);
+          // otherwise the default-only shape is enough for the common case.
+          exports: builtinRegistryEntry.moduleExports ?? { default: definition },
         })
         return definition
       }

@@ -13,6 +13,7 @@ import {
   getPluginManager,
   initializePluginManager,
   __resetPluginManagerForTesting,
+  toClonableManifest,
 } from "./manager"
 import {
   getPluginPointDiagnostics,
@@ -1762,6 +1763,69 @@ describe("PluginManager", () => {
       expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
       // The signature verifier must never be consulted for a built-in.
       expect(mockVerifier.verify).not.toHaveBeenCalled()
+    })
+
+    it("applies a plugin's declared Dexie tables BEFORE loadPlugin runs activate()", async () => {
+      // Regression: loadPlugin runs the plugin's activate(), and activate()
+      // typically touches ctx.dexie right away (github-delivery counts its 4
+      // tables). If applyPluginTables runs AFTER loadPlugin, that first
+      // db.table() throws "Table <id>:<name> does not exist" on a first-ever
+      // enable (no persisted pluginDexieMeta row to restore at boot), and the
+      // meta row is never written — so the plugin can never be enabled on any
+      // later boot either. applyPluginTables MUST precede loadPlugin.
+      const { applyPluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        applyPluginTables: jest.Mock
+      }
+      applyPluginTables.mockClear()
+
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = {
+            ...store.plugins[pluginId],
+            status: "installed",
+            installedAt: new Date(),
+          }
+        }),
+        loadPlugin: jest.fn(),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      await manager.scanPlugins()
+
+      // github-delivery declares a `dexie` block in its manifest, so
+      // applyPluginTables must fire. Stub the manager's loadPlugin (which is
+      // what actually runs activate()) so we can observe invocation order
+      // without a real IndexedDB / module load.
+      const loadSpy = jest.spyOn(manager, "loadPlugin").mockResolvedValue(undefined)
+
+      await manager.enablePlugin("github-delivery")
+
+      expect(applyPluginTables).toHaveBeenCalledTimes(1)
+      expect(loadSpy).toHaveBeenCalledTimes(1)
+      expect(applyPluginTables.mock.invocationCallOrder[0]).toBeLessThan(
+        loadSpy.mock.invocationCallOrder[0]
+      )
     })
 
     it("registers a WASM plugin's declared tools so the agent can call them", async () => {
@@ -3996,5 +4060,44 @@ describe("PluginManager", () => {
         jest.useRealTimers()
       }
     })
+  })
+})
+
+describe("toClonableManifest", () => {
+  it("strips function-valued members so the manifest is structured-clone-safe", () => {
+    const write = jest.fn()
+    const manifest = {
+      id: "cognia-agent-team-examples",
+      name: "Agent Team Examples",
+      version: "1.0.0",
+      sharedMemoryAdapters: [
+        { id: "demo", name: "In-Memory (demo)", write, read: () => undefined },
+      ],
+    } as unknown as PluginManifest
+
+    const clonable = toClonableManifest(manifest)
+
+    // Serializable metadata survives…
+    expect(clonable.id).toBe("cognia-agent-team-examples")
+    const adapters = (
+      clonable as unknown as { sharedMemoryAdapters: Array<Record<string, unknown>> }
+    ).sharedMemoryAdapters
+    expect(adapters[0].id).toBe("demo")
+    expect(adapters[0].name).toBe("In-Memory (demo)")
+    // …but the function members are gone, so structuredClone no longer throws.
+    expect(adapters[0].write).toBeUndefined()
+    expect(adapters[0].read).toBeUndefined()
+    expect(() => structuredClone(clonable)).not.toThrow()
+  })
+
+  it("returns a manifest with no functions unchanged in shape", () => {
+    const manifest = {
+      id: "plain",
+      name: "Plain",
+      version: "0.1.0",
+      capabilities: ["tools"],
+    } as unknown as PluginManifest
+
+    expect(toClonableManifest(manifest)).toEqual(manifest)
   })
 })

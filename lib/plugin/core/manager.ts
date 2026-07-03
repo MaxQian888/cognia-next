@@ -438,6 +438,25 @@ export function __resetPluginManagerForTesting(): void {
   pluginManagerInstance = null
 }
 
+/**
+ * Produce a structured-clone-safe copy of a plugin manifest for persistence
+ * into the Dexie `plugins` table. Some manifests carry live runtime objects
+ * whose members are functions (e.g. a `sharedMemoryAdapters[]` adapter's
+ * `write`/`read`/`delete`). IndexedDB's structured-clone algorithm throws
+ * `DataCloneError` on functions, which would abort the whole discovery-row
+ * write. A JSON round-trip drops every function-valued (and otherwise
+ * non-serializable) property while preserving the serializable metadata the
+ * discovery UI actually reads. Falls back to the original object only if the
+ * manifest is somehow not JSON-encodable, letting the caller's try/catch log it.
+ */
+export function toClonableManifest(manifest: PluginManifest): PluginManifest {
+  try {
+    return JSON.parse(JSON.stringify(manifest)) as PluginManifest
+  } catch {
+    return manifest
+  }
+}
+
 // =============================================================================
 // Plugin Manager Class
 // =============================================================================
@@ -1207,16 +1226,26 @@ export class PluginManager {
     source: PluginSource,
     path: string
   ): Promise<void> {
+    // Some manifests carry LIVE runtime objects with function members — e.g.
+    // agent-team-examples' `sharedMemoryAdapters[].write/read/…`. IndexedDB's
+    // structured-clone algorithm rejects functions with DataCloneError, so the
+    // whole row fails to persist and the plugin never reaches the Dexie-backed
+    // UI. Strip to a clone-safe projection first. The live manifest (functions
+    // intact) is rebuilt fresh from the module on every discovery and is what
+    // enable-time registration reads; the persisted row is metadata-only.
+    const serializableManifest = toClonableManifest(manifest)
     try {
       await upsertPlugin({
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        type: (manifest.type as string) || "frontend",
+        id: serializableManifest.id,
+        name: serializableManifest.name,
+        version: serializableManifest.version,
+        type: (serializableManifest.type as string) || "frontend",
         source,
         path,
-        manifest: manifest as unknown as Record<string, unknown>,
-        capabilities: Array.isArray(manifest.capabilities) ? [...manifest.capabilities] : [],
+        manifest: serializableManifest as unknown as Record<string, unknown>,
+        capabilities: Array.isArray(serializableManifest.capabilities)
+          ? [...serializableManifest.capabilities]
+          : [],
       })
     } catch (error) {
       loggers.manager.warn(`[plugin:${manifest.id}] failed to persist discovery row to Dexie`, {
@@ -2021,7 +2050,25 @@ export class PluginManager {
         store.setPluginStatus?.(pluginId, "installed")
       }
 
-      // Load first when not currently active in runtime. Re-read the live
+      // Apply any declared Dexie tables BEFORE loadPlugin. loadPlugin runs the
+      // plugin's activate() (see loadPlugin → definition.activate), and
+      // activate() typically touches ctx.dexie right away (e.g. github-delivery
+      // counts its tables to surface mis-declared schemas). If the namespaced
+      // stores aren't in the live schema yet, that first db.table() throws
+      // "Table <id>:<name> does not exist" and enable fails. Worse, it fails
+      // permanently: the pluginDexieMeta row that restorePluginDexieTables
+      // relies on at boot is only written by applyPluginTables, which never runs
+      // if loadPlugin already threw — so the tables are never restored on any
+      // later boot either. Applying tables first breaks that deadlock.
+      if (plugin.manifest.dexie) {
+        await applyPluginTables(
+          getDb() as unknown as import("dexie").default,
+          pluginId,
+          plugin.manifest.dexie
+        )
+      }
+
+      // Load next when not currently active in runtime. Re-read the live
       // status so the just-applied error recovery (or any concurrent enable) is
       // reflected here rather than the stale captured snapshot.
       const currentStatus = store.plugins[pluginId]?.status ?? plugin.status
@@ -2031,16 +2078,6 @@ export class PluginManager {
         !this.loader.isLoaded(pluginId)
       ) {
         await this.loadPlugin(pluginId)
-      }
-
-      // Apply any declared Dexie tables before enabling the plugin so that
-      // ctx.dexie is ready when the plugin's activate() runs.
-      if (plugin.manifest.dexie) {
-        await applyPluginTables(
-          getDb() as unknown as import("dexie").default,
-          pluginId,
-          plugin.manifest.dexie
-        )
       }
 
       // Register plugin-provided i18n strings so the next render of any

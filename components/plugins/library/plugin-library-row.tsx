@@ -7,7 +7,7 @@
 // without scrolling forever. Action set is shared with PluginCard via
 // PluginRowActionsMenu so the two views can't drift.
 
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { CircleAlertIcon, ShieldCheckIcon, TriangleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -35,7 +35,10 @@ interface Props {
   onRollback?: (id: string) => void
 }
 
-export function PluginLibraryRow({
+// Memoized: the list re-renders on every store change (search keystrokes,
+// selection, detail focus) while row objects keep their identity across
+// re-filters — memo limits the work to rows whose own props changed.
+export const PluginLibraryRow = memo(function PluginLibraryRow({
   plugin,
   selected,
   active,
@@ -170,7 +173,7 @@ export function PluginLibraryRow({
       />
     </div>
   )
-}
+})
 
 interface CapabilityHoverChipProps {
   capability: string

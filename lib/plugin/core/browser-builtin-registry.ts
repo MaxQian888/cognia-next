@@ -45,6 +45,10 @@ import evalModule from "@/plugins/eval/src/index"
 import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
 import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
 import githubDeliveryModule from "@/plugins/github-delivery/src/index"
+// Namespace import: the connectors bridge looks up the adapter factory
+// (`createGithubAdapterForBridge`) by name in the module's exports, so the
+// loader must cache the full export namespace — not just `{ default }`.
+import * as githubDeliveryExports from "@/plugins/github-delivery/src/index"
 import workflowAiModule from "@/plugins/workflow-ai/src/index"
 import agentTeamExamplesModule from "@/plugins/agent-team-examples/src/index"
 import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
@@ -72,6 +76,14 @@ export interface BrowserBuiltinRegistryEntry {
   path: string
   compatibilityDiagnostics: ExtensionCompatibilityDiagnostic[]
   load?: () => Promise<PluginDefinition>
+  /**
+   * Full module export namespace, cached by the loader as the plugin's
+   * `moduleExports`. Set this only for built-ins whose manifest declares
+   * `connectors[]` (or any other bridge that resolves a factory by name from
+   * exports) — otherwise the loader falls back to `{ default: definition }`,
+   * which drops the named factory functions and the bridge skips them.
+   */
+  moduleExports?: Record<string, unknown>
 }
 
 function resolvePluginModule(mod: unknown): PluginDefinition {
@@ -159,6 +171,11 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://github-delivery",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(githubDeliveryModule),
+    // github-delivery declares a `connectors[]` factory; the loader must keep
+    // the named export (`createGithubAdapterForBridge`) so connectors-bridge
+    // can resolve it. Without this it caches only `{ default }` and the bridge
+    // logs "factory … not found in exports — skipping".
+    moduleExports: githubDeliveryExports as unknown as Record<string, unknown>,
   },
   {
     manifest: builtinManifest(workflowAiManifest, workflowAiModule),
