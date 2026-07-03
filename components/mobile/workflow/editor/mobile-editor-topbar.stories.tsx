@@ -15,7 +15,13 @@ const meta = {
   title: "Mobile/Workflow/Editor/MobileEditorTopbar",
   component: MobileEditorTopbar,
   parameters: { layout: "fullscreen" },
-  args: { store, reactFlowInstance: null, mode: "read", onToggleMode: fn() },
+  args: {
+    store,
+    reactFlowInstance: null,
+    mode: "read",
+    onToggleMode: fn(),
+    onOpenCopilot: fn(),
+  },
   decorators: [
     (Story) => (
       <div className="mx-auto w-[390px] border">

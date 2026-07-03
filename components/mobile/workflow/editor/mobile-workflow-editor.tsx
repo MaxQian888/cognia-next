@@ -32,6 +32,7 @@ import { MobileCanvas, type WorkflowFlowInstance } from "./mobile-canvas"
 import { MobileEditorTopbar } from "./mobile-editor-topbar"
 import { MobileNodePaletteSheet } from "./mobile-node-palette-sheet"
 import { MobileNodeInspectorDrawer } from "./mobile-node-inspector-drawer"
+import { MobileWorkflowCopilotSheet } from "./mobile-workflow-copilot-sheet"
 import { useTapConnect } from "./use-tap-connect"
 
 function MobileEditorInner({ store }: { store: EditorStore }) {
@@ -40,11 +41,14 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
   const [mode, setMode] = useState<"read" | "edit">("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [copilotOpen, setCopilotOpen] = useState(false)
   const [rf, setRf] = useState<WorkflowFlowInstance | null>(null)
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
   const tapConnect = useTapConnect(store)
   const selectedId = store((s) => s.selectedNodeIds[0] ?? null)
   const selectedEdgeId = store((s) => s.selectedEdgeIds[0] ?? null)
+  const workflowId = store((s) => s.baseWorkflow.id)
+  const workflowName = store((s) => s.baseWorkflow.name)
 
   // `touchConnect` arms the shared node renderer's tap-to-connect entry: tapping
   // a source handle starts a connection. It's an edit-mode affordance only, and
@@ -152,6 +156,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         reactFlowInstance={rf}
         mode={mode}
         onToggleMode={onToggleMode}
+        onOpenCopilot={() => setCopilotOpen(true)}
       />
       <div ref={canvasAreaRef} className="relative min-h-0 flex-1">
         <MobileCanvas
@@ -218,6 +223,13 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         store={store}
         canConnect={mode === "edit"}
         onStartConnect={onStartConnect}
+      />
+      <MobileWorkflowCopilotSheet
+        open={copilotOpen}
+        onOpenChange={setCopilotOpen}
+        store={store}
+        workflowId={workflowId}
+        workflowName={workflowName}
       />
     </div>
   )

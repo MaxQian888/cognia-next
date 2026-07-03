@@ -56,6 +56,7 @@ import { RightSidebar } from "./right-sidebar"
 import { CommandPalette } from "./command-palette"
 import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
 import * as ResizablePrimitive from "react-resizable-panels"
+import type { PanelImperativeHandle } from "react-resizable-panels"
 import { GripVerticalIcon } from "lucide-react"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 
@@ -134,6 +135,35 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const [saving, setSaving] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+
+  // Collapsible side panels (palette / right sidebar). Imperative collapse —
+  // never a key-remount, which would tear down React Flow. `onResize` keeps
+  // the flags in sync when the user drags a divider past the min size (the
+  // panels snap collapsed) so the toolbar toggles always reflect reality.
+  const leftPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const rightPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
+  const handleLeftPanelResize = useCallback(
+    (size: { asPercentage: number }) => setLeftCollapsed(size.asPercentage === 0),
+    []
+  )
+  const handleRightPanelResize = useCallback(
+    (size: { asPercentage: number }) => setRightCollapsed(size.asPercentage === 0),
+    []
+  )
+  const toggleLeftPanel = useCallback(() => {
+    const panel = leftPanelRef.current
+    if (!panel) return
+    if (panel.isCollapsed()) panel.expand()
+    else panel.collapse()
+  }, [])
+  const toggleRightPanel = useCallback(() => {
+    const panel = rightPanelRef.current
+    if (!panel) return
+    if (panel.isCollapsed()) panel.expand()
+    else panel.collapse()
+  }, [])
   // Canvas-toolbar view state. Local to this editor instance (the store is
   // recreated per workflow, so these reset on navigation) — see canvas-toolbar.
   // `interactive` mirrors React Flow's native lock; `minimapVisible` and
@@ -265,8 +295,22 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     })
   }, [perfTier.flags.edgeAnimations, reactFlowInstance])
   const ctxConfigureNode = useCallback(
-    (nodeId: string) => setSelectedNodes([nodeId]),
-    [setSelectedNodes]
+    (nodeId: string) => {
+      setSelectedNodes([nodeId])
+      // Explicit configure gesture — reveal the inspector even over a pinned
+      // right-sidebar tab (the plain click auto-switch respects pins), and
+      // pop the sidebar back open if the user had collapsed it.
+      if (rightPanelRef.current?.isCollapsed()) rightPanelRef.current.expand()
+      useStore.getState().requestInspectorPanel()
+    },
+    [setSelectedNodes, useStore]
+  )
+  // Node double-click = the same explicit configure gesture as the context
+  // menu's "Configure" — surfaces the form when a pinned Chat/Runs tab would
+  // otherwise swallow the selection silently.
+  const handleNodeDoubleClick = useCallback(
+    (_e: React.MouseEvent, node: { id: string }) => ctxConfigureNode(node.id),
+    [ctxConfigureNode]
   )
   // Forward-declared via ref so the call sites below can reach the
   // post-declaration `handleRun`. The ref is wired by a `useEffect` after
@@ -345,6 +389,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         toast.error(tDiag("blockedRunTitle"), {
           description: tDiag("blockedRunSummary", { count: diagnostics.errorCount }),
         })
+        if (rightPanelRef.current?.isCollapsed()) rightPanelRef.current.expand()
         useStore.getState().requestProblemsPanel()
         return
       }
@@ -551,6 +596,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         toast.error(tDiag("blockedRunTitle"), {
           description: tDiag("blockedRunSummary", { count: diagnostics.errorCount }),
         })
+        if (rightPanelRef.current?.isCollapsed()) rightPanelRef.current.expand()
         useStore.getState().requestProblemsPanel()
         return
       }
@@ -775,6 +821,19 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setPaletteOpen((v) => !v)
         return
       }
+      // Ctrl/Cmd+B / Ctrl/Cmd+J — toggle the node palette / right sidebar.
+      // Mirrors the Canvas-guild (VS Code) bindings so muscle memory carries
+      // over; reclaims ~34% width on laptop screens.
+      if (key === "b" && !e.shiftKey) {
+        e.preventDefault()
+        toggleLeftPanel()
+        return
+      }
+      if (key === "j" && !e.shiftKey) {
+        e.preventDefault()
+        toggleRightPanel()
+        return
+      }
       // Ctrl/Cmd+F → in-canvas Spotlight search. Skipped when typing into
       // an inspector field so the browser's native find UI still works
       // for `<input>` values.
@@ -840,7 +899,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [handleSave, handleUndo, handleRedo, useStore])
+  }, [handleSave, handleUndo, handleRedo, useStore, toggleLeftPanel, toggleRightPanel])
 
   const addManualTrigger = useCallback(() => {
     const id = useStore.getState().addNode("trigger.manual", { x: 80, y: 80 })
@@ -949,6 +1008,10 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onImportJson={handleImportJson}
         onOpenCommandPalette={handleOpenPalette}
         onOpenShortcuts={handleOpenShortcuts}
+        onToggleLeftPanel={toggleLeftPanel}
+        leftPanelCollapsed={leftCollapsed}
+        onToggleRightPanel={toggleRightPanel}
+        rightPanelCollapsed={rightCollapsed}
       />
       <ShareLinkDialog
         open={shareImageOpen}
@@ -967,10 +1030,21 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         className="flex flex-1 overflow-hidden"
         id="cognia-workflow-editor-layout"
       >
-        <ResizablePrimitive.Panel defaultSize="20%" minSize="14%" maxSize="32%">
+        <ResizablePrimitive.Panel
+          panelRef={leftPanelRef}
+          defaultSize="20%"
+          minSize="14%"
+          maxSize="32%"
+          collapsible
+          collapsedSize="0%"
+          onResize={handleLeftPanelResize}
+          className="overflow-hidden"
+        >
           <NodeSearchSidebar onAddNodeAtCenter={handleAddAtCenter} />
         </ResizablePrimitive.Panel>
-        <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
+        <ResizablePrimitive.Separator
+          className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${leftCollapsed ? "hidden" : ""}`}
+        >
           <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
             <GripVerticalIcon className="size-2.5" />
           </div>
@@ -992,6 +1066,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             onPaneContextMenu={handlePaneContextMenu}
             onNodeContextMenu={handleNodeContextMenu}
             onEdgeContextMenu={handleEdgeContextMenu}
+            onNodeDoubleClick={handleNodeDoubleClick}
             overlays={
               <>
                 <SelectionToolbar
@@ -1032,12 +1107,23 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             }
           />
         </ResizablePrimitive.Panel>
-        <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
+        <ResizablePrimitive.Separator
+          className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed ? "hidden" : ""}`}
+        >
           <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
             <GripVerticalIcon className="size-2.5" />
           </div>
         </ResizablePrimitive.Separator>
-        <ResizablePrimitive.Panel defaultSize="28%" minSize="20%" maxSize="42%">
+        <ResizablePrimitive.Panel
+          panelRef={rightPanelRef}
+          defaultSize="28%"
+          minSize="20%"
+          maxSize="42%"
+          collapsible
+          collapsedSize="0%"
+          onResize={handleRightPanelResize}
+          className="overflow-hidden"
+        >
           <RightSidebar
             useStore={store}
             className="h-full w-full"

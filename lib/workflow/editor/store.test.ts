@@ -1073,6 +1073,17 @@ describe("editor store — problems-panel signal", () => {
   })
 })
 
+describe("editor store — inspector-panel signal", () => {
+  it("sets and clears the requestedInspectorPanel signal", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().requestedInspectorPanel).toBe(false)
+    useStore.getState().requestInspectorPanel()
+    expect(useStore.getState().requestedInspectorPanel).toBe(true)
+    useStore.getState().clearRequestedInspectorPanel()
+    expect(useStore.getState().requestedInspectorPanel).toBe(false)
+  })
+})
+
 describe("editor store — insertNodeOnEdge", () => {
   it("splits an edge into source → new → target in one undo entry", () => {
     const useStore = createEditorStore(emptyWorkflow())

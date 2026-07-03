@@ -15,6 +15,7 @@
  */
 
 import { memo, useCallback } from "react"
+import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import {
   AlignCenterHorizontal,
@@ -197,19 +198,30 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   const selectedNodeIds = store((s: EditorState) => s.selectedNodeIds)
   const count = selectedNodeIds.length
 
-  // Stable-boolean selector: re-renders only when the lock state actually
-  // flips, not on every drag frame that mutates `nodes`.
-  const allLocked = store((s: EditorState) => {
-    const sel = new Set(s.selectedNodeIds)
-    const ns = s.nodes.filter((n) => sel.has(n.id))
-    return ns.length > 0 && ns.every((n) => Boolean(n.data.locked))
-  })
-  // The single selected group container's id, or null. Stable string selector.
-  const singleGroupId = store((s: EditorState) => {
-    if (s.selectedNodeIds.length !== 1) return null
-    const n = s.nodes.find((x) => x.id === s.selectedNodeIds[0])
-    return n && n.data.kind === "annotation.group" ? n.id : null
-  })
+  // Stable-primitive selector: re-renders only when the lock state / group
+  // status actually flips, not on every drag frame that mutates `nodes`.
+  // One `useShallow` subscription with a single early-exit pass over the
+  // node list (instead of two selectors doing filter + find each frame) —
+  // drag frames still invoke the selector, but the scan stops as soon as
+  // every selected node has been seen.
+  const { allLocked, singleGroupId } = store(
+    useShallow((s: EditorState) => {
+      const sel = s.selectedNodeIds
+      if (sel.length === 0) return { allLocked: false, singleGroupId: null as string | null }
+      const wanted = new Set(sel)
+      let seen = 0
+      let locked = 0
+      let groupId: string | null = null
+      for (const n of s.nodes) {
+        if (!wanted.has(n.id)) continue
+        seen++
+        if (n.data.locked) locked++
+        if (sel.length === 1 && n.data.kind === "annotation.group") groupId = n.id
+        if (seen === wanted.size) break
+      }
+      return { allLocked: seen > 0 && locked === seen, singleGroupId: groupId }
+    })
+  )
 
   const gatherRects = useCallback((): NodeRect[] => {
     const selected = new Set(selectedNodeIds)

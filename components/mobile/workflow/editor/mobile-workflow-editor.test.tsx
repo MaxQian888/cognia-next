@@ -50,6 +50,26 @@ jest.mock("./mobile-editor-topbar", () => ({
       <button data-testid="toggle-mode" onClick={props.onToggleMode as () => void}>
         toggle
       </button>
+      <button data-testid="open-copilot" onClick={props.onOpenCopilot as () => void}>
+        copilot
+      </button>
+    </div>
+  ),
+}))
+
+jest.mock("./mobile-workflow-copilot-sheet", () => ({
+  MobileWorkflowCopilotSheet: (props: ChildProps) => (
+    <div
+      data-testid="copilot-sheet"
+      data-open={String(props.open)}
+      data-workflow-id={String(props.workflowId)}
+    >
+      <button
+        data-testid="close-copilot"
+        onClick={() => (props.onOpenChange as (o: boolean) => void)(false)}
+      >
+        close
+      </button>
     </div>
   ),
 }))
@@ -139,6 +159,16 @@ describe("<MobileWorkflowEditor />", () => {
     fireEvent.click(screen.getByTestId("toggle-mode"))
     expect(screen.getByTestId("canvas")).toHaveAttribute("data-mode", "edit")
     expect(screen.getByTestId("mobile-editor-fab")).toBeInTheDocument()
+  })
+
+  it("opens the copilot sheet from the topbar and passes the workflow id", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-open", "false")
+    expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-workflow-id", "wf_edit")
+    fireEvent.click(screen.getByTestId("open-copilot"))
+    expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-open", "true")
+    fireEvent.click(screen.getByTestId("close-copilot"))
+    expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-open", "false")
   })
 
   it("opens the inspector drawer when a node is tapped", () => {

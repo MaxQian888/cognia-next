@@ -286,6 +286,16 @@ export interface EditorState extends EditorStateSnapshot {
   requestedProblemsPanel: boolean
   requestProblemsPanel: () => void
   clearRequestedProblemsPanel: () => void
+  /**
+   * Signal → right sidebar to reveal the Inspector tab. Set by explicit
+   * configure gestures (node double-click, context-menu "Configure") so the
+   * form surfaces even when the user pinned another tab. The sidebar consumes
+   * and clears it, and drops any pinned tab so subsequent selections resume
+   * auto-switching.
+   */
+  requestedInspectorPanel: boolean
+  requestInspectorPanel: () => void
+  clearRequestedInspectorPanel: () => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -565,6 +575,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         requestedRunFromStepId: null,
         requestedRunSingleStepId: null,
         requestedProblemsPanel: false,
+        requestedInspectorPanel: false,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
         setIsDraggingAny: (isDraggingAny) => set({ isDraggingAny }),
@@ -634,6 +645,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedRunSingleStep: () => set({ requestedRunSingleStepId: null }),
         requestProblemsPanel: () => set({ requestedProblemsPanel: true }),
         clearRequestedProblemsPanel: () => set({ requestedProblemsPanel: false }),
+        requestInspectorPanel: () => set({ requestedInspectorPanel: true }),
+        clearRequestedInspectorPanel: () => set({ requestedInspectorPanel: false }),
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
@@ -829,7 +842,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           const seenIn = new Set<string>()
           const inboundEdges: RFWorkflowEdge[] = []
           for (const r of rewires.inbound) {
-            const key = `${r.source} ${r.sourceHandle ?? ""}`
+            const key = `${r.source}\u0000${r.sourceHandle ?? ""}`
             if (seenIn.has(key)) continue
             seenIn.add(key)
             inboundEdges.push({
@@ -843,7 +856,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           const seenOut = new Set<string>()
           const outboundEdges: RFWorkflowEdge[] = []
           for (const r of rewires.outbound) {
-            const key = `${r.target} ${r.targetHandle ?? ""}`
+            const key = `${r.target}\u0000${r.targetHandle ?? ""}`
             if (seenOut.has(key)) continue
             seenOut.add(key)
             outboundEdges.push({

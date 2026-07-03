@@ -108,6 +108,8 @@ export interface FlowCanvasProps {
   onPaneContextMenu: (event: React.MouseEvent | MouseEvent) => void
   onNodeContextMenu: (event: React.MouseEvent, node: { id: string }) => void
   onEdgeContextMenu: (event: React.MouseEvent, edge: { id: string }) => void
+  /** Explicit configure gesture — CanvasInner reveals the inspector. */
+  onNodeDoubleClick?: (event: React.MouseEvent, node: { id: string }) => void
   /**
    * Toolbars + empty-state, created by `CanvasInner`. Rendered inside the
    * canvas wrapper (so they stay positioned over the flow) but their element
@@ -133,6 +135,7 @@ export function FlowCanvas({
   onPaneContextMenu,
   onNodeContextMenu,
   onEdgeContextMenu,
+  onNodeDoubleClick,
   overlays,
 }: FlowCanvasProps) {
   const useStore = store
@@ -464,6 +467,7 @@ export function FlowCanvas({
           onPaneContextMenu={onPaneContextMenu}
           onNodeContextMenu={onNodeContextMenu}
           onEdgeContextMenu={onEdgeContextMenu}
+          onNodeDoubleClick={onNodeDoubleClick}
           onInit={setReactFlowInstance}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}

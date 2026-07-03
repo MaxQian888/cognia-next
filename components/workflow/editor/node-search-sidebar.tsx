@@ -233,7 +233,10 @@ function NodeCategoryGroup({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <p className="px-6 pb-1 text-[11px] text-muted-foreground/70">{hint}</p>
-        <div className="px-2 pb-1 space-y-1">
+        {/* content-visibility skips layout/paint for groups scrolled out of
+            view — the palette renders the full catalog unvirtualized, so this
+            is the cheap 80% of a virtual list for plugin-heavy catalogs. */}
+        <div className="px-2 pb-1 space-y-1 [content-visibility:auto] [contain-intrinsic-size:auto_300px]">
           {entries.map((entry) => (
             <NodeChip key={entry.kind} entry={entry} onAddNodeAtCenter={onAddNodeAtCenter} />
           ))}
@@ -290,7 +293,10 @@ function PinnedNodeGroup({
   )
 }
 
-function NodeChip({
+// Memoized: catalog entries are stable references, so a favorite toggle (or
+// any parent re-render from search/preference churn) only re-renders the
+// chips whose own subscribed slice actually changed.
+const NodeChip = memo(function NodeChip({
   entry,
   onAddNodeAtCenter,
 }: {
@@ -371,4 +377,4 @@ function NodeChip({
       </button>
     </div>
   )
-}
+})

@@ -93,6 +93,7 @@ function RightSidebarInner({
     errorCount,
     warningCount,
     requestedProblemsPanel,
+    requestedInspectorPanel,
   } = useStore(
     useShallow((s: EditorState) => ({
       selectionCount: s.selectedNodeIds.length,
@@ -102,6 +103,7 @@ function RightSidebarInner({
       errorCount: s.diagnostics?.errorCount ?? 0,
       warningCount: s.diagnostics?.warningCount ?? 0,
       requestedProblemsPanel: s.requestedProblemsPanel ?? false,
+      requestedInspectorPanel: s.requestedInspectorPanel ?? false,
     }))
   )
   // Inspector shows the node form when nodes are selected, else the edge
@@ -132,6 +134,17 @@ function RightSidebarInner({
     setTab("problems")
     useStore.getState().clearRequestedProblemsPanel()
   }, [requestedProblemsPanel, useStore])
+
+  // Explicit configure gesture (node double-click / context-menu "Configure")
+  // → reveal the Inspector even over a pinned tab, and drop the pin so
+  // subsequent selections resume the normal auto-switch behavior.
+  useEffect(() => {
+    if (!requestedInspectorPanel) return
+    userPinnedTab.current = null
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional bridge from the Zustand requestedInspectorPanel signal into the local tab state.
+    setTab("inspector")
+    useStore.getState().clearRequestedInspectorPanel()
+  }, [requestedInspectorPanel, useStore])
 
   const handleTabChange = (next: string) => {
     const v: RightSidebarTab =

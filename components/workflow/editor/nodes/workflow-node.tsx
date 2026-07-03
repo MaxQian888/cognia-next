@@ -1,6 +1,6 @@
 "use client"
 
-import { createElement, memo } from "react"
+import { createElement, memo, useMemo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import {
   Loader2 as LoadingIcon,
@@ -191,16 +191,21 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   const tRoot = useTranslations() as unknown as ((key: string) => string) & {
     has?: (key: string) => boolean
   }
-  const catalogEntry = nodeCatalogEntry(data.kind)
-  const displayLabel =
-    data.label === defaultLabelFor(data.kind)
-      ? translateNodeLabel(tRoot, {
-          kind: data.kind,
-          pluginId: catalogEntry?.pluginId,
-          field: "label",
-          fallback: catalogEntry?.label ?? data.label,
-        })
-      : data.label
+  // (A9) Catalog lookup + label translation are stable per (kind, label) —
+  // memoized so hover/selection re-renders skip the registry + i18n walk.
+  const catalogEntry = useMemo(() => nodeCatalogEntry(data.kind), [data.kind])
+  const displayLabel = useMemo(
+    () =>
+      data.label === defaultLabelFor(data.kind)
+        ? translateNodeLabel(tRoot, {
+            kind: data.kind,
+            pluginId: catalogEntry?.pluginId,
+            field: "label",
+            fallback: catalogEntry?.label ?? data.label,
+          })
+        : data.label,
+    [data.label, data.kind, catalogEntry, tRoot]
+  )
   const status: NodeRunStatus = decoration.runStatus ?? data.runStatus ?? "idle"
   const validationFields = decoration.validation?.fields
   const validationSummary = decoration.validation?.summary
@@ -247,28 +252,53 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // during editing) no longer re-render every node. Per-render reads of
   // those arrays go through `store.getState()` + the indexed helpers in
   // `edge-index.ts`, which are O(1).
+  //
+  // (A9) The global signals (`hoveredNodeId`, `spotlightedNodeId`,
+  // `hoveredEdgeId`, `connectionState`) are derived to *per-node booleans*
+  // INSIDE the selector: hovering one node used to flip the raw id in every
+  // node's slice and re-render the whole graph; now only the two nodes whose
+  // derived flags actually change (the previous and next hover target)
+  // re-render. Same for connection drags — pointer moves that don't change
+  // this node's candidate/ring status are no-ops for it.
   const storeSelector = useShallow(
     (
       s: Parameters<NonNullable<typeof store>>[0] extends (state: infer S) => unknown ? S : never
-    ) => ({
-      hoveredNodeId: s.hoveredNodeId,
-      setHoveredNode: s.setHoveredNode,
-      setSelectedNodes: s.setSelectedNodes,
-      removeNodes: s.removeNodes,
-      performanceTier: s.performanceTier,
-      nodeCount: s.nodes.length,
-      spotlightedNodeId: s.spotlightedNodeId,
-      hoveredEdgeId: s.hoveredEdgeId,
-      connectionState: s.connectionState,
-      touchConnect: s.touchConnect,
-      requestContextMenu: s.requestContextMenu,
-      requestRunFromStep: s.requestRunFromStep,
-      errorPolicy: s.baseWorkflow.settings.errorPolicy,
-    })
+    ) => {
+      const cs = s.connectionState
+      let connectionRing: "compatible" | "incompatible" | null = null
+      let isActiveCandidate = false
+      if (cs && cs.sourceId !== id && showInput) {
+        isActiveCandidate = cs.candidate?.nodeId === id
+        const kindOk = !data.kind.startsWith("trigger.") && data.kind !== "annotation.note"
+        // (A5) Disallow self / multi-incoming-cycle creation cheaply via the
+        // indexed edge lookup. The canonical gate runs through
+        // `validateConnection` when the actual drop happens.
+        const wouldCycle = hasEdgeBetween(s.edges, id, cs.sourceId)
+        connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
+      }
+      const hoveredEdge = s.hoveredEdgeId ? getEdgeById(s.edges, s.hoveredEdgeId) : null
+      return {
+        isHovered: s.hoveredNodeId === id,
+        isSpotlit: s.spotlightedNodeId === id,
+        isHoveredEdgeEndpoint:
+          !!hoveredEdge && (hoveredEdge.source === id || hoveredEdge.target === id),
+        isActiveCandidate,
+        connectionRing,
+        setHoveredNode: s.setHoveredNode,
+        setSelectedNodes: s.setSelectedNodes,
+        removeNodes: s.removeNodes,
+        performanceTier: s.performanceTier,
+        nodeCount: s.nodes.length,
+        touchConnect: s.touchConnect,
+        requestContextMenu: s.requestContextMenu,
+        requestRunFromStep: s.requestRunFromStep,
+        errorPolicy: s.baseWorkflow.settings.errorPolicy,
+      }
+    }
   )
   const storeBits = store?.(storeSelector)
-  const isHovered = storeBits?.hoveredNodeId === id
-  const isSpotlit = storeBits?.spotlightedNodeId === id
+  const isHovered = storeBits?.isHovered ?? false
+  const isSpotlit = storeBits?.isSpotlit ?? false
   const motionEnabled = storeBits
     ? flagsForTier(
         resolveEffectiveTier(storeBits.performanceTier, {
@@ -281,35 +311,15 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       ).nodeCardTransitions
     : true
 
-  // Hovered-edge endpoint ring: when an edge in the workflow is being
-  // hovered and one of its endpoints is THIS node, draw a thin primary ring
-  // so the user sees which two nodes the edge connects.
-  // (A5) Read via the indexed `getEdgeById` helper — O(1) lookup against
-  // a WeakMap-cached edge index instead of O(E) `Array.find` per render.
-  const isHoveredEdgeEndpoint = (() => {
-    if (!storeBits?.hoveredEdgeId || !store) return false
-    const edge = getEdgeById(store.getState().edges, storeBits.hoveredEdgeId)
-    return !!edge && (edge.source === id || edge.target === id)
-  })()
-
-  // Connection-state handle styling (Flowith drag silk). When a connection
-  // is in flight from another node, this node's target handle is rendered
-  // green (compatible) / red (incompatible) / thick primary (active
-  // candidate). The source node itself stays neutral so the user doesn't
-  // confuse the source with a candidate.
-  const cs = storeBits?.connectionState ?? null
-  const isConnectionSource = cs?.sourceId === id
-  let connectionRing: "compatible" | "incompatible" | null = null
-  let isActiveCandidate = false
-  if (cs && !isConnectionSource && showInput && store) {
-    isActiveCandidate = cs.candidate?.nodeId === id
-    const kindOk = !data.kind.startsWith("trigger.") && data.kind !== "annotation.note"
-    // (A5) Disallow self / multi-incoming-cycle creation cheaply via the
-    // indexed edge lookup. The canonical gate runs through
-    // `validateConnection` when the actual drop happens.
-    const wouldCycle = hasEdgeBetween(store.getState().edges, id, cs.sourceId)
-    connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
-  }
+  // Hovered-edge endpoint ring + connection-state handle styling (Flowith
+  // drag silk) are derived per-node inside the selector above — read the
+  // precomputed flags here. When a connection is in flight from another
+  // node, this node's target handle renders green (compatible) / red
+  // (incompatible) / thick primary (active candidate). The source node
+  // stays neutral so the user doesn't confuse the source with a candidate.
+  const isHoveredEdgeEndpoint = storeBits?.isHoveredEdgeEndpoint ?? false
+  const connectionRing = storeBits?.connectionRing ?? null
+  const isActiveCandidate = storeBits?.isActiveCandidate ?? false
 
   // Mobile tap-to-connect entry: tapping a source handle arms a connection
   // rooted at that handle (carrying the handle id so branch/switch outputs
@@ -340,13 +350,19 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
 
   // Labeled decision handles (branch/switch v2) — single source of truth in
   // `node-handles.ts`, shared with the connection validator and smart edge.
-  const decisionHandles = showOutput
-    ? outputHandlesFor({
-        kind: data.kind,
-        typeVersion: data.typeVersion,
-        params: (data.params as Record<string, unknown>) ?? {},
-      })
-    : null
+  // Memoized on the actual inputs so unrelated re-renders skip the handle
+  // resolution walk.
+  const decisionHandles = useMemo(
+    () =>
+      showOutput
+        ? outputHandlesFor({
+            kind: data.kind,
+            typeVersion: data.typeVersion,
+            params: (data.params as Record<string, unknown>) ?? {},
+          })
+        : null,
+    [showOutput, data.kind, data.typeVersion, data.params]
+  )
 
   // The lastRun footer is suppressed while a run is actively in progress so
   // the user sees current-run state, not stale history.
@@ -429,7 +445,12 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
               /* best effort */
             }
           }}
-          onConfigure={() => storeBits.setSelectedNodes([id])}
+          onConfigure={() => {
+            storeBits.setSelectedNodes([id])
+            // Explicit configure gesture — reveal the inspector even when
+            // another right-sidebar tab is pinned.
+            store?.getState().requestInspectorPanel()
+          }}
           onDelete={() => storeBits.removeNodes([id])}
           onMore={(rect) => {
             // Anchor the canvas context menu at the More button's screen
