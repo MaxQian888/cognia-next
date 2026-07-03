@@ -177,3 +177,66 @@ export function buildExecutionMonitorModel(input: BuildMonitorModelInput): Unifi
 export function countRunningRows(rows: UnifiedExecutionRow[]): number {
   return rows.reduce((n, r) => (r.status === "running" ? n + 1 : n), 0)
 }
+
+/**
+ * The stable set of kinds the monitor can filter/group by. Broker legs already
+ * carry one of the seven {@link ExecutionLegKind} values; workflow-run rows and
+ * scheduler rows are normalized to `"workflow"` / `"scheduled"` so the filter
+ * stays stable regardless of a scheduler task's arbitrary `taskType`.
+ */
+export const EXECUTION_FILTER_KINDS = [
+  "chat",
+  "subagent",
+  "team",
+  "goal",
+  "connector",
+  "workflow",
+  "workflow-step",
+  "scheduled",
+] as const
+
+export type ExecutionFilterKind = (typeof EXECUTION_FILTER_KINDS)[number]
+
+/**
+ * Normalize a row to its filterable kind. Workflow-run and scheduler rows carry
+ * a display `kind` (`"workflow"` / the raw `taskType`) that isn't stable for
+ * filtering, so they are keyed off `source`; broker rows use their leg kind,
+ * which is always one of {@link EXECUTION_FILTER_KINDS}.
+ */
+export function executionRowFilterKind(row: UnifiedExecutionRow): ExecutionFilterKind {
+  if (row.source === "workflow") return "workflow"
+  if (row.source === "scheduled") return "scheduled"
+  return row.kind as ExecutionFilterKind
+}
+
+/** Tally live rows by filterable kind — powers the filter chips + their counts. */
+export function countExecutionRowsByKind(
+  rows: UnifiedExecutionRow[]
+): Record<ExecutionFilterKind, number> {
+  const counts = Object.fromEntries(EXECUTION_FILTER_KINDS.map((k) => [k, 0])) as Record<
+    ExecutionFilterKind,
+    number
+  >
+  for (const row of rows) counts[executionRowFilterKind(row)] += 1
+  return counts
+}
+
+export interface ElapsedParts {
+  hours: number
+  minutes: number
+  seconds: number
+}
+
+/**
+ * Split the wall-clock elapsed since `startedAt` into h/m/s parts (clamped at
+ * zero for clock skew). Pure so the panel's live timer stays testable; the
+ * panel maps the parts to the right i18n form.
+ */
+export function elapsedPartsFrom(startedAt: number, now: number): ElapsedParts {
+  const total = Math.max(0, Math.floor((now - startedAt) / 1000))
+  return {
+    hours: Math.floor(total / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60,
+  }
+}

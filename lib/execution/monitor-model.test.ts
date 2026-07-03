@@ -1,9 +1,14 @@
 import {
   buildExecutionMonitorModel,
   countRunningRows,
+  countExecutionRowsByKind,
+  elapsedPartsFrom,
+  executionRowFilterKind,
+  EXECUTION_FILTER_KINDS,
   mapRunStatus,
   mapExecStatus,
 } from "./monitor-model"
+import type { UnifiedExecutionRow } from "./monitor-model"
 import type { ExecutionLegSnapshot } from "./types"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TaskExecution } from "@/types/scheduler"
@@ -169,5 +174,61 @@ describe("buildExecutionMonitorModel", () => {
     expect(mapExecStatus("skipped")).toBe("done")
     expect(mapExecStatus("failed")).toBe("error")
     expect(mapExecStatus("cancelled")).toBe("cancelled")
+  })
+})
+
+const row = (o: Partial<UnifiedExecutionRow> = {}): UnifiedExecutionRow => ({
+  rowId: "broker:leg1",
+  source: "broker",
+  nativeId: "leg1",
+  kind: "connector",
+  label: "WeCom reply",
+  status: "running",
+  startedAt: 1,
+  cancellable: true,
+  ...o,
+})
+
+describe("executionRowFilterKind", () => {
+  it("normalizes workflow-run and scheduler rows off their source", () => {
+    expect(executionRowFilterKind(row({ source: "workflow", kind: "workflow" }))).toBe("workflow")
+    // A scheduler row's display kind is the raw taskType — still filters as "scheduled".
+    expect(executionRowFilterKind(row({ source: "scheduled", kind: "backup" }))).toBe("scheduled")
+  })
+
+  it("uses the leg kind for broker rows", () => {
+    expect(executionRowFilterKind(row({ source: "broker", kind: "team" }))).toBe("team")
+    expect(executionRowFilterKind(row({ source: "broker", kind: "workflow-step" }))).toBe(
+      "workflow-step"
+    )
+  })
+})
+
+describe("countExecutionRowsByKind", () => {
+  it("tallies rows by filterable kind with every kind present", () => {
+    const counts = countExecutionRowsByKind([
+      row({ rowId: "a", source: "broker", kind: "chat" }),
+      row({ rowId: "b", source: "broker", kind: "chat" }),
+      row({ rowId: "c", source: "workflow", kind: "workflow" }),
+      row({ rowId: "d", source: "scheduled", kind: "backup" }),
+    ])
+    expect(counts.chat).toBe(2)
+    expect(counts.workflow).toBe(1)
+    expect(counts.scheduled).toBe(1)
+    expect(counts.team).toBe(0)
+    // Keyed by exactly the known filter kinds.
+    expect(Object.keys(counts).sort()).toEqual([...EXECUTION_FILTER_KINDS].sort())
+  })
+})
+
+describe("elapsedPartsFrom", () => {
+  it("splits elapsed seconds into h/m/s", () => {
+    expect(elapsedPartsFrom(0, 5_000)).toEqual({ hours: 0, minutes: 0, seconds: 5 })
+    expect(elapsedPartsFrom(0, 90_000)).toEqual({ hours: 0, minutes: 1, seconds: 30 })
+    expect(elapsedPartsFrom(0, 3_661_000)).toEqual({ hours: 1, minutes: 1, seconds: 1 })
+  })
+
+  it("clamps negative skew to zero", () => {
+    expect(elapsedPartsFrom(10_000, 5_000)).toEqual({ hours: 0, minutes: 0, seconds: 0 })
   })
 })
