@@ -28,3 +28,4 @@ export {
   type EffectiveSkillItem,
   type EffectiveSkillsView,
 } from "./use-effective-skills"
+export { useSkillPanelPrefs, useSkillPrefsHydration } from "./use-skill-prefs"

@@ -8,7 +8,7 @@ import { SparklesIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import { createSkill, deleteSkill, getSkill, updateSkill } from "@/lib/db/skills"
-import { useSkills, useSkillShortcuts } from "@/hooks/skills"
+import { useSkills, useSkillShortcuts, useSkillPrefsHydration } from "@/hooks/skills"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useSkillsStore } from "@/stores/skills"
 import { useChatStore } from "@/stores/chat"
@@ -37,7 +37,7 @@ import { SkillPanelProvider } from "./skill-panel-context"
 import { SkillMarketplace } from "./skill-marketplace"
 import { SkillAnalytics } from "./skill-analytics"
 import { SkillEditorWorkspace } from "./editor/skill-editor-workspace"
-import { useSkillAi } from "@/hooks/skills"
+import { useSkillAi, useSkillPanelPrefs } from "@/hooks/skills"
 import { isTauri } from "@/lib/tauri"
 
 interface Props {
@@ -54,6 +54,9 @@ export function SkillPanel({ className }: Props) {
   const isMobile = useIsMobile()
   const reduce = useReducedMotion()
   useSkillShortcuts(view.filtered)
+  // Seed the ephemeral panel state (tab / sort / status) from persisted
+  // preferences on mount, and persist the last view when that toggle is on.
+  useSkillPrefsHydration()
   const fadeTransition = reduce
     ? { duration: 0 }
     : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
@@ -189,12 +192,18 @@ function SkillEditorHost() {
     [editorTarget]
   )
   const ai = useSkillAi()
+  const autoEnableNew = useSkillPanelPrefs().autoEnableNew
 
   const onSave = async (draft: Parameters<typeof createSkill>[0]) => {
     const mode = editorTarget?.mode
     try {
       if (mode === "create") {
-        const created = await createSkill(draft)
+        // Honor the "auto-enable new skills" preference: when off, a freshly
+        // created skill lands disabled so the user opts it into the prompt.
+        const created = await createSkill({
+          ...draft,
+          status: autoEnableNew ? (draft.status ?? "enabled") : "disabled",
+        })
         toast.success(tToasts("createdName", { name: draft.name }))
         loggers.skills.info("create ok", { skillId: created.id, name: draft.name })
       } else if (mode === "edit" && skill) {

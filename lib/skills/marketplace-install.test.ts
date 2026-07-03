@@ -187,6 +187,34 @@ describe("installMarketplaceItem", () => {
       })
     )
   })
+
+  it("installs a clean row as 'disabled' when disabledByDefault is set", async () => {
+    mockedRegFetch.mockResolvedValue({
+      content: "MD",
+      canonicalId: "registry:id-1",
+      marketplaceSkillId: "id-1",
+    })
+    mockedParse.mockReturnValue({ draft: { name: "P", content: "B" } })
+    mockedUpsert.mockResolvedValue({ skill: { id: "x" }, created: true })
+    await installMarketplaceItem(item(), { disabledByDefault: true })
+    expect(mockedUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ draft: expect.objectContaining({ status: "disabled" }) })
+    )
+  })
+
+  it("keeps status='error' even when disabledByDefault is set (broken row)", async () => {
+    mockedRegFetch.mockResolvedValue({
+      content: "MD",
+      canonicalId: "registry:id-1",
+      marketplaceSkillId: "id-1",
+    })
+    mockedParse.mockReturnValue({ draft: { name: "a".repeat(80), content: "B" } })
+    mockedUpsert.mockResolvedValue({ skill: { id: "x" }, created: true })
+    await installMarketplaceItem(item(), { disabledByDefault: true })
+    expect(mockedUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ draft: expect.objectContaining({ status: "error" }) })
+    )
+  })
 })
 
 describe("installMarketplaceItem — skills.sh multi-file branch", () => {

@@ -154,6 +154,9 @@ describe("load", () => {
         shellAdvanced: false,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
       },
       updates: { autoCheck: true },
       canvasCodeSandboxEnabled: true,
@@ -393,6 +396,9 @@ describe("setBuiltinToolEnabled", () => {
         shellAdvanced: false,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
       },
     })
     expect(useSettingsStore.getState().settings?.builtinTools.process).toBe(true)
@@ -430,6 +436,9 @@ describe("setBuiltinToolEnabled", () => {
         shellAdvanced: true,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
       },
     })
   })
@@ -745,12 +754,10 @@ describe("setProviderConfig — anthropic env push + debounced restart", () => {
     // A following config edit with the same (apiKey, baseURL) must NOT schedule
     // a second (debounced) restart — the immediate one already applied it.
     await act(async () => {
-      await useSettingsStore
-        .getState()
-        .setProviderConfig("anthropic", {
-          apiKey: "sk-switch",
-          baseURL: "https://switch.example.com",
-        })
+      await useSettingsStore.getState().setProviderConfig("anthropic", {
+        apiKey: "sk-switch",
+        baseURL: "https://switch.example.com",
+      })
     })
     jest.advanceTimersByTime(800)
     expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
@@ -1031,6 +1038,70 @@ describe("resolveSkillBundleMirrors", () => {
         baseSettings({ skillBundleMirrors: { claude: false, codex: false } })
       )
     ).toEqual({ claude: false, codex: false })
+  })
+})
+
+// ---- Skill panel prefs ----
+
+describe("setSkillPanelPrefs", () => {
+  it("persists a partial patch when no prior value exists", async () => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSkillPanelPrefs({ density: "compact", viewMode: "grid" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillPanelPrefs: { density: "compact", viewMode: "grid" },
+    })
+  })
+
+  it("merges over an existing partial rather than replacing it", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ skillPanelPrefs: { density: "compact", showTags: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setSkillPanelPrefs({ showTags: false, autoEnableNew: false })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillPanelPrefs: { density: "compact", showTags: false, autoEnableNew: false },
+    })
+  })
+})
+
+describe("setLastSkillView", () => {
+  it("merges over the existing last-view snapshot", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ lastSkillView: { tab: "browse", sort: "name" } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setLastSkillView({ sort: "usage", tag: "yaml" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      lastSkillView: { tab: "browse", sort: "usage", tag: "yaml" },
+    })
+  })
+})
+
+describe("resolveSkillPanelPrefs (re-export)", () => {
+  it("applies defaults when settings has no prefs", async () => {
+    const { resolveSkillPanelPrefs } = await import("./settings-store")
+    const resolved = resolveSkillPanelPrefs(baseSettings().skillPanelPrefs)
+    expect(resolved.density).toBe("comfortable")
+    expect(resolved.autoEnableNew).toBe(true)
+    expect(resolved.showDescription).toBe(true)
+  })
+
+  it("honors stored overrides", async () => {
+    const { resolveSkillPanelPrefs } = await import("./settings-store")
+    const resolved = resolveSkillPanelPrefs({ density: "compact", enabledWarnThreshold: 5 })
+    expect(resolved.density).toBe("compact")
+    expect(resolved.enabledWarnThreshold).toBe(5)
   })
 })
 

@@ -50,6 +50,7 @@ type ViewSkill = { id: string; name: string; status?: string }
 const viewRef: { all: ViewSkill[]; filtered: ViewSkill[] } = { all: [], filtered: [] }
 
 const aiRun = jest.fn(async () => null)
+const prefsRef = { current: { autoEnableNew: true } as { autoEnableNew: boolean } }
 jest.mock("@/hooks/skills", () => ({
   useSkills: () => ({
     all: viewRef.all,
@@ -60,6 +61,8 @@ jest.mock("@/hooks/skills", () => ({
   }),
   useSkillAi: () => ({ run: aiRun }),
   useSkillShortcuts: () => {},
+  useSkillPrefsHydration: () => {},
+  useSkillPanelPrefs: () => prefsRef.current,
   URL_INSTALL_INVALID: "invalid",
   useUrlInstall: () => ({
     run: jest.fn(),
@@ -241,6 +244,7 @@ beforeEach(() => {
   viewRef.filtered = []
   mobileRef.current = false
   tauriRef.current = false
+  prefsRef.current = { autoEnableNew: true }
   storeState.activeTab = "my-skills"
   storeState.editorTarget = null
   storeState.importStaging = null
@@ -341,7 +345,18 @@ describe("SkillPanel", () => {
     render(<SkillPanel />)
     fireEvent.click(screen.getByTestId("editor-save"))
     await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    // autoEnableNew (default) → the new skill is created enabled.
+    expect(createSkill.mock.calls[0][0]).toMatchObject({ status: "enabled" })
     expect(storeState.closeEditor).toHaveBeenCalled()
+  })
+
+  it("creates the new skill disabled when auto-enable is off", async () => {
+    prefsRef.current = { autoEnableNew: false }
+    storeState.editorTarget = { mode: "create" }
+    render(<SkillPanel />)
+    fireEvent.click(screen.getByTestId("editor-save"))
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    expect(createSkill.mock.calls[0][0]).toMatchObject({ status: "disabled" })
   })
 
   it("calls deleteSkill and clears the target when the delete dialog confirms", async () => {

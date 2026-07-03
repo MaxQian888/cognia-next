@@ -7,6 +7,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { useSkillsStore } from "@/stores/skills"
 import { SkillPanelToolbar } from "./skill-panel-toolbar"
+import { SkillPreferencesPopover } from "./skill-preferences"
 
 interface Props {
   totalCount: number
@@ -61,6 +62,7 @@ export function SkillPanelHeader({ totalCount, filteredCount, tabsSlot }: Props)
           <span className="hidden sm:inline">{t("filters")}</span>
         </Button>
       )}
+      <SkillPreferencesPopover />
       <SkillPanelToolbar />
     </div>
   )

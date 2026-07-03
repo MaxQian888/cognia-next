@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useSettingsStore } from "@/stores/settings"
+import { resolveSkillPanelPrefs, useSettingsStore } from "@/stores/settings"
 import { fetchRegistryItems } from "@/lib/skills/marketplace-registry"
 import {
   SkillsShTokenError,
@@ -241,7 +241,10 @@ export function useSkillMarketplace(): UseSkillMarketplace {
   const install = useCallback(async (item: MarketplaceItem) => {
     setInstallingId(item.id)
     try {
-      await installMarketplaceItem(item)
+      const autoEnableNew = resolveSkillPanelPrefs(
+        useSettingsStore.getState().settings?.skillPanelPrefs
+      ).autoEnableNew
+      await installMarketplaceItem(item, { disabledByDefault: !autoEnableNew })
     } finally {
       setInstallingId(null)
     }

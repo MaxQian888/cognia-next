@@ -7,10 +7,36 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import type { Skill } from "@/lib/claude/types"
-import { inferCategory } from "@/lib/db/skills"
-import { getCategoryMeta } from "@/lib/skills/categories"
+import { inferCategory, inferSource } from "@/lib/db/skills"
+import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
 import { isTauri } from "@/lib/tauri"
 import { useSkillsStore } from "@/stores/skills/skills-store"
+
+/** Per-row display options, resolved from the skill panel preferences. */
+export interface SkillListDisplay {
+  density: "comfortable" | "compact"
+  viewMode: "list" | "grid"
+  showDescription: boolean
+  showTags: boolean
+  showSource: boolean
+  showUsage: boolean
+}
+
+/**
+ * Default display — preserves the pre-preferences look (comfortable list rows
+ * with a description line). Used when a caller renders the item without an
+ * explicit `display` prop.
+ */
+export const DEFAULT_LIST_DISPLAY: SkillListDisplay = {
+  density: "comfortable",
+  viewMode: "list",
+  showDescription: true,
+  showTags: false,
+  showSource: false,
+  showUsage: false,
+}
+
+const MAX_TAG_CHIPS = 3
 
 interface Props {
   skill: Skill
@@ -20,12 +46,16 @@ interface Props {
   active: boolean
   onToggleSelect: (id: string) => void
   onOpen: (id: string) => void
+  /** Display options (density, view mode, per-field visibility). */
+  display?: SkillListDisplay
 }
 
 /**
- * Compact row for the master-detail skill list (left pane). Mirrors the
- * provider sidebar item markup; the checkbox is a sibling of the row button
- * (never nested) so batch selection doesn't trigger `onOpen`.
+ * Row (or card) for the master-detail skill list. Adapts to the user's display
+ * preferences: comfortable/compact density, list/grid layout, and per-field
+ * visibility (description, tags, source badge, usage count). The checkbox is a
+ * sibling of the row button (never nested) so batch selection doesn't trigger
+ * `onOpen`.
  */
 export const SkillListItem = memo(function SkillListItem({
   skill,
@@ -33,6 +63,7 @@ export const SkillListItem = memo(function SkillListItem({
   active,
   onToggleSelect,
   onOpen,
+  display = DEFAULT_LIST_DISPLAY,
 }: Props) {
   const t = useTranslations("skills")
   const category = getCategoryMeta(inferCategory(skill))
@@ -40,67 +71,147 @@ export const SkillListItem = memo(function SkillListItem({
   const Icon = category.icon
   const errorCount = skill.validationErrors?.length ?? 0
   const updateAvailable = useSkillsStore((s) => Boolean(s.updateAvailable[skill.id]))
+  const compact = display.density === "compact"
+  const grid = display.viewMode === "grid"
+
+  const tags = display.showTags ? (skill.tags ?? []).slice(0, MAX_TAG_CHIPS) : []
+  const sourceMeta = display.showSource ? getSourceMeta(inferSource(skill)) : null
+  const usageCount = skill.usageCount ?? 0
+
+  const selectCheckbox = (
+    <Checkbox
+      checked={selected}
+      onCheckedChange={() => onToggleSelect(skill.id)}
+      aria-label={t("card.selectAria", { name: skill.name })}
+    />
+  )
+
+  const iconBox = (
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-md",
+        compact ? "h-6 w-6" : "h-7 w-7",
+        category.color
+      )}
+    >
+      <Icon className="size-3.5" />
+    </span>
+  )
+
+  const metaChips =
+    sourceMeta || tags.length > 0 || display.showUsage ? (
+      <span className="mt-0.5 flex flex-wrap items-center gap-1">
+        {sourceMeta && (
+          <Badge
+            variant={sourceMeta.badgeVariant}
+            className="h-4 px-1.5 text-[9px]"
+            data-testid="skill-source-badge"
+          >
+            {t(`source.${sourceMeta.labelKey}` as never)}
+          </Badge>
+        )}
+        {tags.map((tag) => (
+          <Badge key={tag} variant="outline" className="h-4 px-1.5 text-[9px]">
+            {tag}
+          </Badge>
+        ))}
+        {display.showUsage && (
+          <span className="text-[9px] text-muted-foreground" data-testid="skill-usage-count">
+            {t("card.usageCount", { count: usageCount })}
+          </span>
+        )}
+      </span>
+    ) : null
+
+  const statusBadges = (
+    <>
+      {updateAvailable && (
+        <Badge
+          variant="secondary"
+          className="h-5 gap-1 text-[10px]"
+          data-testid="skill-update-badge"
+        >
+          <ArrowUpCircleIcon className="size-3" />
+          {t("detail.updateAvailable")}
+        </Badge>
+      )}
+      {errorCount > 0 && (
+        <Badge
+          variant="destructive"
+          className="h-5 gap-1 text-[10px]"
+          aria-label={t("validation.cardBadge", { count: errorCount })}
+        >
+          <AlertTriangleIcon className="size-3" />
+          {errorCount}
+        </Badge>
+      )}
+      {status === "disabled" && (
+        <Badge variant="secondary" className="h-5 text-[10px]">
+          {t("status.disabled")}
+        </Badge>
+      )}
+      {isTauri() && <SyncDot skill={skill} />}
+    </>
+  )
+
+  if (grid) {
+    return (
+      <div className="relative">
+        <span className="absolute right-2 top-2 z-10">{selectCheckbox}</span>
+        <button
+          type="button"
+          onClick={() => onOpen(skill.id)}
+          className={cn(
+            "flex w-full flex-col gap-1.5 rounded-lg border text-left transition-colors",
+            compact ? "p-2" : "p-3",
+            active
+              ? "border-primary bg-accent font-medium ring-1 ring-primary"
+              : "hover:bg-muted/50",
+            status === "disabled" && "opacity-60"
+          )}
+        >
+          <span className="flex items-center gap-2 pr-6">
+            {iconBox}
+            <span className="min-w-0 flex-1 truncate text-sm">{skill.name}</span>
+          </span>
+          {display.showDescription && skill.description && (
+            <span className="line-clamp-2 text-[11px] font-normal text-muted-foreground">
+              {skill.description}
+            </span>
+          )}
+          <span className="flex flex-wrap items-center gap-1">
+            {metaChips}
+            {statusBadges}
+          </span>
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center gap-2 pl-2">
-      <Checkbox
-        checked={selected}
-        onCheckedChange={() => onToggleSelect(skill.id)}
-        aria-label={t("card.selectAria", { name: skill.name })}
-      />
+      {selectCheckbox}
       <button
         type="button"
         onClick={() => onOpen(skill.id)}
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border-l-2 border-l-transparent px-2.5 py-2 text-left transition-colors",
+          "flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border-l-2 border-l-transparent px-2.5 text-left transition-colors",
+          compact ? "py-1.5" : "py-2",
           active ? "border-l-primary bg-accent font-medium" : "hover:bg-muted/50",
           status === "disabled" && "opacity-60"
         )}
       >
-        <span
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
-            category.color
-          )}
-        >
-          <Icon className="size-3.5" />
-        </span>
+        {iconBox}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm">{skill.name}</span>
-          {skill.description && (
+          {display.showDescription && skill.description && (
             <span className="block truncate text-[11px] font-normal text-muted-foreground">
               {skill.description}
             </span>
           )}
+          {metaChips}
         </span>
-        <span className="flex shrink-0 items-center gap-1">
-          {updateAvailable && (
-            <Badge
-              variant="secondary"
-              className="h-5 gap-1 text-[10px]"
-              data-testid="skill-update-badge"
-            >
-              <ArrowUpCircleIcon className="size-3" />
-              {t("detail.updateAvailable")}
-            </Badge>
-          )}
-          {errorCount > 0 && (
-            <Badge
-              variant="destructive"
-              className="h-5 gap-1 text-[10px]"
-              aria-label={t("validation.cardBadge", { count: errorCount })}
-            >
-              <AlertTriangleIcon className="size-3" />
-              {errorCount}
-            </Badge>
-          )}
-          {status === "disabled" && (
-            <Badge variant="secondary" className="h-5 text-[10px]">
-              {t("status.disabled")}
-            </Badge>
-          )}
-          {isTauri() && <SyncDot skill={skill} />}
-        </span>
+        <span className="flex shrink-0 items-center gap-1">{statusBadges}</span>
       </button>
     </div>
   )

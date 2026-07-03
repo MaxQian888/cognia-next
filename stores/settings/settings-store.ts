@@ -36,6 +36,12 @@ export type {
   UserProviderSettings,
 }
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
+import {
+  resolveSkillPanelPrefs,
+  type PartialLastSkillView,
+  type PartialSkillPanelPrefs,
+  type SkillPanelPrefs,
+} from "@/lib/skills/preferences"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { restartSidecar, setApiKey, setProviderEnv } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
@@ -161,6 +167,18 @@ interface SettingsState {
    * `<appData>/cognia/skills/<id>/` is always written and is not toggleable.
    */
   setSkillBundleMirrors: (patch: { claude?: boolean; codex?: boolean }) => Promise<void>
+
+  /**
+   * Merge a partial Skills-panel preferences patch over the current value and
+   * persist. Mirrors `setSkillBundleMirrors`: the resolver applies defaults at
+   * read time, so a patch need only carry the changed fields.
+   */
+  setSkillPanelPrefs: (patch: PartialSkillPanelPrefs) => Promise<void>
+  /**
+   * Persist the last Skills-panel view snapshot (tab + sort + non-query
+   * filters). Callers should only invoke this when `rememberLastView` is on.
+   */
+  setLastSkillView: (patch: PartialLastSkillView) => Promise<void>
 
   // ---- Web search actions (all persist via saveSettings) ----
   setSearchEnabled: (v: boolean) => Promise<void>
@@ -545,6 +563,12 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
  * Exported as a pure helper so the sync layer can call it without
  * subscribing to the store (the sync layer runs from non-React contexts).
  */
+// Re-export the pure skill-panel-prefs resolver (and its types) so components
+// and the non-React sync/injection layers can import them from the settings
+// store alongside `resolveSkillBundleMirrors` — matching the existing pattern.
+export { resolveSkillPanelPrefs }
+export type { SkillPanelPrefs, PartialSkillPanelPrefs, PartialLastSkillView }
+
 export function resolveSkillBundleMirrors(settings: AppSettings | null | undefined): {
   claude: boolean
   codex: boolean
@@ -747,6 +771,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         codex: patch.codex ?? cur.codex ?? true,
       }
       const next = await saveSettings({ skillBundleMirrors })
+      set({ settings: next })
+    },
+
+    setSkillPanelPrefs: async (patch) => {
+      // Merge over the raw stored partial (not the resolved value) so we only
+      // persist fields the user has actually touched.
+      const cur = get().settings?.skillPanelPrefs ?? {}
+      const skillPanelPrefs = { ...cur, ...patch }
+      const next = await saveSettings({ skillPanelPrefs })
+      set({ settings: next })
+    },
+
+    setLastSkillView: async (patch) => {
+      const cur = get().settings?.lastSkillView ?? {}
+      const lastSkillView = { ...cur, ...patch }
+      const next = await saveSettings({ lastSkillView })
       set({ settings: next })
     },
 

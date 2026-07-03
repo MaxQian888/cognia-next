@@ -12,6 +12,7 @@ import type {
 } from "@/lib/claude/types"
 import type { MonacoLanguage } from "@/components/skills/editor/language-from-path"
 import type { SkillResourceDraft } from "@/lib/db/skill-resources"
+import type { LastSkillView, SkillPanelPrefs } from "@/lib/skills/preferences"
 
 export interface EditorFile {
   /** "main" for SKILL.md, otherwise the resource id. */
@@ -91,6 +92,13 @@ interface SkillsStoreState {
   setActiveTab: (tab: SkillPanelTab) => void
   setFilters: (patch: Partial<SkillFilters>) => void
   resetFilters: () => void
+  /**
+   * Seed the ephemeral panel state from persisted preferences on mount:
+   * default tab + sort + status filter. When `lastView` is provided
+   * (`rememberLastView` on), restore the last tab and non-query filters
+   * instead. Never persists — the caller owns write-back.
+   */
+  hydrateFromPrefs: (prefs: SkillPanelPrefs, lastView?: LastSkillView | null) => void
   setQuery: (query: string) => void
   toggleSelection: (id: string) => void
   selectAll: (ids: string[]) => void
@@ -182,6 +190,29 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
+  hydrateFromPrefs: (prefs, lastView) =>
+    set((s) =>
+      lastView
+        ? {
+            activeTab: lastView.tab,
+            filters: {
+              ...s.filters,
+              sort: lastView.sort,
+              category: lastView.category,
+              source: lastView.source,
+              status: lastView.status,
+              tag: lastView.tag,
+            },
+          }
+        : {
+            activeTab: prefs.defaultTab,
+            filters: {
+              ...s.filters,
+              sort: prefs.defaultSort,
+              status: prefs.defaultStatusFilter,
+            },
+          }
+    ),
   setQuery: (query) => set((s) => ({ filters: { ...s.filters, query } })),
   toggleSelection: (id) =>
     set((s) => {

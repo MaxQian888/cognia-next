@@ -28,6 +28,17 @@ jest.mock("@/stores/skills", () => ({
   useSkillsStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
 }))
 
+const mockUsePrefs = jest.fn()
+jest.mock("@/hooks/skills", () => ({
+  useSkillPanelPrefs: () => mockUsePrefs(),
+}))
+
+const mockSetSkillPanelPrefs = jest.fn()
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (s: { setSkillPanelPrefs: jest.Mock }) => unknown) =>
+    selector({ setSkillPanelPrefs: mockSetSkillPanelPrefs }),
+}))
+
 jest.mock("./skill-list-item", () => ({
   SkillListItem: ({
     skill,
@@ -47,6 +58,7 @@ jest.mock("./skill-list-item", () => ({
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { SkillListPane } from "./skill-list-pane"
+import { DEFAULT_SKILL_PANEL_PREFS } from "@/lib/skills/preferences"
 import type { Skill } from "@/lib/claude/types"
 
 const skills = [
@@ -67,6 +79,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   storeState.detailSkillId = null
   storeState.filters = { ...storeState.filters, query: "", category: "all", source: "all" }
+  mockUsePrefs.mockReturnValue({ ...DEFAULT_SKILL_PANEL_PREFS })
 })
 
 describe("SkillListPane", () => {
@@ -115,5 +128,56 @@ describe("SkillListPane", () => {
   it("renders the stats bar with enabled and total counts", () => {
     render(<SkillListPane {...baseProps} />)
     expect(screen.getByText('panel.statsBar:{"enabled":1,"total":2}')).toBeInTheDocument()
+  })
+
+  it("changes the current sort via the visible sort control", async () => {
+    const user = userEvent.setup()
+    render(<SkillListPane {...baseProps} />)
+    await user.click(screen.getByLabelText("filter.sortBy"))
+    await user.click(await screen.findByText("filter.sortUpdated"))
+    expect(storeState.setFilters).toHaveBeenCalledWith({ sort: "updated" })
+  })
+
+  it("persists the view mode when the grid toggle is clicked", () => {
+    render(<SkillListPane {...baseProps} />)
+    fireEvent.click(screen.getByTestId("skill-view-grid"))
+    expect(mockSetSkillPanelPrefs).toHaveBeenCalledWith({ viewMode: "grid" })
+  })
+
+  it("marks the active view-mode button as pressed", () => {
+    mockUsePrefs.mockReturnValue({ ...DEFAULT_SKILL_PANEL_PREFS, viewMode: "grid" })
+    render(<SkillListPane {...baseProps} />)
+    expect(screen.getByTestId("skill-view-grid")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("skill-view-list")).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("persists the view mode when the list toggle is clicked", () => {
+    mockUsePrefs.mockReturnValue({ ...DEFAULT_SKILL_PANEL_PREFS, viewMode: "grid" })
+    render(<SkillListPane {...baseProps} />)
+    fireEvent.click(screen.getByTestId("skill-view-list"))
+    expect(mockSetSkillPanelPrefs).toHaveBeenCalledWith({ viewMode: "list" })
+  })
+
+  it("uses a grid container in grid mode and keeps the empty state visible", () => {
+    mockUsePrefs.mockReturnValue({ ...DEFAULT_SKILL_PANEL_PREFS, viewMode: "grid" })
+    const { rerender } = render(<SkillListPane {...baseProps} />)
+    expect(screen.getByTestId("skill-list").className).toMatch(/grid/)
+    rerender(<SkillListPane {...baseProps} skills={[]} />)
+    expect(screen.getByText("panel.emptyTitle")).toBeInTheDocument()
+  })
+
+  it("shows the enabled-budget warning when the threshold is exceeded", () => {
+    mockUsePrefs.mockReturnValue({ ...DEFAULT_SKILL_PANEL_PREFS, enabledWarnThreshold: 1 })
+    render(<SkillListPane {...baseProps} enabledCount={3} />)
+    expect(screen.getByTestId("skill-budget-warning")).toBeInTheDocument()
+    expect(screen.getByText('prefs.budgetWarning:{"count":3,"threshold":1}')).toBeInTheDocument()
+  })
+
+  it("hides the budget warning when disabled (threshold 0) or under budget", () => {
+    render(<SkillListPane {...baseProps} enabledCount={99} />)
+    expect(screen.queryByTestId("skill-budget-warning")).not.toBeInTheDocument()
+    mockUsePrefs.mockReturnValue({ ...DEFAULT_SKILL_PANEL_PREFS, enabledWarnThreshold: 10 })
+    render(<SkillListPane {...baseProps} enabledCount={5} />)
+    expect(screen.queryByTestId("skill-budget-warning")).not.toBeInTheDocument()
   })
 })
