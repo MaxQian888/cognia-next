@@ -61,6 +61,39 @@ describe("OverviewTab", () => {
     expect(screen.getByText(/no inbound calls/i)).toBeInTheDocument()
   })
 
+  it("summarizes recent traffic as success / errors / rate", () => {
+    mockedIsTauri.mockReturnValue(true)
+    useRemoteControlStore.setState({
+      recentCalls: [
+        {
+          id: "a",
+          at: "2026-05-03T10:00:00.000Z",
+          route: "/api/v1/health",
+          status: 200,
+          remoteIp: "127.0.0.1",
+        },
+        {
+          id: "b",
+          at: "2026-05-03T10:00:01.000Z",
+          route: "/api/v1/events",
+          status: 200,
+          remoteIp: "127.0.0.1",
+        },
+        {
+          id: "c",
+          at: "2026-05-03T10:00:02.000Z",
+          route: "/api/v1/events",
+          status: 500,
+          remoteIp: "127.0.0.1",
+        },
+      ],
+    })
+    render(<OverviewTab />)
+    expect(screen.getByText(/success rate/i)).toBeInTheDocument()
+    // 2 of 3 succeeded → 67%.
+    expect(screen.getByText("67%")).toBeInTheDocument()
+  })
+
   it("lists recent inbound calls newest-first", () => {
     mockedIsTauri.mockReturnValue(true)
     useRemoteControlStore.setState({

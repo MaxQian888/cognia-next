@@ -4,13 +4,21 @@ import {
   DEFAULT_REMOTE_CONTROL_PORT,
   DEFAULT_REMOTE_CONTROL_RATE_LIMIT_PER_MIN,
   DEFAULT_TOKEN_CAPABILITY,
+  DEFAULT_WEBHOOK_DELIVERY,
+  OUTBOUND_EVENT_TYPES,
   REMOTE_COMMAND_TARGETS,
   REMOTE_CONTROL_RECENT_CALLS_LIMIT,
   SENSITIVE_REMOTE_COMMAND_TARGETS,
+  WEBHOOK_DELIVERY_BOUNDS,
+  endpointSubscribesTo,
+  groupRemoteCommandTargets,
   isLoopbackAllowlistEntry,
   isRemoteCommandTarget,
+  isRemoteCommandTargetEnabled,
   isSensitiveRemoteCommandTarget,
+  normalizeWebhookDelivery,
   validateCidrOrIp,
+  type WebhookEgressEndpoint,
 } from "./index"
 
 describe("remote-control type defaults", () => {
@@ -27,7 +35,9 @@ describe("remote-control type defaults", () => {
       hasSigningSecret: false,
       defaultHeaders: [],
       endpoints: [],
+      delivery: DEFAULT_WEBHOOK_DELIVERY,
     })
+    expect(DEFAULT_REMOTE_CONTROL_CONFIG.inbound.disabledTargets).toEqual([])
   })
 
   it("DEFAULT config returns a fresh allowlist (so callers can mutate without leaking)", () => {
@@ -129,5 +139,96 @@ describe("isLoopbackAllowlistEntry", () => {
     expect(isLoopbackAllowlistEntry("127.0.0.0/8")).toBe(false)
     expect(isLoopbackAllowlistEntry("10.0.0.1")).toBe(false)
     expect(isLoopbackAllowlistEntry("")).toBe(false)
+  })
+})
+
+describe("groupRemoteCommandTargets", () => {
+  it("groups every target by subsystem, covering all of them exactly once", () => {
+    const groups = groupRemoteCommandTargets()
+    const flat = groups.flatMap((g) => g.targets)
+    // Every known target appears exactly once, order preserved.
+    expect(flat).toEqual([...REMOTE_COMMAND_TARGETS])
+    // Group segment is the substring before the first dot.
+    for (const { group, targets } of groups) {
+      for (const target of targets) expect(target.split(".")[0]).toBe(group)
+    }
+    // Multi-target subsystems collapse into one group.
+    const scheduler = groups.find((g) => g.group === "scheduler")
+    expect(scheduler?.targets).toEqual(["scheduler.task.run", "scheduler.event"])
+  })
+})
+
+describe("isRemoteCommandTargetEnabled", () => {
+  it("treats an undefined / empty denylist as everything enabled", () => {
+    expect(isRemoteCommandTargetEnabled(undefined, "workflow.run")).toBe(true)
+    expect(isRemoteCommandTargetEnabled([], "workflow.run")).toBe(true)
+  })
+
+  it("disables only the exact listed targets", () => {
+    const denied = ["plugin.disable", "terminal.exec"]
+    expect(isRemoteCommandTargetEnabled(denied, "plugin.disable")).toBe(false)
+    expect(isRemoteCommandTargetEnabled(denied, "terminal.exec")).toBe(false)
+    expect(isRemoteCommandTargetEnabled(denied, "workflow.run")).toBe(true)
+    // A prefix must not partially match.
+    expect(isRemoteCommandTargetEnabled(denied, "plugin")).toBe(true)
+  })
+})
+
+describe("endpointSubscribesTo", () => {
+  const base: WebhookEgressEndpoint = {
+    id: "ep",
+    name: "n",
+    url: "https://x.test",
+    headers: [],
+    enabled: true,
+  }
+
+  it("receives everything when the filter is missing or empty", () => {
+    expect(endpointSubscribesTo(base, "complete")).toBe(true)
+    expect(endpointSubscribesTo({ ...base, eventTypes: [] }, "complete")).toBe(true)
+  })
+
+  it("receives only subscribed event types when a filter is set", () => {
+    const ep = { ...base, eventTypes: ["complete", "error"] }
+    expect(endpointSubscribesTo(ep, "complete")).toBe(true)
+    expect(endpointSubscribesTo(ep, "error")).toBe(true)
+    expect(endpointSubscribesTo(ep, "start")).toBe(false)
+  })
+
+  it("exposes the known lifecycle event types", () => {
+    expect(OUTBOUND_EVENT_TYPES).toEqual(["start", "progress", "complete", "error", "auto-paused"])
+  })
+})
+
+describe("normalizeWebhookDelivery", () => {
+  it("fills defaults for a missing config", () => {
+    expect(normalizeWebhookDelivery()).toEqual(DEFAULT_WEBHOOK_DELIVERY)
+    expect(normalizeWebhookDelivery({})).toEqual(DEFAULT_WEBHOOK_DELIVERY)
+  })
+
+  it("clamps out-of-range values into the accepted bounds", () => {
+    const low = normalizeWebhookDelivery({ maxRetries: -5, timeoutMs: 10, baseDelayMs: 1 })
+    expect(low).toEqual({
+      maxRetries: WEBHOOK_DELIVERY_BOUNDS.maxRetries.min,
+      timeoutMs: WEBHOOK_DELIVERY_BOUNDS.timeoutMs.min,
+      baseDelayMs: WEBHOOK_DELIVERY_BOUNDS.baseDelayMs.min,
+    })
+    const high = normalizeWebhookDelivery({
+      maxRetries: 999,
+      timeoutMs: 999_999,
+      baseDelayMs: 999_999,
+    })
+    expect(high).toEqual({
+      maxRetries: WEBHOOK_DELIVERY_BOUNDS.maxRetries.max,
+      timeoutMs: WEBHOOK_DELIVERY_BOUNDS.timeoutMs.max,
+      baseDelayMs: WEBHOOK_DELIVERY_BOUNDS.baseDelayMs.max,
+    })
+  })
+
+  it("rounds fractional inputs and ignores NaN", () => {
+    expect(normalizeWebhookDelivery({ maxRetries: 2.7 }).maxRetries).toBe(3)
+    expect(normalizeWebhookDelivery({ timeoutMs: Number.NaN }).timeoutMs).toBe(
+      DEFAULT_WEBHOOK_DELIVERY.timeoutMs
+    )
   })
 })

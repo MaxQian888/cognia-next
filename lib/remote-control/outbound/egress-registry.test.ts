@@ -18,9 +18,10 @@ jest.mock("@/lib/db/remote-control-audit", () => ({
 }))
 
 let endpoints: WebhookEgressEndpoint[] = []
+const delivery: unknown = { maxRetries: 2, timeoutMs: 5000, baseDelayMs: 500 }
 jest.mock("@/stores/remote-control/store", () => ({
   useRemoteControlStore: {
-    getState: () => ({ config: { outbound: { endpoints } } }),
+    getState: () => ({ config: { outbound: { endpoints, delivery } } }),
   },
 }))
 
@@ -94,6 +95,25 @@ describe("publishOutboundEvent", () => {
     await publishOutboundEvent(event())
     expect(deliverWebhook).toHaveBeenCalledWith(
       expect.objectContaining({ signingSecret: undefined })
+    )
+  })
+
+  it("delivers only to endpoints subscribed to the event type", async () => {
+    endpoints = [
+      ep({ id: "ep_all" }), // no filter → all events
+      ep({ id: "ep_match", eventTypes: ["task.complete"] }),
+      ep({ id: "ep_miss", eventTypes: ["task.error"] }),
+    ]
+    const out = await publishOutboundEvent(event()) // eventType: task.complete
+    expect(out.map((o) => o.endpointId)).toEqual(["ep_all", "ep_match"])
+    expect(deliverWebhook).toHaveBeenCalledTimes(2)
+  })
+
+  it("forwards the configured delivery limits to each delivery", async () => {
+    endpoints = [ep()]
+    await publishOutboundEvent(event())
+    expect(deliverWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ limits: { maxRetries: 2, timeoutMs: 5000, baseDelayMs: 500 } })
     )
   })
 })

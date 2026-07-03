@@ -42,6 +42,17 @@ export interface RemoteControlInboundConfig {
    * next stop/start.
    */
   allowSensitiveTargets: boolean
+  /**
+   * Per-target permission denylist (least-privilege ACL). Any target listed
+   * here is rejected with `403 target_disabled` even for a `write` token — a
+   * finer-grained gate on top of the binary read/write capability and the
+   * sensitive-target guardrail. Empty (default) means every known target is
+   * dispatchable. Applied at listener start; changing it takes effect on the
+   * next stop/start, like port/allowlist/capability. Enforced server-side in
+   * Rust (`run_command`) with a renderer-side guard in `dispatchRemoteCommand`
+   * as defence-in-depth.
+   */
+  disabledTargets: RemoteCommandTarget[]
 }
 
 export interface RemoteControlOutboundHeader {
@@ -56,6 +67,69 @@ export interface RemoteControlOutboundConfig {
   defaultHeaders: RemoteControlOutboundHeader[]
   /** Egress endpoints any subsystem can publish events to (Standard Webhooks). */
   endpoints: WebhookEgressEndpoint[]
+  /**
+   * User-tunable delivery limits (retries / timeout / backoff) applied to every
+   * outbound webhook delivery. Optional so configs persisted before this field
+   * existed fall back to {@link DEFAULT_WEBHOOK_DELIVERY}.
+   */
+  delivery?: WebhookDeliveryConfig
+}
+
+/**
+ * Tunable outbound-webhook delivery limits. Read by {@link deliverWebhook} on
+ * every attempt; surfaced as editable inputs in the Outbound settings tab.
+ */
+export interface WebhookDeliveryConfig {
+  /** Retry attempts after the first send (total sends = maxRetries + 1). 0–10. */
+  maxRetries: number
+  /** Per-attempt request timeout in milliseconds. 1000–120000. */
+  timeoutMs: number
+  /** Base delay for exponential backoff in milliseconds. 100–60000. */
+  baseDelayMs: number
+}
+
+export const DEFAULT_WEBHOOK_DELIVERY: WebhookDeliveryConfig = {
+  maxRetries: 3,
+  timeoutMs: 10_000,
+  baseDelayMs: 1000,
+}
+
+/** Bounds enforced on {@link WebhookDeliveryConfig} inputs (UI + delivery). */
+export const WEBHOOK_DELIVERY_BOUNDS = {
+  maxRetries: { min: 0, max: 10 },
+  timeoutMs: { min: 1000, max: 120_000 },
+  baseDelayMs: { min: 100, max: 60_000 },
+} as const
+
+/** Clamp a partial delivery config into the accepted bounds, filling defaults. */
+export function normalizeWebhookDelivery(
+  partial?: Partial<WebhookDeliveryConfig>
+): WebhookDeliveryConfig {
+  const clamp = (v: number, min: number, max: number, fallback: number): number => {
+    if (!Number.isFinite(v)) return fallback
+    return Math.min(max, Math.max(min, Math.round(v)))
+  }
+  const b = WEBHOOK_DELIVERY_BOUNDS
+  return {
+    maxRetries: clamp(
+      partial?.maxRetries ?? DEFAULT_WEBHOOK_DELIVERY.maxRetries,
+      b.maxRetries.min,
+      b.maxRetries.max,
+      DEFAULT_WEBHOOK_DELIVERY.maxRetries
+    ),
+    timeoutMs: clamp(
+      partial?.timeoutMs ?? DEFAULT_WEBHOOK_DELIVERY.timeoutMs,
+      b.timeoutMs.min,
+      b.timeoutMs.max,
+      DEFAULT_WEBHOOK_DELIVERY.timeoutMs
+    ),
+    baseDelayMs: clamp(
+      partial?.baseDelayMs ?? DEFAULT_WEBHOOK_DELIVERY.baseDelayMs,
+      b.baseDelayMs.min,
+      b.baseDelayMs.max,
+      DEFAULT_WEBHOOK_DELIVERY.baseDelayMs
+    ),
+  }
 }
 
 export interface RemoteControlConfig {
@@ -197,6 +271,41 @@ export function isSensitiveRemoteCommandTarget(value: string): boolean {
   return (SENSITIVE_REMOTE_COMMAND_TARGETS as readonly string[]).includes(value)
 }
 
+/**
+ * Group the command targets by subsystem (the segment before the first dot).
+ * Preserves the declaration order of {@link REMOTE_COMMAND_TARGETS} both for
+ * the group ordering and within each group, so the per-target permission UI
+ * renders deterministically. Pure — safe for both UI and tests.
+ */
+export function groupRemoteCommandTargets(): Array<{
+  group: string
+  targets: RemoteCommandTarget[]
+}> {
+  const order: string[] = []
+  const byGroup = new Map<string, RemoteCommandTarget[]>()
+  for (const target of REMOTE_COMMAND_TARGETS) {
+    const group = target.split(".")[0]
+    if (!byGroup.has(group)) {
+      byGroup.set(group, [])
+      order.push(group)
+    }
+    byGroup.get(group)!.push(target)
+  }
+  return order.map((group) => ({ group, targets: byGroup.get(group)! }))
+}
+
+/**
+ * True when `target` is dispatchable given the inbound denylist. Mirrors the
+ * Rust `run_command` gate: a target present in `disabledTargets` is rejected
+ * with `403 target_disabled`. Used by the renderer dispatch guard + the UI.
+ */
+export function isRemoteCommandTargetEnabled(
+  disabledTargets: readonly string[] | undefined,
+  target: string
+): boolean {
+  return !disabledTargets || !disabledTargets.includes(target)
+}
+
 /** Wire shape emitted by the Rust `/api/v1/commands/:target` route. */
 export interface RemoteCommand {
   target: RemoteCommandTarget
@@ -302,6 +411,36 @@ export interface WebhookEgressEndpoint {
   /** Extra headers merged onto every delivery to this endpoint. */
   headers: RemoteControlOutboundHeader[]
   enabled: boolean
+  /**
+   * Event-type subscription filter (GitHub/Svix-style). When omitted or empty,
+   * the endpoint receives every published event. Otherwise it only receives
+   * events whose `eventType` is in this list. Matched by exact string.
+   */
+  eventTypes?: string[]
+}
+
+/**
+ * Known outbound lifecycle event types offered as subscription checkboxes. The
+ * scheduler webhook channel emits these (`TaskEventType`) through
+ * `publishOutboundEvent`; other subsystems may publish additional free-form
+ * types, so subscription matching stays string-based rather than a closed enum.
+ */
+export const OUTBOUND_EVENT_TYPES: readonly string[] = [
+  "start",
+  "progress",
+  "complete",
+  "error",
+  "auto-paused",
+] as const
+
+/**
+ * True when `endpoint` should receive an event of `eventType`. An endpoint with
+ * no subscription filter (undefined / empty) receives everything.
+ */
+export function endpointSubscribesTo(endpoint: WebhookEgressEndpoint, eventType: string): boolean {
+  const subs = endpoint.eventTypes
+  if (!subs || subs.length === 0) return true
+  return subs.includes(eventType)
 }
 
 export type WebhookSignatureScheme = "standard-webhooks"
@@ -405,11 +544,13 @@ export const DEFAULT_REMOTE_CONTROL_CONFIG: RemoteControlConfig = {
     rateLimitPerMin: DEFAULT_REMOTE_CONTROL_RATE_LIMIT_PER_MIN,
     capability: DEFAULT_TOKEN_CAPABILITY,
     allowSensitiveTargets: false,
+    disabledTargets: [],
   },
   outbound: {
     hasSigningSecret: false,
     defaultHeaders: [],
     endpoints: [],
+    delivery: { ...DEFAULT_WEBHOOK_DELIVERY },
   },
 }
 

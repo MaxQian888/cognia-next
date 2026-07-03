@@ -25,6 +25,7 @@ import type {
   RemoteCommandTarget,
   RemoteControlRunStatusValue,
 } from "@/types/remote-control"
+import { isRemoteCommandTargetEnabled } from "@/types/remote-control"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
@@ -354,6 +355,23 @@ export async function dispatchRemoteCommand(
   const { target, runId } = command
   const handler = HANDLERS[target] as RemoteCommandHandler | undefined
   if (!handler) return reject(runId, `unknown target: ${String(target)}`)
+  // Renderer-side least-privilege guard (defence-in-depth). The Rust inbound
+  // server already rejects denylisted targets with `403 target_disabled`
+  // before emitting the command event, so this branch is normally unreachable
+  // on desktop — it closes any non-Rust dispatch path and keeps the ACL
+  // enforceable/testable without a running listener. Store imported lazily so
+  // the pure routing table stays free of store side effects.
+  try {
+    const { useRemoteControlStore } = await import("@/stores/remote-control/store")
+    const disabled = useRemoteControlStore.getState().config.inbound.disabledTargets
+    if (!isRemoteCommandTargetEnabled(disabled, target)) {
+      return reject(runId, "target_disabled")
+    }
+  } catch (error) {
+    // Store unavailable (e.g. an isolated unit env) — fail open to the Rust
+    // gate, which is the authoritative enforcement point.
+    log.warn("remote command ACL check skipped", { error })
+  }
   try {
     return await handler(command)
   } catch (error) {

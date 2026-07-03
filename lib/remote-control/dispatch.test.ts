@@ -78,6 +78,14 @@ jest.mock("@/lib/db/remote-control-run-status", () => ({
   setRemoteRunCorrelation: (...a: unknown[]) => setRemoteRunCorrelation(...a),
 }))
 
+// Renderer-side ACL guard reads the inbound denylist from this store.
+let disabledTargets: string[] = []
+jest.mock("@/stores/remote-control/store", () => ({
+  useRemoteControlStore: {
+    getState: () => ({ config: { inbound: { disabledTargets } } }),
+  },
+}))
+
 function cmd(over: Partial<RemoteCommand>): RemoteCommand {
   return { target: "scheduler.task.run", args: {}, runId: "run_1", ...over }
 }
@@ -85,6 +93,7 @@ function cmd(over: Partial<RemoteCommand>): RemoteCommand {
 describe("dispatchRemoteCommand", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    disabledTargets = []
     startWorkflowFromRemote.mockResolvedValue({ ok: true, runId: "run_wf" })
     teamStart.mockResolvedValue(undefined)
     runPlan.mockResolvedValue({ status: "completed" })
@@ -106,6 +115,25 @@ describe("dispatchRemoteCommand", () => {
     )
     expect(runTaskNow).toHaveBeenCalledWith("t1", { triggerSource: "remote" })
     expect(r.status).toBe("accepted")
+  })
+
+  it("rejects a target on the inbound denylist without running its handler", async () => {
+    disabledTargets = ["plugin.disable"]
+    const r = await dispatchRemoteCommand(
+      cmd({ target: "plugin.disable", args: { pluginId: "p1" } })
+    )
+    expect(r.status).toBe("rejected")
+    expect(r.detail).toBe("target_disabled")
+    expect(disablePlugin).not.toHaveBeenCalled()
+  })
+
+  it("dispatches normally when the denylist excludes the target", async () => {
+    disabledTargets = ["terminal.exec"]
+    const r = await dispatchRemoteCommand(
+      cmd({ target: "scheduler.task.run", args: { taskId: "t1" } })
+    )
+    expect(r.status).toBe("accepted")
+    expect(runTaskNow).toHaveBeenCalledWith("t1", { triggerSource: "remote" })
   })
 
   it("rejects scheduler.task.run with missing taskId", async () => {

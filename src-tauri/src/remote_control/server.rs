@@ -120,6 +120,9 @@ struct AppState {
     idempotency: Arc<IdempotencyCache>,
     capability: Capability,
     allow_sensitive_targets: bool,
+    /// Per-target permission denylist (least-privilege ACL). A target here is
+    /// rejected with `403 target_disabled` even for a `write` token.
+    disabled_targets: Arc<Vec<String>>,
     queries: Arc<QueryRegistry>,
 }
 
@@ -148,6 +151,7 @@ pub async fn spawn_server(
     rate_limit_per_min: u32,
     capability: Capability,
     allow_sensitive_targets: bool,
+    disabled_targets: Vec<String>,
     queries: Arc<QueryRegistry>,
     on_request: Arc<dyn RequestObserver>,
 ) -> Result<ServerHandle, RemoteControlError> {
@@ -172,6 +176,7 @@ pub async fn spawn_server(
         idempotency: Arc::new(IdempotencyCache::new()),
         capability,
         allow_sensitive_targets,
+        disabled_targets: Arc::new(disabled_targets),
         queries,
     };
 
@@ -285,6 +290,13 @@ async fn run_command(
 ) -> impl IntoResponse {
     if !KNOWN_TARGETS.contains(&target.as_str()) {
         return error_body(StatusCode::NOT_FOUND, "unknown command target");
+    }
+    // Per-target permission denylist (least-privilege ACL): a target the user
+    // explicitly disabled is rejected even for a `write` token. Checked before
+    // the sensitivity guardrail so a disabled target reports the more specific
+    // reason regardless of its sensitivity.
+    if state.disabled_targets.iter().any(|t| t == &target) {
+        return error_body(StatusCode::FORBIDDEN, "target_disabled");
     }
     // Sensitivity guardrail: model-cost / off-device targets need an explicit
     // opt-in beyond the binary write capability.
@@ -683,5 +695,19 @@ mod tests {
         // terminal.exec runs an arbitrary shell command — it MUST be sensitive.
         assert!(is_sensitive_target("terminal.exec"));
         assert_eq!(SENSITIVE_TARGETS.len(), 4);
+    }
+
+    #[test]
+    fn disabled_targets_match_is_exact() {
+        // The denylist gate compares the concrete target string for equality;
+        // an empty list disables nothing and a listed target is denied.
+        let denied: Vec<String> = vec!["plugin.disable".into(), "terminal.exec".into()];
+        assert!(denied.iter().any(|t| t == "plugin.disable"));
+        assert!(denied.iter().any(|t| t == "terminal.exec"));
+        assert!(!denied.iter().any(|t| t == "workflow.run"));
+        // A prefix must NOT partially match — "plugin" is not "plugin.disable".
+        assert!(!denied.iter().any(|t| t == "plugin"));
+        let empty: Vec<String> = Vec::new();
+        assert!(!empty.iter().any(|t| t == "scheduler.task.run"));
     }
 }

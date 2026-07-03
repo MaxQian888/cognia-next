@@ -10,6 +10,7 @@ import {
   KeyRoundIcon,
   RefreshCwIcon,
   SendIcon,
+  TerminalIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -22,9 +23,12 @@ import { isTauri } from "@/lib/tauri"
 import { remoteControlGetToken, remoteControlRotateToken } from "@/lib/tauri/remote-control"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 import {
+  groupRemoteCommandTargets,
   isLoopbackAllowlistEntry,
+  isRemoteCommandTargetEnabled,
   isSensitiveRemoteCommandTarget,
   REMOTE_COMMAND_TARGETS,
+  type RemoteCommandTarget,
   SENSITIVE_REMOTE_COMMAND_TARGETS,
   validateCidrOrIp,
 } from "@/types/remote-control"
@@ -56,6 +60,32 @@ export function InboundTab() {
 
   const endpointUrl = `http://127.0.0.1:${inbound.port}`
   const hasNonLoopback = inbound.allowlist.some((entry) => !isLoopbackAllowlistEntry(entry))
+
+  const disabledTargets = inbound.disabledTargets ?? []
+  const targetGroups = groupRemoteCommandTargets()
+  const enabledTargetCount = REMOTE_COMMAND_TARGETS.filter((target) =>
+    isRemoteCommandTargetEnabled(disabledTargets, target)
+  ).length
+
+  const onToggleTarget = (target: RemoteCommandTarget, enabled: boolean) => {
+    const next = new Set(disabledTargets)
+    if (enabled) next.delete(target)
+    else next.add(target)
+    void updateInbound({ disabledTargets: [...next] })
+  }
+  const onEnableAllTargets = () => void updateInbound({ disabledTargets: [] })
+  const onDisableAllTargets = () =>
+    void updateInbound({ disabledTargets: [...REMOTE_COMMAND_TARGETS] })
+
+  // Quickstart snippets use a $COGNIA_RC_TOKEN placeholder rather than the real
+  // token so copying to a shared terminal history never leaks the bearer.
+  const healthSnippet = `curl -sS ${endpointUrl}/api/v1/health \\\n  -H "Authorization: Bearer $COGNIA_RC_TOKEN"`
+  const commandSnippet = `curl -sS -X POST ${endpointUrl}/api/v1/commands/scheduler.task.run \\\n  -H "Authorization: Bearer $COGNIA_RC_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '{"args":{"taskId":"<task-id>"}}'`
+
+  const onCopySnippet = async (snippet: string) => {
+    await navigator.clipboard.writeText(snippet).catch(() => {})
+    toast.success(t("quickstartCopied"))
+  }
 
   const onRevealToken = async () => {
     try {
@@ -329,24 +359,68 @@ export function InboundTab() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">{t("commandTargetsHeading")}</CardTitle>
-          <CardDescription>{t("commandTargetsHelp")}</CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="space-y-1">
+              <CardTitle className="text-sm font-medium">
+                {t("commandPermissionsHeading")}
+              </CardTitle>
+              <CardDescription>{t("commandPermissionsHelp")}</CardDescription>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" variant="ghost" onClick={onEnableAllTargets}>
+                {t("commandPermissionsEnableAll")}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onDisableAllTargets}>
+                {t("commandPermissionsDisableAll")}
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("commandPermissionsEnabledCount", {
+              enabled: enabledTargetCount,
+              total: REMOTE_COMMAND_TARGETS.length,
+            })}
+          </p>
         </CardHeader>
-        <CardContent>
-          <ul className="space-y-1">
-            {REMOTE_COMMAND_TARGETS.map((target) => (
-              <li key={target} className="flex items-center gap-2">
-                <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
-                  POST /api/v1/commands/{target}
-                </code>
-                {isSensitiveRemoteCommandTarget(target) && (
-                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                    {t("sensitiveBadge")}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
+        <CardContent className="space-y-4">
+          {targetGroups.map(({ group, targets }) => (
+            <div key={group} className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">
+                {t(`commandGroup_${group}` as never)}
+              </p>
+              <ul className="space-y-1">
+                {targets.map((target) => {
+                  const enabled = isRemoteCommandTargetEnabled(disabledTargets, target)
+                  return (
+                    <li
+                      key={target}
+                      className="flex items-center gap-2 rounded-md border bg-muted/20 px-2.5 py-1.5"
+                    >
+                      <Switch
+                        id={`rc-target-${target}`}
+                        checked={enabled}
+                        onCheckedChange={(v) => onToggleTarget(target, v)}
+                        aria-label={t("commandPermissionsToggleAria", { target })}
+                      />
+                      <code
+                        className={`flex-1 truncate font-mono text-xs ${
+                          enabled ? "" : "text-muted-foreground line-through"
+                        }`}
+                      >
+                        POST /api/v1/commands/{target}
+                      </code>
+                      {isSensitiveRemoteCommandTarget(target) && (
+                        <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                          {t("sensitiveBadge")}
+                        </span>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">{t("capabilityRestartNote")}</p>
         </CardContent>
       </Card>
 
@@ -372,6 +446,37 @@ export function InboundTab() {
             })}
           </p>
           <p className="text-xs text-muted-foreground">{t("capabilityRestartNote")}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm font-medium">
+            <TerminalIcon className="h-4 w-4" />
+            {t("quickstartHeading")}
+          </CardTitle>
+          <CardDescription>{t("quickstartHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {(
+            [
+              { label: t("quickstartHealthLabel"), snippet: healthSnippet },
+              { label: t("quickstartCommandLabel"), snippet: commandSnippet },
+            ] as const
+          ).map(({ label, snippet }) => (
+            <div key={label} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                <Button size="sm" variant="ghost" onClick={() => onCopySnippet(snippet)}>
+                  <CopyIcon className="mr-1.5 h-3.5 w-3.5" />
+                  {t("quickstartCopy")}
+                </Button>
+              </div>
+              <pre className="overflow-x-auto rounded-md border bg-muted/40 p-2.5 text-[11px] leading-relaxed">
+                <code>{snippet}</code>
+              </pre>
+            </div>
+          ))}
         </CardContent>
       </Card>
 

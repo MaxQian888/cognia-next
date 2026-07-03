@@ -61,9 +61,70 @@ describe("OutboundTab", () => {
     )
   })
 
-  it("renders the read-only retry summary", () => {
+  it("edits the delivery limits and clamps out-of-range input", async () => {
     render(<OutboundTab />)
-    expect(screen.getByText(/Retries.*3.*1000.*10000/i)).toBeInTheDocument()
+    const retries = screen.getByLabelText(/max retries/i) as HTMLInputElement
+    expect(retries.value).toBe("3")
+    fireEvent.change(retries, { target: { value: "6" } })
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.delivery?.maxRetries).toBe(6)
+    )
+    // 999 is clamped to the max of 10.
+    fireEvent.change(retries, { target: { value: "999" } })
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.delivery?.maxRetries).toBe(10)
+    )
+  })
+
+  it("resets the delivery limits to defaults", async () => {
+    await useRemoteControlStore
+      .getState()
+      .updateOutbound({ delivery: { maxRetries: 9, timeoutMs: 30000, baseDelayMs: 5000 } })
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /reset to defaults/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.delivery).toEqual({
+        maxRetries: 3,
+        timeoutMs: 10000,
+        baseDelayMs: 1000,
+      })
+    )
+  })
+
+  it("toggles an endpoint event subscription", async () => {
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /add endpoint/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints).toHaveLength(1)
+    )
+    fireEvent.click(screen.getByLabelText(/task completed/i))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints[0].eventTypes).toEqual([
+        "complete",
+      ])
+    )
+  })
+
+  it("flags an invalid endpoint URL", async () => {
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /add endpoint/i }))
+    const urlInput = await screen.findByPlaceholderText("https://example.com/webhook")
+    fireEvent.change(urlInput, { target: { value: "not-a-url" } })
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+  })
+
+  it("adds a per-endpoint custom header", async () => {
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /add endpoint/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints).toHaveLength(1)
+    )
+    // The endpoints card renders before the global default-headers card, so the
+    // first "Add header" button is the per-endpoint one.
+    fireEvent.click(screen.getAllByRole("button", { name: /add header/i })[0])
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints[0].headers).toHaveLength(1)
+    )
   })
 
   it("adds, edits, and removes an egress endpoint", async () => {

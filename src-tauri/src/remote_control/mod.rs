@@ -142,7 +142,7 @@ impl RemoteControlState {
             .map_err(RemoteControlError::Keyring)?
             .ok_or(RemoteControlError::TokenMissing)?;
 
-        let (port, allowlist, rate_limit, capability, allow_sensitive_targets) = {
+        let (port, allowlist, rate_limit, capability, allow_sensitive_targets, disabled_targets) = {
             let inner = self.inner.lock();
             if inner.server.is_some() {
                 return Err(RemoteControlError::AlreadyRunning(
@@ -155,6 +155,7 @@ impl RemoteControlState {
                 inner.config.inbound.rate_limit_per_min,
                 inner.config.inbound.capability,
                 inner.config.inbound.allow_sensitive_targets,
+                inner.config.inbound.disabled_targets.clone(),
             )
         };
 
@@ -171,6 +172,7 @@ impl RemoteControlState {
             rate_limit,
             capability,
             allow_sensitive_targets,
+            disabled_targets,
             self.queries.clone(),
             observer,
         )

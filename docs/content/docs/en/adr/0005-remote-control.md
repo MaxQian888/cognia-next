@@ -35,6 +35,27 @@ the inbound surface was generalized beyond the scheduler:
 
 See the [Remote Control subsystem docs](../subsystems/remote-control) for the wired detail.
 
+## Customization update (2026-07-03)
+
+The settings panels gained finer-grained, end-to-end-wired controls, following
+least-privilege ACL and mainstream webhook-dashboard conventions:
+
+- **Per-target permission ACL (inbound).** `RemoteControlInboundConfig.disabledTargets`
+  is a denylist enforced server-side in Rust (`run_command` returns `403 target_disabled`
+  before emitting the command event), with a renderer-side guard in `dispatchRemoteCommand`
+  as defence-in-depth. The Inbound tab renders the command targets as per-subsystem toggles
+  (with bulk enable/disable). Applied on the next listener start, like port/allowlist/capability.
+- **Per-endpoint event subscriptions (outbound).** `WebhookEgressEndpoint.eventTypes`
+  filters an egress endpoint to specific lifecycle event types (empty = all), enforced by
+  `endpointSubscribesTo` in `publishOutboundEvent`. Endpoints also gained a per-endpoint
+  custom-headers editor and live URL validation.
+- **Tunable delivery limits (outbound).** `RemoteControlOutboundConfig.delivery`
+  (`maxRetries` / `timeoutMs` / `baseDelayMs`, clamped by `normalizeWebhookDelivery`) replaces
+  the previously hard-coded constants in `deliverWebhook`; applied to both per-task URLs and
+  egress endpoints.
+- **Inbound quickstart** cURL snippets + an Overview traffic snapshot (success / errors /
+  success-rate over the recent-calls window).
+
 ## Context
 
 cognia-next has shipped two adjacent half-features since the scheduler landed:
