@@ -565,6 +565,55 @@ describe("Canvas API", () => {
       // Should not throw
       expect(() => api.insertText("test")).not.toThrow()
     })
+
+    it("inserts at the live editor caret via executeEdits when an editor is bound", () => {
+      const docId = "insert-live"
+      mockCanvasDocuments[docId] = {
+        id: docId,
+        sessionId: "session-1",
+        title: "Insert Live",
+        content: "Hello World",
+        type: "text",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        aiSuggestions: [],
+        versions: [],
+      }
+      mockActiveCanvasId = docId
+      // Caret after "Hello" (column 6), no selection span.
+      const editor = new MockMonacoEditor("Hello World", createSelection(1, 6, 1, 6))
+      mockActiveEditorContext = { contextId: "canvas", editor }
+
+      const api = createCanvasAPI(testPluginId)
+      api.insertText("XX")
+
+      expect(mockCanvasDocuments[docId].content).toBe("HelloXX World")
+      expect(editor.focus).toHaveBeenCalled()
+    })
+
+    it("inserts at the store's tracked cursor when no live editor is bound", () => {
+      const docId = "insert-tracked"
+      mockCanvasDocuments[docId] = {
+        id: docId,
+        sessionId: "session-1",
+        title: "Insert Tracked",
+        content: "Hello World",
+        type: "text",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        aiSuggestions: [],
+        versions: [],
+        // Cursor tracked at column 6 (after "Hello") from a prior selection sync.
+        editorContext: { selection: createSelection(1, 6, 1, 6) },
+      }
+      mockActiveCanvasId = docId
+      mockActiveEditorContext = null // no live editor
+
+      const api = createCanvasAPI(testPluginId)
+      api.insertText("XX")
+
+      expect(mockCanvasDocuments[docId].content).toBe("HelloXX World")
+    })
   })
 
   describe("Version management", () => {

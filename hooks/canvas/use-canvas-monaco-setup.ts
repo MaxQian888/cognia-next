@@ -8,9 +8,10 @@
  * separate suggestions panel so this hook is just the editor wiring.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
+import type { MonacoLike, EditorLike } from "@/hooks/use-monaco-markers"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import { useSettingsStore } from "@/stores"
@@ -53,6 +54,13 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
   const monacoRef = useRef<typeof import("monaco-editor") | null>(null)
   const workbenchHandleRef = useRef<MonacoWorkbenchHandle | null>(null)
   const editorActionsRef = useRef<MonacoDisposable[]>([])
+  // Live monaco + editor for the diagnostics bar. State (not a ref) so the bar
+  // re-renders once Monaco mounts and LSP markers start flowing. Owned here (the
+  // hook manages the editor lifecycle) rather than in the panel, which keeps the
+  // panel's onMount side-effect-free.
+  const [diagnostics, setDiagnostics] = useState<{ monaco: MonacoLike; editor: EditorLike } | null>(
+    null
+  )
   const settings = useCanvasSettingsStore((s) => s.settings)
   // Subscribe to the customizable keybindings so a rebind re-registers the
   // editor actions (the effect below keys off this value).
@@ -98,6 +106,12 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
         monaco,
         useKeybindingStore.getState().bindings
       )
+
+      // Expose the live handles to the diagnostics bar.
+      setDiagnostics({
+        monaco: monaco as unknown as MonacoLike,
+        editor: editor as unknown as EditorLike,
+      })
 
       // Mount the workbench primitive so this editor is visible to the
       // VS Code reuse layer (LSP providers, decorations, diagnostics)
@@ -195,5 +209,6 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
     onMount,
     editorOptions,
     settings,
+    diagnostics,
   }
 }

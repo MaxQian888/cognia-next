@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 
 const settingsRef = {
   settings: {
@@ -161,6 +161,17 @@ describe("useCanvasMonacoSetup", () => {
     rerender()
     expect(registerCanvasEditorActionsMock).toHaveBeenCalledTimes(2)
     expect(disposeMock).toHaveBeenCalled() // previous batch disposed first
+  })
+
+  it("exposes the live monaco + editor to the diagnostics bar after mount", () => {
+    const { result } = renderHook(() => useCanvasMonacoSetup())
+    expect(result.current.diagnostics).toBeNull()
+    const editor = { getValue: () => "" } as never
+    const monaco = { editor: { setTheme: jest.fn() } } as never
+    act(() => {
+      result.current.onMount(editor, monaco)
+    })
+    expect(result.current.diagnostics).toEqual({ monaco, editor })
   })
 
   it("disposes the registered editor actions on unmount", () => {

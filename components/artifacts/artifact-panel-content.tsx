@@ -11,7 +11,7 @@
  */
 
 import dynamic from "next/dynamic"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Maximize2, Minimize2, MoreHorizontal, Pencil, Save, X, FileCode } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -70,6 +70,8 @@ import { useArtifactPanelState, type ArtifactViewMode } from "@/hooks/artifacts/
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { LspServerHint } from "@/components/editor/lsp-server-hint"
+import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar"
+import type { MonacoLike, EditorLike } from "@/hooks/use-monaco-markers"
 import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
 
 type ArtifactPanelAction =
@@ -129,6 +131,8 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
   // editor mounts, attach a stable `artifact:///{id}.{ext}` URI so LSP
   // providers bind to it. Tear down on artifact change / unmount.
   const workbenchHandleRef = useRef<MonacoWorkbenchHandle | null>(null)
+  // Live monaco + editor for the diagnostics bar (state so it re-renders on mount).
+  const [diag, setDiag] = useState<{ monaco: MonacoLike; editor: EditorLike } | null>(null)
   const activeArtifactId = activeArtifact?.id ?? null
   useEffect(() => {
     return () => {
@@ -387,6 +391,10 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
               value={editContent}
               onChange={handleEditorChange}
               onMount={(editor, monaco) => {
+                setDiag({
+                  monaco: monaco as unknown as MonacoLike,
+                  editor: editor as unknown as EditorLike,
+                })
                 workbenchHandleRef.current = mountMonacoWorkbench(
                   editor as unknown as IMonacoEditor,
                   monaco as unknown as MonacoNamespace,
@@ -411,6 +419,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
               }}
             />
           </div>
+          <MonacoDiagnosticsBar monaco={diag?.monaco ?? null} editor={diag?.editor ?? null} />
         </div>
       )
     }

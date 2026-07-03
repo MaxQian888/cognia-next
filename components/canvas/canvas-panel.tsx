@@ -57,6 +57,7 @@ import { useCanvasMonacoSetup } from "@/hooks/canvas/use-canvas-monaco-setup"
 import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
 import { useCanvasKeyboardShortcuts } from "@/hooks/canvas/use-canvas-keyboard-shortcuts"
+import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import { RenameDialog } from "./rename-dialog"
@@ -69,6 +70,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { CanvasInlineCommand } from "./canvas-inline-command"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { LspServerHint } from "@/components/editor/lsp-server-hint"
+import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar"
 import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 
@@ -124,6 +126,9 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // workbench, no worker assets); every editorRef consumer below falls back
   // to whole-document semantics when the Monaco ref is absent.
   const isMobile = useIsMobile()
+  // Feature-flag gate: `canvas.aiWorkbench.v1` (env / localStorage override).
+  // When off, the AI action toolbar items and the Ctrl+K palette are hidden.
+  const aiWorkbenchEnabled = useCanvasFeatureFlag("canvas.aiWorkbench.v1")
   const { resolvedTheme } = useTheme()
   const accessibility = useCanvasSettingsStore((s) => s.settings.accessibility)
   const monacoLink = useSettingsStore((s) => s.monacoLink)
@@ -392,6 +397,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         onTriggerSuggestions={triggerSuggestions}
         onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
         onFormat={handleFormat}
+        aiEnabled={aiWorkbenchEnabled}
       />
 
       <PluginExtensionSlot
@@ -443,6 +449,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
                   />
                 </Suspense>
               </div>
+              {monacoSetup.diagnostics ? (
+                <MonacoDiagnosticsBar
+                  monaco={monacoSetup.diagnostics.monaco}
+                  editor={monacoSetup.diagnostics.editor}
+                />
+              ) : null}
             </div>
           )
         ) : (
@@ -478,13 +490,15 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         </div>
       )}
 
-      <CanvasInlineCommand
-        running={actions.running}
-        onAction={runAction}
-        onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
-        onTriggerSuggestions={triggerSuggestions}
-        onCreateDocument={onCreate}
-      />
+      {aiWorkbenchEnabled && (
+        <CanvasInlineCommand
+          running={actions.running}
+          onAction={runAction}
+          onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
+          onTriggerSuggestions={triggerSuggestions}
+          onCreateDocument={onCreate}
+        />
+      )}
     </div>
   )
 }
@@ -508,6 +522,7 @@ interface CanvasToolbarProps {
   onTriggerSuggestions: () => void
   onSaveVersion: () => void
   onFormat: (action: FormatAction) => void
+  aiEnabled: boolean
 }
 
 function CanvasToolbar({
@@ -525,6 +540,7 @@ function CanvasToolbar({
   onTriggerSuggestions,
   onSaveVersion,
   onFormat,
+  aiEnabled,
 }: CanvasToolbarProps) {
   const t = useTranslations("canvas")
   const tActions = useTranslations("canvas.actions")
@@ -672,55 +688,59 @@ function CanvasToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => void onAction("review")} disabled={running}>
-                <Wand2 className="mr-2 size-3.5" />
-                {tActions("review")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("fix")} disabled={running}>
-                <Bug className="mr-2 size-3.5" />
-                {tActions("fix")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("improve")} disabled={running}>
-                <Sparkles className="mr-2 size-3.5" />
-                {tActions("improve")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <DropdownMenuItem disabled={running} onSelect={(e) => e.preventDefault()}>
-                    <Languages className="mr-2 size-3.5" />
-                    {tActions("translate")}
+              {aiEnabled && (
+                <>
+                  <DropdownMenuItem onClick={() => void onAction("review")} disabled={running}>
+                    <Wand2 className="mr-2 size-3.5" />
+                    {tActions("review")}
                   </DropdownMenuItem>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="left">
-                  {TRANSLATE_LANGUAGES.map((l) => (
-                    <DropdownMenuItem
-                      key={l.value}
-                      onClick={() => void onAction("translate", { targetLanguage: l.value })}
-                    >
-                      {l.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
-                <HelpCircle className="mr-2 size-3.5" />
-                {tActions("explain")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
-                <Minimize2 className="mr-2 size-3.5" />
-                {tActions("simplify")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
-                <Maximize2 className="mr-2 size-3.5" />
-                {tActions("expand")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
-                <Lightbulb className="mr-2 size-3.5" />
-                {tActions("suggest", { default: "Suggest" })}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => void onAction("fix")} disabled={running}>
+                    <Bug className="mr-2 size-3.5" />
+                    {tActions("fix")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void onAction("improve")} disabled={running}>
+                    <Sparkles className="mr-2 size-3.5" />
+                    {tActions("improve")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <DropdownMenuItem disabled={running} onSelect={(e) => e.preventDefault()}>
+                        <Languages className="mr-2 size-3.5" />
+                        {tActions("translate")}
+                      </DropdownMenuItem>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" side="left">
+                      {TRANSLATE_LANGUAGES.map((l) => (
+                        <DropdownMenuItem
+                          key={l.value}
+                          onClick={() => void onAction("translate", { targetLanguage: l.value })}
+                        >
+                          {l.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
+                    <HelpCircle className="mr-2 size-3.5" />
+                    {tActions("explain")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
+                    <Minimize2 className="mr-2 size-3.5" />
+                    {tActions("simplify")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
+                    <Maximize2 className="mr-2 size-3.5" />
+                    {tActions("expand")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
+                    <Lightbulb className="mr-2 size-3.5" />
+                    {tActions("suggest", { default: "Suggest" })}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onClick={onSaveVersion} disabled={running}>
                 <Save className="mr-2 size-3.5" />
                 {tActions("saveVersion", { default: "Save version" })}

@@ -18,6 +18,7 @@ const bridge = jest.requireMock("@/lib/plugin/vscode-shim/monaco-bridge") as {
 }
 
 const lightBindingDispose = jest.fn()
+const lightBindingUpdate = jest.fn()
 const bindingMock = jest.requireMock("./monaco-context-binding") as {
   bindMonacoEditorContext: jest.Mock
 }
@@ -31,7 +32,10 @@ jest.mock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
 }))
 
 jest.mock("./monaco-context-binding", () => ({
-  bindMonacoEditorContext: jest.fn(() => ({ dispose: lightBindingDispose })),
+  bindMonacoEditorContext: jest.fn(() => ({
+    dispose: lightBindingDispose,
+    update: lightBindingUpdate,
+  })),
 }))
 
 function makeFakeMonaco(): {
@@ -161,6 +165,7 @@ beforeEach(() => {
   bridge.notifySelectionChanged.mockClear()
   bindingMock.bindMonacoEditorContext.mockClear()
   lightBindingDispose.mockClear()
+  lightBindingUpdate.mockClear()
 })
 
 describe("buildWorkbenchUri", () => {
@@ -283,6 +288,10 @@ describe("mountMonacoWorkbench", () => {
         editorId: "ed-42",
         documentId: "doc-1",
         language: "typescript",
+        contextId: "canvas",
+        editor,
+        selection: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+        cursor: { line: 1, column: 1 },
       })
     )
   })
@@ -305,6 +314,36 @@ describe("mountMonacoWorkbench", () => {
       })
     )
     expect(adapted.getPosition()).toEqual({ lineNumber: 1, column: 1 })
+  })
+
+  it("exposes an adapter that delegates selection / edits / decorations to the editor", () => {
+    const { monaco } = makeFakeMonaco()
+    const { editor } = makeFakeEditor("ed-adapt")
+    mountMonacoWorkbench(editor, monaco, baseSpec)
+    const adapted = bridge.notifyEditorMounted.mock.calls[0]?.[0] as {
+      getSelection(): unknown
+      applyEdits(edits: unknown[]): void
+      setDecorations(typeId: string, decorations: unknown[]): void
+    }
+    expect(adapted.getSelection()).toEqual({
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 1,
+    })
+    adapted.applyEdits([{ range: {}, text: "x" }])
+    expect(editor.executeEdits).toHaveBeenCalledWith("workbench", [{ range: {}, text: "x" }])
+    adapted.setDecorations("type-1", [{ range: {} }])
+    expect(editor.deltaDecorations).toHaveBeenCalledWith([], [{ range: {} }])
+  })
+
+  it("adapter getSelection returns null when the editor has no selection", () => {
+    const { monaco } = makeFakeMonaco()
+    const { editor } = makeFakeEditor("ed-nosel")
+    ;(editor as unknown as { getSelection: () => null }).getSelection = () => null
+    mountMonacoWorkbench(editor, monaco, baseSpec)
+    const adapted = bridge.notifyEditorMounted.mock.calls[0]?.[0] as { getSelection(): unknown }
+    expect(adapted.getSelection()).toBeNull()
   })
 
   it("forwards focus → notifyActiveEditorChanged(editorId)", () => {
@@ -337,6 +376,13 @@ describe("mountMonacoWorkbench", () => {
     mountMonacoWorkbench(editor, monaco, baseSpec)
     triggers.selection()
     expect(bridge.notifySelectionChanged).toHaveBeenLastCalledWith("ed-7")
+    // The registry binding is patched with the fresh selection/cursor too.
+    expect(lightBindingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selection: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+        cursor: { line: 1, column: 1 },
+      })
+    )
   })
 
   it("dispose() tears down all listeners, unmounts the bridge, releases the light binding", () => {
