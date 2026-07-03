@@ -1145,6 +1145,20 @@ export interface ChatSession {
   /** Skills the user has temporarily disabled for this session only. */
   disabledSkillIds?: string[]
   pinned?: boolean
+  /**
+   * Manual sort position within the Pinned section (ascending). Written by the
+   * ChannelList drag-reorder; `undefined` sorts by recency after ordered rows.
+   * Non-indexed optional column — no Dexie schema bump.
+   */
+  pinnedOrder?: number
+  /**
+   * Denormalized text preview of this session's most-recent message, written by
+   * `persistMessages` (only when it changes) so the ChannelList can render a
+   * second preview line without a per-row message query. Truncated (~120 chars).
+   */
+  lastMessagePreview?: string
+  /** Epoch ms of the most-recent message, paired with {@link lastMessagePreview}. */
+  lastMessageAt?: number
   /** Per-session overrides — take precedence over the character/app defaults. */
   model?: string
   /**
@@ -1390,6 +1404,30 @@ export interface ConversationTimelineSettings {
   expanded?: boolean
   /** Optional LLM-generated node labels (off by default — costs one call/turn). */
   labelSummary?: UtilityModelConfig
+}
+
+/** Row density for the conversation sidebar (ChannelList). */
+export type ConversationSidebarDensity = "comfortable" | "compact"
+/** How far the conversation-sidebar search reaches. */
+export type ConversationSearchScope = "title" | "titleAndContent"
+
+/**
+ * Behavior preferences for the conversation sidebar (ChannelList). All fields
+ * optional; read sites derive the default with `?? <default>` so an absent
+ * object (legacy settings) keeps today's behavior. Layout state (width, view,
+ * collapsed folders) lives in `useUIStore`, not here.
+ */
+export interface ConversationSidebarSettings {
+  /** Row density. Defaults to `"comfortable"`. */
+  density?: ConversationSidebarDensity
+  /** Show a second line with the last-message preview + relative time. Default off. */
+  showPreview?: boolean
+  /** Group non-search results into date buckets. Defaults to on. */
+  groupByDate?: boolean
+  /** Show per-conversation unread badges. Defaults to on. */
+  showUnreadBadges?: boolean
+  /** Whether search also matches message content (async). Defaults to title-only. */
+  searchScope?: ConversationSearchScope
 }
 
 export type AppTheme = "light" | "dark" | "system"
@@ -1847,6 +1885,8 @@ export interface AppSettings {
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings
+  /** Conversation sidebar (ChannelList) behavior preferences. */
+  conversationSidebar?: ConversationSidebarSettings
   // Tools the user has chosen to always allow for this app (per-tool name).
   alwaysAllowTools: string[]
   /**
@@ -2017,6 +2057,50 @@ export interface AppSettings {
      */
     cursorBlink?: boolean
     /**
+     * Line height as a multiplier of the font size (xterm `lineHeight`).
+     * Defaults to 1.0. Values > 1 add vertical breathing room between rows;
+     * changing it re-fits the terminal (the cell size shifts).
+     */
+    lineHeight?: number
+    /**
+     * Extra horizontal spacing between glyphs in pixels (xterm `letterSpacing`).
+     * Defaults to 0. Small positive values improve legibility for dense mono
+     * fonts; changing it re-fits the terminal.
+     */
+    letterSpacing?: number
+    /**
+     * Font weight for normal (non-bold) text (xterm `fontWeight`). Defaults to
+     * `"normal"`. Accepts CSS keywords or the 100–900 numeric-string scale.
+     */
+    fontWeight?:
+      | "normal"
+      | "bold"
+      | "100"
+      | "200"
+      | "300"
+      | "400"
+      | "500"
+      | "600"
+      | "700"
+      | "800"
+      | "900"
+    /**
+     * Font weight used for bold text (xterm `fontWeightBold`). Defaults to
+     * `"bold"`. Same accepted values as {@link fontWeight}.
+     */
+    fontWeightBold?:
+      | "normal"
+      | "bold"
+      | "100"
+      | "200"
+      | "300"
+      | "400"
+      | "500"
+      | "600"
+      | "700"
+      | "800"
+      | "900"
+    /**
      * Enable programming-font ligatures via `@xterm/addon-ligatures`. Off by
      * default — the addon shapes glyph runs at render time, a small cost only
      * worth paying for fonts that ship ligatures (Cascadia Code, JetBrains
@@ -2045,6 +2129,20 @@ export interface AppSettings {
      * escape hatch when WebGL renders blank/garbled in a given WebView2.
      */
     renderer?: "auto" | "webgl" | "canvas" | "dom"
+    /**
+     * Mouse-wheel scroll speed — number of lines scrolled per wheel notch
+     * (xterm `scrollSensitivity`). Defaults to 1. `fastScrollSensitivity`
+     * (Alt-scroll) is derived as 5× this value.
+     */
+    scrollSensitivity?: number
+    /**
+     * Minimum WCAG contrast ratio the renderer enforces between glyph and
+     * background by lightening/darkening the foreground (xterm
+     * `minimumContrastRatio`). `1` (default) disables it; `4.5` = WCAG AA,
+     * `7` = AAA, `21` = maximum (forces black/white). Improves legibility of
+     * low-contrast ANSI color output.
+     */
+    minimumContrastRatio?: number
     /**
      * Named launch profiles (Windows-Terminal style). Each bundles a shell +
      * cwd + env + args the dock's profile picker can spawn directly. See
@@ -2136,6 +2234,14 @@ export interface AppSettings {
      * the top of the viewport while reading its output. Default true.
      */
     stickyScroll?: boolean
+    /**
+     * Ask for confirmation before closing a terminal tab whose shell is still
+     * running a command (status `"running"`). Guards against losing an
+     * in-flight command to an accidental × click. Default true — matches VS
+     * Code's `terminal.integrated.confirmOnKill`. Idle / exited tabs close
+     * immediately regardless.
+     */
+    confirmOnClose?: boolean
   }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string
@@ -2161,6 +2267,45 @@ export interface AppSettings {
    * installed) degrades to an info toast rather than an error.
    */
   skillBundleMirrors?: { claude?: boolean; codex?: boolean }
+  /**
+   * User-customizable Skills panel preferences (display density, list/grid
+   * view, per-row field visibility, default tab/sort/status filter, and the
+   * `autoEnableNew` / `enabledWarnThreshold` injection hints). All fields are
+   * optional; defaults are applied at read time by `resolveSkillPanelPrefs`
+   * (`lib/skills/preferences.ts`), so existing installs pick up new options
+   * without a Dexie migration — same pattern as `skillBundleMirrors`. The
+   * shape is typed structurally here (rather than importing
+   * `PartialSkillPanelPrefs`) so `types.ts` stays free of any store/lib import
+   * cycle.
+   */
+  skillPanelPrefs?: {
+    density?: "comfortable" | "compact"
+    viewMode?: "list" | "grid"
+    showDescription?: boolean
+    showTags?: boolean
+    showSource?: boolean
+    showUsage?: boolean
+    defaultTab?: "my-skills" | "browse" | "editor" | "analytics"
+    defaultSort?: "name" | "updated" | "usage"
+    defaultStatusFilter?: SkillStatus | "all"
+    rememberLastView?: boolean
+    autoEnableNew?: boolean
+    enabledWarnThreshold?: number
+  }
+  /**
+   * Last Skills panel view snapshot (tab + sort + non-query filters). Written
+   * only when `skillPanelPrefs.rememberLastView` is on, and re-seeded into the
+   * ephemeral skills store on the next mount. Lives in settings JSON so the
+   * ephemeral store stays free of persistence middleware.
+   */
+  lastSkillView?: {
+    tab?: "my-skills" | "browse" | "editor" | "analytics"
+    sort?: "name" | "updated" | "usage"
+    category?: SkillCategory | "all"
+    source?: SkillSource | "all"
+    status?: SkillStatus | "all"
+    tag?: string | null
+  }
   /**
    * Workflow ids the user has pinned in the mobile Workflows tab. Surfaced
    * as a "Pinned" section above the main list. Lives in settings JSON to
@@ -2222,6 +2367,31 @@ export interface AppSettings {
    */
   discoverFavorites?: string[]
   /**
+   * Global defaults for the `/discover` page. Lives in settings JSON (same
+   * pattern as `discoverViewByCategory` / `discoverFavorites`) so it syncs
+   * cross-device without a Dexie migration. Edited from
+   * `/settings?section=discover`.
+   *
+   *  - `landingCategory`: the category (or the `favorites` pseudo-category) the
+   *    page opens on when `?category=` is absent. Falls back to the first
+   *    visible category when unset, invalid, or currently hidden.
+   *  - `view`: the fallback view mode (`grid` | `list` | `compact`) applied to
+   *    categories that have no explicit per-category override in
+   *    `discoverViewByCategory`.
+   */
+  discoverDefaults?: {
+    landingCategory?: string
+    view?: import("@/lib/discover/categories").DiscoverViewMode
+  }
+  /**
+   * Execution Monitor view preferences ("围观设置") — hidden kinds, row sort,
+   * group-by-kind, and the live-elapsed toggle for the "what is running right
+   * now" panel. Lives in settings JSON (same pattern as `discoverDefaults`) so
+   * the chosen view follows the user across devices without a Dexie migration.
+   * See `@/lib/execution/monitor-prefs` for the model + defaults.
+   */
+  executionMonitorPrefs?: import("@/lib/execution/monitor-prefs").StoredExecutionMonitorPrefs
+  /**
    * Active view mode for the `/scheduler` dashboard (`overview` | `calendar` |
    * `timeline`). `overview` is the default static dashboard; `calendar` shows a
    * month grid of projected runs; `timeline` shows a day-grouped agenda. Lives
@@ -2236,6 +2406,14 @@ export interface AppSettings {
    * migration.
    */
   goalConsoleView?: "grid" | "list"
+  /**
+   * Persisted preferences for the `/goals` console (ADR-0019 Phase 3): the
+   * default landing tab and the open-goals default sort. Lives in settings
+   * JSON (same pattern as `goalConsoleView` / `executionMonitorPrefs`) so it
+   * follows the user across devices without a Dexie migration. Partial — unset
+   * fields fall back to `DEFAULT_GOAL_CONSOLE_PREFS`.
+   */
+  goalConsolePrefs?: import("@/lib/goal/console-prefs").StoredGoalConsolePrefs
   /**
    * Unified Notification Center preferences (ADR-0042): global default
    * channels, per-source overrides, OS/push level gates, DND/quiet-hours,
@@ -2456,6 +2634,14 @@ export interface AppSettings {
      */
     reviewBeforeApply?: boolean
   }
+
+  // ---- Agent evaluation ----
+  /**
+   * Project-level Agent-Eval defaults (judge model, default k / scorers,
+   * new-dataset gate template, cost guard). Consumed by the run-config dialog
+   * and `createDataset`; see {@link import("@/types/eval/settings").EvalSettings}.
+   */
+  evalSettings?: import("@/types/eval/settings").EvalSettings
 
   // ---- Backup reminders & scheduling ----
   /**

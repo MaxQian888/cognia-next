@@ -15,6 +15,7 @@ import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_GIT_SETTINGS } from "@/types/git"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
 import { getDb } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
@@ -60,6 +61,7 @@ export const DEFAULTS: AppSettings = {
   language: "en",
   reduceMotion: false,
   workflowEditorPerformanceTier: undefined,
+  evalSettings: { ...DEFAULT_EVAL_SETTINGS },
   telemetryEnabled: false,
   storageRetention: { traceRetentionDays: 30 },
   sttLanguage: "en-US",
@@ -163,6 +165,15 @@ export const DEFAULTS: AppSettings = {
   // Right-edge timeline minimap — feature on, collapsed by default, label
   // summaries off (they cost one model call per turn).
   conversationTimeline: { enabled: true, expanded: false, labelSummary: { enabled: false } },
+  // Conversation sidebar (ChannelList) — comfortable density, no preview line,
+  // date grouping + unread badges on, title-only search (content search is opt-in).
+  conversationSidebar: {
+    density: "comfortable",
+    showPreview: false,
+    groupByDate: true,
+    showUnreadBadges: true,
+    searchScope: "title",
+  },
   // Token-level streaming for interactive chat — on by default.
   streamPartialMessages: true,
 }
@@ -220,6 +231,10 @@ export async function getSettings(): Promise<AppSettings> {
         ...DEFAULTS.conversationTimeline?.labelSummary,
         ...(row.conversationTimeline?.labelSummary ?? {}),
       },
+    },
+    conversationSidebar: {
+      ...DEFAULTS.conversationSidebar,
+      ...(row.conversationSidebar ?? {}),
     },
     id: SINGLETON_ID,
   }
