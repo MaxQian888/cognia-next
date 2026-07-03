@@ -56,6 +56,7 @@ import type { CanvasDocument } from "@/types/artifact/artifact"
 import { useCanvasMonacoSetup } from "@/hooks/canvas/use-canvas-monaco-setup"
 import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
+import { useAutoSuggestions } from "@/hooks/canvas/use-auto-suggestions"
 import { useCanvasKeyboardShortcuts } from "@/hooks/canvas/use-canvas-keyboard-shortcuts"
 import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
@@ -350,6 +351,20 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       cursorColumn: pos?.column,
     })
   }, [activeDoc, suggestions])
+
+  // Auto-trigger suggestions after a typing pause when the AI settings ask for it.
+  // Gated on the AI-workbench flag and idle state so it never fights an in-flight run.
+  useAutoSuggestions({
+    enabled:
+      aiWorkbenchEnabled &&
+      !isMobile &&
+      Boolean(activeDoc) &&
+      !actions.running &&
+      !suggestions.running,
+    documentId: activeId ?? "",
+    content: activeDoc?.content ?? "",
+    trigger: triggerSuggestions,
+  })
 
   const onCreate = useCallback(() => {
     const id = create({
