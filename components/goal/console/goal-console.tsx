@@ -96,7 +96,7 @@ export interface GoalConsoleProps {
   initialTab?: GoalConsoleTab
 }
 
-export function GoalConsole({ initialTab }: GoalConsoleProps = {}) {
+export function GoalConsole({ initialTab }: GoalConsoleProps) {
   const t = useTranslations("goal")
   const { view } = useGoalConsoleView()
   const { prefs } = useGoalConsolePrefs()
