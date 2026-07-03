@@ -39,7 +39,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
 
 import { toast } from "sonner"
 import { loggers } from "@/lib/logging"
-import { UpdateCheckInitializer } from "./update-check-initializer"
+import { UpdateCheckInitializer, __resetAutoCheckThrottle } from "./update-check-initializer"
 
 const toastMock = toast as unknown as {
   success: jest.Mock
@@ -55,6 +55,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
   settingsState.settings = { updates: { autoCheck: true } }
+  __resetAutoCheckThrottle()
 })
 
 describe("UpdateCheckInitializer", () => {
@@ -175,6 +176,20 @@ describe("UpdateCheckInitializer", () => {
       expect(debugMock).toHaveBeenCalledWith("about.autoUpdateCheckNoRelease", expect.any(Object))
     )
     expect(warnMock).not.toHaveBeenCalled()
+  })
+
+  it("throttles boot-storm re-mounts to a single check", async () => {
+    checkForUpdateMock.mockResolvedValue(null)
+    const first = render(<UpdateCheckInitializer />)
+    await waitFor(() => expect(checkForUpdateMock).toHaveBeenCalledTimes(1))
+    first.unmount()
+    // StrictMode double-invoke / settings-hydration re-subscribe: a remount
+    // within the throttle gap must NOT hit the endpoint again.
+    render(<UpdateCheckInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(checkForUpdateMock).toHaveBeenCalledTimes(1)
   })
 
   it("re-checks on the interval but does not re-toast the same version", async () => {

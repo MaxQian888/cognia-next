@@ -37,6 +37,22 @@ interface DescribedReason {
   error?: Error
 }
 
+/**
+ * Browser-generated noise that reaches `window.onerror` but signals no real
+ * fault. The ResizeObserver loop messages mean the browser deferred resize
+ * notifications by one frame — spec-sanctioned behavior, fired routinely by
+ * layout-observing UI libraries — yet arriving here they would be logged as
+ * FATAL and trip the Next.js dev overlay.
+ */
+const BENIGN_ERROR_PATTERNS = [
+  /^ResizeObserver loop completed with undelivered notifications/,
+  /^ResizeObserver loop limit exceeded/,
+]
+
+function isBenignBrowserError(message: string): boolean {
+  return BENIGN_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+}
+
 /** Normalise an arbitrary rejection reason / thrown value into a message + Error. */
 function describeReason(reason: unknown): DescribedReason {
   if (reason instanceof Error) {
@@ -116,6 +132,10 @@ export function installGlobalErrorHandlers(
     }
 
     const described = describeReason(errorEvent.error ?? errorEvent.message ?? "Uncaught error")
+    if (isBenignBrowserError(described.message)) {
+      emit("warn", `Benign browser error: ${described.message}`, undefined, "window.onerror")
+      return
+    }
     emit("fatal", `Uncaught error: ${described.message}`, described.error, "window.onerror")
   }
 

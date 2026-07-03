@@ -106,6 +106,31 @@ describe("installGlobalErrorHandlers", () => {
     expect(message).toContain("img")
   })
 
+  it.each([
+    "ResizeObserver loop completed with undelivered notifications.",
+    "ResizeObserver loop limit exceeded",
+  ])("downgrades the benign browser error %p to warn", (message) => {
+    const target = new FakeTarget()
+    installGlobalErrorHandlers({ target })
+
+    target.fire("error", { message, target })
+
+    expect(appLogger.fatal).not.toHaveBeenCalled()
+    expect(appLogger.warn).toHaveBeenCalledTimes(1)
+    expect(appLogger.warn.mock.calls[0][0]).toContain("ResizeObserver")
+  })
+
+  it("still reports a real error whose message merely mentions ResizeObserver", () => {
+    const target = new FakeTarget()
+    installGlobalErrorHandlers({ target })
+
+    const err = new Error("cannot construct ResizeObserver loop helper")
+    target.fire("error", { error: err, message: err.message, target })
+
+    expect(appLogger.fatal).toHaveBeenCalledTimes(1)
+    expect(appLogger.warn).not.toHaveBeenCalled()
+  })
+
   it("stringifies non-Error rejection reasons", () => {
     const target = new FakeTarget()
     installGlobalErrorHandlers({ target })
