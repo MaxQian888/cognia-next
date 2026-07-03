@@ -245,6 +245,13 @@ export function createPluginContext(
     pluginPath: plugin.path,
     config: plugin.config,
     logger: createLogger(pluginId),
+    // Base context intentionally exposes the legacy `PluginStorage` surface,
+    // which satisfies the required `storage` field of the base `PluginContext`.
+    // This is NOT a duplicate/shadowed key: every runtime plugin is built via
+    // `createFullPluginContext` (see manager.ts), where `contextAPI.storage`
+    // (the extended `createStorageAPI`) overrides this through the
+    // `{ ...baseContext, ...contextAPI }` spread — so `ctx.storage` is the
+    // extended `PluginStorageAPI` at runtime.
     storage: createStorage(pluginId),
     events: createEventEmitter(pluginId),
     ui: createUIAPI(pluginId),
