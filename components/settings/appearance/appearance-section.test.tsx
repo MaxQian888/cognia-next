@@ -24,6 +24,9 @@ jest.mock("./tabs/theme-pack-tab", () => ({
 jest.mock("./tabs/typography-tab", () => ({
   TypographyTab: () => <div data-testid="tab-typography" />,
 }))
+jest.mock("./tabs/layout-tab", () => ({
+  LayoutTab: () => <div data-testid="tab-layout" />,
+}))
 jest.mock("./tabs/wallpaper-tab", () => ({
   WallpaperTab: () => <div data-testid="tab-wallpaper" />,
 }))
@@ -40,6 +43,12 @@ jest.mock("./tabs/a11y-tab", () => ({ A11yTab: () => <div data-testid="tab-a11y"
 jest.mock("./tabs/advanced-tab", () => ({ AdvancedTab: () => <div data-testid="tab-advanced" /> }))
 jest.mock("../personalization-card", () => ({
   PersonalizationCard: () => <div data-testid="personalization-card-stub" />,
+}))
+jest.mock("./components/appearance-preview", () => ({
+  AppearancePreview: () => <div data-testid="appearance-preview-stub" />,
+}))
+jest.mock("./components/appearance-config-toolbar", () => ({
+  AppearanceConfigToolbar: () => <div data-testid="io-toolbar-stub" />,
 }))
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
@@ -75,6 +84,12 @@ describe("AppearanceSection", () => {
     expect(screen.getByTestId("tab-auto")).toBeInTheDocument()
   })
 
+  it("renders the new layout tab when selected", () => {
+    searchString = "?appearanceTab=layout"
+    render(<AppearanceSection />)
+    expect(screen.getByTestId("tab-layout")).toBeInTheDocument()
+  })
+
   it("falls back to theme tab on an unknown id", () => {
     searchString = "?appearanceTab=garbage"
     render(<AppearanceSection />)
@@ -90,8 +105,8 @@ describe("AppearanceSection", () => {
 
   it("exposes every tab as a tab control (wrapping strip stays fully visible)", () => {
     render(<AppearanceSection />)
-    // All 10 tabs are rendered as tab triggers — none hidden behind a scroll.
-    expect(screen.getAllByRole("tab")).toHaveLength(10)
+    // All 11 tabs are rendered as tab triggers — none hidden behind a scroll.
+    expect(screen.getAllByRole("tab")).toHaveLength(11)
   })
 
   it("does not render an inline reset button (the shell owns section reset)", () => {
