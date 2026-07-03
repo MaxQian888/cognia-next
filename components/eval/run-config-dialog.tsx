@@ -6,34 +6,28 @@
  * Replaces the dashboard's hardcoded single-chat-run button. Target option
  * lists (models / characters / teams / workflows) are passed in by the parent;
  * each falls back to a free-text id input when its list is empty.
+ *
+ * Defaults (k, scorer selection, judge model, deterministic-only) come from
+ * `AppSettings.evalSettings` via {@link resolveEvalSettings}, so the run dialog
+ * inherits whatever the user configured under Settings → Agent 评估. A cost
+ * estimate (extrapolated from the dataset's most recent run) warns before an
+ * expensive matrix when the settings cost guard is set.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { PlusIcon, Trash2Icon, PlayIcon, Loader2Icon } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { PlusIcon, Trash2Icon, PlayIcon, Loader2Icon, ScaleIcon, SettingsIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { AppSettings } from "@/lib/claude/types"
 import { buildConfiguredRunDeps } from "@/lib/ai/eval/browser-deps"
 import { runEvalService, type EvalProgress } from "@/lib/ai/eval/service"
+import { resolveEvalSettings } from "@/lib/ai/eval/settings"
+import { useEvalRuns, useEvalCases } from "@/hooks/eval/use-eval-data"
 import type { EvalRunConfig, TargetKind, TargetSpec } from "@/types/eval/run-config"
-
-/** The scorer ids the engine can produce (deterministic + llm tiers). */
-export const KNOWN_SCORER_IDS = [
-  "tool-selection",
-  "tool-args",
-  "tool-order",
-  "redundancy",
-  "trajectory-unordered",
-  "assertion",
-  "cost",
-  "rag-context-recall",
-  "judge-task-completion",
-  "judge-instruction-following",
-  "rag-faithfulness",
-  "rag-answer-relevancy",
-  "rag-context-precision",
-] as const
+import { ScorerPicker, expandScorerSelection, normalizeScorerSelection } from "./scorer-picker"
 
 interface NameId {
   id: string
@@ -84,23 +78,56 @@ export function RunConfigDialog({
   onComplete,
 }: RunConfigDialogProps) {
   const t = useTranslations("eval")
+  const router = useRouter()
+  const evalSettings = useMemo(() => resolveEvalSettings(appSettings), [appSettings])
   const defaultModel = appSettings?.defaultModel ?? "claude-opus-4-8"
+
   const [targets, setTargets] = useState<TargetDraft[]>([
     { kind: "chat", label: "", ref: defaultModel },
   ])
-  const [k, setK] = useState(1)
-  const [scorerIds, setScorerIds] = useState<string[]>([...KNOWN_SCORER_IDS])
+  const [k, setK] = useState(evalSettings.defaultK)
+  const [scorerIds, setScorerIds] = useState<string[]>(() =>
+    expandScorerSelection(evalSettings.defaultScorerIds)
+  )
   const [split, setSplit] = useState("")
   const [capabilities, setCapabilities] = useState("")
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<EvalProgress | null>(null)
+  const [costAck, setCostAck] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const { deterministicOnly } = useMemo(
-    () => buildConfiguredRunDeps({ appSettings }),
-    [appSettings]
+    () =>
+      buildConfiguredRunDeps({
+        appSettings,
+        ...(evalSettings.deterministicOnly ? { forceDeterministic: true } : {}),
+        ...(evalSettings.judgeModel ? { judgeModel: evalSettings.judgeModel } : {}),
+      }),
+    [appSettings, evalSettings.deterministicOnly, evalSettings.judgeModel]
   )
+
+  // Cost estimate: extrapolate the dataset's most recent run's per-(case×rep)
+  // cost across the current case count × k × target count. An upper bound (it
+  // ignores the case subset), which is the safe side for a "this may be pricey"
+  // warning. Null until the dataset has at least one prior run.
+  const datasetRuns = useEvalRuns(datasetId)
+  const cases = useEvalCases(datasetId)
+  const costPerUnit = useMemo(() => {
+    let last: (typeof datasetRuns)[number] | undefined
+    for (const r of datasetRuns) if (!last || r.createdAt > last.createdAt) last = r
+    if (!last) return null
+    return last.totalCostUsd / Math.max(1, last.caseCount * last.k)
+  }, [datasetRuns])
+
+  const targetCount = Math.max(1, targets.filter((d) => d.ref.trim()).length)
+  const estimatedCost =
+    costPerUnit != null
+      ? costPerUnit * Math.max(1, cases.length) * Math.max(1, k) * targetCount
+      : null
+  const costWarnUsd = evalSettings.costWarnUsd
+  const overBudget =
+    estimatedCost != null && costWarnUsd != null && costWarnUsd > 0 && estimatedCost > costWarnUsd
 
   const setTarget = (i: number, patch: Partial<TargetDraft>) =>
     setTargets((cur) => cur.map((tg, idx) => (idx === i ? { ...tg, ...patch } : tg)))
@@ -112,13 +139,18 @@ export function RunConfigDialog({
       .filter(Boolean)
 
   const handleRun = useCallback(async () => {
+    // First click while over the cost guard: acknowledge, don't run yet.
+    if (overBudget && !costAck) {
+      setCostAck(true)
+      return
+    }
     setRunning(true)
     setError(null)
     setProgress(null)
     try {
       const config: EvalRunConfig = {
         targets: targets.filter((d) => d.ref.trim()).map(draftToSpec),
-        scorerIds: scorerIds.length === KNOWN_SCORER_IDS.length ? [] : scorerIds,
+        scorerIds: normalizeScorerSelection(scorerIds),
         k: Math.max(1, k),
         ...(split.trim() || capabilities.trim()
           ? {
@@ -140,6 +172,8 @@ export function RunConfigDialog({
         config,
         appSettings,
         signal: controller.signal,
+        ...(evalSettings.deterministicOnly ? { forceDeterministic: true } : {}),
+        ...(evalSettings.judgeModel ? { judgeModel: evalSettings.judgeModel } : {}),
         onProgress: (p) => setProgress(p),
       })
       onComplete?.(reports.length)
@@ -150,7 +184,22 @@ export function RunConfigDialog({
       setRunning(false)
       abortRef.current = null
     }
-  }, [targets, scorerIds, k, split, capabilities, appSettings, datasetId, onClose, onComplete, t])
+  }, [
+    overBudget,
+    costAck,
+    targets,
+    scorerIds,
+    k,
+    split,
+    capabilities,
+    appSettings,
+    datasetId,
+    evalSettings.deterministicOnly,
+    evalSettings.judgeModel,
+    onClose,
+    onComplete,
+    t,
+  ])
 
   return (
     <div className="flex flex-col gap-3 rounded-md border p-3" data-testid="run-config-dialog">
@@ -255,33 +304,52 @@ export function RunConfigDialog({
         />
       </div>
 
-      {/* Scorer subset */}
-      <details className="rounded-md border p-2">
-        <summary className="cursor-pointer text-sm font-medium">
+      {/* Judge indicator + link to settings */}
+      <div className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ScaleIcon className="size-3.5 shrink-0" />
+          <span className="truncate">
+            {deterministicOnly
+              ? t("judge.deterministic")
+              : t("judge.using", { model: evalSettings.judgeModel ?? t("judge.auto") })}
+          </span>
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 shrink-0 gap-1 px-2"
+          onClick={() => router.push("/settings?section=eval")}
+        >
+          <SettingsIcon className="size-3.5" />
+          {t("judge.configure")}
+        </Button>
+      </div>
+
+      {/* Scorer subset — grouped by dimension */}
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium">
           {t("runConfig.scorers", { count: scorerIds.length })}
-        </summary>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {KNOWN_SCORER_IDS.map((id) => (
-            <label key={id} className="flex items-center gap-1 text-xs">
-              <input
-                type="checkbox"
-                checked={scorerIds.includes(id)}
-                aria-label={id}
-                onChange={() =>
-                  setScorerIds((cur) =>
-                    cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
-                  )
-                }
-              />
-              {id}
-            </label>
-          ))}
-        </div>
-      </details>
+        </span>
+        <ScorerPicker
+          value={scorerIds}
+          onChange={setScorerIds}
+          judgeAvailable={!deterministicOnly}
+        />
+      </div>
 
       {deterministicOnly && (
         <p className="text-muted-foreground text-xs">{t("runConfig.deterministicOnly")}</p>
       )}
+
+      {estimatedCost != null && (
+        <p className={cn("text-xs", overBudget ? "text-destructive" : "text-muted-foreground")}>
+          {t("cost.estimate", { cost: estimatedCost.toFixed(2) })}
+          {overBudget && costWarnUsd != null
+            ? ` — ${t("cost.overBudget", { budget: costWarnUsd.toFixed(2) })}`
+            : ""}
+        </p>
+      )}
+
       {running && progress && (
         <div className="flex items-center gap-2" data-testid="run-progress">
           <progress
@@ -308,13 +376,21 @@ export function RunConfigDialog({
         </p>
       )}
 
-      <Button onClick={() => void handleRun()} disabled={running}>
+      <Button
+        onClick={() => void handleRun()}
+        disabled={running}
+        variant={overBudget && !costAck ? "destructive" : "default"}
+      >
         {running ? (
           <Loader2Icon className="size-4 animate-spin" />
         ) : (
           <PlayIcon className="size-4" />
         )}
-        {running ? t("runConfig.running") : t("runConfig.run")}
+        {running
+          ? t("runConfig.running")
+          : overBudget && !costAck
+            ? t("runConfig.runAnyway")
+            : t("runConfig.run")}
       </Button>
     </div>
   )

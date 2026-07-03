@@ -177,6 +177,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   memory: ["memory", "memoryView"],
   artifacts: ["artifacts"],
   pet: ["petSettings"],
+  eval: ["evalSettings"],
   sidebar: ["sidebarLayout"],
   workflows: ["workflowEditorPerformanceTier"],
 }

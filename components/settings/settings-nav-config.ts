@@ -50,6 +50,7 @@ import {
   BoxIcon,
   GitPullRequestArrowIcon,
   CircleUserIcon,
+  ClipboardCheckIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -67,6 +68,7 @@ export type SettingsSectionId =
   | "agent-modes"
   | "agent-runtime"
   | "agent-teams"
+  | "eval"
   | "hooks"
   | "workspace-trust"
   | "slash-commands"
@@ -202,6 +204,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "agentTeams",
     group: "ai",
     icon: Layers3Icon,
+  },
+  {
+    id: "eval",
+    labelKey: "eval",
+    descriptionKey: "eval",
+    group: "ai",
+    icon: ClipboardCheckIcon,
   },
   {
     id: "hooks",
@@ -1115,6 +1124,32 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "agent team",
     "团队",
     "多代理",
+  ],
+  eval: [
+    "eval",
+    "evals",
+    "evaluation",
+    "agent eval",
+    "judge",
+    "judge model",
+    "scorer",
+    "scorers",
+    "pass@1",
+    "pass^k",
+    "gate",
+    "threshold",
+    "calibration",
+    "dataset",
+    "benchmark",
+    "deterministic",
+    "评估",
+    "评测",
+    "评委",
+    "评分器",
+    "门限",
+    "校准",
+    "数据集",
+    "基准",
   ],
   plugins: [
     "plugin",

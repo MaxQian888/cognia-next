@@ -28,6 +28,8 @@ export interface CreateDatasetInput {
   capability: string
   id?: string
   createdAt?: number
+  /** Gate template stamped onto the new dataset (from eval settings defaults). */
+  gate?: import("@/types/eval/gate").GateThresholds
 }
 
 export async function createDataset(input: CreateDatasetInput): Promise<EvalDataset> {
@@ -38,6 +40,7 @@ export async function createDataset(input: CreateDatasetInput): Promise<EvalData
     ...(input.description ? { description: input.description } : {}),
     capability: input.capability,
     version: 1,
+    ...(input.gate && Object.keys(input.gate).length > 0 ? { gate: input.gate } : {}),
     createdAt: now,
     updatedAt: now,
   }

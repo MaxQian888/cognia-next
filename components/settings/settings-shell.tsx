@@ -208,6 +208,10 @@ const GoalsSection = dynamic(() => import("./goals/goals-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const EvalSettingsSection = dynamic(
+  () => import("./eval/eval-settings-section").then((m) => m.EvalSettingsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const PetSection = dynamic(() => import("./pet/pet-section").then((m) => m.PetSection), {
   ssr: false,
   loading: () => <SectionLoading />,
@@ -437,6 +441,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <AgentRuntimeSection />
     case "agent-teams":
       return <AgentTeamTemplatesSection />
+    case "eval":
+      return <EvalSettingsSection />
     case "hooks":
       return <HooksSection />
     case "workspace-trust":
