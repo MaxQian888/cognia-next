@@ -13,6 +13,13 @@ import {
 import { buildSendContent, type SubmittedFile } from "@/lib/chat/attachments/dispatch"
 import { useChatStore } from "@/stores/chat/chat-store"
 
+export interface SendScreenshotOptions {
+  /** Target chat session. Defaults to the focused session. */
+  sessionId?: string
+  /** Current preview URL, included in the prompt for context. */
+  pageUrl?: string
+}
+
 export interface SendCommentOptions {
   /** Attach a screenshot of the embedded preview region. Defaults to true. */
   includeScreenshot?: boolean
@@ -64,5 +71,31 @@ export function useSelectionToChat() {
     [send, interruptAndSteer]
   )
 
-  return { sendComment }
+  /**
+   * Capture the preview region and ship it to chat as an image + a short
+   * context line. Returns false when no chat session is available.
+   */
+  const sendScreenshot = useCallback(
+    async (rect: ElementRect, options: SendScreenshotOptions = {}): Promise<boolean> => {
+      const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return false
+
+      const shot = await browserClient.embedCapture(rect)
+      if (!shot?.bytes) throw new Error("Screenshot capture returned no image")
+      const text = options.pageUrl
+        ? `Screenshot of the in-app browser preview at ${options.pageUrl}.`
+        : "Screenshot of the in-app browser preview."
+      const { content } = await buildSendContent(text, [screenshotToFile(shot.bytes)])
+
+      const status = useChatStore.getState().sessions[sessionId]?.status
+      if (status === "streaming" || status === "awaiting_approval") {
+        await interruptAndSteer(sessionId)
+      }
+      await send(content, undefined, { sessionId })
+      return true
+    },
+    [send, interruptAndSteer]
+  )
+
+  return { sendComment, sendScreenshot }
 }
