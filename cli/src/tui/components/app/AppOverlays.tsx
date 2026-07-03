@@ -67,7 +67,7 @@ import { getLiveSubagent, listLiveSubagents } from "../../../agent/subagent-live
 import { listCliBackgroundRuns } from "../../../agent/subagent-background-tasks"
 import { refreshAgentPanelRows } from "../../runtime/agents-panel-model"
 import { formatToolResultBody } from "../../commands/expand-command"
-import { cycleEnum } from "../../runtime/settings-sections"
+import { cycleEnum, applyTargetDefault } from "../../runtime/settings-sections"
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES } from "../../../config/schema"
 import { deriveEffortSliderState, modelSupportsEffort } from "../../../config/thinking"
 import { bufferFromText } from "../../input/buffer"
@@ -364,6 +364,14 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           onToggle={(row) => {
             if (row.control.type !== "boolean") return
             applySettings(row.control.apply, !row.control.current)
+          }}
+          onReset={(row) => {
+            // Reset the focused enum/boolean row to its product default by
+            // feeding the default straight back through the same apply path.
+            if (row.control.type !== "enum" && row.control.type !== "boolean") return
+            const def = applyTargetDefault(row.control.apply)
+            if (def === undefined) return
+            applySettings(row.control.apply, def)
           }}
           onActivate={(row) => activateSettings(row)}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}

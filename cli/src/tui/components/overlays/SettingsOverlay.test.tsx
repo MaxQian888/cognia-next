@@ -32,12 +32,14 @@ const sections: SettingsSectionView[] = [
           current: "dark",
           apply: { kind: "theme" },
         },
+        description: "TUI colour theme.",
       },
       {
         id: "mascot",
         label: "Mascot",
         value: "on",
         control: { type: "boolean", current: true, apply: { kind: "mascotEnabled" } },
+        description: "Show the terminal mascot.",
       },
     ],
   },
@@ -53,6 +55,7 @@ function setup(over: Partial<React.ComponentProps<typeof SettingsOverlay>> = {})
     onAdjust: jest.fn(),
     onToggle: jest.fn(),
     onActivate: jest.fn(),
+    onReset: jest.fn(),
     onClose: jest.fn(),
     ...over,
   }
@@ -132,5 +135,24 @@ describe("SettingsOverlay", () => {
     const { onClose } = setup()
     __fireInput("", { escape: true })
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("shows the focused row's description and 1-based position", () => {
+    const { container } = setup({ section: 1, index: 1 })
+    const text = container.textContent ?? ""
+    expect(text).toContain("Show the terminal mascot.") // focused-row description strip
+    expect(text).toContain("2/2") // row 2 of 2 in the Appearance section
+  })
+
+  it("r resets a focused enum/boolean row to its default", () => {
+    const { onReset } = setup({ section: 1, index: 0 }) // enum theme row
+    __fireInput("r", {})
+    expect(onReset).toHaveBeenCalledWith(sections[1].rows[0])
+  })
+
+  it("r is a no-op on a non-resettable (delegate) row", () => {
+    const { onReset } = setup({ section: 0, index: 0 }) // delegate provider row
+    __fireInput("r", {})
+    expect(onReset).not.toHaveBeenCalled()
   })
 })

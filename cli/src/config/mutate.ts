@@ -10,6 +10,7 @@ import path from "node:path"
 import {
   cliConfigFileSchema,
   type CliConfigFile,
+  type ClipboardConfig,
   type EditorConfig,
   type MascotConfig,
   type RenderConfig,
@@ -319,6 +320,9 @@ export const BOOLEAN_FLAG_KEYS = [
   "pluginTools",
   "notify",
   "desktopNotifications",
+  "autoCompact",
+  "showActiveSkills",
+  "terminalTitle",
 ] as const
 export type BooleanFlagKey = (typeof BOOLEAN_FLAG_KEYS)[number]
 
@@ -338,6 +342,55 @@ export function setBooleanFlag(
   }
   const current = readUserConfig(home, fsx)
   return writeMergedConfig(home, { ...current, [key]: value }, fsx)
+}
+
+/**
+ * Top-level NUMERIC config keys editable from the settings panel — the reliability
+ * / context-management knobs that {@link setConfigValue} (strings only) and
+ * {@link setBooleanFlag} (booleans only) can't reach. `autoCompactThreshold` is a
+ * 0–1 fraction; the rest are millisecond / step counts. Values are validated
+ * against the schema (min/int constraints) before anything lands on disk.
+ */
+export const NUMBER_CONFIG_KEYS = [
+  "autoCompactThreshold",
+  "streamIdleTimeoutMs",
+  "aiSdkMaxSteps",
+  "toolExecutionTimeoutMs",
+  "subagentStreamIdleTimeoutMs",
+] as const
+export type NumberConfigKey = (typeof NUMBER_CONFIG_KEYS)[number]
+
+/**
+ * Set one top-level numeric config key in `config.json`. A dedicated writer (not
+ * {@link setConfigValue}, which coerces everything to a string) so the schema's
+ * numeric constraints validate the merged file before writing. Returns the path.
+ */
+export function setNumberConfig(
+  home: string,
+  key: NumberConfigKey,
+  value: number,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!(NUMBER_CONFIG_KEYS as readonly string[]).includes(key)) {
+    throw new Error(`unknown numeric key "${key}" — settable: ${NUMBER_CONFIG_KEYS.join(", ")}`)
+  }
+  const current = readUserConfig(home, fsx)
+  return writeMergedConfig(home, { ...current, [key]: value }, fsx)
+}
+
+/**
+ * Merge a clipboard patch into `config.json`'s `clipboard` object (OSC 52 mode +
+ * byte cap). An object, not a scalar, so it can't go through {@link
+ * setConfigValue}; validated by the schema before writing. Returns the path.
+ */
+export function setClipboardConfig(
+  home: string,
+  patch: ClipboardConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const clipboard = { ...current.clipboard, ...patch }
+  return writeMergedConfig(home, { ...current, clipboard }, fsx)
 }
 
 /** Top-level string-array keys editable from the settings panel. */

@@ -100,6 +100,8 @@ import {
   setBooleanFlag,
   setBuiltinHookOverride,
   setRenderConfig,
+  setNumberConfig,
+  setClipboardConfig,
   setSubagentModel,
   setEditorConfig,
 } from "../../config/mutate"
@@ -124,6 +126,7 @@ import type {
   ResolvedConfig,
   StatusBarConfig,
   MascotConfig,
+  ClipboardConfig,
   EditorConfig,
   OutputStyle,
   StatusTheme,
@@ -1230,6 +1233,24 @@ export function App({
             setConfigValue(home, target.key, String(value))
             invalidate = true
             break
+          case "numberValue": {
+            // Arrives as a string from an enum row; the schema stores a number.
+            const num = Number(value)
+            patch = { [target.key]: num } as Partial<ResolvedConfig>
+            setNumberConfig(home, target.key, num)
+            invalidate = true
+            break
+          }
+          case "clipboard": {
+            // osc52 is a string mode; osc52MaxBytes a number. Read live at copy
+            // time from state.config, so no SendOptions invalidation needed.
+            const clipPatch = (
+              target.key === "osc52" ? { osc52: String(value) } : { osc52MaxBytes: Number(value) }
+            ) as ClipboardConfig
+            patch = { clipboard: { ...cfg.clipboard, ...clipPatch } }
+            setClipboardConfig(home, clipPatch)
+            break
+          }
           case "builtinTool":
             patch = { builtinTools: { ...cfg.builtinTools, [target.key]: Boolean(value) } }
             setBuiltinTools(home, { [target.key]: Boolean(value) } as Partial<BuiltinToolsConfig>)

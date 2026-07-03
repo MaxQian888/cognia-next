@@ -6,7 +6,9 @@
  * panel renders the {@link SettingsSectionView} model from
  * `runtime/settings-sections.ts`; it does no persistence itself. Enum/boolean
  * rows edit inline (←/→ cycle, Space toggle) via `onAdjust`/`onToggle`; delegate
- * and form rows hand off to an existing overlay via `onActivate`.
+ * and form rows hand off to an existing overlay via `onActivate`. `r` resets the
+ * focused enum/boolean row to its product default via `onReset`. A help strip
+ * below the rows shows the focused row's one-line description.
  */
 import React from "react"
 import { Box, Text, useInput } from "ink"
@@ -16,7 +18,8 @@ import { windowList } from "../list-window"
 import { OverlayFooter } from "../OverlayFooter"
 import type { SettingsRow, SettingsSectionView } from "../../runtime/settings-sections"
 
-const FOOTER_HINT = "Tab section · ↑/↓ row · ←/→ change · Space toggle · Enter open · Esc close"
+const FOOTER_HINT =
+  "Tab section · ↑/↓ row · ←/→ change · Space toggle · Enter open · r reset · Esc close"
 
 /** Right-hand display of a row's current value, styled by control type. */
 function rowValue(row: SettingsRow, accent: string, muted: string): React.ReactNode {
@@ -45,6 +48,7 @@ export function SettingsOverlay({
   onAdjust,
   onToggle,
   onActivate,
+  onReset,
   onClose,
   isActive = true,
 }: {
@@ -58,6 +62,8 @@ export function SettingsOverlay({
   onAdjust: (row: SettingsRow, delta: number) => void
   onToggle: (row: SettingsRow) => void
   onActivate: (row: SettingsRow) => void
+  /** Reset the focused enum/boolean row to its product default. */
+  onReset?: (row: SettingsRow) => void
   onClose: () => void
   isActive?: boolean
 }) {
@@ -95,6 +101,13 @@ export function SettingsOverlay({
         if (current?.control.type === "boolean") onToggle(current)
         return
       }
+      // `r` resets the focused row to its product default (enum/boolean only;
+      // delegate/form/readonly rows have no default to reset to).
+      if ((input === "r" || input === "R") && current && onReset) {
+        const t = current.control.type
+        if (t === "enum" || t === "boolean") onReset(current)
+        return
+      }
       if (key.return && current) {
         const c = current.control
         if (c.type === "enum") onAdjust(current, 1)
@@ -118,7 +131,11 @@ export function SettingsOverlay({
       paddingX={1}
       width={width}
     >
-      <Text bold>Settings</Text>
+      {/* Title + focused-row position (row N of M in the active section). */}
+      <Box justifyContent="space-between">
+        <Text bold>Settings</Text>
+        {rows.length > 0 ? <Text color={theme.muted}>{`${index + 1}/${rows.length}`}</Text> : null}
+      </Box>
       {/* Section tabs */}
       <Box>
         {sections.map((s, i) => (
@@ -144,6 +161,10 @@ export function SettingsOverlay({
         )
       })}
       {win.below > 0 ? <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text> : null}
+      {/* Help strip: the focused row's one-line description. */}
+      {current?.description ? (
+        <Text color={theme.muted} wrap="truncate-end">{`  ${current.description}`}</Text>
+      ) : null}
       <OverlayFooter hint={FOOTER_HINT} />
     </Box>
   )

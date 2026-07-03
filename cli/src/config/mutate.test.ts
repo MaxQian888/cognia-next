@@ -6,10 +6,12 @@ import {
   setBooleanFlag,
   setBuiltinHookOverride,
   setBuiltinTools,
+  setClipboardConfig,
   setConfigValue,
   setCustomTheme,
   setEditorConfig,
   setKeybindings,
+  setNumberConfig,
   setMascotConfig,
   setPluginToolsConfig,
   setProviderBaseURL,
@@ -389,6 +391,78 @@ describe("setBooleanFlag", () => {
     expect(() => setBooleanFlag(HOME, "provider" as never, true, memFs().fsx)).toThrow(
       /unknown boolean flag/
     )
+  })
+
+  it("writes the on-by-default flags (autoCompact/terminalTitle/showActiveSkills)", () => {
+    for (const key of ["autoCompact", "terminalTitle", "showActiveSkills"] as const) {
+      const m = memFs()
+      setBooleanFlag(HOME, key, false, m.fsx)
+      expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ [key]: false })
+    }
+  })
+})
+
+describe("setNumberConfig", () => {
+  it("writes each numeric key with a validated value", () => {
+    const cases: [Parameters<typeof setNumberConfig>[1], number][] = [
+      ["autoCompactThreshold", 0.9],
+      ["streamIdleTimeoutMs", 120000],
+      ["aiSdkMaxSteps", 512],
+      ["toolExecutionTimeoutMs", 0],
+      ["subagentStreamIdleTimeoutMs", 600000],
+    ]
+    for (const [key, value] of cases) {
+      const m = memFs()
+      const target = setNumberConfig(HOME, key, value, m.fsx)
+      expect(target).toBe(userConfigPath(HOME))
+      expect(JSON.parse(m.files.get(target)!)).toEqual({ [key]: value })
+    }
+  })
+
+  it("preserves other keys when setting a numeric knob", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", theme: "dark" }),
+    })
+    setNumberConfig(HOME, "aiSdkMaxSteps", 128, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      theme: "dark",
+      aiSdkMaxSteps: 128,
+    })
+  })
+
+  it("rejects an unknown numeric key", () => {
+    expect(() => setNumberConfig(HOME, "provider" as never, 1, memFs().fsx)).toThrow(
+      /unknown numeric key/
+    )
+  })
+
+  it("rejects a non-integer millisecond value", () => {
+    expect(() => setNumberConfig(HOME, "streamIdleTimeoutMs", 12.5, memFs().fsx)).toThrow()
+  })
+})
+
+describe("setClipboardConfig", () => {
+  it("writes a clipboard object into a fresh config", () => {
+    const m = memFs()
+    setClipboardConfig(HOME, { osc52: "always" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      clipboard: { osc52: "always" },
+    })
+  })
+
+  it("merges into an existing clipboard object, preserving other keys", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ clipboard: { osc52: "auto", osc52MaxBytes: 1024 } }),
+    })
+    setClipboardConfig(HOME, { osc52MaxBytes: 2048 }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      clipboard: { osc52: "auto", osc52MaxBytes: 2048 },
+    })
+  })
+
+  it("validates the patch against the schema (bad osc52 mode)", () => {
+    expect(() => setClipboardConfig(HOME, { osc52: "sometimes" as never }, memFs().fsx)).toThrow()
   })
 })
 
