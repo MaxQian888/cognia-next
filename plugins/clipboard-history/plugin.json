@@ -53,7 +53,36 @@
     {
       "id": "clipboard-noir",
       "name": "Clipboard Noir",
-      "vscodeJsonPath": "themes/clipboard-noir.json"
+      "isDark": true,
+      "colors": {
+        "background": "#1a1a1f",
+        "foreground": "#e6e6e8",
+        "primary": "#a78bfa",
+        "primaryForeground": "#1a1a1f",
+        "secondary": "#2d2d33",
+        "secondaryForeground": "#e6e6e8",
+        "accent": "#c4b5fd",
+        "accentForeground": "#1a1a1f",
+        "muted": "#15151a",
+        "mutedForeground": "#5b6299",
+        "card": "#15151a",
+        "cardForeground": "#e6e6e8",
+        "popover": "#15151a",
+        "popoverForeground": "#e6e6e8",
+        "input": "#1a1a1f",
+        "border": "#0f0f12",
+        "ring": "#5b6299",
+        "destructive": "#fb7185",
+        "destructiveForeground": "#1a1a1f",
+        "sidebar": "#1a1a1f",
+        "sidebarForeground": "#e6e6e8",
+        "sidebarPrimary": "#a78bfa",
+        "sidebarPrimaryForeground": "#1a1a1f",
+        "sidebarBorder": "#0f0f12",
+        "sidebarAccent": "#2d2d33",
+        "sidebarAccentForeground": "#e6e6e8",
+        "sidebarRing": "#5b6299"
+      }
     },
     {
       "id": "clipboard-paper",
