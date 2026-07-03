@@ -8,6 +8,7 @@
  */
 
 import type { AgentTraceSpan, SpanOperationName, SpanSurface } from "@/types/agent-trace/span"
+import type { Dimension } from "./breakdown"
 import { modelKeyOf } from "./model-key"
 
 export interface TraceFilters {
@@ -16,6 +17,30 @@ export interface TraceFilters {
   operation?: SpanOperationName[]
   tool?: string[]
   session?: string[]
+}
+
+/**
+ * Pure toggle: add/remove `value` from the given dimension's selection,
+ * dropping a dimension entirely once its last value is removed so
+ * `isFilterEmpty` stays accurate. Shared by the variable-filter bar and the
+ * click-to-filter breakdown panels (donut / bar).
+ */
+export function toggleFilterValue(
+  filters: TraceFilters,
+  dim: Dimension,
+  value: string
+): TraceFilters {
+  const current = (filters[dim] as string[] | undefined) ?? []
+  const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value]
+  const out: TraceFilters = { ...filters }
+  if (next.length === 0) delete out[dim]
+  else (out[dim] as string[]) = next
+  return out
+}
+
+/** True when `value` is currently selected under `dim`. */
+export function isValueSelected(filters: TraceFilters, dim: Dimension, value: string): boolean {
+  return ((filters[dim] as string[] | undefined) ?? []).includes(value)
 }
 
 /** True when no dimension narrows the set. */

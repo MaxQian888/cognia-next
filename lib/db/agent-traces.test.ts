@@ -8,6 +8,8 @@ import {
   aggregateStatsAll,
   aggregateStatsBySession,
   bulkInsertSpans,
+  clearAllSpans,
+  countAllSpans,
   deleteSpansForSession,
   insertSpan,
   pruneOlderThan,
@@ -25,7 +27,9 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await __clearAgentTracesForTesting()
-})
+  // Cold-opening the (now high-version) Dexie schema under fake-indexeddb can
+  // exceed the default 5s hook budget on the first test — give it room.
+}, 30_000)
 
 function span(over: Partial<AgentTraceSpan>): AgentTraceSpan {
   const id = over.id ?? over.spanId ?? "span-" + Math.random().toString(36).slice(2, 10)
@@ -406,5 +410,24 @@ describe("pruneOlderThan", () => {
   it("returns 0 for non-finite or non-positive cutoff", async () => {
     expect(await pruneOlderThan(0)).toBe(0)
     expect(await pruneOlderThan(Number.NaN)).toBe(0)
+  })
+})
+
+describe("countAllSpans / clearAllSpans", () => {
+  it("counts every stored span", async () => {
+    expect(await countAllSpans()).toBe(0)
+    await bulkInsertSpans([span({ id: "a" }), span({ id: "b" })])
+    expect(await countAllSpans()).toBe(2)
+  })
+
+  it("clears all spans and returns how many were removed", async () => {
+    await bulkInsertSpans([span({ id: "a" }), span({ id: "b" }), span({ id: "c" })])
+    const removed = await clearAllSpans()
+    expect(removed).toBe(3)
+    expect(await countAllSpans()).toBe(0)
+  })
+
+  it("returns 0 when clearing an empty table", async () => {
+    expect(await clearAllSpans()).toBe(0)
   })
 })

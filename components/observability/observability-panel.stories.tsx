@@ -4,6 +4,7 @@ import { fn } from "storybook/test"
 import { ObservabilityPanel } from "./observability-panel"
 import { panelById } from "./panel-registry"
 import { makeSeries } from "@/lib/storybook/fixtures/observability"
+import { DEFAULT_THRESHOLDS } from "@/lib/observability/thresholds"
 
 // `ObservabilityPanel` maps a panel definition to its concrete panel component,
 // feeding it the right slice of the shared derived series. Pure dispatch.
@@ -18,6 +19,9 @@ const meta = {
     series,
     editMode: false,
     onSelectTrace: fn(),
+    thresholds: DEFAULT_THRESHOLDS,
+    filters: {},
+    onFilterValue: fn(),
   },
   decorators: [
     (Story) => (

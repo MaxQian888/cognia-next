@@ -3,9 +3,10 @@ import { fn } from "storybook/test"
 
 import { ObservabilityToolbar } from "./observability-toolbar"
 import { makeWindowSpans } from "@/lib/storybook/fixtures/observability"
+import { DASHBOARD_CONFIG_VERSION } from "@/lib/observability/dashboard-config"
 
 // `ObservabilityToolbar` composes the variable filter bar, time-range picker,
-// refresh selector and the edit/lock + reset-layout controls. Pure props-only.
+// refresh + export controls, settings, and the edit/lock + reset-layout controls.
 const meta = {
   title: "Observability/Toolbar",
   component: ObservabilityToolbar,
@@ -17,12 +18,28 @@ const meta = {
     filters: {},
     editMode: false,
     windowSpans: makeWindowSpans(),
+    lastUpdated: null,
+    traces: [],
     onPreset: fn(),
     onCustom: fn(),
     onRefreshMs: fn(),
+    onRefresh: fn(),
     onFilters: fn(),
     onToggleEdit: fn(),
     onResetLayout: fn(),
+    onOpenSettings: fn(),
+    buildConfig: () => ({
+      version: DASHBOARD_CONFIG_VERSION,
+      layouts: null,
+      hiddenPanels: [],
+      thresholds: {},
+      rangePreset: "1h" as const,
+      customSince: null,
+      customUntil: null,
+      refreshMs: 10_000 as const,
+      filters: {},
+    }),
+    onImportConfig: fn(),
   },
   decorators: [
     (Story) => (
