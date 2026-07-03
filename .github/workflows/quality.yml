@@ -73,6 +73,9 @@ jobs:
       - name: Plugin silent-failure flag audit (ADR 0016 T4)
         run: pnpm audit:silent-flags
 
+      - name: Plugin SDK WIT contract sync check
+        run: pnpm lint:plugin-sdk-wit
+
       - name: i18n lint (key parity + hardcoded-string baseline)
         run: pnpm lint:i18n
 
