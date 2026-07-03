@@ -82,17 +82,20 @@ export const useCanvasSettingsStore = create<CanvasSettingsState>()(
       },
 
       getEditorOptions: () => {
-        const { editor } = get().settings
-        return {
+        const { editor, accessibility } = get().settings
+        const options: Record<string, unknown> = {
           fontSize: editor.fontSize,
           fontFamily: editor.fontFamily,
+          fontLigatures: editor.fontLigatures,
+          letterSpacing: editor.letterSpacing,
           lineHeight: editor.lineHeight,
           tabSize: editor.tabSize,
           insertSpaces: editor.insertSpaces,
           wordWrap: editor.wordWrap ? "on" : "off",
-          minimap: { enabled: editor.minimap, scale: 1 },
+          minimap: { enabled: editor.minimap, scale: editor.minimapScale },
           lineNumbers: editor.lineNumbers,
           renderWhitespace: editor.renderWhitespace,
+          renderLineHighlight: editor.renderLineHighlight,
           scrollBeyondLastLine: editor.scrollBeyondLastLine,
           autoClosingBrackets: editor.autoClosingBrackets ? "always" : "never",
           autoClosingQuotes: editor.autoClosingQuotes ? "always" : "never",
@@ -100,13 +103,32 @@ export const useCanvasSettingsStore = create<CanvasSettingsState>()(
           formatOnType: editor.formatOnType,
           cursorBlinking: editor.cursorBlinking,
           cursorStyle: editor.cursorStyle,
+          cursorSmoothCaretAnimation: editor.cursorSmoothCaretAnimation,
           smoothScrolling: editor.smoothScrolling,
           mouseWheelZoom: editor.mouseWheelZoom,
           bracketPairColorization: { enabled: editor.bracketPairColorization },
+          padding: { top: editor.padding.top, bottom: editor.padding.bottom },
           guides: editor.guides,
-          stickyScroll: { enabled: true, maxLineCount: 5 },
-          inlineSuggest: { enabled: true },
+          folding: editor.folding,
+          showFoldingControls: editor.showFoldingControls,
+          stickyScroll: {
+            enabled: editor.stickyScroll,
+            maxLineCount: editor.stickyScrollMaxLines,
+          },
+          inlineSuggest: { enabled: editor.inlineSuggest },
+          // Screen-reader mode forces Monaco's accessible DOM tree; otherwise
+          // let Monaco auto-detect so sighted users keep the fast canvas.
+          accessibilitySupport: accessibility.screenReaderOptimized ? "on" : "auto",
         }
+        // Reduced-motion is an accessibility override: it wins over the editor's
+        // own animation prefs so a user who asked for calm never gets a moving
+        // caret or momentum scroll, whatever the editor tab says.
+        if (accessibility.reducedMotion) {
+          options.smoothScrolling = false
+          options.cursorSmoothCaretAnimation = "off"
+          options.cursorBlinking = "solid"
+        }
+        return options
       },
     }),
     {

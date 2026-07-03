@@ -124,12 +124,17 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // to whole-document semantics when the Monaco ref is absent.
   const isMobile = useIsMobile()
   const { resolvedTheme } = useTheme()
+  const accessibility = useCanvasSettingsStore((s) => s.settings.accessibility)
   const monacoLink = useSettingsStore((s) => s.monacoLink)
   // Monaco accepts only specific theme ids ("vs", "vs-dark", etc).
   // Resolve "auto" to vs / vs-dark via the next-themes resolved theme
   // so we never pass an unknown id at first render. The hook's effect
   // re-applies on changes; this prevents an initial flash.
   const resolvedMonacoTheme = useMemo(() => {
+    // High contrast is an accessibility need — it overrides every other theme
+    // source (app lock, per-canvas pick, linking) so the user always gets the
+    // maximal-contrast Monaco palette matching the light/dark side they're on.
+    if (accessibility.highContrast) return resolvedTheme === "dark" ? "hc-black" : "hc-light"
     // App-level Monaco linking (Settings → Appearance → Advanced). A lock pins
     // Monaco to a base theme regardless of the app theme; otherwise the
     // per-canvas setting wins, and an "auto" canvas theme follows the app theme
@@ -139,7 +144,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     if (theme && theme !== "auto") return theme
     if (!monacoLink.enabled) return "vs-dark"
     return resolvedTheme === "dark" ? "vs-dark" : "vs"
-  }, [monacoLink, monacoSetup.settings.theme, resolvedTheme])
+  }, [accessibility.highContrast, monacoLink, monacoSetup.settings.theme, resolvedTheme])
 
   // Drop the stale Monaco handle when the viewport flips to mobile (the
   // light editor renders instead) so consumers take their fallback paths.
@@ -378,7 +383,17 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         className="flex items-center gap-1 border-b bg-muted/20 px-2 py-1 empty:hidden"
       />
 
-      <div ref={editorContainerRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div
+        ref={editorContainerRef}
+        className={cn(
+          "relative min-h-0 min-w-0 flex-1 overflow-hidden",
+          // Accessibility → focus indicator: draw an inset ring around the
+          // editor whenever focus lands inside it, so keyboard users can see
+          // where they are without hunting for the caret.
+          accessibility.focusIndicator &&
+            "focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/60"
+        )}
+      >
         {activeDoc ? (
           isMobile ? (
             // Mobile: CodeMirror light editor — Monaco's worker bundle and
@@ -436,7 +451,13 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         )}
       </div>
       {actions.error && (
-        <div className="border-t bg-destructive/5 p-2 text-xs text-destructive">
+        <div
+          className="border-t bg-destructive/5 p-2 text-xs text-destructive"
+          // Accessibility → announce errors: expose the AI-action failure to
+          // assistive tech as an alert region so screen readers speak it.
+          role={accessibility.announceErrors ? "alert" : undefined}
+          aria-live={accessibility.announceErrors ? "assertive" : "off"}
+        >
           {actions.error}
         </div>
       )}

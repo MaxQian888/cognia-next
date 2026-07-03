@@ -61,12 +61,15 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
 
   const getEditorOptions = useCanvasSettingsStore((s) => s.getEditorOptions)
   const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
+  const accessibilitySettings = useCanvasSettingsStore((s) => s.settings.accessibility)
   const editorOptions = useMemo(() => {
-    // editorSettings drives Monaco option regeneration; reading it inside the
-    // body satisfies exhaustive-deps without an extra reference.
+    // editorSettings + accessibilitySettings both feed getEditorOptions (the
+    // latter for accessibilitySupport + the reduced-motion overrides); reading
+    // them here re-derives Monaco options whenever either slice changes.
     void editorSettings
+    void accessibilitySettings
     return getEditorOptions()
-  }, [getEditorOptions, editorSettings])
+  }, [getEditorOptions, editorSettings, accessibilitySettings])
 
   const onMount = useCallback(
     (editor: MonacoEditor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {

@@ -7,23 +7,47 @@
 export interface CanvasEditorSettings {
   fontSize: number
   fontFamily: string
+  /** Enable programming-font ligatures (Fira Code `=>`, `!==`, …). */
+  fontLigatures: boolean
+  /** Extra horizontal spacing between characters, in px. */
+  letterSpacing: number
   lineHeight: number
   tabSize: number
   insertSpaces: boolean
   wordWrap: boolean
   minimap: boolean
+  /** Minimap render scale (1–3); higher = larger minimap glyphs. */
+  minimapScale: number
   lineNumbers: "on" | "off" | "relative"
   renderWhitespace: "none" | "boundary" | "selection" | "trailing" | "all"
+  /** Highlight the line/gutter the cursor sits on. */
+  renderLineHighlight: "none" | "gutter" | "line" | "all"
   scrollBeyondLastLine: boolean
+  /** Pin the enclosing scope headers to the top while scrolling. */
+  stickyScroll: boolean
+  /** Max number of pinned sticky-scroll header lines (1–10). */
+  stickyScrollMaxLines: number
+  /** Show the code-folding gutter controls. */
+  folding: boolean
+  showFoldingControls: "always" | "mouseover"
+  /** Show ghost-text inline completions from the suggestion provider. */
+  inlineSuggest: boolean
   autoClosingBrackets: boolean
   autoClosingQuotes: boolean
   formatOnPaste: boolean
   formatOnType: boolean
   cursorBlinking: "blink" | "smooth" | "phase" | "expand" | "solid"
   cursorStyle: "line" | "block" | "underline"
+  /** Animate the caret when it moves between positions. */
+  cursorSmoothCaretAnimation: "off" | "explicit" | "on"
   smoothScrolling: boolean
   mouseWheelZoom: boolean
   bracketPairColorization: boolean
+  /** Inner padding above the first line / below the last line, in px. */
+  padding: {
+    top: number
+    bottom: number
+  }
   guides: {
     indentation: boolean
     bracketPairs: boolean
@@ -109,23 +133,37 @@ export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
   editor: {
     fontSize: 14,
     fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+    fontLigatures: true,
+    letterSpacing: 0,
     lineHeight: 1.5,
     tabSize: 2,
     insertSpaces: true,
     wordWrap: false,
     minimap: true,
+    minimapScale: 1,
     lineNumbers: "on",
     renderWhitespace: "selection",
+    renderLineHighlight: "line",
     scrollBeyondLastLine: false,
+    stickyScroll: true,
+    stickyScrollMaxLines: 5,
+    folding: true,
+    showFoldingControls: "mouseover",
+    inlineSuggest: true,
     autoClosingBrackets: true,
     autoClosingQuotes: true,
     formatOnPaste: false,
     formatOnType: false,
     cursorBlinking: "blink",
     cursorStyle: "line",
+    cursorSmoothCaretAnimation: "off",
     smoothScrolling: true,
     mouseWheelZoom: false,
     bracketPairColorization: true,
+    padding: {
+      top: 8,
+      bottom: 8,
+    },
     guides: {
       indentation: true,
       bracketPairs: true,
@@ -216,6 +254,33 @@ export function validateSettings(settings: Partial<CanvasSettings>): string[] {
       (settings.editor.lineHeight < 1 || settings.editor.lineHeight > 3)
     ) {
       errors.push("Line height must be between 1 and 3")
+    }
+    if (
+      settings.editor.letterSpacing !== undefined &&
+      (settings.editor.letterSpacing < -3 || settings.editor.letterSpacing > 8)
+    ) {
+      errors.push("Letter spacing must be between -3 and 8")
+    }
+    if (
+      settings.editor.minimapScale !== undefined &&
+      (settings.editor.minimapScale < 1 || settings.editor.minimapScale > 3)
+    ) {
+      errors.push("Minimap scale must be between 1 and 3")
+    }
+    if (
+      settings.editor.stickyScrollMaxLines !== undefined &&
+      (settings.editor.stickyScrollMaxLines < 1 || settings.editor.stickyScrollMaxLines > 10)
+    ) {
+      errors.push("Sticky scroll max lines must be between 1 and 10")
+    }
+    if (
+      settings.editor.padding !== undefined &&
+      (settings.editor.padding.top < 0 ||
+        settings.editor.padding.top > 40 ||
+        settings.editor.padding.bottom < 0 ||
+        settings.editor.padding.bottom > 40)
+    ) {
+      errors.push("Editor padding must be between 0 and 40")
     }
   }
 
