@@ -1831,6 +1831,16 @@
     "filtered": "filtered",
     "history": "History",
     "importKeybindings": "Import keybindings",
+    "inlineCommand": {
+      "description": "Search for a command to run in the canvas editor",
+      "empty": "No matching commands",
+      "groupActions": "AI actions",
+      "groupDocument": "Document",
+      "groupTranslate": "Translate",
+      "newDocument": "New document",
+      "placeholder": "Type a command…",
+      "title": "Canvas command palette"
+    },
     "join": {
       "documentLabel": "Document",
       "error": "Couldn't join",
@@ -1947,6 +1957,9 @@
     "versionHistory": "Version history",
     "versionPreview": "Version preview",
     "viewDiff": "View diff",
+    "viewFiles": "Files",
+    "viewGrouped": "Recent",
+    "viewMode": "View mode",
     "yesterday": "Yesterday"
   },
   "capture": {
@@ -2406,6 +2419,10 @@
         "noPresets": "No presets available.",
         "noSkillMatches": "No skills match \"{query}\".",
         "noSkills": "No skills available.",
+        "noWorkflowEdgeMatches": "No edges match \"{query}\".",
+        "noWorkflowEdges": "No edges in this workflow.",
+        "noWorkflowNodeMatches": "No nodes match \"{query}\".",
+        "noWorkflowNodes": "No nodes in this workflow.",
         "pinAction": "Pin /{name}",
         "pinnedSection": "Pinned",
         "presetTitle": "Apply a prompt preset",
@@ -2415,6 +2432,8 @@
         "skillTitle": "Enable a skill",
         "slashTitle": "Slash command",
         "unpinAction": "Unpin /{name}",
+        "wfEdgeTitle": "Reference an edge",
+        "wfNodeTitle": "Reference a node",
         "workspaceEmpty": "Workspace is empty.",
         "workspaceMissing": "Set a working directory in session settings to use @-references."
       },
@@ -2484,6 +2503,10 @@
           "explainAria": "Explain selected nodes",
           "explainNoSelection": "Select one or more nodes on the canvas first",
           "explainTooltip": "Ask the agent to explain the {count} selected node(s)",
+          "reference": "Reference",
+          "referenceAria": "Reference the selected nodes in chat",
+          "referenceNoSelection": "Select nodes or edges on the canvas first",
+          "referenceTooltip": "Attach the {count} selected element(s) to the next message",
           "suggest": "Suggest",
           "suggestAria": "Suggest the next node",
           "suggestTooltip": "Ask the workflow-designer agent for the next node to add",
@@ -2499,7 +2522,10 @@
         "selectMicAria": "Select microphone",
         "voiceSettings": "Voice settings"
       },
-      "webLabel": "Web"
+      "webLabel": "Web",
+      "workflowRefs": {
+        "removeAria": "Remove reference to {label}"
+      }
     },
     "concurrent": {
       "awaitingApproval": "Awaiting approval",
@@ -6576,12 +6602,22 @@
       "denied": "denied",
       "deniedOnly": "Denied only",
       "desktopOnly": "Bridge status and the audit log are only available in desktop mode.",
+      "logsSubtitle": "The latest log lines emitted by connected MCP servers.",
+      "logsTitle": "Recent logs",
       "openBridgeSettings": "Open External Bridge settings",
+      "outboundSubtitle": "Live sessions and recent logs for the MCP servers this app connects to.",
+      "outboundTitle": "MCP servers",
       "port": "Port {port}",
       "running": "Running",
+      "sectionInbound": "Inbound",
+      "sectionOutbound": "Outbound",
       "startedAt": "Started {time}",
+      "statErrors": "Errors",
+      "statLogs": "Log lines",
+      "statServers": "Servers",
       "stopped": "Stopped",
-      "title": "Health & logs"
+      "title": "Health & logs",
+      "windowNote": "Showing the most recent log lines."
     },
     "import": {
       "back": "Back",
@@ -6629,6 +6665,7 @@
       "disable": "Disable",
       "empty": "No MCP servers attached to this session.",
       "enable": "Enable",
+      "recentLogAt": "{time} · {message}",
       "reconnect": "Reconnect",
       "reconnectStarted": "Reconnecting {name}…",
       "refresh": "Refresh live MCP status",
@@ -6641,7 +6678,9 @@
       },
       "subtitle": "Live status of the MCP servers the running agent session is connected to.",
       "title": "Live session servers",
-      "toolsCount": "{count} tools"
+      "toolsCount": "{count} tools",
+      "viewLogs": "View logs",
+      "viewLogsFor": "View logs for {name}"
     },
     "panel": {
       "searchPlaceholder": "Filter servers by name, command, or URL…"
@@ -6945,6 +6984,20 @@
       "savedUpdate": "Character updated.",
       "saving": "Saving…",
       "systemPromptLabel": "System prompt"
+    },
+    "commandHistory": {
+      "backAria": "Back to settings",
+      "copied": "Command copied to clipboard.",
+      "copyAria": "Copy command: {command}",
+      "copyError": "Clipboard unavailable in this shell.",
+      "empty": "No commands have synced from your paired desktop yet.",
+      "intro": "Terminal commands run on your paired desktop, mirrored here read-only. Tap a command to copy it.",
+      "noProject": "No project",
+      "noResults": "No commands match your search.",
+      "searchAria": "Search command history",
+      "searchPlaceholder": "Search commands",
+      "title": "Command history",
+      "uses": "{count, plural, =1 {1 run} other {# runs}}"
     },
     "companion": {
       "diagnostics": {
@@ -7541,6 +7594,7 @@
       "backupRow": "Backup & restore",
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
+      "commandHistoryRow": "Command history",
       "computerUse": {
         "masterStateOff": "Mobile Computer Use is disabled.",
         "masterStateOn": "Mobile Computer Use is enabled.",
@@ -15177,10 +15231,17 @@
         "systemPromptPlaceholder": "You are…",
         "twinBinding": {
           "cancel": "Cancel",
+          "citationStyleLabel": "Citation style",
           "confirmBind": "Bind",
           "createNew": "Create new twin",
+          "enableCitations": "Source citations",
+          "enableCitationsHint": "Attach formatted citations for the retrieved chunks to the Twin-RAG sources (display only — never changes the prompt).",
+          "enableCorrectiveFilter": "Corrective filtering",
+          "enableCorrectiveFilterHint": "Drop low-relevance retrieved chunks with a heuristic grader before they reach the prompt.",
           "enableHybrid": "Hybrid keyword search",
           "enableHybridHint": "Blend BM25 keyword retrieval with the vector search so verbatim names, ids, and file references aren't missed.",
+          "enableQueryExpansion": "Query expansion",
+          "enableQueryExpansionHint": "Widen recall with synonym expansion (and optional LLM HyDE/step-back when configured in twin runtime settings).",
           "enableRag": "Enable RAG",
           "enableRagHint": "Retrieve top-K twin chunks at send time and inject them into the system prompt.",
           "enableStyleFewShot": "Style few-shot",
@@ -15591,6 +15652,9 @@
         "status": {
           "connected": "Connected",
           "disabled": "Not enabled"
+        },
+        "transportLabels": {
+          "dingtalkStream": "Stream Mode WSS"
         }
       },
       "audit": {
@@ -15848,6 +15912,13 @@
         "sectionAdvancedDesc": "Quiet hours and mute.",
         "sectionIdentity": "Identity",
         "sectionIdentityDesc": "DingTalk open-platform app credentials.",
+        "testButtonLabel": "Test credentials",
+        "testCredentialsAria": "Test credentials",
+        "testFailedLabel": "Credential test failed",
+        "testFailedToast": "DingTalk credential test failed: {error}",
+        "testSucceededLabel": "Credentials valid",
+        "testSucceededStatus": "Access token minted.",
+        "testSucceededToast": "Access token minted successfully.",
         "titleEdit": "Edit DingTalk connector",
         "titleNew": "Add DingTalk connector"
       },
@@ -16037,15 +16108,21 @@
           "title": "Chat allow/blocklist"
         },
         "whoami": {
+          "dingtalkNoProbe": "DingTalk adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
           "lastProbeAt": "Last probed at {time}",
           "onebotNoProbe": "OneBot adapters do not expose an active identity probe — the QQ UIN below was entered when the adapter was configured.",
           "probeButton": "Probe identity",
           "probeFailed": "Probe failed",
+          "qqOfficialNoProbe": "QQ Official adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
           "reprobeButton": "Re-probe",
           "requiresDesktop": "Bot identity probe requires the desktop runtime.",
           "tenant": "Tenant",
           "title": "Bot identity",
-          "unknown": "Identity has not been probed yet. Click \"Probe identity\" after saving credentials."
+          "unknown": "Identity has not been probed yet. Click \"Probe identity\" after saving credentials.",
+          "unsupportedNoProbe": "This adapter doesn't expose an active identity probe.",
+          "wechatOaNoProbe": "WeChat Official Account adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
+          "wechatPersonalNoProbe": "Personal WeChat adapters don't expose an active identity probe.",
+          "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured."
         }
       },
       "matrix": {
@@ -16082,6 +16159,13 @@
         "sectionAdvancedDesc": "Quiet hours and mute.",
         "sectionIdentity": "Identity",
         "sectionIdentityDesc": "Homeserver and access token for the bot account.",
+        "testAccessTokenAria": "Test Matrix access token",
+        "testButtonLabel": "Test access token",
+        "testFailedLabel": "Access token test failed",
+        "testFailedToast": "Matrix token test failed: {error}",
+        "testSucceededLabel": "Access token valid",
+        "testSucceededStatus": "Signed in as {userId}",
+        "testSucceededToast": "Signed in as {userId}",
         "titleEdit": "Edit Matrix connector",
         "titleNew": "Add Matrix connector"
       },
@@ -16222,6 +16306,13 @@
         "sectionAdvancedDesc": "Quiet hours and mute.",
         "sectionIdentity": "Identity",
         "sectionIdentityDesc": "App credentials for the QQ open platform.",
+        "testButtonLabel": "Test credentials",
+        "testCredentialsAria": "Test credentials",
+        "testFailedLabel": "Credential test failed",
+        "testFailedToast": "QQ credential test failed: {error}",
+        "testGatewayUrl": "Gateway: {gatewayUrl}",
+        "testSucceededLabel": "Credentials valid",
+        "testSucceededToast": "Connected to gateway {gatewayUrl}.",
         "titleEdit": "Edit QQ Official Bot",
         "titleNew": "Add QQ Official Bot"
       },
@@ -16260,17 +16351,17 @@
       "sendTest": {
         "bodyLabel": "Body",
         "chatIdHelp": {
-          "dingtalk": "1:1: the sender's staff id. Group: the conversationId from an inbound callback.",
+          "dingtalk": "1:1: the sender's staff id (or single:<staffId>). Group: group:<conversationId> from an inbound callback.",
           "discord": "Right-click the channel in Discord (Developer Mode on) → Copy Channel ID.",
           "lark": "Open Lark chat → Settings → Group Info → Copy chat_id (oc_…).",
           "matrix": "The room id (e.g. !abcd:matrix.org). Invite the bot to the room first.",
-          "onebot": "QQ user uin (private chat) or group uin.",
-          "qq-official": "The channel id or group openid.",
+          "onebot": "QQ user uin (private chat) or group:<uin> for a group chat.",
+          "qq-official": "The channel id; prefix with group: / c2c: / direct: to target a group openid or user.",
           "slack": "Channel id from the URL or the channel kebab menu → Open channel details → Copy Channel ID.",
           "telegram": "Forward any message from the chat to @userinfobot to read its numeric id.",
           "wechat-oa": "The follower's OpenID (from an inbound message).",
           "wechat-personal": "Reply-only — personal WeChat cannot be messaged proactively, so the test send will be rejected.",
-          "wecom": "Single chat: the recipient's userid. Group: the chatid from a prior inbound callback."
+          "wecom": "Single chat: the recipient's userid. Group: group:<chatid> from a prior inbound callback."
         },
         "chatIdLabel": "Target chat / channel id",
         "defaultBody": "[cognia] Test message from the Adapters → Config tab.",
@@ -16279,7 +16370,21 @@
         "sendButton": "Send test",
         "sentError": "Send failed ({code}): {message}",
         "sentSuccess": "Sent. platform_message_id = {messageId}",
-        "title": "Send a test message"
+        "targetPlaceholder": {
+          "dingtalk": "staff-id or group:conversationId",
+          "discord": "e.g. 1234567890123456789",
+          "lark": "oc_…",
+          "matrix": "!abcd:matrix.org",
+          "onebot": "uin or group:uin",
+          "qq-official": "channel id, group:openid or c2c:openid",
+          "slack": "C0123456789",
+          "telegram": "e.g. 123456789",
+          "wechat-oa": "OpenID",
+          "wechat-personal": "reply-only",
+          "wecom": "userid or group:chatid"
+        },
+        "title": "Send a test message",
+        "unsupportedReplyOnly": "This adapter can only reply to inbound messages; it can't send a standalone test message."
       },
       "slack": {
         "adapterCreated": "Adapter created.",
@@ -16464,6 +16569,8 @@
         "encodingAesKeyHelp": "43-character key from Server Config (safe mode) — used to decrypt callbacks.",
         "encodingAesKeyInvalid": "EncodingAESKey must be exactly 43 characters.",
         "encodingAesKeyLabel": "EncodingAESKey",
+        "openCompanion": "Open companion",
+        "openCompanionAria": "Open the companion tunnel settings",
         "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
         "save": "Save",
         "sectionAdvanced": "Advanced",
@@ -16472,6 +16579,14 @@
         "sectionDeliveryDesc": "The callback URL WeChat posts messages to.",
         "sectionIdentity": "Identity",
         "sectionIdentityDesc": "Official Account credentials and safe-mode keys.",
+        "testButtonLabel": "Test credentials",
+        "testCredentialScopeHelp": "Testing mints a short-lived access token from WeChat to verify the AppID and AppSecret.",
+        "testCredentialsAria": "Test credentials",
+        "testFailedLabel": "Credential test failed",
+        "testFailedToast": "WeChat OA credential test failed: {error}",
+        "testSucceededLabel": "Credentials valid",
+        "testSucceededStatus": "Access token minted.",
+        "testSucceededToast": "Access token minted successfully.",
         "titleEdit": "Edit WeChat Official Account",
         "titleNew": "Add WeChat Official Account",
         "tokenHelp": "The Token you set under Server Config (used for signature checks).",
@@ -16486,6 +16601,7 @@
         "adapterUpdated": "WeChat adapter updated.",
         "banRiskNote": "Unofficial integration via the iLink gateway. Personal-account automation may violate WeChat's terms — there is a real account-ban risk. Use a non-primary account.",
         "create": "Create",
+        "desktopOnly": "Personal WeChat QR login is only available in the desktop runtime.",
         "displayNameLabel": "Display name",
         "displayNamePlaceholder": "My WeChat",
         "displayNameRequired": "Display name is required.",
@@ -16538,6 +16654,14 @@
         "sectionIdentityDesc": "The 智能机器人 BotID + long-connection Secret, plus an optional welcome message.",
         "sectionQuickCommands": "Quick commands",
         "sectionQuickCommandsDesc": "Buttons pushed on enter_chat as a template_card menu — each maps a trigger key to a prompt or slash command.",
+        "testButtonLabel": "Test credentials",
+        "testCredentialScopeHelp": "Testing mints a short-lived access token from WeCom to verify the corp credentials.",
+        "testCredentialsAria": "Test WeCom credentials",
+        "testFailedLabel": "Credential test failed",
+        "testFailedToast": "WeCom credential test failed: {error}",
+        "testSucceededLabel": "Credentials valid",
+        "testSucceededStatus": "Subscribe endpoint reachable.",
+        "testSucceededToast": "Subscribe endpoint reachable; credentials valid.",
         "titleEdit": "Configure WeCom (企业微信) Bot",
         "titleNew": "Add WeCom (企业微信) Bot",
         "welcomeHelp": "Sent when a user opens the bot chat (enter_chat). Leave blank to send no welcome.",
@@ -17558,6 +17682,7 @@
       "bindInterface": "Bind interface",
       "bindLan": "Local network (0.0.0.0)",
       "bindLoopback": "Loopback (127.0.0.1)",
+      "cancel": "Cancel",
       "clearLog": "Clear log",
       "colKey": "Key",
       "colLatency": "Latency",
@@ -17579,6 +17704,7 @@
       "description": "Expose your configured providers as a local OpenAI- and Anthropic-compatible endpoint so external tools can borrow Cognia's routing and credentials.",
       "desktopOnlyNotice": "The gateway needs an HTTP listener and is available only in the desktop app.",
       "disable": "Disable",
+      "editKey": "Edit key",
       "enable": "Enable",
       "enabled": "Enable gateway",
       "enabledHelp": "Run the local HTTP server. Off by default; requires an API key.",
@@ -17605,6 +17731,10 @@
       "keyNamePlaceholder": "e.g. Claude Code laptop",
       "keyNeverExpires": "Never",
       "keyNeverUsed": "Never used",
+      "keyQuota": "Token quota",
+      "keyQuotaHelp": "Cumulative input+output token budget for this key. Blank = unlimited. The gateway rejects the key once it is spent.",
+      "keyQuotaNone": "Unlimited",
+      "keyQuotaUsed": "{used} / {total} tokens",
       "keyRateLimit": "Rate limit / min",
       "keyRateLimitHelp": "Per-key request budget. Blank = only the global limit applies.",
       "keyRateLimitNone": "—",
@@ -17615,6 +17745,7 @@
       "logCleared": "Log cleared",
       "logEmpty": "No requests yet.",
       "logFilterAll": "All",
+      "logFilterAllKeys": "All keys",
       "logFilterErrors": "Errors",
       "logFilterModelPlaceholder": "Filter by model…",
       "logFilterOk": "Success",
@@ -17626,6 +17757,8 @@
       "newKeyReveal": "Copy this key now — for your security it is shown only once.",
       "openaiSnippet": "OpenAI clients",
       "port": "Port",
+      "quotaExceeded": "Quota spent",
+      "quotaReset": "Quota usage reset",
       "rateLimit": "Global requests / minute",
       "reliabilityHeading": "Reliability & access",
       "reliabilityHelp": "Timeouts, failover retries, and who may connect.",
@@ -17633,6 +17766,7 @@
       "requestTimeout": "Request timeout (s)",
       "requestTimeoutHelp": "Total cap for non-streaming requests. 0 disables it; streaming responses are never capped.",
       "requiresKey": "Create an API key before enabling the gateway.",
+      "resetQuota": "Reset usage",
       "restartHint": "Network changes (port, bind interface, allowlist, connect timeout, global rate limit) apply the next time you restart the listener.",
       "retryStatusCodes": "Retry on statuses",
       "retryStatusCodesHelp": "Upstream HTTP statuses that fail over to the next provider instead of surfacing.",
@@ -18054,6 +18188,11 @@
         "label": "Hybrid retrieval"
       },
       "manage": "Manage memories",
+      "queryExpansion": {
+        "description": "Widen the keyword leg with synonym expansion when recalling memories.",
+        "heading": "Query expansion",
+        "label": "Query expansion"
+      },
       "scope": {
         "character": "Per character",
         "description": "Where new memories are stored. Global is shared across all characters.",
@@ -18969,6 +19108,17 @@
       "webModeBanner": "Custom command create / edit / delete needs the desktop build — file system writes are not available in web mode."
     },
     "sourceControl": {
+      "aiFeature": {
+        "customInstructions": {
+          "heading": "Custom instructions",
+          "placeholder": "Extra guidance for the model (focus areas, tone, language…)"
+        },
+        "model": {
+          "model": "Model",
+          "provider": "Provider",
+          "useDefault": "Use chat default"
+        }
+      },
       "commitAi": {
         "conventional": {
           "description": "Constrain the generated message to the type(scope): summary format.",
@@ -18987,6 +19137,10 @@
         }
       },
       "description": "AI commit-message generation and other Git panel preferences.",
+      "explainAi": {
+        "description": "Show an \"Explain\" button on file and commit diffs to summarize what changed and why.",
+        "heading": "AI change explanation"
+      },
       "panel": {
         "autoFetch": {
           "description": "Periodically fetch from the remote in the background so ahead/behind stays current.",
@@ -19042,6 +19196,10 @@
           "list": "List"
         },
         "title": "Panel & workflow"
+      },
+      "reviewAi": {
+        "description": "Show an \"AI review\" button in the hunk review list to flag issues per hunk.",
+        "heading": "AI code review"
       },
       "title": "Source Control"
     },
@@ -20444,6 +20602,18 @@
       "pullFailed": "Pull failed: {message}",
       "pushFailed": "Push failed: {message}"
     },
+    "explain": {
+      "button": "Explain",
+      "copied": "Explanation copied",
+      "copy": "Copy explanation",
+      "copyFailed": "Failed to copy",
+      "empty": "No changes to explain",
+      "failed": "Failed to explain the change",
+      "generating": "Explaining change…",
+      "redacted": "Sensitive data was redacted before sending to the model",
+      "retry": "Regenerate",
+      "title": "AI explanation"
+    },
     "forcePush": {
       "confirmAction": "Force push",
       "confirmDescription": "This overwrites the remote branch with your local history using --force-with-lease. It is rejected if someone else has pushed since your last fetch.",
@@ -20505,9 +20675,24 @@
       "accept": "Accept hunk",
       "acceptedCount": "{accepted}/{total} accepted",
       "addComment": "Add comment",
+      "ai": {
+        "clear": "Clear AI findings",
+        "failed": "AI review failed",
+        "noFindings": "AI review found no issues",
+        "noHunks": "No changes to review",
+        "redacted": "Sensitive data was redacted before sending to the model",
+        "run": "AI review",
+        "severity": {
+          "critical": "Critical",
+          "info": "Info",
+          "warning": "Warning"
+        }
+      },
       "applyAccepted": "Apply {count} accepted",
+      "collapse": "Collapse review",
       "comment": "Hunk comment",
       "commentPlaceholder": "Leave a note on this hunk…",
+      "expand": "Expand review",
       "hunkLabel": "Hunk @ line {line}",
       "reject": "Reject hunk",
       "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
@@ -21707,7 +21892,9 @@
     },
     "panel": {
       "activeTwin": "Active twin",
-      "noTwinHint": "Bind a character to a twin via its settings to start ingesting documents, chats, and code. Every twin lives alongside its character — there is no separate identity to create up front.",
+      "createFirst": "Create your first twin",
+      "loading": "Loading twins…",
+      "noTwinHint": "A digital twin learns from the documents, chats, and code you feed it, then speaks in your voice. Create one with the guided setup — you can add sources and bind a character along the way.",
       "noTwinTitle": "No digital twins yet",
       "tabs": {
         "drafts": "Drafts",
@@ -21717,6 +21904,7 @@
         "sources": "Sources"
       },
       "title": "Digital twin",
+      "twinDeleted": "Deleted \"{name}\" and all its data.",
       "workerActive": "worker ● active",
       "workerIdle": "worker ○ idle"
     },
@@ -21835,6 +22023,7 @@
       "delete": "Delete",
       "deleteDescription": "Delete \"{name}\" and cascade-remove every source, chunk, draft, and job that belongs to it. This cannot be undone.",
       "deleteTitle": "Delete twin?",
+      "guidedCreate": "Guided setup…",
       "nameLabel": "Twin name",
       "nameRequired": "Name is required",
       "newTwin": "New twin",
@@ -21869,6 +22058,11 @@
       "never": "(never)",
       "openDataFolder": "Open data folder",
       "provider": "Provider",
+      "queryExpansionStrategyHyde": "HyDE (hypothetical answer)",
+      "queryExpansionStrategyLabel": "Expansion strategy",
+      "queryExpansionStrategyStepback": "Step-back query",
+      "queryExpansionToggleHint": "When a character enables query expansion, generate an expanded query with the distill LLM and fuse a second vector search (uses the distill LLM API key).",
+      "queryExpansionToggleLabel": "LLM query expansion",
       "ragDefaultsBody": "Per-character overrides live on the character record (twinSettings.ragTopK, twinSettings.styleSamplesK). When unset, the runtime falls back to topK = 6, styleSamplesK = 3, with both RAG and style few-shot enabled.",
       "ragDefaultsTitle": "RAG defaults",
       "rerankerModelHint": "Lexical is local and key-free. LLM asks the distill model to rate relevance (uses the distill LLM API key).",
@@ -21905,6 +22099,7 @@
       "workerToggleLabel": "Auto-start the job worker for this twin"
     },
     "sourceUploader": {
+      "addUrl": "Add URL",
       "authorFilter": "Author filter (optional)",
       "authorPlaceholder": "e.g. alice or alice@example.com",
       "contentLabel": "Content",
@@ -21924,8 +22119,13 @@
         "parseFailedFallback": "Failed to parse file (fallback parser also rejected it)",
         "pasteContentRequired": "Paste some content before saving",
         "shapeNoMessages": "Export contains no messages",
-        "unknownFileType": "Unknown file type"
+        "unknownFileType": "Unknown file type",
+        "urlEmpty": "Enter a URL first",
+        "urlFetchFailed": "Couldn’t fetch that URL: {reason}",
+        "urlInvalid": "That doesn’t look like a valid URL",
+        "urlNoText": "That URL returned no readable text"
       },
+      "fetching": "Fetching…",
       "filesDescription": "Text formats (Markdown / CSV / HTML / JSON / source code / .eml / .mbox) are stored as-is. Binary formats (PDF / DOCX / PPTX / EPUB / ODT / ODP) are parsed in the browser; only the extracted text lands in Dexie. Chat exports (ChatGPT / Claude / Gemini / Slack / Lark / WeChat / DingTalk) and mbox files fan out into one source per conversation.",
       "filesTitle": "From file(s)",
       "formatLabel": "Format",
@@ -21945,12 +22145,22 @@
       "saving": "Saving…",
       "titleLabel": "Title (optional)",
       "titlePlaceholder": "e.g. onboarding-notes.md",
-      "walking": "Walking…"
+      "urlDescription": "Fetch a web page or article and store its readable text as one source. WeChat / X / YouTube links use dedicated extractors; other pages fall back to readable-text extraction.",
+      "urlImported": "Imported “{title}”.",
+      "urlLabel": "URL",
+      "urlPlaceholder": "https://example.com/article",
+      "urlTitle": "From a URL",
+      "walking": "Walking…",
+      "webModeHint": "In the browser, cross-origin fetches may be blocked by CORS. The desktop app fetches through a local proxy without this limit."
     },
     "sources": {
       "addSource": "Add source",
       "cancelAdd": "Cancel",
       "chunks": "{count, plural, =0 {0 chunks} =1 {1 chunk} other {# chunks}}",
+      "contentHeading": "Source text",
+      "contentTruncated": "Showing the first {count} characters.",
+      "copied": "Copied",
+      "copyMarkdown": "Copy as Markdown",
       "delete": "Delete",
       "deleteConfirmAction": "Delete",
       "deleteConfirmCancel": "Cancel",
@@ -21963,9 +22173,16 @@
       "filterLabel": "Filter sources by status",
       "headerCount": "Sources ({count})",
       "imported": "imported {when}",
+      "moreRows": "+{count} more rows",
+      "noTables": "No tables detected in this source.",
       "pendingIngestBusy": "Queuing…",
       "pendingIngestCta": "Start ingest",
-      "pendingIngestHint": "{count, plural, =1 {1 source waiting to ingest} other {# sources waiting to ingest}}"
+      "pendingIngestHint": "{count, plural, =1 {1 source waiting to ingest} other {# sources waiting to ingest}}",
+      "preview": "Preview",
+      "previewDescription": "Detected tables and the stored source text.",
+      "previewTitle": "Preview: {title}",
+      "tableStats": "{rows} rows × {cols} cols · {numeric} numeric",
+      "tablesHeading": "Detected tables ({count})"
     },
     "status": {
       "accepted": "Accepted",
@@ -21988,6 +22205,74 @@
       "noPlaceholders": "No placeholders to restore.",
       "restoreAll": "Restore all",
       "title": "Restore sensitive details?"
+    },
+    "wizard": {
+      "back": "Back",
+      "bindError": "Could not bind the character: {reason}",
+      "bindExisting": "Bind an existing character",
+      "bindNew": "Create a new character",
+      "bindNone": "Don't bind now",
+      "cancel": "Cancel",
+      "close": "Close",
+      "colorLabel": "Accent color",
+      "createError": "Could not create the twin: {reason}",
+      "creating": "Creating…",
+      "descriptionLabel": "Description (optional)",
+      "descriptionPlaceholder": "What this twin is for…",
+      "done": "Go to workbench",
+      "enableWorker": "Enable the twin worker",
+      "enableWorkerHint": "Let the app process queued ingest and distill jobs in the background.",
+      "existingCharacterLabel": "Character",
+      "existingCharacterPlaceholder": "Pick a character",
+      "finish": "Finish",
+      "nameLabel": "Twin name",
+      "namePlaceholder": "e.g. Alex — Support Lead",
+      "nameRequired": "Name is required",
+      "newCharacterNameLabel": "Character name",
+      "newCharacterNamePlaceholder": "e.g. Alex",
+      "next": "Next",
+      "noCharacters": "No characters available",
+      "notReadyHint": "Set the embedding provider, vector store, and distill LLM in Settings before sources can be ingested.",
+      "notReadyTitle": "Runtime not configured yet",
+      "openSettings": "Open twin settings",
+      "queueDistill": "Distill after ingest",
+      "queueDistillHint": "Extract style, playbooks, and entities into the persona.",
+      "queueError": "Could not queue jobs: {reason}",
+      "queueIngest": "Queue ingest now",
+      "queueIngestBlocked": "Add sources and configure the runtime to enable ingest.",
+      "queueIngestHint": "Chunk and embed the pending sources. Uses embedding tokens.",
+      "readyHint": "The twin worker can process this twin's sources.",
+      "readyTitle": "Runtime is configured",
+      "skip": "Skip",
+      "sourcesCount": "{count, plural, =0 {No sources yet} =1 {1 source registered} other {# sources registered}}",
+      "step1Description": "Name your twin and pick a purpose. You can change everything later.",
+      "step1Title": "Identity",
+      "step2Description": "Feed the twin documents, chats, code, or a URL. Optional — you can add more anytime from the Sources tab.",
+      "step2Title": "Add knowledge",
+      "step3Description": "Ingesting sources needs an embedding provider, a vector store, and a distill LLM.",
+      "step3Title": "Runtime readiness",
+      "step4Description": "A character is what actually chats using this twin. Bind one now, or skip and do it later from character settings.",
+      "step4Title": "Bind a character",
+      "step5Description": "Your twin is ready. Choose what happens next.",
+      "step5Title": "Finish",
+      "stepLabel": "Step {current} of {total}",
+      "summaryCharacter": "Character",
+      "summaryCharacterNone": "None",
+      "summaryName": "Twin",
+      "summarySources": "Sources",
+      "templateBlank": "Blank",
+      "templateBlankHint": "Start from scratch.",
+      "templateColleague": "Colleague",
+      "templateColleagueHint": "Capture a teammate's expertise.",
+      "templateLabel": "Purpose",
+      "templateMentor": "Mentor",
+      "templateMentorHint": "Distill a mentor's guidance and playbooks.",
+      "templatePredecessor": "Predecessor",
+      "templatePredecessorHint": "Preserve a departing employee's know-how.",
+      "templateSelf": "Myself",
+      "templateSelfHint": "A twin of my own voice and knowledge.",
+      "title": "Create a digital twin",
+      "workerEnabled": "Worker enabled"
     }
   },
   "webSearchToggle": {
@@ -22716,11 +23001,25 @@
         }
       },
       "aiClassify": {
+        "apiFlavor": {
+          "auto": "Auto",
+          "chat": "Chat Completions",
+          "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+          "label": "OpenAI endpoint",
+          "responses": "Responses API"
+        },
         "apiKey": {
           "label": "API key"
         },
         "baseURL": {
-          "label": "Base URL (optional)"
+          "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+          "label": "Base URL (optional)",
+          "placeholder": "https://api.openai.com/v1"
+        },
+        "headersJson": {
+          "hint": "Static provider headers as a JSON object. Values must be strings.",
+          "label": "Headers JSON (optional)",
+          "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
         },
         "hint": {
           "label": "Guidance (optional)"
@@ -22735,12 +23034,55 @@
           "placeholder": "urgent, normal, spam"
         },
         "model": {
+          "hint": "Provider-specific model id.",
           "label": "Model",
           "placeholder": "claude-haiku-4-5-20251001"
         },
         "provider": {
+          "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
           "label": "Provider",
-          "placeholder": "Provider"
+          "placeholder": "openrouter"
+        }
+      },
+      "aiCouncil": {
+        "councillorsJson": {
+          "hint": "Array of { name, modelAlias, systemPrompt? } objects. modelAlias uses Settings -> Routing aliases.",
+          "label": "Councillors JSON",
+          "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+        },
+        "executionMode": {
+          "label": "Execution mode",
+          "options": {
+            "parallel": "Parallel",
+            "serial": "Serial"
+          }
+        },
+        "maxConcurrency": {
+          "hint": "Maximum councillor calls running at once in parallel mode.",
+          "label": "Max concurrency"
+        },
+        "piiGate": {
+          "block": "Block (fail the step)",
+          "hint": "Runs before the prompt egresses to every councillor and the synthesizer.",
+          "label": "PII gate",
+          "off": "Off",
+          "redact": "Redact"
+        },
+        "prompt": {
+          "label": "Prompt"
+        },
+        "synthesisInstructions": {
+          "hint": "Optional guidance for the final synthesis pass.",
+          "label": "Synthesis instructions"
+        },
+        "synthesizerAlias": {
+          "hint": "Routing alias for the model that merges councillor responses.",
+          "label": "Synthesizer alias",
+          "placeholder": "quality"
+        },
+        "timeoutMs": {
+          "hint": "Per-councillor timeout. Valid range: 1000-600000 ms.",
+          "label": "Timeout (ms)"
         }
       },
       "aiEmbed": {
@@ -22767,11 +23109,25 @@
         }
       },
       "aiExtract": {
+        "apiFlavor": {
+          "auto": "Auto",
+          "chat": "Chat Completions",
+          "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+          "label": "OpenAI endpoint",
+          "responses": "Responses API"
+        },
         "apiKey": {
           "label": "API key"
         },
         "baseURL": {
-          "label": "Base URL (optional)"
+          "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+          "label": "Base URL (optional)",
+          "placeholder": "https://api.openai.com/v1"
+        },
+        "headersJson": {
+          "hint": "Static provider headers as a JSON object. Values must be strings.",
+          "label": "Headers JSON (optional)",
+          "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
         },
         "hint": {
           "label": "Guidance (optional)"
@@ -22780,11 +23136,14 @@
           "label": "Input"
         },
         "model": {
-          "label": "Model"
+          "hint": "Provider-specific model id.",
+          "label": "Model",
+          "placeholder": "claude-haiku-4-5-20251001"
         },
         "provider": {
+          "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
           "label": "Provider",
-          "placeholder": "Provider"
+          "placeholder": "openrouter"
         },
         "required": {
           "hint": "Comma-separated. output.valid is false if any are missing.",
@@ -22797,6 +23156,13 @@
         }
       },
       "aiPrompt": {
+        "apiFlavor": {
+          "auto": "Auto",
+          "chat": "Chat Completions",
+          "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+          "label": "OpenAI endpoint",
+          "responses": "Responses API"
+        },
         "apiKey": {
           "hint": "Embedded inline. For shared workflows, use a credential ref instead.",
           "label": "API key"
@@ -22805,6 +23171,11 @@
           "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
           "label": "Base URL (optional)",
           "placeholder": "https://api.openai.com/v1"
+        },
+        "headersJson": {
+          "hint": "Static provider headers as a JSON object. Values must be strings.",
+          "label": "Headers JSON (optional)",
+          "placeholder": "{ \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" }"
         },
         "jsonSchema": {
           "hint": "A sample shape the model should match. Injected into the prompt.",
@@ -22835,8 +23206,9 @@
           "redact": "Redact placeholders"
         },
         "provider": {
+          "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
           "label": "Provider",
-          "placeholder": "(stub)"
+          "placeholder": "openrouter"
         },
         "responseFormat": {
           "hint": "JSON parses the reply into structured output for downstream nodes.",
@@ -24162,6 +24534,42 @@
         "removeField": "Remove field",
         "required": "Required",
         "sectionTitle": "Typed output"
+      },
+      "petEventTrigger": {
+        "cooldownMs": {
+          "hint": "Minimum time between fires for the same workflow. Prevents workflows from retriggering themselves.",
+          "label": "Cooldown (ms)"
+        },
+        "intro": "Fires when the desktop pet reaches a supported lifecycle event.",
+        "kinds": {
+          "hint": "Leave all off to fire on every supported pet lifecycle event.",
+          "label": "Pet events",
+          "options": {
+            "achievementUnlocked": "Achievement unlocked",
+            "evolved": "Evolved",
+            "levelUp": "Level up",
+            "unwell": "Unwell"
+          }
+        }
+      },
+      "petInteract": {
+        "itemId": {
+          "hint": "Optional shop item id consumed by the pet controller.",
+          "label": "Item id",
+          "placeholder": "pet_item_..."
+        },
+        "kind": {
+          "label": "Interaction",
+          "options": {
+            "cleaned": "Clean",
+            "fed": "Feed",
+            "petted": "Pet",
+            "played": "Play",
+            "slept": "Sleep",
+            "talked": "Talk",
+            "treated": "Treat"
+          }
+        }
       },
       "pickers": {
         "character": "Select a character",
