@@ -1743,15 +1743,23 @@ test("interrupt() resolves all pending round-trips so a stuck session cleans up"
       reviewResolvedSentinel = v === undefined ? "__undefined__" : v
     },
   })
+  let protocolCancel = null
+  session.pendingProtocolExecs.set("pa-1", {
+    cancel: (reason) => {
+      protocolCancel = reason
+    },
+  })
   assert.equal(session.pendingApprovals.size, 1)
   assert.equal(session.pendingPluginToolCalls.size, 1)
   assert.equal(session.pendingToolResultReviews.size, 1)
+  assert.equal(session.pendingProtocolExecs.size, 1)
   await session.q.interrupt()
   // Every pending entry is resolved so the tool gate / plugin-tool / review
   // round-trip doesn't hang forever.
   assert.equal(session.pendingApprovals.size, 0)
   assert.equal(session.pendingPluginToolCalls.size, 0)
   assert.equal(session.pendingToolResultReviews.size, 0)
+  assert.equal(session.pendingProtocolExecs.size, 0)
   assert.ok(permissionResolved, "pending approval was resolved")
   assert.deepEqual(
     permissionResolved,
@@ -1771,6 +1779,7 @@ test("interrupt() resolves all pending round-trips so a stuck session cleans up"
     "plugin call errored so M2 unblocks"
   )
   assert.equal(reviewResolvedSentinel, "__undefined__", "review passes through unchanged")
+  assert.equal(protocolCancel, "interrupted", "protocol adapter exec was cancelled")
 })
 
 test("external mcpServers tools are merged into the turn (parity with the Anthropic path)", async () => {

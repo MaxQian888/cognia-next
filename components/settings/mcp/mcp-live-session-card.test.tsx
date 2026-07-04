@@ -26,6 +26,14 @@ jest.mock("@/lib/claude/ipc", () => ({
   toggleSessionMcpServer: (...a: unknown[]) => toggleSessionMcpServer(...a),
 }))
 
+const useMcpServerLogs = jest.fn()
+jest.mock("@/hooks/mcp/use-mcp-server-logs", () => ({
+  mcpServerLogsHref: (s: string) => `/logs?src=mcp&module=mcp:${s}`,
+  useMcpServerLogs: (...a: unknown[]) => useMcpServerLogs(...a),
+}))
+
+const EMPTY_LOGS = { logs: [], lastEntry: null, lastError: null, errorCount: 0, isLoading: false }
+
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 import type { SdkMcpServerStatus } from "@/lib/claude/types"
@@ -44,6 +52,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   activeSessionId = "s1"
   mockIsTauri.mockReturnValue(true)
+  useMcpServerLogs.mockReturnValue(EMPTY_LOGS)
 })
 
 describe("McpLiveSessionCard", () => {
@@ -178,6 +187,28 @@ describe("McpLiveSessionCard", () => {
     resolveReconnectFetch([failedRow])
     await waitFor(() => expect(screen.queryByTestId("mcp-live-row-github")).toBeNull())
     expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument()
+  })
+
+  it("links each row to its per-server log view", async () => {
+    getSessionMcpStatus.mockResolvedValue([failedRow])
+    render(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-github")).toBeInTheDocument())
+    expect(screen.getByLabelText('viewLogsFor:{"name":"github"}')).toHaveAttribute(
+      "href",
+      "/logs?src=mcp&module=mcp:github"
+    )
+  })
+
+  it("surfaces the most recent bridged error line when the SDK reports none", async () => {
+    useMcpServerLogs.mockReturnValue({
+      ...EMPTY_LOGS,
+      lastError: { message: "stderr boom", timestamp: new Date().toISOString(), level: "error" },
+      errorCount: 1,
+    })
+    getSessionMcpStatus.mockResolvedValue([okRow]) // connected → no srv.error
+    render(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument())
+    expect(screen.getByTitle("stderr boom")).toBeInTheDocument()
   })
 
   it("toasts an error when toggle fails", async () => {

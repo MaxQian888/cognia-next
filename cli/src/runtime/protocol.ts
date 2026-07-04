@@ -72,6 +72,7 @@ export interface OutboundMessage {
     | "session_ended"
     | "ready"
     | "log"
+    | "mcp_log"
     | "a2ui_dispatch"
     | "usage_headers"
     | "control_response"

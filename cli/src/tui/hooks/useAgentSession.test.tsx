@@ -71,6 +71,9 @@ function harness(
     store: { restore },
   }
   const createCheckpoints = jest.fn(() => capture as never)
+  // Inject an off-disk MCP-log file sink so the `mcp_log`/`log` capture branch
+  // never writes to the real `~/.cognia/logs/mcp.log` in tests.
+  const appendMcpLog = jest.fn()
   const { result: hook } = renderHook(() =>
     useAgentSession({
       config,
@@ -80,6 +83,7 @@ function harness(
       subscribeSidecar,
       requestCompact,
       createCheckpoints,
+      appendMcpLog,
       ...(opts.hooks ? { createHooks: () => opts.hooks as HookRunner } : {}),
     })
   )
@@ -93,6 +97,7 @@ function harness(
     requestCompact,
     capture,
     restore,
+    appendMcpLog,
     fireSidecar: (p: unknown) => sidecarHandler?.(p),
     api: () => hook.current,
   }
@@ -174,6 +179,72 @@ describe("useAgentSession", () => {
       h.fireSidecar("not-an-object")
     })
     expect(h.actions.some((a) => a.type === "SET_RATE_LIMITS")).toBe(false)
+  })
+
+  it("captures an mcp_log event into MCP_LOG_APPEND and the file sink", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({
+        type: "mcp_log",
+        ts: 5,
+        level: "info",
+        source: "stderr",
+        server: "github",
+        message: "connected",
+      })
+    })
+    const appended = h.actions.find((a) => a.type === "MCP_LOG_APPEND")
+    expect(appended).toMatchObject({
+      entry: { level: "info", server: "github", message: "connected", source: "stderr" },
+    })
+    expect(h.appendMcpLog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "connected", server: "github" })
+    )
+  })
+
+  it("captures the generic sidecar log stream tagged source=sidecar", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({ type: "log", level: "warn", message: "hook slow" })
+    })
+    expect(h.actions.find((a) => a.type === "MCP_LOG_APPEND")).toMatchObject({
+      entry: { level: "warn", message: "hook slow", source: "sidecar" },
+    })
+  })
+
+  it("raises a throttled error toast on an mcp_log error (once per burst)", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({
+        type: "mcp_log",
+        level: "error",
+        source: "stderr",
+        server: "db",
+        message: "boom",
+      })
+      h.fireSidecar({
+        type: "mcp_log",
+        level: "error",
+        source: "stderr",
+        server: "db",
+        message: "again",
+      })
+    })
+    const toasts = h.actions.filter(
+      (a) => a.type === "TOAST_PUSH" && a.message === 'MCP server "db" error'
+    )
+    // Both lines are captured, but only ONE toast fires for the burst.
+    expect(h.actions.filter((a) => a.type === "MCP_LOG_APPEND")).toHaveLength(2)
+    expect(toasts).toHaveLength(1)
+  })
+
+  it("does not toast for a non-error mcp_log or a generic sidecar log", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({ type: "mcp_log", level: "warn", source: "stderr", message: "slow" })
+      h.fireSidecar({ type: "log", level: "error", message: "internal only" })
+    })
+    expect(h.actions.some((a) => a.type === "TOAST_PUSH")).toBe(false)
   })
 
   it("surfaces a sidecar_exited event as SIDECAR_STATUS + an error toast", () => {

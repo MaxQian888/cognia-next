@@ -3,6 +3,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { PassThrough } from "node:stream"
 import { buildAiSdkMcpTools, toMcpTransport, wrapMcpToolWithGate } from "./ai-sdk-mcp.mjs"
 
 // A no-op stdio transport stand-in so toMcpTransport doesn't construct the real
@@ -243,4 +244,73 @@ test("buildAiSdkMcpTools with no servers returns an empty map and a no-op close"
 test("wrapMcpToolWithGate returns the tool unchanged when no gate is supplied", () => {
   const t = { description: "d", execute: async () => "x" }
   assert.equal(wrapMcpToolWithGate(t, "mcp__s__t", undefined), t)
+})
+
+test("toMcpTransport wires a provided stderr stream into the stdio config", () => {
+  const s = new PassThrough()
+  const t = toMcpTransport(
+    { type: "stdio", command: "node" },
+    { StdioTransport: FakeStdio, stderr: s }
+  )
+  assert.equal(t.cfg.stderr, s, "stderr stream forwarded to the transport config")
+})
+
+test("buildAiSdkMcpTools captures stdio server stderr into emitMcpLog", async () => {
+  const logs = []
+  let stderrStream = null
+  const createClient = async ({ transport }) => {
+    stderrStream = transport.cfg.stderr // the PassThrough wired by toMcpTransport
+    return { tools: async () => ({ ping: { execute: async () => "pong" } }), close: async () => {} }
+  }
+  const { close } = await buildAiSdkMcpTools({
+    mcpServers: { fs: { type: "stdio", command: "node" } },
+    createClient,
+    StdioTransport: FakeStdio,
+    emitMcpLog: (e) => logs.push(e),
+  })
+  assert.ok(stderrStream, "stderr stream wired for stdio server")
+  stderrStream.write("[error] boom\nwarn: slow\n")
+  await new Promise((r) => setImmediate(r))
+  const err = logs.find((l) => l.source === "stderr" && l.level === "error")
+  assert.ok(err, "stderr error line captured as an mcp_log")
+  assert.equal(err.server, "fs")
+  assert.equal(err.message, "[error] boom")
+  assert.ok(
+    logs.some((l) => l.source === "stderr" && l.level === "warn"),
+    "stderr warn line captured too"
+  )
+  // A successful connect also emits a diagnostic summary.
+  assert.ok(logs.some((l) => l.source === "diagnostic" && /connected/.test(l.message)))
+  await close()
+})
+
+test("buildAiSdkMcpTools emits a diagnostic mcp_log when a server fails to connect", async () => {
+  const logs = []
+  const createClient = async () => {
+    throw new Error("ECONNREFUSED")
+  }
+  await buildAiSdkMcpTools({
+    mcpServers: { bad: { type: "sse", url: "https://down" } },
+    createClient,
+    emitMcpLog: (e) => logs.push(e),
+    retryDelayMs: 0,
+  })
+  const d = logs.find((l) => l.source === "diagnostic" && /failed to connect/.test(l.message))
+  assert.ok(d, "connect failure surfaced as a diagnostic mcp_log")
+  assert.equal(d.server, "bad")
+  assert.equal(d.level, "warn")
+})
+
+test("stdio transport has no stderr stream when no emitMcpLog sink is supplied", async () => {
+  let cfg = null
+  const createClient = async ({ transport }) => {
+    cfg = transport.cfg
+    return { tools: async () => ({}), close: async () => {} }
+  }
+  await buildAiSdkMcpTools({
+    mcpServers: { fs: { type: "stdio", command: "node" } },
+    createClient,
+    StdioTransport: FakeStdio,
+  })
+  assert.equal(cfg.stderr, undefined, "no stderr stream spawned without a log sink")
 })

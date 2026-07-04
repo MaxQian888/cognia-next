@@ -2096,3 +2096,61 @@ describe("tuiReducer — toasts & completion signals", () => {
     expect(ended.lastCompletion).toMatchObject({ kind: "activity", status: "done" })
   })
 })
+
+describe("tuiReducer — MCP logs", () => {
+  it("starts with an empty MCP log buffer", () => {
+    expect(base().mcpLogs).toEqual([])
+  })
+
+  it("MCP_LOG_APPEND stamps a stable id and preserves order", () => {
+    const s = reduce(
+      base(),
+      {
+        type: "MCP_LOG_APPEND",
+        entry: { ts: 1, level: "error", source: "stderr", message: "boom", server: "github" },
+      },
+      { type: "MCP_LOG_APPEND", entry: { ts: 2, level: "info", source: "sidecar", message: "ok" } }
+    )
+    expect(s.mcpLogs).toHaveLength(2)
+    expect(s.mcpLogs[0]).toMatchObject({ level: "error", message: "boom", server: "github" })
+    expect(s.mcpLogs[1]).toMatchObject({ level: "info", message: "ok" })
+    // Ids are unique + monotonic (derived from seq).
+    expect(s.mcpLogs[0].id).not.toEqual(s.mcpLogs[1].id)
+    expect(typeof s.mcpLogs[0].id).toBe("string")
+  })
+
+  it("MCP_LOG_APPEND caps the ring buffer at 1000 (oldest drop)", () => {
+    let s = base()
+    for (let i = 0; i < 1005; i++) {
+      s = reduce(s, {
+        type: "MCP_LOG_APPEND",
+        entry: { ts: i, level: "info", source: "stderr", message: `line ${i}` },
+      })
+    }
+    expect(s.mcpLogs).toHaveLength(1000)
+    // The oldest 5 were dropped; newest is retained.
+    expect(s.mcpLogs[0].message).toBe("line 5")
+    expect(s.mcpLogs.at(-1)?.message).toBe("line 1004")
+  })
+
+  it("MCP_LOG_CLEAR empties the buffer and is a no-op when already empty", () => {
+    const filled = reduce(base(), {
+      type: "MCP_LOG_APPEND",
+      entry: { ts: 1, level: "warn", source: "diagnostic", message: "x" },
+    })
+    const cleared = reduce(filled, { type: "MCP_LOG_CLEAR" })
+    expect(cleared.mcpLogs).toEqual([])
+    // Already-empty clear returns the same reference (no needless re-render).
+    expect(reduce(cleared, { type: "MCP_LOG_CLEAR" })).toBe(cleared)
+  })
+
+  it("MCP logs survive RESET (backend diagnostics aren't conversation state)", () => {
+    const withLog = reduce(base(), {
+      type: "MCP_LOG_APPEND",
+      entry: { ts: 1, level: "info", source: "stderr", message: "kept" },
+    })
+    const afterReset = reduce(withLog, { type: "RESET", sessionId: "ses2" })
+    expect(afterReset.mcpLogs).toHaveLength(1)
+    expect(afterReset.mcpLogs[0].message).toBe("kept")
+  })
+})

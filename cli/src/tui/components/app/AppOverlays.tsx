@@ -15,6 +15,8 @@ import { SelectList } from "../SelectList"
 import { MarketplaceBrowser } from "../MarketplaceBrowser"
 import { McpPanel } from "../McpPanel"
 import { McpToolsPanel } from "../McpToolsPanel"
+import { McpLogPanel } from "../McpLogPanel"
+import { copyToClipboard } from "../../clipboard"
 import { SkillPanel } from "../SkillPanel"
 import { EffortSlider } from "../EffortSlider"
 import { PermissionOverlay } from "../overlays/PermissionOverlay"
@@ -566,6 +568,27 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             agent.invalidate()
           }}
           onBack={() => void runMcpPanel(mcpPanelDeps())}
+        />
+      )}
+      {state.overlay.kind === "mcpLogs" && (
+        <McpLogPanel
+          logs={state.mcpLogs}
+          statusSummary={state.overlay.statusSummary}
+          width={columns}
+          maxRows={overlayRows}
+          onClear={() => dispatch({ type: "MCP_LOG_CLEAR" })}
+          onCopy={(text) => {
+            if (!text) return
+            void copyToClipboard(text).then((res) =>
+              dispatch({
+                type: "NOTICE",
+                message: res.ok
+                  ? "Copied MCP logs to the clipboard."
+                  : "Couldn't copy MCP logs to the clipboard.",
+              })
+            )
+          }}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
       {state.overlay.kind === "skills" && (

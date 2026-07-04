@@ -14,10 +14,13 @@
 // honours the allow/deny tool filters. Connections are opened once per session
 // and closed via the returned `close()`.
 
+import { PassThrough } from "node:stream"
+
 import { createMCPClient } from "@ai-sdk/mcp"
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio"
 
 import { resolveForToolCall } from "./permission-resolver.mjs"
+import { createLineBuffer, classifyMcpLogLine } from "./mcp-log.mjs"
 
 /**
  * Build an AI SDK MCP transport (instance or config) from a Claude-Agent-SDK-
@@ -25,7 +28,10 @@ import { resolveForToolCall } from "./permission-resolver.mjs"
  * carries `command`/`args`/`env`/`cwd`; sse/http carry `url`/`headers`.
  * Returns null for an unsupported or incompletely-specified entry.
  */
-export function toMcpTransport(entry, { StdioTransport = Experimental_StdioMCPTransport } = {}) {
+export function toMcpTransport(
+  entry,
+  { StdioTransport = Experimental_StdioMCPTransport, stderr } = {}
+) {
   const type = entry?.type
   if (type === "stdio") {
     if (typeof entry.command !== "string" || !entry.command) return null
@@ -34,6 +40,10 @@ export function toMcpTransport(entry, { StdioTransport = Experimental_StdioMCPTr
       ...(Array.isArray(entry.args) ? { args: entry.args } : {}),
       ...(entry.env && typeof entry.env === "object" ? { env: entry.env } : {}),
       ...(typeof entry.cwd === "string" ? { cwd: entry.cwd } : {}),
+      // Redirect the spawned server's stderr into a stream we read line-by-line
+      // (@ai-sdk/mcp StdioConfig.stderr accepts a Stream) so its diagnostics
+      // reach the MCP log panel instead of being discarded.
+      ...(stderr ? { stderr } : {}),
     })
   }
   if (type === "sse" || type === "http") {
@@ -78,6 +88,7 @@ function isMcpToolPermitted(namespaced, server, allowSet, disallowedSet) {
  *   allowedTools?: string[],
  *   disallowedTools?: string[],
  *   log?: (level: "info"|"warn"|"error", message: string) => void,
+ *   emitMcpLog?: (entry: { level: "error"|"warn"|"info"|"debug", message: string, server?: string, source?: "stderr"|"diagnostic" }) => void,
  *   createClient?: (config: any) => Promise<any>,   // injected in tests
  *   StdioTransport?: any,                            // injected in tests
  *   retryDelayMs?: number,                           // backoff before the 1 retry
@@ -90,6 +101,7 @@ export async function buildAiSdkMcpTools({
   allowedTools,
   disallowedTools,
   log,
+  emitMcpLog,
   createClient,
   StdioTransport,
   retryDelayMs = 200,
@@ -98,12 +110,27 @@ export async function buildAiSdkMcpTools({
   const tools = {}
   /** @type {Array<{ close: () => Promise<void> }>} */
   const clients = []
+  /** @type {Array<{ end: () => void, stream: import("node:stream").PassThrough }>} */
+  const captures = []
   const close = async () => {
     for (const c of clients) {
       try {
         await c.close()
       } catch {
         // best-effort teardown — a failed close shouldn't crash session end.
+      }
+    }
+    // Flush each stderr sink's trailing partial line, then tear down the stream.
+    for (const cap of captures) {
+      try {
+        cap.end()
+      } catch {
+        // ignore — flushing a dead sink shouldn't crash session end.
+      }
+      try {
+        cap.stream.destroy()
+      } catch {
+        // ignore
       }
     }
   }
@@ -113,29 +140,75 @@ export async function buildAiSdkMcpTools({
   const allowSet =
     Array.isArray(allowedTools) && allowedTools.length > 0 ? new Set(allowedTools) : null
   const disallowedSet = new Set(Array.isArray(disallowedTools) ? disallowedTools : [])
-  const buildTransport = (entry) =>
-    toMcpTransport(entry, StdioTransport ? { StdioTransport } : undefined)
+  const buildTransport = (entry, stderr) =>
+    toMcpTransport(entry, {
+      ...(StdioTransport ? { StdioTransport } : {}),
+      ...(stderr ? { stderr } : {}),
+    })
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+  // Structured diagnostic → MCP log panel (in addition to the free-text `log`
+  // channel, which is kept for backward-compatible stderr-of-the-sidecar).
+  const diag = (server, level, message) =>
+    emitMcpLog?.({ level, message, server, source: "diagnostic" })
+
   /**
-   * Connect one server (one retry on connect failure), returning its client and
-   * namespaced/gated tools, or `null` when the server can't be reached / has an
-   * unsupported transport. A fresh transport is built per attempt — a spawned
-   * stdio transport that failed to connect can't be reused.
+   * Build a stderr capture for a stdio server: a PassThrough wired as the
+   * child's stderr, read line-by-line into `mcp_log` diagnostics tagged with
+   * the server name. Returns null when no `emitMcpLog` sink is supplied (tests /
+   * headless paths that don't surface logs) so no stream is spawned needlessly.
+   */
+  const makeStderrCapture = (server) => {
+    if (typeof emitMcpLog !== "function") return null
+    const stream = new PassThrough()
+    const buffer = createLineBuffer()
+    const emitLines = (lines) => {
+      for (const line of lines) {
+        const { level, server: parsed, message } = classifyMcpLogLine(line, { knownServer: server })
+        try {
+          emitMcpLog({ level, message, server: parsed ?? server, source: "stderr" })
+        } catch {
+          // never let a downstream emit failure fault the stderr pump
+        }
+      }
+    }
+    stream.on("data", (chunk) => emitLines(buffer.push(chunk.toString())))
+    stream.on("error", () => undefined) // a broken pipe must not crash the turn
+    return { stream, end: () => emitLines(buffer.flush()) }
+  }
+
+  /**
+   * Connect one server (one retry on connect failure), returning its client,
+   * namespaced/gated tools, and any stderr capture — or `null` when the server
+   * can't be reached / has an unsupported transport. A fresh transport (and
+   * capture) is built per attempt: a spawned stdio transport that failed to
+   * connect can't be reused, and its stderr stream must be torn down.
    */
   const connectServer = async (server, entry) => {
-    if (!buildTransport(entry)) {
-      log?.("warn", `mcp "${server}": unsupported or incomplete transport config, skipped`)
-      return null
-    }
+    const isStdio = entry?.type === "stdio"
     let client = null
+    let capture = null
     for (let attempt = 0; attempt < 2 && !client; attempt++) {
       if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs)
+      const thisCapture = isStdio ? makeStderrCapture(server) : null
+      const transport = buildTransport(entry, thisCapture?.stream)
+      if (!transport) {
+        // Unsupported/incomplete config — no point retrying.
+        thisCapture?.end()
+        thisCapture?.stream.destroy()
+        log?.("warn", `mcp "${server}": unsupported or incomplete transport config, skipped`)
+        diag(server, "warn", "unsupported or incomplete transport config, skipped")
+        return null
+      }
       try {
-        client = await make({ transport: buildTransport(entry) })
+        client = await make({ transport })
+        capture = thisCapture
       } catch (err) {
+        thisCapture?.end()
+        thisCapture?.stream.destroy()
         if (attempt === 1) {
           log?.("warn", `mcp "${server}" failed to connect: ${err?.message ?? err}`)
+          diag(server, "warn", `failed to connect: ${err?.message ?? err}`)
           return null
         }
       }
@@ -145,8 +218,9 @@ export async function buildAiSdkMcpTools({
       serverTools = await client.tools()
     } catch (err) {
       log?.("warn", `mcp "${server}" tools() failed: ${err?.message ?? err}`)
-      // Keep the client so `close()` still disconnects it.
-      return { client, tools: {} }
+      diag(server, "warn", `tools() failed: ${err?.message ?? err}`)
+      // Keep the client + capture so `close()` still disconnects/flushes them.
+      return { client, tools: {}, capture }
     }
     /** @type {Record<string, any>} */
     const collected = {}
@@ -155,7 +229,8 @@ export async function buildAiSdkMcpTools({
       if (!isMcpToolPermitted(namespaced, server, allowSet, disallowedSet)) continue
       collected[namespaced] = wrapMcpToolWithGate(toolDef, namespaced, gate)
     }
-    return { client, tools: collected }
+    diag(server, "info", `connected · ${Object.keys(collected).length} tool(s) exposed`)
+    return { client, tools: collected, capture }
   }
 
   // Connect every server concurrently; merge in input order so the tool map is
@@ -167,6 +242,7 @@ export async function buildAiSdkMcpTools({
   for (const r of settled) {
     if (r.status !== "fulfilled" || !r.value) continue
     if (r.value.client) clients.push(r.value.client)
+    if (r.value.capture) captures.push(r.value.capture)
     Object.assign(tools, r.value.tools)
   }
 

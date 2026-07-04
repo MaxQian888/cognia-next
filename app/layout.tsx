@@ -66,6 +66,7 @@ import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
+import { McpLogProvider } from "@/components/providers/mcp-log-provider"
 import {
   BackgroundApplier,
   ComponentStyleApplier,
@@ -241,35 +242,37 @@ export default async function RootLayout({
                                           <ConnectorBusProvider>
                                             <ConnectorDeepLinkRouter>
                                               <SubscriptionUsageProvider>
-                                                <CompanionBootProvider>
-                                                  <WebCompanionBootProvider>
-                                                    <DesktopSyncSourceProvider>
-                                                      <DesktopMessageSourceProvider>
-                                                        {/* Subscribes the renderer to the remote-control axum
+                                                <McpLogProvider>
+                                                  <CompanionBootProvider>
+                                                    <WebCompanionBootProvider>
+                                                      <DesktopSyncSourceProvider>
+                                                        <DesktopMessageSourceProvider>
+                                                          {/* Subscribes the renderer to the remote-control axum
                                                     server's Tauri events so inbound HTTP triggers
                                                     actually dispatch. No-op off Tauri. */}
-                                                        <RemoteControlReceiver>
-                                                          {/* id="app" is the scope root for user
+                                                          <RemoteControlReceiver>
+                                                            {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                          <div
-                                                            id="app"
-                                                            data-bg-target="global"
-                                                            className="contents"
-                                                          >
-                                                            <MobileShellWrapper>
-                                                              <DesktopAppShell>
-                                                                {children}
-                                                              </DesktopAppShell>
-                                                            </MobileShellWrapper>
-                                                          </div>
-                                                        </RemoteControlReceiver>
-                                                      </DesktopMessageSourceProvider>
-                                                    </DesktopSyncSourceProvider>
-                                                  </WebCompanionBootProvider>
-                                                </CompanionBootProvider>
+                                                            <div
+                                                              id="app"
+                                                              data-bg-target="global"
+                                                              className="contents"
+                                                            >
+                                                              <MobileShellWrapper>
+                                                                <DesktopAppShell>
+                                                                  {children}
+                                                                </DesktopAppShell>
+                                                              </MobileShellWrapper>
+                                                            </div>
+                                                          </RemoteControlReceiver>
+                                                        </DesktopMessageSourceProvider>
+                                                      </DesktopSyncSourceProvider>
+                                                    </WebCompanionBootProvider>
+                                                  </CompanionBootProvider>
+                                                </McpLogProvider>
                                               </SubscriptionUsageProvider>
                                             </ConnectorDeepLinkRouter>
                                           </ConnectorBusProvider>

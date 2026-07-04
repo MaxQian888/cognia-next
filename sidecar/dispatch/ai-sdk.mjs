@@ -30,6 +30,7 @@ import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } fro
 import { planStrategy } from "./compaction-strategies.mjs"
 import { capToolResults } from "./tool-result-cap.mjs"
 import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
+import { buildMcpLogEvent } from "./mcp-log.mjs"
 
 // Recent user/assistant messages kept verbatim when compacting; everything
 // older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
@@ -371,6 +372,9 @@ export function dispatchAiSdk({
     emit,
     sessionId,
     pendingProtocolExecs,
+    onCancel: (execId, reason) => {
+      emit({ type: "protocol_adapter_cancel", sessionId, execId, reason })
+    },
   })
   if (!protocolAdapter) {
     emit({
@@ -952,6 +956,11 @@ export function dispatchAiSdk({
               allowedTools: agentScopedSendOptions.allowedTools,
               disallowedTools: agentScopedSendOptions.disallowedTools,
               log,
+              // Surface each server's stderr + connect/tool diagnostics as
+              // `mcp_log` events for the renderer's MCP log panel (the ai-sdk
+              // path previously logged these only to the sidecar's own stderr).
+              emitMcpLog: (entry) =>
+                emit(buildMcpLogEvent({ sessionId, ts: Date.now(), ...entry })),
             })
             mcpClose = mcp.close
             if (Object.keys(mcp.tools).length > 0) {
@@ -1361,7 +1370,8 @@ export function dispatchAiSdk({
           for (const [id, ch] of pendingProtocolExecs) {
             pendingProtocolExecs.delete(id)
             try {
-              ch.fail("interrupted")
+              if (typeof ch.cancel === "function") ch.cancel("interrupted")
+              else ch.fail("interrupted")
             } catch {
               /* defensive — the channel shape is adapter-defined */
             }
@@ -1428,6 +1438,17 @@ export function dispatchAiSdk({
       closing = true
       cancelled = true
       activeAbortController?.abort()
+      if (pendingProtocolExecs) {
+        for (const [id, ch] of pendingProtocolExecs) {
+          pendingProtocolExecs.delete(id)
+          try {
+            if (typeof ch.cancel === "function") ch.cancel("session closed")
+            else ch.fail("session closed")
+          } catch {
+            /* defensive — the channel shape is adapter-defined */
+          }
+        }
+      }
       inputStream.close()
       lsp.dispose()
       codeGraph.dispose()

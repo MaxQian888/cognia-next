@@ -35,6 +35,7 @@ import {
 } from "../../mcp/probe-mcp-server"
 import { probeMcpTools, type McpToolInfo } from "../../mcp/probe-mcp-tools"
 import { type McpProbeCache, toCacheEntry } from "./mcp-cache"
+import { formatServerStatusSummary } from "./mcp-log-model"
 import { openDocument } from "./shared"
 import { buildPromptsDocument, buildResourcesDocument, buildToolsDocument } from "./tool-doc"
 import type { TuiAction } from "../state/types"
@@ -232,6 +233,26 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
         })
     )
   )
+}
+
+/**
+ * `/mcp logs` — open the captured MCP log panel. Rows render from the live
+ * `state.mcpLogs` buffer (fed by the sidecar's `mcp_log` + generic `log`
+ * stream); this just opens the overlay with a snapshot of each server's status
+ * (from the warmed probe cache) for the header. Never probes — the panel is a
+ * pure view over already-captured output.
+ */
+export function mcpLogsPanel(deps: McpDeps): void {
+  const cache = deps.probeCache
+  const servers = loadServers(deps).map((s) => ({
+    name: s.name,
+    status: !s.enabled ? "disabled" : (cache?.get(s.name)?.status ?? "pending"),
+  }))
+  const statusSummary = formatServerStatusSummary(servers)
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: { kind: "mcpLogs", ...(statusSummary ? { statusSummary } : {}) },
+  })
 }
 
 /**

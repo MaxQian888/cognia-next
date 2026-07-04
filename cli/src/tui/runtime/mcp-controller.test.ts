@@ -7,6 +7,7 @@ import {
   mcpAuthStartupNotices,
   mcpList,
   mcpLogout,
+  mcpLogsPanel,
   mcpPanel,
   mcpPresets,
   mcpPrompts,
@@ -108,6 +109,35 @@ describe("mcpList", () => {
     const { dispatch, actions } = recorder()
     await mcpList({ ...base, dispatch, load: () => [] })
     expect((actions[0] as { message: string }).message).toContain("No MCP servers")
+  })
+})
+
+describe("mcpLogsPanel", () => {
+  it("opens the mcpLogs overlay with a status summary from the probe cache", () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set("fs", toCacheEntry(ok({ tools: [{ name: "read" } as never] }), 0))
+    probeCache.set("gh", toCacheEntry(ok({ status: "failed", error: "x" }), 0))
+    mcpLogsPanel({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs"), server("gh"), server("off", false)],
+    })
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "mcpLogs" },
+    })
+    const summary = (actions[0] as { overlay: { statusSummary?: string } }).overlay.statusSummary
+    expect(summary).toContain("✓ fs")
+    expect(summary).toContain("✗ gh")
+    expect(summary).toContain("○ off") // disabled server
+  })
+
+  it("opens with no summary when no servers are configured", () => {
+    const { dispatch, actions } = recorder()
+    mcpLogsPanel({ ...base, dispatch, load: () => [] })
+    expect(actions[0]).toEqual({ type: "OVERLAY_OPEN", overlay: { kind: "mcpLogs" } })
   })
 })
 

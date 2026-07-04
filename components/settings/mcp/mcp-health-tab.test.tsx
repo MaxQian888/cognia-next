@@ -10,7 +10,20 @@ jest.mock("next-intl", () => ({
 const mockIsTauri = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
 
-jest.mock("@/lib/logging", () => ({ loggers: { mcp: { error: jest.fn() } } }))
+const getLogs = jest.fn()
+const onLogsUpdated = jest.fn((_cb?: () => void) => jest.fn())
+jest.mock("@/lib/logging", () => ({
+  loggers: { mcp: { error: jest.fn() } },
+  getIndexedDBTransport: () => ({ getLogs: (...a: unknown[]) => getLogs(...a) }),
+  IndexedDBTransport: { onLogsUpdated: (cb: () => void) => onLogsUpdated(cb) },
+}))
+
+jest.mock("@/components/logging", () => ({
+  LogPanel: (props: { sources?: string[] }) => (
+    <div data-testid="log-panel" data-sources={JSON.stringify(props.sources)} />
+  ),
+}))
+
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 const getMcpServerStatus = jest.fn()
@@ -25,7 +38,7 @@ jest.mock("@/lib/db/mcp-audit-log", () => ({
   clearMcpAuditLog: () => clearMcpAuditLog(),
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { McpHealthTab } from "./mcp-health-tab"
 import type { McpAuditLogRow } from "@/types/wiki"
 
@@ -49,10 +62,41 @@ const rows: McpAuditLogRow[] = [
   },
 ]
 
+const mcpLogs = [
+  {
+    id: "a",
+    timestamp: new Date().toISOString(),
+    level: "info",
+    message: "connected",
+    module: "mcp:github",
+    origin: "mcp",
+    data: { server: "github" },
+  },
+  {
+    id: "b",
+    timestamp: new Date().toISOString(),
+    level: "error",
+    message: "tools() failed",
+    module: "mcp:slack",
+    origin: "mcp",
+    data: { server: "slack" },
+  },
+  {
+    id: "c",
+    timestamp: new Date().toISOString(),
+    level: "warn",
+    message: "internal diag",
+    module: "logger.internal",
+    origin: "diagnostic",
+  },
+]
+
 beforeEach(() => {
   mockIsTauri.mockReturnValue(true)
   getMcpServerStatus.mockResolvedValue({ running: true, port: 8765, startedAt: null })
   listMcpAuditLog.mockResolvedValue(rows)
+  getLogs.mockResolvedValue(mcpLogs)
+  onLogsUpdated.mockClear()
   clearMcpAuditLog.mockClear()
 })
 
@@ -63,6 +107,23 @@ describe("McpHealthTab", () => {
     expect(screen.getByText('port:{"port":8765}')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText("wiki_search")).toBeInTheDocument())
     expect(screen.getByText("rag_search")).toBeInTheDocument()
+  })
+
+  it("summarizes outbound MCP-client log activity (distinct servers + errors)", async () => {
+    render(<McpHealthTab />)
+    const overview = await screen.findByTestId("mcp-health-overview")
+    await waitFor(() => expect(within(overview).getByText("1")).toBeInTheDocument()) // 1 error
+    // 2 distinct mcp servers (github, slack); the diagnostic entry is excluded.
+    expect(within(overview).getAllByText("2").length).toBeGreaterThanOrEqual(1)
+    expect(within(overview).getByText("statServers")).toBeInTheDocument()
+    expect(getLogs).toHaveBeenCalled()
+    expect(onLogsUpdated).toHaveBeenCalled()
+  })
+
+  it("embeds the shared LogPanel scoped to the mcp source", async () => {
+    render(<McpHealthTab />)
+    const panel = await screen.findByTestId("log-panel")
+    expect(panel).toHaveAttribute("data-sources", JSON.stringify(["mcp"]))
   })
 
   it("wraps the audit table in a horizontal-scroll container for narrow screens", async () => {
@@ -91,11 +152,13 @@ describe("McpHealthTab", () => {
     await waitFor(() => expect(clearMcpAuditLog).toHaveBeenCalled())
   })
 
-  it("shows a desktop-only notice off Tauri", async () => {
+  it("shows desktop-only notices off Tauri and skips the log query", async () => {
     mockIsTauri.mockReturnValue(false)
     getMcpServerStatus.mockResolvedValue({ running: false, port: null, startedAt: null })
     listMcpAuditLog.mockResolvedValue([])
     render(<McpHealthTab />)
-    await waitFor(() => expect(screen.getByText("desktopOnly")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText("desktopOnly").length).toBeGreaterThan(0))
+    expect(getLogs).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("log-panel")).not.toBeInTheDocument()
   })
 })

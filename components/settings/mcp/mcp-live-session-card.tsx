@@ -14,8 +14,9 @@
  */
 
 import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { PlugZapIcon, RefreshCwIcon } from "lucide-react"
+import { PlugZapIcon, RefreshCwIcon, ScrollTextIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -30,6 +31,7 @@ import {
   toggleSessionMcpServer,
 } from "@/lib/claude/ipc"
 import type { SdkMcpServerStatus } from "@/lib/claude/types"
+import { mcpServerLogsHref, useMcpServerLogs } from "@/hooks/mcp/use-mcp-server-logs"
 
 const STATUS_STYLE: Record<SdkMcpServerStatus["status"], string> = {
   connected: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
@@ -166,57 +168,112 @@ export function McpLiveSessionCard() {
         {rows && rows.length === 0 ? (
           <p className="py-2 text-center text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          (rows ?? []).map((srv) => {
-            const isDisabled = srv.status === "disabled"
-            const canReconnect = srv.status === "failed" || srv.status === "needs-auth"
-            return (
-              <div
-                key={srv.name}
-                className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-xs"
-                data-testid={`mcp-live-row-${srv.name}`}
-              >
-                <span className="min-w-0 flex-1 truncate font-mono">{srv.name}</span>
-                <Badge
-                  variant="secondary"
-                  className={cn("shrink-0 text-[10px]", STATUS_STYLE[srv.status])}
-                >
-                  {t(`status.${STATUS_LABEL_KEY[srv.status]}`)}
-                </Badge>
-                {srv.tools && srv.tools.length > 0 ? (
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {t("toolsCount", { count: srv.tools.length })}
-                  </span>
-                ) : null}
-                {srv.error ? (
-                  <span className="w-full truncate text-[10px] text-destructive" title={srv.error}>
-                    {srv.error}
-                  </span>
-                ) : null}
-                {canReconnect ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 shrink-0 px-2 text-[10px]"
-                    onClick={() => void handleReconnect(srv.name)}
-                    disabled={busyServer === srv.name}
-                  >
-                    {t("reconnect")}
-                  </Button>
-                ) : null}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 shrink-0 px-2 text-[10px]"
-                  onClick={() => void handleToggle(srv.name, isDisabled)}
-                  disabled={busyServer === srv.name}
-                >
-                  {isDisabled ? t("enable") : t("disable")}
-                </Button>
-              </div>
-            )
-          })
+          (rows ?? []).map((srv) => (
+            <LiveSessionRow
+              key={srv.name}
+              srv={srv}
+              busy={busyServer === srv.name}
+              t={t}
+              onReconnect={handleReconnect}
+              onToggle={handleToggle}
+            />
+          ))
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * One live-session server row. Combines the SDK-reported status (from
+ * `mcpServerStatus()`) with the most recent bridged log line for the same
+ * server (`useMcpServerLogs`) — the SDK only carries an `error` string for a
+ * failed status, so a captured `stderr` warning while "connected" would
+ * otherwise be invisible. Rendered per-server so the hook is called at the top
+ * level of its own component (never inside a `.map`).
+ */
+function LiveSessionRow({
+  srv,
+  busy,
+  t,
+  onReconnect,
+  onToggle,
+}: {
+  srv: SdkMcpServerStatus
+  busy: boolean
+  t: ReturnType<typeof useTranslations>
+  onReconnect: (name: string) => Promise<void> | void
+  onToggle: (name: string, currentlyDisabled: boolean) => Promise<void> | void
+}) {
+  const isDisabled = srv.status === "disabled"
+  const canReconnect = srv.status === "failed" || srv.status === "needs-auth"
+  const { lastError, lastEntry } = useMcpServerLogs(srv.name, { limit: 20 })
+
+  // Prefer the SDK error; otherwise fall back to the most recent bridged error
+  // line, then to the most recent log line of any level.
+  const recent = srv.error
+    ? { message: srv.error, isError: true, time: null as string | null }
+    : lastError
+      ? { message: lastError.message, isError: true, time: lastError.timestamp }
+      : lastEntry
+        ? { message: lastEntry.message, isError: false, time: lastEntry.timestamp }
+        : null
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-xs"
+      data-testid={`mcp-live-row-${srv.name}`}
+    >
+      <span className="min-w-0 flex-1 truncate font-mono">{srv.name}</span>
+      <Badge variant="secondary" className={cn("shrink-0 text-[10px]", STATUS_STYLE[srv.status])}>
+        {t(`status.${STATUS_LABEL_KEY[srv.status]}`)}
+      </Badge>
+      {srv.tools && srv.tools.length > 0 ? (
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {t("toolsCount", { count: srv.tools.length })}
+        </span>
+      ) : null}
+      <Button asChild variant="ghost" size="icon" className="size-6 shrink-0" title={t("viewLogs")}>
+        <Link href={mcpServerLogsHref(srv.name)} aria-label={t("viewLogsFor", { name: srv.name })}>
+          <ScrollTextIcon className="size-3" />
+        </Link>
+      </Button>
+      {recent ? (
+        <span
+          className={cn(
+            "w-full truncate text-[10px]",
+            recent.isError ? "text-destructive" : "text-muted-foreground"
+          )}
+          title={recent.message}
+        >
+          {recent.time
+            ? t("recentLogAt", {
+                time: new Date(recent.time).toLocaleTimeString(),
+                message: recent.message,
+              })
+            : recent.message}
+        </span>
+      ) : null}
+      {canReconnect ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 shrink-0 px-2 text-[10px]"
+          onClick={() => void onReconnect(srv.name)}
+          disabled={busy}
+        >
+          {t("reconnect")}
+        </Button>
+      ) : null}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 shrink-0 px-2 text-[10px]"
+        onClick={() => void onToggle(srv.name, isDisabled)}
+        disabled={busy}
+      >
+        {isDisabled ? t("enable") : t("disable")}
+      </Button>
+    </div>
   )
 }

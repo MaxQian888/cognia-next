@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -9,6 +10,7 @@ import {
   Loader2Icon,
   PencilIcon,
   PlayIcon,
+  ScrollTextIcon,
   StarIcon,
   Trash2Icon,
   XCircleIcon,
@@ -16,6 +18,7 @@ import {
 
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { mcpServerLogsHref } from "@/hooks/mcp/use-mcp-server-logs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
@@ -161,6 +164,14 @@ export function McpServerCard({
         ) : (
           <PlayIcon className="size-3.5" />
         )}
+      </Button>
+      <Button asChild variant="ghost" size="icon" className="size-7" title={tRow("logsTooltip")}>
+        <Link
+          href={mcpServerLogsHref(server.name)}
+          aria-label={tRow("logs", { name: server.name })}
+        >
+          <ScrollTextIcon className="size-3.5" />
+        </Link>
       </Button>
       <Button
         variant="ghost"

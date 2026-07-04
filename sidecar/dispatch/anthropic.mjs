@@ -36,6 +36,7 @@ import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
+import { createStderrLogSink } from "./mcp-log.mjs"
 
 /** Bare name of the `ask_user` elicitation tool (namespaced by the sidecar as
  * `mcp__cognia-plugin-tools__ask_user`). */
@@ -115,6 +116,12 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // without stderr access.
   const CANUSETOOL_DEBUG =
     process.env.COGNIA_SIDECAR_VERBOSE === "1" || process.env.COGNIA_SIDECAR_VERBOSE === "true"
+  // MCP server output capture. The Agent SDK forwards the spawned claude-code
+  // subprocess's stderr — which carries every stdio MCP server's diagnostic
+  // output — through the `stderr` option wired into `options` below. Each line
+  // becomes an `mcp_log` event the renderer's MCP log panel renders. Before
+  // this the output had no sink ("without stderr access") and was silently lost.
+  const mcpStderrSink = createStderrLogSink({ sessionId, emit, source: "stderr" })
   /** @type {Map<string, { resolve: (r: any) => void }>} */
   const pendingApprovals = new Map()
   /**
@@ -350,6 +357,11 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     forkSession: isFork ? true : undefined,
     env: baseEnv,
 
+    // Capture the claude-code subprocess stderr (incl. spawned stdio MCP
+    // servers' diagnostics) into `mcp_log` events. Wrapped by the sink so a
+    // downstream emit failure never faults the SDK's stderr pump.
+    stderr: (data) => mcpStderrSink.write(data),
+
     // Diagnostics-after-edit feedback loop (Phase 2). Omitted when LSP is
     // disabled — the strip-undefined pass below removes the field.
     hooks: lspEnabled ? buildLspHooks(lspResolver) : undefined,
@@ -524,6 +536,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       })
     } finally {
       session._ended = true
+      // Flush any trailing partial stderr line so the last unterminated MCP log
+      // isn't dropped at session end.
+      mcpStderrSink.end()
       // Tear down any per-session LSP servers the resolver started.
       lsp.dispose()
       // Close the code-graph store + file watcher.

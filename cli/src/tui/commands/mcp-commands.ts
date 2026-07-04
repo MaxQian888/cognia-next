@@ -34,6 +34,11 @@ export const MCP_COMMANDS: CommandDescriptor[] = [
       { name: "panel", description: "open the interactive MCP panel", handler: rt("mcp", "panel") },
       { name: "list", description: "browse MCP servers (text list)", handler: rt("mcp", "list") },
       {
+        name: "logs",
+        description: "view captured MCP server output logs",
+        handler: rt("mcp", "logs"),
+      },
+      {
         name: "reconnect",
         description: "re-probe a failed server",
         argumentHint: "<name>",

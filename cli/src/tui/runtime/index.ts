@@ -18,6 +18,7 @@ import {
   mcpAuth,
   mcpList,
   mcpLogout,
+  mcpLogsPanel,
   mcpPanel,
   mcpPresets,
   mcpPrompts,
@@ -173,6 +174,7 @@ export interface RuntimeImpl {
   mcpLogout: typeof mcpLogout
   mcpPresets: typeof mcpPresets
   mcpPanel: typeof mcpPanel
+  mcpLogsPanel: typeof mcpLogsPanel
   mcpReconnect: typeof mcpReconnect
   mcpRemove: typeof mcpRemove
   skillList: typeof skillList
@@ -270,6 +272,7 @@ const REAL: RuntimeImpl = {
   mcpLogout,
   mcpPresets,
   mcpPanel,
+  mcpLogsPanel,
   mcpReconnect,
   mcpRemove,
   skillList,
@@ -434,6 +437,7 @@ export async function runRuntimeRequest(
       if (req.action === "remove") return impl.mcpRemove(arg, mc)
       if (req.action === "panel") return impl.mcpPanel(mc)
       if (req.action === "list") return impl.mcpList(mc)
+      if (req.action === "logs") return impl.mcpLogsPanel(mc)
       return impl.mcpPanel(mc)
     }
     case "skill": {

@@ -20,16 +20,34 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { getIndexedDBTransport, IndexedDBTransport, loggers } from "@/lib/logging"
+import { LogPanel } from "@/components/logging"
 import { getMcpServerStatus, type McpServerStatus } from "@/lib/external-bridge/tauri-control"
 import { clearMcpAuditLog, listMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import type { McpAuditLogRow } from "@/types/wiki"
 
+/** Rolling window for the outbound-log overview stats. */
+const OVERVIEW_WINDOW_MS = 60 * 60 * 1000
+
+interface McpLogOverview {
+  servers: number
+  errors: number
+  total: number
+}
+
 /**
- * "Health & Logs" tab — surfaces the inbound External Bridge server status
- * (Cognia-as-MCP-server) and the bridge audit log. Both are desktop-only;
- * full scope configuration stays in the dedicated External Bridge settings
- * section, deep-linked from here. All data comes from existing helpers.
+ * "Health & Logs" tab — two directions of MCP health:
+ *
+ * - **Outbound** (Cognia-as-MCP-client): per-server connect/error/stderr logs
+ *   the sidecar produces while connecting to configured MCP servers, bridged
+ *   into the unified log store (`lib/mcp/log-bridge.ts`) and rendered here via
+ *   the shared `<LogPanel sources={["mcp"]} />` plus a rolling activity summary.
+ * - **Inbound** (Cognia-as-MCP-server / External Bridge): the bridge server
+ *   status and its request audit log.
+ *
+ * Desktop-only; full bridge scope configuration stays in the dedicated External
+ * Bridge settings section, deep-linked from here. All data comes from existing
+ * helpers.
  */
 export function McpHealthTab() {
   const t = useTranslations("mcp.health")
@@ -38,6 +56,7 @@ export function McpHealthTab() {
   const [rows, setRows] = useState<McpAuditLogRow[]>([])
   const [deniedOnly, setDeniedOnly] = useState(false)
   const [loadingStatus, setLoadingStatus] = useState(false)
+  const [overview, setOverview] = useState<McpLogOverview | null>(null)
 
   // Manual refresh (button handler — sets the loading spinner). Not called
   // from an effect, so the synchronous setState is fine here.
@@ -79,6 +98,41 @@ export function McpHealthTab() {
     }
   }, [deniedOnly])
 
+  // Outbound-log activity summary over a rolling 1h window. Reads the shared
+  // IndexedDB log store directly (the same store `<LogPanel>` renders), filters
+  // to bridged MCP-client entries, and live-refreshes on new logs. State is
+  // written only in the async callback, never synchronously in the effect body.
+  useEffect(() => {
+    if (!desktop) return
+    let cancelled = false
+
+    const load = async () => {
+      const transport = getIndexedDBTransport()
+      if (!transport) return
+      const since = new Date(Date.now() - OVERVIEW_WINDOW_MS)
+      const entries = await transport.getLogs({ since, limit: 1000 })
+      const mcp = entries.filter((e) => e.origin === "mcp" || e.runtime === "mcp")
+      if (cancelled) return
+      const servers = new Set(
+        mcp.map((e) => (typeof e.data?.server === "string" ? e.data.server : e.module))
+      )
+      const errors = mcp.reduce(
+        (n, e) => (e.level === "error" || e.level === "fatal" ? n + 1 : n),
+        0
+      )
+      setOverview({ servers: servers.size, errors, total: mcp.length })
+    }
+
+    void load().catch((err) => loggers.mcp.error("health.overviewFailed", err))
+    const unsub = IndexedDBTransport.onLogsUpdated(() => {
+      void load().catch(() => {})
+    })
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [desktop])
+
   const handleClear = async () => {
     try {
       await clearMcpAuditLog()
@@ -93,6 +147,77 @@ export function McpHealthTab() {
 
   return (
     <div className="space-y-4" data-testid="mcp-health-tab">
+      {/* ---- Outbound: Cognia-as-MCP-client per-server logs ---------------- */}
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {t("sectionOutbound")}
+      </p>
+
+      <Card data-testid="mcp-health-overview">
+        <CardHeader className="pb-3">
+          <div className="space-y-1">
+            <CardTitle className="text-sm">{t("outboundTitle")}</CardTitle>
+            <CardDescription className="text-xs">{t("outboundSubtitle")}</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!desktop ? (
+            <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div className="space-y-0.5">
+                <p className="text-lg font-semibold tabular-nums">{overview?.servers ?? 0}</p>
+                <p className="text-[11px] text-muted-foreground">{t("statServers")}</p>
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-lg font-semibold tabular-nums">{overview?.total ?? 0}</p>
+                <p className="text-[11px] text-muted-foreground">{t("statLogs")}</p>
+              </div>
+              <div className="space-y-0.5">
+                <p
+                  className={cn(
+                    "text-lg font-semibold tabular-nums",
+                    (overview?.errors ?? 0) > 0 && "text-destructive"
+                  )}
+                >
+                  {overview?.errors ?? 0}
+                </p>
+                <p className="text-[11px] text-muted-foreground">{t("statErrors")}</p>
+              </div>
+              <span className="text-[11px] text-muted-foreground">{t("windowNote")}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card data-testid="mcp-health-server-logs">
+        <CardHeader className="pb-3">
+          <div className="space-y-1">
+            <CardTitle className="text-sm">{t("logsTitle")}</CardTitle>
+            <CardDescription className="text-xs">{t("logsSubtitle")}</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!desktop ? (
+            <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>
+          ) : (
+            <LogPanel
+              sources={["mcp"]}
+              showStats={false}
+              showTimeline={false}
+              includeAgentTrace={false}
+              defaultAutoRefresh
+              hideToolbarPresets
+              maxHeight="22rem"
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ---- Inbound: External Bridge (Cognia-as-MCP-server) --------------- */}
+      <p className="pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {t("sectionInbound")}
+      </p>
+
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">

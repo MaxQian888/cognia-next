@@ -40,6 +40,7 @@ import type {
   Inflight,
   InputBuffer,
   InputEditOp,
+  McpLogEntry,
   Overlay,
   ToolCell,
   TodoCell,
@@ -72,6 +73,9 @@ function makeId(seq: number): string {
 
 /** Max transient toasts kept on screen at once (newest win; oldest drop). */
 const MAX_TOASTS = 3
+
+/** Max captured MCP log lines kept in the session ring buffer (oldest drop). */
+const MAX_MCP_LOGS = 1000
 
 /** Append a toast, keeping only the most recent {@link MAX_TOASTS}. Pure. */
 function pushToast(list: Toast[], toast: Toast): Toast[] {
@@ -1253,6 +1257,20 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         },
       }
     }
+
+    case "MCP_LOG_APPEND": {
+      // Stamp a stable id from the monotonic seq (no Date.now/Math.random) and
+      // append to the bounded ring buffer. Independent of the open overlay — the
+      // buffer accrues even when the `/mcp logs` panel is closed.
+      const seq = state.seq + 1
+      const entry: McpLogEntry = { id: makeId(seq), ...action.entry }
+      const next = [...state.mcpLogs, entry]
+      const mcpLogs = next.length > MAX_MCP_LOGS ? next.slice(next.length - MAX_MCP_LOGS) : next
+      return { ...state, seq, mcpLogs }
+    }
+
+    case "MCP_LOG_CLEAR":
+      return state.mcpLogs.length === 0 ? state : { ...state, mcpLogs: [] }
 
     case "SKILL_ROW_TOGGLE": {
       if (state.overlay.kind !== "skills") return state

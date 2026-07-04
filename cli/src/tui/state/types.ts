@@ -355,6 +355,29 @@ export interface InspectItem {
   isError: boolean
 }
 
+/** Severity of a captured MCP log line, most→least severe. */
+export type McpLogLevel = "error" | "warn" | "info" | "debug"
+
+/** Where a captured MCP log line came from:
+ *  - `stderr`     — a spawned MCP server's stderr (both dispatch paths)
+ *  - `diagnostic` — a structured connect/tool diagnostic from the ai-sdk bridge
+ *  - `sidecar`    — the sidecar's generic `log` stream (not MCP-specific)
+ *  - `status`     — a live `mcpServerStatus` snapshot line */
+export type McpLogSource = "stderr" | "diagnostic" | "sidecar" | "status"
+
+/** One captured MCP log line held in the session ring buffer (`state.mcpLogs`). */
+export interface McpLogEntry {
+  /** Stable id (also the row key) — monotonic, from `state.seq`. */
+  id: string
+  /** Epoch ms the line was captured. */
+  ts: number
+  /** Server the line belongs to, when known. */
+  server?: string
+  level: McpLogLevel
+  source: McpLogSource
+  message: string
+}
+
 export type Overlay =
   | { kind: "none" }
   | { kind: "permission"; req: PermissionRequestEvent; choices: PermissionChoice[]; index: number }
@@ -464,6 +487,14 @@ export type Overlay =
   // panel). Space toggles a tool (writes the `disabledTools` overlay → the
   // model's `disallowedTools`); Esc returns to the server panel.
   | { kind: "mcpTools"; server: string; tools: McpPanelTool[] }
+  // Captured MCP server output log (`/mcp logs`). A scrollable, filterable view
+  // over `state.mcpLogs` (the sidecar's `mcp_log` + generic `log` stream). Like
+  // the `mcp` panel, the component owns its view controls (query, level/server
+  // filter cycle, follow-tail, scroll cursor) as local state; the rows render
+  // from the live buffer so new entries stream in while it's open.
+  // `statusSummary` is a snapshot of each server's status (from the warmed probe
+  // cache) shown under the title.
+  | { kind: "mcpLogs"; statusSummary?: string }
   // Interactive Skills panel (`/skill`). One browsable row per skill with the
   // rich metadata the old flat list hid (origin · category · usage · validation
   // warnings) and an enabled badge. Space toggles for the session, Enter opens
@@ -679,6 +710,11 @@ export interface TuiState {
    * a `sidecar_exited` event, cleared at the next TURN_START (the send respawns
    * it) and on RESET. Lets the footer flag a dead backend even while idle. */
   sidecarDown?: boolean
+  /** Captured MCP server output log (newest last), a bounded ring buffer fed by
+   * the sidecar's `mcp_log` + generic `log` stream. Rendered by the `/mcp logs`
+   * panel. Survives `/clear` (backend diagnostics aren't conversation state);
+   * `MCP_LOG_CLEAR` empties it. */
+  mcpLogs: McpLogEntry[]
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -844,6 +880,13 @@ export type TuiAction =
       /** Clear the panel-level `probing` spinner (set on the last server). */
       doneProbing?: boolean
     }
+  // Append a captured MCP log line to the session ring buffer (`state.mcpLogs`).
+  // `id`/`ts` are stamped by the reducer from `seq`/the event so the action stays
+  // a plain payload. Independent of the open overlay — the buffer accrues even
+  // when the `/mcp logs` panel is closed.
+  | { type: "MCP_LOG_APPEND"; entry: Omit<McpLogEntry, "id"> }
+  // Empty the captured MCP log buffer (the `/mcp logs` panel's `c` action).
+  | { type: "MCP_LOG_CLEAR" }
   // Flip one skill row's enabled badge in an open `skills` overlay (the panel's
   // space toggle). Persistence to `skill-state.json` is done by the caller; this
   // just keeps the visible badge in sync (no-op if a different overlay is open).

@@ -22,6 +22,8 @@ import { createCheckpointCapture, type CheckpointCapture } from "../runtime/chec
 import { realCheckpointFs } from "../runtime/checkpoint-store"
 import { createGateController, runTurn } from "./turn-engine"
 import { captureEventToActions } from "../state/event-mapper"
+import { sidecarEventToMcpLog } from "../runtime/mcp-log-model"
+import { defaultMcpLogFileWriter, type McpLogFileWriter } from "../runtime/mcp-log-file"
 import { parseRateLimitHeaders, rateLimitWarning } from "../format/rate-limits"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
@@ -131,6 +133,7 @@ export function useAgentSession({
   getCellCount = () => 0,
   createCheckpoints = defaultCreateCheckpoints,
   resolveApprovedTools,
+  appendMcpLog,
 }: {
   config: ResolvedConfig
   dispatch: (action: TuiAction) => void
@@ -155,6 +158,9 @@ export function useAgentSession({
    * auto-approve set. Defaults to the `tool-approvals.json` store (cwd-scoped);
    * injected in tests to stay off-disk. */
   resolveApprovedTools?: () => Set<string>
+  /** Durable sink for captured MCP logs (`~/.cognia/logs/mcp.log`). Defaults to
+   * a home-scoped rotating file writer; injected in tests to stay off-disk. */
+  appendMcpLog?: McpLogFileWriter
 }): AgentSessionApi {
   const configRef = useRef(config)
   // Keep the latest config available to the async callbacks below without
@@ -200,10 +206,49 @@ export function useAgentSession({
   // "exceeded" / null) so a stream of headers near the limit warns once per
   // escalation, and re-warns only after quota recovers.
   const rateWarnLevelRef = useRef<"crit" | "exceeded" | null>(null)
+  // Durable MCP-log file sink (rotating `~/.cognia/logs/mcp.log`). Home-scoped;
+  // built once (useMemo, not a render-time ref write) so the effect below keeps a
+  // stable identity. Injected in tests to stay off-disk.
+  const writeMcpLogFile = useMemo<McpLogFileWriter>(
+    () => appendMcpLog ?? defaultMcpLogFileWriter(resolveHome(process.env, os.homedir())),
+    [appendMcpLog]
+  )
+  // Throttle the "MCP server error" toast so a burst of stderr error lines warns
+  // once, not once per line. Holds the epoch ms of the last error toast.
+  const mcpErrToastAtRef = useRef(0)
   useEffect(() => {
     const off = subscribeSidecar((payload) => {
       if (!payload || typeof payload !== "object") return
       const type = (payload as { type?: unknown }).type
+      // Captured MCP output log (`mcp_log`) + the generic sidecar `log` stream →
+      // the `/mcp logs` panel buffer + the durable file, plus a throttled toast
+      // on an error so a broken server isn't silent. These events were dropped
+      // entirely before (only usage/exit were handled), so MCP diagnostics were
+      // invisible.
+      if (type === "mcp_log" || type === "log") {
+        const entry = sidecarEventToMcpLog(payload, Date.now)
+        if (entry) {
+          dispatch({ type: "MCP_LOG_APPEND", entry })
+          writeMcpLogFile(entry)
+          if (
+            entry.level === "error" &&
+            (entry.source === "stderr" || entry.source === "diagnostic")
+          ) {
+            const t = Date.now()
+            if (t - mcpErrToastAtRef.current > 8000) {
+              mcpErrToastAtRef.current = t
+              dispatch({
+                type: "TOAST_PUSH",
+                severity: "error",
+                message: entry.server ? `MCP server "${entry.server}" error` : "MCP server error",
+                hint: "Open /mcp logs to see details.",
+              })
+            }
+          }
+        }
+        // Fall through: a `log` isn't otherwise handled here; `mcp_log` is ours.
+        return
+      }
       if (type === "usage_headers") {
         const headers = (payload as { headers?: unknown }).headers
         if (!headers || typeof headers !== "object") return
@@ -241,7 +286,7 @@ export function useAgentSession({
       }
     })
     return off
-  }, [subscribeSidecar, dispatch])
+  }, [subscribeSidecar, dispatch, writeMcpLogFile])
 
   // The settings.json lifecycle-hook runner (loads the merged cognia + .claude
   // hook config once). Fired for each capture event + at turn end + on submit.
