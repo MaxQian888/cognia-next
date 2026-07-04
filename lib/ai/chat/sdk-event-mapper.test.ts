@@ -175,7 +175,7 @@ describe("createSdkEventMapper", () => {
     })
 
     const asst = (m.sealAssistant() as AnyMsg[]).find((x) => x.type === "assistant")!
-    expect(asst.message.metadata).toEqual({
+    expect(asst.message!.metadata).toEqual({
       phase: "finish",
       nested: { keep: true, replace: "mid", add: 2 },
       list: ["mid"],
