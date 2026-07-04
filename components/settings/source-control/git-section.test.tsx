@@ -71,6 +71,51 @@ describe("GitSection", () => {
     )
   })
 
+  it("renders the review + explain AI toggles", () => {
+    render(<GitSection />)
+    expect(screen.getByLabelText(/AI code review/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/AI change explanation/i)).toBeInTheDocument()
+  })
+
+  it("enables AI code review on toggle", () => {
+    render(<GitSection />)
+    fireEvent.click(screen.getByLabelText(/AI code review/i))
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gitSettings: expect.objectContaining({
+          reviewAI: expect.objectContaining({ enabled: true }),
+        }),
+      })
+    )
+  })
+
+  it("enables AI change explanation on toggle", () => {
+    render(<GitSection />)
+    fireEvent.click(screen.getByLabelText(/AI change explanation/i))
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gitSettings: expect.objectContaining({
+          explainAI: expect.objectContaining({ enabled: true }),
+        }),
+      })
+    )
+  })
+
+  it("reveals the review provider override when enabled", () => {
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          gitSettings: {
+            commitMessageAI: { enabled: false, conventionalCommits: true },
+            reviewAI: { enabled: true },
+          },
+        } as never,
+      })
+    })
+    render(<GitSection />)
+    expect(screen.getByTestId("git-ai-review-provider")).toBeInTheDocument()
+  })
+
   it("renders the Panel & workflow card with its guardrail toggles", () => {
     render(<GitSection />)
     expect(screen.getByLabelText(/Confirm before discarding/i)).toBeInTheDocument()

@@ -6,11 +6,23 @@ import userEvent from "@testing-library/user-event"
 
 import { HunkReviewList } from "./hunk-review-list"
 import { diffReviewFileKey, useDiffReviewStore } from "@/stores/git/diff-review-store"
+import { hunkContentHash } from "@/lib/git/hunk-review"
 import type { GitDiff, GitFileChange, GitHunk } from "@/types/git"
+
+let mockAiEnabled = false
+let mockReviewing = false
+const mockReview = jest.fn()
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
+}))
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (sel: (s: unknown) => unknown) =>
+    sel({ settings: { gitSettings: { reviewAI: { enabled: mockAiEnabled } } } }),
+}))
+jest.mock("@/hooks/git/use-ai-diff-review", () => ({
+  useAiDiffReview: () => ({ reviewing: mockReviewing, error: null, review: mockReview }),
 }))
 
 // Test double: surface the props as buttons so list logic is isolated.
@@ -58,7 +70,12 @@ function diff(hunks: GitHunk[]): GitDiff {
   return { path: "a.ts", oldContent: "", newContent: "", hunks, isBinary: false }
 }
 
-beforeEach(() => useDiffReviewStore.setState({ decisions: {}, order: [] }))
+beforeEach(() => {
+  useDiffReviewStore.setState({ decisions: {}, order: [] })
+  mockAiEnabled = false
+  mockReviewing = false
+  mockReview.mockReset()
+})
 
 describe("HunkReviewList", () => {
   it("renders one item per hunk and a 0/N accepted count", () => {
@@ -128,6 +145,40 @@ describe("HunkReviewList", () => {
     expect(screen.getByTestId("apply-accepted")).toBeDisabled()
   })
 
+  it("renders only the header (no hunk items) when collapsed", () => {
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([hunk(1, "a"), hunk(5, "b")])}
+        onStagePatch={jest.fn()}
+        onInvalidate={jest.fn()}
+        collapsed
+        onToggleCollapse={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("hunk-review-list")).toHaveAttribute("data-collapsed", "true")
+    expect(screen.getByTestId("accepted-count")).toBeInTheDocument()
+    expect(screen.queryByTestId("item-0")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("apply-accepted")).not.toBeInTheDocument()
+  })
+
+  it("fires onToggleCollapse when the chevron is clicked", async () => {
+    const onToggleCollapse = jest.fn()
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([hunk(1, "a")])}
+        onStagePatch={jest.fn()}
+        onInvalidate={jest.fn()}
+        onToggleCollapse={onToggleCollapse}
+      />
+    )
+    await userEvent.click(screen.getByTestId("review-collapse-toggle"))
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1)
+  })
+
   it("shows the remap notice when stored decisions no longer match", () => {
     // Seed a decision whose hash matches nothing in the current diff.
     act(() =>
@@ -150,5 +201,57 @@ describe("HunkReviewList", () => {
       />
     )
     expect(screen.getByTestId("remap-notice")).toHaveTextContent('"count":1')
+  })
+
+  it("hides the AI review button when the feature is disabled", () => {
+    mockAiEnabled = false
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([hunk(1, "a")])}
+        onStagePatch={jest.fn()}
+        onInvalidate={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("ai-review-run")).not.toBeInTheDocument()
+  })
+
+  it("runs the AI review when the button is clicked", async () => {
+    mockAiEnabled = true
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([hunk(1, "a")])}
+        onStagePatch={jest.fn()}
+        onInvalidate={jest.fn()}
+      />
+    )
+    await userEvent.click(screen.getByTestId("ai-review-run"))
+    expect(mockReview).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a clear button when AI findings exist and clears them", async () => {
+    mockAiEnabled = true
+    const h = hunk(1, "a")
+    act(() =>
+      useDiffReviewStore
+        .getState()
+        .setAiFinding("/r", "a.ts", 0, hunkContentHash(h), { severity: "warning", note: "n" })
+    )
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([h])}
+        onStagePatch={jest.fn()}
+        onInvalidate={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("ai-review-clear")).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId("ai-review-clear"))
+    expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toEqual([])
+    expect(screen.queryByTestId("ai-review-clear")).not.toBeInTheDocument()
   })
 })

@@ -3,7 +3,11 @@
  */
 import { act } from "@testing-library/react"
 
-import { DIFF_REVIEW_FILE_CAP, useDiffReviewStore } from "./diff-review-store"
+import {
+  DIFF_REVIEW_FILE_CAP,
+  migrateDiffReviewState,
+  useDiffReviewStore,
+} from "./diff-review-store"
 
 function reset() {
   useDiffReviewStore.setState({ decisions: {}, order: [] })
@@ -46,6 +50,77 @@ describe("useDiffReviewStore", () => {
       useDiffReviewStore.getState().clearFile("/r", "a.ts")
     })
     expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toEqual([])
+  })
+
+  it("attaches an AI finding without clobbering an existing decision/comment", () => {
+    act(() => {
+      useDiffReviewStore.getState().setDecision("/r", "a.ts", 0, "h0", "accepted")
+      useDiffReviewStore
+        .getState()
+        .setAiFinding("/r", "a.ts", 0, "h0", { severity: "warning", note: "leak" })
+    })
+    expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toEqual([
+      { hunkIndex: 0, hash: "h0", decision: "accepted", ai: { severity: "warning", note: "leak" } },
+    ])
+  })
+
+  it("removes an AI finding when passed null", () => {
+    act(() => {
+      useDiffReviewStore
+        .getState()
+        .setAiFinding("/r", "a.ts", 0, "h0", { severity: "info", note: "x" })
+      useDiffReviewStore.getState().setAiFinding("/r", "a.ts", 0, "h0", null)
+    })
+    expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")[0].ai).toBeUndefined()
+  })
+
+  it("clearAiFindings strips ai but keeps human decisions, dropping empty entries", () => {
+    act(() => {
+      // Hunk 0: has a human decision + AI finding → keeps decision, loses AI.
+      useDiffReviewStore.getState().setDecision("/r", "a.ts", 0, "h0", "accepted")
+      useDiffReviewStore
+        .getState()
+        .setAiFinding("/r", "a.ts", 0, "h0", { severity: "info", note: "keep-decision" })
+      // Hunk 1: AI-only → dropped entirely.
+      useDiffReviewStore
+        .getState()
+        .setAiFinding("/r", "a.ts", 1, "h1", { severity: "critical", note: "ai-only" })
+      useDiffReviewStore.getState().clearAiFindings("/r", "a.ts")
+    })
+    expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toEqual([
+      { hunkIndex: 0, hash: "h0", decision: "accepted" },
+    ])
+  })
+
+  it("clearAiFindings is a no-op for an unknown file", () => {
+    act(() => useDiffReviewStore.getState().clearAiFindings("/r", "missing.ts"))
+    expect(useDiffReviewStore.getState().getFileDecisions("/r", "missing.ts")).toEqual([])
+  })
+
+  it("migrate is the identity — v1 state survives the v2 bump unchanged", () => {
+    const v1 = {
+      decisions: { "/r\na.ts": [{ hunkIndex: 0, hash: "h0", decision: "accepted" }] },
+      order: ["/r\na.ts"],
+    }
+    expect(migrateDiffReviewState(v1, 1)).toBe(v1)
+  })
+
+  it("rehydrates a persisted v1 payload instead of discarding it", async () => {
+    localStorage.setItem(
+      "cognia-git-review",
+      JSON.stringify({
+        state: {
+          decisions: { "/r\na.ts": [{ hunkIndex: 0, hash: "h0", decision: "rejected" }] },
+          order: ["/r\na.ts"],
+        },
+        version: 1,
+      })
+    )
+    await act(() => useDiffReviewStore.persist.rehydrate())
+    expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toEqual([
+      { hunkIndex: 0, hash: "h0", decision: "rejected" },
+    ])
+    localStorage.removeItem("cognia-git-review")
   })
 
   it("evicts the least-recently-touched file past the cap", () => {

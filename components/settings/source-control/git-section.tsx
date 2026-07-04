@@ -10,7 +10,11 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { GitBranchIcon, RotateCcwIcon, SlidersHorizontalIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_GIT_SETTINGS, type GitCommitAiSettings } from "@/types/git"
+import {
+  DEFAULT_GIT_SETTINGS,
+  type GitAiFeatureSettings,
+  type GitCommitAiSettings,
+} from "@/types/git"
 import {
   AUTO_FETCH_INTERVAL_MAX,
   AUTO_FETCH_INTERVAL_MIN,
@@ -37,6 +41,99 @@ import {
 } from "@/components/ui/select"
 
 const DEFAULT_PROVIDER_VALUE = "__default__"
+
+/**
+ * A diff-oriented AI feature block (per-hunk review / change explanation):
+ * enable switch + custom instructions + provider/model override. Module-scoped
+ * (not nested in GitSection) so it isn't remounted on every render — that would
+ * blur the textarea/inputs mid-typing.
+ */
+function AiFeatureBlock({
+  idPrefix,
+  heading,
+  description,
+  value,
+  providers,
+  onChange,
+  t,
+}: {
+  idPrefix: string
+  heading: string
+  description: string
+  value: GitAiFeatureSettings
+  providers: { id: string; name: string }[]
+  onChange: (patch: Partial<GitAiFeatureSettings>) => void
+  t: (key: string) => string
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <Label htmlFor={`${idPrefix}-enable`}>{heading}</Label>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+        <Switch
+          id={`${idPrefix}-enable`}
+          aria-label={heading}
+          checked={value.enabled}
+          onCheckedChange={(v) => onChange({ enabled: v })}
+        />
+      </div>
+
+      {value.enabled && (
+        <div className="space-y-4 rounded-md border p-3">
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-instructions`}>
+              {t("aiFeature.customInstructions.heading")}
+            </Label>
+            <Textarea
+              id={`${idPrefix}-instructions`}
+              rows={2}
+              value={value.customInstructions ?? ""}
+              placeholder={t("aiFeature.customInstructions.placeholder")}
+              onChange={(e) => onChange({ customInstructions: e.target.value || undefined })}
+              className="resize-none text-sm"
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>{t("aiFeature.model.provider")}</Label>
+              <Select
+                value={value.providerOverride || DEFAULT_PROVIDER_VALUE}
+                onValueChange={(v) =>
+                  onChange({ providerOverride: v === DEFAULT_PROVIDER_VALUE ? undefined : v })
+                }
+              >
+                <SelectTrigger data-testid={`${idPrefix}-provider`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_PROVIDER_VALUE}>
+                    {t("aiFeature.model.useDefault")}
+                  </SelectItem>
+                  {providers.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idPrefix}-model`}>{t("aiFeature.model.model")}</Label>
+              <Input
+                id={`${idPrefix}-model`}
+                value={value.model ?? ""}
+                placeholder={t("aiFeature.model.useDefault")}
+                onChange={(e) => onChange({ model: e.target.value || undefined })}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
 
 /** A labeled on/off row: title + helper text left, Switch right. */
 function SwitchRow({
@@ -86,6 +183,10 @@ export function GitSection() {
   } = useSourceControlPrefs()
 
   const commitAi = settings?.gitSettings?.commitMessageAI ?? DEFAULT_GIT_SETTINGS.commitMessageAI
+  const reviewAi = settings?.gitSettings?.reviewAI ??
+    DEFAULT_GIT_SETTINGS.reviewAI ?? { enabled: false }
+  const explainAi = settings?.gitSettings?.explainAI ??
+    DEFAULT_GIT_SETTINGS.explainAI ?? { enabled: false }
 
   const providers = useMemo<{ id: string; name: string }[]>(() => {
     const map = new Map<string, { id: string; name: string }>()
@@ -102,6 +203,24 @@ export function GitSection() {
       gitSettings: {
         ...settings?.gitSettings,
         commitMessageAI: { ...commitAi, ...patch },
+      },
+    })
+
+  const saveReviewAi = (patch: Partial<GitAiFeatureSettings>) =>
+    void save({
+      gitSettings: {
+        ...settings?.gitSettings,
+        commitMessageAI: commitAi,
+        reviewAI: { ...reviewAi, ...patch },
+      },
+    })
+
+  const saveExplainAi = (patch: Partial<GitAiFeatureSettings>) =>
+    void save({
+      gitSettings: {
+        ...settings?.gitSettings,
+        commitMessageAI: commitAi,
+        explainAI: { ...explainAi, ...patch },
       },
     })
 
@@ -197,6 +316,30 @@ export function GitSection() {
             </div>
           )}
         </section>
+
+        <Separator />
+
+        <AiFeatureBlock
+          idPrefix="git-ai-review"
+          heading={t("reviewAi.heading")}
+          description={t("reviewAi.description")}
+          value={reviewAi}
+          providers={providers}
+          onChange={saveReviewAi}
+          t={t}
+        />
+
+        <Separator />
+
+        <AiFeatureBlock
+          idPrefix="git-ai-explain"
+          heading={t("explainAi.heading")}
+          description={t("explainAi.description")}
+          value={explainAi}
+          providers={providers}
+          onChange={saveExplainAi}
+          t={t}
+        />
       </SettingsCard>
 
       <SettingsCard

@@ -16,6 +16,7 @@ import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 
 import type { HunkDecision, StoredHunkDecision } from "@/lib/git/hunk-review"
+import type { HunkAiFinding } from "@/types/git"
 
 /** Max distinct files retained before the least-recently-touched is evicted. */
 export const DIFF_REVIEW_FILE_CAP = 200
@@ -49,6 +50,16 @@ interface DiffReviewState {
     hash: string,
     comment: string
   ) => void
+  /** Attach (or clear) an AI review finding on one hunk. `null` removes it. */
+  setAiFinding: (
+    rootDir: string,
+    reviewKey: string,
+    hunkIndex: number,
+    hash: string,
+    ai: HunkAiFinding | null
+  ) => void
+  /** Drop AI findings from every hunk of a file, keeping human decisions/comments. */
+  clearAiFindings: (rootDir: string, reviewKey: string) => void
   getFileDecisions: (rootDir: string, reviewKey: string) => StoredHunkDecision[]
   clearFile: (rootDir: string, reviewKey: string) => void
 }
@@ -67,6 +78,20 @@ function upsert(
   const next = list.slice()
   next[idx] = { ...next[idx], hunkIndex, ...patch }
   return next
+}
+
+/** Persisted slice shape (see `partialize`). */
+type PersistedDiffReviewState = Pick<DiffReviewState, "decisions" | "order">
+
+/**
+ * v1 → v2: identical persisted shape (`ai` is a new optional field entries
+ * simply lack), so the migration is the identity. Exported for tests.
+ */
+export function migrateDiffReviewState(
+  persisted: unknown,
+  _version: number
+): PersistedDiffReviewState {
+  return persisted as PersistedDiffReviewState
 }
 
 export const useDiffReviewStore = create<DiffReviewState>()(
@@ -99,6 +124,25 @@ export const useDiffReviewStore = create<DiffReviewState>()(
           writeFile(key, upsert(get().decisions[key] ?? [], hunkIndex, hash, { comment }))
         },
 
+        setAiFinding: (rootDir, reviewKey, hunkIndex, hash, ai) => {
+          const key = diffReviewFileKey(rootDir, reviewKey)
+          writeFile(
+            key,
+            upsert(get().decisions[key] ?? [], hunkIndex, hash, { ai: ai ?? undefined })
+          )
+        },
+
+        clearAiFindings: (rootDir, reviewKey) => {
+          const key = diffReviewFileKey(rootDir, reviewKey)
+          const list = get().decisions[key]
+          if (!list) return
+          // Strip `ai` from each entry, then drop entries left with no signal.
+          const next = list
+            .map(({ ai: _ai, ...rest }) => rest)
+            .filter((d) => d.decision !== "undecided" || d.comment)
+          writeFile(key, next)
+        },
+
         getFileDecisions: (rootDir, reviewKey) =>
           get().decisions[diffReviewFileKey(rootDir, reviewKey)] ?? [],
 
@@ -114,7 +158,12 @@ export const useDiffReviewStore = create<DiffReviewState>()(
     },
     {
       name: "cognia-git-review",
-      version: 1,
+      // v2 adds the optional `ai` finding field on decisions; older persisted
+      // entries simply lack it. The shape is read-compatible, but zustand
+      // DISCARDS persisted state on any version mismatch unless a `migrate`
+      // is provided — so an identity migrate is load-bearing here.
+      version: 2,
+      migrate: migrateDiffReviewState,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({ decisions: s.decisions, order: s.order }),
     }

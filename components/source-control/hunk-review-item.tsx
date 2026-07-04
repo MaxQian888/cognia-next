@@ -10,13 +10,13 @@
 
 import { memo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Check, ChevronDown, MessageSquarePlus, X } from "lucide-react"
+import { Check, ChevronDown, MessageSquarePlus, SparklesIcon, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
-import type { GitHunk } from "@/types/git"
+import type { GitHunk, HunkAiFinding, HunkFindingSeverity } from "@/types/git"
 import type { HunkDecision } from "@/lib/git/hunk-review"
 
 interface Props {
@@ -24,6 +24,7 @@ interface Props {
   index: number
   decision: HunkDecision
   comment?: string
+  ai?: HunkAiFinding
   onDecision: (index: number, decision: HunkDecision) => void
   onComment: (index: number, comment: string) => void
   disabled?: boolean
@@ -37,11 +38,19 @@ const LINE_CLASS: Record<string, string> = {
 
 const LINE_PREFIX: Record<string, string> = { add: "+", del: "-", context: " " }
 
+/** Severity → border/text accent for the AI finding banner. */
+const SEVERITY_CLASS: Record<HunkFindingSeverity, string> = {
+  info: "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  warning: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  critical: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300",
+}
+
 export const HunkReviewItem = memo(function HunkReviewItem({
   hunk,
   index,
   decision,
   comment,
+  ai,
   onDecision,
   onComment,
   disabled,
@@ -105,6 +114,23 @@ export const HunkReviewItem = memo(function HunkReviewItem({
           </Button>
         </div>
       </div>
+
+      {ai && (
+        <div
+          className={cn(
+            "flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-[11px] leading-snug",
+            SEVERITY_CLASS[ai.severity]
+          )}
+          data-testid="hunk-ai-finding"
+          data-severity={ai.severity}
+        >
+          <SparklesIcon className="mt-0.5 size-3 shrink-0" />
+          <div className="min-w-0">
+            <span className="font-medium uppercase">{t(`ai.severity.${ai.severity}`)}</span>
+            <span className="ml-1.5 break-words">{ai.note}</span>
+          </div>
+        </div>
+      )}
 
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger asChild>

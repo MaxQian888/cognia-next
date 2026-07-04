@@ -119,6 +119,18 @@
     "pullFailed": "Pull failed: {message}",
     "pushFailed": "Push failed: {message}"
   },
+  "explain": {
+    "button": "Explain",
+    "copied": "Explanation copied",
+    "copy": "Copy explanation",
+    "copyFailed": "Failed to copy",
+    "empty": "No changes to explain",
+    "failed": "Failed to explain the change",
+    "generating": "Explaining change…",
+    "redacted": "Sensitive data was redacted before sending to the model",
+    "retry": "Regenerate",
+    "title": "AI explanation"
+  },
   "forcePush": {
     "confirmAction": "Force push",
     "confirmDescription": "This overwrites the remote branch with your local history using --force-with-lease. It is rejected if someone else has pushed since your last fetch.",
@@ -180,9 +192,24 @@
     "accept": "Accept hunk",
     "acceptedCount": "{accepted}/{total} accepted",
     "addComment": "Add comment",
+    "ai": {
+      "clear": "Clear AI findings",
+      "failed": "AI review failed",
+      "noFindings": "AI review found no issues",
+      "noHunks": "No changes to review",
+      "redacted": "Sensitive data was redacted before sending to the model",
+      "run": "AI review",
+      "severity": {
+        "critical": "Critical",
+        "info": "Info",
+        "warning": "Warning"
+      }
+    },
     "applyAccepted": "Apply {count} accepted",
+    "collapse": "Collapse review",
     "comment": "Hunk comment",
     "commentPlaceholder": "Leave a note on this hunk…",
+    "expand": "Expand review",
     "hunkLabel": "Hunk @ line {line}",
     "reject": "Reject hunk",
     "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",

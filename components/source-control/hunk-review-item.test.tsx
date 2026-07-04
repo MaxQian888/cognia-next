@@ -74,4 +74,17 @@ describe("HunkReviewItem", () => {
     expect(screen.getByTestId("hunk-accept")).toBeDisabled()
     expect(screen.getByTestId("hunk-reject")).toBeDisabled()
   })
+
+  it("renders the AI finding banner with severity + note when present", () => {
+    setup({ ai: { severity: "critical", note: "possible null deref" } })
+    const banner = screen.getByTestId("hunk-ai-finding")
+    expect(banner).toHaveAttribute("data-severity", "critical")
+    expect(banner).toHaveTextContent("possible null deref")
+    expect(banner).toHaveTextContent("ai.severity.critical")
+  })
+
+  it("omits the AI banner when there is no finding", () => {
+    setup()
+    expect(screen.queryByTestId("hunk-ai-finding")).not.toBeInTheDocument()
+  })
 })

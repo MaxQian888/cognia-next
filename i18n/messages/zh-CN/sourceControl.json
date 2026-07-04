@@ -119,6 +119,18 @@
     "pullFailed": "拉取失败：{message}",
     "pushFailed": "推送失败：{message}"
   },
+  "explain": {
+    "button": "解释",
+    "copied": "解释已复制",
+    "copy": "复制解释",
+    "copyFailed": "复制失败",
+    "empty": "没有可解释的更改",
+    "failed": "解释更改失败",
+    "generating": "正在解释更改…",
+    "redacted": "发送给模型前已对敏感数据脱敏",
+    "retry": "重新生成",
+    "title": "AI 解释"
+  },
   "forcePush": {
     "confirmAction": "强制推送",
     "confirmDescription": "这将使用 --force-with-lease 用你的本地历史覆盖远程分支。如果在你上次获取之后有他人推送过，操作会被拒绝。",
@@ -180,9 +192,24 @@
     "accept": "接受此块",
     "acceptedCount": "已接受 {accepted}/{total}",
     "addComment": "添加评论",
+    "ai": {
+      "clear": "清除 AI 结果",
+      "failed": "AI 审查失败",
+      "noFindings": "AI 审查未发现问题",
+      "noHunks": "没有可审查的更改",
+      "redacted": "发送给模型前已对敏感数据脱敏",
+      "run": "AI 审查",
+      "severity": {
+        "critical": "严重",
+        "info": "提示",
+        "warning": "警告"
+      }
+    },
     "applyAccepted": "应用 {count} 个已接受",
+    "collapse": "折叠审阅",
     "comment": "块评论",
     "commentPlaceholder": "对此块留个备注…",
+    "expand": "展开审阅",
     "hunkLabel": "块 @ 第 {line} 行",
     "reject": "拒绝此块",
     "remapNotice": "{count} 条早先的决策与当前 diff 不再匹配，已跳过。",

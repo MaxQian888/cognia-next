@@ -7,12 +7,16 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { gitDiffFile } from "@/lib/git/commands"
 import { fileDiffKey, type GitDiff, type GitFileChange, type GitHunk } from "@/types/git"
 import { useGitStore } from "@/stores/git/git-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer, type HunkAction } from "./diff-viewer"
 import { HunkReviewList } from "./hunk-review-list"
+import { AiExplainPopover } from "./ai-explain-popover"
 
 interface DiffPaneProps {
   rootDir: string
@@ -29,6 +33,8 @@ export function DiffPane({ rootDir, path, staged, actions }: DiffPaneProps) {
   const invalidateDiff = useGitStore((s) => s.invalidateDiff)
   // Re-fetch the diff whenever the status changes (e.g. after a hunk op).
   const statusStamp = useGitStore((s) => s.status)
+  const [reviewCollapsed, setReviewCollapsed] = useState(false)
+  const reviewLayout = useResizableLayout("cognia-git-diff-review")
 
   // The working-tree change row backs the rename-aware review key. Fall back to
   // a plain modified change when the status row isn't found (e.g. mid-refresh).
@@ -87,21 +93,74 @@ export function DiffPane({ rootDir, path, staged, actions }: DiffPaneProps) {
 
   const diff = cachedDiff ?? fetched
 
-  return (
-    <div className="flex h-full flex-col">
+  const explainEnabled = useSettingsStore(
+    (s) => s.settings?.gitSettings?.explainAI?.enabled ?? false
+  )
+  const canExplain = explainEnabled && !!diff && !diff.isBinary && diff.hunks.length > 0
+
+  // Explain toolbar + Monaco diff in one column so the bar stays pinned above.
+  const viewer = (
+    <div className="flex h-full min-h-0 flex-col">
+      {canExplain && (
+        <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
+          <AiExplainPopover subject={path} diffText={diff.hunks.map((h) => h.patch).join("\n")} />
+        </div>
+      )}
       <div className="min-h-0 flex-1">
         <DiffViewer diff={diff} staged={staged} hunkActions={hunkActions} />
       </div>
-      {/* Per-hunk review (accept/reject/comment) — working-tree files only. */}
-      {!staged && diff && !diff.isBinary && diff.hunks.length > 0 && (
-        <HunkReviewList
-          rootDir={rootDir}
-          change={change}
-          diff={diff}
-          onStagePatch={(patch) => actions.stage([], patch)}
-          onInvalidate={() => invalidateDiff(fileDiffKey(path, staged))}
-        />
-      )}
     </div>
+  )
+
+  // Per-hunk review (accept/reject/comment) — working-tree files only.
+  const showReview = !staged && !!diff && !diff.isBinary && diff.hunks.length > 0
+
+  if (!showReview) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="min-h-0 flex-1">{viewer}</div>
+      </div>
+    )
+  }
+
+  const review = (
+    <HunkReviewList
+      rootDir={rootDir}
+      change={change}
+      diff={diff}
+      onStagePatch={(patch) => actions.stage([], patch)}
+      onInvalidate={() => invalidateDiff(fileDiffKey(path, staged))}
+      collapsed={reviewCollapsed}
+      onToggleCollapse={() => setReviewCollapsed((c) => !c)}
+    />
+  )
+
+  // Collapsed: the review shrinks to its header bar so the diff keeps the space.
+  if (reviewCollapsed) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="min-h-0 flex-1">{viewer}</div>
+        {review}
+      </div>
+    )
+  }
+
+  // Expanded: a persisted vertical split so the review can be resized instead of
+  // squeezing the diff above it.
+  return (
+    <ResizablePanelGroup
+      orientation="vertical"
+      defaultLayout={reviewLayout.defaultLayout}
+      onLayoutChanged={reviewLayout.onLayoutChanged}
+      className="h-full"
+    >
+      <ResizablePanel id="sc-diff-body" defaultSize="65%" minSize="25%">
+        {viewer}
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel id="sc-diff-review" defaultSize="35%" minSize="15%">
+        {review}
+      </ResizablePanel>
+    </ResizablePanelGroup>
   )
 }

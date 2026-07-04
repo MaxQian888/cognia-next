@@ -98,6 +98,22 @@ describe("replayDecisions", () => {
     )
     expect(out.get(0)?.comment).toBe("look here")
   })
+
+  it("carries an AI finding through the remap, even on an undecided hunk", () => {
+    const h = hunk({ lines: [ctx("c")] })
+    const out = replayDecisions(
+      [
+        {
+          hunkIndex: 0,
+          hash: hunkContentHash(h),
+          decision: "undecided",
+          ai: { severity: "critical", note: "bug" },
+        },
+      ],
+      [h]
+    )
+    expect(out.get(0)?.ai).toEqual({ severity: "critical", note: "bug" })
+  })
 })
 
 describe("countUnmappedDecisions", () => {
@@ -109,6 +125,13 @@ describe("countUnmappedDecisions", () => {
       { hunkIndex: 2, hash: "x", decision: "undecided" }, // not actionable → ignored
     ]
     expect(countUnmappedDecisions(stored, [matched])).toBe(1)
+  })
+
+  it("counts an unmapped AI-only finding as actionable", () => {
+    const stored: StoredHunkDecision[] = [
+      { hunkIndex: 0, hash: "gone", decision: "undecided", ai: { severity: "info", note: "n" } },
+    ]
+    expect(countUnmappedDecisions(stored, [hunk({ lines: [add("x")] })])).toBe(1)
   })
 })
 

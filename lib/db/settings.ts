@@ -216,6 +216,16 @@ export async function getSettings(): Promise<AppSettings> {
         ...DEFAULT_GIT_SETTINGS.commitMessageAI,
         ...(row.gitSettings?.commitMessageAI ?? {}),
       },
+      reviewAI: {
+        enabled: false,
+        ...DEFAULT_GIT_SETTINGS.reviewAI,
+        ...(row.gitSettings?.reviewAI ?? {}),
+      },
+      explainAI: {
+        enabled: false,
+        ...DEFAULT_GIT_SETTINGS.explainAI,
+        ...(row.gitSettings?.explainAI ?? {}),
+      },
     },
     // Forward-compat: a row saved before sidebar customization existed has no
     // `sidebarLayout` — fall back to the default so the rail renders pinned

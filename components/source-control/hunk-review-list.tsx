@@ -9,8 +9,10 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { ChevronDownIcon, ChevronUpIcon, SparklesIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { diffReviewFileKey, useDiffReviewStore } from "@/stores/git/diff-review-store"
 import {
   countUnmappedDecisions,
@@ -20,6 +22,8 @@ import {
   selectAcceptedPatches,
   type HunkDecision,
 } from "@/lib/git/hunk-review"
+import { useAiDiffReview } from "@/hooks/git/use-ai-diff-review"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { GitDiff, GitFileChange } from "@/types/git"
 import { HunkReviewItem } from "./hunk-review-item"
 
@@ -31,19 +35,36 @@ interface Props {
   onStagePatch: (patch: string) => Promise<void>
   /** Invalidate the cached diff so it re-fetches after applying. */
   onInvalidate: () => void
+  /** Collapsed shows only the header bar so the diff above keeps the space. */
+  collapsed?: boolean
+  /** Toggle the collapsed/expanded state (owned by the parent DiffPane). */
+  onToggleCollapse?: () => void
 }
 
-export function HunkReviewList({ rootDir, change, diff, onStagePatch, onInvalidate }: Props) {
+export function HunkReviewList({
+  rootDir,
+  change,
+  diff,
+  onStagePatch,
+  onInvalidate,
+  collapsed = false,
+  onToggleCollapse,
+}: Props) {
   const t = useTranslations("sourceControl.review")
   const [applying, setApplying] = useState(false)
   const setDecision = useDiffReviewStore((s) => s.setDecision)
   const setComment = useDiffReviewStore((s) => s.setComment)
   const clearFile = useDiffReviewStore((s) => s.clearFile)
+  const clearAiFindings = useDiffReviewStore((s) => s.clearAiFindings)
   // Subscribe to this file's slice so decisions re-render on change.
   const reviewKey = normalizeReviewKey(change)
   const stored = useDiffReviewStore((s) => s.decisions[diffReviewFileKey(rootDir, reviewKey)])
 
+  const aiEnabled = useSettingsStore((s) => s.settings?.gitSettings?.reviewAI?.enabled ?? false)
+  const { reviewing, review } = useAiDiffReview(rootDir, change, diff)
+
   const remapped = useMemo(() => replayDecisions(stored ?? [], diff.hunks), [stored, diff.hunks])
+  const hasAiFindings = useMemo(() => [...remapped.values()].some((d) => d.ai), [remapped])
   const unmapped = useMemo(
     () => countUnmappedDecisions(stored ?? [], diff.hunks),
     [stored, diff.hunks]
@@ -86,47 +107,124 @@ export function HunkReviewList({ rootDir, change, diff, onStagePatch, onInvalida
 
   if (diff.hunks.length === 0) return null
 
-  return (
-    <div className="space-y-2 border-t p-3" data-testid="hunk-review-list">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] uppercase text-muted-foreground">{t("title")}</p>
+  const header = (
+    <div className="flex items-center justify-between gap-2 px-3 py-2">
+      <div className="flex min-w-0 items-center gap-1.5">
+        {onToggleCollapse && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-5 text-muted-foreground hover:text-foreground"
+            aria-label={collapsed ? t("expand") : t("collapse")}
+            aria-expanded={!collapsed}
+            onClick={onToggleCollapse}
+            data-testid="review-collapse-toggle"
+          >
+            {collapsed ? (
+              <ChevronUpIcon className="size-3.5" />
+            ) : (
+              <ChevronDownIcon className="size-3.5" />
+            )}
+          </Button>
+        )}
+        <p className="truncate text-[10px] uppercase text-muted-foreground">{t("title")}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {aiEnabled && (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[11px]"
+              disabled={reviewing}
+              onClick={() => void review()}
+              data-testid="ai-review-run"
+            >
+              {reviewing ? <Spinner className="size-3" /> : <SparklesIcon className="size-3" />}
+              {t("ai.run")}
+            </Button>
+            {hasAiFindings && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-6 text-muted-foreground hover:text-foreground"
+                aria-label={t("ai.clear")}
+                disabled={reviewing}
+                onClick={() => clearAiFindings(rootDir, reviewKey)}
+                data-testid="ai-review-clear"
+              >
+                <XIcon className="size-3.5" />
+              </Button>
+            )}
+          </>
+        )}
         <span className="text-[11px] text-muted-foreground" data-testid="accepted-count">
           {t("acceptedCount", { accepted: acceptedCount, total: diff.hunks.length })}
         </span>
       </div>
+    </div>
+  )
 
-      {diff.hunks.map((hunk, index) => {
-        const d = remapped.get(index)
-        return (
-          <HunkReviewItem
-            key={`${index}-${hunkContentHash(hunk)}`}
-            hunk={hunk}
-            index={index}
-            decision={d?.decision ?? "undecided"}
-            comment={d?.comment}
-            onDecision={handleDecision}
-            onComment={handleComment}
-            disabled={applying}
-          />
-        )
-      })}
+  // Collapsed: render the header bar only so the diff viewer above keeps its
+  // full height (this container is shrink-0 in the parent flex column).
+  if (collapsed) {
+    return (
+      <div className="shrink-0 border-t" data-testid="hunk-review-list" data-collapsed="true">
+        {header}
+      </div>
+    )
+  }
 
-      {unmapped > 0 && (
-        <p className="text-[11px] text-amber-600 dark:text-amber-400" data-testid="remap-notice">
-          {t("remapNotice", { count: unmapped })}
-        </p>
-      )}
+  // Expanded: fill the resizable panel; the hunk list scrolls internally so it
+  // never grows past its allotted height and squeezes the diff above.
+  return (
+    <div
+      className="flex h-full min-h-0 flex-col border-t"
+      data-testid="hunk-review-list"
+      data-collapsed="false"
+    >
+      <div className="shrink-0">{header}</div>
 
-      <Button
-        type="button"
-        size="sm"
-        className="w-full"
-        disabled={applying || acceptedCount === 0}
-        onClick={() => void applyAccepted()}
-        data-testid="apply-accepted"
-      >
-        {t("applyAccepted", { count: acceptedCount })}
-      </Button>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-2">
+        {diff.hunks.map((hunk, index) => {
+          const d = remapped.get(index)
+          return (
+            <HunkReviewItem
+              key={`${index}-${hunkContentHash(hunk)}`}
+              hunk={hunk}
+              index={index}
+              decision={d?.decision ?? "undecided"}
+              comment={d?.comment}
+              ai={d?.ai}
+              onDecision={handleDecision}
+              onComment={handleComment}
+              disabled={applying}
+            />
+          )
+        })}
+
+        {unmapped > 0 && (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400" data-testid="remap-notice">
+            {t("remapNotice", { count: unmapped })}
+          </p>
+        )}
+      </div>
+
+      <div className="shrink-0 border-t p-3">
+        <Button
+          type="button"
+          size="sm"
+          className="w-full"
+          disabled={applying || acceptedCount === 0}
+          onClick={() => void applyAccepted()}
+          data-testid="apply-accepted"
+        >
+          {t("applyAccepted", { count: acceptedCount })}
+        </Button>
+      </div>
     </div>
   )
 }

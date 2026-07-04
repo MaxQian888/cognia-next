@@ -11,7 +11,7 @@
  * guess. Pure — no React, no I/O.
  */
 
-import type { GitFileStatus, GitHunk } from "@/types/git"
+import type { GitFileStatus, GitHunk, HunkAiFinding } from "@/types/git"
 
 export type HunkDecision = "accepted" | "rejected" | "undecided"
 
@@ -23,6 +23,8 @@ export interface StoredHunkDecision {
   hash: string
   decision: HunkDecision
   comment?: string
+  /** AI review finding for this hunk (advisory; set by the AI review action). */
+  ai?: HunkAiFinding
 }
 
 /** FNV-1a (base36) — copied from the rag embedding cache (separate workspace). */
@@ -86,7 +88,7 @@ export function normalizeReviewKey(change: {
 export function replayDecisions(
   stored: StoredHunkDecision[],
   currentHunks: GitHunk[]
-): Map<number, { decision: HunkDecision; comment?: string }> {
+): Map<number, { decision: HunkDecision; comment?: string; ai?: HunkAiFinding }> {
   // Build hash → current-index list.
   const hashToIndices = new Map<string, number[]>()
   currentHunks.forEach((hunk, index) => {
@@ -96,12 +98,12 @@ export function replayDecisions(
     hashToIndices.set(hash, arr)
   })
 
-  const out = new Map<number, { decision: HunkDecision; comment?: string }>()
+  const out = new Map<number, { decision: HunkDecision; comment?: string; ai?: HunkAiFinding }>()
   for (const entry of stored) {
-    if (entry.decision === "undecided" && !entry.comment) continue
+    if (entry.decision === "undecided" && !entry.comment && !entry.ai) continue
     const candidates = hashToIndices.get(entry.hash)
     if (candidates && candidates.length === 1) {
-      out.set(candidates[0], { decision: entry.decision, comment: entry.comment })
+      out.set(candidates[0], { decision: entry.decision, comment: entry.comment, ai: entry.ai })
     }
     // 0 or ≥2 matches → ambiguous/vanished → drop.
   }
@@ -117,7 +119,7 @@ export function countUnmappedDecisions(
   currentHunks: GitHunk[]
 ): number {
   const remapped = replayDecisions(stored, currentHunks)
-  const actionable = stored.filter((s) => s.decision !== "undecided" || s.comment)
+  const actionable = stored.filter((s) => s.decision !== "undecided" || s.comment || s.ai)
   return Math.max(0, actionable.length - remapped.size)
 }
 

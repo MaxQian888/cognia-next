@@ -1,4 +1,15 @@
 {
+  "aiFeature": {
+    "customInstructions": {
+      "heading": "Custom instructions",
+      "placeholder": "Extra guidance for the model (focus areas, tone, language…)"
+    },
+    "model": {
+      "model": "Model",
+      "provider": "Provider",
+      "useDefault": "Use chat default"
+    }
+  },
   "commitAi": {
     "conventional": {
       "description": "Constrain the generated message to the type(scope): summary format.",
@@ -17,6 +28,10 @@
     }
   },
   "description": "AI commit-message generation and other Git panel preferences.",
+  "explainAi": {
+    "description": "Show an \"Explain\" button on file and commit diffs to summarize what changed and why.",
+    "heading": "AI change explanation"
+  },
   "panel": {
     "autoFetch": {
       "description": "Periodically fetch from the remote in the background so ahead/behind stays current.",
@@ -72,6 +87,10 @@
       "list": "List"
     },
     "title": "Panel & workflow"
+  },
+  "reviewAi": {
+    "description": "Show an \"AI review\" button in the hunk review list to flag issues per hunk.",
+    "heading": "AI code review"
   },
   "title": "Source Control"
 }
