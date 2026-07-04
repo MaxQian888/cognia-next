@@ -479,16 +479,21 @@ function McpServerInspector({ server }: { server: McpServer }) {
 function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
   const t = useTranslations("discover")
   const planned = connector.status === "planned"
+  const githubDelivery = connector.type === "github"
+  const settingsHref = githubDelivery
+    ? "/settings/github-delivery"
+    : `/settings/connections?platform=${connector.type}`
   // Live count of configured adapter instances for this platform — drives
   // the "N configured" badge so the user sees current state without
   // navigating to /settings/connections. Skip the read entirely for
-  // `planned` platforms (no adapter row will ever exist).
+  // `planned` platforms (no adapter row will ever exist) and GitHub Delivery
+  // (plugin-owned delivery surface, not a native adapter-registry instance).
   const instances = useLiveQuery<readonly AdapterInstanceRow[]>(
     () =>
-      planned
+      planned || githubDelivery
         ? Promise.resolve<readonly AdapterInstanceRow[]>([])
         : listAdapterInstancesByType(connector.type),
-    [connector.type, planned]
+    [connector.type, planned, githubDelivery]
   )
   const instanceCount = instances?.length ?? 0
   return (
@@ -503,7 +508,7 @@ function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
         {connector.oauth ? <Badge variant="outline">OAuth</Badge> : null}
         {connector.richMessages ? <Badge variant="outline">A2UI</Badge> : null}
       </div>
-      {!planned ? (
+      {!planned && !githubDelivery ? (
         <p
           className="text-xs text-muted-foreground"
           data-testid="discover-inspector-connector-count"
@@ -520,7 +525,7 @@ function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
         data-testid="discover-inspector-open-connector"
       >
         <Link
-          href={planned ? "#" : `/settings/connections?platform=${connector.type}`}
+          href={planned ? "#" : settingsHref}
           onClick={planned ? (e) => e.preventDefault() : undefined}
         >
           <ExternalLinkIcon className="size-4" />

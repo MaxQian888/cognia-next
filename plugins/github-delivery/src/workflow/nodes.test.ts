@@ -11,13 +11,14 @@ import type { GhAction, GhAuditEntry, GhPolicy, PolicyDecision } from "@/lib/git
 import { DEFAULT_GH_POLICY } from "@/lib/github/types"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
 import { setGithubRuntime } from "./runtime"
+import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
 
 // Post-ADR-0026 migration: nodes are no longer registered at import
 // time. We pull in the explicit register helper and call it from a
 // top-level `beforeAll` so every describe block sees a populated
 // registry. `afterAll` matches with the unregister helper to keep the
 // suite hermetic against other tests that also touch the registry.
-import { registerGithubNodes, unregisterGithubNodes } from "./nodes"
+import { getGithubNodeDefinitions, registerGithubNodes, unregisterGithubNodes } from "./nodes"
 
 beforeAll(() => {
   registerGithubNodes()
@@ -81,6 +82,18 @@ async function exec(kind: string, params: Record<string, unknown>) {
 }
 
 afterEach(() => setGithubRuntime(null))
+
+describe("github workflow node definition parity", () => {
+  it("covers every global action.github.* kind with exactly one plugin executor", () => {
+    const declaredGithubKinds = WORKFLOW_NODE_KINDS.filter((kind) =>
+      kind.startsWith("action.github.")
+    )
+    const definitionKinds = getGithubNodeDefinitions().map((definition) => definition.kind)
+
+    expect([...new Set(definitionKinds)].sort()).toEqual([...definitionKinds].sort())
+    expect(definitionKinds.sort()).toEqual(declaredGithubKinds.sort())
+  })
+})
 
 describe("action.github.openPr", () => {
   it("issues POST /pulls and returns number + htmlUrl", async () => {
