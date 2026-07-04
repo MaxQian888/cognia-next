@@ -110,6 +110,7 @@ describe("plugin capability contracts", () => {
       expect.objectContaining({
         id: "media",
         support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/media.ts"]),
         requiredTests: expect.arrayContaining(["lib/plugin/api/media-api.test.ts"]),
       })
     )
@@ -118,6 +119,7 @@ describe("plugin capability contracts", () => {
       expect.objectContaining({
         id: "canvas",
         support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/canvas.ts"]),
         requiredTests: expect.arrayContaining(["lib/plugin/api/canvas-api.test.ts"]),
       })
     )
@@ -126,7 +128,50 @@ describe("plugin capability contracts", () => {
       expect.objectContaining({
         id: "ai-provider",
         support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/ai-provider.ts"]),
         requiredTests: expect.arrayContaining(["lib/plugin/api/ai-provider-api.test.ts"]),
+      })
+    )
+  })
+
+  it("records runtime-only SDK facades without promoting experimental capabilities", () => {
+    expect(getPluginCapabilityContract("python")).toEqual(
+      expect.objectContaining({
+        id: "python",
+        support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/python.ts"]),
+      })
+    )
+
+    expect(getPluginCapabilityContract("providers")).toEqual(
+      expect.objectContaining({
+        id: "providers",
+        support: "experimental",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/ai-provider.ts"]),
+      })
+    )
+
+    expect(getPluginCapabilityContract("automation")).toEqual(
+      expect.objectContaining({
+        id: "automation",
+        support: "experimental",
+        typescriptSdk: ["packages/plugin-sdk/src/api/automation.ts"],
+      })
+    )
+
+    expect(getPluginCapabilityContract("companion")).toEqual(
+      expect.objectContaining({
+        id: "companion",
+        support: "experimental",
+        typescriptSdk: ["packages/plugin-sdk/src/api/companion.ts"],
+      })
+    )
+
+    expect(getPluginCapabilityContract("processors")).toEqual(
+      expect.objectContaining({
+        id: "processors",
+        support: "experimental",
+        typescriptSdk: [],
       })
     )
   })

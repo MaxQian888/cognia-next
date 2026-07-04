@@ -36,6 +36,9 @@ import type {
   PluginModeDef,
   PluginNativeAnthropicToolDef,
   PluginOcrProviderDef,
+  PluginPetAchievementCondition,
+  PluginPetAchievementDef,
+  PluginPetItemDef,
   PluginProtocolAdapterDef,
   PluginQuickActionDef,
   PluginQuickActionSurface,
@@ -124,6 +127,9 @@ describe("plugin-sdk: manifest", () => {
         | PluginModeDef
         | PluginNativeAnthropicToolDef
         | PluginOcrProviderDef
+        | PluginPetAchievementCondition
+        | PluginPetAchievementDef
+        | PluginPetItemDef
         | PluginProtocolAdapterDef
         | PluginQuickActionDef
         | PluginQuickActionSurface
@@ -184,6 +190,9 @@ describe("plugin-sdk: manifest", () => {
       "PluginModeDef",
       "PluginNativeAnthropicToolDef",
       "PluginOcrProviderDef",
+      "PluginPetAchievementCondition",
+      "PluginPetAchievementDef",
+      "PluginPetItemDef",
       "PluginProtocolAdapterDef",
       "PluginQuickActionDef",
       "PluginQuickActionSurface",
@@ -224,6 +233,8 @@ describe("plugin-sdk: manifest", () => {
       "PluginLspServerDef",
       "PluginOcrProviderDef",
       "PluginAiProviderDef",
+      "PluginPetAchievementDef",
+      "PluginPetItemDef",
     ]
 
     for (const documentedType of documentedTypes) {

@@ -26,6 +26,7 @@ import {
   getBackgroundAgentManager,
   __resetBackgroundAgentManagerForTesting,
 } from "@/lib/ai/agent/background-agent-manager"
+import { nodeCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -217,6 +218,51 @@ describe("createPluginContext", () => {
     const context = createPluginContext(plugin, mockManager)
 
     expect(context.pluginId).toBe("test-plugin")
+  })
+
+  describe("workflow extension API", () => {
+    afterEach(() => {
+      __resetPluginCatalogForTesting()
+    })
+
+    it("surfaces plugin node default params on the hot-merged catalog entry", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const dispose = context.workflow.registerNode({
+        kind: "action.format",
+        typeVersion: 1,
+        category: "plugin",
+        label: "Format",
+        description: "Format text",
+        iconName: "Wand",
+        paramsSchema: { type: "object" },
+        defaultParams: { mode: "markdown", retries: 2 },
+        execute: async () => ({ output: {} }),
+      })
+
+      const entry = nodeCatalogEntry("test-plugin.action.format" as never)
+      expect(entry.defaultParams).toEqual({ mode: "markdown", retries: 2 })
+
+      dispose()
+    })
+
+    it("surfaces plugin trigger default params on the hot-merged catalog entry", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const dispose = context.workflow.registerTrigger({
+        kind: "trigger.webhookLite",
+        typeVersion: 1,
+        label: "Webhook lite",
+        description: "Receive webhook events",
+        iconName: "Webhook",
+        paramsSchema: { type: "object" },
+        defaultParams: { path: "/demo", method: "POST" },
+        start: async () => ({ stop: jest.fn() }),
+      })
+
+      const entry = nodeCatalogEntry("trigger.test-plugin.webhookLite" as never)
+      expect(entry.defaultParams).toEqual({ path: "/demo", method: "POST" })
+
+      dispose()
+    })
   })
 
   it("should create context with plugin path", () => {

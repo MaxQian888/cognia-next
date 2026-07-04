@@ -28,6 +28,28 @@ describe("plugin-sdk: contracts", () => {
     )
   })
 
+  it("records SDK runtime facades for context-backed capability tags", () => {
+    expect(getPluginCapabilityContract("media")?.typescriptSdk).toEqual(
+      expect.arrayContaining(["packages/plugin-sdk/src/api/media.ts"])
+    )
+    expect(getPluginCapabilityContract("canvas")?.typescriptSdk).toEqual(
+      expect.arrayContaining(["packages/plugin-sdk/src/api/canvas.ts"])
+    )
+    expect(getPluginCapabilityContract("python")?.typescriptSdk).toEqual(
+      expect.arrayContaining(["packages/plugin-sdk/src/api/python.ts"])
+    )
+    expect(getPluginCapabilityContract("automation")?.typescriptSdk).toEqual([
+      "packages/plugin-sdk/src/api/automation.ts",
+    ])
+    expect(getPluginCapabilityContract("companion")?.typescriptSdk).toEqual([
+      "packages/plugin-sdk/src/api/companion.ts",
+    ])
+    expect(getPluginCapabilityContract("providers")?.typescriptSdk).toEqual(
+      expect.arrayContaining(["packages/plugin-sdk/src/api/ai-provider.ts"])
+    )
+    expect(getPluginCapabilityContract("processors")?.typescriptSdk).toEqual([])
+  })
+
   it("re-exports extension-point contracts through the same audit subpath", () => {
     const point = CANONICAL_EXTENSION_POINTS[0]
     expect(point).toBeDefined()

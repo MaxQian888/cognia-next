@@ -148,8 +148,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.media + AI-backed media helpers",
     hostBindings: ["lib/plugin/api/media-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/media.ts",
       "packages/plugin-sdk/src/context/extended.ts",
-      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -163,8 +163,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.canvas + active editor selection bridge",
     hostBindings: ["lib/plugin/api/canvas-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/canvas.ts",
       "packages/plugin-sdk/src/context/extended.ts",
-      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -178,8 +178,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.ai + built-in provider fallback",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/ai-provider.ts",
       "packages/plugin-sdk/src/context/extended.ts",
-      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -266,6 +266,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "Provider extension integration is not production-ready",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/ai-provider.ts",
       "packages/plugin-sdk/src/index.ts",
       "packages/plugin-sdk/src/context/extended.ts",
     ],
@@ -366,7 +367,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: ["pythonMain", "pythonDependencies"],
     runtimeBinding: "PyO3/Tauri python runtime",
     hostBindings: ["src-tauri/src/plugin_api/python/commands.rs", "lib/plugin/core/manager.ts"],
-    typescriptSdk: ["packages/plugin-sdk/src/context/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/api/python.ts",
+      "packages/plugin-sdk/src/context/index.ts",
+    ],
     pythonSdk: [
       "plugin-sdk/python/src/cognia/runtime.py",
       "plugin-sdk/python/src/cognia/plugin.py",
@@ -1308,7 +1312,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/automation",
       "src-tauri/src/automation",
     ],
-    typescriptSdk: [],
+    typescriptSdk: ["packages/plugin-sdk/src/api/automation.ts"],
     pythonSdk: [],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -1331,7 +1335,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/companion",
       "src-tauri/src/companion_api",
     ],
-    typescriptSdk: [],
+    typescriptSdk: ["packages/plugin-sdk/src/api/companion.ts"],
     pythonSdk: [],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [

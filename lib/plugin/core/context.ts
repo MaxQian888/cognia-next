@@ -2395,6 +2395,7 @@ export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         // Surfacing the JSON Schema lets the inspector render a SchemaForm
         // instead of falling back to a raw-JSON editor.
         paramsSchema: def.paramsSchema,
+        defaultParams: def.defaultParams,
       }
       addPluginCatalogEntry(catalogEntry)
       registry.nodes.add(prefixed)
@@ -2430,6 +2431,7 @@ export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         desktopOnly: def.desktopOnly,
         pluginId,
         paramsSchema: def.paramsSchema,
+        defaultParams: def.defaultParams,
       })
       registry.triggers.add(prefixed)
       registry.triggerVersions.set(prefixed, def.typeVersion)
