@@ -1044,8 +1044,6 @@ describe("inboundEventToSendContent", () => {
         {
           type: "image",
           url: "ignored",
-          // @ts-expect-error - dataBase64 is an extension field used by adapters
-          //  that surface inline image bytes
           dataBase64: "AAA",
           mimeType: "image/jpeg",
         },

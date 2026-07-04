@@ -69,7 +69,8 @@ class MatrixApiError extends Error {
 
 function mediaName(seg: MatrixMediaChunk["segment"]): string {
   if (seg.type === "file") return seg.name
-  return seg.alt || seg.type
+  if (seg.type === "image") return seg.alt || seg.type
+  return seg.type
 }
 
 function mediaMimeType(seg: MatrixMediaChunk["segment"]): string | undefined {

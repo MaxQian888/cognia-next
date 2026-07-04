@@ -5,17 +5,20 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
+import type { TunnelStatus } from "@/hooks/use-tunnel-status"
 
 const mockCreate = jest.fn().mockResolvedValue({ id: "wxoa-new" })
 const mockUpdate = jest.fn().mockResolvedValue(undefined)
 const mockKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHttpRequest = jest.fn()
 const mockRotated = jest.fn()
-const mockUseTunnelStatus = jest.fn(() => ({
-  url: "https://demo.trycloudflare.com",
-  running: true,
-  loading: false,
-}))
+const mockUseTunnelStatus = jest.fn(
+  (): TunnelStatus => ({
+    url: "https://demo.trycloudflare.com",
+    running: true,
+    loading: false,
+  })
+)
 
 jest.mock("@/lib/db/adapter-instances", () => ({
   createAdapterInstance: (...a: unknown[]) => mockCreate(...a),

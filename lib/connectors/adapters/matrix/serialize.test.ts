@@ -9,6 +9,7 @@ import {
   serializeOutbound,
   serializeReaction,
 } from "./serialize"
+import type { MatrixSendContent, MatrixSerializedContent } from "./serialize"
 
 function req(segments: MessageSegment[], extra: Partial<OutboundRequest> = {}): OutboundRequest {
   return {
@@ -18,6 +19,9 @@ function req(segments: MessageSegment[], extra: Partial<OutboundRequest> = {}): 
     ...extra,
   }
 }
+
+/** Narrow a serialized content to a text send content for assertions. */
+const asSend = (c: MatrixSerializedContent): MatrixSendContent => c as MatrixSendContent
 
 describe("escapeHtml / mdToMatrixHtml", () => {
   it("escapes HTML special chars", () => {
@@ -44,17 +48,17 @@ describe("serializeOutbound", () => {
 
   it("renders markdown with an org.matrix.custom.html formatted_body", () => {
     const { contents } = serializeOutbound(req([{ type: "markdown", md: "**hey**" }]))
-    expect(contents[0].format).toBe("org.matrix.custom.html")
-    expect(contents[0].formatted_body).toBe("<strong>hey</strong>")
-    expect(contents[0].body).toBe("**hey**")
+    expect(asSend(contents[0]).format).toBe("org.matrix.custom.html")
+    expect(asSend(contents[0]).formatted_body).toBe("<strong>hey</strong>")
+    expect(asSend(contents[0]).body).toBe("**hey**")
   })
 
   it("renders a mention with m.mentions + matrix.to link", () => {
     const { contents } = serializeOutbound(
       req([{ type: "mention", userId: "@u:s", displayName: "U" }])
     )
-    expect(contents[0]["m.mentions"]).toEqual({ user_ids: ["@u:s"] })
-    expect(contents[0].formatted_body).toContain('href="https://matrix.to/#/%40u%3As"')
+    expect(asSend(contents[0])["m.mentions"]).toEqual({ user_ids: ["@u:s"] })
+    expect(asSend(contents[0]).formatted_body).toContain('href="https://matrix.to/#/%40u%3As"')
   })
 
   it("emits media chunks instead of degrading media to link text", () => {
@@ -71,14 +75,14 @@ describe("serializeOutbound", () => {
     const { contents } = serializeOutbound(
       req([{ type: "text", text: "re" }], { replyTo: { messageId: "$orig" } })
     )
-    expect(contents[0]["m.relates_to"]).toEqual({ "m.in_reply_to": { event_id: "$orig" } })
+    expect(asSend(contents[0])["m.relates_to"]).toEqual({ "m.in_reply_to": { event_id: "$orig" } })
   })
 
   it("applies a thread relation with fallback in-reply-to", () => {
     const { contents } = serializeOutbound(
       req([{ type: "text", text: "t" }], { threadId: "$root" })
     )
-    expect(contents[0]["m.relates_to"]).toMatchObject({
+    expect(asSend(contents[0])["m.relates_to"]).toMatchObject({
       rel_type: "m.thread",
       event_id: "$root",
       is_falling_back: true,
@@ -104,9 +108,9 @@ describe("serializeOutbound", () => {
       is_falling_back: true,
       "m.in_reply_to": { event_id: "$root" },
     }
-    expect(contents[0]["m.relates_to"]).toMatchObject(rel)
+    expect(asSend(contents[0])["m.relates_to"]).toMatchObject(rel)
     expect(contents[1]).toMatchObject({ kind: "media", relatesTo: rel })
-    expect(contents[2]["m.relates_to"]).toMatchObject(rel)
+    expect(asSend(contents[2])["m.relates_to"]).toMatchObject(rel)
   })
 
   it("applies a plain reply relation to the first chunk even when it is media", () => {
@@ -123,7 +127,7 @@ describe("serializeOutbound", () => {
       kind: "media",
       relatesTo: { "m.in_reply_to": { event_id: "$orig" } },
     })
-    expect(contents[1]["m.relates_to"]).toBeUndefined()
+    expect(asSend(contents[1])["m.relates_to"]).toBeUndefined()
   })
 
   it("serializeMediaLinkFallback renders the pre-upload link line", () => {
@@ -149,13 +153,13 @@ describe("serializeOutbound", () => {
       req([{ type: "a2ui", surfaceId: "surf-1", content, plainTextMirror: "Choose: Yes / No" }])
     )
     expect(a2uiBinding).toEqual({ surfaceId: "surf-1" })
-    expect(contents[0].format).toBe("org.matrix.custom.html")
-    expect(contents[0].formatted_body).toContain("<strong>Choose</strong>")
-    expect(contents[0].formatted_body).toContain("1. <strong>Yes</strong>")
-    expect(contents[0].formatted_body).toContain("2. <strong>No</strong>")
-    expect(contents[0].formatted_body).toContain("Reply to this message")
+    expect(asSend(contents[0]).format).toBe("org.matrix.custom.html")
+    expect(asSend(contents[0]).formatted_body).toContain("<strong>Choose</strong>")
+    expect(asSend(contents[0]).formatted_body).toContain("1. <strong>Yes</strong>")
+    expect(asSend(contents[0]).formatted_body).toContain("2. <strong>No</strong>")
+    expect(asSend(contents[0]).formatted_body).toContain("Reply to this message")
     // Mirror is the plain-text fallback body.
-    expect(contents[0].body).toBe("Choose: Yes / No")
+    expect(asSend(contents[0]).body).toBe("Choose: Yes / No")
   })
 
   it("does not bind a non-interactive A2UI surface", () => {
@@ -168,7 +172,7 @@ describe("serializeOutbound", () => {
       req([{ type: "a2ui", surfaceId: "s", content, plainTextMirror: "just text" }])
     )
     expect(a2uiBinding).toBeUndefined()
-    expect(contents[0].formatted_body).toContain("just text")
+    expect(asSend(contents[0]).formatted_body).toContain("just text")
   })
 
   it("flushes buffered text before an A2UI surface (preserves order)", () => {
@@ -184,8 +188,8 @@ describe("serializeOutbound", () => {
       ])
     )
     expect(contents).toHaveLength(2)
-    expect(contents[0].body).toBe("intro")
-    expect(contents[1].body).toBe("card")
+    expect(asSend(contents[0]).body).toBe("intro")
+    expect(asSend(contents[1]).body).toBe("card")
   })
 })
 
