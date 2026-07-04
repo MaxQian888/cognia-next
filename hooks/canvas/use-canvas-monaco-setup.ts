@@ -66,8 +66,10 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
   // editor actions (the effect below keys off this value).
   const keybindings = useKeybindingStore((s) => s.bindings)
   const themePref = useCanvasSettingsStore((s) => s.settings.theme)
+  const highContrast = useCanvasSettingsStore((s) => s.settings.accessibility.highContrast)
   const { resolvedTheme } = useTheme()
 
+  const monacoLink = useSettingsStore((s) => s.monacoLink)
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
   const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
@@ -139,40 +141,60 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
     [opts.documentId, opts.sessionId, opts.language, opts.initialContent]
   )
 
-  // Sync the cognia-active Monaco theme from the live appearance palette so
-  // editors paint with the user's chosen colors. Registration is idempotent;
-  // re-running on any appearance change just overwrites the existing entry.
-  useEffect(() => {
-    const monaco = monacoRef.current
-    if (!monaco) return
-    if (!resolvedTheme) return
-    const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
-    const resolved = resolveActiveThemeColors({
-      colorTheme: appearanceColorTheme,
-      resolvedTheme: variant,
-      activeCustomThemeId: appearanceActiveCustomThemeId,
-      customThemes: appearanceCustomThemes,
-    })
-    try {
-      syncCogniaActiveTheme(monaco, resolved.colors, variant)
-    } catch (err) {
-      loggers.canvas.warn("cognia-active monaco theme sync failed", { err: String(err) })
-    }
-  }, [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes])
+  // Single source of truth for the Monaco theme id. Resolves the same way the
+  // panel used to (and no longer does), so there is exactly one writer of
+  // `monaco.editor.setTheme` — the dual-write between the panel's `theme` prop
+  // and this hook was the cause of the editor/app theme disagreeing.
+  //
+  //   1. High contrast (accessibility) overrides everything.
+  //   2. An app-level lock (Settings → Appearance → Advanced) pins a base theme.
+  //   3. An explicit per-canvas pick (vs / monokai / …) wins next.
+  //   4. Linking off → stock `vs-dark`, standalone from the app theme.
+  //   5. Otherwise → the cognia-active theme derived from the live app palette,
+  //      so "auto" actually matches the user's chosen colors instead of the
+  //      generic VS Code light/dark defaults.
+  const resolvedThemeId = useMemo(() => {
+    if (highContrast) return resolvedTheme === "dark" ? "hc-black" : "hc-light"
+    if (monacoLink.lockedThemeId) return monacoLink.lockedThemeId
+    if (themePref && themePref !== "auto") return themePref
+    if (!monacoLink.enabled) return "vs-dark"
+    return COGNIA_ACTIVE_THEME_ID
+  }, [highContrast, monacoLink, themePref, resolvedTheme])
 
-  // Track the Monaco theme name. An explicit user pick (vs / monokai / etc.)
-  // always wins; otherwise we fall back to the cognia-active theme so the
-  // canvas reflects the active appearance palette instead of stock VS Code.
+  // Apply the resolved theme. When the target is cognia-active we (re)build it
+  // from the current appearance palette + light/dark variant first, because the
+  // theme id stays "cognia-active" across a light↔dark flip — Monaco only
+  // repaints on a `setTheme` call, so redefining alone wouldn't refresh it.
   useEffect(() => {
     const monaco = monacoRef.current
-    if (!monaco) return
-    const target = themePref && themePref !== "auto" ? themePref : COGNIA_ACTIVE_THEME_ID
-    try {
-      monaco.editor.setTheme(target)
-    } catch {
-      // Theme not registered yet — registry registers built-ins on mount.
+    if (!monaco || !resolvedTheme) return
+    if (resolvedThemeId === COGNIA_ACTIVE_THEME_ID) {
+      const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
+      const resolved = resolveActiveThemeColors({
+        colorTheme: appearanceColorTheme,
+        resolvedTheme: variant,
+        activeCustomThemeId: appearanceActiveCustomThemeId,
+        customThemes: appearanceCustomThemes,
+      })
+      try {
+        syncCogniaActiveTheme(monaco, resolved.colors, variant)
+      } catch (err) {
+        loggers.canvas.warn("cognia-active monaco theme sync failed", { err: String(err) })
+      }
     }
-  }, [themePref, resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId])
+    try {
+      monaco.editor.setTheme(resolvedThemeId)
+    } catch {
+      // Theme not registered yet — registry registers built-ins on mount and
+      // the panel's `theme` prop re-applies once it is.
+    }
+  }, [
+    resolvedThemeId,
+    resolvedTheme,
+    appearanceColorTheme,
+    appearanceActiveCustomThemeId,
+    appearanceCustomThemes,
+  ])
 
   // Tear the workbench down when the editor unmounts OR when the
   // surface identity (documentId/sessionId) changes. The workbench's
@@ -210,5 +232,7 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
     editorOptions,
     settings,
     diagnostics,
+    /** Single-writer Monaco theme id — pass straight to the editor `theme` prop. */
+    resolvedThemeId,
   }
 }

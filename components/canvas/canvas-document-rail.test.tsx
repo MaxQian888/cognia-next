@@ -158,6 +158,30 @@ describe("CanvasDocumentRail", () => {
     expect(screen.getByText("typescript")).toBeInTheDocument()
   })
 
+  it("switches to a flat file-list view showing name.ext when the Files toggle is clicked", async () => {
+    act(() => {
+      useArtifactStore.getState().createCanvasDocument({
+        title: "Report",
+        content: "",
+        language: "python",
+        type: "code",
+      })
+    })
+    const user = userEvent.setup()
+    renderWithProviders(<CanvasDocumentRail />)
+    // Default (grouped) view shows the bare title + a language badge.
+    expect(screen.getByText("Report")).toBeInTheDocument()
+    expect(screen.getByText("python")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /^Files$/i }))
+
+    // File-list view shows the filename with extension and drops the badge.
+    expect(screen.getByText("Report.py")).toBeInTheDocument()
+    expect(screen.queryByText("Report")).not.toBeInTheDocument()
+    expect(screen.queryByText("python")).not.toBeInTheDocument()
+    expect(useCanvasLayoutStore.getState().railViewMode).toBe("files")
+  })
+
   describe("Sidebar primitive migration", () => {
     it("renders SidebarHeader / SidebarContent / SidebarGroup structural slots", () => {
       const { container } = renderWithProviders(<CanvasDocumentRail />)

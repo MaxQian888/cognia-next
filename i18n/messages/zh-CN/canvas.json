@@ -253,5 +253,8 @@
   "versionHistory": "版本历史",
   "versionPreview": "版本预览",
   "viewDiff": "查看差异",
+  "viewFiles": "文件列表",
+  "viewGrouped": "最近",
+  "viewMode": "视图模式",
   "yesterday": "昨天"
 }

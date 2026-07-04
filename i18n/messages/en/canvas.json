@@ -253,5 +253,8 @@
   "versionHistory": "Version history",
   "versionPreview": "Version preview",
   "viewDiff": "View diff",
+  "viewFiles": "Files",
+  "viewGrouped": "Recent",
+  "viewMode": "View mode",
   "yesterday": "Yesterday"
 }

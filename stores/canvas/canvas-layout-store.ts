@@ -12,6 +12,9 @@ import { persist } from "zustand/middleware"
 
 export type CanvasRightTab = "suggestions" | "history" | "comments" | "collaboration" | "execution"
 
+/** Left-rail presentation: time-grouped buckets vs a flat filename.ext list. */
+export type CanvasRailViewMode = "grouped" | "files"
+
 export interface CanvasLayoutState {
   leftSize: number
   centerSize: number
@@ -19,6 +22,8 @@ export interface CanvasLayoutState {
   leftCollapsed: boolean
   rightCollapsed: boolean
   activeRightTab: CanvasRightTab
+  /** How the document rail lists documents (see CanvasRailViewMode). */
+  railViewMode: CanvasRailViewMode
   mobileLeftOpen: boolean
   mobileRightOpen: boolean
   /** Bumped on migrate / reset so ResizablePanelGroup remounts with new defaults. */
@@ -32,6 +37,7 @@ export interface CanvasLayoutState {
   setLeftCollapsed: (collapsed: boolean) => void
   setRightCollapsed: (collapsed: boolean) => void
   setActiveRightTab: (tab: CanvasRightTab) => void
+  setRailViewMode: (mode: CanvasRailViewMode) => void
   setMobileLeftOpen: (open: boolean) => void
   setMobileRightOpen: (open: boolean) => void
   resetLayout: () => void
@@ -47,6 +53,7 @@ interface PersistedCanvasLayoutState {
   leftCollapsed: boolean
   rightCollapsed: boolean
   activeRightTab: CanvasRightTab
+  railViewMode: CanvasRailViewMode
   layoutVersion: number
   pinnedDocIds: string[]
 }
@@ -58,6 +65,7 @@ export const CANVAS_LAYOUT_DEFAULTS = {
   leftCollapsed: false,
   rightCollapsed: false,
   activeRightTab: "suggestions" as CanvasRightTab,
+  railViewMode: "grouped" as CanvasRailViewMode,
   layoutVersion: 0,
   pinnedDocIds: new Set<string>(),
 }
@@ -116,6 +124,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
       setLeftCollapsed: (collapsed) => set({ leftCollapsed: collapsed }),
       setRightCollapsed: (collapsed) => set({ rightCollapsed: collapsed }),
       setActiveRightTab: (tab) => set({ activeRightTab: tab }),
+      setRailViewMode: (mode) => set({ railViewMode: mode }),
       setMobileLeftOpen: (open) => set({ mobileLeftOpen: open }),
       setMobileRightOpen: (open) => set({ mobileRightOpen: open }),
       resetLayout: () =>
@@ -154,6 +163,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
         leftCollapsed: state.leftCollapsed,
         rightCollapsed: state.rightCollapsed,
         activeRightTab: state.activeRightTab,
+        railViewMode: state.railViewMode,
         layoutVersion: state.layoutVersion,
         pinnedDocIds: [...state.pinnedDocIds],
       }),

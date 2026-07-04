@@ -14,7 +14,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
-import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import {
   Save,
@@ -51,7 +50,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useSettingsStore } from "@/stores/settings"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { useCanvasMonacoSetup } from "@/hooks/canvas/use-canvas-monaco-setup"
 import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
@@ -130,29 +128,13 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // Feature-flag gate: `canvas.aiWorkbench.v1` (env / localStorage override).
   // When off, the AI action toolbar items and the Ctrl+K palette are hidden.
   const aiWorkbenchEnabled = useCanvasFeatureFlag("canvas.aiWorkbench.v1")
-  const { resolvedTheme } = useTheme()
   const accessibility = useCanvasSettingsStore((s) => s.settings.accessibility)
   const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
-  const monacoLink = useSettingsStore((s) => s.monacoLink)
-  // Monaco accepts only specific theme ids ("vs", "vs-dark", etc).
-  // Resolve "auto" to vs / vs-dark via the next-themes resolved theme
-  // so we never pass an unknown id at first render. The hook's effect
-  // re-applies on changes; this prevents an initial flash.
-  const resolvedMonacoTheme = useMemo(() => {
-    // High contrast is an accessibility need — it overrides every other theme
-    // source (app lock, per-canvas pick, linking) so the user always gets the
-    // maximal-contrast Monaco palette matching the light/dark side they're on.
-    if (accessibility.highContrast) return resolvedTheme === "dark" ? "hc-black" : "hc-light"
-    // App-level Monaco linking (Settings → Appearance → Advanced). A lock pins
-    // Monaco to a base theme regardless of the app theme; otherwise the
-    // per-canvas setting wins, and an "auto" canvas theme follows the app theme
-    // only while linking is enabled (else it stays standalone on vs-dark).
-    if (monacoLink.lockedThemeId) return monacoLink.lockedThemeId
-    const theme = monacoSetup.settings.theme
-    if (theme && theme !== "auto") return theme
-    if (!monacoLink.enabled) return "vs-dark"
-    return resolvedTheme === "dark" ? "vs-dark" : "vs"
-  }, [accessibility.highContrast, monacoLink, monacoSetup.settings.theme, resolvedTheme])
+  // Single-writer Monaco theme id, resolved inside the setup hook (the hook is
+  // the only caller of `monaco.editor.setTheme`). Passing it to the `theme` prop
+  // too just avoids a first-paint flash — both agree, so the editor now tracks
+  // the app palette / light-dark / high-contrast state instead of fighting it.
+  const resolvedMonacoTheme = monacoSetup.resolvedThemeId
 
   // Drop the stale Monaco handle when the viewport flips to mobile (the
   // light editor renders instead) so consumers take their fallback paths.

@@ -97,7 +97,13 @@ export function buildCogniaActiveEditorTheme(
     matchingBracket: withAlpha(primary, "33"),
     findMatch: withAlpha(accent, "55"),
     findMatchHighlight: withAlpha(accent, "33"),
-    minimap: bg,
+    // The minimap is a <canvas> whose clear color is `minimap.background`; CSS
+    // cannot make its pixels transparent. Clearing it to a fully-transparent
+    // form of the editor background lets a canvas wallpaper show through the
+    // minimap the same way the CSS override does for the main editor. Without a
+    // wallpaper this is visually identical — the editor background painted
+    // behind the minimap is the same `bg`.
+    minimap: withAlpha(bg, "00"),
     minimapSlider: withAlpha(mutedFg, "55"),
   }
 

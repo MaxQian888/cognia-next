@@ -466,6 +466,114 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot
 }
 
 /* ----------------------------------------------------------------------
+   Editor wallpaper pass-through.
+
+   Monaco (desktop canvas) and CodeMirror (mobile canvas) paint an opaque
+   editor background that would completely hide a wallpaper. When one targets
+   the canvas surface (scope canvas / all / global), drop the editor + gutter
+   background to transparent so the image shows through behind the code. The
+   syntax colors, cursor, and selection still come from the active theme, so
+   this composes with the theme fix rather than replacing it.
+
+   Monaco reads its surface color from the `--vscode-*-background` custom
+   properties in recent builds; the concrete `.monaco-editor-background` /
+   `.margin` overrides (with `!important`) cover the generated stylesheet that
+   older builds emit. Minimap is a <canvas> and can't go transparent via CSS —
+   it stays off by default so this is a non-issue in practice.
+---------------------------------------------------------------------- */
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor {
+  --vscode-editor-background: transparent;
+  --vscode-editorGutter-background: transparent;
+  --vscode-editorStickyScroll-background: transparent;
+  --vscode-breadcrumb-background: transparent;
+  --vscode-minimap-background: transparent;
+  --vscode-editorOverviewRuler-background: transparent;
+  --vscode-scrollbar-shadow: transparent;
+}
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .margin,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .margin,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .margin,
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .cm-gutters,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .cm-gutters,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .cm-gutters {
+  background-color: transparent !important;
+}
+/* Minimap container + scrollbar/overview surfaces. The minimap and overview
+   ruler are <canvas> elements — their pixels clear to `minimap.background` /
+   `editorOverviewRuler.background`, handled by the cognia-active theme above;
+   these rules zero the surrounding DOM boxes so no opaque strip frames them. */
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .minimap,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .scrollbar,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .minimap,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .scrollbar,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .minimap,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .scrollbar {
+  background-color: transparent !important;
+}
+/* Kill the scroll shadows Monaco paints at the scrolled edges — they read as
+   opaque dark bars over a wallpaper. The translucent scrollbar slider itself
+   (theme `scrollbarSlider.background`, alpha 55) stays, so the handle is still
+   visible against the image. */
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .scrollbar
+  .shadow,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .scrollbar
+  .shadow,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .scrollbar
+  .shadow {
+  box-shadow: none !important;
+}
+
+/* ----------------------------------------------------------------------
    Text-protection scrim.
 
    When a low-opacity image wallpaper is active, BackgroundApplier sets

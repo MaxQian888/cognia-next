@@ -6,6 +6,7 @@ import { act, renderHook } from "@testing-library/react"
 const settingsRef = {
   settings: {
     theme: "auto" as string,
+    accessibility: { highContrast: false },
   },
   getEditorOptions: () => ({ fontSize: 14 }),
 }
@@ -22,8 +23,15 @@ jest.mock("@/stores", () => ({
       colorTheme: string
       activeCustomThemeId: string | null
       customThemes: unknown[]
+      monacoLink: { enabled: boolean; lockedThemeId?: string }
     }) => T
-  ): T => selector({ colorTheme: "default", activeCustomThemeId: null, customThemes: [] }),
+  ): T =>
+    selector({
+      colorTheme: "default",
+      activeCustomThemeId: null,
+      customThemes: [],
+      monacoLink: { enabled: true },
+    }),
 }))
 
 jest.mock("next-themes", () => ({
@@ -84,6 +92,18 @@ describe("useCanvasMonacoSetup", () => {
     expect(result.current.editorOptions).toEqual({ fontSize: 14 })
     expect(result.current.editorRef).toBeDefined()
     expect(result.current.monacoRef).toBeDefined()
+  })
+
+  it("resolves an 'auto' + linked theme to the cognia-active id (matches the app palette)", () => {
+    settingsRef.settings.theme = "auto"
+    const { result } = renderHook(() => useCanvasMonacoSetup())
+    expect(result.current.resolvedThemeId).toBe("cognia-active")
+  })
+
+  it("passes an explicit theme pick through unchanged", () => {
+    settingsRef.settings.theme = "monokai"
+    const { result } = renderHook(() => useCanvasMonacoSetup())
+    expect(result.current.resolvedThemeId).toBe("monokai")
   })
 
   it("onMount registers snippets, canvas editor keybindings, and mounts the workbench", () => {
