@@ -88,6 +88,13 @@ jest.mock("@/lib/twin/runtime", () => ({
   applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
 }))
 
+// Project-scoped RAG (workspace knowledge base) — dynamically imported by
+// resolveSendOptions. Mock so we can drive the injected section deterministically.
+const mApplyProjectKnowledge = jest.fn()
+jest.mock("@/lib/project-knowledge/runtime/apply-project-context", () => ({
+  applyProjectKnowledgeContext: (...args: unknown[]) => mApplyProjectKnowledge(...args),
+}))
+
 // skills-bridge is dynamically imported by resolveSendOptions when a character
 // has pluginSkillIds. Mock it so we can drive the anthropic-managed (container)
 // skill path deterministically.
@@ -3853,5 +3860,90 @@ describe("resolveSendOptions — IM prompt-fragment memos", () => {
     const second = await resolveSendOptions({ session: capSession(), imAdapterRow })
     // The lark.* tool allowlist is identical across turns (manifest memo hit).
     expect(second.allowedTools).toEqual(first.allowedTools)
+  })
+})
+
+describe("resolveSendOptions — project knowledge base (project-scoped RAG)", () => {
+  function projectWithKb(overrides: Partial<Project> = {}): Project {
+    return {
+      id: "ws1",
+      name: "WS",
+      roots: [],
+      knowledgeBase: [
+        {
+          id: "f1",
+          name: "guide.md",
+          type: "text",
+          content: "x",
+          size: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+      ...overrides,
+    } as Project
+  }
+
+  const deps = { store: {}, embedding: {} } as never
+
+  it("appends a project-knowledge section after the base prompt (does not replace it)", async () => {
+    mApplyProjectKnowledge.mockResolvedValue({
+      systemPromptSection: "## Project knowledge base\nchunk text",
+      retrievedChunks: [{ fileId: "f1", fileName: "guide.md", content: "chunk text", score: 0.9 }],
+      degraded: false,
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb(),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(opts.systemPrompt).toContain("base prompt")
+    expect(opts.systemPrompt).toContain("## Project knowledge base")
+    expect(opts.systemPrompt!.indexOf("base prompt")).toBeLessThan(
+      opts.systemPrompt!.indexOf("## Project knowledge base")
+    )
+    expect(opts.projectKnowledgeContext?.retrievedChunks).toHaveLength(1)
+    expect(opts.projectKnowledgeContext?.degraded).toBe(false)
+  })
+
+  it("skips when the workspace has no knowledge files", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb({ knowledgeBase: [] }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+    expect(opts.systemPrompt).not.toContain("## Project knowledge base")
+  })
+
+  it("skips when project RAG is disabled for the workspace", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb({ knowledgeSettings: { enableProjectRag: false } }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+  })
+
+  it("skips when no project-knowledge deps are supplied", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb(),
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
   })
 })

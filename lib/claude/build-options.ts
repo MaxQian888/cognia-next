@@ -65,6 +65,7 @@ import type {
 import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
+import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
@@ -418,6 +419,23 @@ export interface BuildOptionsContext {
    * other. Ignored when `memoryDeps` is missing.
    */
   memoryUserMessage?: string
+  /**
+   * Optional project-scoped RAG dependencies (workspace knowledge base). When
+   * supplied AND `projectKnowledgeUserMessage` is set AND the active workspace
+   * (`activeProject`) has knowledge files AND project RAG is enabled,
+   * `resolveSendOptions` invokes `applyProjectKnowledgeContext` and APPENDS a
+   * "Project knowledge base" section — coexisting with, never replacing, the Twin
+   * / Memory sections. Reuses the twin deps shape (built by
+   * `tryBuildProjectKnowledgeDeps`, which shares the twin vector store). Undefined
+   * → project knowledge injection skipped.
+   */
+  projectKnowledgeDeps?: TwinRuntimeDepsForBuild
+  /**
+   * The user's current message text for project-knowledge retrieval. Usually the
+   * same value as `twinUserMessage`; kept separate so a caller can drive one
+   * without the other. Ignored when `projectKnowledgeDeps` is missing.
+   */
+  projectKnowledgeUserMessage?: string
   /**
    * Per-message ephemeral skill ids unioned with the active character's
    * `skillIds`. The composer's SkillPicker drives this; the chat send hook
@@ -1397,6 +1415,58 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // --- Project knowledge base injection (project-scoped RAG) ---------------
+  // When `projectKnowledgeDeps` + `projectKnowledgeUserMessage` are supplied and
+  // the active workspace has knowledge files (and project RAG is enabled),
+  // retrieve the most relevant chunks and APPEND a "Project knowledge base"
+  // section. Coexists with the Twin (persona) + Memory (user facts) sections —
+  // it never replaces `baseSystem`. The runtime never throws; failures degrade
+  // silently. Query-dependent, so it rides the dynamic tail under cache
+  // optimization (like memory) to stay out of the cacheable prefix.
+  let projectKnowledgeSection = ""
+  if (
+    ctx.projectKnowledgeDeps &&
+    ctx.projectKnowledgeUserMessage &&
+    ctx.projectKnowledgeUserMessage.trim() &&
+    ctx.activeProject &&
+    (ctx.activeProject.knowledgeBase?.length ?? 0) > 0
+  ) {
+    const knowledgeSettings = resolveProjectKnowledgeSettings(ctx.activeProject.knowledgeSettings)
+    if (knowledgeSettings.enableProjectRag) {
+      try {
+        const { applyProjectKnowledgeContext } =
+          await import("@/lib/project-knowledge/runtime/apply-project-context")
+        const fileNames: Record<string, string> = {}
+        for (const f of ctx.activeProject.knowledgeBase ?? []) fileNames[f.id] = f.name
+        const result = await applyProjectKnowledgeContext({
+          projectId: ctx.activeProject.id,
+          userMessage: ctx.projectKnowledgeUserMessage,
+          topK: knowledgeSettings.ragTopK,
+          precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
+          fileNames,
+          deps: ctx.projectKnowledgeDeps as Parameters<
+            typeof applyProjectKnowledgeContext
+          >[0]["deps"],
+        })
+        if (result.systemPromptSection) {
+          if (cacheOptimizationEnabled) {
+            dynamicTailSections.push(result.systemPromptSection)
+          } else {
+            projectKnowledgeSection = result.systemPromptSection
+          }
+        }
+        if (result.retrievedChunks.length > 0 || result.degraded) {
+          opts.projectKnowledgeContext = {
+            retrievedChunks: result.retrievedChunks,
+            degraded: result.degraded,
+          }
+        }
+      } catch {
+        // Project-knowledge runtime failure is non-fatal — keep the prompt as-is.
+      }
+    }
+  }
+
   // --- Working directory ---------------------------------------------------
   // Priority: per-session override → active workspace root → character default
   // → app default. The active workspace sits above the character default
@@ -1530,6 +1600,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     personaSection,
     instructionSection,
     memorySection,
+    projectKnowledgeSection,
     modeSection,
     skillSection,
     pluginSkillSection,

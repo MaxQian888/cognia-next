@@ -40,6 +40,7 @@ import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { WorkflowRuntimeProvider } from "@/components/providers/workflow-runtime-provider"
 import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
+import { ProjectKnowledgeWorkerInitializer } from "@/components/shell/project-kb-worker-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
 import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
@@ -206,6 +207,10 @@ export default async function RootLayout({
                          * no-op; the inbound cache still seeds). */}
                         <WorkflowRuntimeProvider />
                         <TwinWorkerInitializer />
+                        {/* Keeps each workspace's project-scoped RAG index
+                         * (`projectChunks`) in sync with its `knowledgeBase`.
+                         * No-op when no vector backend is configured. */}
+                        <ProjectKnowledgeWorkerInitializer />
                         {/* Reconnects the isolated provider-routing engine to the
                          * live telemetry/settings stores (health, breaker, spend,
                          * rate, in-flight, session affinity, difficulty + semantic

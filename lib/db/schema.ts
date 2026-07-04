@@ -23,6 +23,7 @@ import type {
   Team,
 } from "@/lib/claude/types"
 import type { Project } from "@/types"
+import type { ProjectChunk } from "@/types/project-knowledge"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type { BackupHistoryRow } from "./backup-history"
 import type { NotificationRecord } from "@/types/notifications"
@@ -2211,6 +2212,20 @@ export class CogniaDB extends Dexie {
     this.version(99).stores({
       gatewayRequestLog: "&id, at, status, model, keyId",
     })
+
+    // v100 — Project-scoped RAG (workspace knowledge base). One row per sliced
+    // chunk of a `Project.knowledgeBase` file, with a pointer into the remote
+    // vector store (collection `cognia_project_{projectId}`). Project-scoped —
+    // listed in `PROJECT_SCOPED_TABLES` so `deleteProjectCascade` drops the
+    // local rows (and a best-effort remote collection drop). Indexes mirror
+    // `twinChunks`: `[projectId+fileId]` for per-file cascade on remove,
+    // `[projectId+createdAt]` for the cheap corpus-version signal. Pure additive
+    // — chunks are derived and repopulate on next ingest. See
+    // `lib/db/project-chunks.ts` + `lib/project-knowledge/`.
+    this.version(100).stores({
+      projectChunks:
+        "&id, projectId, fileId, vectorDocId, [projectId+fileId], [projectId+createdAt]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2221,6 +2236,9 @@ export class CogniaDB extends Dexie {
   syncCursors!: Table<SyncCursorRow, string>
   // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
   projects!: Table<Project, string>
+  // v100 — Project-scoped RAG chunks (workspace knowledge base). See
+  // `lib/db/project-chunks.ts` and `@/types/project-knowledge`.
+  projectChunks!: Table<ProjectChunk, string>
   // v65 — Autonomous long-term memory. See `lib/db/memories.ts`.
   memories!: Table<Memory, string>
   // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.

@@ -13,6 +13,28 @@
     "deleted": "Workspace deleted",
     "description": "A workspace bundles a primary directory and extra mounted folders. The active workspace drives the working directory, the Source Control panel, and the terminal scope.",
     "empty": "No workspaces yet",
+    "knowledge": {
+      "addFile": "Upload files",
+      "backendHint": "Retrieval needs a configured vector backend and embedding model (Twin settings). Without one, ingestion and retrieval are skipped.",
+      "chunkCount": "{count, plural, one {# chunk} other {# chunks}}",
+      "enableRag": "Inject knowledge into chat",
+      "listLabel": "Knowledge files",
+      "pasteText": "Add pasted text",
+      "pasteNamePlaceholder": "Note name (optional)",
+      "pastePlaceholder": "Paste text to add to this workspace's knowledge…",
+      "pastedDefaultName": "Pasted note",
+      "reindex": "Reindex file",
+      "reindexAll": "Reindex all",
+      "removeFile": "Remove file",
+      "status": {
+        "indexed": "Indexed",
+        "outdated": "Outdated",
+        "pending": "Pending"
+      },
+      "summary": "{files, plural, one {# file} other {# files}} · {chunks, plural, one {# chunk} other {# chunks}}",
+      "title": "Knowledge base",
+      "topK": "Chunks per message"
+    },
     "listLabel": "Workspaces",
     "nameLabel": "Name",
     "namePlaceholder": "Workspace name",

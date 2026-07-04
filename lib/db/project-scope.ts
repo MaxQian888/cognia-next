@@ -89,6 +89,10 @@ const PROJECT_SCOPED_TABLES = [
   "connectorDrafts",
   "connectorAudit",
   "conversationOverrides",
+  // v100 — project-scoped RAG chunks (workspace knowledge base). Dropping the
+  // local rows here handles the Dexie side; the remote vector collection is
+  // dropped separately in `deleteProjectCascade` (best-effort, see below).
+  "projectChunks",
 ] as const
 
 /** Child/event tables dropped by parent id (parent collected via its projectId). */
@@ -163,6 +167,34 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
   })
 
   await purgeStoreBuckets(projectId)
+  await purgeProjectVectorCollection(projectId)
+}
+
+/**
+ * Best-effort drop of the workspace's remote vector collection
+ * (`cognia_project_{projectId}`). The Dexie `projectChunks` rows are already
+ * gone (dropped in the cascade transaction above); this removes the vectors
+ * from the configured backend so a deleted workspace doesn't leave the user's
+ * (redacted) content resident in a third-party store — and so a re-created
+ * project reusing the id can't hit stale vectors.
+ *
+ * Never throws: web / offline / an unreachable backend must not block project
+ * deletion. When no vector backend is configured, `tryBuildProjectKnowledgeDeps`
+ * returns `undefined` and this is a no-op. Dynamic import keeps `lib/db` free of
+ * a static dependency on the project-knowledge runtime.
+ */
+async function purgeProjectVectorCollection(projectId: string): Promise<void> {
+  try {
+    const { tryBuildProjectKnowledgeDeps } =
+      await import("@/lib/project-knowledge/runtime/build-deps")
+    const { projectVectorCollectionName } = await import("@/lib/project-knowledge/ingest/persist")
+    const deps = await tryBuildProjectKnowledgeDeps()
+    if (!deps?.store?.deleteCollection) return
+    await deps.store.deleteCollection(projectVectorCollectionName(projectId))
+  } catch {
+    // Non-fatal — the local rows are already dropped; a remote purge failure
+    // must never block workspace deletion.
+  }
 }
 
 /** Best-effort purge of localStorage-backed per-project state. Never throws. */

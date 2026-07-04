@@ -693,6 +693,24 @@ export interface SendOptions {
   }
 
   /**
+   * Project (workspace) knowledge-base context injected this turn (project-scoped
+   * RAG). Set by `resolveSendOptions` when `applyProjectKnowledgeContext`
+   * retrieved any chunks from the active workspace's knowledge files. Mirrors
+   * `twinContext` / `memoryContext` — stashed so the chat hook can render a
+   * "Project knowledge" SourcesPart. Stripped before the SDK call. `degraded` is
+   * true when the runtime failed and fell back to no context.
+   */
+  projectKnowledgeContext?: {
+    retrievedChunks: Array<{
+      fileId: string
+      fileName?: string
+      content: string
+      score: number
+    }>
+    degraded: boolean
+  }
+
+  /**
    * Agent-trace correlation identifiers — set by the chat hook before the
    * sidecar call so downstream events (tool spans, sub-agent spans,
    * connector callbacks) can attach to the same trace. Both are W3C-style

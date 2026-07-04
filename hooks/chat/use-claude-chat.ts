@@ -1658,6 +1658,12 @@ async function buildSendOptions(
     twinUserMessage: twinHandshake ? userMessage : undefined,
     memoryDeps: memoryHandshake,
     memoryUserMessage: memoryHandshake ? userMessage : undefined,
+    // Project-scoped RAG (workspace knowledge base). Reuses the same twin deps
+    // (shared vector store + embedding); `resolveSendOptions` gates injection on
+    // the active workspace having knowledge files + project RAG enabled. Shares
+    // the turn's query embedding — no extra embed call.
+    projectKnowledgeDeps: twinHandshake,
+    projectKnowledgeUserMessage: twinHandshake ? userMessage : undefined,
     precomputedQueryEmbedding: turnEmbedding,
     // Routing context-window pre-check input (B4): always pass the raw user
     // message (unlike twin/memory it needs no handshake gate).
