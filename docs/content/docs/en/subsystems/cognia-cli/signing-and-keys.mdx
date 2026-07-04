@@ -75,11 +75,14 @@ sequenceDiagram
 `sign` (`cmd_sign.rs:17-59`) defaults the output to `<bundle>.sig`, creates parent directories
 for a custom `--out`, and gates overwrite. `verify` (`cmd_verify.rs`) resolves the public key in
 priority order — explicit `--public-key`, else extracted from the bundle's own `plugin.json`
-(`extract_public_key_from_bundle`, `cmd_verify.rs:111-127`; empty/missing →
+(`extract_public_key_from_bundle`, `cmd_verify.rs`; empty/missing →
 `plugin.json has no author.publicKey; pass --public-key explicitly`). Failures are wrapped with
 the remediation `re-sign the bundle with the matching private key, or pass --public-key
-explicitly`. `--json` emits `{schemaVersion: 1, ok, bundle, signature, publicKey, fingerprint,
-error?}` (`cmd_verify.rs:97-109`).
+explicitly`. `--json` emits `{schemaVersion: 1, ok, action, bundle, signature, publicKey, fingerprint,
+stage?, error?}` (`VerifyJsonPayload`, `cmd_verify.rs`). Successful verification omits `stage`;
+failures set it to `bundle`, `public-key`, `signature`, or `verify`. Local bundle/signature read
+failures, invalid or missing public keys, and signature failures are serialized through the same
+stdout payload, exit non-zero, and keep stderr empty.
 
 <Callout type="warn" title="Verify trusts the bundle's own key by default">
   Without `--public-key`, verification proves *internal consistency* — the bundle was signed by
@@ -97,7 +100,8 @@ error?}` (`cmd_verify.rs:97-109`).
 - size + sorted file table (zip entries with directory entries skipped, or recursive directory
   files with symlinks skipped)
 - embedded `cognia:api-version` — read from the `wasmMain` entry via a tolerant custom-section
-  walk that returns `None` on corruption instead of erroring
+  walk that returns `None` on corruption, missing files, or directory manifests whose `wasmMain`
+  path would escape the selected plugin root
 - signature status. Bundle inputs use sidecar verification; directory inputs report
   `not-applicable` because there are no immutable zip bytes to verify:
 
@@ -109,8 +113,9 @@ error?}` (`cmd_verify.rs:97-109`).
 | `valid` | Ed25519 verifies — reported with public key + fingerprint |
 | `invalid` | verification failed — reason string included |
 
-`--json` mirrors all of it under `{schemaVersion: 1, inputKind, path, sizeBytes, manifest, files[],
-signature{status, publicKey?, fingerprint?, reason?}, wasmApiVersion?}` (`cmd_info.rs:65-173`).
+`--json` mirrors all of it under `{schemaVersion: 1, ok: true, action: "info", inputKind, path,
+sizeBytes, manifest, files[], signature{status, publicKey?, fingerprint?, reason?},
+wasmApiVersion?}` (`cmd_info.rs:65-173`).
 
 ## The release key — three copies, one source
 
@@ -120,7 +125,7 @@ when the desktop app downloads it from GitHub Releases
 
 | Copy | File | Consumer |
 | --- | --- | --- |
-| canonical | `crates/cognia-cli/src/release_key.rs:25` | the CLI (future self-update surface) |
+| canonical | `crates/cognia-cli/src/release_key.rs:25` | `cognia release-key [--json]` and future CLI self-update checks |
 | Rust mirror | `src-tauri/src/cli_bridge/release_key.rs:11` | `download.rs` Ed25519 check (`download.rs:200-309`) |
 | TS mirror | `lib/cli-bridge/embedded-pubkey.ts:13` | renderer display / `isPlaceholderReleaseKey()` |
 
@@ -128,6 +133,20 @@ All three currently hold the all-zero placeholder
 `"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`; `is_placeholder_key()`
 (`release_key.rs:27-30`) lets the downloader **skip Ed25519 (with a logged warning) while still
 enforcing SHA-256**. Publishing a real key flips verification to mandatory with no code change.
+
+`cognia release-key` exposes the canonical copy to operators without reading source files. Human
+output shows the public key, SHA-256 fingerprint, placeholder status, and active signature policy;
+`--json` emits `{schemaVersion, ok, action, publicKey, placeholder, fingerprint, signaturePolicy}`
+for release pipelines and support scripts. `cognia release-verify <artifact> --checksums
+<checksums.txt>` is the offline counterpart to the downloader: SHA-256 is always enforced, and
+once the release key is provisioned it verifies `<artifact>.sig` by default unless `--signature`
+points at a different detached signature file. Use `--artifact-name` when the local path cannot
+infer the release asset name or has been renamed before checking `checksums.txt`; the override
+must be the release asset filename only, not a path or blank string. Its `--json` mode keeps local
+file read errors, missing or invalid artifact names, checksum mismatches, missing checksum entries,
+and signature failures in the same
+`schemaVersion: 1` stdout payload; non-zero exits use the quiet JSON failure path so scripts do not
+need to strip human diagnostics from stderr.
 
 `scripts/release-sync-keys.mjs` keeps the mirrors honest: it regex-extracts the constant from the
 canonical file (`release-sync-keys.mjs:31-39`), rewrites both mirrors (`:41-62`), and in

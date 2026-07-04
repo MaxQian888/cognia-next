@@ -83,6 +83,13 @@ Key mechanics (`src-tauri/src/cli_bridge/download.rs`):
   (`normalize_signature`, `:313-324`); placeholder key ⇒ skip with
   `release signing key is a placeholder; skipping Ed25519 verification (SHA-256 enforced)`;
   real key ⇒ failure aborts the install
+- **offline check** — `cognia release-verify <artifact> --checksums <checksums.txt> [--signature <sig>] [--json]`
+  applies the same checksum and release-key policy without downloading or installing anything.
+  When the release key is real, it reads `<artifact>.sig` by default; `--signature` only overrides
+  that sidecar path. JSON reports both digests, `checksumVerified`, `signatureStatus`, and the
+  release-key fingerprint. Missing local artifact/checksum files are reported through the same JSON
+  payload with `ok: false`, `checksumVerified: false`, `signatureStatus: "not-checked"`, and an
+  actionable `error` string.
 - **install dir** (`:282-291`) — `<app_data>/cognia/cli/<version_label>` (Roaming AppData /
   Application Support / `~/.config`), overridable per call via `targetDir`
 - **extraction** (`extract_tar_gz`, `:154-189`) — gzip + tar walk, **rejects path-traversal

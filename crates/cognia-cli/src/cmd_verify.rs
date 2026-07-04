@@ -17,10 +17,8 @@ pub fn run(
     public_key: Option<String>,
     signature: Option<PathBuf>,
     json: bool,
-    _ui: &mut RuntimeUi,
+    ui: &mut RuntimeUi,
 ) -> Result<()> {
-    let bundle_bytes =
-        std::fs::read(&bundle).with_context(|| format!("read {}", bundle.display()))?;
     let sig_path = signature.unwrap_or_else(|| {
         let mut p = bundle.clone();
         let n = format!(
@@ -32,19 +30,58 @@ pub fn run(
         p.set_file_name(n);
         p
     });
-    let sig_str = std::fs::read_to_string(&sig_path)
-        .with_context(|| format!("read {}", sig_path.display()))?;
+    let bundle_bytes = match std::fs::read(&bundle) {
+        Ok(bytes) => bytes,
+        Err(err) if json => {
+            return emit_json_failure(
+                &bundle,
+                &sig_path,
+                "bundle",
+                None,
+                format!("read {}: {err}", bundle.display()),
+            );
+        }
+        Err(err) => return Err(err).with_context(|| format!("read {}", bundle.display())),
+    };
 
     let pk_b64 = match public_key {
         Some(s) => s,
-        None => extract_public_key_from_bundle(&bundle_bytes)?,
+        None => match extract_public_key_from_bundle(&bundle_bytes) {
+            Ok(public_key) => public_key,
+            Err(err) if json => {
+                return emit_json_failure(&bundle, &sig_path, "public-key", None, err.to_string());
+            }
+            Err(err) => return Err(err),
+        },
+    };
+    let fp = match public_key_fingerprint(&pk_b64) {
+        Ok(fingerprint) => fingerprint,
+        Err(err) if json => {
+            return emit_json_failure(
+                &bundle,
+                &sig_path,
+                "public-key",
+                Some(pk_b64),
+                err.to_string(),
+            );
+        }
+        Err(err) => return Err(err),
+    };
+    let sig_str = match std::fs::read_to_string(&sig_path) {
+        Ok(signature) => signature,
+        Err(err) if json => {
+            return emit_json_failure(
+                &bundle,
+                &sig_path,
+                "signature",
+                Some(pk_b64.clone()),
+                format!("read {}: {err}", sig_path.display()),
+            );
+        }
+        Err(err) => return Err(err).with_context(|| format!("read {}", sig_path.display())),
     };
 
     let verify_outcome = verify_bundle(&pk_b64, &bundle_bytes, sig_str.trim());
-    let fp = match crate::b64_decode(&pk_b64) {
-        Ok(bytes) => fingerprint(&bytes),
-        Err(_) => "<invalid base64>".to_string(),
-    };
 
     match verify_outcome {
         Ok(()) => {
@@ -52,6 +89,8 @@ pub fn run(
                 let payload = VerifyJsonPayload {
                     schema_version: 1,
                     ok: true,
+                    action: "verify",
+                    stage: None,
                     bundle: bundle.display().to_string(),
                     signature: sig_path.display().to_string(),
                     public_key: pk_b64.clone(),
@@ -59,7 +98,7 @@ pub fn run(
                     error: None,
                 };
                 println!("{}", serde_json::to_string_pretty(&payload)?);
-            } else {
+            } else if !ui.flags.quiet {
                 println!(
                     "{}{}",
                     style::success_prefix(),
@@ -77,6 +116,8 @@ pub fn run(
                 let payload = VerifyJsonPayload {
                     schema_version: 1,
                     ok: false,
+                    action: "verify",
+                    stage: Some(classify_verify_failure(&e)),
                     bundle: bundle.display().to_string(),
                     signature: sig_path.display().to_string(),
                     public_key: pk_b64.clone(),
@@ -86,6 +127,7 @@ pub fn run(
                 println!("{}", serde_json::to_string_pretty(&payload)?);
                 // Still error out so the exit code distinguishes pass/fail
                 // for scripts that don't parse the JSON.
+                return Err(crate::JsonFailureExit.into());
             }
             // Wrap with an actionable hint so plain-text consumers get a
             // helpful suggestion line under the cause chain.
@@ -101,6 +143,9 @@ struct VerifyJsonPayload {
     #[serde(rename = "schemaVersion")]
     schema_version: u32,
     ok: bool,
+    action: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stage: Option<&'static str>,
     bundle: String,
     signature: String,
     #[serde(rename = "publicKey")]
@@ -108,6 +153,59 @@ struct VerifyJsonPayload {
     fingerprint: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+fn emit_json_failure(
+    bundle: &PathBuf,
+    signature: &PathBuf,
+    stage: &'static str,
+    public_key: Option<String>,
+    error: String,
+) -> Result<()> {
+    let fingerprint = json_failure_fingerprint(public_key.as_deref());
+    let payload = VerifyJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "verify",
+        stage: Some(stage),
+        bundle: bundle.display().to_string(),
+        signature: signature.display().to_string(),
+        public_key: public_key.unwrap_or_default(),
+        fingerprint,
+        error: Some(error),
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
+}
+
+fn public_key_fingerprint(public_key: &str) -> Result<String> {
+    let bytes = crate::b64_decode(public_key)?;
+    if bytes.len() != 32 {
+        return Err(anyhow!("public key must be 32 bytes (got {})", bytes.len()));
+    }
+    Ok(fingerprint(&bytes))
+}
+
+fn json_failure_fingerprint(public_key: Option<&str>) -> String {
+    let Some(public_key) = public_key else {
+        return "<unavailable>".into();
+    };
+    match crate::b64_decode(public_key) {
+        Ok(bytes) if bytes.len() == 32 => fingerprint(&bytes),
+        Ok(_) => "<invalid public key>".into(),
+        Err(_) => "<invalid base64>".into(),
+    }
+}
+
+fn classify_verify_failure(err: &anyhow::Error) -> &'static str {
+    let message = err.to_string();
+    if message.contains("public key") || message.contains("invalid public key") {
+        "public-key"
+    } else if message.contains("signature must be") || message.contains("decode base64") {
+        "signature"
+    } else {
+        "verify"
+    }
 }
 
 fn extract_public_key_from_bundle(bundle: &[u8]) -> Result<String> {
@@ -210,6 +308,8 @@ mod tests {
         let payload = VerifyJsonPayload {
             schema_version: 1,
             ok: true,
+            action: "verify",
+            stage: None,
             bundle: "bundle.zip".into(),
             signature: "bundle.zip.sig".into(),
             public_key: "pk".into(),
@@ -219,6 +319,7 @@ mod tests {
         let s = serde_json::to_string(&payload).unwrap();
         assert!(s.contains("\"schemaVersion\":1"));
         assert!(s.contains("\"ok\":true"));
+        assert!(s.contains("\"action\":\"verify\""));
         assert!(!s.contains("\"error\""));
     }
 
@@ -227,6 +328,8 @@ mod tests {
         let payload = VerifyJsonPayload {
             schema_version: 1,
             ok: false,
+            action: "verify",
+            stage: Some("verify"),
             bundle: "b.zip".into(),
             signature: "b.zip.sig".into(),
             public_key: "pk".into(),

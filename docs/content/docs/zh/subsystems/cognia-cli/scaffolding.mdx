@@ -54,8 +54,8 @@ flowchart TD
 
 ### 名称校验
 
-`validate_name`（`cmd_new.rs:366-385`）：≤ 64 字符，ASCII 字母数字开头，其后为字母数字
-加 `-`、`_`、`.`。具体失败信息：
+`validate_name`（`cmd_new.rs:366-385`）：≤ 64 字符，以小写 ASCII 字母或数字开头和结尾，
+中间允许小写字母数字加 `-`、`_`、`.`。具体失败信息：
 
 ```text
 plugin name is empty                                       (cmd_new.rs:368)
@@ -63,7 +63,8 @@ plugin name must be ≤ 64 characters                        (cmd_new.rs:371)
 plugin name must be lowercase alphanumeric plus -_. (got `…`)  (cmd_new.rs:382)
 ```
 
-`"0plugin"` 与 `"foo.bar_1"` 通过；`"has space"` 与 `"!banged"` 失败（单元测试位于
+`"0plugin"` 与 `"foo.bar_1"` 通过；`"has space"`、`"!banged"`、`"Uppercase"` 与
+`"trailing-"` 失败（单元测试位于
 `cmd_new.rs:393-404`）。
 
 ## 模板是同级源码目录，于编译期内嵌

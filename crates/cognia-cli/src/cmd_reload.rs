@@ -1,7 +1,7 @@
 //! `cognia plugin reload` - ask the running desktop bridge to hot-reload a plugin.
 
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -23,16 +23,125 @@ struct ReloadResponse {
 }
 
 pub fn run(bundle: Option<PathBuf>, plugin_id: Option<String>, ui: &mut RuntimeUi) -> Result<()> {
-    let endpoint = load_endpoint()?;
-    run_with_endpoint(bundle, plugin_id, &endpoint, ui)
+    let prepared = match prepare_reload_request(bundle.clone(), plugin_id.clone()) {
+        Ok(prepared) => prepared,
+        Err(err) if ui.flags.json => {
+            return emit_json_input_failure(bundle.as_ref(), plugin_id.as_ref(), err.to_string());
+        }
+        Err(err) => return Err(err),
+    };
+    let endpoint = match load_endpoint() {
+        Ok(endpoint) => endpoint,
+        Err(err) if ui.flags.json => {
+            return emit_json_failure("endpoint", &prepared, err.to_string(), Vec::new());
+        }
+        Err(err) => return Err(err),
+    };
+    run_prepared_with_endpoint(prepared, &endpoint, ui)
 }
 
+#[cfg(test)]
 pub fn run_with_endpoint(
     bundle: Option<PathBuf>,
     plugin_id: Option<String>,
     endpoint: &EndpointFile,
-    _ui: &mut RuntimeUi,
+    ui: &mut RuntimeUi,
 ) -> Result<()> {
+    let prepared = prepare_reload_request(bundle, plugin_id)?;
+    run_prepared_with_endpoint(prepared, endpoint, ui)
+}
+
+fn run_prepared_with_endpoint(
+    prepared: PreparedReloadRequest,
+    endpoint: &EndpointFile,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
+    let mut body = serde_json::Map::new();
+    if let Some(input) = &prepared.reload_input {
+        match input.kind {
+            ReloadInputKind::Bundle => body.insert("bundle_path".into(), json!(input.path)),
+            ReloadInputKind::Directory => body.insert("source_dir".into(), json!(input.path)),
+        };
+    }
+    if let Some(id) = &prepared.plugin_id {
+        body.insert("plugin_id".into(), json!(id));
+    }
+
+    let resp: ReloadResponse =
+        match post_json(endpoint, RELOAD_PATH, &serde_json::Value::Object(body)) {
+            Ok(resp) => resp,
+            Err(err) if ui.flags.json => {
+                return emit_json_failure("bridge", &prepared, err.to_string(), Vec::new());
+            }
+            Err(err) => return Err(err),
+        };
+    if !resp.ok {
+        let error = resp.error.unwrap_or_else(|| "<no error message>".into());
+        if ui.flags.json {
+            return emit_json_failure("bridge", &prepared, error, resp.warnings);
+        }
+        bail!("reload rejected by cognia: {}", error);
+    }
+
+    let id = resp
+        .plugin_id
+        .as_deref()
+        .or(prepared.plugin_id.as_deref())
+        .unwrap_or("<unknown id>");
+    if ui.flags.json {
+        let (path, input_kind) = prepared.reload_input_payload_fields();
+        let payload = ReloadJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "reload",
+            plugin_id: id.to_string(),
+            input_kind,
+            path,
+            warnings: resp.warnings,
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else if !ui.flags.quiet {
+        println!(
+            "{}{} {}",
+            style::success_prefix(),
+            style::ok("reloaded"),
+            style::bold(id)
+        );
+        if let Some(input) = &prepared.reload_input {
+            println!("  {}: {}", input.kind.label(), style::dim(&input.path));
+        }
+        for warning in resp.warnings {
+            println!("  {}{}", style::warn_prefix(), warning);
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct PreparedReloadRequest {
+    reload_input: Option<PreparedReloadInput>,
+    plugin_id: Option<String>,
+}
+
+impl PreparedReloadRequest {
+    fn reload_input_payload_fields(&self) -> (Option<String>, Option<&'static str>) {
+        match &self.reload_input {
+            Some(input) => (Some(input.path.clone()), Some(input.kind.label())),
+            None => (None, None),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreparedReloadInput {
+    path: String,
+    kind: ReloadInputKind,
+}
+
+fn prepare_reload_request(
+    bundle: Option<PathBuf>,
+    plugin_id: Option<String>,
+) -> Result<PreparedReloadRequest> {
     let plugin_id = plugin_id
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty());
@@ -46,48 +155,18 @@ pub fn run_with_endpoint(
                 .canonicalize()
                 .with_context(|| format!("resolve {}", path.display()))?;
             let kind = reload_input_kind(&abs)?;
-            Some((abs.to_string_lossy().into_owned(), kind))
+            Some(PreparedReloadInput {
+                path: abs.to_string_lossy().into_owned(),
+                kind,
+            })
         }
         None => None,
     };
 
-    let mut body = serde_json::Map::new();
-    if let Some((path, kind)) = &reload_input {
-        match kind {
-            ReloadInputKind::Bundle => body.insert("bundle_path".into(), json!(path)),
-            ReloadInputKind::Directory => body.insert("source_dir".into(), json!(path)),
-        };
-    }
-    if let Some(id) = &plugin_id {
-        body.insert("plugin_id".into(), json!(id));
-    }
-
-    let resp: ReloadResponse = post_json(endpoint, RELOAD_PATH, &serde_json::Value::Object(body))?;
-    if !resp.ok {
-        bail!(
-            "reload rejected by cognia: {}",
-            resp.error.unwrap_or_else(|| "<no error message>".into())
-        );
-    }
-
-    let id = resp
-        .plugin_id
-        .as_deref()
-        .or(plugin_id.as_deref())
-        .unwrap_or("<unknown id>");
-    println!(
-        "{}{} {}",
-        style::success_prefix(),
-        style::ok("reloaded"),
-        style::bold(id)
-    );
-    if let Some((path, kind)) = reload_input {
-        println!("  {}: {}", kind.label(), style::dim(path));
-    }
-    for warning in resp.warnings {
-        println!("  {}{}", style::warn_prefix(), warning);
-    }
-    Ok(())
+    Ok(PreparedReloadRequest {
+        reload_input,
+        plugin_id,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +196,82 @@ fn reload_input_kind(path: &Path) -> Result<ReloadInputKind> {
         "reload path is neither a file bundle nor a plugin directory: {}",
         path.display()
     )
+}
+
+#[derive(Debug, Serialize)]
+struct ReloadJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    #[serde(rename = "pluginId")]
+    plugin_id: String,
+    #[serde(rename = "inputKind", skip_serializing_if = "Option::is_none")]
+    input_kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReloadFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    #[serde(rename = "pluginId", skip_serializing_if = "Option::is_none")]
+    plugin_id: Option<String>,
+    #[serde(rename = "inputKind", skip_serializing_if = "Option::is_none")]
+    input_kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    error: String,
+    warnings: Vec<String>,
+}
+
+fn emit_json_failure(
+    stage: &'static str,
+    prepared: &PreparedReloadRequest,
+    error: String,
+    warnings: Vec<String>,
+) -> Result<()> {
+    let (path, input_kind) = prepared.reload_input_payload_fields();
+    let payload = ReloadFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "reload",
+        stage,
+        plugin_id: prepared.plugin_id.clone(),
+        input_kind,
+        path,
+        error,
+        warnings,
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
+}
+
+fn emit_json_input_failure(
+    bundle: Option<&PathBuf>,
+    plugin_id: Option<&String>,
+    error: String,
+) -> Result<()> {
+    let payload = ReloadFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "reload",
+        stage: "input",
+        plugin_id: plugin_id
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty()),
+        input_kind: None,
+        path: bundle.map(|path| path.display().to_string()),
+        error,
+        warnings: Vec::new(),
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
 }
 
 #[cfg(test)]
@@ -222,5 +377,66 @@ mod tests {
                 .to_string_lossy()
                 .into_owned()
         );
+    }
+
+    #[test]
+    fn reload_json_payload_is_schema_versioned() {
+        let payload = ReloadJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "reload",
+            plugin_id: "demo".into(),
+            input_kind: Some("bundle"),
+            path: Some("C:/plugins/demo.zip".into()),
+            warnings: vec!["hot reload complete".into()],
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["action"], "reload");
+        assert_eq!(json["pluginId"], "demo");
+        assert_eq!(json["inputKind"], "bundle");
+        assert_eq!(json["path"], "C:/plugins/demo.zip");
+        assert_eq!(json["warnings"][0], "hot reload complete");
+    }
+
+    #[test]
+    fn reload_json_payload_omits_absent_input() {
+        let payload = ReloadJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "reload",
+            plugin_id: "demo".into(),
+            input_kind: None,
+            path: None,
+            warnings: Vec::new(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert!(json.get("inputKind").is_none(), "got: {json}");
+        assert!(json.get("path").is_none(), "got: {json}");
+    }
+
+    #[test]
+    fn reload_failure_json_payload_omits_absent_input() {
+        let payload = ReloadFailureJsonPayload {
+            schema_version: 1,
+            ok: false,
+            action: "reload",
+            stage: "bridge",
+            plugin_id: Some("missing".into()),
+            input_kind: None,
+            path: None,
+            error: "plugin not installed".into(),
+            warnings: Vec::new(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["action"], "reload");
+        assert_eq!(json["stage"], "bridge");
+        assert_eq!(json["pluginId"], "missing");
+        assert_eq!(json["error"], "plugin not installed");
+        assert!(json.get("inputKind").is_none(), "got: {json}");
+        assert!(json.get("path").is_none(), "got: {json}");
     }
 }

@@ -9,7 +9,7 @@
 //!
 //! # Connection resolution
 //!
-//! 1. `COGNIA_ACP_URL` + `COGNIA_ACP_TOKEN` env vars, when both set —
+//! 1. `COGNIA_ACP_URL` + `COGNIA_ACP_TOKEN` env vars, when both non-empty —
 //!    headless / manual override.
 //! 2. Otherwise: discover the running desktop via the CLI bridge
 //!    (`cli-endpoint.json`), then `POST /api/v1/dev/acp/token` to mint a
@@ -35,6 +35,7 @@ use tungstenite::client::IntoClientRequest;
 use tungstenite::{Connector, Message, WebSocket};
 
 use crate::http_client;
+use crate::ui::RuntimeUi;
 
 /// How long the poll loop sleeps in the underlying socket read before
 /// checking the stdin channel again.
@@ -61,7 +62,9 @@ pub(crate) struct ConnectionTarget {
 
 /// Resolve the WS URL + token: env override first, broker second.
 pub(crate) fn resolve_target() -> Result<ConnectionTarget> {
-    let env_url = std::env::var("COGNIA_ACP_URL").ok().filter(|s| !s.is_empty());
+    let env_url = std::env::var("COGNIA_ACP_URL")
+        .ok()
+        .filter(|s| !s.is_empty());
     let env_token = std::env::var("COGNIA_ACP_TOKEN")
         .ok()
         .filter(|s| !s.is_empty());
@@ -70,15 +73,15 @@ pub(crate) fn resolve_target() -> Result<ConnectionTarget> {
         (Some(_), None) => {
             bail!("COGNIA_ACP_URL is set but COGNIA_ACP_TOKEN is missing — set both, or neither")
         }
+        (None, Some(_)) => {
+            bail!("COGNIA_ACP_TOKEN is set but COGNIA_ACP_URL is missing — set both, or neither")
+        }
         _ => {}
     }
 
     let endpoint = http_client::load_endpoint()?;
-    let response: AcpTokenResponse = http_client::post_json(
-        &endpoint,
-        "/api/v1/dev/acp/token",
-        &serde_json::json!({}),
-    )?;
+    let response: AcpTokenResponse =
+        http_client::post_json(&endpoint, "/api/v1/dev/acp/token", &serde_json::json!({}))?;
     if !response.ok {
         bail!(
             "ACP token broker refused: {}",
@@ -113,9 +116,26 @@ pub(crate) fn parse_ws_host(ws_url: &str) -> Result<(String, u16, bool)> {
         bail!("ACP URL must start with ws:// or wss:// (got {ws_url})");
     };
     let authority = rest.split(['/', '?']).next().unwrap_or("");
-    let (host, port_str) = match authority.rsplit_once(':') {
-        Some((h, p)) => (h, p),
-        None => (authority, if is_tls { "443" } else { "80" }),
+    let (host, port_str) = if let Some(after_bracket) = authority.strip_prefix('[') {
+        let (host, rest) = after_bracket
+            .split_once(']')
+            .ok_or_else(|| anyhow!("invalid bracketed IPv6 host in ACP URL {ws_url}"))?;
+        let port = if rest.is_empty() {
+            if is_tls {
+                "443"
+            } else {
+                "80"
+            }
+        } else {
+            rest.strip_prefix(':')
+                .ok_or_else(|| anyhow!("invalid bracketed IPv6 host in ACP URL {ws_url}"))?
+        };
+        (host, port)
+    } else {
+        match authority.rsplit_once(':') {
+            Some((h, p)) => (h, p),
+            None => (authority, if is_tls { "443" } else { "80" }),
+        }
     };
     if host.is_empty() {
         bail!("ACP URL has no host (got {ws_url})");
@@ -136,14 +156,20 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn run() -> Result<()> {
+pub(crate) fn has_explicit_acp_url_override() -> bool {
+    std::env::var("COGNIA_ACP_URL")
+        .ok()
+        .is_some_and(|value| !value.is_empty())
+}
+
+pub fn run(ui: &RuntimeUi) -> Result<()> {
     let target = resolve_target()?;
     let (host, port, is_tls) = parse_ws_host(&target.ws_url)?;
 
     // Certificate verification is skipped below, which is only sound on the
     // loopback path. A broker-issued URL is always loopback; an env-supplied
     // remote URL is the user's own explicit decision.
-    let env_override = std::env::var("COGNIA_ACP_URL").is_ok();
+    let env_override = has_explicit_acp_url_override();
     if !is_loopback_host(&host) && !env_override {
         bail!("refusing non-loopback ACP endpoint {host} (set COGNIA_ACP_URL to override)");
     }
@@ -173,8 +199,11 @@ pub fn run() -> Result<()> {
     let (socket, _response) =
         tungstenite::client_tls_with_config(request, stream, None, Some(connector))
             .context("WebSocket upgrade to the cognia ACP endpoint failed")?;
-    // stdout belongs to the JSON-RPC stream — status goes to stderr only.
-    eprintln!("cognia acp: connected to {host}:{port}; bridging stdio");
+    // stdout belongs to the JSON-RPC stream. Status goes to stderr and is
+    // suppressed by the global --quiet flag.
+    if !ui.flags.quiet {
+        eprintln!("cognia acp: connected to {host}:{port}; bridging stdio");
+    }
 
     pump(socket)
 }
@@ -242,7 +271,9 @@ where
             }
             // tungstenite answers pings internally on the next read/write;
             // nothing to do for control frames.
-            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Binary(_))
+            Ok(Message::Ping(_))
+            | Ok(Message::Pong(_))
+            | Ok(Message::Binary(_))
             | Ok(Message::Frame(_)) => {}
             Ok(Message::Close(_)) => return Ok(()),
             Err(tungstenite::Error::Io(e))
@@ -251,8 +282,9 @@ where
             {
                 // Read-timeout tick — loop back to drain stdin.
             }
-            Err(tungstenite::Error::ConnectionClosed)
-            | Err(tungstenite::Error::AlreadyClosed) => return Ok(()),
+            Err(tungstenite::Error::ConnectionClosed) | Err(tungstenite::Error::AlreadyClosed) => {
+                return Ok(())
+            }
             Err(e) => return Err(anyhow!("ACP WebSocket read failed: {e}")),
         }
     }
@@ -262,7 +294,6 @@ where
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::io::Read;
 
     // ── URL helpers ─────────────────────────────────────────────────────
 
@@ -285,6 +316,14 @@ mod tests {
             ("127.0.0.1".to_string(), 7890, true)
         );
         assert_eq!(
+            parse_ws_host("ws://[::1]:7890/ws/v1/acp").unwrap(),
+            ("::1".to_string(), 7890, false)
+        );
+        assert_eq!(
+            parse_ws_host("wss://[::1]/ws/v1/acp").unwrap(),
+            ("::1".to_string(), 443, true)
+        );
+        assert_eq!(
             parse_ws_host("ws://localhost:8080").unwrap(),
             ("localhost".to_string(), 8080, false)
         );
@@ -294,6 +333,7 @@ mod tests {
         );
         assert!(parse_ws_host("https://x").is_err());
         assert!(parse_ws_host("wss://:123").is_err());
+        assert!(parse_ws_host("wss://[::1]junk/ws/v1/acp").is_err());
         assert!(parse_ws_host("wss://h:notaport/x").is_err());
     }
 
@@ -307,6 +347,26 @@ mod tests {
         assert!(!is_loopback_host("example.com"));
     }
 
+    #[test]
+    fn explicit_acp_url_override_requires_non_empty_url() {
+        let _guard = crate::test_env::lock();
+        let prior_url = std::env::var_os("COGNIA_ACP_URL");
+
+        std::env::remove_var("COGNIA_ACP_URL");
+        assert!(!has_explicit_acp_url_override());
+
+        std::env::set_var("COGNIA_ACP_URL", "");
+        assert!(
+            !has_explicit_acp_url_override(),
+            "empty env vars should not bypass broker-issued loopback checks"
+        );
+
+        std::env::set_var("COGNIA_ACP_URL", "wss://example.com/ws/v1/acp");
+        assert!(has_explicit_acp_url_override());
+
+        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
+    }
+
     // ── Target resolution ───────────────────────────────────────────────
     //
     // Env-var tests mutate process state; each restores what it changes.
@@ -315,11 +375,14 @@ mod tests {
 
     #[test]
     fn resolve_target_prefers_env_override() {
+        let _guard = crate::test_env::lock();
+        let prior_url = std::env::var_os("COGNIA_ACP_URL");
+        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
         std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/v1/acp");
         std::env::set_var("COGNIA_ACP_TOKEN", "tok");
         let target = resolve_target().unwrap();
-        std::env::remove_var("COGNIA_ACP_URL");
-        std::env::remove_var("COGNIA_ACP_TOKEN");
+        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
         assert_eq!(
             target,
             ConnectionTarget {
@@ -331,15 +394,36 @@ mod tests {
 
     #[test]
     fn resolve_target_rejects_url_without_token() {
+        let _guard = crate::test_env::lock();
+        let prior_url = std::env::var_os("COGNIA_ACP_URL");
+        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
         std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/v1/acp");
         std::env::remove_var("COGNIA_ACP_TOKEN");
         let err = resolve_target().unwrap_err();
-        std::env::remove_var("COGNIA_ACP_URL");
+        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
         assert!(err.to_string().contains("COGNIA_ACP_TOKEN"));
     }
 
     #[test]
+    fn resolve_target_rejects_token_without_url() {
+        let _guard = crate::test_env::lock();
+        let prior_url = std::env::var_os("COGNIA_ACP_URL");
+        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
+        std::env::remove_var("COGNIA_ACP_URL");
+        std::env::set_var("COGNIA_ACP_TOKEN", "tok");
+        let err = resolve_target().unwrap_err();
+        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        assert!(err.to_string().contains("COGNIA_ACP_URL"));
+    }
+
+    #[test]
     fn resolve_target_uses_broker_via_cli_bridge() {
+        let _guard = crate::test_env::lock();
+        let prior_url = std::env::var_os("COGNIA_ACP_URL");
+        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
+        let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let server_thread = std::thread::spawn(move || {
@@ -376,7 +460,9 @@ mod tests {
         std::env::remove_var("COGNIA_ACP_TOKEN");
 
         let target = resolve_target().unwrap();
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let _ = server_thread.join();
 
         assert_eq!(target.ws_url, "wss://127.0.0.1:7890/ws/v1/acp");
@@ -385,6 +471,12 @@ mod tests {
 
     #[test]
     fn resolve_target_surfaces_broker_refusal() {
+        let _guard = crate::test_env::lock();
+        let prior_url = std::env::var_os("COGNIA_ACP_URL");
+        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
+        let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
+        std::env::remove_var("COGNIA_ACP_URL");
+        std::env::remove_var("COGNIA_ACP_TOKEN");
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let server_thread = std::thread::spawn(move || {
@@ -411,12 +503,11 @@ mod tests {
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
 
         let err = resolve_target().unwrap_err();
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let _ = server_thread.join();
-        assert!(
-            err.to_string().contains("not running"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("not running"), "got: {err}");
     }
 
     // ── Pump: exercised over an in-memory duplex stream ─────────────────
@@ -433,8 +524,10 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut ws = tungstenite::accept(stream).unwrap();
-            ws.send(Message::Text(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.into()))
-                .unwrap();
+            ws.send(Message::Text(
+                r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.into(),
+            ))
+            .unwrap();
             ws.send(Message::Close(None)).unwrap();
             // Drain until the close handshake completes.
             loop {

@@ -10,10 +10,11 @@
 //!   * `vscode-extension`: build-free Node sidecar extension entry.
 
 use anyhow::{anyhow, bail, Context, Result};
+use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::signing::Keypair;
-use crate::template::{files_for, next_steps, TemplateKind};
+use crate::signing::{fingerprint, Keypair};
+use crate::template::{files_for, next_steps, TemplateFile, TemplateKind};
 use crate::ui::{style, RuntimeUi};
 
 const ID_PATTERN_HINT: &str = "lowercase alphanumeric plus -_.";
@@ -50,16 +51,20 @@ pub fn run(
     with_keygen: Option<bool>,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
-    let answers = collect_answers(
+    let answers = match collect_answers(
         name,
-        dir,
+        dir.clone(),
         kind,
         author,
         author_email,
         description,
         with_keygen,
         ui,
-    )?;
+    ) {
+        Ok(answers) => answers,
+        Err(err) if ui.flags.json => return emit_json_failure("input", dir.as_ref(), err),
+        Err(err) => return Err(err),
+    };
 
     // Run the bare-metal stamp first so we have a manifest file on disk
     // to mutate when the wizard requested an embedded public key.
@@ -67,35 +72,110 @@ pub fn run(
         .dir
         .clone()
         .unwrap_or_else(|| PathBuf::from(&answers.name));
-    stamp(answers.name.clone(), Some(target_dir.clone()), answers.kind)?;
+    let scaffold = match stamp_inner(answers.name.clone(), target_dir.clone(), answers.kind) {
+        Ok(scaffold) => scaffold,
+        Err(err) if ui.flags.json => return emit_json_failure("scaffold", Some(&target_dir), err),
+        Err(err) => return Err(err),
+    };
+    if !ui.flags.json && !ui.flags.quiet {
+        print_scaffold_report(&scaffold);
+    }
 
     // Patch plugin.json with the collected metadata. Template writes a
     // minimal stub; the wizard supplies real values via in-place rewrite
     // so dispatch_plugin doesn't need to thread them all the way down.
-    patch_manifest(&target_dir, &answers)?;
+    if let Err(err) = patch_manifest(&target_dir, &answers) {
+        if ui.flags.json {
+            return emit_json_failure("manifest", Some(&target_dir), err);
+        }
+        return Err(err);
+    }
 
     // Optional: generate a keypair and embed the public key.
+    let mut keygen = NewJsonKeygen {
+        generated: false,
+        private_key_path: None,
+        public_key_path: None,
+        public_key: None,
+        fingerprint: None,
+    };
     if answers.with_keygen {
         let key_dir = target_dir.join(".cognia");
-        std::fs::create_dir_all(&key_dir)
-            .with_context(|| format!("mkdir {}", key_dir.display()))?;
+        if let Err(err) = std::fs::create_dir_all(&key_dir)
+            .with_context(|| format!("mkdir {}", key_dir.display()))
+        {
+            if ui.flags.json {
+                return emit_json_failure("keygen", Some(&target_dir), err);
+            }
+            return Err(err);
+        }
         let kp = Keypair::generate();
-        std::fs::write(key_dir.join("plugin.private.b64"), kp.private_base64())
-            .context("write plugin.private.b64")?;
-        std::fs::write(key_dir.join("plugin.public.b64"), kp.public_base64())
-            .context("write plugin.public.b64")?;
-        embed_public_key(&target_dir, &kp.public_base64())?;
-        println!();
-        println!(
-            "{}embedded author.publicKey ({})",
-            style::success_prefix(),
-            style::dim(&kp.public_base64())
-        );
-        println!(
-            "  {}private key stored at {}",
-            style::dim("·"),
-            style::bold(key_dir.join("plugin.private.b64").display().to_string())
-        );
+        let private_key_path = key_dir.join("plugin.private.b64");
+        let public_key_path = key_dir.join("plugin.public.b64");
+        let public_key = kp.public_base64();
+        let key_fingerprint = fingerprint(&kp.verifying_key.to_bytes());
+        if let Err(err) = std::fs::write(&private_key_path, kp.private_base64())
+            .context("write plugin.private.b64")
+        {
+            if ui.flags.json {
+                return emit_json_failure("keygen", Some(&target_dir), err);
+            }
+            return Err(err);
+        }
+        if let Err(err) =
+            std::fs::write(&public_key_path, &public_key).context("write plugin.public.b64")
+        {
+            if ui.flags.json {
+                return emit_json_failure("keygen", Some(&target_dir), err);
+            }
+            return Err(err);
+        }
+        if let Err(err) = embed_public_key(&target_dir, &public_key) {
+            if ui.flags.json {
+                return emit_json_failure("keygen", Some(&target_dir), err);
+            }
+            return Err(err);
+        }
+        keygen = NewJsonKeygen {
+            generated: true,
+            private_key_path: Some(private_key_path.display().to_string()),
+            public_key_path: Some(public_key_path.display().to_string()),
+            public_key: Some(public_key.clone()),
+            fingerprint: Some(key_fingerprint),
+        };
+        if !ui.flags.json && !ui.flags.quiet {
+            println!();
+            println!(
+                "{}embedded author.publicKey ({})",
+                style::success_prefix(),
+                style::dim(&public_key)
+            );
+            println!(
+                "  {}private key stored at {}",
+                style::dim("·"),
+                style::bold(private_key_path.display().to_string())
+            );
+        }
+    }
+
+    if ui.flags.json {
+        let payload = NewJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "new",
+            plugin_id: answers.name,
+            plugin_type: manifest_plugin_type(answers.kind),
+            template_kind: template_kind_name(answers.kind),
+            directory: scaffold.target_dir.display().to_string(),
+            manifest_path: target_dir.join("plugin.json").display().to_string(),
+            files: scaffold
+                .files
+                .into_iter()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .collect(),
+            keygen,
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
     }
 
     Ok(())
@@ -319,9 +399,17 @@ fn embed_public_key(target_dir: &std::path::Path, pub_b64: &str) -> Result<()> {
 /// Bare-metal stamping: validate name, create target dir, write template
 /// files, print next-steps. Phase 1 keeps this signature stable so existing
 /// tests (which exercise it directly) need no churn.
+#[cfg(test)]
 pub(crate) fn stamp(name: String, dir: Option<PathBuf>, kind: TemplateKind) -> Result<()> {
     validate_name(&name)?;
     let target_dir = dir.unwrap_or_else(|| PathBuf::from(&name));
+    let report = stamp_inner(name, target_dir, kind)?;
+    print_scaffold_report(&report);
+    Ok(())
+}
+
+fn stamp_inner(name: String, target_dir: PathBuf, kind: TemplateKind) -> Result<ScaffoldReport> {
+    validate_name(&name)?;
     if target_dir.exists() {
         let entries = std::fs::read_dir(&target_dir)
             .ok()
@@ -334,33 +422,127 @@ pub(crate) fn stamp(name: String, dir: Option<PathBuf>, kind: TemplateKind) -> R
     std::fs::create_dir_all(&target_dir)
         .with_context(|| format!("create target dir {}", target_dir.display()))?;
 
-    for file in files_for(kind, &name) {
-        let dest = target_dir.join(&file.rel_path);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("mkdir {}", parent.display()))?;
-        }
-        std::fs::write(&dest, file.content.as_bytes())
-            .with_context(|| format!("write {}", dest.display()))?;
+    let files = files_for(kind, &name);
+    let written_files: Vec<PathBuf> = files.iter().map(|file| file.rel_path.clone()).collect();
+    for file in files {
+        write_template_file(&target_dir, file)?;
     }
 
+    Ok(ScaffoldReport {
+        kind,
+        target_dir,
+        files: written_files,
+    })
+}
+
+fn write_template_file(target_dir: &std::path::Path, file: TemplateFile) -> Result<()> {
+    let dest = target_dir.join(&file.rel_path);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
+    }
+    std::fs::write(&dest, file.content.as_bytes())
+        .with_context(|| format!("write {}", dest.display()))?;
+    Ok(())
+}
+
+fn print_scaffold_report(report: &ScaffoldReport) {
     println!(
         "Created {} plugin at {}",
-        match kind {
-            TemplateKind::Wasm => "WASM",
-            TemplateKind::Ts => "frontend TypeScript",
-            TemplateKind::Python => "Python",
-            TemplateKind::Hybrid => "hybrid",
-            TemplateKind::VscodeExtension => "VS Code extension",
-        },
-        target_dir.display()
+        kind_label(report.kind),
+        report.target_dir.display()
     );
     println!();
     println!("Next steps:");
-    for step in next_steps(kind, &target_dir) {
+    for step in next_steps(report.kind, &report.target_dir) {
         println!("  {step}");
     }
-    Ok(())
+}
+
+struct ScaffoldReport {
+    kind: TemplateKind,
+    target_dir: PathBuf,
+    files: Vec<PathBuf>,
+}
+
+fn template_kind_name(kind: TemplateKind) -> &'static str {
+    match kind {
+        TemplateKind::Wasm => "wasm",
+        TemplateKind::Ts => "ts",
+        TemplateKind::Python => "python",
+        TemplateKind::Hybrid => "hybrid",
+        TemplateKind::VscodeExtension => "vscode-extension",
+    }
+}
+
+fn manifest_plugin_type(kind: TemplateKind) -> &'static str {
+    match kind {
+        TemplateKind::Wasm => "wasm",
+        TemplateKind::Ts => "frontend",
+        TemplateKind::Python => "python",
+        TemplateKind::Hybrid => "hybrid",
+        TemplateKind::VscodeExtension => "vscode-extension",
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct NewJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    #[serde(rename = "pluginId")]
+    plugin_id: String,
+    #[serde(rename = "pluginType")]
+    plugin_type: &'static str,
+    #[serde(rename = "templateKind")]
+    template_kind: &'static str,
+    directory: String,
+    #[serde(rename = "manifestPath")]
+    manifest_path: String,
+    files: Vec<String>,
+    keygen: NewJsonKeygen,
+}
+
+#[derive(Debug, Serialize)]
+struct NewFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    directory: Option<String>,
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct NewJsonKeygen {
+    generated: bool,
+    #[serde(rename = "privateKeyPath", skip_serializing_if = "Option::is_none")]
+    private_key_path: Option<String>,
+    #[serde(rename = "publicKeyPath", skip_serializing_if = "Option::is_none")]
+    public_key_path: Option<String>,
+    #[serde(rename = "publicKey", skip_serializing_if = "Option::is_none")]
+    public_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fingerprint: Option<String>,
+}
+
+fn emit_json_failure(
+    stage: &'static str,
+    directory: Option<&PathBuf>,
+    err: anyhow::Error,
+) -> Result<()> {
+    let payload = NewFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "new",
+        stage,
+        directory: directory.map(|path| path.display().to_string()),
+        error: err.to_string(),
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
 }
 
 pub(crate) fn validate_name(name: &str) -> Result<()> {
@@ -370,14 +552,12 @@ pub(crate) fn validate_name(name: &str) -> Result<()> {
     if name.len() > 64 {
         bail!("plugin name must be ≤ 64 characters");
     }
-    let valid = name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-        && name
-            .chars()
-            .next()
-            .map(|c| c.is_ascii_alphabetic() || c.is_ascii_digit())
-            .unwrap_or(false);
+    let bytes = name.as_bytes();
+    let valid = (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && (bytes[bytes.len() - 1].is_ascii_lowercase() || bytes[bytes.len() - 1].is_ascii_digit())
+        && name.chars().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' || c == '.'
+        });
     if !valid {
         bail!("plugin name must be {} (got `{}`)", ID_PATTERN_HINT, name);
     }
@@ -401,6 +581,10 @@ mod tests {
         assert!(validate_name("").is_err());
         assert!(validate_name("has space").is_err());
         assert!(validate_name("!banged").is_err());
+        assert!(validate_name("Uppercase").is_err());
+        assert!(validate_name("trailing-").is_err());
+        assert!(validate_name("trailing_").is_err());
+        assert!(validate_name("trailing.").is_err());
         assert!(validate_name(&"a".repeat(100)).is_err());
     }
 
@@ -623,6 +807,45 @@ mod tests {
         assert_eq!(pk.trim().len(), 44, "got: {pk:?}");
         assert!(target.join(".cognia/plugin.private.b64").exists());
         assert!(target.join(".cognia/plugin.public.b64").exists());
+    }
+
+    #[test]
+    fn new_json_payload_is_schema_versioned() {
+        let payload = NewJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "new",
+            plugin_id: "demo".into(),
+            plugin_type: "python",
+            template_kind: "python",
+            directory: "demo".into(),
+            manifest_path: "demo/plugin.json".into(),
+            files: vec!["plugin.json".into(), "main.py".into()],
+            keygen: NewJsonKeygen {
+                generated: true,
+                private_key_path: Some("demo/.cognia/plugin.private.b64".into()),
+                public_key_path: Some("demo/.cognia/plugin.public.b64".into()),
+                public_key: Some("pub".into()),
+                fingerprint: Some("abc".into()),
+            },
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["action"], "new");
+        assert_eq!(json["pluginId"], "demo");
+        assert_eq!(json["pluginType"], "python");
+        assert_eq!(json["templateKind"], "python");
+        assert_eq!(json["directory"], "demo");
+        assert_eq!(json["manifestPath"], "demo/plugin.json");
+        assert_eq!(json["files"][0], "plugin.json");
+        assert_eq!(json["keygen"]["generated"], true);
+        assert_eq!(
+            json["keygen"]["privateKeyPath"],
+            "demo/.cognia/plugin.private.b64"
+        );
+        assert_eq!(json["keygen"]["publicKey"], "pub");
+        assert_eq!(json["keygen"]["fingerprint"], "abc");
     }
 
     #[test]

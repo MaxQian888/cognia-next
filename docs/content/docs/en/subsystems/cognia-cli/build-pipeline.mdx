@@ -21,10 +21,14 @@ description: cognia plugin build — mandatory lint, toolchain preflight, manife
 
 ## Flags
 
-`cognia plugin build [--path .] [--out <zip>] [--skip-build]` — `--skip-build` skips the
+`cognia plugin build [--path .] [--out <zip>] [--skip-build] [--json]` — `--skip-build` skips the
 compiler/bundler step for runtimes that have one (`wasm`, `frontend`) and re-packs whatever is
 already on disk. Python, hybrid, and VS Code-extension plugins are always build-free from the
-CLI's perspective: their declared entry files must exist before packaging starts.
+CLI's perspective: their declared entry files must exist before packaging starts. In `--json`
+mode, missing or unreadable plugin roots/manifests use `stage: "input"` with `{path, error}`;
+lint failures use `stage: "lint"` with the nested lint report; toolchain, build, embed, and
+packaging failures use a structured `{ok:false, action:"build", stage, pluginId, version,
+pluginType, bundle, error}` payload. All JSON failures keep stderr empty.
 
 ## End-to-end flow
 
@@ -105,9 +109,9 @@ pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
 
 `strip_section` (`packaging.rs:67-106`) uses `wasmparser` to drop any pre-existing copy, so
 re-builds and manual re-embeds are idempotent. The standalone escape hatch is
-`cognia plugin embed-version <wasm> <ver> [--out]` (`main.rs:395-408`), which validates the
-version with `looks_like_semver` (`--version must be MAJOR.MINOR.PATCH`) and defaults to
-overwriting the input in place.
+`cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]`, which validates the version with
+`looks_like_semver` (`--version must be MAJOR.MINOR.PATCH`) and defaults to overwriting the input
+in place. JSON mode reports `stage: "input" | "read" | "embed" | "write"` for failures.
 
 <Callout type="info" title="Contract versioning in one sentence">
   The CLI writes the WIT contract version (currently 0.1.0) into every WASM bundle; a host

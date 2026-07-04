@@ -26,17 +26,49 @@ const API_VERSION_SECTION: &str = "cognia:api-version";
 ///   * `--detailed` ⇒ comfy-table file list + full signature breakdown.
 ///   * default ⇒ compact human report: manifest summary, file count +
 ///                 total size, one-line signature status.
-pub fn run(input: PathBuf, json: bool, detailed: bool, _ui: &mut RuntimeUi) -> Result<()> {
-    let report = inspect_path(&input)?;
+pub fn run(input: PathBuf, json: bool, detailed: bool, ui: &mut RuntimeUi) -> Result<()> {
+    let report = match inspect_path(&input) {
+        Ok(report) => report,
+        Err(err) if json => return emit_json_failure(&input, "inspect", err),
+        Err(err) => return Err(err),
+    };
     if json {
         let payload = report.to_json_payload();
         println!("{}", serde_json::to_string_pretty(&payload)?);
-    } else if detailed {
-        print_detailed(&report);
+    } else if ui.flags.quiet {
+        return Ok(());
     } else {
-        print_compact(&report);
+        if detailed {
+            print_detailed(&report);
+        } else {
+            print_compact(&report);
+        }
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct InfoFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    path: String,
+    error: String,
+}
+
+fn emit_json_failure(path: &Path, stage: &'static str, err: anyhow::Error) -> Result<()> {
+    let payload = InfoFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "info",
+        stage,
+        path: path.display().to_string(),
+        error: err.to_string(),
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +136,8 @@ pub enum SignatureStatus {
 pub struct InfoJsonPayload<'a> {
     #[serde(rename = "schemaVersion")]
     schema_version: u32,
+    ok: bool,
+    action: &'static str,
     #[serde(rename = "inputKind")]
     input_kind: &'static str,
     path: String,
@@ -160,6 +194,8 @@ impl InfoReport {
         };
         InfoJsonPayload {
             schema_version: 1,
+            ok: true,
+            action: "info",
             input_kind: self.input_kind.as_str(),
             path: self.path.display().to_string(),
             size_bytes: self.size_bytes,
@@ -369,6 +405,9 @@ fn extract_wasm_api_version_from_directory(
     let Some(wasm_main) = wasm_main_from_manifest(manifest) else {
         return Ok(None);
     };
+    if !is_safe_manifest_file_path(&wasm_main) {
+        return Ok(None);
+    }
     let wasm_path = root.join(wasm_main);
     if !wasm_path.exists() {
         return Ok(None);
@@ -384,6 +423,18 @@ fn wasm_main_from_manifest(manifest: &serde_json::Value) -> Option<String> {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn is_safe_manifest_file_path(rel: &str) -> bool {
+    !rel.is_empty()
+        && !rel.contains('\0')
+        && !rel.starts_with('/')
+        && !rel.starts_with('\\')
+        && !rel
+            .as_bytes()
+            .get(1)
+            .is_some_and(|b| *b == b':' && rel.as_bytes()[0].is_ascii_alphabetic())
+        && !rel.split(['/', '\\']).any(|part| part == "..")
 }
 
 /// Walk wasm sections and return the contents of the named custom section
@@ -707,6 +758,26 @@ mod tests {
         std::fs::write(&path, &bundle).unwrap();
         let report = inspect(&path, &bundle).unwrap();
         assert_eq!(report.wasm_api_version.as_deref(), Some("0.1.0"));
+    }
+
+    #[test]
+    fn inspect_directory_does_not_read_wasm_main_outside_plugin_root() {
+        let parent = tempdir().unwrap();
+        let plugin_dir = parent.path().join("plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let min_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+        let outside = crate::packaging::embed_api_version(&min_wasm, "9.9.9").unwrap();
+        std::fs::write(parent.path().join("outside.wasm"), outside).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{"id":"escape","name":"Escape","version":"0.1.0","type":"wasm","capabilities":["tools"],"wasmMain":"../outside.wasm","wasm":{"apiVersion":"0.1.0"}}"#,
+        )
+        .unwrap();
+
+        let report = inspect_path(&plugin_dir).unwrap();
+
+        assert_eq!(report.wasm_api_version, None);
+        assert!(!report.files.iter().any(|f| f.name.contains("outside.wasm")));
     }
 
     #[test]
