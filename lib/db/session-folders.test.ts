@@ -1,5 +1,7 @@
 import "fake-indexeddb/auto"
 
+import { liveQuery } from "dexie"
+
 import { createFolder, deleteFolder, listFolders, renameFolder } from "./session-folders"
 import { createSession, getSession, assignSessionToFolder } from "./sessions"
 import { saveSettings } from "./settings"
@@ -43,6 +45,31 @@ describe("session-folders CRUD", () => {
     const f = await createFolder("Old")
     await renameFolder(f.id, "  New  ")
     expect((await getDb().sessionFolders.get(f.id))?.name).toBe("New")
+  })
+
+  // Regression: same liveQuery zone-safety as `listScopedSessions` — with an
+  // explicit pid the Dexie read must be registered before any await, or folder
+  // mutations never re-emit to the sidebar.
+  it("re-emits an explicit-pid liveQuery after a rename", async () => {
+    const f = await createFolder("Old")
+
+    const emissions: string[][] = []
+    const sub = liveQuery(() => listFolders("proj-A")).subscribe({
+      next: (rows) => emissions.push(rows.map((r) => r.name)),
+    })
+    const waitUntil = async (pred: () => boolean) => {
+      const start = Date.now()
+      while (!pred()) {
+        if (Date.now() - start > 3000) throw new Error("waitUntil timed out")
+        await new Promise((r) => setTimeout(r, 20))
+      }
+    }
+    await waitUntil(() => emissions.length >= 1)
+    await renameFolder(f.id, "New")
+    await waitUntil(() => emissions.length >= 2)
+    sub.unsubscribe()
+
+    expect(emissions[emissions.length - 1]).toEqual(["New"])
   })
 })
 

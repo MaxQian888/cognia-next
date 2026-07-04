@@ -58,6 +58,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import type { ConversationSidebarDensity, ConversationSearchScope } from "@/lib/claude/types"
+import { conversationSectionKey } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
 import type { Character, ChatSession, SessionFolder, Team } from "@/lib/claude/types"
 import {
@@ -138,8 +139,11 @@ interface Props {
   onRenameFolder?: (id: string, name: string) => void | Promise<void>
   onDeleteFolder?: (id: string) => void | Promise<void>
   onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
-  /** Persist a manual ordering of the Pinned section (drag-reorder). */
-  onReorderPinned?: (ids: string[]) => void | Promise<void>
+  /**
+   * Persist a manual ordering of one conversation section (drag-reorder).
+   * `sectionKey` is the `conversationSectionKey` of the section dragged in.
+   */
+  onReorderSessions?: (ids: string[], sectionKey: string) => void | Promise<void>
 }
 
 /**
@@ -277,7 +281,7 @@ function ChannelListBody({
   onRenameFolder,
   onDeleteFolder,
   onAssignToFolder,
-  onReorderPinned,
+  onReorderSessions,
 }: Props) {
   const t = useTranslations("desktop.channelList")
   const selectedGuild = useUIStore((s) => s.selectedGuild)
@@ -545,28 +549,42 @@ function ChannelListBody({
     [clear, orderedIds, selectAll, selected.size, focusedId, onSelect]
   )
 
-  // Drag-and-drop: reorder the Pinned section or drop a conversation onto a
-  // folder. A short activation distance keeps plain clicks from starting drags.
+  // Drag-and-drop: reorder any conversation section or drop a conversation onto
+  // a folder. A short activation distance keeps plain clicks from starting drags.
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor)
   )
-  const pinnedIds = useMemo(() => {
-    const pinnedSection = sections.find((s) => s.kind === "pinned")
-    return pinnedSection ? pinnedSection.sessions.map((s) => s.id) : []
+  // Maps each session id to the ordered ids of the section it renders in (and
+  // that section's stable key), so a drop can reorder that section (pinned /
+  // date bucket / folder / recent) and tag the persisted order with the
+  // section it belongs to. Search results aren't reorderable and are
+  // intentionally excluded.
+  const sectionIdsBySession = useMemo(() => {
+    const map = new Map<string, { ids: string[]; key: string }>()
+    for (const section of sections) {
+      if (section.kind === "search") continue
+      const ids = section.sessions.map((s) => s.id)
+      const key = conversationSectionKey(section)
+      for (const id of ids) map.set(id, { ids, key })
+    }
+    return map
   }, [sections])
   const handleDragEnd = useCallback(
     (e: DragEndEvent) => {
+      // Reorder is scoped to the section the drop target lives in.
+      const overId = e.over ? String(e.over.id) : null
+      const overSection = overId ? sectionIdsBySession.get(overId) : undefined
       const action = resolveConversationDrop(
         e.active ? { id: String(e.active.id), data: e.active.data.current } : null,
-        e.over ? { id: String(e.over.id), data: e.over.data.current } : null,
-        pinnedIds
+        e.over ? { id: overId!, data: e.over.data.current } : null,
+        overSection?.ids ?? []
       )
       if (!action) return
       if (action.type === "assign") void onAssignToFolder?.(action.sessionId, action.folderId)
-      else void onReorderPinned?.(action.ids)
+      else if (overSection) void onReorderSessions?.(action.ids, overSection.key)
     },
-    [pinnedIds, onAssignToFolder, onReorderPinned]
+    [sectionIdsBySession, onAssignToFolder, onReorderSessions]
   )
 
   // Toolbar visibility: show when ≥2 are selected OR when a single row was

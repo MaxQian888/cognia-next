@@ -36,7 +36,7 @@ describe("resolveConversationDrop", () => {
     })
   })
 
-  it("reorders within the pinned section when dropped on another pinned row", () => {
+  it("reorders within a section when dropped on another row in it", () => {
     // Move "c" before "a": [a,b,c] with active c over a → [c,a,b]
     expect(resolveConversationDrop(sess("c"), sess("a"), ["a", "b", "c"])).toEqual({
       type: "reorder",
@@ -44,7 +44,9 @@ describe("resolveConversationDrop", () => {
     })
   })
 
-  it("returns null when either end of a reorder is not pinned", () => {
+  it("returns null when either end of a reorder is outside the section", () => {
+    // Cross-section drag (e.g. between two date buckets): the dragged row (x)
+    // isn't in the drop target's section, or vice versa → no manual-order meaning.
     expect(resolveConversationDrop(sess("x"), sess("a"), ["a", "b"])).toBeNull()
     expect(resolveConversationDrop(sess("a"), sess("x"), ["a", "b"])).toBeNull()
   })

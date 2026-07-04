@@ -16,7 +16,7 @@ const pickMock = pickDirectory as jest.Mock
 const searchMock = searchWorkspace as jest.Mock
 
 function entry(relPath: string, isDir = false): WorkspaceEntry {
-  return { relPath, absolutePath: `/repo/${relPath}`, isDir, size: 0 }
+  return { relPath, absolutePath: `/repo/${relPath}`, isDir, size: 0, mtimeMs: null }
 }
 
 beforeEach(() => {

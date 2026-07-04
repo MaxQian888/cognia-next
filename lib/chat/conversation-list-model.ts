@@ -72,15 +72,47 @@ function byRecent(a: ChatSession, b: ChatSession): number {
 }
 
 /**
- * Sort the Pinned section: manual `pinnedOrder` (ascending) leads, sessions
- * without a manual order fall to the end by recency. Lets the drag-reorder
- * curate the pinned block while un-dragged pins keep their newest-first order.
+ * Stable identity of one conversation-list section, stored alongside
+ * `manualOrder` (see `ChatSession.manualOrderSection`) so a manual order only
+ * applies inside the section it was dragged in. Without the key, an order set
+ * in one date bucket would pin the session to the top of every bucket it later
+ * migrates into (today → yesterday → …), permanently overriding recency.
  */
-function byPinnedOrder(a: ChatSession, b: ChatSession): number {
-  const ao = a.pinnedOrder ?? Number.POSITIVE_INFINITY
-  const bo = b.pinnedOrder ?? Number.POSITIVE_INFINITY
-  if (ao !== bo) return ao - bo
-  return byRecent(a, b)
+export function conversationSectionKey(
+  section: Pick<ConversationSection, "kind"> & { folder?: SessionFolder; bucket?: DateBucket }
+): string {
+  switch (section.kind) {
+    case "pinned":
+      return "pinned"
+    case "folder":
+      return `folder:${section.folder!.id}`
+    case "date":
+      return `date:${section.bucket!}`
+    case "recent":
+      return "recent"
+    case "search":
+      return "search"
+  }
+}
+
+/**
+ * Comparator factory: sort a section by `manualOrder` (ascending) first —
+ * honored only for rows whose `manualOrderSection` matches this section —
+ * falling back to recency for un-dragged rows and for orders that were set in
+ * a different section (legacy rows without a section key keep working inside
+ * whichever section they sit in today).
+ */
+function byManualThenRecent(sectionKey: string): (a: ChatSession, b: ChatSession) => number {
+  const orderOf = (s: ChatSession): number =>
+    s.manualOrder != null && (s.manualOrderSection == null || s.manualOrderSection === sectionKey)
+      ? s.manualOrder
+      : Number.POSITIVE_INFINITY
+  return (a, b) => {
+    const ao = orderOf(a)
+    const bo = orderOf(b)
+    if (ao !== bo) return ao - bo
+    return byRecent(a, b)
+  }
 }
 
 /** Map a session's `updatedAt` to its relative date bucket (local calendar). */
@@ -142,7 +174,7 @@ export function buildConversationSections(
   const sections: ConversationSection[] = []
 
   // 1. Pinned float to the top (regardless of folder).
-  const pinned = viewed.filter((s) => s.pinned).sort(byPinnedOrder)
+  const pinned = viewed.filter((s) => s.pinned).sort(byManualThenRecent("pinned"))
   if (pinned.length) sections.push({ kind: "pinned", sessions: pinned })
 
   const rest = viewed.filter((s) => !s.pinned)
@@ -168,7 +200,7 @@ export function buildConversationSections(
     sections.push({
       kind: "folder",
       folder,
-      sessions: (byFolder.get(folder.id) ?? []).sort(byRecent),
+      sessions: (byFolder.get(folder.id) ?? []).sort(byManualThenRecent(`folder:${folder.id}`)),
       collapsed: collapsedFolderIds.has(folder.id),
     })
   }
@@ -176,7 +208,8 @@ export function buildConversationSections(
   // 3. Remaining loose sessions: date buckets, or a single flat "recent" list
   //    when date grouping is disabled.
   if (!groupByDate) {
-    if (loose.length) sections.push({ kind: "recent", sessions: loose.sort(byRecent) })
+    if (loose.length)
+      sections.push({ kind: "recent", sessions: loose.sort(byManualThenRecent("recent")) })
   } else {
     const buckets = new Map<DateBucket, ChatSession[]>()
     for (const s of loose) {
@@ -187,7 +220,12 @@ export function buildConversationSections(
     }
     for (const bucket of DATE_BUCKET_ORDER) {
       const list = buckets.get(bucket)
-      if (list?.length) sections.push({ kind: "date", bucket, sessions: list.sort(byRecent) })
+      if (list?.length)
+        sections.push({
+          kind: "date",
+          bucket,
+          sessions: list.sort(byManualThenRecent(`date:${bucket}`)),
+        })
     }
   }
 

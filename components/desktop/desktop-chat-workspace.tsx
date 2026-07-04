@@ -41,7 +41,7 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
-import { updateSession, setPinnedOrder } from "@/lib/db/sessions"
+import { updateSession, setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@/lib/logging"
@@ -343,8 +343,8 @@ export function DesktopChatWorkspace() {
     [rename]
   )
 
-  const handleReorderPinned = useCallback((ids: string[]) => {
-    void setPinnedOrder(ids)
+  const handleReorderSessions = useCallback((ids: string[], sectionKey: string) => {
+    void setSessionOrder(ids, sectionKey)
   }, [])
 
   // `useTranslations` returns a fresh function reference on each render. Hold
@@ -491,7 +491,7 @@ export function DesktopChatWorkspace() {
               onRenameFolder={renameFolder}
               onDeleteFolder={deleteFolder}
               onAssignToFolder={assignToFolder}
-              onReorderPinned={handleReorderPinned}
+              onReorderSessions={handleReorderSessions}
             />
           )}
 

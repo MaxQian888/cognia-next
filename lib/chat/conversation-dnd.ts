@@ -4,9 +4,10 @@
  *
  * Two gestures are supported:
  *  - Drop a conversation onto a folder header → assign it to that folder.
- *  - Drop a pinned conversation onto another pinned conversation → reorder the
- *    Pinned section (recency ordering is otherwise automatic, so manual order
- *    only applies to pinned rows).
+ *  - Drop a conversation onto another conversation in the same section →
+ *    reorder that section (Pinned, a date bucket, a folder, or the flat
+ *    "recent" list). Both rows must belong to the same section; dropping across
+ *    sections (e.g. between two date buckets) has no manual-order meaning.
  */
 
 /** Minimal shape of a @dnd-kit draggable/droppable identifier + payload. */
@@ -27,14 +28,16 @@ export type ConversationDropAction =
 /**
  * Resolve a drag-end into a concrete action, or `null` for a no-op.
  *
- * @param active   the dragged node (always a session row)
- * @param over     the drop target, or null when dropped on nothing
- * @param pinnedIds current render order of the Pinned section
+ * @param active     the dragged node (always a session row)
+ * @param over       the drop target, or null when dropped on nothing
+ * @param siblingIds current render order of the section the drop target lives
+ *                   in. A reorder only happens when the dragged row also
+ *                   belongs to it (same-section constraint).
  */
 export function resolveConversationDrop(
   active: DndNode | null,
   over: DndNode | null,
-  pinnedIds: readonly string[]
+  siblingIds: readonly string[]
 ): ConversationDropAction | null {
   if (!active || !over || active.id === over.id) return null
 
@@ -46,14 +49,14 @@ export function resolveConversationDrop(
     return { type: "assign", sessionId: active.id, folderId }
   }
 
-  // Dropped onto another pinned row → reorder within the Pinned section. Both
-  // ends must be pinned; dragging a pinned row onto a non-pinned one (or vice
-  // versa) has no manual-order meaning.
-  const from = pinnedIds.indexOf(active.id)
-  const to = pinnedIds.indexOf(over.id)
+  // Dropped onto another row in the same section → reorder that section. Both
+  // ends must be present in `siblingIds`; dragging a row from one section onto
+  // a row in another (e.g. across date buckets) has no manual-order meaning.
+  const from = siblingIds.indexOf(active.id)
+  const to = siblingIds.indexOf(over.id)
   if (from === -1 || to === -1) return null
 
-  const ids = [...pinnedIds]
+  const ids = [...siblingIds]
   ids.splice(from, 1)
   ids.splice(to, 0, active.id)
   return { type: "reorder", ids }

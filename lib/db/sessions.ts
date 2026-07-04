@@ -32,7 +32,13 @@ export async function listSessions(): Promise<ChatSession[]> {
  * compound index (Dexie v86).
  */
 export async function listScopedSessions(projectId?: string): Promise<ChatSession[]> {
-  const pid = await resolveScopeProjectId(projectId)
+  // liveQuery zone-safety: when the caller already knows the workspace (the
+  // chat sidebar always passes it), the Dexie read below must start *before*
+  // any `await` — awaiting a native promise (resolveScopeProjectId is a plain
+  // async fn) drops Dexie's liveQuery dependency-tracking zone, so writes such
+  // as `setSessionOrder` would never re-emit and the sidebar would keep the
+  // stale order (the drag-reorder "snap back" bug).
+  const pid = projectId || (await resolveScopeProjectId())
   return getDb()
     .sessions.where("[projectId+updatedAt]")
     .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
@@ -254,19 +260,23 @@ export async function assignSessionToFolder(
 }
 
 /**
- * Persist manual ordering of the Pinned section (ChannelList drag-reorder).
- * Writes each id's array index into its non-indexed `pinnedOrder`; the
- * conversation-list model then sorts pinned rows by it. Ordering is
+ * Persist manual ordering of one ChannelList section (drag-reorder). `ids` are
+ * the section's rows in their new order — the Pinned block, a date bucket, a
+ * folder, or the flat "recent" list. Writes each id's array index into its
+ * non-indexed `manualOrder`, tagged with `sectionKey`
+ * (`conversationSectionKey` of the section the drag happened in) so the order
+ * only applies inside that section — otherwise a rank set in one date bucket
+ * would follow the session into every bucket it later migrates to. Ordering is
  * organizational, so `updatedAt` is left untouched (like folder assignment).
  * Runs in one `rw` transaction so a mid-batch failure rolls back atomically;
  * missing ids are skipped (Dexie `update` is a no-op on a stale id).
  */
-export async function setPinnedOrder(ids: readonly string[]): Promise<void> {
+export async function setSessionOrder(ids: readonly string[], sectionKey: string): Promise<void> {
   if (ids.length === 0) return
   const db = getDb()
   await db.transaction("rw", db.sessions, async () => {
     for (let i = 0; i < ids.length; i++) {
-      await db.sessions.update(ids[i], { pinnedOrder: i })
+      await db.sessions.update(ids[i], { manualOrder: i, manualOrderSection: sectionKey })
     }
   })
 }
