@@ -13619,6 +13619,35 @@
     "title": "Usage statistics",
     "totalSearches": "Total"
   },
+  "sessionImport": {
+    "back": "Back",
+    "cardBody": "Import past sessions from Claude Code, Codex, or OpenCode.",
+    "cardTitle": "Coding-agent sessions",
+    "close": "Close",
+    "description": "Bring your Claude Code, Codex, and OpenCode command-line histories into Cognia as continuable conversations.",
+    "deselectAll": "Clear selection",
+    "doneBody": "Added {sessions, plural, one {# conversation} other {# conversations}} with {messages, plural, one {# message} other {# messages}}.",
+    "doneTitle": "Import complete",
+    "empty": "No sessions found.",
+    "emptyHint": "Nothing was found on disk. Try choosing session files manually.",
+    "errorTitle": "Import failed",
+    "importSelected": "Import {count} selected",
+    "importing": "Importing…",
+    "messagesLabel": "{count, plural, one {# message} other {# messages}}",
+    "pickButton": "Choose files…",
+    "retry": "Try again",
+    "scanButton": "Scan installed agents",
+    "scanning": "Looking for sessions…",
+    "selectAll": "Select all",
+    "sources": {
+      "claude-code": "Claude Code",
+      "codex": "Codex CLI",
+      "opencode": "OpenCode"
+    },
+    "title": "Import agent sessions",
+    "unrecognized": "These files weren't recognized as a supported agent session.",
+    "webHint": "Auto-scan needs the desktop app. On the web, choose session files manually."
+  },
   "sessionInsights": {
     "assessments": {
       "label": {
@@ -21683,6 +21712,10 @@
       "terminateProcess": "Terminate a PID (default: only PIDs this session started).",
       "topMemoryProcesses": "Top N processes by resident memory."
     },
+    "webAllowPrivateDesc": "Let web_fetch reach localhost and private-network hosts (10.x, 192.168.x, 169.254.x cloud metadata). Off by default to block SSRF — enable only for trusted local development.",
+    "webAllowPrivateTitle": "Allow private / local addresses",
+    "webAlwaysDistillDesc": "Run every fetched page through the utility model before the agent sees it, even without a question — the agent never reads raw page text, narrowing the prompt-injection surface. Needs a configured model; slightly more cost per fetch.",
+    "webAlwaysDistillTitle": "Always distill fetched pages",
     "webCardDesc": "Web search and fetch (web_search / web_fetch). On by default — works in the browser and the CLI. web_search needs a provider configured in Settings → Search.",
     "webCardTitle": "Web",
     "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
@@ -26798,6 +26831,28 @@
       "deleted": "Workspace deleted",
       "description": "A workspace bundles a primary directory and extra mounted folders. The active workspace drives the working directory, the Source Control panel, and the terminal scope.",
       "empty": "No workspaces yet",
+      "knowledge": {
+        "addFile": "Upload files",
+        "backendHint": "Retrieval needs a configured vector backend and embedding model (Twin settings). Without one, ingestion and retrieval are skipped.",
+        "chunkCount": "{count, plural, one {# chunk} other {# chunks}}",
+        "enableRag": "Inject knowledge into chat",
+        "listLabel": "Knowledge files",
+        "pasteNamePlaceholder": "Note name (optional)",
+        "pastePlaceholder": "Paste text to add to this workspace's knowledge…",
+        "pasteText": "Add pasted text",
+        "pastedDefaultName": "Pasted note",
+        "reindex": "Reindex file",
+        "reindexAll": "Reindex all",
+        "removeFile": "Remove file",
+        "status": {
+          "indexed": "Indexed",
+          "outdated": "Outdated",
+          "pending": "Pending"
+        },
+        "summary": "{files, plural, one {# file} other {# files}} · {chunks, plural, one {# chunk} other {# chunks}}",
+        "title": "Knowledge base",
+        "topK": "Chunks per message"
+      },
       "listLabel": "Workspaces",
       "nameLabel": "Name",
       "namePlaceholder": "Workspace name",

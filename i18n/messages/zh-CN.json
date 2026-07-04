@@ -13619,6 +13619,35 @@
     "title": "使用统计",
     "totalSearches": "总搜索数"
   },
+  "sessionImport": {
+    "back": "返回",
+    "cardBody": "从 Claude Code、Codex 或 OpenCode 导入历史会话。",
+    "cardTitle": "编程 Agent 会话",
+    "close": "关闭",
+    "description": "将你的 Claude Code、Codex 和 OpenCode 命令行历史导入 Cognia，作为可继续的对话。",
+    "deselectAll": "清除选择",
+    "doneBody": "已添加 {sessions, plural, one {# 个对话} other {# 个对话}}，共 {messages, plural, one {# 条消息} other {# 条消息}}。",
+    "doneTitle": "导入完成",
+    "empty": "未找到会话。",
+    "emptyHint": "磁盘上没有找到内容。可尝试手动选择会话文件。",
+    "errorTitle": "导入失败",
+    "importSelected": "导入选中的 {count} 项",
+    "importing": "正在导入…",
+    "messagesLabel": "{count, plural, one {# 条消息} other {# 条消息}}",
+    "pickButton": "选择文件…",
+    "retry": "重试",
+    "scanButton": "扫描已安装的 Agent",
+    "scanning": "正在查找会话…",
+    "selectAll": "全选",
+    "sources": {
+      "claude-code": "Claude Code",
+      "codex": "Codex CLI",
+      "opencode": "OpenCode"
+    },
+    "title": "导入 Agent 会话",
+    "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
+    "webHint": "自动扫描需要桌面应用。在网页端请手动选择会话文件。"
+  },
   "sessionInsights": {
     "assessments": {
       "label": {
@@ -21683,6 +21712,10 @@
       "terminateProcess": "终止 PID（默认仅允许本会话启动的 PID）。",
       "topMemoryProcesses": "按常驻内存排序取前 N 个进程。"
     },
+    "webAllowPrivateDesc": "允许 web_fetch 访问 localhost 及内网主机（10.x、192.168.x、169.254.x 云元数据）。默认关闭以阻断 SSRF——仅在可信的本地开发时开启。",
+    "webAllowPrivateTitle": "允许私有 / 本地地址",
+    "webAlwaysDistillDesc": "即使没有问题，也先用工具模型处理每个抓取的网页再交给智能体——智能体不会读到原始网页文本，从而收窄提示注入面。需已配置模型；每次抓取成本略增。",
+    "webAlwaysDistillTitle": "始终蒸馏抓取的网页",
     "webCardDesc": "网络搜索与抓取（web_search / web_fetch）。默认开启——浏览器与 CLI 均可用。web_search 需要在 设置 → 搜索 中配置 provider。",
     "webCardTitle": "网络",
     "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
@@ -26798,6 +26831,28 @@
       "deleted": "工作区已删除",
       "description": "工作区包含一个主目录和额外挂载的文件夹。活动工作区决定工作目录、源代码管理面板和终端范围。",
       "empty": "暂无工作区",
+      "knowledge": {
+        "addFile": "上传文件",
+        "backendHint": "检索需要已配置的向量后端和嵌入模型（Twin 设置）。未配置时将跳过入库与检索。",
+        "chunkCount": "{count, plural, other {# 个片段}}",
+        "enableRag": "将知识注入对话",
+        "listLabel": "知识文件",
+        "pasteNamePlaceholder": "笔记名称（可选）",
+        "pastePlaceholder": "粘贴要加入该工作区知识库的文本…",
+        "pasteText": "添加粘贴的文本",
+        "pastedDefaultName": "粘贴的笔记",
+        "reindex": "重新索引文件",
+        "reindexAll": "全部重新索引",
+        "removeFile": "移除文件",
+        "status": {
+          "indexed": "已索引",
+          "outdated": "已过期",
+          "pending": "待处理"
+        },
+        "summary": "{files, plural, other {# 个文件}} · {chunks, plural, other {# 个片段}}",
+        "title": "知识库",
+        "topK": "每条消息片段数"
+      },
       "listLabel": "工作区",
       "nameLabel": "名称",
       "namePlaceholder": "工作区名称",
