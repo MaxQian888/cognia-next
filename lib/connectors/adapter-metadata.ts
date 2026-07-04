@@ -33,11 +33,11 @@ export interface ConnectorMeta {
 /**
  * Per-platform metadata. Order is the display order for the discover grid.
  * The `status` field reflects what's actually shipped in adapter-registry:
- *   stable — telegram, discord, slack, lark, onebot (Phase-1 builtins)
- *   beta   — github (delivery plugin; inbox-only no outbound)
- *   planned — wecom / dingtalk / wechat-oa / qq-official / email / matrix /
- *             kook / line / mattermost (PlatformKind union allows them; no
- *             adapter factory branch yet)
+ *   stable — native adapter-registry platforms that can be configured and
+ *            started from Settings.
+ *   beta   — github (delivery plugin; inbox-only no outbound).
+ *   planned — email / kook / line / mattermost (PlatformKind union reserves
+ *             them; no native adapter factory branch yet).
  */
 export const CONNECTOR_METADATA: readonly ConnectorMeta[] = [
   { type: "telegram", iconName: "Send", status: "stable", oauth: false, richMessages: true },
@@ -50,32 +50,30 @@ export const CONNECTOR_METADATA: readonly ConnectorMeta[] = [
   {
     type: "dingtalk",
     iconName: "MessageSquare",
-    status: "planned",
+    status: "stable",
     oauth: true,
     richMessages: true,
   },
-  { type: "wecom", iconName: "Building2", status: "planned", oauth: true, richMessages: true },
+  { type: "wecom", iconName: "Building2", status: "stable", oauth: true, richMessages: true },
   {
     type: "wechat-oa",
     iconName: "MessageCircle",
-    status: "planned",
+    status: "stable",
     oauth: true,
-    richMessages: true,
+    richMessages: false,
   },
   {
-    // Personal WeChat (iLink) — long-poll bridge, reply-only. Surfaces in
-    // CONNECTOR_METADATA so the Discover sidebar can render it; status
-    // stays `"planned"` because the test's `stableSet` ground truth
-    // intentionally tracks the Phase-1 builtins. (The actual adapter
-    // ships under `lib/connectors/adapters/wechat-personal/`.)
+    // Personal WeChat (iLink) — long-poll bridge, reply-only. It ships as a
+    // native adapter, but richMessages remains false because the protocol
+    // cannot initiate proactive rich outbound in v1.
     type: "wechat-personal",
     iconName: "MessageCircle",
-    status: "planned",
+    status: "stable",
     oauth: false,
     richMessages: false,
   },
-  { type: "qq-official", iconName: "Bot", status: "planned", oauth: true, richMessages: true },
-  { type: "matrix", iconName: "Network", status: "planned", oauth: false, richMessages: false },
+  { type: "qq-official", iconName: "Bot", status: "stable", oauth: true, richMessages: false },
+  { type: "matrix", iconName: "Network", status: "stable", oauth: false, richMessages: true },
   { type: "kook", iconName: "MessageCircle", status: "planned", oauth: true, richMessages: true },
   { type: "line", iconName: "MessageCircle", status: "planned", oauth: true, richMessages: true },
   {

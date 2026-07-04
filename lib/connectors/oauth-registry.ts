@@ -5,11 +5,10 @@
  * Maps platform kind to the async function that completes the OAuth code
  * exchange and stores the resulting credentials in the keyring.
  *
- * Telegram and Discord do not use OAuth. Slack still ships the stub
- * (D1 carryover). Lark now runs the full
- * `handleLarkOAuth(code, {state})` path which resolves the adapter row,
- * decrypts the app secret, swaps the code for user_access_token +
- * refresh_token, and stamps the connected-user metadata.
+ * Telegram and Discord do not use OAuth. Slack and Lark both route to
+ * platform-specific completion handlers that resolve the adapter row,
+ * exchange the code, store credentials in the keyring, and stamp connected
+ * metadata back onto the adapter settings.
  *
  * The ConnectorDeepLinkRouter calls the registered handler after
  * validating the OAuth state parameter — state is also forwarded into

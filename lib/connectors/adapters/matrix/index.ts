@@ -14,14 +14,22 @@ import type {
   PlatformAdapter,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
-import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
 import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { MATRIX_A2UI_CAPABILITY, MATRIX_CAPS } from "./capability"
 import { normalizeHomeserver } from "./auth"
 import { parseMatrixEvent, parseMatrixReplyCorrelation } from "./parse"
-import { serializeEdit, serializeOutbound, serializeReaction } from "./serialize"
+import { resolveInboundMatrixMedia } from "./media"
+import {
+  serializeEdit,
+  serializeMediaLinkFallback,
+  serializeOutbound,
+  serializeReaction,
+  type MatrixMediaChunk,
+  type MatrixSendContent,
+} from "./serialize"
 import { startMatrixSync } from "./transport-sync"
 
 export interface MatrixAdapterOptions {
@@ -56,6 +64,62 @@ class MatrixApiError extends Error {
   ) {
     super(message)
     this.name = "MatrixApiError"
+  }
+}
+
+function mediaName(seg: MatrixMediaChunk["segment"]): string {
+  if (seg.type === "file") return seg.name
+  return seg.alt || seg.type
+}
+
+function mediaMimeType(seg: MatrixMediaChunk["segment"]): string | undefined {
+  return seg.mimeType
+}
+
+function buildMediaEventContent(
+  seg: MatrixMediaChunk["segment"],
+  contentUri: string
+): Record<string, unknown> {
+  switch (seg.type) {
+    case "image":
+      return {
+        msgtype: "m.image",
+        body: seg.alt ?? "image",
+        url: contentUri,
+        info: {
+          ...(seg.mimeType ? { mimetype: seg.mimeType } : {}),
+          ...(seg.width !== undefined ? { w: seg.width } : {}),
+          ...(seg.height !== undefined ? { h: seg.height } : {}),
+        },
+      }
+    case "video":
+      return {
+        msgtype: "m.video",
+        body: "video",
+        url: contentUri,
+        info: {
+          ...(seg.mimeType ? { mimetype: seg.mimeType } : {}),
+          ...(seg.durationSec !== undefined ? { duration: seg.durationSec * 1000 } : {}),
+        },
+      }
+    case "voice":
+      return {
+        msgtype: "m.audio",
+        body: "audio",
+        url: contentUri,
+        info: {
+          ...(seg.mimeType ? { mimetype: seg.mimeType } : {}),
+          ...(seg.durationSec !== undefined ? { duration: seg.durationSec * 1000 } : {}),
+        },
+      }
+    case "file":
+      return {
+        msgtype: "m.file",
+        body: seg.name,
+        filename: seg.name,
+        url: contentUri,
+        info: { mimetype: seg.mimeType, size: seg.sizeBytes },
+      }
   }
 }
 
@@ -120,6 +184,42 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     return typeof body.event_id === "string" ? body.event_id : ""
   }
 
+  async function uploadMedia(seg: MatrixMediaChunk["segment"]): Promise<string> {
+    const token = await opts.accessToken()
+    const mimeType = mediaMimeType(seg)
+    return connectorsMediaUpload({
+      uploadUrl: `${base}/_matrix/media/v3/upload?filename=${encodeURIComponent(mediaName(seg))}`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(mimeType ? { "Content-Type": mimeType } : {}),
+      },
+      sourceUrl: seg.url,
+      contentType: mimeType,
+    })
+  }
+
+  async function sendSerializedContent(
+    roomId: string,
+    txnId: string,
+    content: MatrixSendContent | MatrixMediaChunk
+  ): Promise<string> {
+    if (content.kind === "media") {
+      let mediaContent: Record<string, unknown>
+      try {
+        const contentUri = await uploadMedia(content.segment)
+        mediaContent = buildMediaEventContent(content.segment, contentUri)
+      } catch {
+        // Upload failed (media repo error, unfetchable source URL, or web
+        // mode without the Tauri upload command) — degrade to a link line
+        // instead of aborting the whole multi-chunk send.
+        mediaContent = { ...serializeMediaLinkFallback(content.segment) }
+      }
+      if (content.relatesTo) mediaContent["m.relates_to"] = content.relatesTo
+      return sendRoomEvent(roomId, "m.room.message", txnId, mediaContent)
+    }
+    return sendRoomEvent(roomId, "m.room.message", txnId, content)
+  }
+
   async function start(ctx: AdapterContext): Promise<void> {
     if (abortController) return
     stopCalled = false
@@ -148,11 +248,30 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
             })
           }
 
-          const normalized = parseMatrixEvent(opts.id, opts.selfId, roomId, event)
-          if (normalized) {
-            if (!(await gateInboundEvent(opts.id, normalized))) continue
-            lastActivityAt = Date.now()
-            await ctx.emit(normalized)
+          // Isolate per-event parse/dispatch failures: a single malformed or
+          // unexpected event must not throw out of the `for await` loop (which
+          // would flip health to "degraded" and stop delivering ALL further
+          // messages until restart), matching the reply-correlation guard above.
+          try {
+            const normalized = parseMatrixEvent(opts.id, opts.selfId, roomId, event, {
+              homeserver: base,
+            })
+            if (normalized) {
+              // Gate BEFORE resolving media (like the Telegram / Discord
+              // adapters): in a busy room with a mention-gate, downloading +
+              // encrypting every bystander attachment would waste bandwidth and
+              // head-of-line-block gated messages behind serial media fetches.
+              if (!(await gateInboundEvent(opts.id, normalized))) continue
+              await resolveInboundMatrixMedia(normalized, {
+                accessToken: await opts.accessToken(),
+              })
+              lastActivityAt = Date.now()
+              await ctx.emit(normalized)
+            }
+          } catch (err) {
+            ctx.logger.warn("matrix:event parse/dispatch failed", {
+              reason: err instanceof Error ? err.message : String(err),
+            })
           }
         }
         if (!stopCalled) healthState = "down"
@@ -223,7 +342,7 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       for (let i = 0; i < contents.length; i += 1) {
         // Stable txn per chunk so retries dedup server-side.
         const txnId = `${req.metadata.idempotencyKey}:${i}`
-        const eventId = await sendRoomEvent(roomId, "m.room.message", txnId, contents[i])
+        const eventId = await sendSerializedContent(roomId, txnId, contents[i])
         if (eventId) platformMessageId = eventId
       }
 

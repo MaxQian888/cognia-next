@@ -36,9 +36,14 @@ This guide walks you through creating a Slack app, obtaining the required tokens
 
 ---
 
-## 3. Enable Socket Mode
+## 3. Choose the inbound transport
 
-cognia-next uses **Socket Mode** by default, which means it connects via a persistent WebSocket and does not require a public URL.
+cognia-next supports two Slack inbound transports:
+
+- **Socket Mode** (default): cognia-next dials Slack over a persistent WebSocket. No public URL is required. This mode needs an app-level `xapp-...` token.
+- **Events API webhook**: Slack calls cognia-next through a public HTTPS Request URL. This mode needs the Signing Secret and a running public tunnel.
+
+For the default Socket Mode path:
 
 1. In your app settings, select **Socket Mode** from the left sidebar.
 2. Toggle **Enable Socket Mode** to on.
@@ -47,6 +52,13 @@ cognia-next uses **Socket Mode** by default, which means it connects via a persi
    - Add the scope `connections:write`.
    - Click **Generate**.
 4. Copy the token — it starts with `xapp-`. **Store it securely.**
+
+For the Events API webhook path:
+
+1. In cognia-next, create the Slack adapter with **Events API webhook** selected, then reopen it after saving.
+2. Start the Cloudflared tunnel in **Settings → Companion → Tunnel**.
+3. Copy the generated **Request URL** from the Slack configuration dialog.
+4. In Slack, open **Event Subscriptions**, enable events, and paste that URL as the **Request URL**.
 
 ---
 
@@ -75,12 +87,11 @@ cognia-next uses **Socket Mode** by default, which means it connects via a persi
    - Enter a **Display Name** for this bot (e.g. "My Workspace Bot").
    - Paste the **Bot Token** (`xoxb-...`) you copied in step 4.
    - Click **Test** to verify the token connects to Slack successfully. The dialog will display your bot's username and workspace name.
-   - Paste the **Signing Secret** you copied in step 5.
-   - Select **Socket Mode** as the transport (default).
-   - Paste the **App Token** (`xapp-...`) you copied in step 3.
+   - Select **Socket Mode** (default) and paste the **App Token** (`xapp-...`) you copied in step 3.
+   - Or select **Events API webhook**, paste the **Signing Secret** you copied in step 5, save, then use the generated Request URL in Slack Event Subscriptions.
 4. Click **Create**.
 
-cognia-next will connect to Slack via Socket Mode. No public URL is required.
+cognia-next will either connect to Slack via Socket Mode or wait for verified Events API webhook callbacks, depending on the selected transport.
 
 ---
 
@@ -93,8 +104,8 @@ cognia-next will connect to Slack via Socket Mode. No public URL is required.
 If the adapter shows **Down** or **Degraded**:
 
 - Verify the bot token is correct (`xoxb-...`).
-- Verify the app token is correct (`xapp-...`) and has the `connections:write` scope.
-- Confirm Socket Mode is enabled in the Slack Developer Portal.
+- For Socket Mode: verify the app token is correct (`xapp-...`) and has the `connections:write` scope, and confirm Socket Mode is enabled in the Slack Developer Portal.
+- For Events API webhook: verify the Signing Secret is saved, the Cloudflared tunnel is running, and the Slack Event Subscriptions Request URL matches the generated URL.
 - Check the **Audit Log** tab in Settings → Connections for error details.
 
 ---
@@ -102,6 +113,6 @@ If the adapter shows **Down** or **Degraded**:
 ## Notes
 
 - **Rate limits**: Slack enforces a burst limit of approximately 1 message per second per channel. cognia-next's outbound runner respects retryable errors (HTTP 429).
-- **Events API webhook**: For production deployments behind a public URL, you can switch the transport to **Events API webhook** in the configuration dialog. This requires a publicly reachable HTTPS URL and is outside the scope of Phase 1.
-- **Typing indicator**: Slack's `assistant.threads.setStatus` is restricted to Slack Assistant apps. Standard bot adapters do not support typing indicators in Phase 1.
-- **File uploads**: Phase 1 sends files as hyperlinks via `chat.postMessage`. Native file upload via `files.upload` is planned for Phase 2.
+- **Events API webhook**: Supported when the desktop tunnel exposes the connectors server at a public HTTPS URL. The Rust webhook handler verifies Slack HMAC signatures before emitting events to the adapter.
+- **Typing indicator**: Slack's `assistant.threads.setStatus` is restricted to Slack Assistant apps. Standard bot adapters do not support typing indicators.
+- **File uploads**: Slack outbound sends file segments as hyperlinks via `chat.postMessage`. Native upload through Slack file APIs is still future work.

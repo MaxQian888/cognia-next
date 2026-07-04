@@ -172,6 +172,11 @@ describe("DiscordConfigDialog — create new", () => {
     expect(screen.getByTestId("dc-public-key-phase2-note")).toBeInTheDocument()
   })
 
+  it("does not surface an Interactions endpoint before the Discord adapter supports webhook transport", () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.queryByText(/interactions endpoint url/i)).not.toBeInTheDocument()
+  })
+
   it("shows error toast when bot token is empty on Save", async () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
     fireEvent.click(screen.getByRole("button", { name: /create/i }))

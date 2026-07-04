@@ -9,7 +9,7 @@ description: "Common questions about the OneBot QQ integration: UIN vs OpenID, m
 
 cognia-next's OneBot adapter uses the bot's **UIN** (QQ number), which is what NapCat, Lagrange, and LLOneBot expose.
 
-The **QQ Official Bot** platform uses **OpenID** — a completely different API with an official SDK and webhook. That platform will be supported by a separate `qq-official` adapter in a future release.
+The **QQ Official Bot** platform uses **OpenID** — a completely different API with the official Bot gateway and REST endpoints. Use the separate [`qq-official` adapter](./qq-official-setup) for that path.
 
 Do **not** mix the two: NapCat does not understand OpenID, and the QQ Official Bot API does not use OneBot.
 
@@ -36,7 +36,7 @@ By default cognia-next's connectors server binds to `127.0.0.1` (loopback only).
 **Solutions:**
 
 1. Run NapCat on the same host as cognia-next.
-2. If separation is required, use `ssh -L 8080:127.0.0.1:8080 user@cognia-host` to forward the port.
+2. If separation is required, use `ssh -L 7842:127.0.0.1:7842 user@cognia-host` to forward the default connectors port.
 3. A future setting will allow binding to `0.0.0.0` — watch the changelog.
 
 ---
@@ -47,10 +47,11 @@ If you change the bearer token in NapCat or cognia-next:
 
 1. Update the token in cognia-next **Settings → Connections → (adapter) → Bearer Token**.
 2. Update the `accessToken` in NapCat config.
-3. **Restart cognia-next** so the new keyring entry is picked up by the axum WS server.
-4. Restart NapCat to reconnect with the new token.
+3. Restart or reconnect NapCat so it opens a new WebSocket with the new token.
 
-Simply saving the dialog is not enough — the Rust server reads the keyring at upgrade time.
+You do not need to restart cognia-next. The reverse-WS server reads the keyring on each WebSocket
+upgrade, so the saved token is used by the next connection. For forward WS, cognia-next sends the
+saved token as `Authorization: Bearer <token>` when it dials the OneBot client's WebSocket server.
 
 ---
 
@@ -77,8 +78,8 @@ If the adapter shows **running** (green) but no messages trigger the bot:
 You can add multiple OneBot adapters in cognia-next — each gets a unique `adapterId` and therefore a unique endpoint URL:
 
 ```
-ws://127.0.0.1:8080/ws/onebot/adapter-abc-1
-ws://127.0.0.1:8080/ws/onebot/adapter-abc-2
+ws://127.0.0.1:7842/ws/onebot/adapter-abc-1
+ws://127.0.0.1:7842/ws/onebot/adapter-abc-2
 ```
 
 Point each NapCat instance to its own URL. Bearer tokens can differ per adapter.

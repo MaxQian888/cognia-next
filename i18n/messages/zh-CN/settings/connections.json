@@ -152,6 +152,9 @@
     "status": {
       "connected": "已连接",
       "disabled": "未启用"
+    },
+    "transportLabels": {
+      "dingtalkStream": "Stream 模式 WSS"
     }
   },
   "audit": {
@@ -410,7 +413,14 @@
     "sectionIdentity": "身份",
     "sectionIdentityDesc": "钉钉开放平台的应用凭据。",
     "titleEdit": "编辑钉钉连接器",
-    "titleNew": "添加钉钉连接器"
+    "titleNew": "添加钉钉连接器",
+    "testButtonLabel": "测试凭据",
+    "testCredentialsAria": "测试凭据",
+    "testSucceededLabel": "凭据有效",
+    "testFailedLabel": "凭据测试失败",
+    "testSucceededToast": "访问令牌已成功获取。",
+    "testFailedToast": "钉钉凭据测试失败：{error}",
+    "testSucceededStatus": "访问令牌已获取。"
   },
   "discord": {
     "adapterCreated": "适配器已创建。",
@@ -606,7 +616,13 @@
       "requiresDesktop": "机器人身份探测需要桌面端运行时。",
       "tenant": "租户",
       "title": "机器人身份",
-      "unknown": "尚未探测身份。保存凭据后点击「探测身份」。"
+      "unknown": "尚未探测身份。保存凭据后点击「探测身份」。",
+      "dingtalkNoProbe": "钉钉适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
+      "qqOfficialNoProbe": "QQ 官方适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
+      "wechatOaNoProbe": "微信公众号适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
+      "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
+      "wechatPersonalNoProbe": "个人微信适配器没有主动探测身份的接口。",
+      "unsupportedNoProbe": "该适配器没有主动探测身份的接口。"
     }
   },
   "matrix": {
@@ -644,7 +660,14 @@
     "sectionIdentity": "身份",
     "sectionIdentityDesc": "机器人账号的 homeserver 与访问令牌。",
     "titleEdit": "编辑 Matrix 连接器",
-    "titleNew": "添加 Matrix 连接器"
+    "titleNew": "添加 Matrix 连接器",
+    "testAccessTokenAria": "测试 Matrix 访问令牌",
+    "testButtonLabel": "测试访问令牌",
+    "testSucceededLabel": "访问令牌有效",
+    "testFailedLabel": "访问令牌测试失败",
+    "testSucceededToast": "已登录为 {userId}",
+    "testFailedToast": "Matrix 令牌测试失败：{error}",
+    "testSucceededStatus": "已登录为 {userId}"
   },
   "onebot": {
     "adapterCreatedWithEndpoint": "适配器已创建。请把端点 URL 粘贴到 NapCat 配置中。",
@@ -784,7 +807,14 @@
     "sectionIdentity": "身份",
     "sectionIdentityDesc": "QQ 开放平台的应用凭据。",
     "titleEdit": "编辑 QQ 官方机器人",
-    "titleNew": "添加 QQ 官方机器人"
+    "titleNew": "添加 QQ 官方机器人",
+    "testButtonLabel": "测试凭据",
+    "testCredentialsAria": "测试凭据",
+    "testSucceededLabel": "凭据有效",
+    "testFailedLabel": "凭据测试失败",
+    "testSucceededToast": "已连接到网关 {gatewayUrl}。",
+    "testFailedToast": "QQ 凭据测试失败：{error}",
+    "testGatewayUrl": "网关：{gatewayUrl}"
   },
   "quickCommands": {
     "actionTypeLabel": "动作类型",
@@ -821,17 +851,17 @@
   "sendTest": {
     "bodyLabel": "内容",
     "chatIdHelp": {
-      "dingtalk": "单聊：发送者的 staffId；群聊：来自入站回调的 conversationId。",
+      "dingtalk": "单聊：发送者的 staffId（或 single:<staffId>）；群聊：group:<conversationId>（来自入站回调）。",
       "discord": "在 Discord 中右键频道（需开启开发者模式）→ 复制频道 ID。",
       "lark": "打开 Lark 聊天 → 设置 → 群信息 → 复制 chat_id（oc_…）。",
       "matrix": "房间 ID（例如 !abcd:matrix.org）。请先把机器人邀请进房间。",
-      "onebot": "QQ 私聊 uin 或群 uin。",
-      "qq-official": "频道 ID 或群 openid。",
+      "onebot": "QQ 私聊 uin；群聊请写 group:<uin>。",
+      "qq-official": "频道 ID；群或单聊请加前缀 group: / c2c: / direct:。",
       "slack": "频道 id 可从 URL 复制，或点击频道菜单 → 查看频道详情 → 复制频道 ID。",
       "telegram": "把聊天里的任意一条消息转发给 @userinfobot 即可读取其数字 id。",
       "wechat-oa": "粉丝的 OpenID（来自一条入站消息）。",
       "wechat-personal": "仅回复——个人微信无法主动发起会话，测试发送会被拒绝。",
-      "wecom": "单聊：填接收人的 userid。群聊：填此前入站回调中的 chatid。"
+      "wecom": "单聊：接收者的 userid；群聊：group:<chatid>（来自入站回调）。"
     },
     "chatIdLabel": "目标聊天 / 频道 id",
     "defaultBody": "[cognia] 来自 Adapters → Config 的测试消息。",
@@ -840,7 +870,21 @@
     "sendButton": "发送测试",
     "sentError": "发送失败（{code}）：{message}",
     "sentSuccess": "已发送。platform_message_id = {messageId}",
-    "title": "发送测试消息"
+    "targetPlaceholder": {
+      "dingtalk": "staff-id 或 group:conversationId",
+      "discord": "如 1234567890123456789",
+      "lark": "oc_…",
+      "matrix": "!abcd:matrix.org",
+      "onebot": "uin 或 group:uin",
+      "qq-official": "频道 id、group:openid 或 c2c:openid",
+      "slack": "C0123456789",
+      "telegram": "如 123456789",
+      "wechat-oa": "OpenID",
+      "wechat-personal": "仅回复",
+      "wecom": "userid 或 group:chatid"
+    },
+    "title": "发送测试消息",
+    "unsupportedReplyOnly": "该适配器仅支持回复入站消息，无法发送独立的测试消息。"
   },
   "slack": {
     "adapterCreated": "适配器已创建。",
@@ -1040,7 +1084,17 @@
     "webhookUrlAfterSave": "（保存后生成）",
     "webhookUrlHelp": "在此路径前加上你的公网基础地址，填入 服务器配置 → URL。",
     "webhookUrlLabel": "Webhook 地址",
-    "windowNote": "回复使用客服消息接口，仅允许在用户最后一条消息后的 48 小时内发送。"
+    "windowNote": "回复使用客服消息接口，仅允许在用户最后一条消息后的 48 小时内发送。",
+    "testButtonLabel": "测试凭据",
+    "testCredentialsAria": "测试凭据",
+    "testCredentialScopeHelp": "测试会向微信申请一个短期访问令牌，以验证 AppID 与 AppSecret。",
+    "testSucceededLabel": "凭据有效",
+    "testFailedLabel": "凭据测试失败",
+    "testSucceededToast": "访问令牌已成功获取。",
+    "testFailedToast": "微信公众号凭据测试失败：{error}",
+    "testSucceededStatus": "访问令牌已获取。",
+    "openCompanion": "打开陪伴端",
+    "openCompanionAria": "打开陪伴端隧道设置"
   },
   "wechatPersonal": {
     "adapterCreated": "微信已连接。有联系人给机器人发消息后即可开始回复。",
@@ -1070,7 +1124,8 @@
     "statusScaned": "已扫码——请在手机上确认…",
     "statusWaiting": "等待扫码…",
     "titleEdit": "配置个人微信（iLink）",
-    "titleNew": "添加个人微信（iLink）"
+    "titleNew": "添加个人微信（iLink）",
+    "desktopOnly": "个人微信扫码登录仅在桌面运行时中可用。"
   },
   "wecom": {
     "adapterCreated": "企业微信机器人已创建。启用后长连接将自动建立。",
@@ -1103,6 +1158,14 @@
     "titleNew": "添加企业微信（WeCom）机器人",
     "welcomeHelp": "用户打开机器人会话（enter_chat）时发送。留空则不发送欢迎语。",
     "welcomeLabel": "欢迎语（可选）",
-    "welcomePlaceholder": "你好！有什么可以帮你的吗？"
+    "welcomePlaceholder": "你好！有什么可以帮你的吗？",
+    "testButtonLabel": "测试凭据",
+    "testCredentialsAria": "测试企业微信凭据",
+    "testCredentialScopeHelp": "测试会向企业微信申请一个短期访问令牌，以验证企业凭据。",
+    "testSucceededLabel": "凭据有效",
+    "testFailedLabel": "凭据测试失败",
+    "testSucceededToast": "已连接企业微信订阅端点，凭据有效。",
+    "testFailedToast": "企业微信凭据测试失败：{error}",
+    "testSucceededStatus": "订阅端点可达。"
   }
 }

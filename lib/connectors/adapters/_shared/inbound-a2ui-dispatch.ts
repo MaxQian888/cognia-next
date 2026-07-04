@@ -9,6 +9,7 @@
  */
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
+import type { MessageSegment } from "@/types/connectors/segment"
 import type { InboundA2UIBlock } from "./inbound-a2ui-types"
 import { slackInboundToA2UI } from "../slack/inbound-to-a2ui"
 import { larkInboundToA2UI } from "../lark/inbound-to-a2ui"
@@ -24,7 +25,14 @@ import { dingtalkInboundToA2UI } from "../dingtalk/inbound-to-a2ui"
 
 export function projectInboundToA2UI(
   platform: PlatformKind,
-  rawPayload: unknown
+  rawPayload: unknown,
+  /**
+   * The normalized event's segments, when the caller has them. Mappers whose
+   * raw payload carries platform-internal media refs (Matrix `mxc://`) use
+   * these to surface the parser-resolved download URL / inlined bytes instead
+   * of a URI no browser can load.
+   */
+  segments?: MessageSegment[]
 ): InboundA2UIBlock | null {
   // `wechat-oa` hands us the inbound XML as a string; every other adapter
   // hands an object. Only reject nullish payloads here and let each mapper
@@ -49,7 +57,7 @@ export function projectInboundToA2UI(
       case "wechat-oa":
         return wechatOaInboundToA2UI(rawPayload as never)
       case "matrix":
-        return matrixInboundToA2UI(rawPayload as never)
+        return matrixInboundToA2UI(rawPayload as never, { segments })
       case "qq-official":
         return qqOfficialInboundToA2UI(rawPayload as never)
       case "dingtalk":

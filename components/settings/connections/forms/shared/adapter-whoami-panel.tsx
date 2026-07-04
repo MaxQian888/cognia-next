@@ -14,6 +14,10 @@
  *   - onebot   → no HTTP probe (bot connects TO us via reverse-WS;
  *               identity is whatever the operator configured in
  *               `settings.selfBotUin`). The button is hidden.
+ *   - dingtalk / qq-official / wechat-oa / wecom / wechat-personal → no
+ *               reliable get-me style endpoint in the current adapter code;
+ *               the panel shows the cached snapshot when one exists, otherwise
+ *               a platform-specific no-probe reason.
  *
  * Probe results all land in `adapterInstances.lastWhoamiResult` so the
  * panel can render the cached snapshot regardless of which probe wrote
@@ -35,12 +39,15 @@ import { isTauri } from "@/lib/tauri"
 import { probeTelegramIdentity, TelegramWhoamiError } from "@/lib/connectors/whoami/telegram-whoami"
 import { probeDiscordIdentity, DiscordWhoamiError } from "@/lib/connectors/whoami/discord-whoami"
 import { probeSlackIdentity, SlackWhoamiError } from "@/lib/connectors/whoami/slack-whoami"
+import { probeMatrixIdentity, MatrixWhoamiError } from "@/lib/connectors/whoami/matrix-whoami"
 
 export interface AdapterWhoamiPanelProps {
   adapterId: string
   /** The platform discriminator from `AdapterInstanceRow.type`. */
   platform: PlatformKind
 }
+
+const PROBEABLE_PLATFORMS = new Set<PlatformKind>(["telegram", "discord", "slack", "matrix"])
 
 async function dispatchProbe(adapterId: string, platform: PlatformKind): Promise<void> {
   switch (platform) {
@@ -53,10 +60,25 @@ async function dispatchProbe(adapterId: string, platform: PlatformKind): Promise
     case "slack":
       await probeSlackIdentity(adapterId)
       return
+    case "matrix":
+      await probeMatrixIdentity(adapterId)
+      return
     case "onebot":
       // No reverse-WS probe — identity is what the operator entered in
       // `settings.selfBotUin`. The panel renders that statically without
       // hitting the network.
+      return
+    case "dingtalk":
+      // DingTalk's Stream bot surface validates credentials, but the current
+      // adapter does not expose a stable bot-identity endpoint.
+      return
+    case "qq-official":
+      // QQ exposes token + gateway checks, not a generic bot identity probe in
+      // the current adapter surface.
+      return
+    case "wechat-oa":
+      // WeChat OA token validation is available in the config form; there is no
+      // get-me style bot identity endpoint wired here.
       return
     case "wecom":
       // No identity probe — WeCom 智能机器人 exposes no getMe-style API; the
@@ -82,6 +104,9 @@ function probeErrorMessage(err: unknown): string {
   if (err instanceof SlackWhoamiError) {
     return `${err.httpStatus ?? "?"} — ${err.message}`
   }
+  if (err instanceof MatrixWhoamiError) {
+    return `${err.httpStatus ?? "?"} — ${err.message}`
+  }
   return err instanceof Error ? err.message : String(err)
 }
 
@@ -90,8 +115,7 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
   const [probing, setProbing] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
   const desktop = isTauri()
-  const probeSupported =
-    platform !== "onebot" && platform !== "wecom" && platform !== "wechat-personal"
+  const probeSupported = PROBEABLE_PLATFORMS.has(platform)
 
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
     () =>
@@ -122,6 +146,24 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
     !whoami && platform === "onebot"
       ? (row?.settings as { selfBotUin?: string } | undefined)?.selfBotUin
       : undefined
+  const noProbeReason = (() => {
+    switch (platform) {
+      case "onebot":
+        return t("onebotNoProbe")
+      case "dingtalk":
+        return t("dingtalkNoProbe")
+      case "qq-official":
+        return t("qqOfficialNoProbe")
+      case "wechat-oa":
+        return t("wechatOaNoProbe")
+      case "wecom":
+        return t("wecomNoProbe")
+      case "wechat-personal":
+        return t("wechatPersonalNoProbe")
+      default:
+        return t("unsupportedNoProbe")
+    }
+  })()
 
   return (
     <Card data-testid="adapter-whoami-panel" data-platform={platform}>
@@ -207,6 +249,10 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
               </p>
             </div>
           </div>
+        ) : !probeSupported ? (
+          <p className="text-xs text-muted-foreground" data-testid="adapter-whoami-no-probe">
+            {noProbeReason}
+          </p>
         ) : (
           <p className="text-xs text-muted-foreground" data-testid="adapter-whoami-empty">
             {t("unknown")}

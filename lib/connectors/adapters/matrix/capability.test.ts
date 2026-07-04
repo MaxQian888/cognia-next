@@ -14,9 +14,11 @@ describe("matrix capability", () => {
     expect(MATRIX_CAPS).toContain("typing")
   })
 
-  it("does not claim native media upload (honest about Phase 1)", () => {
-    expect(MATRIX_CAPS).not.toContain("send.image")
-    expect(MATRIX_CAPS).not.toContain("send.file")
+  it("declares native media upload capabilities", () => {
+    expect(MATRIX_CAPS).toContain("send.image")
+    expect(MATRIX_CAPS).toContain("send.file")
+    expect(MATRIX_CAPS).toContain("send.voice")
+    expect(MATRIX_CAPS).toContain("send.video")
   })
 
   it("covers every A2UI component kind in the matrix", () => {
@@ -32,6 +34,7 @@ describe("matrix capability", () => {
     expect(MATRIX_A2UI_CAPABILITY.Button).toBe("simulated")
     expect(MATRIX_A2UI_CAPABILITY.Select).toBe("simulated")
     expect(MATRIX_A2UI_CAPABILITY.TextField).toBe("simulated")
+    // A2UI Image degrades to an `[alt]` text placeholder (not a native upload).
     expect(MATRIX_A2UI_CAPABILITY.Image).toBe("fallback")
     // Unmentioned data widgets default to fallback.
     expect(MATRIX_A2UI_CAPABILITY.Chart).toBe("fallback")

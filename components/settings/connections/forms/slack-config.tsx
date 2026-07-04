@@ -178,7 +178,7 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
       toast.error(t("botTokenRequired"))
       return
     }
-    if (isNew && !signingSecret.trim()) {
+    if (isNew && transport === "events-api-webhook" && !signingSecret.trim()) {
       toast.error(t("signingSecretRequired"))
       return
     }
@@ -206,7 +206,11 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
           settings: nextSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["botToken", "signingSecret", "appToken"],
+            accounts: [
+              "botToken",
+              ...(transport === "events-api-webhook" ? ["signingSecret"] : []),
+              ...(transport === "socket-mode" ? ["appToken"] : []),
+            ],
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
@@ -316,7 +320,9 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
           <div className="space-y-1.5">
             <Label htmlFor="sl-signing-secret">
               {t("signingSecretLabel")}
-              <span className="ml-1 text-destructive">*</span>
+              {transport === "events-api-webhook" && (
+                <span className="ml-1 text-destructive">*</span>
+              )}
             </Label>
             <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
             <Input

@@ -74,6 +74,14 @@ interface TelegramConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+function telegramCredentialAccounts(transport: TransportMode): string[] {
+  return transport === "webhook" ? ["botToken", "webhookSecret"] : ["botToken"]
+}
+
+function sameCredentialAccounts(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && expected.every((account) => actual.includes(account))
+}
+
 export function TelegramConfigDialog({
   open,
   onOpenChange,
@@ -150,6 +158,7 @@ export function TelegramConfigDialog({
     setSaving(true)
     try {
       let adapterId: string
+      const credentialAccounts = telegramCredentialAccounts(transport)
 
       if (isNew) {
         const newRow = await createAdapterInstance({
@@ -160,7 +169,7 @@ export function TelegramConfigDialog({
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["botToken", "webhookSecret"],
+            accounts: credentialAccounts,
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
@@ -171,7 +180,7 @@ export function TelegramConfigDialog({
       } else {
         adapterId = row.id
         const existingAccounts = row.credentialsRef?.accounts ?? []
-        const needsMigration = !existingAccounts.includes("webhookSecret")
+        const needsMigration = !sameCredentialAccounts(existingAccounts, credentialAccounts)
         await updateAdapterInstance(adapterId, {
           displayName: displayName.trim(),
           transportMode: transport,
@@ -180,7 +189,7 @@ export function TelegramConfigDialog({
           ...(needsMigration && {
             credentialsRef: {
               keyringService: row.credentialsRef?.keyringService ?? "com.cognia.platforms",
-              accounts: ["botToken", "webhookSecret"],
+              accounts: credentialAccounts,
             },
           }),
         })

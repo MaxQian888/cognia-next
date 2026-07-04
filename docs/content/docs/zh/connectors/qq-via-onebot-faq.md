@@ -9,7 +9,7 @@ description: "关于 OneBot QQ 接入的常见问题：UIN 与 OpenID、多账�
 
 cognia-next 的 OneBot 适配器使用机器人的 **UIN**（QQ 号），这正是 NapCat、Lagrange 和 LLOneBot 所暴露的标识。
 
-**QQ 官方机器人**平台使用 **OpenID** —— 这是一套完全不同的 API，配有官方 SDK 和 webhook。该平台将在未来版本中由独立的 `qq-official` 适配器支持。
+**QQ 官方机器人**平台使用 **OpenID** —— 这是一套完全不同的 API，走官方 Bot 网关与 REST 接口。如需接入该通道，请使用独立的 [`qq-official` 适配器](./qq-official-setup)。
 
 请**不要**混用两者：NapCat 不认识 OpenID，而 QQ 官方机器人 API 也不使用 OneBot。
 
@@ -36,7 +36,7 @@ cognia-next 的 OneBot 适配器使用机器人的 **UIN**（QQ 号），这正�
 **解决方案：**
 
 1. 让 NapCat 与 cognia-next 运行在同一台主机上。
-2. 如果确实需要分离部署，使用 `ssh -L 8080:127.0.0.1:8080 user@cognia-host` 转发端口。
+2. 如果确实需要分离部署，使用 `ssh -L 7842:127.0.0.1:7842 user@cognia-host` 转发默认连接器端口。
 3. 未来会提供一个设置项，允许绑定到 `0.0.0.0` —— 请关注更新日志。
 
 ---
@@ -47,10 +47,11 @@ cognia-next 的 OneBot 适配器使用机器人的 **UIN**（QQ 号），这正�
 
 1. 在 cognia-next **设置 → 平台连接 → （适配器）→ Bearer Token** 中更新 token。
 2. 更新 NapCat 配置中的 `accessToken`。
-3. **重启 cognia-next**，使 axum WS 服务器能够读取到新的 keyring 条目。
-4. 重启 NapCat，以使用新 token 重新连接。
+3. 重启或重新连接 NapCat，让它使用新 token 打开新的 WebSocket。
 
-仅保存对话框是不够的 —— Rust 服务器只在升级（upgrade）时读取 keyring。
+不需要重启 cognia-next。反向 WS 服务器会在每次 WebSocket upgrade 时读取 keyring，
+因此下一次连接会使用已保存的 token。正向 WS 下，cognia-next 连接 OneBot 客户端的
+WebSocket 服务端时，会把已保存的 token 作为 `Authorization: Bearer <token>` 发送。
 
 ---
 
@@ -77,8 +78,8 @@ OneBot 客户端通常将单个 WS 帧上限设为几 MB。如果你发送一个
 你可以在 cognia-next 中添加多个 OneBot 适配器 —— 每个适配器都会获得唯一的 `adapterId`，因此也会得到唯一的端点 URL：
 
 ```
-ws://127.0.0.1:8080/ws/onebot/adapter-abc-1
-ws://127.0.0.1:8080/ws/onebot/adapter-abc-2
+ws://127.0.0.1:7842/ws/onebot/adapter-abc-1
+ws://127.0.0.1:7842/ws/onebot/adapter-abc-2
 ```
 
 让每个 NapCat 实例指向各自的 URL。Bearer token 可以按适配器分别设置。

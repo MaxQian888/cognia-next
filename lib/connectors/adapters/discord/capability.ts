@@ -8,7 +8,9 @@ import {
  * Capability flags declared by the Discord adapter.
  *
  * Kept in alphabetical order for stable diffs. G3.2 added `send.voice`
- * (multipart upload via `voice-upload.ts`) plus the full A2UI projection.
+ * (voice-flagged Discord message fallback via `voice-upload.ts`) plus the full
+ * A2UI projection. Native multipart upload still depends on a future Tauri
+ * upload bridge.
  */
 export const DISCORD_CAPS: readonly Capability[] = [
   "delete",

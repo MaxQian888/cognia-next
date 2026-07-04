@@ -7,9 +7,9 @@
  * such contents, applies reply / thread relations, and projects A2UI surfaces
  * into HTML (native parts) + a numbered fallback (interactive parts).
  *
- * Media segments (image/video/voice/file) are not natively uploaded in
- * Phase 1 (see capability.ts) — they render as a link line so the recipient
- * still gets the URL.
+ * Media segments (image/video/voice/file) are emitted as ordered media chunks.
+ * The adapter's send path uploads each chunk to the Matrix media repository
+ * and sends a native `m.image` / `m.file` / `m.audio` / `m.video` event.
  */
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
@@ -18,6 +18,7 @@ import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { MatrixMentions, MatrixRelatesTo } from "./parse"
 
 export interface MatrixSendContent {
+  kind?: "message"
   msgtype: "m.text" | "m.notice"
   body: string
   format?: "org.matrix.custom.html"
@@ -27,9 +28,22 @@ export interface MatrixSendContent {
   "m.new_content"?: Omit<MatrixSendContent, "m.relates_to" | "m.new_content">
 }
 
+export interface MatrixMediaChunk {
+  kind: "media"
+  segment: Extract<MessageSegment, { type: "image" | "video" | "voice" | "file" }>
+  /**
+   * Reply / thread relation for the media event. The send path merges this
+   * into the uploaded event's content as `m.relates_to` (media events must
+   * carry the thread relation too, or they fall out of the thread).
+   */
+  relatesTo?: MatrixRelatesTo
+}
+
+export type MatrixSerializedContent = MatrixSendContent | MatrixMediaChunk
+
 export interface MatrixSerializedSend {
   /** One `m.room.message` content per outbound chunk, in render order. */
-  contents: MatrixSendContent[]
+  contents: MatrixSerializedContent[]
   /**
    * Present when the request carried an A2UI surface with interactive
    * components. The index binds `surfaceId` to the sent event id so a user
@@ -232,9 +246,14 @@ function renderSegments(segments: MessageSegment[]): RenderedBody {
       case "video":
       case "voice":
       case "file": {
-        const url = seg.url
-        textParts.push(`[${seg.type}] ${url}`)
-        htmlParts.push(`<a href="${escapeAttr(url)}">[${seg.type}]</a>`)
+        // In the outbound SEND path, media segments are split into upload
+        // chunks by serializeOutbound before ever reaching renderSegments, so
+        // this arm only fires for edits (serializeEdit), where an `m.replace`
+        // can't carry a real media upload. Render a link line so an edit to a
+        // media segment isn't silently dropped to an empty body.
+        const label = `[${seg.type}]`
+        textParts.push(`${label} ${seg.url}`)
+        htmlParts.push(`<a href="${escapeAttr(seg.url)}">${escapeHtml(label)}</a>`)
         usedHtml = true
         break
       }
@@ -272,7 +291,7 @@ function renderSegments(segments: MessageSegment[]): RenderedBody {
 // ---------------------------------------------------------------------------
 
 export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
-  const contents: MatrixSendContent[] = []
+  const contents: MatrixSerializedContent[] = []
   let a2uiBinding: { surfaceId: string } | undefined
   let buffer: MessageSegment[] = []
 
@@ -304,13 +323,23 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
       }
       contents.push(content)
       if (hasInteractive) a2uiBinding = { surfaceId: seg.surfaceId }
+    } else if (
+      seg.type === "image" ||
+      seg.type === "video" ||
+      seg.type === "voice" ||
+      seg.type === "file"
+    ) {
+      flush()
+      contents.push({ kind: "media", segment: seg })
     } else {
       buffer.push(seg)
     }
   }
   flush()
 
-  // Apply reply / thread relations to the first chunk only.
+  // Apply reply / thread relations. A Matrix thread relation must be carried
+  // by EVERY event in the thread (message and media alike), or later chunks
+  // render outside the thread. A plain reply annotates only the first chunk.
   if (contents.length > 0 && (req.replyTo || req.threadId)) {
     const rel: MatrixRelatesTo = {}
     if (req.threadId) {
@@ -321,10 +350,30 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
     } else if (req.replyTo) {
       rel["m.in_reply_to"] = { event_id: req.replyTo.messageId }
     }
-    contents[0]["m.relates_to"] = rel
+    const targets = req.threadId ? contents : [contents[0]]
+    for (const chunk of targets) {
+      if (chunk.kind === "media") chunk.relatesTo = rel
+      else chunk["m.relates_to"] = rel
+    }
   }
 
   return { contents, a2uiBinding }
+}
+
+/**
+ * Link-line fallback for a media chunk whose upload to the Matrix media
+ * repository failed (media repo error, unfetchable source URL, or web mode
+ * where the Tauri upload command doesn't exist). This is the pre-upload
+ * Phase 1 rendering — the recipient still gets the URL instead of the whole
+ * send aborting.
+ */
+export function serializeMediaLinkFallback(seg: MatrixMediaChunk["segment"]): MatrixSendContent {
+  return {
+    msgtype: "m.text",
+    body: `[${seg.type}] ${seg.url}`,
+    format: "org.matrix.custom.html",
+    formatted_body: `<a href="${escapeAttr(seg.url)}">[${seg.type}]</a>`,
+  }
 }
 
 /**

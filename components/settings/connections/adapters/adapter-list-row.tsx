@@ -43,7 +43,7 @@ import { deleteAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-i
 import { connectorsKeyringDelete } from "@/lib/connectors/tauri/commands"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
-import { getPlatformMeta } from "./platform-meta"
+import { getAdapterTransportLabelKey, getPlatformMeta } from "./platform-meta"
 import { useSelectedAdapter } from "./use-selected-adapter"
 import { deriveAdapterStatus } from "./adapter-status"
 import { healthReasonLabel } from "./tabs/health-reason-label"
@@ -73,6 +73,8 @@ export function AdapterListRow({
   const selected = selectedAdapterId === row.id
   const { labelKey, Icon } = getPlatformMeta(row.type)
   const platformLabel = t(`platforms.${labelKey}`)
+  const transportLabelKey = getAdapterTransportLabelKey(row.type, row.transportMode)
+  const transportLabel = transportLabelKey ? t(transportLabelKey) : row.transportMode
 
   const health = useAdapterHealth(row.id)
   const status = deriveAdapterStatus(row.enabled, health)
@@ -147,7 +149,7 @@ export function AdapterListRow({
             selected ? "text-primary-foreground/70" : "text-muted-foreground"
           )}
         >
-          {platformLabel} · {row.transportMode}
+          {platformLabel} · {transportLabel}
         </div>
       </div>
 

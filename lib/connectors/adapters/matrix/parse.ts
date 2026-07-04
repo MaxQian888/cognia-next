@@ -130,55 +130,78 @@ export function stripReplyFallback(body: string): string {
   return lines.slice(i).join("\n").trim() || body.trim()
 }
 
-function buildSegments(content: MatrixEventContent): MessageSegment[] {
+function resolveMediaUrl(
+  url: string,
+  homeserver: string | undefined
+): { url: string; rawUrl?: string } {
+  if (!url.startsWith("mxc://")) return { url }
+  const resolved = homeserver ? matrixMediaDownloadUrl(homeserver, url) : null
+  return { url: resolved ?? url, rawUrl: url }
+}
+
+function buildSegments(
+  content: MatrixEventContent,
+  options: { homeserver?: string } = {}
+): MessageSegment[] {
   const segments: MessageSegment[] = []
   const msgtype = content.msgtype ?? "m.text"
 
   switch (msgtype) {
     case "m.image":
       if (content.url) {
+        const media = resolveMediaUrl(content.url, options.homeserver)
         segments.push({
           type: "image",
-          url: content.url,
+          url: media.url,
+          rawUrl: media.rawUrl,
           alt: content.body,
           width: content.info?.w,
           height: content.info?.h,
+          mimeType: content.info?.mimetype,
         })
         return segments
       }
       break
     case "m.video":
       if (content.url) {
+        const media = resolveMediaUrl(content.url, options.homeserver)
         segments.push({
           type: "video",
-          url: content.url,
+          url: media.url,
+          rawUrl: media.rawUrl,
           thumbnailUrl: content.info?.thumbnail_url,
           durationSec:
             content.info?.duration !== undefined
               ? Math.round(content.info.duration / 1000)
               : undefined,
+          mimeType: content.info?.mimetype,
         })
         return segments
       }
       break
     case "m.audio":
       if (content.url) {
+        const media = resolveMediaUrl(content.url, options.homeserver)
         segments.push({
           type: "voice",
-          url: content.url,
+          url: media.url,
+          rawUrl: media.rawUrl,
           durationSec:
             content.info?.duration !== undefined
               ? Math.round(content.info.duration / 1000)
               : undefined,
+          mimeType: content.info?.mimetype,
         })
         return segments
       }
       break
     case "m.file":
       if (content.url) {
+        const media = resolveMediaUrl(content.url, options.homeserver)
         segments.push({
           type: "file",
-          url: content.url,
+          url: media.url,
+          rawUrl: media.rawUrl,
           name: content.filename ?? content.body ?? "file",
           mimeType: content.info?.mimetype ?? "application/octet-stream",
           sizeBytes: content.info?.size ?? 0,
@@ -224,7 +247,8 @@ export function parseMatrixEvent(
   adapterId: string,
   selfId: string,
   roomId: string,
-  ev: MatrixTimelineEvent
+  ev: MatrixTimelineEvent,
+  options: { homeserver?: string } = {}
 ): NormalizedInboundEvent | null {
   // Never echo our own sends back into the bus.
   if (selfId !== "" && ev.sender === selfId) return null
@@ -258,7 +282,7 @@ export function parseMatrixEvent(
 
   // ── Reaction → system event ───────────────────────────────────────────
   if (ev.type === "m.reaction") {
-    const rel = ev.content["m.relates_to"]
+    const rel = ev.content?.["m.relates_to"]
     if (!rel || rel.rel_type !== "m.annotation" || !rel.event_id) return null
     const conversationKey = buildConversationKey("matrix", adapterId, roomId)
     return {
@@ -285,10 +309,14 @@ export function parseMatrixEvent(
   if (ev.type !== "m.room.message") return null
   if (ev.unsigned?.redacted_because !== undefined) return null
 
-  const rel = ev.content["m.relates_to"]
+  // A spec-conformant `m.room.message` always carries `content`, but a
+  // malformed / non-standard event may omit it; default to `{}` so a single bad
+  // event yields an empty message instead of throwing out of the sync loop.
+  const msgContent = ev.content ?? {}
+  const rel = msgContent["m.relates_to"]
   const isEdit = rel?.rel_type === "m.replace" && rel.event_id !== undefined
   // For edits the renderable content lives in `m.new_content`.
-  const renderContent = isEdit ? (ev.content["m.new_content"] ?? ev.content) : ev.content
+  const renderContent = isEdit ? (msgContent["m.new_content"] ?? msgContent) : msgContent
 
   // Thread root → conversation thread key. A threaded reply carries
   // rel_type === "m.thread"; the `event_id` is the thread root.
@@ -302,7 +330,7 @@ export function parseMatrixEvent(
     ? { messageId: inReplyTo, snippet: (renderContent.body ?? "").slice(0, 100) }
     : undefined
 
-  const segments = buildSegments(renderContent)
+  const segments = buildSegments(renderContent, options)
   const plainText = segmentsToPlainText(segments)
   const { selfMentioned, users } = detectMentions(selfId, renderContent, false)
 
@@ -328,6 +356,23 @@ export function parseMatrixEvent(
     kind: isEdit ? "edit" : "create",
     replacesMessageId: isEdit ? rel?.event_id : undefined,
   }
+}
+
+export function matrixMediaDownloadUrl(homeserver: string, mxcUrl: string): string | null {
+  const match = /^mxc:\/\/([^/]+)\/(.+)$/.exec(mxcUrl)
+  if (!match) return null
+  const base = normalizeMediaHomeserver(homeserver)
+  if (!base) return null
+  const serverName = encodeURIComponent(match[1])
+  const mediaId = encodeURIComponent(match[2])
+  return `${base}/_matrix/client/v1/media/download/${serverName}/${mediaId}`
+}
+
+function normalizeMediaHomeserver(homeserver: string): string {
+  const trimmed = homeserver.trim()
+  if (!trimmed) return ""
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  return withScheme.replace(/\/+$/, "")
 }
 
 // ---------------------------------------------------------------------------

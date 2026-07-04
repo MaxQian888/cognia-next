@@ -22,8 +22,8 @@ description: The eleven in-tree IM platform adapters — Telegram, Discord, Lark
 <StatGrid>
   <Stat label="Built-in adapters" value="11" hint="one createXxxAdapter factory each" />
   <Stat label="Deep-documented" value="4" hint="Telegram / Discord / Lark / OneBot" />
-  <Stat label="Long-poll" value="telegram / matrix / dingtalk / wechat-personal" hint="cursor-driven HTTP loop" />
-  <Stat label="Gateway WSS" value="discord / qq-official / lark / wecom / slack" hint="op-coded or bridged WS" />
+  <Stat label="Long-poll" value="telegram / matrix / wechat-personal" hint="cursor-driven HTTP loop" />
+  <Stat label="Persistent WSS" value="discord / qq-official / lark / wecom / slack / dingtalk" hint="op-coded, bridged, Socket Mode, or Stream Mode" />
   <Stat label="Reverse-WS" value="onebot" hint="client dials cognia (Rust axum)" />
   <Stat label="Webhook-only" value="wechat-oa" hint="Rust verify + decrypt" />
 </StatGrid>
@@ -77,7 +77,7 @@ drive the next assistant turn.
 | platform | transport (file) | signature / auth (file / Rust) | self-id resolution | notable caps |
 | --- | --- | --- | --- | --- |
 | **telegram** | longpoll `getUpdates` cursor (`transport-longpoll.ts`) OR webhook | `X-Telegram` secret-token (Rust `sigverify/telegram.rs`) | `getMe` → `result.id` | reply / edit (`editMessageText`) / delete / react (`setMessageReaction`); TextField = ForceReply simulated |
-| **discord** | Gateway v10 WSS (`gateway-client.ts`, opcodes / IDENTIFY / RESUME / heartbeat) | `Authorization: Bot` + webhook Ed25519 (Rust `sigverify/discord.rs`) | READY `user.id` (or `/users/@me`) | reply / edit / delete / react / fetchHistory; embeds + ActionRow; modal simulated |
+| **discord** | Gateway v10 WSS (`gateway-client.ts`, opcodes / IDENTIFY / RESUME / heartbeat) | `Authorization: Bot`; Rust Ed25519 verifier exists but is reserved for a future webhook transport | READY `user.id` (or `/users/@me`) | reply / edit / delete / react / fetchHistory; embeds + ActionRow; modal simulated |
 | **lark** | long-connection (Rust `lark_ws.rs` protobuf, TS `transport-long-conn.ts` thin consumer) OR webhook | `tenant_access_token` Bearer (`auth.ts`) + webhook AES-CBC + verification_token (Rust `sigverify/lark.rs`) | `bot/v3/info` → `open_id` cached | richest cards (`rich-card.lark`) interactive cards 2.0; bot-menu quick commands |
 | **onebot** | reverse-WS (Rust `ws_server.rs`, `transport-reverse-ws.ts`) OR forward-WS | optional bearer, **NO signature** | first event `self_id` | reply / delete (recall) / react (NapCat `set_msg_emoji_like`) / fetchHistory (v11); **NO** edit / markdown / cards (interactive → plainTextMirror tail); v11/v12 auto-detect |
 | **slack** | Socket Mode WSS (`transport-socket-mode.ts`) OR events-api webhook | bot `xoxb` + app `xapp` + webhook HMAC (Rust `sigverify/slack.rs`) | `auth.test` → `user_id` | `rich-card.slack` Block Kit + `rich-markdown.slack`; richest native A2UI set |
@@ -86,11 +86,11 @@ drive the next assistant turn.
 | **wechat-oa** | webhook only (Rust `wechat_oa_handler` verify + decrypt, `transport-webhook.ts` yields `{xml}`) | token + EncodingAESKey, GET signature + POST msg_signature + AES (Rust `sigverify/wechat.rs`) | first-message id | text-only; 48h 客服 (customer-service) window (`errcode 45015` non-retryable) |
 | **wechat-personal** | HTTP long-poll iLink (~35s cursor, `protocol.ts` + index loop) | iLink `bot_token` QR-login, echoes `context_token`, **NO** proactive send | login session id | reply-only text + numeric-action-registry for numbered replies; `ret -14` session expired |
 | **dingtalk** | Stream Mode WSS (`stream-client.ts`, gateway ticket + ack + ping) | AppKey / AppSecret = Stream clientId / secret + OpenAPI app access token (`auth.ts`) | `chatbotUserId` optional selfId | markdown-first; outbound `oToMessages/batchSend` + `groupMessages/send` sampleMarkdown; every inbound `selfMentioned`; Button simulated |
-| **matrix** | `/sync` long-poll (`transport-sync.ts`, `next_batch` cursor, HTTP via Tauri proxy) | access token Bearer (`auth.ts` `normalizeHomeserver`), **NO** signature | whoami → `@bot:hs` | reply / edit (`m.replace`) / delete (redaction) / react (`m.annotation`) / thread / typing; HTML `formatted_body`; Button / Select / TextField simulated via reply-correlation; **NO** `send.image` |
+| **matrix** | `/sync` long-poll (`transport-sync.ts`, `next_batch` cursor, HTTP via Tauri proxy) | access token Bearer (`auth.ts` `normalizeHomeserver`), **NO** signature | whoami → `@bot:hs` + `device_id` | reply / edit (`m.replace`) / delete (redaction) / react (`m.annotation`) / thread / typing; HTML `formatted_body`; native `m.image` / `m.file` / `m.audio` / `m.video` media upload; Button / Select / TextField simulated via reply-correlation |
 
 > Where the `transportModes` meta field says `gateway` it covers any persistent-WS driver — Discord/QQ opcode
-> gateways, the Lark long-connection, the WeCom WS bridge, and Slack Socket Mode all report `gateway`; long-poll
-> drivers (Telegram, Matrix, DingTalk, WeChat-Personal) report `longpoll`; WeChat-OA reports `webhook`.
+> gateways, the Lark long-connection, the WeCom WS bridge, and Slack Socket Mode all report `gateway`; real long-poll
+> drivers (Telegram, Matrix, WeChat-Personal) report `longpoll`; DingTalk also reports `longpoll` as a legacy outbound-dialing bucket even though its provider transport is Stream Mode WSS; WeChat-OA reports `webhook`.
 
 ## Telegram
 
@@ -233,6 +233,8 @@ under `lib/connectors/whoami/` call the platform identity endpoint with the keyr
   (`slack-whoami.ts:47-109`).
 - **Discord** — `probeDiscordIdentity` calls `GET /users/@me` and stores the bot name + avatar + snowflake id
   (`discord-whoami.ts:49-102`).
+- **Matrix** — `probeMatrixIdentity` calls `/account/whoami` and stores the Matrix user id plus device id when
+  the homeserver returns one (`matrix-whoami.ts`).
 
 The persisted result is rendered in **Adapters → Config** as "Connected as …", giving operators a one-glance
 confirmation that the token is valid and bound to the expected bot.
@@ -247,5 +249,5 @@ confirmation that the token is valid and bound to the expected bot.
   <Card title="Slack setup" href="../../connectors/slack-setup" description="Socket Mode tokens, scopes, and webhook signing for the Slack adapter." />
   <Card title="Lark setup" href="../../connectors/lark-setup" description="App ID / secret, long-connection vs webhook, and bot-menu quick commands." />
   <Card title="OneBot setup" href="../../connectors/onebot-setup" description="NapCat / Lagrange reverse-WS wiring and the get_version_info feature probe." />
-  <Card title="Discord setup" href="../../connectors/discord-setup" description="Gateway intents, bot token, and Ed25519 interaction verification." />
+  <Card title="Discord setup" href="../../connectors/discord-setup" description="Gateway intents, bot token, and the reserved public-key field." />
 </Cards>

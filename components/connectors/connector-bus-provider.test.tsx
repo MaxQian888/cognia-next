@@ -59,6 +59,7 @@ const mockStartServer = jest.fn().mockResolvedValue("127.0.0.1:7842")
 const mockStopServer = jest.fn().mockResolvedValue(undefined)
 const mockRegisterAdapterCmd = jest.fn().mockResolvedValue(undefined)
 const mockUnregisterAdapterCmd = jest.fn().mockResolvedValue(undefined)
+const mockResetAllWs = jest.fn().mockResolvedValue(0)
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringGet: jest.fn().mockResolvedValue(null),
   connectorsHttpRequest: jest.fn().mockResolvedValue({ status: 200, body: "{}", headers: {} }),
@@ -66,6 +67,7 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsStopServer: (...args: unknown[]) => mockStopServer(...args),
   connectorsRegisterAdapter: (...args: unknown[]) => mockRegisterAdapterCmd(...args),
   connectorsUnregisterAdapter: (...args: unknown[]) => mockUnregisterAdapterCmd(...args),
+  connectorsResetAllWs: (...args: unknown[]) => mockResetAllWs(...args),
 }))
 
 // ── Mock the AdapterContext factory (no IndexedDB needed for unit test) ──
@@ -206,6 +208,7 @@ describe("ConnectorBusProvider", () => {
     expect(mockRegisterAdapter).not.toHaveBeenCalled()
     expect(mockInstallRuntime).not.toHaveBeenCalled()
     expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+    expect(mockResetAllWs).not.toHaveBeenCalled()
   })
 
   it("registers the connector scheduler-task executors when booting in Tauri mode", async () => {
@@ -573,6 +576,52 @@ describe("ConnectorBusProvider", () => {
     // A failed start short-circuits before the register/audit/heartbeat tail.
     expect(mockRecordHeartbeatNow).not.toHaveBeenCalled()
     errSpy.mockRestore()
+  })
+
+  // Reload recovery — reap Rust-side sockets leaked by a prior webview load
+  // whose React cleanup never ran, BEFORE opening any fresh transport.
+
+  it("reaps leaked WS handles before opening any adapter", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_reset")
+    const adapter = makeFakeAdapter(row.id)
+    adapter.start.mockResolvedValue(undefined)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(adapter.start).toHaveBeenCalledTimes(1))
+    expect(mockResetAllWs).toHaveBeenCalledTimes(1)
+    // The reap must precede the transport start so it can't kill the fresh
+    // socket this boot is about to open.
+    const resetOrder = mockResetAllWs.mock.invocationCallOrder[0]
+    const startOrder = adapter.start.mock.invocationCallOrder[0]
+    expect(resetOrder).toBeLessThan(startOrder)
+  })
+
+  it("still boots when the WS reset fails (best-effort)", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockResetAllWs.mockRejectedValueOnce(new Error("reset bombed"))
+    const row = makeTelegramRow("cai_reset_fail")
+    const adapter = makeFakeAdapter(row.id)
+    adapter.start.mockResolvedValue(undefined)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => expect(adapter.start).toHaveBeenCalledTimes(1))
+    expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ws reset failed"))
+    warnSpy.mockRestore()
   })
 
   // WS3 — inbound axum server lifecycle (webhook / reverse-WS transports).

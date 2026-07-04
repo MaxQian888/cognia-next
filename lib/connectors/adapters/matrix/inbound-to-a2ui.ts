@@ -13,9 +13,20 @@
  * mapper: `m.image` → image node, other media → link nodes.
  */
 
+import type { MessageSegment } from "@/types/connectors/segment"
 import type { InboundA2UIBlock, InboundA2UINode } from "../_shared/inbound-a2ui-types"
 import type { MatrixTimelineEvent, MatrixEventContent } from "./parse"
 import { stripReplyFallback } from "./parse"
+
+export interface MatrixInboundToA2UIOptions {
+  /**
+   * The normalized event's segments. The parser resolved each `mxc://` URI
+   * into a homeserver download URL (`url`, with the original kept in
+   * `rawUrl`), and the media resolver inlines small images as `dataBase64` —
+   * both are renderable where the raw `mxc://` URI is not.
+   */
+  segments?: MessageSegment[]
+}
 
 /** `@local:server` → `local` for a friendlier mention chip. */
 function localpart(userId: string): string {
@@ -23,9 +34,30 @@ function localpart(userId: string): string {
   return m ? m[1] : userId
 }
 
-function mediaNode(content: MatrixEventContent): InboundA2UINode | null {
-  const url = content.url
-  if (!url) return null
+type MediaSegment = Extract<MessageSegment, { type: "image" | "video" | "voice" | "file" }>
+
+function findMediaSegment(mxcUrl: string, segments?: MessageSegment[]): MediaSegment | undefined {
+  return segments?.find(
+    (s): s is MediaSegment =>
+      (s.type === "image" || s.type === "video" || s.type === "voice" || s.type === "file") &&
+      (s.rawUrl === mxcUrl || s.url === mxcUrl)
+  )
+}
+
+function mediaNode(
+  content: MatrixEventContent,
+  segments?: MessageSegment[]
+): InboundA2UINode | null {
+  const rawUrl = content.url
+  if (!rawUrl) return null
+  const seg = findMediaSegment(rawUrl, segments)
+  // Prefer inlined bytes (small images), then the parser-resolved download
+  // URL. Without either, fall through with the raw URI (direct-call/test
+  // path) — better than dropping the node entirely.
+  const url =
+    seg?.type === "image" && seg.dataBase64
+      ? `data:${seg.mimeType ?? content.info?.mimetype ?? "image/png"};base64,${seg.dataBase64}`
+      : (seg?.url ?? rawUrl)
   switch (content.msgtype) {
     case "m.image":
       return {
@@ -46,7 +78,10 @@ function mediaNode(content: MatrixEventContent): InboundA2UINode | null {
   }
 }
 
-export function matrixInboundToA2UI(ev: MatrixTimelineEvent): InboundA2UIBlock | null {
+export function matrixInboundToA2UI(
+  ev: MatrixTimelineEvent,
+  options: MatrixInboundToA2UIOptions = {}
+): InboundA2UIBlock | null {
   if (!ev || typeof ev !== "object" || !ev.content) return null
 
   // For `m.replace` edits the renderable content lives in `m.new_content`;
@@ -62,7 +97,7 @@ export function matrixInboundToA2UI(ev: MatrixTimelineEvent): InboundA2UIBlock |
     body.push({ kind: "reply_context", replyToMessageId: inReplyTo })
   }
 
-  const media = mediaNode(content)
+  const media = mediaNode(content, options.segments)
   if (media) {
     body.push(media)
   } else {

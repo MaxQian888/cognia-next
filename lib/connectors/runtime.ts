@@ -243,7 +243,7 @@ export async function insertInboundMessage(
   // into an InboundA2UIBlock so the Inbox renderer can show native UI
   // structure rather than the plaintext fallback. Best-effort — the
   // mapper returns null when the payload has nothing structured.
-  const inboundA2UI = projectInboundToA2UI(event.platform, event.raw)
+  const inboundA2UI = projectInboundToA2UI(event.platform, event.raw, event.segments)
 
   const row: StoredMessage = {
     id: crypto.randomUUID(),

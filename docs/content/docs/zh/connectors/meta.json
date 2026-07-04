@@ -6,6 +6,7 @@
     "telegram-setup",
     "matrix-setup",
     "lark-setup",
+    "dingtalk-setup",
     "wecom-setup",
     "wechat-oa-setup",
     "wechat-personal-setup",

@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
+import type React from "react"
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -10,9 +11,25 @@ import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 
 const mockRequestLoginQr = jest.fn()
 const mockPollLoginStatus = jest.fn()
+const mockIsTauri = jest.fn(() => true)
 jest.mock("@/lib/connectors/adapters/wechat-personal/auth", () => ({
   requestLoginQr: (...a: unknown[]) => mockRequestLoginQr(...a),
   pollLoginStatus: (...a: unknown[]) => mockPollLoginStatus(...a),
+}))
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => mockIsTauri(),
+}))
+
+jest.mock("next/image", () => ({
+  __esModule: true,
+  default: ({
+    unoptimized: _unoptimized,
+    priority: _priority,
+    ...props
+  }: React.ImgHTMLAttributes<HTMLImageElement> & {
+    unoptimized?: boolean
+    priority?: boolean
+  }) => <img {...props} alt={props.alt ?? ""} />,
 }))
 
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "wx-new" })
@@ -43,6 +60,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 beforeEach(() => {
   jest.clearAllMocks()
   mockCreateAdapterInstance.mockResolvedValue({ id: "wx-new" })
+  mockIsTauri.mockReturnValue(true)
 })
 
 describe("WeChatPersonalConfigDialog — create", () => {
@@ -65,6 +83,44 @@ describe("WeChatPersonalConfigDialog — create", () => {
     expect(mockRequestLoginQr).toHaveBeenCalled()
     expect(screen.getByTestId("wechat-personal-qr")).toBeInTheDocument()
     expect(screen.getByText(/waiting for scan/i)).toBeInTheDocument()
+  })
+
+  it("reports QR responses that do not include a QR code", async () => {
+    mockRequestLoginQr.mockResolvedValue({ qrcode_img_content: "BASE64PNG" })
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /get login qr/i }))
+    })
+
+    expect(screen.queryByTestId("wechat-personal-qr")).not.toBeInTheDocument()
+    expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/failed/i)
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Failed"))
+  })
+
+  it("reports QR request errors", async () => {
+    mockRequestLoginQr.mockRejectedValueOnce(new Error("gateway offline"))
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /get login qr/i }))
+    })
+
+    expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/failed/i)
+    expect(mockToastError).toHaveBeenCalledWith("gateway offline")
+  })
+
+  it("disables QR login outside the desktop runtime", async () => {
+    mockIsTauri.mockReturnValue(false)
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+
+    expect(screen.getByText(/desktop runtime/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /get login qr/i })).toBeDisabled()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /get login qr/i }))
+    })
+    expect(mockRequestLoginQr).not.toHaveBeenCalled()
   })
 
   it("persists token + creates the adapter when the scan is confirmed", async () => {
@@ -99,6 +155,70 @@ describe("WeChatPersonalConfigDialog — create", () => {
         })
       )
       expect(mockKeyringSet).toHaveBeenCalledWith("wx-new", "botToken", "tok-9")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("shows scanned and expired polling states without persisting credentials", async () => {
+    jest.useFakeTimers()
+    try {
+      mockRequestLoginQr.mockResolvedValue({ qrcode: "qr1", qrcode_img_content: "B64" })
+      mockPollLoginStatus
+        .mockResolvedValueOnce({ status: "scaned" })
+        .mockResolvedValueOnce({ status: "expired" })
+      render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /get login qr/i }))
+      })
+      await act(async () => {
+        jest.advanceTimersByTime(3000)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/scanned/i)
+
+      await act(async () => {
+        jest.advanceTimersByTime(3000)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/expired/i)
+      expect(mockKeyringSet).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("reports persistence errors when the confirmed scan cannot be stored", async () => {
+    jest.useFakeTimers()
+    try {
+      mockCreateAdapterInstance.mockRejectedValueOnce(new Error("db locked"))
+      mockRequestLoginQr.mockResolvedValue({ qrcode: "qr1", qrcode_img_content: "B64" })
+      mockPollLoginStatus.mockResolvedValue({
+        status: "confirmed",
+        bot_token: "tok-9",
+      })
+      render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /get login qr/i }))
+      })
+      await act(async () => {
+        jest.advanceTimersByTime(3000)
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("db locked")
+      })
+      expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/failed/i)
     } finally {
       jest.useRealTimers()
     }
@@ -145,5 +265,57 @@ describe("WeChatPersonalConfigDialog — edit", () => {
     )
     expect(mockToastSuccess).not.toHaveBeenCalled() // edit save just closes
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("persists re-login credentials for an existing adapter", async () => {
+    jest.useFakeTimers()
+    try {
+      mockRequestLoginQr.mockResolvedValue({ qrcode: "qr1", qrcode_img_content: "B64" })
+      mockPollLoginStatus.mockResolvedValue({
+        status: "confirmed",
+        bot_token: "new-token",
+        baseurl: "https://new",
+        account_id: "acc2",
+      })
+      render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={row} />)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /re-scan qr/i }))
+      })
+      await act(async () => {
+        jest.advanceTimersByTime(3000)
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+        "wx1",
+        expect.objectContaining({
+          settings: { baseUrl: "https://new", accountId: "acc2" },
+        })
+      )
+      expect(mockKeyringSet).toHaveBeenCalledWith("wx1", "botToken", "new-token")
+      expect(mockEmitCredentialsRotated).toHaveBeenCalledWith("wx1")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("reports edit save failures without closing the dialog", async () => {
+    const onOpenChange = jest.fn()
+    mockUpdateAdapterInstance.mockRejectedValueOnce(new Error("save denied"))
+    render(<WeChatPersonalConfigDialog open onOpenChange={onOpenChange} row={row} />)
+    fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Renamed" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    })
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("save denied")
+    })
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 })

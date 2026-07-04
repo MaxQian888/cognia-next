@@ -1,0 +1,83 @@
+---
+title: "Personal WeChat (iLink) Setup"
+description: "Connect a personal WeChat account through the iLink gateway with QR login. Unofficial, reply-only, and carries account-ban risk."
+---
+
+# Personal WeChat (iLink) Setup Guide
+
+This guide walks you through connecting a personal WeChat account to cognia-next through the
+**iLink gateway**.
+
+---
+
+## 1. Read the Risk Notice
+
+Review these constraints before you start:
+
+- This connector uses the **iLink gateway** (`https://ilinkai.weixin.qq.com`). It is an
+  **unofficial** integration path, not an official WeChat bot capability.
+- Automating a personal WeChat account may violate WeChat's terms and carries a real
+  **account-ban risk**.
+- Use a **non-primary** WeChat account. Do not connect an account that has payments, critical
+  contacts, or work communication attached to it.
+- Because the path is unofficial and gateway-dependent, availability, protocol shape, and limits
+  can change without notice.
+
+Use an official connector such as WeCom or Slack when you cannot accept those risks.
+
+---
+
+## 2. Sign In With QR Login
+
+iLink does not have static credentials. Login is completed by scanning a QR code with the WeChat
+mobile app. QR login depends on the gateway and is available only in the desktop runtime (Tauri).
+
+1. Open cognia-next and go to **Settings → Connections → Adapters**.
+2. Click **Add adapter** and choose **Personal WeChat (iLink)**.
+3. Enter a **Display name** for the connector, for example `WeChat side account`.
+4. Click **Get login QR**. The dialog shows a QR image.
+5. Scan it with **WeChat on your phone** and confirm the login on the phone.
+6. The dialog status advances automatically: **waiting for scan → scanned → confirmed**.
+7. After confirmation, the gateway returns `bot_token` and `baseurl`. cognia-next persists
+   `bot_token` in the OS keyring as `botToken`, and stores `baseurl` in the adapter settings.
+8. Click **Create** to finish.
+
+If the QR code expires, click **Get login QR** again to generate a new one.
+
+---
+
+## 3. Verify the Connection
+
+This channel is **reply-only**, so verification must start from the WeChat side:
+
+1. Ask any WeChat contact to send a message to the connected account.
+2. Once cognia-next receives that message, it can reply in the same WeChat conversation.
+3. Check **Settings → Connections**. The adapter should show as **running**.
+
+If the adapter shows **degraded** or **stopped**:
+
+- `session_expired_rescan` means the gateway session expired. Reopen the adapter dialog and scan a
+  fresh QR code.
+- Check the **Audit Log** tab under **Connections** for the exact platform or gateway error.
+
+---
+
+## Notes
+
+- **Reply-only**: the bot can only reply to contacts who have already sent it a message. Every reply
+  needs the inbound message's `context_token`; without that anchor, no send is possible.
+- **No proactive push**: scheduled tasks, workflows, and other outbound-first messages are not
+  delivered through this connector.
+- **Session expiry**: when the gateway returns the session-expired signal (`ret -14`), the adapter
+  degrades and stops polling until you scan a new QR code.
+- **Inbound media**: text, image, voice, file, and video messages can be received. Images are
+  decrypted and inlined for model processing; voice, file, and video are represented as markers.
+- **Outbound media**: current outbound support is plain text only. Image, voice, file, and video
+  segments downgrade to text markers because outbound media requires AES-128-ECB encryption plus a
+  CDN upload handshake.
+- **No rich text or native interaction UI**: iLink renders plain text only. A2UI surfaces degrade
+  through their `plainTextMirror`.
+- **Numeric actions**: when an A2UI surface registers numeric options for a conversation, a reply
+  like `1` is routed as a button callback instead of a normal chat message.
+- **Desktop-only**: QR login and long-poll messaging use the gateway through Tauri's HTTP proxy, so
+  this connector is desktop-only.

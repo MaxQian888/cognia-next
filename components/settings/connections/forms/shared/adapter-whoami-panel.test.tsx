@@ -20,6 +20,10 @@ jest.mock("@/lib/connectors/whoami/slack-whoami", () => ({
   probeSlackIdentity: jest.fn(),
   SlackWhoamiError: class extends Error {},
 }))
+jest.mock("@/lib/connectors/whoami/matrix-whoami", () => ({
+  probeMatrixIdentity: jest.fn(),
+  MatrixWhoamiError: class extends Error {},
+}))
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => true,
@@ -28,6 +32,7 @@ jest.mock("@/lib/tauri", () => ({
 import { probeTelegramIdentity } from "@/lib/connectors/whoami/telegram-whoami"
 import { probeDiscordIdentity } from "@/lib/connectors/whoami/discord-whoami"
 import { probeSlackIdentity } from "@/lib/connectors/whoami/slack-whoami"
+import { probeMatrixIdentity } from "@/lib/connectors/whoami/matrix-whoami"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -35,6 +40,7 @@ beforeEach(async () => {
   ;(probeTelegramIdentity as jest.Mock).mockReset()
   ;(probeDiscordIdentity as jest.Mock).mockReset()
   ;(probeSlackIdentity as jest.Mock).mockReset()
+  ;(probeMatrixIdentity as jest.Mock).mockReset()
 })
 
 function seed(
@@ -134,6 +140,21 @@ describe("AdapterWhoamiPanel", () => {
     })
   })
 
+  it("dispatches to probeMatrixIdentity for matrix platform", async () => {
+    await seed("mx-2", "matrix")
+    ;(probeMatrixIdentity as jest.Mock).mockResolvedValue({
+      botName: "bot",
+      appId: "https://matrix.org",
+      openId: "@bot:matrix.org",
+    })
+    render(<AdapterWhoamiPanel adapterId="mx-2" platform="matrix" />)
+    await waitFor(() => screen.getByTestId("adapter-whoami-reprobe"))
+    fireEvent.click(screen.getByTestId("adapter-whoami-reprobe"))
+    await waitFor(() => {
+      expect(probeMatrixIdentity).toHaveBeenCalledWith("mx-2")
+    })
+  })
+
   it("hides the probe button for OneBot and surfaces the selfBotUin fallback", async () => {
     await seed("ob-1", "onebot", { settings: { selfBotUin: "10001234" } })
     render(<AdapterWhoamiPanel adapterId="ob-1" platform="onebot" />)
@@ -143,6 +164,26 @@ describe("AdapterWhoamiPanel", () => {
       expect(screen.getByText("10001234")).toBeInTheDocument()
     })
   })
+
+  it.each([
+    ["onebot"],
+    ["dingtalk"],
+    ["qq-official"],
+    ["wechat-oa"],
+    ["wecom"],
+    ["wechat-personal"],
+  ] as Array<[AdapterInstanceRow["type"]]>)(
+    "hides the probe button and shows a no-probe reason for %s rows without a snapshot",
+    async (platform) => {
+      await seed(`${platform}-no-probe`, platform)
+      render(<AdapterWhoamiPanel adapterId={`${platform}-no-probe`} platform={platform} />)
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("adapter-whoami-reprobe")).not.toBeInTheDocument()
+        expect(screen.getByTestId("adapter-whoami-no-probe")).toBeInTheDocument()
+      })
+    }
+  )
 
   it("surfaces probe errors in a dedicated error panel", async () => {
     await seed("sl-3", "slack")

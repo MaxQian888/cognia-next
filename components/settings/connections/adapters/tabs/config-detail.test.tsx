@@ -74,6 +74,21 @@ jest.mock("@/components/settings/connections/forms/slack-config", () => ({
     ) : null,
 }))
 
+jest.mock("@/components/settings/connections/forms/matrix-config", () => ({
+  MatrixConfigDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="matrix-config-dialog">
+        <button onClick={() => onOpenChange(false)}>Close</button>
+      </div>
+    ) : null,
+}))
+
 jest.mock("@/components/settings/connections/forms/onebot-config", () => ({
   OneBotConfigDialog: ({
     open,
@@ -84,6 +99,81 @@ jest.mock("@/components/settings/connections/forms/onebot-config", () => ({
   }) =>
     open ? (
       <div data-testid="onebot-config-dialog">
+        <button onClick={() => onOpenChange(false)}>Close</button>
+      </div>
+    ) : null,
+}))
+
+jest.mock("@/components/settings/connections/forms/wecom-config", () => ({
+  WeComConfigDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="wecom-config-dialog">
+        <button onClick={() => onOpenChange(false)}>Close</button>
+      </div>
+    ) : null,
+}))
+
+jest.mock("@/components/settings/connections/forms/wechat-personal-config", () => ({
+  WeChatPersonalConfigDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="wechat-personal-config-dialog">
+        <button onClick={() => onOpenChange(false)}>Close</button>
+      </div>
+    ) : null,
+}))
+
+jest.mock("@/components/settings/connections/forms/dingtalk-config", () => ({
+  DingTalkConfigDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="dingtalk-config-dialog">
+        <button onClick={() => onOpenChange(false)}>Close</button>
+      </div>
+    ) : null,
+}))
+
+jest.mock("@/components/settings/connections/forms/qq-official-config", () => ({
+  QQOfficialConfigDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="qq-official-config-dialog">
+        <button onClick={() => onOpenChange(false)}>Close</button>
+      </div>
+    ) : null,
+}))
+
+jest.mock("@/components/settings/connections/forms/wechat-oa-config", () => ({
+  WechatOaConfigDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="wechat-oa-config-dialog">
         <button onClick={() => onOpenChange(false)}>Close</button>
       </div>
     ) : null,
@@ -139,6 +229,9 @@ const messages = {
   settings: {
     connections: {
       adapters: {
+        transportLabels: {
+          dingtalkStream: "Stream Mode WSS",
+        },
         detail: {
           editCredentials: "Edit credentials",
         },
@@ -205,6 +298,12 @@ describe("ConfigDetail — base rendering", () => {
     expect(screen.getByText("telegram")).toBeInTheDocument()
     expect(screen.getByText("longpoll")).toBeInTheDocument()
     expect(screen.getByText("auto")).toBeInTheDocument()
+  })
+
+  it("shows DingTalk Stream Mode while preserving the raw transport enum as metadata", () => {
+    render(withIntl(<ConfigDetail row={makeRow("dingtalk")} />))
+    expect(screen.getByText("Stream Mode WSS")).toHaveAttribute("title", "longpoll")
+    expect(screen.queryByText("longpoll")).not.toBeInTheDocument()
   })
 
   it("renders publicUrl when the row has one", () => {
@@ -383,6 +482,68 @@ describe("ConfigDetail — OneBot dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /close/i }))
     await waitFor(() => {
       expect(screen.queryByTestId("onebot-config-dialog")).not.toBeInTheDocument()
+    })
+  })
+})
+
+describe("ConfigDetail — Matrix dialog", () => {
+  it("opens MatrixConfigDialog for a matrix row", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("matrix")} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => {
+      expect(screen.getByTestId("matrix-config-dialog")).toBeInTheDocument()
+    })
+  })
+
+  it("closes MatrixConfigDialog when onOpenChange(false) fires", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("matrix")} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => screen.getByTestId("matrix-config-dialog"))
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+    await waitFor(() => {
+      expect(screen.queryByTestId("matrix-config-dialog")).not.toBeInTheDocument()
+    })
+  })
+})
+
+describe("ConfigDetail — expanded stable provider dialogs", () => {
+  it("opens WeComConfigDialog for a wecom row", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("wecom")} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => {
+      expect(screen.getByTestId("wecom-config-dialog")).toBeInTheDocument()
+    })
+  })
+
+  it("opens WeChatPersonalConfigDialog for a wechat-personal row", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("wechat-personal")} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => {
+      expect(screen.getByTestId("wechat-personal-config-dialog")).toBeInTheDocument()
+    })
+  })
+
+  it("opens DingTalkConfigDialog for a dingtalk row", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("dingtalk")} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => {
+      expect(screen.getByTestId("dingtalk-config-dialog")).toBeInTheDocument()
+    })
+  })
+
+  it("opens QQOfficialConfigDialog for a qq-official row", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("qq-official")} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => {
+      expect(screen.getByTestId("qq-official-config-dialog")).toBeInTheDocument()
+    })
+  })
+
+  it("opens WechatOaConfigDialog for a wechat-oa row", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("wechat-oa")} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => {
+      expect(screen.getByTestId("wechat-oa-config-dialog")).toBeInTheDocument()
     })
   })
 })

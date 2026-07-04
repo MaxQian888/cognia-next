@@ -16,11 +16,9 @@
  *   - i18n keys live in `settings.connections.sendTest.*` shared across
  *     every platform.
  *
- * Per-platform `chat_id` placeholder text is the only varying bit — every
- * platform's `ConversationReference` shape lets us drop the target id in
- * under a stable key (`chatId` for telegram/lark/onebot, `channelId` for
- * discord/slack). The adapter parses whichever it understands; passing
- * both keys is safe.
+ * Each adapter owns its `ConversationReference` shape, so this shared panel
+ * keeps one compact target input but projects it into the fields that the
+ * selected runtime actually reads.
  */
 
 import { useState } from "react"
@@ -35,27 +33,91 @@ import { newIdempotencyKey } from "@/types/connectors/outbound"
 import { isTauri } from "@/lib/tauri"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { OutboundResult } from "@/types/connectors/outbound"
+import type { ConversationReference } from "@/types/connectors/event"
 
 export interface SendTestMessageSectionProps {
   adapterId: string
   platform: PlatformKind
 }
 
-const PLATFORM_PLACEHOLDER: Partial<Record<PlatformKind, string>> = {
-  telegram: "123456789",
-  discord: "1234567890123456789",
-  slack: "C0123ABC456",
-  lark: "oc_xxxxxxxxxxxxxxxx",
-  onebot: "987654321",
-  wecom: "userid (single) / chatid (group)",
-  "wechat-personal": "reply-only — cannot test proactively",
-  matrix: "!roomid:matrix.org",
-  "wechat-oa": "follower OpenID",
-  "qq-official": "channel id / group openid",
+const REPLY_ONLY_PLATFORMS = new Set<PlatformKind>(["wechat-personal"])
+
+interface ParsedTarget {
+  kind?: string
+  id: string
 }
 
-function placeholderFor(platform: PlatformKind): string {
-  return PLATFORM_PLACEHOLDER[platform] ?? "chat-id"
+/**
+ * Prefixes that select a conversation kind (e.g. `group:12345`). Anything
+ * else containing a colon — Matrix room ids like `!abcd:matrix.org`, URLs,
+ * platform ids with embedded colons — is a raw target id, NOT a kind prefix.
+ */
+const KNOWN_TARGET_KINDS = new Set([
+  "group",
+  "g",
+  "single",
+  "user",
+  "private",
+  "p",
+  "c2c",
+  "direct",
+  "channel",
+])
+
+function parseTarget(raw: string): ParsedTarget {
+  const trimmed = raw.trim()
+  const separator = trimmed.indexOf(":")
+  if (separator <= 0) return { id: trimmed }
+  const kind = trimmed.slice(0, separator).trim().toLowerCase()
+  if (!KNOWN_TARGET_KINDS.has(kind)) return { id: trimmed }
+  const id = trimmed.slice(separator + 1).trim()
+  return { kind, id }
+}
+
+function buildConversationRef(
+  platform: PlatformKind,
+  adapterId: string,
+  rawTarget: string
+): ConversationReference {
+  const { kind, id } = parseTarget(rawTarget)
+  const base: ConversationReference = { platform, adapterId }
+
+  switch (platform) {
+    case "discord":
+    case "slack":
+    case "lark":
+      return { ...base, channelId: id }
+    case "matrix":
+      return { ...base, roomId: id }
+    case "onebot": {
+      const group = kind === "group" || kind === "g"
+      return group
+        ? { ...base, groupId: id, chatKey: `g:${id}` }
+        : { ...base, userId: id, chatKey: `p:${id}` }
+    }
+    case "dingtalk": {
+      const group = kind === "group"
+      return group
+        ? { ...base, conversationType: "2", openConversationId: id }
+        : { ...base, conversationType: "1", userId: id }
+    }
+    case "wecom": {
+      const chatType = kind === "group" ? "group" : "single"
+      return { ...base, chatId: id, chatType, ...(chatType === "single" ? { userId: id } : {}) }
+    }
+    case "wechat-oa":
+      return { ...base, openId: id }
+    case "qq-official": {
+      const scene =
+        kind === "group" || kind === "c2c" || kind === "direct" || kind === "channel"
+          ? kind
+          : "channel"
+      return { ...base, scene, sceneId: id }
+    }
+    case "telegram":
+    default:
+      return { ...base, chatId: id, channelId: id }
+  }
 }
 
 export function SendTestMessageSection({ adapterId, platform }: SendTestMessageSectionProps) {
@@ -65,25 +127,15 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<OutboundResult | null>(null)
   const desktop = isTauri()
+  const sendUnsupported = REPLY_ONLY_PLATFORMS.has(platform)
 
   const handleSend = async () => {
-    if (!chatId.trim()) return
+    if (!chatId.trim() || sendUnsupported) return
     setSending(true)
     setResult(null)
     try {
       const trimmedBody = body.trim() || t("defaultBody")
-      // Pass both `chatId` and `channelId` so any adapter can pick the
-      // key it understands — the bus doesn't inspect this object beyond
-      // `platform` + `adapterId`, the adapter is what reads the rest.
-      const conversationRef = {
-        platform,
-        adapterId,
-        chatId: chatId.trim(),
-        channelId: chatId.trim(),
-        // Matrix reads `roomId`; passing every key is safe since the bus
-        // never inspects the ref beyond `platform` + `adapterId`.
-        roomId: chatId.trim(),
-      }
+      const conversationRef = buildConversationRef(platform, adapterId, chatId)
       const sendResult = await getBus().sendOutbound(adapterId, {
         conversationRef,
         segments: [{ type: "text", text: trimmedBody }],
@@ -104,7 +156,7 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
     }
   }
 
-  const disabled = !desktop || sending || !chatId.trim()
+  const disabled = !desktop || sending || !chatId.trim() || sendUnsupported
 
   return (
     <Card data-testid="send-test-message-section">
@@ -122,12 +174,20 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
             id="send-test-chat-id"
             value={chatId}
             onChange={(e) => setChatId(e.target.value)}
-            placeholder={placeholderFor(platform)}
+            placeholder={t(`targetPlaceholder.${platform}`)}
             disabled={sending}
             className="h-9 font-mono text-xs"
             data-testid="send-test-chat-id"
           />
           <p className="text-[10px] text-muted-foreground">{t(`chatIdHelp.${platform}`)}</p>
+          {sendUnsupported && (
+            <p
+              className="text-[10px] text-amber-700 dark:text-amber-400"
+              data-testid="send-test-unsupported"
+            >
+              {t("unsupportedReplyOnly")}
+            </p>
+          )}
         </div>
 
         <div className="space-y-1.5">

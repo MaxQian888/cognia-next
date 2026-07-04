@@ -140,6 +140,16 @@ describe("AdapterListRow", () => {
     expect(screen.getByText(/Telegram · longpoll/)).toBeInTheDocument()
   })
 
+  it("renders DingTalk Stream Mode instead of the internal longpoll bucket", () => {
+    renderRow({
+      id: "dt-1",
+      type: "dingtalk",
+      displayName: "DingTalk Bot",
+      transportMode: "longpoll",
+    })
+    expect(screen.getByText(/DingTalk .* · Stream Mode WSS/)).toBeInTheDocument()
+  })
+
   it("selects the adapter when the row is clicked", () => {
     renderRow()
     fireEvent.click(screen.getByTestId("adapter-card-tg-1"))

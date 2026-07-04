@@ -1,0 +1,73 @@
+---
+title: "WeChat Official Account Setup"
+description: "Configure WeChat Official Account server safe mode, connect the callback webhook to cognia-next, and store the credentials used for signature verification and AES-256-CBC decryption."
+---
+
+# WeChat Official Account Setup Guide
+
+This guide walks through enabling server configuration in the WeChat Official Account platform, connecting its webhook to cognia-next, and storing the access-token and safe-mode decryption credentials. SHA-1 signature verification and AES-256-CBC body decryption are handled by the Rust webhook handler in cognia-next.
+
+---
+
+## 1. Prepare an Official Account
+
+1. Prepare a WeChat Official Account. A **Service Account** is recommended because Subscription Accounts have restricted developer APIs and may not support the customer-service reply API you need.
+2. Sign in to [WeChat Official Accounts Platform](https://mp.weixin.qq.com), then open **Settings and Development → Basic Configuration**.
+3. Record the **AppID** and **AppSecret**. The full AppSecret is shown only when generated or reset, so store it securely.
+
+---
+
+## 2. Configure Credentials in cognia-next
+
+1. Open cognia-next and navigate to **Settings → Platform Connections → Adapters**.
+2. Click **Add connector**, then choose **WeChat Official Account**.
+3. In the **Identity** section, fill in all four fields:
+
+   | Field | Purpose |
+   | --- | --- |
+   | `App ID` | The **AppID** from Basic Configuration |
+   | `App Secret` | The **AppSecret**, used to mint `access_token` and call the customer-service reply API |
+   | `Token` | The exact token you will configure in WeChat server settings for signature verification |
+   | `EncodingAESKey` | The 43-character safe-mode key used to decrypt callback bodies |
+
+4. Click **Create**. All four values are encrypted in the OS keyring and are not stored in plaintext settings.
+5. Reopen the saved adapter. The **Delivery** section now shows the real webhook URL because the adapter id exists.
+
+---
+
+## 3. Configure the WeChat Server Callback
+
+1. In the saved adapter's **Delivery** section, copy the **Webhook URL**. When the Cloudflared Tunnel is running, it should be a full public HTTPS URL shaped like `https://.../webhook/wechat-oa/{adapterId}`. If only `/webhook/wechat-oa/{adapterId}` is shown, prepend your public HTTPS base URL manually or start the tunnel first.
+2. In the WeChat Official Accounts Platform, open **Settings and Development → Basic Configuration → Server Configuration**, click **Modify configuration**, and enter:
+   - **URL**: the full public HTTPS webhook URL.
+   - **Token**: exactly the same value you saved in cognia-next.
+   - **EncodingAESKey**: exactly the same 43-character value you saved in cognia-next.
+   - **Message encryption mode**: choose **Safe Mode**. Plaintext and compatibility mode are not supported by this connector.
+3. WeChat requires a publicly reachable HTTPS endpoint. In the desktop app, use **Settings → Mobile Companion → Cloudflared Tunnel** to expose the connectors server publicly.
+4. Click **Submit**. WeChat sends a GET verification request with `echostr`; the Rust handler verifies the SHA-1 signature from `token`, `timestamp`, and `nonce`, then echoes `echostr`. Later POST message callbacks are AES-256-CBC decrypted and emitted to the adapter.
+
+> The WeChat `/cgi-bin/token` API may require the server's public egress IP to be allowlisted under Basic Configuration. If outbound replies fail with token-related errors, check that IP allowlist first.
+
+---
+
+## 4. Verify the Connection
+
+1. Use a WeChat account that follows the Official Account and send it a text message.
+2. The message should appear in cognia-next within a few seconds.
+3. Check **Platform Connections** — the adapter status should show **running**.
+
+If the adapter shows **stopped** or **degraded**:
+
+- Confirm the WeChat **Token** and **EncodingAESKey** exactly match the values saved in cognia-next, and that encryption mode is **Safe Mode**.
+- Confirm your public HTTPS endpoint or Cloudflared Tunnel is still running and the WeChat submit verification succeeded.
+- Confirm the `AppID` / `AppSecret` are correct and the public egress IP is allowlisted if WeChat requires it.
+- Open **Settings → Platform Connections → Audit Log** for detailed errors.
+
+---
+
+## Notes
+
+- **48-hour customer-service window**: replies use WeChat's customer-service API (`message/custom/send`). The platform only allows messages within 48 hours of the user's last message. Outside that window WeChat rejects the send with `errcode 45015`, and cognia-next marks it as non-retryable. Template messages require a separate approved flow and are not part of this adapter.
+- **Safe Mode and 43-character EncodingAESKey are required**: this connector supports Safe Mode only. The form validates that `EncodingAESKey` is 43 characters. Rust decodes `EncodingAESKey + "="` to a 32-byte AES key and uses the first 16 bytes as the IV for AES-256-CBC decryption.
+- **Desktop only**: this connector depends on the Tauri Rust webhook server for signature verification and decryption. The browser-only build has no HTTP ingress for WeChat callbacks.
+- **Message capability**: the current adapter declares text send only (`send.text`). Richer outbound segment types and A2UI surfaces degrade to a plain-text mirror.

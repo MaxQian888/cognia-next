@@ -37,6 +37,7 @@ import { startOutboundRunner } from "@/lib/connectors/outbound-runner"
 import { installScheduledOutboundHandlers } from "@/lib/connectors/scheduled-outbound"
 import {
   connectorsRegisterAdapter,
+  connectorsResetAllWs,
   connectorsStartServer,
   connectorsStopServer,
   connectorsUnregisterAdapter,
@@ -195,6 +196,28 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
     }
 
     void (async () => {
+      // Reap any connector WS / Lark long-connection sockets leaked by a
+      // PREVIOUS webview load (hard reload / Fast-Refresh full reload / crash)
+      // whose React cleanup never ran. The Rust core process survives a webview
+      // reload, so those sockets — and Lark's self-reconnect loop — would
+      // otherwise accumulate and deliver duplicate inbound events on every
+      // reload. This MUST run before any `adapter.start()` opens a fresh socket.
+      // Best-effort: a reset failure must not block the boot (first-ever load
+      // reaps nothing and returns 0).
+      try {
+        const reaped = await connectorsResetAllWs()
+        if (reaped > 0) {
+          console.info(
+            `[connector-bus] reaped ${reaped} leaked WS handle(s) from a prior webview load`
+          )
+        }
+      } catch (err) {
+        console.warn(
+          `[connector-bus] ws reset failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+      if (cancelled) return
+
       let enabled: Awaited<ReturnType<typeof listEnabledAdapterInstances>>
       try {
         enabled = await listEnabledAdapterInstances()

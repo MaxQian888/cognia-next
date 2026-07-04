@@ -4,16 +4,15 @@
  * Discord adapter configuration dialog.
  *
  * Migrated to the shared `AdapterFormSections` shell — Identity / Delivery /
- * Advanced collapsible sections. Discord uses gateway transport in v1; the
- * Delivery section also exposes the optional Ed25519 public key used for
- * Interactions webhook verification, plus the application's slash-command
- * endpoint URL (derived from the running Cloudflared tunnel) so the
- * operator can paste it into the Discord developer portal.
+ * Advanced collapsible sections. Discord uses gateway transport in v1. The
+ * Delivery section keeps the optional Ed25519 public-key field visible as a
+ * clearly inactive future webhook credential, but does not surface a callback
+ * URL until the runtime adapter advertises a webhook transport.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -25,7 +24,6 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
-import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
@@ -88,7 +86,6 @@ export function DiscordConfigDialog({
   const [saving, setSaving] = useState(false)
 
   const desktop = isTauri()
-  const tunnel = useTunnelStatus()
 
   const dirty =
     isNew ||
@@ -112,15 +109,6 @@ export function DiscordConfigDialog({
       toast.success(t("connectedToast", { username: result.username ?? t("unknownUsername") }))
     } else {
       toast.error(result.error ?? t("connectionFailedToast"))
-    }
-  }
-
-  const handleCopyInteractionsUrl = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url)
-      toast.success(t("interactionsUrlCopied"))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -178,11 +166,9 @@ export function DiscordConfigDialog({
         emitCredentialsRotated(adapterId)
       }
       // Phase 1 ships gateway transport only — the Interactions webhook
-      // path is not consumed yet. We intentionally do NOT write the
-      // public key to keyring to avoid the "ghost credential" foot-gun
-      // where the operator thinks the field is active. The input stays
-      // mounted (clearly labelled `[Phase 2]`) so credentials can be
-      // captured in advance and persisted once webhook mode lands.
+      // verifier exists in Rust but the Discord adapter does not subscribe to
+      // that inbound channel or answer Discord PING handshakes yet. Do not
+      // write publicKey until a real webhook transport lands.
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       if (isNew) onCreated?.(adapterId)
@@ -193,10 +179,6 @@ export function DiscordConfigDialog({
       setSaving(false)
     }
   }
-
-  const interactionsPath = isNew ? null : `/webhook/discord/${row?.id ?? ""}/interactions`
-  const interactionsUrl =
-    tunnel.url && interactionsPath ? `${tunnel.url.replace(/\/$/, "")}${interactionsPath}` : null
 
   const identitySection: FormSection = {
     id: "identity",
@@ -314,74 +296,6 @@ export function DiscordConfigDialog({
             placeholder={t("publicKeyPlaceholder")}
             disabled={saving}
           />
-        </div>
-
-        <div className="space-y-2 rounded border bg-card px-3 py-3">
-          <Label className="text-xs font-medium">{t("interactionsUrlLabel")}</Label>
-          {interactionsPath === null ? (
-            <p className="text-xs text-muted-foreground">{t("interactionsUrlNewAdapterHint")}</p>
-          ) : tunnel.loading ? (
-            <p className="text-xs text-muted-foreground">{t("interactionsUrlTunnelLoading")}</p>
-          ) : tunnel.running && interactionsUrl ? (
-            <div className="space-y-2">
-              <Input
-                readOnly
-                value={interactionsUrl}
-                className="font-mono text-[11px]"
-                aria-label={t("interactionsUrlLabel")}
-                data-testid="discord-interactions-url-input"
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleCopyInteractionsUrl(interactionsUrl)}
-                  aria-label={t("interactionsUrlCopyAria")}
-                >
-                  {t("interactionsUrlCopy")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    typeof window !== "undefined" &&
-                    window.open(
-                      "https://discord.com/developers/applications",
-                      "_blank",
-                      "noopener,noreferrer"
-                    )
-                  }
-                >
-                  <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
-                  {t("openConsole")}
-                </Button>
-              </div>
-              <p className="text-[10px] text-muted-foreground">{t("interactionsUrlHelp")}</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p
-                className="text-xs text-amber-700 dark:text-amber-400"
-                data-testid="discord-interactions-url-tunnel-off"
-              >
-                {t("interactionsUrlTunnelOffHelp")}
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (typeof window !== "undefined") {
-                    window.location.assign("/settings/companion#tunnel")
-                  }
-                }}
-              >
-                {t("openCompanion")}
-              </Button>
-            </div>
-          )}
         </div>
       </div>
     ),

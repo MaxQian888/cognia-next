@@ -7,7 +7,7 @@
  * URL — alongside per-adapter webhook URL helpers so operators can copy
  * the right callback for each enabled adapter and paste it into the
  * platform admin console (Slack Event Subscriptions, Lark Open Platform
- * webhook callback URL, Discord Interactions endpoint, etc.).
+ * webhook callback URL, Telegram webhook URL, etc.).
  *
  * The launcher itself is the same Tauri command set the Companion
  * section uses (`companion_tunnel_start` / `companion_tunnel_stop` /
@@ -93,8 +93,11 @@ function detectPlatform(): "mac" | "win" | "linux" | "unknown" {
 const ADAPTER_WEBHOOK_PATH: Record<string, (id: string) => string | null> = {
   lark: (id) => `/webhook/lark/${id}`,
   slack: (id) => `/webhook/slack/${id}`,
-  discord: (id) => `/webhook/discord/${id}/interactions`,
   telegram: (id) => `/webhook/telegram/${id}`,
+  "wechat-oa": (id) => `/webhook/wechat-oa/${id}`,
+  // Discord is gateway-only until the adapter starts an Interactions webhook
+  // transport and handles Discord PING callbacks.
+  discord: () => null,
   // OneBot uses reverse-WS, not webhook — no public URL.
   onebot: () => null,
 }
@@ -293,7 +296,8 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
             <ul className="space-y-2">
               {(adapters ?? []).map((adapter) => {
                 const builder = ADAPTER_WEBHOOK_PATH[adapter.type]
-                const path = builder ? builder(adapter.id) : null
+                const path =
+                  adapter.transportMode === "webhook" && builder ? builder(adapter.id) : null
                 const url = path && info?.publicUrl ? `${info.publicUrl}${path}` : null
                 return (
                   <li

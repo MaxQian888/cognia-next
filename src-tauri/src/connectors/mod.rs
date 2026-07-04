@@ -13,6 +13,8 @@ pub mod http_client;
 pub mod keyring;
 pub mod lark_upload;
 pub mod lark_ws;
+pub mod matrix_crypto;
+pub mod media_upload;
 pub mod replay_guard;
 pub mod server_lifecycle;
 pub mod sigverify;

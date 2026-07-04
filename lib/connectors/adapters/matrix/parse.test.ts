@@ -4,6 +4,7 @@ jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
 
 import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import {
+  matrixMediaDownloadUrl,
   parseMatrixEvent,
   parseMatrixReplyCorrelation,
   stripReplyFallback,
@@ -95,6 +96,29 @@ describe("parseMatrixEvent", () => {
     expect(out!.segments).toEqual([])
   })
 
+  it("does not throw on a content-less reaction event (skips it)", () => {
+    // A malformed / non-spec event without `content` must not throw out of the
+    // sync loop — parseMatrixEvent guards the deref and returns null.
+    const ev = {
+      type: "m.reaction",
+      event_id: "$r",
+      sender: "@alice:matrix.org",
+      origin_server_ts: 1700000000000,
+    } as unknown as MatrixTimelineEvent
+    expect(() => parseMatrixEvent(ADAPTER, SELF, ROOM, ev)).not.toThrow()
+    expect(parseMatrixEvent(ADAPTER, SELF, ROOM, ev)).toBeNull()
+  })
+
+  it("does not throw on a content-less room message event", () => {
+    const ev = {
+      type: "m.room.message",
+      event_id: "$m",
+      sender: "@alice:matrix.org",
+      origin_server_ts: 1700000000000,
+    } as unknown as MatrixTimelineEvent
+    expect(() => parseMatrixEvent(ADAPTER, SELF, ROOM, ev)).not.toThrow()
+  })
+
   it("maps media msgtypes to segments", () => {
     const img = parseMatrixEvent(
       ADAPTER,
@@ -146,6 +170,29 @@ describe("parseMatrixEvent", () => {
       })
     )
     expect(voice!.segments[0]).toMatchObject({ type: "voice", durationSec: 5 })
+  })
+
+  it("projects mxc media urls to authenticated Matrix media download urls", () => {
+    const img = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          msgtype: "m.image",
+          body: "pic.png",
+          url: "mxc://matrix.org/abc/def",
+          info: { mimetype: "image/png" },
+        },
+      }),
+      { homeserver: "matrix.org" }
+    )
+    expect(img!.segments[0]).toMatchObject({
+      type: "image",
+      url: "https://matrix.org/_matrix/client/v1/media/download/matrix.org/abc%2Fdef",
+      mimeType: "image/png",
+      rawUrl: "mxc://matrix.org/abc/def",
+    })
   })
 
   it("captures reply target and strips the quote fallback", () => {
@@ -200,6 +247,18 @@ describe("parseMatrixEvent", () => {
       content: {},
     }
     expect(parseMatrixEvent(ADAPTER, SELF, ROOM, member)).toBeNull()
+  })
+})
+
+describe("matrixMediaDownloadUrl", () => {
+  it("returns a Matrix v1 authenticated media download URL", () => {
+    expect(matrixMediaDownloadUrl("matrix.org", "mxc://example.org/media/id")).toBe(
+      "https://matrix.org/_matrix/client/v1/media/download/example.org/media%2Fid"
+    )
+  })
+
+  it("returns null for non-mxc urls", () => {
+    expect(matrixMediaDownloadUrl("matrix.org", "https://example.org/x")).toBeNull()
   })
 })
 

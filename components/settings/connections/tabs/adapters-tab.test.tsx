@@ -22,6 +22,9 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: jest.fn().mockResolvedValue(undefined),
   connectorsKeyringDelete: jest.fn().mockResolvedValue(undefined),
 }))
+jest.mock("@/hooks/use-tunnel-status", () => ({
+  useTunnelStatus: () => ({ running: false, url: null, loading: false }),
+}))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 // Each AdapterListRow calls useAdapterHealth → useLiveQuery. Stub it to a
@@ -275,6 +278,10 @@ describe("AdaptersTab", () => {
     ["discord", /add discord bot/i],
     ["slack", /add slack bot/i],
     ["onebot", /add onebot/i],
+    ["wecom", /add wecom/i],
+    ["wechat-personal", /add personal wechat/i],
+    ["qq-official", /add qq official bot/i],
+    ["wechat-oa", /add wechat official account/i],
   ])("opens the %s dialog when its picker card is clicked", async (kind, dialogText) => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByTestId("add-adapter-button"))
@@ -289,6 +296,10 @@ describe("AdaptersTab", () => {
     ["discord", "discord", /configure discord bot/i],
     ["slack", "slack", /configure slack bot/i],
     ["onebot", "onebot", /configure onebot/i],
+    ["wecom", "wecom", /configure wecom/i],
+    ["wechat-personal", "wechat-personal", /configure personal wechat/i],
+    ["qq-official", "qq-official", /edit qq official bot/i],
+    ["wechat-oa", "wechat-oa", /edit wechat official account/i],
   ])("opens the %s configure dialog from the row menu", async (kind, type, dialogText) => {
     const row: AdapterInstanceRow = {
       ...baseAdapter,
