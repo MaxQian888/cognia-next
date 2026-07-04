@@ -2,17 +2,22 @@
  * MCP tool handlers — wiki domain.
  *
  * Two tools:
- *   • `wiki_search(query, scope?, k?)` — hybrid text-rank over `wikiArticles`,
- *     returns top-K summaries with slug + module.
- *   • `wiki_read(slug)` — fetches one article's full Markdown body.
+ *   • `wiki_search(query, scope?, k?)` — keyword (BM25) rank over `wikiArticles`
+ *     (`title + module + summary`), returns top-K summaries with slug + module.
+ *   • `wiki_read(slug)` — fetches one article's full Markdown body, wrapped in
+ *     `<untrusted_content>` (ADR-0008 R7) so a downstream LLM never treats
+ *     generated wiki prose as instructions.
  *
- * The handlers are pure(-ish) — they hit Dexie via the v17 CRUD modules
- * but never touch the network or LLM directly. The MCP server skeleton
- * (lib/external-bridge/mcp-server) handles the protocol envelope; this
- * module just owns input validation + retrieval logic.
+ * Ranking reuses the shared `BM25Index` from `@cognia/rag/hybrid-search` — the
+ * same primitive the `rag_search` handler and the twin runtime use — so the two
+ * knowledge surfaces rank consistently (IDF + length normalisation + CJK-aware
+ * tokenisation) instead of the old hand-rolled token-overlap counter. PageRank
+ * stays a stable secondary tie-break.
  *
- * Permission gating is enforced one layer up so the handlers themselves
- * stay independently testable.
+ * The handlers are pure(-ish) — they hit Dexie via the v17 CRUD modules but
+ * never touch the network or an LLM. The MCP server skeleton
+ * (lib/external-bridge/mcp-server) handles the protocol envelope + permission
+ * gate; this module owns input validation + retrieval logic.
  */
 
 import {
@@ -20,6 +25,8 @@ import {
   listAllWikiArticles,
   listWikiArticlesByScope,
 } from "@/lib/db/wiki-articles"
+import { BM25Index } from "@cognia/rag/hybrid-search"
+import { wrapUntrusted } from "../untrusted"
 import type { WikiArticle, WikiScope, WikiSourceRef } from "@/types/wiki"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,19 +80,24 @@ export async function wikiSearch(input: WikiSearchInput): Promise<WikiSearchOutp
     }
   }
 
-  const tokens = tokenize(query)
-  const ranked = candidates
-    .map((article) => ({ article, score: scoreArticle(article, tokens) }))
-    .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score)
+  const bySlug = new Map(candidates.map((a) => [a.slug, a]))
+  const index = new BM25Index()
+  for (const article of candidates) {
+    index.addDocument(article.slug, `${article.title}\n${article.module}\n${article.summary}`)
+  }
+
+  const ranked = index
+    .search(query, candidates.length)
+    // BM25 indexes each article under its slug, so `r.id` is the slug.
+    .map((r) => ({ article: bySlug.get(r.id)!, score: r.score }))
+    .filter((r) => r.article)
+    // BM25 score first; pageRank as a stable secondary tie-break.
+    .sort((a, b) => b.score - a.score || b.article.pageRank - a.article.pageRank)
     .slice(0, k)
 
   return {
     considered: candidates.length,
-    results: ranked.map(({ article, score }) => ({
-      ...toHit(article),
-      score,
-    })),
+    results: ranked.map(({ article, score }) => ({ ...toHit(article), score })),
   }
 }
 
@@ -99,43 +111,6 @@ function toHit(a: WikiArticle): WikiSearchHit {
     pageRank: a.pageRank,
     score: a.pageRank,
   }
-}
-
-/**
- * Token-overlap ranking. Each article's title/module/summary contribute
- * weighted matches; pageRank is a tie-breaker. This is a deliberate MVP
- * simplification — once the orchestrator wires real embeddings (M2 / Phase
- * 2), we'll switch to hybrid (BM25 + dense vector cosine).
- */
-function scoreArticle(a: WikiArticle, tokens: readonly string[]): number {
-  if (tokens.length === 0) return 0
-  const title = tokenize(a.title)
-  const moduleTokens = tokenize(a.module)
-  const summary = tokenize(a.summary)
-  const titleHits = countHits(title, tokens)
-  const moduleHits = countHits(moduleTokens, tokens)
-  const summaryHits = countHits(summary, tokens)
-  const raw = titleHits * 4 + moduleHits * 3 + summaryHits * 1
-  if (raw === 0) return 0
-  // Add pageRank as a small tie-breaker (0..0.5 boost).
-  return raw + a.pageRank * 0.5
-}
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[\s/.\\:_\-`,!?;()[\]{}<>"']+/)
-    .filter((t) => t.length > 1)
-}
-
-function countHits(haystack: readonly string[], needles: readonly string[]): number {
-  if (haystack.length === 0 || needles.length === 0) return 0
-  const set = new Set(haystack)
-  let hits = 0
-  for (const n of needles) {
-    if (set.has(n)) hits++
-  }
-  return hits
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -166,6 +141,10 @@ export interface WikiReadOutput {
  * Returns `undefined` (NOT throws) when the slug is unknown — callers
  * map that to MCP's not-found shape. Throwing here would force every
  * caller to wrap in try/catch for the common case.
+ *
+ * `contentMd` is `<untrusted_content>`-wrapped (ADR-0008 R7): a coding agent
+ * feeding the body back into a model must not have generated wiki prose treated
+ * as instructions.
  */
 export async function wikiRead(input: WikiReadInput): Promise<WikiReadOutput | undefined> {
   const slug = input.slug?.trim() ?? ""
@@ -178,10 +157,10 @@ export async function wikiRead(input: WikiReadInput): Promise<WikiReadOutput | u
     module: article.module,
     scope: article.scope,
     summary: article.summary,
-    contentMd: article.contentMd,
+    contentMd: wrapUntrusted(article.contentMd),
     sourceRefs: article.sourceRefs,
     generatedAt: article.generatedAt,
   }
 }
 
-export const __TESTING__ = { tokenize, scoreArticle, countHits, clamp, MIN_K, MAX_K, DEFAULT_K }
+export const __TESTING__ = { clamp, MIN_K, MAX_K, DEFAULT_K }

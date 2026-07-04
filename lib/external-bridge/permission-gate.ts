@@ -87,32 +87,49 @@ export function checkRuntimeCall(
 }
 
 /**
- * Convenience wrapper for `rag_search` calls. The required scope depends
- * on the requested rag scope:
+ * Resolve the `BridgeScope` a `rag_search` call requires from its `scope` arg.
+ * Single source of truth for both the permission check (`checkRagCall`) and the
+ * audit-log label (so a `user-repo` call is never mislabeled as `rag:cognia`):
  *   • "twin" → `rag:twin` (default OFF)
  *   • "user-repo" → `rag:user-repo`
- *   • "cognia-self" or "all" → `rag:cognia`
+ *   • "cognia-self" | "runtime" | "all" | undefined | "" → `rag:cognia`
+ *   • anything else → `undefined` (caller denies as "unknown rag scope")
+ *
+ * `runtime` is a valid `WikiScope` describing Cognia's own runtime knowledge —
+ * public code, the same bucket already retrieved via `scope: "all"` under
+ * `rag:cognia`. There is no separate `rag:runtime` scope, so folding it into
+ * `rag:cognia` keeps the explicit `runtime` path coherent with `all` instead of
+ * denying it outright.
  */
-export function checkRagCall(
-  settings: ExternalBridgeSettings | undefined,
-  ragScope: string
-): ScopeCheckResult {
-  let scope: BridgeScope
+export function bridgeScopeForRagScope(ragScope: string | undefined): BridgeScope | undefined {
   switch (ragScope) {
     case "twin":
-      scope = "rag:twin"
-      break
+      return "rag:twin"
     case "user-repo":
-      scope = "rag:user-repo"
-      break
+      return "rag:user-repo"
     case "cognia-self":
+    case "runtime":
     case "all":
     case undefined:
     case "":
-      scope = "rag:cognia"
-      break
+      return "rag:cognia"
     default:
-      return { allowed: false, reason: `unknown rag scope '${ragScope}'` }
+      return undefined
+  }
+}
+
+/**
+ * Convenience wrapper for `rag_search` calls. Resolves the required scope via
+ * {@link bridgeScopeForRagScope} and runs the gate; an unmapped scope string is
+ * denied with a clear reason rather than silently passing.
+ */
+export function checkRagCall(
+  settings: ExternalBridgeSettings | undefined,
+  ragScope: string | undefined
+): ScopeCheckResult {
+  const scope = bridgeScopeForRagScope(ragScope)
+  if (!scope) {
+    return { allowed: false, reason: `unknown rag scope '${ragScope}'` }
   }
   return checkScope(settings, scope)
 }

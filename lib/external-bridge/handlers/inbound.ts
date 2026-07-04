@@ -19,6 +19,7 @@
  */
 
 import { addInboundDraft, type InboundDraftKind } from "@/lib/db/inbound-drafts"
+import { wrapUntrusted } from "../untrusted"
 
 /** Max characters accepted for a submitted body — bounds a hostile submission. */
 export const MAX_INBOUND_BODY_CHARS = 100_000
@@ -30,12 +31,6 @@ export interface InboundWriteResult {
   draftId: string
   kind: InboundDraftKind
   status: "pending"
-}
-
-/** Wrap untrusted external content so downstream consumers never treat it as
- * instructions (ADR-0008 R7). */
-function wrapUntrusted(text: string): string {
-  return `<untrusted_content>\n${text}\n</untrusted_content>`
 }
 
 function requireText(value: string, field: string, max: number): string {

@@ -211,6 +211,82 @@ describe("audit log integration", () => {
   })
 })
 
+describe("buildMcpServer — rag_search dispatch", () => {
+  it("allows scope='runtime' under rag:cognia (previously always denied)", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["rag:cognia"] }))
+    const result = await client.callTool({
+      name: "rag_search",
+      arguments: { query: "anything", scope: "runtime" },
+    })
+    expect(result.isError).not.toBe(true)
+    await client.close()
+  })
+
+  it("accepts the expand/grade/trim/rerank toggles", async () => {
+    await createWikiArticle({
+      slug: "lib-foo",
+      title: "lib/foo twin distill",
+      module: "lib/foo",
+      scope: "cognia-self",
+      pageRank: 0.5,
+      summary: "twin distill orchestrator",
+      sectionIds: [],
+      sourceRefs: [],
+      contentMd: "body",
+      embedding: [],
+      generatorVersion: "v1",
+      fileHashes: {},
+    })
+    const { client } = await makeWiredPair(settings())
+    const result = await client.callTool({
+      name: "rag_search",
+      arguments: { query: "twin distill", expand: true, grade: true, trim: false, rerank: true },
+    })
+    expect(result.isError).not.toBe(true)
+    await client.close()
+  })
+
+  it("audits a user-repo call under rag:user-repo (not rag:cognia)", async () => {
+    const { client } = await makeWiredPair(
+      settings({ enabledScopes: ["rag:cognia", "rag:user-repo"] })
+    )
+    await client.callTool({
+      name: "rag_search",
+      arguments: { query: "anything", scope: "user-repo" },
+    })
+    const rows = await listMcpAuditLog()
+    const ragRows = rows.filter((r) => r.tool === "rag_search")
+    expect(ragRows.length).toBeGreaterThanOrEqual(1)
+    expect(ragRows.some((r) => r.scope === "rag:user-repo")).toBe(true)
+    await client.close()
+  })
+})
+
+describe("buildMcpServer — wiki resource R7 wrapping", () => {
+  it("returns the wiki article body wrapped in <untrusted_content>", async () => {
+    await createWikiArticle({
+      slug: "lib-foo",
+      title: "lib/foo",
+      module: "lib/foo",
+      scope: "cognia-self",
+      pageRank: 0.5,
+      summary: "s",
+      sectionIds: [],
+      sourceRefs: [],
+      contentMd: "# real body",
+      embedding: [],
+      generatorVersion: "v1",
+      fileHashes: {},
+    })
+    const { client } = await makeWiredPair(settings())
+    const res = (await client.readResource({ uri: "cognia://wiki/lib-foo" })) as {
+      contents: { text: string }[]
+    }
+    expect(res.contents[0].text).toBe("<untrusted_content>\n# real body\n</untrusted_content>")
+    await client.close()
+  })
+})
+
 describe("internal helpers", () => {
   it("mapEntityToScope covers every runtime entity type", () => {
     expect(__TESTING__.mapEntityToScope("skill")).toBe("runtime:skills")

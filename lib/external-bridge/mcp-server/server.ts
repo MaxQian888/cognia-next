@@ -23,7 +23,14 @@ import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-article
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
-import { checkRagCall, checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
+import {
+  bridgeScopeForRagScope,
+  checkRagCall,
+  checkRuntimeCall,
+  checkScope,
+  checkToolCall,
+} from "../permission-gate"
+import { wrapUntrusted } from "../untrusted"
 import { computerUse } from "../handlers/computer-use"
 import { agentDispatch, teamRun, teamList, pluginToolInvoke } from "../handlers/orchestration"
 import { ragSearch } from "../handlers/rag"
@@ -86,7 +93,7 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Search Cognia wiki",
       description:
-        "Semantic search over Cognia's generated code wiki articles. " +
+        "Keyword (BM25) search over Cognia's generated code wiki articles. " +
         "Returns top-K article summaries with slugs you can pass to wiki_read.",
       annotations: {
         readOnlyHint: true,
@@ -149,9 +156,10 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Search Cognia code (RAG)",
       description:
-        "Chunk-level retrieval over Cognia's wiki sections OR over a digital " +
-        "twin's chunks (when scope='twin' and rag:twin is enabled). For " +
-        "module-level overviews use wiki_search.",
+        "Chunk-level keyword (BM25) retrieval over Cognia's wiki sections OR over " +
+        "a digital twin's chunks (when scope='twin' and rag:twin is enabled). " +
+        "Optional heuristic rerank, corrective-RAG grading, and citations; no " +
+        "vector/semantic backend. For module-level overviews use wiki_search.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -163,17 +171,33 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
         scope: z.enum(["cognia-self", "user-repo", "runtime", "all", "twin"]).optional(),
         twinId: z.string().optional(),
         k: z.number().int().min(1).max(30).optional(),
-        rerank: z.boolean().optional(),
+        rerank: z
+          .boolean()
+          .optional()
+          .describe("Apply the key-free lexical reranker over the fused pool (default off)."),
+        expand: z
+          .boolean()
+          .optional()
+          .describe("Heuristic synonym query expansion for recall (default on)."),
+        grade: z
+          .boolean()
+          .optional()
+          .describe("Corrective-RAG relevance grading; drops low-relevance hits (default on)."),
+        trim: z
+          .boolean()
+          .optional()
+          .describe("Dynamic context-budget trimming; may shorten chunk content (default off)."),
       },
     },
     async (args) => {
       const ragScope = args.scope ?? "all"
       const settings = await settingsGetter()
-      // Per-call gate: rag:cognia for everything except twin (rag:twin),
-      // which the user must opt into separately.
+      // Per-call gate + audit label share one mapping (bridgeScopeForRagScope):
+      // rag:twin for twin, rag:user-repo for user-repo, rag:cognia for
+      // cognia-self/runtime/all — so a user-repo call is never mislabeled.
       return runWithGate({
         tool: "rag_search",
-        scope: ragScope === "twin" ? "rag:twin" : "rag:cognia",
+        scope: bridgeScopeForRagScope(ragScope) ?? "rag:cognia",
         check: checkRagCall(settings, ragScope),
         body: () =>
           ragSearch({
@@ -182,6 +206,9 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
             twinId: args.twinId,
             k: args.k,
             rerank: args.rerank,
+            expand: args.expand,
+            grade: args.grade,
+            trim: args.trim,
           }),
       })
     }
@@ -826,7 +853,13 @@ function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter)
         check: { allowed: true },
         latencyMs: Date.now() - start,
       })
-      return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: article.contentMd }] }
+      // ADR-0008 R7: fence generated wiki prose as untrusted so a coding agent
+      // that feeds the body back into a model never treats it as instructions.
+      return {
+        contents: [
+          { uri: uri.href, mimeType: "text/markdown", text: wrapUntrusted(article.contentMd) },
+        ],
+      }
     }
   )
 }
