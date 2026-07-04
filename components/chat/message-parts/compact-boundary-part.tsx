@@ -111,7 +111,9 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
       <div className="h-px flex-1 bg-border" />
       <ScissorsIcon className="size-3 shrink-0" aria-hidden />
       <span className="shrink-0">{t("label")}</span>
-      <span className="shrink-0 text-muted-foreground/70">· {detail}</span>
+      <span className="min-w-0 truncate text-muted-foreground/70" title={detail}>
+        · {detail}
+      </span>
       {phaseLabel && (
         <span className="shrink-0 text-muted-foreground/70" data-testid="compact-phase">
           · {phaseLabel}
@@ -128,7 +130,7 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
           onClick={onUndo}
           disabled={undoing}
           data-testid="compact-undo"
-          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
         >
           <Undo2Icon className="size-3" aria-hidden />
           {tc("undo")}

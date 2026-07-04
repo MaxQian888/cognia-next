@@ -59,7 +59,7 @@ const STATUS_GLYPH: Record<string, { Icon: LucideIcon; className: string }> = {
   queued: { Icon: ClockIcon, className: "text-blue-500" },
   running: { Icon: Loader2Icon, className: "animate-spin text-primary" },
   waiting: { Icon: PauseIcon, className: "text-yellow-500" },
-  completed: { Icon: CheckCircleIcon, className: "text-green-600" },
+  completed: { Icon: CheckCircleIcon, className: "text-green-600 dark:text-green-500" },
   failed: { Icon: XCircleIcon, className: "text-destructive" },
   cancelled: { Icon: BanIcon, className: "text-orange-500" },
   timeout: { Icon: AlertTriangleIcon, className: "text-red-500" },
@@ -284,7 +284,7 @@ export const SubagentPart = memo(function SubagentPart({
             aria-expanded={isOpen}
             aria-label={t("rowAria", { name: part.name, status: statusLabel })}
             data-testid={`subagent-toggle-${part.subagentId}`}
-            className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted/50"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
           >
             <ChevronRightIcon
               className={cn(
@@ -374,7 +374,7 @@ export const SubagentPart = memo(function SubagentPart({
       <Collapsible open={isOpen}>
         <div className="flex items-center justify-between gap-2">
           <CollapsibleTrigger
-            className="flex flex-1 items-center gap-2 text-left"
+            className="flex flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
             data-testid={`subagent-toggle-${part.subagentId}`}
             onClick={toggle}
           >

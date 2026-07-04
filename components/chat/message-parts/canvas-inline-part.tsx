@@ -85,7 +85,7 @@ export const CanvasInlinePart = memo(function CanvasInlinePart({
         <ArtifactActions>
           <a
             href={canvasHref}
-            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             data-testid="canvas-inline-part-open"
             aria-label={t("openInCanvas")}
             title={t("openInCanvas")}

@@ -116,9 +116,12 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
         className={cn("not-prose my-2 text-primary text-xs", className)}
         defaultOpen={open}
       >
-        <CollapsibleTrigger className="flex items-center gap-2" data-testid="sources-part-trigger">
+        <CollapsibleTrigger
+          className="group flex items-center gap-2 rounded-sm transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          data-testid="sources-part-trigger"
+        >
           <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
-          <ChevronDownIcon className="h-4 w-4" />
+          <ChevronDownIcon className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent
           className={cn(
@@ -297,7 +300,7 @@ const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem 
   if (source.url) {
     return (
       <a
-        className="block rounded px-1 py-0.5 hover:bg-muted/60"
+        className="block rounded px-1 py-0.5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         href={source.url}
         target="_blank"
         rel="noopener noreferrer"

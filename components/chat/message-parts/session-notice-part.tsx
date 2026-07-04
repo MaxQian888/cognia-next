@@ -62,7 +62,11 @@ export function SessionNoticeMarker({ message }: { message: UIMessage }) {
       <div className="h-px flex-1 bg-border" />
       <Icon className="size-3 shrink-0" aria-hidden />
       <span className="shrink-0">{label}</span>
-      {detail ? <span className="shrink-0 text-muted-foreground/70">· {detail}</span> : null}
+      {detail ? (
+        <span className="min-w-0 truncate text-muted-foreground/70" title={detail}>
+          · {detail}
+        </span>
+      ) : null}
       <div className="h-px flex-1 bg-border" />
     </div>
   )

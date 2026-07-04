@@ -99,7 +99,7 @@ export function HookNoticeRow({ data: part }: { data: HookNoticePartData }) {
       <div className="flex items-stretch overflow-hidden rounded-md bg-muted/50 text-xs">
         <div className={cn("w-1 shrink-0", styles.bar)} aria-hidden />
         <CollapsibleTrigger
-          className="group flex flex-1 items-center gap-2 px-2 py-1.5 text-left disabled:cursor-default"
+          className="group flex flex-1 items-center gap-2 px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 enabled:hover:bg-muted/40 disabled:cursor-default"
           aria-label={t("toggle")}
           disabled={!hasBody}
         >

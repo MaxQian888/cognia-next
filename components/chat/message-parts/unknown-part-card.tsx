@@ -39,7 +39,7 @@ export const UnknownPartCard = memo(function UnknownPartCard({ part }: UnknownPa
       data-part-type={type}
     >
       <Collapsible>
-        <CollapsibleTrigger className="group flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-muted-foreground">
+        <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
           <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
           <HelpCircleIcon className="size-3.5 shrink-0" />
           <span className="truncate">{t("unknownPart", { type })}</span>

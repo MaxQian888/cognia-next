@@ -27,11 +27,21 @@ export function SlashCommandResultChip({ block }: { block: SlashCommandResultBlo
       data-testid="slash-command-result"
       data-command={block.commandId}
     >
-      <Badge variant="outline" className="gap-1 border-primary/40 bg-primary/5 text-[10px]">
-        <TerminalSquareIcon className="size-3" />/{block.commandId}
-        {block.args ? <span className="text-muted-foreground"> {block.args}</span> : null}
+      <Badge
+        variant="outline"
+        className="max-w-[16rem] gap-1 border-primary/40 bg-primary/5 text-[10px]"
+      >
+        <TerminalSquareIcon className="size-3 shrink-0" />
+        <span className="shrink-0">/{block.commandId}</span>
+        {block.args ? (
+          <span className="truncate text-muted-foreground" title={block.args}>
+            {block.args}
+          </span>
+        ) : null}
       </Badge>
-      <span className="text-muted-foreground">{block.summary ?? t("ranSlashCommand")}</span>
+      <span className="min-w-0 truncate text-muted-foreground">
+        {block.summary ?? t("ranSlashCommand")}
+      </span>
     </span>
   )
 }

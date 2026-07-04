@@ -8,6 +8,7 @@
 
 import { memo, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { Loader2Icon, PaperclipIcon } from "lucide-react"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { languageFromPath } from "@/components/chat/message-parts/mcp-renderers/common"
 
@@ -43,13 +44,14 @@ function DownloadLink({ url, displayName }: { url: string; displayName: string }
     <a
       href={url}
       download={displayName}
-      className="inline-flex items-center gap-1.5 rounded border px-2 py-1 text-sm hover:bg-muted"
+      className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       target="_blank"
       rel="noopener noreferrer"
       data-testid="file-download-link"
+      title={displayName}
     >
-      <span aria-hidden>📎</span>
-      {displayName}
+      <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="truncate">{displayName}</span>
     </a>
   )
 }
@@ -91,7 +93,12 @@ export const FilePartPreview = memo(function FilePartPreview({
   if (pdf) {
     return (
       <div className="my-1 overflow-hidden rounded border" data-testid="file-preview-pdf">
-        <object data={url} type="application/pdf" className="h-72 w-full" aria-label={displayName}>
+        <object
+          data={url}
+          type="application/pdf"
+          className="h-64 w-full sm:h-80 md:h-96"
+          aria-label={displayName}
+        >
           <div className="p-2 text-sm">
             <p className="mb-1 text-muted-foreground">{t("pdfFallback")}</p>
             <DownloadLink url={url} displayName={displayName} />
@@ -105,8 +112,12 @@ export const FilePartPreview = memo(function FilePartPreview({
     if (text === false) return <DownloadLink url={url} displayName={displayName} />
     if (text === null) {
       return (
-        <p className="text-xs text-muted-foreground" data-testid="file-preview-loading">
-          {t("loading", { name: displayName })}
+        <p
+          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+          data-testid="file-preview-loading"
+        >
+          <Loader2Icon className="size-3.5 shrink-0 animate-spin" aria-hidden />
+          <span className="truncate">{t("loading", { name: displayName })}</span>
         </p>
       )
     }
