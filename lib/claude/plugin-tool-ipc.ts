@@ -177,6 +177,9 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
           : {}),
       },
       sourceVerification: s?.sourceVerificationSettings,
+      // SSRF guard opt-out + always-distill isolation, from Settings → Search.
+      allowPrivateHosts: s?.webTools?.allowPrivateHosts === true,
+      alwaysDistill: s?.webTools?.alwaysDistill === true,
     }
     // Reuse the search-result cache (shared with the search UI) unless the user
     // turned it off; apply their TTL / size config.
@@ -235,7 +238,12 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
         deps.jinaFallback = true
       } else if (isTauri()) {
         const { createProxyFetch } = await import("@/lib/network/proxy-fetch")
-        deps.fetchImpl = createProxyFetch() as typeof fetch
+        const base = createProxyFetch()
+        // Defense-in-depth: also ask the Rust backend to reject private hosts
+        // (mirrors the TS `web_fetch` guard) unless the user opted in.
+        const blockPrivateHosts = deps.allowPrivateHosts !== true
+        deps.fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) =>
+          base(input, { ...init, blockPrivateHosts })) as typeof fetch
         deps.jinaFallback = true
       }
       // Browser: leave fetchImpl unset (global fetch, CORS-limited); Jina off.

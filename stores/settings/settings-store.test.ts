@@ -515,6 +515,38 @@ describe("setWebToolsNativeOnAnthropic", () => {
   })
 })
 
+// ---- setWebToolsAllowPrivateHosts / setWebToolsAlwaysDistill ----
+
+describe("setWebToolsAllowPrivateHosts / setWebToolsAlwaysDistill", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      settings: baseSettings({ webTools: { enabled: true, nativeOnAnthropic: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+  })
+
+  it("persists allowPrivateHosts while preserving other web-tools flags", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsAllowPrivateHosts(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true, allowPrivateHosts: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.allowPrivateHosts).toBe(true)
+  })
+
+  it("persists alwaysDistill while preserving other web-tools flags", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsAlwaysDistill(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true, alwaysDistill: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.alwaysDistill).toBe(true)
+  })
+})
+
 // ---- setSkillToolEnabled / setSlashCommandToolEnabled ----
 
 describe("self-invocation tool toggles", () => {
