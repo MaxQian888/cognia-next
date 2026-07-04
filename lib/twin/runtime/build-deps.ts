@@ -2,7 +2,7 @@ import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { createVectorStore } from "@cognia/vector/store"
 import { embeddingProviderRequiresApiKey } from "@cognia/provider-embedding/embedding-catalog"
 import { createLlmRerankScorer, lexicalRerankScorer } from "./reranker"
-import { createLlmClient } from "@/lib/twin/distill/llm"
+import { createLlmClient, createTwinLanguageModel } from "@/lib/twin/distill/llm"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 
 export type TwinDepsForBuild = TwinRuntimeDepsForBuild
@@ -116,12 +116,40 @@ export async function tryBuildTwinDeps(): Promise<TwinDepsForBuild | undefined> 
     //     so a half-set model id never silently disables reranking. The LLM
     //     batch call gets a longer timeout than the local lexical path.
     const reranker = buildReranker(settings)
+    const expansion = await buildExpansion(settings)
     return {
       store,
       embedding: settings.embedding,
       vectorBackend: settings.storage.vectorBackend,
       ...(reranker ? { reranker } : {}),
+      ...(expansion ? { expansion } : {}),
     }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Build the LLM query-expansion dep from the twin runtime settings, or
+ * `undefined` when the global `queryExpansion` block is off or the distill LLM
+ * is unconfigured (heuristic synonym expansion still runs per-character without
+ * this dep). The per-character `enableQueryExpansion` toggle gates whether the
+ * runtime actually uses it.
+ */
+async function buildExpansion(settings: TwinSettings): Promise<TwinDepsForBuild["expansion"]> {
+  const qe = settings.queryExpansion
+  if (!qe?.enabled) return undefined
+  const llm = settings.llm
+  const llmReady = Boolean(llm.apiKey || llm.baseURL)
+  if (!llmReady) return undefined
+  try {
+    const model = await createTwinLanguageModel({
+      provider: llm.provider,
+      model: llm.model,
+      apiKey: llm.apiKey,
+      baseURL: llm.baseURL,
+    })
+    return { model, strategy: qe.strategy }
   } catch {
     return undefined
   }

@@ -49,6 +49,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { listCharacters } from "@/lib/db/characters"
+import { observeTwins } from "@/lib/db/twins"
 import { countTwinChunksByTwin } from "@/lib/db/twin-chunks"
 import { getTwinProfile } from "@/lib/db/twin-profile"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
@@ -77,23 +78,29 @@ function suggestTwinId(): string {
 export function TwinBindingSection({ value, onChange, excludeCharacterId }: Props) {
   const t = useTranslations("settings.characters.editor.twinBinding")
 
-  // Discover existing twin ids from other characters. We deliberately omit
-  // *this* character (avoid self-referential confusion when the user is
-  // mid-edit) but include orphaned twins (ids whose owner was deleted) by
-  // walking `twinSources` distinct twinId values.
-  const knownTwinIds = useLiveQuery(
+  // The "pick existing" list unions the `twins` registry (named rows, the
+  // single source of truth) with any legacy `character.twinId` still only
+  // referenced from a character. We omit *this* character's own twinId (avoid
+  // self-referential confusion when the user is mid-edit). Registry names make
+  // the picker readable instead of showing raw ids.
+  const knownTwins = useLiveQuery(
     async () => {
-      const seen = new Set<string>()
+      const byId = new Map<string, string>()
+      for (const twin of await observeTwins()) {
+        byId.set(twin.id, twin.name || twin.id)
+      }
       const characters = await listCharacters()
       for (const c of characters) {
         if (!c.twinId) continue
         if (excludeCharacterId && c.id === excludeCharacterId) continue
-        seen.add(c.twinId)
+        if (!byId.has(c.twinId)) byId.set(c.twinId, c.name || c.twinId)
       }
-      return Array.from(seen).sort()
+      return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) =>
+        a.name.localeCompare(b.name)
+      )
     },
     [excludeCharacterId],
-    [] as string[]
+    [] as Array<{ id: string; name: string }>
   )
 
   const isBound = Boolean(value.twinId)
@@ -107,6 +114,14 @@ export function TwinBindingSection({ value, onChange, excludeCharacterId }: Prop
       enableHybrid: value.twinSettings?.enableHybrid ?? DEFAULT_TWIN_SETTINGS.enableHybrid,
       hybridKeywordWeight:
         value.twinSettings?.hybridKeywordWeight ?? DEFAULT_TWIN_SETTINGS.hybridKeywordWeight,
+      enableQueryExpansion:
+        value.twinSettings?.enableQueryExpansion ?? DEFAULT_TWIN_SETTINGS.enableQueryExpansion,
+      enableCorrectiveFilter:
+        value.twinSettings?.enableCorrectiveFilter ?? DEFAULT_TWIN_SETTINGS.enableCorrectiveFilter,
+      correctiveMinKeep:
+        value.twinSettings?.correctiveMinKeep ?? DEFAULT_TWIN_SETTINGS.correctiveMinKeep,
+      enableCitations: value.twinSettings?.enableCitations ?? DEFAULT_TWIN_SETTINGS.enableCitations,
+      citationStyle: value.twinSettings?.citationStyle ?? DEFAULT_TWIN_SETTINGS.citationStyle,
     }),
     [value.twinSettings]
   )
@@ -118,7 +133,7 @@ export function TwinBindingSection({ value, onChange, excludeCharacterId }: Prop
   if (!isBound) {
     return (
       <UnboundCard
-        knownTwinIds={knownTwinIds}
+        knownTwins={knownTwins}
         onBind={(twinId) => onChange({ twinId, twinSettings: DEFAULT_TWIN_SETTINGS })}
         t={t}
       />
@@ -159,11 +174,11 @@ export function TwinBindingSection({ value, onChange, excludeCharacterId }: Prop
 // ─── Unbound state ────────────────────────────────────────────────────────────
 
 function UnboundCard({
-  knownTwinIds,
+  knownTwins,
   onBind,
   t,
 }: {
-  knownTwinIds: string[]
+  knownTwins: Array<{ id: string; name: string }>
   onBind: (twinId: string) => void
   t: ReturnType<typeof useTranslations>
 }) {
@@ -180,7 +195,7 @@ function UnboundCard({
         <p className="text-muted-foreground text-xs">{t("unboundDescription")}</p>
       </div>
 
-      {knownTwinIds.length > 0 && (
+      {knownTwins.length > 0 && (
         <div className="space-y-1">
           <Label className="text-xs">{t("pickExisting")}</Label>
           <Select onValueChange={(v) => onBind(v)} value="">
@@ -188,9 +203,9 @@ function UnboundCard({
               <SelectValue placeholder={t("pickExistingPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {knownTwinIds.map((id) => (
-                <SelectItem key={id} value={id}>
-                  <span className="font-mono text-xs">{id}</span>
+              {knownTwins.map((twin) => (
+                <SelectItem key={twin.id} value={twin.id}>
+                  <span className="truncate">{twin.name}</span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -358,6 +373,74 @@ function RuntimeKnobs({
           aria-label={t("hybridKeywordWeight")}
         />
       </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="twin-enable-query-expansion" className="cursor-pointer text-sm">
+            {t("enableQueryExpansion")}
+          </Label>
+          <p className="text-muted-foreground text-[11px]">{t("enableQueryExpansionHint")}</p>
+        </div>
+        <Switch
+          id="twin-enable-query-expansion"
+          checked={settings.enableQueryExpansion ?? false}
+          onCheckedChange={(v) => onChange({ enableQueryExpansion: v })}
+          disabled={!settings.enableRag}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="twin-enable-corrective" className="cursor-pointer text-sm">
+            {t("enableCorrectiveFilter")}
+          </Label>
+          <p className="text-muted-foreground text-[11px]">{t("enableCorrectiveFilterHint")}</p>
+        </div>
+        <Switch
+          id="twin-enable-corrective"
+          checked={settings.enableCorrectiveFilter ?? false}
+          onCheckedChange={(v) => onChange({ enableCorrectiveFilter: v })}
+          disabled={!settings.enableRag}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="twin-enable-citations" className="cursor-pointer text-sm">
+            {t("enableCitations")}
+          </Label>
+          <p className="text-muted-foreground text-[11px]">{t("enableCitationsHint")}</p>
+        </div>
+        <Switch
+          id="twin-enable-citations"
+          checked={settings.enableCitations ?? false}
+          onCheckedChange={(v) => onChange({ enableCitations: v })}
+          disabled={!settings.enableRag}
+        />
+      </div>
+
+      {settings.enableCitations && (
+        <div className="space-y-1">
+          <Label className="text-xs">{t("citationStyleLabel")}</Label>
+          <Select
+            value={settings.citationStyle ?? "simple"}
+            onValueChange={(v) => onChange({ citationStyle: v as TwinSettings["citationStyle"] })}
+            disabled={!settings.enableRag}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="simple">simple</SelectItem>
+              <SelectItem value="apa">APA</SelectItem>
+              <SelectItem value="mla">MLA</SelectItem>
+              <SelectItem value="chicago">Chicago</SelectItem>
+              <SelectItem value="harvard">Harvard</SelectItem>
+              <SelectItem value="ieee">IEEE</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <div className="space-y-0.5">

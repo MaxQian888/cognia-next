@@ -55,7 +55,7 @@ erDiagram
 
 | 类型簇 | 关键类型（`types/twin/index.ts`） | 用途 |
 | --- | --- | --- |
-| **Sources** | `TwinSource`（L64）、`TwinSourceKind`（L28）、`TwinSourceFormat`（L34）、`TwinSourceStatus`（L62） | 每个被 ingest 的原始素材的注册表。横跨文档 / 聊天 / 邮件 / 代码四族共 21 种格式。 |
+| **Sources** | `TwinSource`（L64）、`TwinSourceKind`（L28）、`TwinSourceFormat`（L34）、`TwinSourceStatus`（L62） | 每个被 ingest 的原始素材的注册表。横跨文档 / 聊天 / 邮件 / 代码四族共 22 种格式。 |
 | **Chunks** | `TwinChunk`（L148）、`TwinChunkMetadata`（L130）、`ChunkingStrategyId`（L111）、`VectorBackend`（L123） | 切片 + 向量库指针（`vectorDocId`）+ 溯源。同时保存 `content`（显示）与 `contentRedacted`（被嵌入）。 |
 | **Profile** | `TwinProfile`（L270）、`StyleSample`（L188）、`Playbook`（L228）、`ProfileEntity`（L245）、`DecisionRecord`（L257） | 蒸馏后的画像，1:1 对应每个孪生。每条子记录都带 `pinned?` 标记（重蒸馏保护）。 |
 | **Drafts** | `TwinDraft`（L330）、`TwinDraftPayload`（L300）、`TwinDraftProvenance`（L312）、`TwinDraftEvaluation`（L321） | 待审核的合成角色 / 技能草稿，含溯源 + 评估分。 |
@@ -68,7 +68,7 @@ erDiagram
 `TwinSourceFormat`（`types/twin/index.ts:34-60`）是每个导入器与 ingest 分发器所依据的联合类型。各族与
 `lib/twin/ingest/dispatch.ts:55`（`KIND_BY_FORMAT`）一一对应：
 
-- **文档** → `markdown · pdf · docx · pptx · odt · odp · html · csv · epub · rtf · code`（路由到 `lib/document/document-processor`）。
+- **文档** → `markdown · pdf · docx · xlsx · pptx · odt · odp · html · csv · epub · rtf · code`（路由到 `lib/document/document-processor`；`xlsx` 同时覆盖 `.xls/.xlsm/.ods` 表格）。
 - **聊天** → `chatgpt-export · claude-export · gemini-export · slack-export · lark-export · dingtalk-export · wechat-export`。
 - **邮件** → `mbox · eml`。
 - **代码** → `git-repo`。

@@ -12,11 +12,13 @@ jest.mock("@cognia/vector/store", () => ({
 
 jest.mock("@/lib/twin/distill/llm", () => ({
   createLlmClient: jest.fn().mockReturnValue({ complete: jest.fn() }),
+  createTwinLanguageModel: jest.fn().mockResolvedValue({ __model: true }),
 }))
 
 const { getTwinRuntimeSettings } = jest.requireMock("@/lib/db/twin-runtime-settings")
 const { createVectorStore } = jest.requireMock("@cognia/vector/store")
 const { createLlmClient } = jest.requireMock("@/lib/twin/distill/llm")
+const { createTwinLanguageModel } = jest.requireMock("@/lib/twin/distill/llm")
 
 function settings(patch: Partial<TwinRuntimeSettings> = {}): TwinRuntimeSettings {
   return {
@@ -120,6 +122,42 @@ describe("tryBuildTwinDeps", () => {
     expect(typeof deps?.reranker?.scorer).toBe("function")
     expect(deps?.reranker?.batchScorer).toBeUndefined()
     expect(createLlmClient).not.toHaveBeenCalled()
+  })
+
+  it("omits the expansion dep by default (queryExpansion disabled)", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({ storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } } })
+    )
+    expect((await tryBuildTwinDeps())?.expansion).toBeUndefined()
+  })
+
+  it("attaches the LLM expansion dep when enabled and the LLM is configured", async () => {
+    createTwinLanguageModel.mockResolvedValue({ __model: true })
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        queryExpansion: { enabled: true, strategy: "stepback" },
+        llm: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "sk-1" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.expansion?.strategy).toBe("stepback")
+    expect(createTwinLanguageModel).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "anthropic", apiKey: "sk-1" })
+    )
+  })
+
+  it("omits expansion when enabled but the LLM is unconfigured", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        queryExpansion: { enabled: true, strategy: "hyde" },
+        llm: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.expansion).toBeUndefined()
+    expect(createTwinLanguageModel).not.toHaveBeenCalled()
   })
 
   it("builds pinecone deps", async () => {

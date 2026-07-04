@@ -11,7 +11,13 @@
  *      `lib/twin/importers/email/*` so a single mailbox produces many
  *      source rows in one click.
  *
- *   2. **Paste text** — the original Phase 7 path; useful for snippets or
+ *   2. **From a URL** — fetches a web page / article via the shared web
+ *      reader (`lib/twin/ingest/url-fetcher:fetchUrlAsRawSource`) and stores
+ *      the extracted readable text as a single `markdown` source. CORS-free
+ *      on Tauri (proxy fetch + Jina fallback); the browser uses the global
+ *      fetch and shows a CORS caveat.
+ *
+ *   3. **Paste text** — the original Phase 7 path; useful for snippets or
  *      content that doesn't live in a file (slack message dumps, prose
  *      notes, etc.).
  */
@@ -34,7 +40,14 @@ import {
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { isTauri } from "@/lib/tauri"
 import { parseGitRepo } from "@/lib/twin/importers"
-import { detectSourceFormat, listSupportedFormats } from "@/lib/twin/ingest"
+import {
+  BINARY_TWIN_FORMATS,
+  detectSourceFormat,
+  listSupportedExtensions,
+  listSupportedFormats,
+} from "@/lib/twin/ingest"
+import { fetchUrlAsRawSource } from "@/lib/twin/ingest/url-fetcher"
+import { safeHostname } from "@/lib/web/reader/types"
 import {
   parseMbox,
   parseEml,
@@ -66,44 +79,15 @@ const getTauriSnapshot = (): boolean => isTauri()
 const getServerTauriSnapshot = (): boolean => false
 
 /**
- * Extensions accepted by the file picker. Binary formats are parsed in the
- * browser; only the extracted text lands in Dexie.
+ * Extensions accepted by the file picker. Derived from the ingest dispatcher's
+ * extension table (`listSupportedExtensions`) so the picker never drifts from
+ * what `detectSourceFormat` can actually route — text formats land verbatim,
+ * binary formats (PDF / DOCX / XLSX / PPTX / EPUB / ODT / ODP) are parsed in
+ * the browser and only their extracted text is stored.
  */
-const FILE_PICKER_ACCEPT = [
-  // Text
-  ".md",
-  ".markdown",
-  ".txt",
-  ".csv",
-  ".tsv",
-  ".html",
-  ".htm",
-  ".json",
-  ".eml",
-  ".mbox",
-  ".rtf",
-  // Code
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".py",
-  ".go",
-  ".rs",
-  ".java",
-  ".cpp",
-  ".c",
-  ".h",
-  ".swift",
-  ".kt",
-  // Binary (parsed client-side)
-  ".pdf",
-  ".docx",
-  ".pptx",
-  ".odt",
-  ".odp",
-  ".epub",
-].join(",")
+const FILE_PICKER_ACCEPT = listSupportedExtensions()
+  .map((ext) => `.${ext}`)
+  .join(",")
 
 const TEXTUAL_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat>([
   "markdown",
@@ -123,17 +107,12 @@ const TEXTUAL_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat>
 ])
 
 /**
- * Formats handled by `lib/document/document-processor:processDocumentAsync`.
- * Parsed in the browser; we persist the resulting text only.
+ * Formats handled by `@cognia/document/document-processor:processDocumentAsync`.
+ * Parsed in the browser; we persist the resulting text only. Sourced from the
+ * ingest dispatcher (`BINARY_TWIN_FORMATS`) so this stays in lock-step with the
+ * routing layer instead of maintaining a drift-prone duplicate.
  */
-const BINARY_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat>([
-  "pdf",
-  "docx",
-  "pptx",
-  "odt",
-  "odp",
-  "epub",
-])
+const BINARY_FORMATS: ReadonlySet<TwinSourceFormat> = BINARY_TWIN_FORMATS
 
 function inferKind(format: TwinSourceFormat): TwinSourceKind {
   if (format === "code" || format === "git-repo") return "code"
@@ -522,6 +501,70 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
   const [repoMaxCommits, setRepoMaxCommits] = useState(200)
   const [repoAuthor, setRepoAuthor] = useState("")
   const [repoSummary, setRepoSummary] = useState<{ path: string; commits: number } | null>(null)
+  const [url, setUrl] = useState("")
+  const [urlSubmitting, setUrlSubmitting] = useState(false)
+  const [urlImported, setUrlImported] = useState<string | null>(null)
+
+  /**
+   * Fetch a URL through the shared web reader and stage its extracted text as
+   * a single `pending` source. The reader already de-HTMLs the page, so we
+   * persist `format:"markdown"` (like the binary-file path) — NOT the raw
+   * content-type — so the ingest worker doesn't re-parse already-clean text.
+   */
+  const handleUrlSubmit = async () => {
+    const trimmed = url.trim()
+    if (!trimmed) {
+      setError(tErr("urlEmpty"))
+      return
+    }
+    const host = safeHostname(trimmed)
+    if (!host) {
+      setError(tErr("urlInvalid"))
+      return
+    }
+    setUrlSubmitting(true)
+    setError(null)
+    setUrlImported(null)
+    try {
+      // CORS-free fetch + Jina fallback on Tauri; the browser falls back to the
+      // global fetch (cross-origin requests may be blocked — see webModeHint).
+      let fetchImpl: typeof fetch | undefined
+      if (tauriAvailable) {
+        const { createProxyFetch } = await import("@/lib/network/proxy-fetch")
+        fetchImpl = createProxyFetch() as typeof fetch
+      }
+      const fetched = await fetchUrlAsRawSource(trimmed, {
+        ...(fetchImpl ? { fetchImpl } : {}),
+        jinaFallback: tauriAvailable,
+      })
+      const text = fetched.text.trim()
+      if (!text) {
+        setError(tErr("urlNoText"))
+        return
+      }
+      const title = fetched.title.trim() || host
+      const fingerprint = await sha256(text)
+      await createTwinSource({
+        twinId,
+        kind: "document",
+        format: "markdown",
+        source: text,
+        title,
+        bytes: text.length,
+        fingerprint,
+        redacted: false,
+        status: "pending",
+        tags: ["url", host],
+      })
+      setUrl("")
+      setUrlImported(title)
+      onUploaded?.()
+    } catch (err) {
+      setError(tErr("urlFetchFailed", { reason: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setUrlSubmitting(false)
+    }
+  }
 
   const handleGitRepoPick = async () => {
     setSubmitting(true)
@@ -681,6 +724,49 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
               ))}
             </ul>
           </div>
+        ) : null}
+      </section>
+
+      <hr className="border-border" />
+
+      <section className="flex flex-col gap-3" data-testid="twin-source-uploader-url">
+        <h3 className="text-sm font-medium">{t("urlTitle")}</h3>
+        <p className="text-muted-foreground text-xs">{t("urlDescription")}</p>
+        {!tauriAvailable ? (
+          <p className="text-muted-foreground text-xs">{t("webModeHint")}</p>
+        ) : null}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex flex-1 flex-col gap-1">
+            <Label htmlFor="twin-source-url">{t("urlLabel")}</Label>
+            <Input
+              id="twin-source-url"
+              type="url"
+              inputMode="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder={t("urlPlaceholder")}
+              disabled={urlSubmitting}
+            />
+          </div>
+          <Button
+            onClick={() => void handleUrlSubmit()}
+            disabled={urlSubmitting}
+            data-testid="twin-source-uploader-url-fetch"
+          >
+            {urlSubmitting ? (
+              <>
+                <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+                {t("fetching")}
+              </>
+            ) : (
+              t("addUrl")
+            )}
+          </Button>
+        </div>
+        {urlImported ? (
+          <p className="text-xs" data-testid="twin-source-uploader-url-imported">
+            {t("urlImported", { title: urlImported })}
+          </p>
         ) : null}
       </section>
 

@@ -253,6 +253,22 @@ describe("TwinSettingsTab — native vector backend", () => {
     })
   })
 
+  it("enables LLM query expansion and persists it on save", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const toggle = screen.getByLabelText(/llm query expansion/i)
+    await user.click(toggle)
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ queryExpansion: expect.objectContaining({ enabled: true }) })
+      )
+    })
+  })
+
   // D1 privacy: extraNameHints textarea parses comma/newline input and saves.
   it("persists extraNameHints parsed from the always-redact names textarea", async () => {
     mockedUsePlatform.mockReturnValue("web")

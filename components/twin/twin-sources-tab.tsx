@@ -24,6 +24,7 @@ import { listTwinSourcesByTwin, deleteTwinSource } from "@/lib/db/twin-sources"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import type { TwinSource, TwinSourceStatus } from "@/types/twin"
 import { TwinSourceUploader } from "./twin-source-uploader"
+import { TwinSourcePreviewDialog } from "./twin-source-preview-dialog"
 
 const STATUS_VARIANT: Record<
   TwinSourceStatus,
@@ -250,6 +251,7 @@ const SourceRow = memo(function SourceRow({
 }) {
   const t = useTranslations("twin.sources")
   const tFormat = useTranslations("twin.format")
+  const [previewOpen, setPreviewOpen] = useState(false)
   return (
     <Card className="flex items-center justify-between gap-3 p-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -283,9 +285,20 @@ const SourceRow = memo(function SourceRow({
           ) : null}
         </div>
       </div>
-      <Button size="sm" variant="outline" onClick={() => onDeleteRequest(source)}>
-        {t("delete")}
-      </Button>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setPreviewOpen(true)}
+          data-testid={`twin-source-${source.id}-preview`}
+        >
+          {t("preview")}
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => onDeleteRequest(source)}>
+          {t("delete")}
+        </Button>
+      </div>
+      <TwinSourcePreviewDialog source={source} open={previewOpen} onOpenChange={setPreviewOpen} />
     </Card>
   )
 })

@@ -274,6 +274,26 @@ function RuntimeConfigCard() {
         <span className="text-muted-foreground text-xs">{t("rerankerToggleHint")}</span>
       </div>
 
+      <div className="flex items-center gap-3">
+        <Switch
+          id="twin-query-expansion-enabled"
+          checked={settings.queryExpansion?.enabled ?? false}
+          onCheckedChange={(v) =>
+            updateField({
+              ...settings,
+              queryExpansion: {
+                enabled: v,
+                strategy: settings.queryExpansion?.strategy ?? "hyde",
+              },
+            })
+          }
+        />
+        <Label htmlFor="twin-query-expansion-enabled" className="text-sm">
+          {t("queryExpansionToggleLabel")}
+        </Label>
+        <span className="text-muted-foreground text-xs">{t("queryExpansionToggleHint")}</span>
+      </div>
+
       <div className="flex flex-col gap-1">
         <Label htmlFor="twin-extra-name-hints">{t("extraNameHintsLabel")}</Label>
         <Textarea
@@ -321,6 +341,33 @@ function RuntimeConfigCard() {
             </SelectContent>
           </Select>
           <span className="text-muted-foreground text-xs">{t("rerankerModelHint")}</span>
+        </div>
+      ) : null}
+
+      {settings.queryExpansion?.enabled ? (
+        <div className="flex flex-col gap-1 pl-11">
+          <Label htmlFor="twin-query-expansion-strategy">{t("queryExpansionStrategyLabel")}</Label>
+          <Select
+            value={settings.queryExpansion?.strategy ?? "hyde"}
+            onValueChange={(next) =>
+              updateField({
+                ...settings,
+                queryExpansion: { enabled: true, strategy: next as "hyde" | "stepback" },
+              })
+            }
+          >
+            <SelectTrigger
+              id="twin-query-expansion-strategy"
+              aria-label={t("queryExpansionStrategyLabel")}
+              className="w-full sm:w-[16rem]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hyde">{t("queryExpansionStrategyHyde")}</SelectItem>
+              <SelectItem value="stepback">{t("queryExpansionStrategyStepback")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       ) : null}
 
