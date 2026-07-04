@@ -1289,7 +1289,7 @@ def helper(a, b):
             format!(
                 r#"
 import json
-from cognia import tool, hook, get_config, progress
+from cognia import tool, hook, get_config, progress, log, on_config_changed
 
 MARKER = {marker:?}
 
@@ -1297,7 +1297,12 @@ def _append(line):
     with open(MARKER, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
+@on_config_changed
+def _watch_config(config):
+    _append("watch:" + json.dumps(config, sort_keys=True))
+
 def on_startup():
+    log("demo plugin started")
     _append("startup:" + json.dumps(get_config(), sort_keys=True))
 
 def on_config_updated(config):

@@ -21,6 +21,6 @@ dev = ["pytest>=7"]
 where = ["src"]
 
 [tool.pytest.ini_options]
-# src-layout: expose `cognia` / `cognia_next` without an editable install.
+# src-layout: expose `cognia` without an editable install.
 pythonpath = ["src"]
 testpaths = ["tests"]

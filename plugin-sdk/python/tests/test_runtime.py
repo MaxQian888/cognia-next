@@ -111,6 +111,15 @@ def test_config_push_and_get():
     assert rt.get_config() == {}
 
 
+def test_module_level_on_config_changed_proxies_active_runtime():
+    import cognia
+
+    seen = []
+    cognia.on_config_changed(lambda cfg: seen.append(cfg))
+    cognia.get_active_runtime().push_config({"a": 1})
+    assert seen == [{"a": 1}]
+
+
 def test_on_config_changed_fires_listeners_on_push():
     rt = Runtime()
     seen = []
