@@ -16,6 +16,7 @@
 import type { Memory, MemoryType } from "@/types/memory/memory"
 import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { tokenizeMultilingual } from "@cognia/rag/cjk-tokenizer"
+import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
 import { scoreMemories } from "./scoring"
 
 /**
@@ -185,6 +186,12 @@ export interface RetrieveMemoriesInput {
    * (and, per team turn, avoids re-embedding once per member).
    */
   precomputedQueryEmbedding?: number[]
+  /**
+   * Heuristic synonym expansion of the BM25 keyword leg only (the vector leg
+   * keeps the raw query). Off by default — opt-in via `MemoryConfig`. Lifts
+   * recall for alternate phrasings without changing the semantic ranking.
+   */
+  enableQueryExpansion?: boolean
 }
 
 export interface RetrievedMemory {
@@ -267,7 +274,8 @@ export async function retrieveMemories(
   // unchanged candidate set (same reader + type filter) isn't re-tokenised.
   const cacheKey = `${input.characterId ?? "global"}::${(input.types ?? []).slice().sort().join(",")}`
   const bm25 = getMemoryBm25Index(cacheKey, candidates)
-  const rawKeywordHits = bm25.search(query, input.topK * OVERFETCH)
+  const keywordQuery = input.enableQueryExpansion ? buildExpandedKeywordQuery(query) : query
+  const rawKeywordHits = bm25.search(keywordQuery, input.topK * OVERFETCH)
 
   // Stopword gate: drop keyword hits that overlap the query only on stopwords.
   // BM25 returns any doc sharing a single term, and the min-max normalization

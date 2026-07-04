@@ -124,6 +124,20 @@ export function MemorySection() {
 
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
+              <Label htmlFor="mem-query-expansion">{t("queryExpansion.heading")}</Label>
+              <p className="text-sm text-muted-foreground">{t("queryExpansion.description")}</p>
+            </div>
+            <Switch
+              id="mem-query-expansion"
+              aria-label={t("queryExpansion.label")}
+              checked={config.enableQueryExpansion ?? false}
+              onCheckedChange={(v) => update({ enableQueryExpansion: v })}
+              disabled={!config.enabled}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
               <Label htmlFor="mem-cloud">{t("cloudEmbedding.heading")}</Label>
               <p className="text-sm text-muted-foreground">{t("cloudEmbedding.description")}</p>
             </div>

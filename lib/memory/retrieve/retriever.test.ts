@@ -58,6 +58,20 @@ describe("retrieveMemories", () => {
     expect(out.map((r) => r.memory.id)).toContain("hit")
   })
 
+  it("still retrieves keyword matches with query expansion enabled", async () => {
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The user prefers pnpm over npm", { id: "hit" }),
+        mem("The user lives in Shanghai", { id: "miss" }),
+      ],
+    }
+    const out = await retrieveMemories(
+      { queryText: "pnpm", enableQueryExpansion: true, ...base },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toContain("hit")
+  })
+
   it("filters by type when `types` is set", async () => {
     const deps: MemoryRetrieverDeps = {
       loadCandidates: async () => [

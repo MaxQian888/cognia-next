@@ -34,6 +34,8 @@ export interface ApplyMemoryContextInput {
    * through to the retriever's vector leg so the same query isn't re-embedded.
    */
   precomputedQueryEmbedding?: number[]
+  /** Heuristic synonym expansion of the memory BM25 keyword leg. Off by default. */
+  enableQueryExpansion?: boolean
   deps: ApplyMemoryContextDeps
 }
 
@@ -93,6 +95,7 @@ export async function applyMemoryContext(
               relevanceFloor: input.relevanceFloor,
               types: RECALLED_TYPES,
               precomputedQueryEmbedding: input.precomputedQueryEmbedding,
+              enableQueryExpansion: input.enableQueryExpansion,
             },
             input.deps
           )

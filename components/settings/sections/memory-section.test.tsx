@@ -37,6 +37,14 @@ describe("MemorySection", () => {
     )
   })
 
+  it("saves when query expansion is toggled on", () => {
+    render(<MemorySection />)
+    fireEvent.click(screen.getByRole("switch", { name: /query expansion/i }))
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({ memory: expect.objectContaining({ enableQueryExpansion: true }) })
+    )
+  })
+
   it("disables auto-learn switch when memory is off", () => {
     mockSettings = { memory: { enabled: false } }
     render(<MemorySection />)
