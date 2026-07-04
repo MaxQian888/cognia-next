@@ -113,5 +113,9 @@
   "webCardDesc": "Web search and fetch (web_search / web_fetch). On by default — works in the browser and the CLI. web_search needs a provider configured in Settings → Search.",
   "webCardTitle": "Web",
   "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
-  "webNativeAnthropicTitle": "Use native Anthropic web tools"
+  "webNativeAnthropicTitle": "Use native Anthropic web tools",
+  "webAlwaysDistillTitle": "Always distill fetched pages",
+  "webAlwaysDistillDesc": "Run every fetched page through the utility model before the agent sees it, even without a question — the agent never reads raw page text, narrowing the prompt-injection surface. Needs a configured model; slightly more cost per fetch.",
+  "webAllowPrivateTitle": "Allow private / local addresses",
+  "webAllowPrivateDesc": "Let web_fetch reach localhost and private-network hosts (10.x, 192.168.x, 169.254.x cloud metadata). Off by default to block SSRF — enable only for trusted local development."
 }

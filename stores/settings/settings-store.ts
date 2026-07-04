@@ -115,6 +115,8 @@ interface SettingsState {
   setBuiltinToolEnabled: (category: keyof BuiltinToolsConfig, enabled: boolean) => Promise<void>
   setWebToolsEnabled: (enabled: boolean) => Promise<void>
   setWebToolsNativeOnAnthropic: (nativeOnAnthropic: boolean) => Promise<void>
+  setWebToolsAllowPrivateHosts: (allowPrivateHosts: boolean) => Promise<void>
+  setWebToolsAlwaysDistill: (alwaysDistill: boolean) => Promise<void>
   setSkillToolEnabled: (enabled: boolean) => Promise<void>
   setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
   setTeamCollaborationToolEnabled: (enabled: boolean) => Promise<void>
@@ -718,6 +720,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const current = get().settings?.webTools
       const next = await saveSettings({
         webTools: { enabled: current?.enabled ?? true, nativeOnAnthropic },
+      })
+      set({ settings: next })
+    },
+
+    setWebToolsAllowPrivateHosts: async (allowPrivateHosts) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, ...current, allowPrivateHosts },
+      })
+      set({ settings: next })
+    },
+
+    setWebToolsAlwaysDistill: async (alwaysDistill) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, ...current, alwaysDistill },
       })
       set({ settings: next })
     },

@@ -1726,6 +1726,21 @@ export interface AppSettings {
      * native tools aren't available and the custom ones are always used.
      */
     nativeOnAnthropic?: boolean
+    /**
+     * Opt-in (default false): allow `web_fetch` to reach private / loopback /
+     * link-local hosts (localhost, 10./192.168., 169.254.x cloud metadata, …).
+     * Off by default — the SSRF guard blocks them so a model-supplied URL can't
+     * probe the user's internal network. Enable only for trusted local dev.
+     */
+    allowPrivateHosts?: boolean
+    /**
+     * Opt-in (default false): always run fetched page text through the cheap
+     * utility model before returning it, even when the model didn't pass a
+     * `prompt`. Narrows the prompt-injection surface (Claude-Code-style: the
+     * main agent never sees raw page text). No-op on hosts without a usable
+     * utility model.
+     */
+    alwaysDistill?: boolean
   }
   /**
    * Agent self-invocation tools (Claude Code parity). Opt-in (default off):

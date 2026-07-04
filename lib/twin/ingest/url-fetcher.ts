@@ -18,6 +18,7 @@
 import { parseHTML } from "@cognia/document/parsers/html-parser"
 import { scrapePlatform } from "@/lib/web/reader/dispatch"
 import { fetchViaJina } from "@/lib/web/reader/jina"
+import { assertFetchTargetAllowed } from "@/lib/web/fetch-guard"
 
 const HTTP_TIMEOUT_MS = 30_000
 /** Below this many extracted chars an HTML page is treated as locally unreadable. */
@@ -37,6 +38,8 @@ export interface FetchUrlOptions {
   signal?: AbortSignal
   /** Enable the Jina Reader fallback for thin HTML extraction. Default false. */
   jinaFallback?: boolean
+  /** Allow private/loopback/link-local targets (SSRF guard opt-out). Default false. */
+  allowPrivateHosts?: boolean
 }
 
 function extractHtmlTitle(html: string): string | null {
@@ -65,6 +68,10 @@ export async function fetchUrlAsRawSource(
   opts: FetchUrlOptions = {}
 ): Promise<FetchedUrl> {
   const fetchImpl = opts.fetchImpl ?? fetch
+
+  // 0. SSRF guard — reject non-http(s) schemes and private/loopback targets
+  //    before any network is touched (throws; caller surfaces the message).
+  assertFetchTargetAllowed(url, { allowPrivateHosts: opts.allowPrivateHosts })
 
   // 1. Platform scraper (WeChat / X / YouTube) → clean Markdown. Returns null
   //    (no network) for every other host.

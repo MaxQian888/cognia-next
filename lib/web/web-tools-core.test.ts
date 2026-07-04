@@ -43,7 +43,9 @@ describe("webFetch", () => {
       unknown
     >
     expect(out.ok).toBe(true)
-    expect(out.text).toBe("readable text")
+    // Raw (non-distilled) page text is framed as untrusted for injection safety.
+    expect(out.text).toContain("readable text")
+    expect(out.text).toContain("Untrusted web content")
     expect(out.title).toBe("Title")
     expect(out.contentType).toBe("text/html")
     // The raw HTML markup must NOT be sent to the model.
@@ -99,7 +101,7 @@ describe("webFetch", () => {
     )) as Record<string, unknown>
     expect(out.source).toBe("jina")
     expect(out.title).toBe("JT")
-    expect(String(out.text).length).toBe(300)
+    expect(String(out.text).endsWith("x".repeat(300))).toBe(true)
   })
 
   it("does not reach Jina by default (privacy)", async () => {
@@ -167,7 +169,9 @@ describe("webFetch", () => {
       string,
       unknown
     >
-    expect((out.text as string).length).toBe(40 * 1024)
+    // Cap applies to the content; the untrusted banner is added on top of it.
+    const content = (out.text as string).replace(/^\[Untrusted[^\]]*\]\n\n/, "")
+    expect(content.length).toBe(40 * 1024)
     expect(out.truncated).toBe(true)
   })
 
@@ -178,8 +182,9 @@ describe("webFetch", () => {
       { url: "https://x.test", maxBytes: 8, headers: { "User-Agent": "Preset/9" } },
       { fetchImpl: fetchImpl as unknown as typeof fetch, userAgent: "Cognia/1" }
     )) as Record<string, unknown>
-    // maxBytes set → extract cap follows it.
-    expect((out.text as string).length).toBe(8)
+    // maxBytes set → extract cap follows it (banner excluded from the cap).
+    const content = (out.text as string).replace(/^\[Untrusted[^\]]*\]\n\n/, "")
+    expect(content.length).toBe(8)
     expect(out.truncated).toBe(true)
     // No title returned when the parser found none.
     expect(out.title).toBeUndefined()
@@ -218,7 +223,9 @@ describe("webFetch", () => {
       { url: "https://x.test", prompt: "what is x?" },
       { fetchImpl, summarize }
     )) as Record<string, unknown>
-    expect(out.text).toBe("readable text")
+    // Fell back to extracted text → framed as untrusted.
+    expect(out.text).toContain("readable text")
+    expect(out.text).toContain("Untrusted web content")
   })
 
   it("ignores the prompt when no summarizer is available", async () => {
@@ -227,7 +234,33 @@ describe("webFetch", () => {
       { url: "https://x.test", prompt: "what is x?" },
       { fetchImpl }
     )) as Record<string, unknown>
-    expect(out.text).toBe("readable text")
+    expect(out.text).toContain("readable text")
+  })
+
+  it("distilled output is NOT wrapped as untrusted", async () => {
+    const fetchImpl = jest.fn(async () => res("<html>full page</html>"))
+    const summarize = jest.fn(async () => "FOCUSED ANSWER")
+    const out = (await webFetch(
+      { url: "https://x.test", prompt: "what is x?" },
+      { fetchImpl, summarize }
+    )) as Record<string, unknown>
+    expect(out.text).toBe("FOCUSED ANSWER")
+    expect(out.text).not.toContain("Untrusted web content")
+  })
+
+  it("alwaysDistill runs the summarizer with a generic prompt when no prompt is given", async () => {
+    const fetchImpl = jest.fn(async () => res("<html>full page</html>"))
+    const summarize = jest.fn(async () => "GENERIC SUMMARY")
+    const out = (await webFetch(
+      { url: "https://x.test" },
+      { fetchImpl, summarize, alwaysDistill: true }
+    )) as Record<string, unknown>
+    expect(out.text).toBe("GENERIC SUMMARY")
+    expect(summarize).toHaveBeenCalledWith(
+      "readable text",
+      expect.stringMatching(/key facts/i),
+      undefined
+    )
   })
 
   it("serves a repeated GET from the cache without re-fetching", async () => {
@@ -275,6 +308,119 @@ describe("webFetch", () => {
       ok: false,
       error: "network down",
     })
+  })
+
+  it("blocks a private/loopback host by default (SSRF guard) without fetching", async () => {
+    const fetchImpl = jest.fn(async () => res("<html>secret</html>"))
+    const out = (await webFetch(
+      { url: "http://169.254.169.254/latest/" },
+      { fetchImpl }
+    )) as Record<string, unknown>
+    expect(out.ok).toBe(false)
+    expect(String(out.error)).toMatch(/private\/loopback/i)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("blocks a non-http(s) scheme", async () => {
+    const fetchImpl = jest.fn(async () => res("x"))
+    const out = (await webFetch({ url: "file:///etc/passwd" }, { fetchImpl })) as Record<
+      string,
+      unknown
+    >
+    expect(out.ok).toBe(false)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("allows a private host when allowPrivateHosts is enabled", async () => {
+    const fetchImpl = jest.fn(async () => res("<html><body>ok</body></html>"))
+    const out = (await webFetch(
+      { url: "http://localhost:3000/" },
+      { fetchImpl, allowPrivateHosts: true }
+    )) as Record<string, unknown>
+    expect(out.ok).toBe(true)
+    expect(fetchImpl).toHaveBeenCalled()
+  })
+
+  it("returns a binary note (not garbage) for non-text content", async () => {
+    const fetchImpl = jest.fn(async () => res("\x00\x01PNGdata", "image/png"))
+    const out = (await webFetch({ url: "https://x.test/logo.png" }, { fetchImpl })) as Record<
+      string,
+      unknown
+    >
+    expect(out.binary).toBe(true)
+    expect(out.body).toBeUndefined()
+    expect(out.text).toBeUndefined()
+    expect(String(out.note)).toMatch(/binary/i)
+    expect(mockParseHTML).not.toHaveBeenCalled()
+  })
+
+  it("routes a PDF through Jina when the fallback is enabled", async () => {
+    const fetchImpl = jest.fn(async (url: string) =>
+      url.startsWith("https://r.jina.ai/")
+        ? res("Title: Doc\nMarkdown Content:\n# PDF as markdown", "text/plain")
+        : res("%PDF-1.7 binary", "application/pdf")
+    )
+    const out = (await webFetch(
+      { url: "https://x.test/report.pdf" },
+      { fetchImpl: fetchImpl as unknown as typeof fetch, jinaFallback: true }
+    )) as Record<string, unknown>
+    expect(out.source).toBe("jina")
+    expect(String(out.text)).toContain("PDF as markdown")
+    expect(out.binary).toBeUndefined()
+  })
+
+  it("reports a PDF as binary when Jina is disabled", async () => {
+    const fetchImpl = jest.fn(async () => res("%PDF-1.7 binary", "application/pdf"))
+    const out = (await webFetch({ url: "https://x.test/report.pdf" }, { fetchImpl })) as Record<
+      string,
+      unknown
+    >
+    expect(out.binary).toBe(true)
+    expect(String(out.note)).toMatch(/pdf/i)
+  })
+
+  it("returns raw bytes for binary content when format is raw", async () => {
+    const fetchImpl = jest.fn(async () => res("rawpngbytes", "image/png"))
+    const out = (await webFetch(
+      { url: "https://x.test/logo.png", format: "raw" },
+      { fetchImpl }
+    )) as Record<string, unknown>
+    expect(out.binary).toBeUndefined()
+    expect(out.body).toBe("rawpngbytes")
+  })
+
+  it("pages a long page via offset and reports totalLength + nextOffset", async () => {
+    mockParseHTML.mockResolvedValue({ text: "x".repeat(50_000), title: "T" })
+    const fetchImpl = jest.fn(async () => res("<html>big</html>"))
+    const first = (await webFetch({ url: "https://x.test" }, { fetchImpl })) as Record<
+      string,
+      unknown
+    >
+    expect(first.truncated).toBe(true)
+    expect(first.totalLength).toBe(50_000)
+    expect(first.nextOffset).toBe(40 * 1024)
+
+    const second = (await webFetch(
+      { url: "https://x.test", offset: 40 * 1024 },
+      { fetchImpl }
+    )) as Record<string, unknown>
+    // The remaining 50000 - 40960 = 9040 chars fit → not truncated, no nextOffset.
+    expect(second.truncated).toBe(false)
+    expect(second.nextOffset).toBeUndefined()
+    const content = (second.text as string).replace(/^\[Untrusted[^\]]*\]\n\n/, "")
+    expect(content.length).toBe(50_000 - 40 * 1024)
+  })
+
+  it("windows the raw body path by offset", async () => {
+    const fetchImpl = jest.fn(async () => res("0123456789", "text/plain"))
+    const out = (await webFetch(
+      { url: "https://x.test/data", maxBytes: 4, offset: 4 },
+      { fetchImpl }
+    )) as Record<string, unknown>
+    expect(out.body).toBe("4567")
+    expect(out.truncated).toBe(true)
+    expect(out.totalLength).toBe(10)
+    expect(out.nextOffset).toBe(8)
   })
 })
 

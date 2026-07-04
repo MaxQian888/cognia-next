@@ -113,5 +113,9 @@
   "webCardDesc": "网络搜索与抓取（web_search / web_fetch）。默认开启——浏览器与 CLI 均可用。web_search 需要在 设置 → 搜索 中配置 provider。",
   "webCardTitle": "网络",
   "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
-  "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具"
+  "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
+  "webAlwaysDistillTitle": "始终蒸馏抓取的网页",
+  "webAlwaysDistillDesc": "即使没有问题，也先用工具模型处理每个抓取的网页再交给智能体——智能体不会读到原始网页文本，从而收窄提示注入面。需已配置模型；每次抓取成本略增。",
+  "webAllowPrivateTitle": "允许私有 / 本地地址",
+  "webAllowPrivateDesc": "允许 web_fetch 访问 localhost 及内网主机（10.x、192.168.x、169.254.x 云元数据）。默认关闭以阻断 SSRF——仅在可信的本地开发时开启。"
 }

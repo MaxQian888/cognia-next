@@ -68,6 +68,7 @@ import {
   testProviderConnection,
   aggregateSearch,
 } from "./search-service"
+import { getProviderHealth, resetProviderHealth } from "./provider-health"
 
 function makeSettings(
   providerId: SearchProviderSettings["providerId"],
@@ -85,6 +86,7 @@ function makeSettings(
 beforeEach(() => {
   routeSearchMock.mockReset()
   incrementSearchUsageMock.mockClear()
+  resetProviderHealth()
   jest.spyOn(console, "warn").mockImplementation(() => {})
 })
 
@@ -157,6 +159,29 @@ describe("search()", () => {
       })
     ).rejects.toThrow(/boom/)
     expect(routeSearchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips an open-circuit provider (tries the healthy one first)", async () => {
+    // Trip tavily's breaker directly.
+    const health = getProviderHealth()
+    health.setConfig({ failureThreshold: 1, cooldownMs: 60_000 })
+    health.recordResult("tavily", false)
+
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    routeSearchMock.mockResolvedValueOnce({
+      provider: "perplexity",
+      query: "q",
+      results: [],
+      responseTime: 1,
+    })
+    const r = await search("q", { providerSettings: settings })
+    // perplexity is tried first because tavily's circuit is open.
+    expect(r.provider).toBe("perplexity")
+    expect(routeSearchMock).toHaveBeenCalledTimes(1)
+    expect(routeSearchMock.mock.calls[0][1]).toBe("perplexity")
   })
 })
 
@@ -248,6 +273,44 @@ describe("aggregateSearch", () => {
     expect(r.results).toHaveLength(1)
     expect(r.results[0].score).toBe(0.9)
     expect(r.answer).toBe("answer-text")
+  })
+
+  it("normalizes each provider's scores to [0,1] before ranking", async () => {
+    // Two providers on different score scales, each with a spread of results.
+    routeSearchMock.mockImplementation(async (_q, providerId) => {
+      if (providerId === "tavily") {
+        return {
+          provider: "tavily",
+          query: "q",
+          results: [
+            { title: "t-top", url: "https://t.test/1", content: "c", score: 0.9 },
+            { title: "t-bot", url: "https://t.test/2", content: "c", score: 0.5 },
+          ],
+          responseTime: 1,
+        }
+      }
+      return {
+        provider: "exa",
+        query: "q",
+        results: [
+          { title: "e-top", url: "https://e.test/1", content: "c", score: 100 },
+          { title: "e-bot", url: "https://e.test/2", content: "c", score: 20 },
+        ],
+        responseTime: 1,
+      }
+    })
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      exa: makeSettings("exa", { priority: 2 }),
+    } as Record<SearchProviderSettings["providerId"], SearchProviderSettings>
+    const r = await aggregateSearch("q", settings)
+    // After min-max per provider, both top results become 1 and both bottoms 0
+    // — exa's raw 100 no longer dominates tavily's 0.9.
+    const byUrl = Object.fromEntries(r.results.map((x) => [x.url, x.score]))
+    expect(byUrl["https://t.test/1"]).toBe(1)
+    expect(byUrl["https://e.test/1"]).toBe(1)
+    expect(byUrl["https://t.test/2"]).toBe(0)
+    expect(byUrl["https://e.test/2"]).toBe(0)
   })
 
   it("throws when all providers fail", async () => {

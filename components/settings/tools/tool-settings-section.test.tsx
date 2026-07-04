@@ -6,6 +6,8 @@ import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 const setBuiltinToolEnabled = jest.fn()
 const setWebToolsEnabled = jest.fn()
 const setWebToolsNativeOnAnthropic = jest.fn()
+const setWebToolsAllowPrivateHosts = jest.fn()
+const setWebToolsAlwaysDistill = jest.fn()
 const setSkillToolEnabled = jest.fn()
 const setSlashCommandToolEnabled = jest.fn()
 const setTeamCollaborationToolEnabled = jest.fn()
@@ -41,6 +43,8 @@ const settingsState = {
   setBuiltinToolEnabled,
   setWebToolsEnabled,
   setWebToolsNativeOnAnthropic,
+  setWebToolsAllowPrivateHosts,
+  setWebToolsAlwaysDistill,
   setSkillToolEnabled,
   setSlashCommandToolEnabled,
   setTeamCollaborationToolEnabled,
@@ -56,6 +60,8 @@ describe("ToolSettingsSection", () => {
     setBuiltinToolEnabled.mockClear()
     setWebToolsEnabled.mockClear()
     setWebToolsNativeOnAnthropic.mockClear()
+    setWebToolsAllowPrivateHosts.mockClear()
+    setWebToolsAlwaysDistill.mockClear()
     setSkillToolEnabled.mockClear()
     setSlashCommandToolEnabled.mockClear()
     setTeamCollaborationToolEnabled.mockClear()
@@ -77,11 +83,24 @@ describe("ToolSettingsSection", () => {
 
   it("calls setBuiltinToolEnabled when a category switch is toggled", () => {
     render(<ToolSettingsSection />)
-    const switches = screen.getAllByRole("switch")
-    // Desktop order: [0]=Web, [1]=native sub-toggle, [2]=Skill, [3]=SlashCommand,
-    // [4]=TeamCollaboration, [5]=first sidecar category (fileExtras).
-    fireEvent.click(switches[5])
+    // Query by label rather than index so the web-card sub-toggles don't shift it.
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:fileExtras"))
     expect(setBuiltinToolEnabled).toHaveBeenCalled()
+  })
+
+  it("toggles the always-distill and allow-private web sub-toggles", () => {
+    render(<ToolSettingsSection />)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:webAlwaysDistillTitle"))
+    expect(setWebToolsAlwaysDistill).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:webAllowPrivateTitle"))
+    expect(setWebToolsAllowPrivateHosts).toHaveBeenCalledWith(true)
+  })
+
+  it("hides the web sub-toggles when web tools are disabled", () => {
+    settingsState.settings.webTools = { enabled: false }
+    render(<ToolSettingsSection />)
+    expect(screen.queryByText("webAlwaysDistillTitle")).not.toBeInTheDocument()
+    expect(screen.queryByText("webAllowPrivateTitle")).not.toBeInTheDocument()
   })
 
   it("toggles the Skill, SlashCommand and team-collaboration self-invocation tools", () => {
@@ -152,18 +171,23 @@ describe("ToolSettingsSection", () => {
   it("disables sidecar category switches in web mode but keeps the Web card enabled", () => {
     isTauriMock.mockReturnValue(false)
     render(<ToolSettingsSection />)
-    const switches = screen.getAllByRole("switch")
-    // Off-desktop the native sub-toggle is hidden, so the host-routed switches
-    // are [0]=Web, [1]=Skill, [2]=SlashCommand, [3]=TeamCollaboration — all
-    // enabled in the browser.
-    expect(switches[0]).not.toBeDisabled()
-    expect(switches[1]).not.toBeDisabled()
-    expect(switches[2]).not.toBeDisabled()
-    expect(switches[3]).not.toBeDisabled()
-    // Every sidecar category switch (the rest) is disabled off-desktop.
-    for (const sw of switches.slice(4)) {
-      expect(sw).toBeDisabled()
+    // Off-desktop the native sub-toggle is hidden. Host-routed switches (web
+    // card enable + its always-distill/allow-private sub-toggles + the three
+    // self-invoke tools) stay enabled; only the sidecar categories are disabled.
+    const hostRouted = [
+      "toggleAriaLabel:webCardTitle",
+      "toggleAriaLabel:webAlwaysDistillTitle",
+      "toggleAriaLabel:webAllowPrivateTitle",
+      "toggleAriaLabel:skillToolTitle",
+      "toggleAriaLabel:slashToolTitle",
+      "toggleAriaLabel:teamCollabToolTitle",
+    ]
+    for (const label of hostRouted) {
+      expect(screen.getByLabelText(label)).not.toBeDisabled()
     }
+    // Sidecar category switches are disabled off-desktop.
+    expect(screen.getByLabelText("toggleAriaLabel:fileExtras")).toBeDisabled()
+    expect(screen.getByLabelText("toggleAriaLabel:gitOperations")).toBeDisabled()
   })
 
   it("renders the always-allow list", () => {

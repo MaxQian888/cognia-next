@@ -86,6 +86,8 @@ export function ToolSettingsSection() {
 
   const setWebToolsEnabled = useSettingsStore((s) => s.setWebToolsEnabled)
   const setWebToolsNativeOnAnthropic = useSettingsStore((s) => s.setWebToolsNativeOnAnthropic)
+  const setWebToolsAllowPrivateHosts = useSettingsStore((s) => s.setWebToolsAllowPrivateHosts)
+  const setWebToolsAlwaysDistill = useSettingsStore((s) => s.setWebToolsAlwaysDistill)
   const setSkillToolEnabled = useSettingsStore((s) => s.setSkillToolEnabled)
   const setSlashCommandToolEnabled = useSettingsStore((s) => s.setSlashCommandToolEnabled)
   const setTeamCollaborationToolEnabled = useSettingsStore((s) => s.setTeamCollaborationToolEnabled)
@@ -93,6 +95,8 @@ export function ToolSettingsSection() {
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
   const webNativeOnAnthropic = settings?.webTools?.nativeOnAnthropic ?? false
+  const webAllowPrivateHosts = settings?.webTools?.allowPrivateHosts ?? false
+  const webAlwaysDistill = settings?.webTools?.alwaysDistill ?? false
   const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
   const slashCommandToolEnabled = settings?.selfInvokeTools?.slashCommand ?? false
   const teamCollaborationToolEnabled = settings?.selfInvokeTools?.teamCollaboration ?? false
@@ -152,6 +156,36 @@ export function ToolSettingsSection() {
                 checked={webNativeOnAnthropic}
                 onCheckedChange={(next) => setWebToolsNativeOnAnthropic(next)}
                 aria-label={t("toggleAriaLabel", { name: t("webNativeAnthropicTitle") })}
+              />
+            </div>
+          )}
+          {webToolsEnabled && (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium">{t("webAlwaysDistillTitle")}</p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("webAlwaysDistillDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={webAlwaysDistill}
+                onCheckedChange={(next) => setWebToolsAlwaysDistill(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webAlwaysDistillTitle") })}
+              />
+            </div>
+          )}
+          {webToolsEnabled && (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed border-amber-500/40 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium">{t("webAllowPrivateTitle")}</p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("webAllowPrivateDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={webAllowPrivateHosts}
+                onCheckedChange={(next) => setWebToolsAllowPrivateHosts(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webAllowPrivateTitle") })}
               />
             </div>
           )}

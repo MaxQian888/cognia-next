@@ -13,9 +13,16 @@ jest.mock("@/lib/web/web-tools-core", () => ({
 }))
 
 import { webFetch, webSearch } from "@/lib/web/web-tools-core"
+import { getPluginRateLimiter, resetPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 
 const mockFetch = webFetch as jest.Mock
 const mockSearch = webSearch as jest.Mock
+
+beforeEach(() => {
+  resetPluginRateLimiter()
+  mockFetch.mockClear()
+  mockSearch.mockClear()
+})
 
 describe("web-builtin-tools", () => {
   it("isWebBuiltinTool recognizes both tools and nothing else", () => {
@@ -68,5 +75,44 @@ describe("web-builtin-tools", () => {
       ok: false,
       error: "unknown web tool: nope",
     })
+  })
+
+  it("forwards allowPrivateHosts + alwaysDistill to web_fetch", async () => {
+    await runWebBuiltinTool(
+      WEB_FETCH_TOOL_NAME,
+      { url: "u" },
+      { allowPrivateHosts: true, alwaysDistill: true }
+    )
+    expect(mockFetch).toHaveBeenCalledWith(
+      { url: "u" },
+      expect.objectContaining({ allowPrivateHosts: true, alwaysDistill: true })
+    )
+  })
+
+  it("rate-limits web_fetch and returns a structured error instead of throwing", async () => {
+    getPluginRateLimiter().setLimit("network:fetch", { capacity: 1, refillPerSecond: 0 })
+    const first = await runWebBuiltinTool(WEB_FETCH_TOOL_NAME, { url: "u" }, {})
+    expect((first as { ok: boolean }).ok).toBe(true)
+    const second = (await runWebBuiltinTool(WEB_FETCH_TOOL_NAME, { url: "u" }, {})) as Record<
+      string,
+      unknown
+    >
+    expect(second.ok).toBe(false)
+    expect(String(second.error)).toMatch(/rate limit/i)
+    // The core is not invoked when the limiter refuses the call.
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("meters web_search on a separate bucket from web_fetch", async () => {
+    getPluginRateLimiter().setLimit("network:search", { capacity: 1, refillPerSecond: 0 })
+    await runWebBuiltinTool(WEB_SEARCH_TOOL_NAME, { query: "q" }, {})
+    const blocked = (await runWebBuiltinTool(WEB_SEARCH_TOOL_NAME, { query: "q" }, {})) as Record<
+      string,
+      unknown
+    >
+    expect(blocked.ok).toBe(false)
+    // web_fetch is unaffected — different operation bucket.
+    const fetchOk = await runWebBuiltinTool(WEB_FETCH_TOOL_NAME, { url: "u" }, {})
+    expect((fetchOk as { ok: boolean }).ok).toBe(true)
   })
 })

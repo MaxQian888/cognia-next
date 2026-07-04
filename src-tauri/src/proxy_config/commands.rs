@@ -126,6 +126,65 @@ pub struct ProxyHttpRequestInput {
     pub proxy_url: Option<String>,
     #[serde(default)]
     pub timeout_secs: Option<u64>,
+    /// Defense-in-depth SSRF guard. When `Some(true)`, reject private /
+    /// loopback / link-local targets (localhost, 10./192.168., 169.254.x cloud
+    /// metadata, …). Off by default so existing callers (Anthropic OAuth,
+    /// localhost companion server) are unaffected; the agent `web_fetch` path
+    /// sets it based on the user's "allow private hosts" setting.
+    #[serde(default, rename = "blockPrivate")]
+    pub block_private: Option<bool>,
+}
+
+/// True when the URL's host is a private / loopback / link-local / reserved
+/// address (or `localhost`) that a guarded fetch must refuse. Unparseable URLs
+/// and unresolved hostnames are treated as *not* private here — the caller's
+/// primary (TS) guard already rejects bad URLs; this is only a backstop against
+/// the fixed IP ranges. Mirrors `lib/web/fetch-guard.ts`.
+fn host_is_private(url: &str) -> bool {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return true; // no host → unsafe
+    };
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    if h == "localhost" || h.ends_with(".localhost") {
+        return true;
+    }
+    // Strip brackets from an IPv6 literal host before parsing.
+    let bare = h.trim_start_matches('[').trim_end_matches(']');
+    match bare.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => ipv4_is_private(v4),
+        Ok(IpAddr::V6(v6)) => ipv6_is_private(v6),
+        Err(_) => false,
+    }
+}
+
+fn ipv4_is_private(v4: std::net::Ipv4Addr) -> bool {
+    if v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified() {
+        return true;
+    }
+    if v4.is_multicast() || v4.is_broadcast() {
+        return true;
+    }
+    let [a, b, ..] = v4.octets();
+    // 100.64.0.0/10 CGNAT (std `is_shared` is unstable) + 240.0.0.0/4 reserved.
+    (a == 100 && (64..=127).contains(&b)) || a >= 240
+}
+
+fn ipv6_is_private(v6: std::net::Ipv6Addr) -> bool {
+    if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
+        return true;
+    }
+    // IPv4-mapped / -compatible — defer to the embedded IPv4 range check.
+    if let Some(v4) = v6.to_ipv4() {
+        return ipv4_is_private(v4);
+    }
+    let first = v6.segments()[0];
+    // fc00::/7 unique-local + fe80::/10 link-local.
+    (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
 }
 
 #[derive(Debug, Serialize)]
@@ -139,6 +198,13 @@ pub struct ProxyHttpRequestOutput {
 pub async fn proxy_http_request(
     input: ProxyHttpRequestInput,
 ) -> Result<ProxyHttpRequestOutput, String> {
+    if input.block_private == Some(true) && host_is_private(&input.url) {
+        return Err(format!(
+            "refusing to fetch a private/loopback address: {}",
+            input.url
+        ));
+    }
+
     let timeout = Duration::from_secs(input.timeout_secs.unwrap_or(30));
     let mut builder = reqwest::Client::builder().timeout(timeout);
 
@@ -269,6 +335,7 @@ mod tests {
             headers: None,
             proxy_url: None,
             timeout_secs: Some(1),
+            block_private: None,
         })
         .await;
         assert!(res.is_err());
@@ -284,8 +351,52 @@ mod tests {
             headers: None,
             proxy_url: None,
             timeout_secs: Some(1),
+            block_private: None,
         })
         .await;
         assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn proxy_http_request_blocks_private_host_when_guarded() {
+        let res = proxy_http_request(ProxyHttpRequestInput {
+            url: "http://169.254.169.254/latest/meta-data/".to_string(),
+            method: None,
+            body: None,
+            headers: None,
+            proxy_url: None,
+            timeout_secs: Some(1),
+            block_private: Some(true),
+        })
+        .await;
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("private/loopback"));
+    }
+
+    #[test]
+    fn host_is_private_matrix() {
+        for url in [
+            "http://localhost/",
+            "http://app.localhost/",
+            "http://127.0.0.1/",
+            "http://10.1.2.3/",
+            "http://172.16.0.1/",
+            "http://192.168.1.1/",
+            "http://169.254.169.254/",
+            "http://100.64.0.1/",
+            "http://[::1]/",
+            "http://[fe80::1]/",
+            "http://[fc00::1]/",
+        ] {
+            assert!(host_is_private(url), "expected private: {url}");
+        }
+        for url in [
+            "https://example.com/",
+            "http://8.8.8.8/",
+            "http://172.32.0.1/",
+            "https://[2606:4700::1111]/",
+        ] {
+            assert!(!host_is_private(url), "expected public: {url}");
+        }
     }
 }
