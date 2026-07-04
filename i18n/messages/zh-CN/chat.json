@@ -283,6 +283,10 @@
       "noPresets": "暂无可用预设。",
       "noSkillMatches": "没有匹配「{query}」的技能。",
       "noSkills": "暂无可用技能。",
+      "noWorkflowEdgeMatches": "没有匹配“{query}”的连线。",
+      "noWorkflowEdges": "此工作流暂无连线。",
+      "noWorkflowNodeMatches": "没有匹配“{query}”的节点。",
+      "noWorkflowNodes": "此工作流暂无节点。",
       "pinAction": "置顶 /{name}",
       "pinnedSection": "置顶",
       "presetTitle": "套用提示词预设",
@@ -292,6 +296,8 @@
       "skillTitle": "启用技能",
       "slashTitle": "斜杠命令",
       "unpinAction": "取消置顶 /{name}",
+      "wfEdgeTitle": "引用一条连线",
+      "wfNodeTitle": "引用一个节点",
       "workspaceEmpty": "工作区为空。",
       "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
     },
@@ -304,6 +310,9 @@
     },
     "references": {
       "removeAria": "移除引用 {path}"
+    },
+    "workflowRefs": {
+      "removeAria": "移除对 {label} 的引用"
     },
     "sandboxShield": {
       "label": {
@@ -360,6 +369,10 @@
         "explainAria": "解释所选节点",
         "explainNoSelection": "请先在画布上选中一个或多个节点",
         "explainTooltip": "让代理解释当前选中的 {count} 个节点",
+        "reference": "引用",
+        "referenceAria": "在对话中引用选中的节点",
+        "referenceNoSelection": "请先在画布上选择节点或连线",
+        "referenceTooltip": "将选中的 {count} 个元素附加到下一条消息",
         "suggest": "下一个",
         "suggestAria": "建议下一个节点",
         "suggestTooltip": "让 workflow-designer 子代理推荐下一个要添加的节点",

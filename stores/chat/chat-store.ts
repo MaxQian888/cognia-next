@@ -52,6 +52,18 @@ export interface LastSendCacheEntry {
   specialAttempts?: Partial<Record<"contextWindowExceeded" | "contentPolicy", number>>
 }
 
+/**
+ * A workflow graph element staged as a reference chip for the next copilot
+ * turn. Denormalized (label + kind stored) so the chip renders without the
+ * live editor store, and expanded to `@node:<id>` / `@edge:<id>` at send time.
+ */
+export interface WorkflowElementRef {
+  type: "node" | "edge"
+  id: string
+  label: string
+  kind: string
+}
+
 export interface FileReference {
   /** Absolute path on disk; what the SDK needs in `additionalDirectories`. */
   absolute: string
@@ -286,6 +298,12 @@ interface ChatState {
   /** Files / folders the user has @-mentioned in the current draft. */
   referencedPaths: FileReference[]
   /**
+   * Workflow graph elements referenced for the next copilot turn (via the `@`
+   * node/edge picker or the "reference selection" action). Cleared on send
+   * (by the workflow chat tab) and on focus change. Empty in non-workflow chats.
+   */
+  referencedWorkflowElements: WorkflowElementRef[]
+  /**
    * Artifact snippets the user selected + commented on, staged as context chips
    * for the next send. Cleared on send (like attachments) and on focus change.
    */
@@ -400,6 +418,10 @@ interface ChatState {
   addReferencedPath: (ref: FileReference) => void
   removeReferencedPath: (absolute: string) => void
   clearReferencedPaths: () => void
+  /** Stage a workflow element as a reference chip for the next copilot turn. */
+  addReferencedWorkflowElement: (ref: WorkflowElementRef) => void
+  removeReferencedWorkflowElement: (type: "node" | "edge", id: string) => void
+  clearReferencedWorkflowElements: () => void
   /** Stage an artifact selection as a context chip for the next send. */
   addArtifactSelection: (selection: ArtifactSelectionRef) => void
   /** Remove a staged artifact selection (by index, since snapshots can repeat). */
@@ -437,6 +459,7 @@ export const useChatStore = create<ChatState>((set) => ({
   pendingApprovals: [],
   permissionMode: null,
   referencedPaths: [],
+  referencedWorkflowElements: [],
   artifactSelections: [],
   pendingCommandOverrides: null,
   bookmarkedIds: [],
@@ -458,6 +481,7 @@ export const useChatStore = create<ChatState>((set) => ({
       const uiReset: Partial<ChatState> = {
         permissionMode: null,
         referencedPaths: [],
+        referencedWorkflowElements: [],
         artifactSelections: [],
         pendingCommandOverrides: null,
         bookmarkedIds: [],
@@ -659,6 +683,22 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
   setPendingCommandOverrides: (overrides) => set({ pendingCommandOverrides: overrides }),
   clearReferencedPaths: () => set({ referencedPaths: [] }),
+  addReferencedWorkflowElement: (ref) =>
+    set((s) =>
+      s.referencedWorkflowElements.some((r) => r.type === ref.type && r.id === ref.id)
+        ? s
+        : { referencedWorkflowElements: [...s.referencedWorkflowElements, ref] }
+    ),
+  removeReferencedWorkflowElement: (type, id) =>
+    set((s) => ({
+      referencedWorkflowElements: s.referencedWorkflowElements.filter(
+        (r) => !(r.type === type && r.id === id)
+      ),
+    })),
+  clearReferencedWorkflowElements: () =>
+    set((s) =>
+      s.referencedWorkflowElements.length === 0 ? s : { referencedWorkflowElements: [] }
+    ),
   toggleBookmark: (messageId) =>
     set((s) => {
       const exists = s.bookmarkedIds.includes(messageId)
@@ -738,6 +778,7 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingApprovals: [],
       permissionMode: null,
       referencedPaths: [],
+      referencedWorkflowElements: [],
       artifactSelections: [],
       pendingCommandOverrides: null,
       bookmarkedIds: [],

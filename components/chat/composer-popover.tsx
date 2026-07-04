@@ -24,12 +24,14 @@ import { useTranslations } from "next-intl"
 import {
   AtSignIcon,
   BookMarkedIcon,
+  BoxIcon,
   FileIcon,
   FolderIcon,
   PinIcon,
   PinOffIcon,
   SlashIcon,
   SparklesIcon,
+  SplineIcon,
   TerminalIcon,
   WandSparklesIcon,
 } from "lucide-react"
@@ -57,7 +59,7 @@ import {
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
-import type { ComposerTrigger, TriggerKind } from "./composer-trigger"
+import type { ComposerTrigger, MentionableWorkflowElement, TriggerKind } from "./composer-trigger"
 
 export type PopoverItem =
   | {
@@ -74,6 +76,7 @@ export type PopoverItem =
   | { kind: "subagent"; target: SubagentMentionTarget }
   | { kind: "skill"; skill: SkillMentionTarget }
   | { kind: "preset"; preset: SystemPromptPreset }
+  | { kind: "wfElement"; element: MentionableWorkflowElement }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -115,6 +118,19 @@ interface Props {
    * inserted). Empty / undefined outside the general chat composer.
    */
   chatPresets?: readonly SystemPromptPreset[]
+  /**
+   * Workflow graph elements surfaced by the workflow composer's `@` / `@node:`
+   * / `@edge:` mentions. Picking one stages a reference chip (no text inserted)
+   * — see `composer.tsx`'s `onPickPopoverItem`. Empty / undefined outside the
+   * workflow-editor composer.
+   */
+  workflowElements?: readonly MentionableWorkflowElement[]
+  /**
+   * Fired when the highlighted row changes to (or away from) a workflow
+   * element — the workflow composer maps this to a transient canvas highlight
+   * so arrowing through the picker pulses the matching node.
+   */
+  onHighlightElement?: (element: MentionableWorkflowElement | null) => void
   /** Recently-used command names (newest first) for the empty-query view. */
   recentCommands?: readonly string[]
   /** Pinned command names (pin order) for the empty-query view + pin toggles. */
@@ -144,6 +160,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     chatAgents,
     chatSkills,
     chatPresets,
+    workflowElements,
+    onHighlightElement,
     recentCommands,
     pinnedCommands,
     onTogglePin,
@@ -316,6 +334,25 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           list.length === 0 ? t("noPresets") : t("noPresetMatches", { query: trigger.query }),
       }
     }
+    if (trigger.kind === "wfNode" || trigger.kind === "wfEdge") {
+      const wantType = trigger.kind === "wfNode" ? "node" : "edge"
+      const list = (workflowElements ?? []).filter((el) => el.type === wantType)
+      // Fuzzy over the pre-lowercased haystack (id + label + kind + endpoints).
+      const filtered = fuzzyFilterSort(list, trigger.query, (el) => el.searchText)
+      return {
+        items: filtered.map((element) => ({ kind: "wfElement" as const, element })),
+        loading: false,
+        error: null,
+        emptyMessage:
+          list.length === 0
+            ? wantType === "node"
+              ? t("noWorkflowNodes")
+              : t("noWorkflowEdges")
+            : wantType === "node"
+              ? t("noWorkflowNodeMatches", { query: trigger.query })
+              : t("noWorkflowEdgeMatches", { query: trigger.query }),
+      }
+    }
     // file (and combined @ mode: subagents on top, then workspace files)
     const base = fileList ?? {
       items: [] as PopoverItem[],
@@ -351,6 +388,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     chatAgents,
     chatSkills,
     chatPresets,
+    workflowElements,
     recentCommands,
     pinnedCommands,
   ])
@@ -373,6 +411,16 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     // engines — guard the method, not just the element.
     el?.scrollIntoView?.({ block: "nearest" })
   }, [highlight, displayList.items.length])
+
+  // Surface the highlighted workflow element to the composer so it can pulse
+  // the matching node on the canvas. Fires with `null` when the highlight is on
+  // a non-workflow row or the popover closes (the list empties → item is
+  // undefined). No-op unless a workflow composer wired `onHighlightElement`.
+  useEffect(() => {
+    if (!onHighlightElement) return
+    const item = displayList.items[highlight]
+    onHighlightElement(item && item.kind === "wfElement" ? item.element : null)
+  }, [highlight, displayList.items, onHighlightElement])
 
   useImperativeHandle(
     ref,
@@ -505,6 +553,10 @@ function triggerTitle(
       return { icon: <SparklesIcon className="size-3.5" />, label: t("skillTitle") }
     case "preset":
       return { icon: <WandSparklesIcon className="size-3.5" />, label: t("presetTitle") }
+    case "wfNode":
+      return { icon: <BoxIcon className="size-3.5" />, label: t("wfNodeTitle") }
+    case "wfEdge":
+      return { icon: <SplineIcon className="size-3.5" />, label: t("wfEdgeTitle") }
     case "agent":
       return {
         icon: <AtSignIcon className="size-3.5" />,
@@ -563,6 +615,7 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "subagent") return `subagent-${item.target.id}`
   if (item.kind === "skill") return `skill-${item.skill.id}`
   if (item.kind === "preset") return `preset-${item.preset.id}`
+  if (item.kind === "wfElement") return `wf-${item.element.type}-${item.element.id}`
   return `idx-${idx}`
 }
 
@@ -680,6 +733,19 @@ const ItemRow = memo(function ItemRow({
         {p.description ? (
           <span className="ml-auto truncate text-xs text-muted-foreground">{p.description}</span>
         ) : null}
+      </>
+    )
+  }
+  if (item.kind === "wfElement") {
+    const el = item.element
+    const Icon = el.type === "node" ? BoxIcon : SplineIcon
+    return (
+      <>
+        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{el.label}</span>
+        <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+          {el.kind}
+        </span>
       </>
     )
   }

@@ -78,7 +78,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { listMessages } from "@/lib/db/messages"
 import { useWorkflowEditorSession } from "@/hooks/chat/use-workflow-editor-session"
 import { useChatStore } from "@/stores/chat"
-import { WorkflowEditorChatTab } from "./chat-tab"
+import { WorkflowEditorChatTab, prependWorkflowRefs } from "./chat-tab"
 
 const mLive = useLiveQuery as jest.Mock
 const mSession = useWorkflowEditorSession as jest.Mock
@@ -104,12 +104,24 @@ const MESSAGES = {
   },
 }
 
-// Minimal EditorStore stub — the tab only reads it on send/quick-action.
-const useStore = Object.assign(() => undefined, {
-  getState: () => ({}),
-  setState: () => undefined,
-  subscribe: () => () => undefined,
-}) as never
+// Minimal EditorStore stub. The tab now also reads nodes/edges (mention
+// source) and writes the reference/highlight channels, so the stub answers
+// both the hook-call form (selector over an empty graph) and `getState()`.
+const editorState = {
+  nodes: [] as unknown[],
+  edges: [] as unknown[],
+  setReferencedNodes: jest.fn(),
+  setHighlightedNodes: jest.fn(),
+}
+const useStore = Object.assign(
+  (selector?: (s: typeof editorState) => unknown) =>
+    selector ? selector(editorState) : editorState,
+  {
+    getState: () => editorState,
+    setState: () => undefined,
+    subscribe: () => () => undefined,
+  }
+) as never
 
 function harness() {
   return render(
@@ -175,5 +187,33 @@ describe("WorkflowEditorChatTab session wiring", () => {
         id: expect.stringMatching(/^workflow:wf_a:/),
       })
     )
+  })
+})
+
+describe("prependWorkflowRefs", () => {
+  it("prepends @node / @edge tokens to a string message", () => {
+    const out = prependWorkflowRefs("fix this", [
+      { type: "node", id: "n_a", label: "A", kind: "ai.prompt" },
+      { type: "edge", id: "e_1", label: "E", kind: "default" },
+    ])
+    expect(out).toBe("Referring to these workflow elements: @node:n_a @edge:e_1\n\nfix this")
+  })
+
+  it("merges into the first text block for block content", () => {
+    const out = prependWorkflowRefs([{ type: "text", text: "hi" }] as never, [
+      { type: "node", id: "n_a", label: "A", kind: "k" },
+    ]) as Array<{ type: string; text: string }>
+    expect(out[0].text).toBe("Referring to these workflow elements: @node:n_a\n\nhi")
+  })
+
+  it("unshifts a text block when the content has none", () => {
+    const out = prependWorkflowRefs([{ type: "image" }] as never, [
+      { type: "node", id: "n_a", label: "A", kind: "k" },
+    ]) as Array<{ type: string; text?: string }>
+    expect(out).toHaveLength(2)
+    expect(out[0]).toEqual({
+      type: "text",
+      text: "Referring to these workflow elements: @node:n_a\n\n",
+    })
   })
 })

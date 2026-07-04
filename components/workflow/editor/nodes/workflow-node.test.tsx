@@ -252,6 +252,29 @@ describe("WorkflowNodeComponent", () => {
     expect(card.className).not.toContain("animate-pulse-ring")
   })
 
+  it("rings the node when it is copilot-referenced (referencedNodeIds)", () => {
+    const { store } = withStore()
+    store.getState().setReferencedNodes(["n_a"])
+    renderNode({ store })
+    const card = screen.getByTestId("wf-node-ai.prompt")
+    expect(card).toHaveAttribute("data-referenced", "true")
+    expect(card.className).toContain("ring-violet-400")
+  })
+
+  it("rings the node when it is transiently highlighted (highlightedNodeIds)", () => {
+    const { store } = withStore()
+    store.getState().setHighlightedNodes(["n_a"])
+    renderNode({ store })
+    expect(screen.getByTestId("wf-node-ai.prompt")).toHaveAttribute("data-referenced", "true")
+  })
+
+  it("does not ring an unreferenced node", () => {
+    const { store } = withStore()
+    store.getState().setReferencedNodes(["n_other"])
+    renderNode({ store })
+    expect(screen.getByTestId("wf-node-ai.prompt")).not.toHaveAttribute("data-referenced")
+  })
+
   it("toolbar Delete invokes store.removeNodes for the active id", () => {
     const { store } = withStore()
     store.getState().addNode("ai.prompt", { x: 0, y: 0 })

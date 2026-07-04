@@ -3,7 +3,7 @@
 import { useCallback, useRef, type ReactNode, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, Loader2 } from "lucide-react"
-import { Composer, type ComposerHandle } from "./composer"
+import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
 import { ChatHeader } from "./chat-header"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import {
@@ -84,6 +84,11 @@ interface ChatPaneProps {
   /** When provided, opens the mobile inline @-mention popover on `@`. */
   mobileMentionMembers?: readonly Character[]
   /**
+   * Workflow-editor copilot wiring — forwarded to the `<Composer>` so `@`
+   * opens a workflow node/edge picker. Only the workflow chat tab passes this.
+   */
+  workflowMention?: ComposerWorkflowMention
+  /**
    * Resume the chat turn after the user approves a plan in the plan-approval
    * dock. The host switches the session permission mode to `mode`
    * (acceptEdits / default / auto) and sends the resume prompt. When omitted
@@ -153,6 +158,7 @@ export function ChatPane({
   showHeader = true,
   emptyState,
   welcomeExtras,
+  workflowMention,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
   const tHistory = useTranslations("chat.history")
@@ -277,6 +283,7 @@ export function ChatPane({
       // concurrent-stream cap is reached (this pane isn't one of the streamers).
       disabled={status === "awaiting_approval" || atCapacity}
       mobileMentionMembers={mobileMentionMembers}
+      workflowMention={workflowMention}
     />
   )
 

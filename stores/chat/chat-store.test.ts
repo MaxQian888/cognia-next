@@ -305,6 +305,92 @@ describe("useChatStore", () => {
     })
   })
 
+  describe("referencedWorkflowElements", () => {
+    beforeEach(() => {
+      act(() => useChatStore.getState().clearReferencedWorkflowElements())
+    })
+
+    it("adds a node reference", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() =>
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "Draft",
+          kind: "ai.prompt",
+        })
+      )
+      expect(result.current.referencedWorkflowElements).toEqual([
+        { type: "node", id: "n_a", label: "Draft", kind: "ai.prompt" },
+      ])
+    })
+
+    it("dedupes by type + id", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A",
+          kind: "k",
+        })
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A2",
+          kind: "k",
+        })
+      })
+      expect(result.current.referencedWorkflowElements).toHaveLength(1)
+      // Same id + different type is a distinct reference.
+      act(() =>
+        result.current.addReferencedWorkflowElement({
+          type: "edge",
+          id: "n_a",
+          label: "E",
+          kind: "default",
+        })
+      )
+      expect(result.current.referencedWorkflowElements).toHaveLength(2)
+    })
+
+    it("removes by type + id (no-op when missing)", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A",
+          kind: "k",
+        })
+        result.current.addReferencedWorkflowElement({
+          type: "edge",
+          id: "e_1",
+          label: "E",
+          kind: "default",
+        })
+      })
+      act(() => result.current.removeReferencedWorkflowElement("node", "n_a"))
+      expect(result.current.referencedWorkflowElements.map((r) => r.id)).toEqual(["e_1"])
+      act(() => result.current.removeReferencedWorkflowElement("node", "missing"))
+      expect(result.current.referencedWorkflowElements).toHaveLength(1)
+    })
+
+    it("clears the list", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A",
+          kind: "k",
+        })
+      })
+      act(() => result.current.clearReferencedWorkflowElements())
+      expect(result.current.referencedWorkflowElements).toEqual([])
+    })
+  })
+
   describe("pendingCommandOverrides", () => {
     it("setPendingCommandOverrides accepts a payload and null", () => {
       const { result } = renderHook(() => useChatStore())

@@ -328,3 +328,33 @@ describe("WorkflowProposalCard — Discard flow", () => {
     expect(screen.queryByTestId("workflow-proposal-apply")).not.toBeInTheDocument()
   })
 })
+
+describe("WorkflowProposalCard — canvas highlight on hover", () => {
+  it("rings the affected nodes on hover and clears them on leave", () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    useProposalStore.getState().openProposal("wf_a", {
+      proposalId: "p_1",
+      workflowId: "wf_a",
+      summary: "s",
+      ops: sampleOps,
+    })
+    render(
+      <WorkflowProposalCard
+        part={makePart({
+          ok: true,
+          proposalId: "p_1",
+          workflowId: "wf_a",
+          summary: "s",
+          opCount: { add: 2, remove: 0, connect: 1, disconnect: 0, configure: 0 },
+        })}
+      />
+    )
+    const card = screen.getByTestId("workflow-proposal-card")
+    // add_node n_a, add_node n_b, connect_edge n_a→n_b → { n_a, n_b }.
+    fireEvent.mouseEnter(card)
+    expect(store.getState().highlightedNodeIds).toEqual({ n_a: true, n_b: true })
+    fireEvent.mouseLeave(card)
+    expect(store.getState().highlightedNodeIds).toEqual({})
+  })
+})

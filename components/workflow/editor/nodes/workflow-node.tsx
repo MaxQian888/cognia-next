@@ -396,7 +396,15 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
         // pair the hovered edge connects.
         isHoveredEdgeEndpoint &&
           !selected &&
-          "ring-2 ring-primary/40 ring-offset-1 ring-offset-background"
+          "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
+        // Copilot reference ring (violet) — the node is attached to the AI
+        // composer (a `@` chip / the "reference selection" action) or under a
+        // transient highlight (the `@`-picker's active row / a proposal-card
+        // hover). Sits below the selection ring so an explicit selection still
+        // wins visually.
+        decoration.referenced &&
+          !selected &&
+          "ring-2 ring-violet-400 ring-offset-2 ring-offset-background dark:ring-violet-500"
       )}
       // Give the card room for every stacked decision handle + label chip.
       style={
@@ -409,6 +417,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       data-testid={`wf-node-${data.kind}`}
       data-run-status={status}
       data-spotlit={isSpotlit ? "true" : undefined}
+      data-referenced={decoration.referenced ? "true" : undefined}
       data-hovered-endpoint={isHoveredEdgeEndpoint ? "true" : undefined}
       data-connection-candidate={isActiveCandidate ? "true" : undefined}
       onMouseEnter={() => storeBits?.setHoveredNode(id)}

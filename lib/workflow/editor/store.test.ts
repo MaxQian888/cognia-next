@@ -3,6 +3,7 @@
  */
 import { createEditorStore, EDITOR_HISTORY_LIMIT } from "./store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
+import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 
 function emptyWorkflow(): VisualWorkflow {
   return {
@@ -132,6 +133,28 @@ describe("editor store — graph mutations", () => {
     expect(node.data.label).toBe("Custom")
     expect((node.data.params as Record<string, unknown>).temperature).toBe(0.2)
     expect(node.data.notes).toBe("hint")
+  })
+
+  it("uses registered plugin default params when no explicit params override is supplied", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.format" as never,
+      category: "plugin",
+      label: "Format",
+      description: "Format text",
+      iconName: "Wand",
+      keywords: [],
+      pluginId: "demo",
+      defaultParams: { mode: "markdown", retries: 2 },
+    })
+
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("demo.action.format" as never, { x: 0, y: 0 })
+    const node = useStore.getState().nodes.find((n) => n.id === id)!
+
+    expect(node.data.params).toEqual({ mode: "markdown", retries: 2 })
+
+    __resetPluginCatalogForTesting()
   })
 })
 
@@ -1266,5 +1289,44 @@ describe("editor store — setBulkOnError (C6 bulk)", () => {
     useStore.getState().setBulkOnError([a], "fail")
     // No retry → errorHandling collapses to undefined.
     expect(useStore.getState().nodes.find((n) => n.id === a)!.data.errorHandling).toBeUndefined()
+  })
+})
+
+describe("editor store — copilot reference / highlight channels", () => {
+  it("sets referenced + highlighted node id maps", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a", "n_b"])
+    expect(useStore.getState().referencedNodeIds).toEqual({ n_a: true, n_b: true })
+    useStore.getState().setHighlightedNodes(["n_c"])
+    expect(useStore.getState().highlightedNodeIds).toEqual({ n_c: true })
+  })
+
+  it("short-circuits redundant sets (stable object identity)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a"])
+    const first = useStore.getState().referencedNodeIds
+    // Same id set (any order) must not produce a new object.
+    useStore.getState().setReferencedNodes(["n_a"])
+    expect(useStore.getState().referencedNodeIds).toBe(first)
+    // A different set replaces it.
+    useStore.getState().setReferencedNodes(["n_a", "n_b"])
+    expect(useStore.getState().referencedNodeIds).not.toBe(first)
+  })
+
+  it("clears via an empty id list", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a"])
+    useStore.getState().setReferencedNodes([])
+    expect(useStore.getState().referencedNodeIds).toEqual({})
+  })
+
+  it("keeps the reference channel out of the undo history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a"])
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    // Undo reverts the node add but must not touch the reference map.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(0)
+    expect(useStore.getState().referencedNodeIds).toEqual({ n_a: true })
   })
 })

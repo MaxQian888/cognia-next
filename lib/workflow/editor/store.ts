@@ -41,6 +41,7 @@ import {
   validateNodeParams,
   type NodeValidationResult,
 } from "@/lib/workflow/nodes/validate-params"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import {
   cloneNodesAndEdges,
   rehydrateFromEnvelope,
@@ -123,6 +124,22 @@ export interface EditorState extends EditorStateSnapshot {
    * read per-node decorations with O(1) fine-grained subscriptions. (A4)
    */
   lastRunByStepId: Record<string, LastRunSummary>
+  /**
+   * Node ids the copilot composer currently references — attached via the
+   * `@` node/edge picker chips or the "reference selection" toolbar action.
+   * Drives a persistent highlight ring so the user can see which nodes are
+   * bound to the next AI turn. Ephemeral; not tracked in the undo history.
+   */
+  referencedNodeIds: Record<string, true>
+  setReferencedNodes: (ids: string[]) => void
+  /**
+   * Node ids under a transient highlight — the copilot `@`-picker's active
+   * row and the proposal card's hover. Cleared when the popover closes / the
+   * hover ends. Unioned with {@link referencedNodeIds} by `useNodeDecoration`.
+   * Ephemeral; not tracked in the undo history.
+   */
+  highlightedNodeIds: Record<string, true>
+  setHighlightedNodes: (ids: string[]) => void
 
   // ── editor preferences (ephemeral; not undoable) ──────────────────────────
   /**
@@ -496,6 +513,10 @@ export function defaultLabelFor(kind: WorkflowNodeKind): string {
   return labelByKind[kind] ?? kind
 }
 
+function defaultParamsFor(kind: WorkflowNodeKind): Record<string, unknown> {
+  return { ...(nodeCatalogEntry(kind).defaultParams ?? {}) }
+}
+
 /**
  * Cheap equality test for `NodeValidationResult` so `revalidateNode` can
  * skip a no-op `set()` and avoid re-triggering subscribers (which would
@@ -559,6 +580,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         validationByStepId: {},
         diagnostics: EMPTY_DIAGNOSTICS,
         lastRunByStepId: {},
+        referencedNodeIds: {},
+        highlightedNodeIds: {},
         performanceTier: "auto",
         isDraggingAny: false,
         snapToGrid: true,
@@ -687,7 +710,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             position,
             data: {
               label: overrides?.label ?? defaultLabelFor(kind),
-              params: overrides?.params ?? {},
+              params: overrides?.params ?? defaultParamsFor(kind),
               notes: overrides?.notes,
               credentialRefs: overrides?.credentialRefs,
               disabled: overrides?.disabled,
@@ -716,7 +739,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             position,
             data: {
               label: overrides?.label ?? defaultLabelFor(kind),
-              params: overrides?.params ?? {},
+              params: overrides?.params ?? defaultParamsFor(kind),
               notes: overrides?.notes,
               credentialRefs: overrides?.credentialRefs,
               disabled: overrides?.disabled,
@@ -777,7 +800,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             position,
             data: {
               label: defaultLabelFor(kind),
-              params: {},
+              params: defaultParamsFor(kind),
               kind,
               typeVersion: defaultTypeVersionFor(kind),
             },
@@ -1368,6 +1391,20 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         setRunStatusBatch: (entries) =>
           set({ runStatusByStepId: { ...get().runStatusByStepId, ...entries } }),
         clearRunStatus: () => set({ runStatusByStepId: {} }),
+        setReferencedNodes: (ids) => {
+          const cur = get().referencedNodeIds
+          if (Object.keys(cur).length === ids.length && ids.every((id) => cur[id])) return
+          const next: Record<string, true> = {}
+          for (const id of ids) next[id] = true
+          set({ referencedNodeIds: next })
+        },
+        setHighlightedNodes: (ids) => {
+          const cur = get().highlightedNodeIds
+          if (Object.keys(cur).length === ids.length && ids.every((id) => cur[id])) return
+          const next: Record<string, true> = {}
+          for (const id of ids) next[id] = true
+          set({ highlightedNodeIds: next })
+        },
 
         setValidation: (stepId, result) => {
           const next = { ...get().validationByStepId }

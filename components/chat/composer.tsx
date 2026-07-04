@@ -79,6 +79,7 @@ import {
   detectTrigger,
   spliceToken,
   type ComposerTrigger,
+  type MentionableWorkflowElement,
   type MentionMode,
 } from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
@@ -193,6 +194,24 @@ interface Props {
    * was a two-tap affair. Desktop callers leave this undefined.
    */
   mobileMentionMembers?: readonly Character[]
+  /**
+   * Workflow-editor copilot integration. When set, `@` (and `@node:` /
+   * `@edge:`) open a picker over the workflow's graph elements; picking one
+   * stages a reference chip. Its presence also flips `@` mode to `"workflow"`.
+   * Undefined for every non-workflow composer.
+   */
+  workflowMention?: ComposerWorkflowMention
+}
+
+/** Copilot ⇄ workflow-editor wiring passed down from the workflow chat tab. */
+export interface ComposerWorkflowMention {
+  /** The workflow's `@`-mentionable nodes + edges (from the editor store). */
+  elements: readonly MentionableWorkflowElement[]
+  /**
+   * Transiently highlight these node ids on the canvas — driven by the picker's
+   * active row. Called with `[]` when the highlight clears.
+   */
+  onHighlight?: (ids: string[]) => void
 }
 
 /**
@@ -259,6 +278,7 @@ interface InnerProps {
   mentionables?: readonly MentionTarget[]
   placeholder?: string
   mobileMentionMembers?: readonly Character[]
+  workflowMention?: ComposerWorkflowMention
 }
 
 function ComposerInner(props: InnerProps) {
@@ -381,7 +401,8 @@ function ComposerInner(props: InnerProps) {
   // (subagents + files), so every general-chat composer gets `@agent` without
   // each call site opting in; non-direct composers keep the file picker.
   const resolvedMentionMode: MentionMode =
-    props.mentionMode ?? (props.session?.kind === "direct" ? "combined" : "files")
+    props.mentionMode ??
+    (props.workflowMention ? "workflow" : props.session?.kind === "direct" ? "combined" : "files")
   const isCombinedMention = resolvedMentionMode === "combined"
   // Reactive subagent list for the combined panel (no-op cost otherwise). The
   // built-in/plugin/template subagents union with on-disk markdown agents
@@ -582,6 +603,17 @@ function ComposerInner(props: InnerProps) {
     dismissPopover()
   }, [trigger, controller.textInput, dismissPopover])
 
+  // The picker's active row → a transient canvas highlight. Depend on the
+  // (memoized) onHighlight fn, not the whole props object, so this callback
+  // stays stable and the popover's highlight effect doesn't re-fire per render.
+  const workflowOnHighlight = props.workflowMention?.onHighlight
+  const handleHighlightElement = useCallback(
+    (element: MentionableWorkflowElement | null) => {
+      workflowOnHighlight?.(element ? [element.id] : [])
+    },
+    [workflowOnHighlight]
+  )
+
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
@@ -649,6 +681,20 @@ function ComposerInner(props: InnerProps) {
         // toasts its own success / "start a chat first" guard.
         removeTriggerToken()
         await applyPreset(item.preset, props.session)
+      } else if (item.kind === "wfElement") {
+        // Picking a workflow element STAGES it as a reference chip (like a
+        // skill/preset pick): no text is inserted. It is expanded to
+        // `@node:<id>` / `@edge:<id>` and cited to the agent at send time. Drop
+        // the `@` / `@node:` token cleanly, clear any picker highlight, close.
+        const el = item.element
+        useChatStore.getState().addReferencedWorkflowElement({
+          type: el.type,
+          id: el.id,
+          label: el.label,
+          kind: el.kind,
+        })
+        removeTriggerToken()
+        props.workflowMention?.onHighlight?.([])
       }
     },
     [
@@ -1643,6 +1689,8 @@ function ComposerInner(props: InnerProps) {
         chatAgents={chatAgents}
         chatSkills={chatSkills}
         chatPresets={chatPresets}
+        workflowElements={props.workflowMention?.elements}
+        onHighlightElement={props.workflowMention ? handleHighlightElement : undefined}
         recentCommands={recentCommands}
         pinnedCommands={pinnedCommands}
         onTogglePin={togglePinnedCommand}
@@ -1722,6 +1770,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     mentionables,
     placeholder,
     mobileMentionMembers,
+    workflowMention,
   },
   ref
 ) {
@@ -2078,6 +2127,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           mentionables={mentionables}
           placeholder={placeholder}
           mobileMentionMembers={mobileMentionMembers}
+          workflowMention={workflowMention}
         />
         <BottomToolbar session={session ?? null} />
         <HelperHints />

@@ -13,6 +13,7 @@ import { estimateDataUrlBytes } from "@/lib/chat/draft-attachments"
 import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { ReferenceChips } from "../reference-chips"
 import { ArtifactSelectionChips } from "./artifact-selection-chips"
+import { WorkflowRefChips } from "./workflow-ref-chips"
 import { AttachmentPreview, type AttachmentPreviewProps } from "./attachment-preview"
 
 export type ContextChipBarProps = AttachmentPreviewProps
@@ -21,12 +22,14 @@ export function ContextChipBar(props: ContextChipBarProps = {}) {
   const t = useTranslations("chat.composer.context")
   const refs = useChatStore((s) => s.referencedPaths)
   const selections = useChatStore((s) => s.artifactSelections)
+  const workflowRefs = useChatStore((s) => s.referencedWorkflowElements)
   const attachments = usePromptInputAttachments()
 
   const refCount = refs.length
   const selCount = selections.length
+  const wfRefCount = workflowRefs.length
   const fileCount = attachments.files.length
-  if (refCount === 0 && selCount === 0 && fileCount === 0) return null
+  if (refCount === 0 && selCount === 0 && wfRefCount === 0 && fileCount === 0) return null
 
   // Only data: URLs carry a recoverable size; blob: previews contribute 0.
   const totalBytes = attachments.files.reduce((sum, f) => sum + estimateDataUrlBytes(f.url), 0)
@@ -38,6 +41,7 @@ export function ContextChipBar(props: ContextChipBarProps = {}) {
       className="flex flex-wrap items-center gap-2 px-2 pt-2"
     >
       <ReferenceChips bare />
+      <WorkflowRefChips bare />
       <ArtifactSelectionChips bare />
       <AttachmentPreview bare {...props} />
       {totalBytes > 0 ? (

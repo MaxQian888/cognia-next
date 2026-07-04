@@ -283,6 +283,10 @@
       "noPresets": "No presets available.",
       "noSkillMatches": "No skills match \"{query}\".",
       "noSkills": "No skills available.",
+      "noWorkflowEdgeMatches": "No edges match \"{query}\".",
+      "noWorkflowEdges": "No edges in this workflow.",
+      "noWorkflowNodeMatches": "No nodes match \"{query}\".",
+      "noWorkflowNodes": "No nodes in this workflow.",
       "pinAction": "Pin /{name}",
       "pinnedSection": "Pinned",
       "presetTitle": "Apply a prompt preset",
@@ -292,6 +296,8 @@
       "skillTitle": "Enable a skill",
       "slashTitle": "Slash command",
       "unpinAction": "Unpin /{name}",
+      "wfEdgeTitle": "Reference an edge",
+      "wfNodeTitle": "Reference a node",
       "workspaceEmpty": "Workspace is empty.",
       "workspaceMissing": "Set a working directory in session settings to use @-references."
     },
@@ -304,6 +310,9 @@
     },
     "references": {
       "removeAria": "Remove reference to {path}"
+    },
+    "workflowRefs": {
+      "removeAria": "Remove reference to {label}"
     },
     "sandboxShield": {
       "label": {
@@ -360,6 +369,10 @@
         "explainAria": "Explain selected nodes",
         "explainNoSelection": "Select one or more nodes on the canvas first",
         "explainTooltip": "Ask the agent to explain the {count} selected node(s)",
+        "reference": "Reference",
+        "referenceAria": "Reference the selected nodes in chat",
+        "referenceNoSelection": "Select nodes or edges on the canvas first",
+        "referenceTooltip": "Attach the {count} selected element(s) to the next message",
         "suggest": "Suggest",
         "suggestAria": "Suggest the next node",
         "suggestTooltip": "Ask the workflow-designer agent for the next node to add",

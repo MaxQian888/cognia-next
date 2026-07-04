@@ -67,6 +67,26 @@ interface ProposeBatchOutput {
   }>
 }
 
+/** Node ids a proposal touches — drives the canvas highlight on card hover. */
+function affectedNodeIdsFromOps(ops: ReadonlyArray<ProposalOp>): string[] {
+  const ids = new Set<string>()
+  for (const op of ops) {
+    switch (op.type) {
+      case "add_node":
+      case "remove_node":
+      case "configure_node":
+        ids.add(op.nodeId)
+        break
+      case "connect_edge":
+        ids.add(op.source)
+        ids.add(op.target)
+        break
+      // disconnect_edge references an edge id, not nodes — nothing to ring.
+    }
+  }
+  return [...ids]
+}
+
 export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
   const t = useTranslations("workflowEditor.chat.proposal")
   const parsed = parseOutputJson(part.output) as ProposeBatchOutput | null
@@ -181,6 +201,16 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
           "my-2 rounded-md border bg-card text-card-foreground transition-opacity",
           effectiveStatus === "discarded" && "opacity-60"
         )}
+        // Hovering the card highlights the nodes this proposal touches on the
+        // canvas (violet ring) so "what will the AI change?" is visible at a
+        // glance. No-op when the editor store isn't registered (e.g. the
+        // proposal renders on a device whose canvas is closed).
+        onMouseEnter={() =>
+          getEditorStore(workflowId)
+            ?.getState()
+            .setHighlightedNodes(affectedNodeIdsFromOps(opsForDisplay))
+        }
+        onMouseLeave={() => getEditorStore(workflowId)?.getState().setHighlightedNodes([])}
       >
         <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
           <div className="flex min-w-0 items-center gap-2">
