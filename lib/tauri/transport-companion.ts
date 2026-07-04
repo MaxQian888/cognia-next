@@ -44,6 +44,8 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "default_export_dir",
   "fs_search_workspace",
   "fs_read_workspace_file",
+  "fs_list_workspace_dir",
+  "fs_stat_workspace_file",
   // Terminal session listings.
   "terminal_list_all",
   "terminal_list_for_project",

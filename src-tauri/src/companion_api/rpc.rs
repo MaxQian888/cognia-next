@@ -312,6 +312,14 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fs_search_workspace",
     "fs_read_workspace_file",
     "fs_write_workspace_file",
+    // File-tree browser: list/stat (reads) + mkdir/delete/rename/copy (writes),
+    // all root-relative + path-traversal checked.
+    "fs_list_workspace_dir",
+    "fs_stat_workspace_file",
+    "fs_create_workspace_dir",
+    "fs_delete_workspace_entry",
+    "fs_rename_workspace_entry",
+    "fs_copy_workspace_entry",
     // ── Terminal ────────────────────────────────────────────────────────────
     // Live PTY stays on `/ws/v1/terminal`; these are request/response only.
     // `terminal_exec` is a one-shot command runner (capture stdout/stderr/exit).
@@ -444,6 +452,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "default_export_dir",
     "fs_search_workspace",
     "fs_read_workspace_file",
+    // File-tree browser reads — same (root, relPath) returns the same listing/stat.
+    "fs_list_workspace_dir",
+    "fs_stat_workspace_file",
     // Terminal session listings.
     "terminal_list_all",
     "terminal_list_for_project",
@@ -514,6 +525,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     "ensure_dir",
     "ensure_dir_confined",
     "fs_write_workspace_file",
+    // File-tree browser writes — mutate the workspace, so remote-control gated.
+    "fs_create_workspace_dir",
+    "fs_delete_workspace_entry",
+    "fs_rename_workspace_entry",
+    "fs_copy_workspace_entry",
     // Raw absolute-path *read* — has no sandbox/root confinement, so it can
     // read any file the desktop user can (`~/.ssh/id_rsa`, `~/.aws/credentials`,
     // keyring-backed stores, …). The write side above is gated; gating the read
@@ -2088,6 +2104,80 @@ pub(super) async fn dispatch(
             let content: String = required(&args, "content")?;
             tokio::task::spawn_blocking(move || {
                 crate::files::fs_write_workspace_file(root, rel_path, content)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        // File-tree browser: list children / stat one path (reads), and
+        // mkdir / delete / rename / copy (CONTROL-gated writes). All use the
+        // `root` + `relPath` sandbox shape of the read/write variants above.
+        "fs_list_workspace_dir" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: Option<String> = optional(&args, "relPath")?;
+            let include_ignored: Option<bool> = optional(&args, "includeIgnored")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_list_workspace_dir(root, rel_path, include_ignored)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "fs_stat_workspace_file" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: String = required(&args, "relPath")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_stat_workspace_file(root, rel_path)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "fs_create_workspace_dir" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: String = required(&args, "relPath")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_create_workspace_dir(root, rel_path)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "fs_delete_workspace_entry" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: String = required(&args, "relPath")?;
+            let recursive: Option<bool> = optional(&args, "recursive")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_delete_workspace_entry(root, rel_path, recursive)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "fs_rename_workspace_entry" => {
+            let root: String = required(&args, "root")?;
+            let from_rel_path: String = required(&args, "fromRelPath")?;
+            let to_rel_path: String = required(&args, "toRelPath")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_rename_workspace_entry(root, from_rel_path, to_rel_path)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "fs_copy_workspace_entry" => {
+            let root: String = required(&args, "root")?;
+            let from_rel_path: String = required(&args, "fromRelPath")?;
+            let to_rel_path: String = required(&args, "toRelPath")?;
+            let recursive: Option<bool> = optional(&args, "recursive")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_copy_workspace_entry(root, from_rel_path, to_rel_path, recursive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?

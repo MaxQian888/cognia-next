@@ -317,6 +317,71 @@ pub struct WorkspaceEntry {
     pub absolute_path: String,
     pub is_dir: bool,
     pub size: u64,
+    /// Last-modified time in milliseconds since the Unix epoch. `None` when the
+    /// platform/filesystem can't report it. Powers the file-tree browser.
+    pub mtime_ms: Option<u64>,
+}
+
+/// Single-path metadata for the workspace file-tree browser. Mirrors the fields
+/// a client needs to render a node without a full directory listing.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorkspaceStat {
+    pub exists: bool,
+    pub is_dir: bool,
+    pub size: u64,
+    pub mtime_ms: Option<u64>,
+}
+
+/// Milliseconds-since-epoch of a file's mtime, or `None` when unavailable.
+fn mtime_ms_of(meta: &std::fs::Metadata) -> Option<u64> {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+}
+
+/// Sort workspace entries for a file-tree listing: directories first, then by
+/// case-insensitive basename.
+fn sort_dir_listing(entries: &mut [WorkspaceEntry]) {
+    entries.sort_by(|a, b| {
+        b.is_dir.cmp(&a.is_dir).then_with(|| {
+            let an = a.rel_path.rsplit('/').next().unwrap_or(&a.rel_path).to_lowercase();
+            let bn = b.rel_path.rsplit('/').next().unwrap_or(&b.rel_path).to_lowercase();
+            an.cmp(&bn)
+        })
+    });
+}
+
+/// Resolve `root`/`rel_path` for a workspace-sandboxed op and verify containment.
+/// `must_exist=true` canonicalizes the target itself (following a symlinked final
+/// component so the *real* location is range-checked); `false` canonicalizes the
+/// deepest existing ancestor (the target may not exist yet — mkdir / rename +
+/// copy destinations). Returns `(canonical_root, joined_target)`; callers operate
+/// on `joined_target`.
+fn resolve_workspace_target(
+    root: &str,
+    rel_path: &str,
+    must_exist: bool,
+) -> Result<(PathBuf, PathBuf), String> {
+    let root_path = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|e| format!("canonicalize root {}: {}", root, e))?;
+    let target = root_path.join(rel_path);
+    let check = if must_exist {
+        target
+            .canonicalize()
+            .map_err(|e| format!("canonicalize {}: {}", target.display(), e))?
+    } else {
+        canonicalize_deepest_existing_ancestor(&target)?
+    };
+    if !check.starts_with(&root_path) {
+        return Err(format!(
+            "path escapes workspace: {} (root {})",
+            check.display(),
+            root_path.display()
+        ));
+    }
+    Ok((root_path, target))
 }
 
 const SEARCH_HARD_LIMIT: usize = 200;
@@ -363,16 +428,19 @@ pub fn fs_search_workspace(
             continue;
         }
         let is_dir = dent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let meta = dent.metadata().ok();
         let size = if is_dir {
             0
         } else {
-            dent.metadata().map(|m| m.len()).unwrap_or(0)
+            meta.as_ref().map(|m| m.len()).unwrap_or(0)
         };
+        let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
         out.push(WorkspaceEntry {
             rel_path: rel_str,
             absolute_path: path.to_string_lossy().to_string(),
             is_dir,
             size,
+            mtime_ms,
         });
         if out.len() >= cap * 4 {
             // gather extra so we can rank, but stop walking eventually
@@ -504,6 +572,262 @@ pub fn fs_write_workspace_file(
     let final_path = canonical_parent.join(file_name);
     reject_symlinked_final(&final_path)?;
     std::fs::write(&final_path, content).map_err(|e| format!("write {}: {}", rel_path, e))
+}
+
+/// List the immediate children of `root`/`rel_path` (empty/None `rel_path` =
+/// the root itself) for the file-tree browser. Non-recursive. Respects the
+/// standard ignore set (`.gitignore` etc.) by default; pass `include_ignored =
+/// Some(true)` to show everything. Directories are listed before files, each
+/// sorted case-insensitively by name. `rel_path` is sandbox-checked against
+/// `root` like the read/write variants.
+#[tauri::command]
+pub fn fs_list_workspace_dir(
+    root: String,
+    rel_path: Option<String>,
+    include_ignored: Option<bool>,
+) -> Result<Vec<WorkspaceEntry>, String> {
+    let rel = rel_path.unwrap_or_default();
+    let (root_path, dir) = resolve_workspace_target(&root, &rel, true)?;
+    if !dir.is_dir() {
+        return Err(format!("not a directory: {}", dir.display()));
+    }
+    let respect_ignore = !include_ignored.unwrap_or(false);
+    let walker = WalkBuilder::new(&dir)
+        .hidden(false)
+        .git_ignore(respect_ignore)
+        .git_exclude(respect_ignore)
+        .git_global(respect_ignore)
+        .ignore(respect_ignore)
+        .parents(respect_ignore)
+        .require_git(false)
+        .max_depth(Some(1))
+        .build();
+
+    let mut out: Vec<WorkspaceEntry> = Vec::new();
+    for dent in walker.flatten() {
+        if dent.depth() == 0 {
+            // The starting directory itself.
+            continue;
+        }
+        let path = dent.path();
+        let rel_to_root = match path.strip_prefix(&root_path) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        let is_dir = dent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let meta = dent.metadata().ok();
+        let size = if is_dir {
+            0
+        } else {
+            meta.as_ref().map(|m| m.len()).unwrap_or(0)
+        };
+        let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
+        out.push(WorkspaceEntry {
+            rel_path: rel_to_root,
+            absolute_path: path.to_string_lossy().to_string(),
+            is_dir,
+            size,
+            mtime_ms,
+        });
+    }
+    sort_dir_listing(&mut out);
+    Ok(out)
+}
+
+/// Metadata for a single workspace path (`root`/`rel_path`). Returns
+/// `exists: false` (never an error) when the path is absent, so a client can
+/// probe before a create/rename. Sandbox-checked against `root`; a `rel_path`
+/// that escapes the workspace is rejected even when it doesn't exist.
+#[tauri::command]
+pub fn fs_stat_workspace_file(root: String, rel_path: String) -> Result<WorkspaceStat, String> {
+    let root_path = PathBuf::from(&root)
+        .canonicalize()
+        .map_err(|e| format!("canonicalize root {}: {}", root, e))?;
+    let target = root_path.join(&rel_path);
+    // Range-check the deepest existing ancestor so a not-yet-existing path is
+    // still confined to the workspace.
+    let check = canonicalize_deepest_existing_ancestor(&target)?;
+    if !check.starts_with(&root_path) {
+        return Err(format!(
+            "path escapes workspace: {} (root {})",
+            check.display(),
+            root_path.display()
+        ));
+    }
+    match std::fs::metadata(&target) {
+        Ok(meta) => Ok(WorkspaceStat {
+            exists: true,
+            is_dir: meta.is_dir(),
+            size: if meta.is_dir() { 0 } else { meta.len() },
+            mtime_ms: mtime_ms_of(&meta),
+        }),
+        Err(_) => Ok(WorkspaceStat {
+            exists: false,
+            is_dir: false,
+            size: 0,
+            mtime_ms: None,
+        }),
+    }
+}
+
+/// Create a directory (and any missing parents) at `root`/`rel_path`, confined
+/// to the workspace. The `root` + `rel_path` counterpart to `ensure_dir_confined`
+/// (which takes an absolute path + allowed roots). Re-verifies the created path
+/// stays inside `root` to guard a symlinked ancestor.
+#[tauri::command]
+pub fn fs_create_workspace_dir(root: String, rel_path: String) -> Result<(), String> {
+    if rel_path.trim().is_empty() {
+        return Err("rel_path is empty".into());
+    }
+    let (root_path, target) = resolve_workspace_target(&root, &rel_path, false)?;
+    std::fs::create_dir_all(&target).map_err(|e| format!("mkdir {}: {}", target.display(), e))?;
+    let canonical = target
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {}", target.display(), e))?;
+    if !canonical.starts_with(&root_path) {
+        return Err(format!(
+            "path escapes workspace: {} (root {})",
+            canonical.display(),
+            root_path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Delete a file or directory at `root`/`rel_path`, confined to the workspace.
+/// A directory is removed only when `recursive = Some(true)` (otherwise it must
+/// be empty). A symlinked final component is unlinked (never followed), so a
+/// symlinked directory can't let removal traverse outside the workspace.
+/// Deleting the root itself (empty `rel_path`) is refused.
+#[tauri::command]
+pub fn fs_delete_workspace_entry(
+    root: String,
+    rel_path: String,
+    recursive: Option<bool>,
+) -> Result<(), String> {
+    if rel_path.trim().is_empty() {
+        return Err("refusing to delete the workspace root".into());
+    }
+    let (_root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
+    let meta = std::fs::symlink_metadata(&target).map_err(|e| format!("stat {}: {}", rel_path, e))?;
+    if meta.file_type().is_symlink() {
+        return std::fs::remove_file(&target)
+            .map_err(|e| format!("remove symlink {}: {}", rel_path, e));
+    }
+    if meta.is_dir() {
+        if recursive.unwrap_or(false) {
+            std::fs::remove_dir_all(&target).map_err(|e| format!("remove dir {}: {}", rel_path, e))
+        } else {
+            std::fs::remove_dir(&target).map_err(|e| format!("remove dir {}: {}", rel_path, e))
+        }
+    } else {
+        std::fs::remove_file(&target).map_err(|e| format!("remove {}: {}", rel_path, e))
+    }
+}
+
+/// Rename/move `from_rel_path` → `to_rel_path` within the workspace. Both
+/// endpoints are sandbox-checked against `root`; the destination parent is
+/// created as needed. Refuses to clobber an existing destination or to write
+/// through a symlinked destination.
+#[tauri::command]
+pub fn fs_rename_workspace_entry(
+    root: String,
+    from_rel_path: String,
+    to_rel_path: String,
+) -> Result<(), String> {
+    if from_rel_path.trim().is_empty() || to_rel_path.trim().is_empty() {
+        return Err("rename requires a non-empty source and destination".into());
+    }
+    let (root_path, from) = resolve_workspace_target(&root, &from_rel_path, true)?;
+    let (_, to) = resolve_workspace_target(&root, &to_rel_path, false)?;
+    if to.exists() {
+        return Err(format!("destination already exists: {}", to_rel_path));
+    }
+    reject_symlinked_final(&to)?;
+    prepare_dest_parent(&root_path, &to)?;
+    std::fs::rename(&from, &to)
+        .map_err(|e| format!("rename {} -> {}: {}", from_rel_path, to_rel_path, e))
+}
+
+/// Copy `from_rel_path` → `to_rel_path` within the workspace. A directory is
+/// copied only when `recursive = Some(true)`. Both endpoints are sandbox-checked;
+/// the destination parent is created as needed; refuses to clobber an existing
+/// destination or to write through a symlinked destination. Symlinks inside a
+/// recursively-copied tree are skipped (never followed out of the workspace).
+#[tauri::command]
+pub fn fs_copy_workspace_entry(
+    root: String,
+    from_rel_path: String,
+    to_rel_path: String,
+    recursive: Option<bool>,
+) -> Result<(), String> {
+    if from_rel_path.trim().is_empty() || to_rel_path.trim().is_empty() {
+        return Err("copy requires a non-empty source and destination".into());
+    }
+    let (root_path, from) = resolve_workspace_target(&root, &from_rel_path, true)?;
+    let (_, to) = resolve_workspace_target(&root, &to_rel_path, false)?;
+    if to.exists() {
+        return Err(format!("destination already exists: {}", to_rel_path));
+    }
+    reject_symlinked_final(&to)?;
+    prepare_dest_parent(&root_path, &to)?;
+    let meta = std::fs::symlink_metadata(&from).map_err(|e| format!("stat {}: {}", from_rel_path, e))?;
+    if meta.is_dir() {
+        if !recursive.unwrap_or(false) {
+            return Err(format!(
+                "{} is a directory (pass recursive = true to copy it)",
+                from_rel_path
+            ));
+        }
+        copy_dir_recursive(&from, &to)
+    } else {
+        std::fs::copy(&from, &to)
+            .map(|_| ())
+            .map_err(|e| format!("copy {} -> {}: {}", from_rel_path, to_rel_path, e))
+    }
+}
+
+/// Create the destination parent for a rename/copy and re-verify it stays inside
+/// `root_path` (guards a symlinked ancestor introduced between the range-check
+/// and the mkdir).
+fn prepare_dest_parent(root_path: &Path, dest: &Path) -> Result<(), String> {
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir {}: {}", parent.display(), e))?;
+            let canonical_parent = parent
+                .canonicalize()
+                .map_err(|e| format!("canonicalize {}: {}", parent.display(), e))?;
+            if !canonical_parent.starts_with(root_path) {
+                return Err(format!(
+                    "path escapes workspace: {} (root {})",
+                    canonical_parent.display(),
+                    root_path.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Recursively copy `from` → `to`, skipping symlinks so a link inside the tree
+/// can't redirect the copy outside the workspace.
+fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| format!("mkdir {}: {}", to.display(), e))?;
+    for entry in std::fs::read_dir(from).map_err(|e| format!("read_dir {}: {}", from.display(), e))? {
+        let entry = entry.map_err(|e| format!("read_dir entry: {}", e))?;
+        let file_type = entry.file_type().map_err(|e| format!("file_type: {}", e))?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if file_type.is_symlink() {
+            continue;
+        } else if file_type.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst).map_err(|e| format!("copy {}: {}", src.display(), e))?;
+        }
+    }
+    Ok(())
 }
 
 /// Canonicalize each allowed root, dropping any that fail to resolve (a root
@@ -1260,6 +1584,277 @@ mod tests {
         let res = ensure_dir_confined(outside.to_string_lossy().to_string(), roots);
         assert!(res.is_err(), "dir outside roots must be denied");
         assert!(!outside.exists(), "denied dir must not be created");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── file-tree browser commands ──────────────────────────────────────────
+
+    #[test]
+    fn list_workspace_dir_lists_immediate_children_dirs_first_nonrecursive() {
+        let root = make_sandbox("list");
+        std::fs::create_dir_all(root.join("zdir")).unwrap();
+        std::fs::write(root.join("zdir").join("child.txt"), "nested").unwrap();
+        std::fs::write(root.join("afile.txt"), "hello").unwrap();
+
+        let entries = fs_list_workspace_dir(root.to_string_lossy().to_string(), None, None).unwrap();
+        let names: Vec<_> = entries.iter().map(|e| e.rel_path.clone()).collect();
+        // Immediate children only — never the nested file.
+        assert!(names.iter().any(|n| n == "zdir"));
+        assert!(names.iter().any(|n| n == "afile.txt"));
+        assert!(
+            !names.iter().any(|n| n.contains("child")),
+            "listing must be non-recursive: {:?}",
+            names
+        );
+        // Directories sort before files.
+        assert!(entries[0].is_dir, "dir should come first: {:?}", names);
+        // Files carry a size + mtime.
+        let file = entries.iter().find(|e| e.rel_path == "afile.txt").unwrap();
+        assert_eq!(file.size, 5);
+        assert!(file.mtime_ms.is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_workspace_dir_respects_gitignore_unless_included() {
+        let root = make_sandbox("list-ignore");
+        std::fs::write(root.join(".gitignore"), "secret.txt\n").unwrap();
+        std::fs::write(root.join("secret.txt"), "x").unwrap();
+        std::fs::write(root.join("public.txt"), "x").unwrap();
+
+        let default = fs_list_workspace_dir(root.to_string_lossy().to_string(), None, None).unwrap();
+        let default_names: Vec<_> = default.iter().map(|e| e.rel_path.clone()).collect();
+        assert!(default_names.iter().any(|n| n == "public.txt"));
+        assert!(
+            !default_names.iter().any(|n| n == "secret.txt"),
+            "gitignored file hidden by default: {:?}",
+            default_names
+        );
+
+        let all =
+            fs_list_workspace_dir(root.to_string_lossy().to_string(), None, Some(true)).unwrap();
+        let all_names: Vec<_> = all.iter().map(|e| e.rel_path.clone()).collect();
+        assert!(
+            all_names.iter().any(|n| n == "secret.txt"),
+            "include_ignored shows everything: {:?}",
+            all_names
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_workspace_dir_subdir_and_rejects_traversal() {
+        let root = make_sandbox("list-sub");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("main.rs"), "x").unwrap();
+        let sub = fs_list_workspace_dir(
+            root.to_string_lossy().to_string(),
+            Some("src".into()),
+            None,
+        )
+        .unwrap();
+        assert!(sub.iter().any(|e| e.rel_path == "src/main.rs"));
+
+        let escape =
+            fs_list_workspace_dir(root.to_string_lossy().to_string(), Some("../".into()), None);
+        assert!(escape.is_err(), "traversal must be rejected");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stat_workspace_file_reports_existence_and_kind() {
+        let root = make_sandbox("stat");
+        std::fs::write(root.join("f.txt"), "hello").unwrap();
+        std::fs::create_dir_all(root.join("d")).unwrap();
+
+        let file = fs_stat_workspace_file(root.to_string_lossy().to_string(), "f.txt".into()).unwrap();
+        assert!(file.exists && !file.is_dir);
+        assert_eq!(file.size, 5);
+        assert!(file.mtime_ms.is_some());
+
+        let dir = fs_stat_workspace_file(root.to_string_lossy().to_string(), "d".into()).unwrap();
+        assert!(dir.exists && dir.is_dir);
+
+        let missing =
+            fs_stat_workspace_file(root.to_string_lossy().to_string(), "nope.txt".into()).unwrap();
+        assert!(!missing.exists);
+
+        let escape = fs_stat_workspace_file(
+            root.to_string_lossy().to_string(),
+            "../../etc/hosts".into(),
+        );
+        assert!(escape.is_err(), "traversal must be rejected");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_workspace_dir_creates_nested_and_blocks_traversal() {
+        let root = make_sandbox("mkdir");
+        fs_create_workspace_dir(root.to_string_lossy().to_string(), "a/b/c".into()).unwrap();
+        assert!(root.join("a").join("b").join("c").is_dir());
+
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("mkdir-escape-{}", std::process::id()));
+        let outside_name = outside.file_name().unwrap().to_string_lossy();
+        let _ = std::fs::remove_dir_all(&outside);
+        let escape = fs_create_workspace_dir(
+            root.to_string_lossy().to_string(),
+            format!("../{outside_name}"),
+        );
+        assert!(escape.is_err(), "traversal mkdir must be rejected");
+        assert!(!outside.exists(), "rejected mkdir must not create outside root");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_workspace_entry_file_dir_and_guards() {
+        let root = make_sandbox("delete");
+        std::fs::write(root.join("f.txt"), "x").unwrap();
+        fs_delete_workspace_entry(root.to_string_lossy().to_string(), "f.txt".into(), None).unwrap();
+        assert!(!root.join("f.txt").exists());
+
+        // Non-empty dir: needs recursive.
+        std::fs::create_dir_all(root.join("d")).unwrap();
+        std::fs::write(root.join("d").join("inner.txt"), "x").unwrap();
+        let non_recursive =
+            fs_delete_workspace_entry(root.to_string_lossy().to_string(), "d".into(), None);
+        assert!(non_recursive.is_err(), "non-empty dir needs recursive");
+        fs_delete_workspace_entry(root.to_string_lossy().to_string(), "d".into(), Some(true))
+            .unwrap();
+        assert!(!root.join("d").exists());
+
+        // Refuse the root itself.
+        assert!(
+            fs_delete_workspace_entry(root.to_string_lossy().to_string(), "".into(), Some(true))
+                .is_err()
+        );
+
+        // Traversal onto an out-of-root file must be rejected and leave it intact.
+        let victim = root
+            .parent()
+            .unwrap()
+            .join(format!("delete-victim-{}.txt", std::process::id()));
+        std::fs::write(&victim, "keep").unwrap();
+        let victim_name = victim.file_name().unwrap().to_string_lossy();
+        let escape = fs_delete_workspace_entry(
+            root.to_string_lossy().to_string(),
+            format!("../{victim_name}"),
+            None,
+        );
+        assert!(escape.is_err(), "traversal delete must be rejected");
+        assert!(victim.exists(), "out-of-root victim must be untouched");
+        let _ = std::fs::remove_file(&victim);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_workspace_entry_unlinks_symlink_without_following() {
+        use std::os::unix::fs::symlink;
+        let root = make_sandbox("delete-symlink");
+        std::fs::write(root.join("real.txt"), "keep").unwrap();
+        symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
+        fs_delete_workspace_entry(root.to_string_lossy().to_string(), "link.txt".into(), None)
+            .unwrap();
+        assert!(!root.join("link.txt").exists(), "link removed");
+        assert_eq!(
+            std::fs::read_to_string(root.join("real.txt")).unwrap(),
+            "keep",
+            "symlink target must be untouched"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_workspace_entry_moves_and_guards() {
+        let root = make_sandbox("rename");
+        std::fs::write(root.join("a.txt"), "payload").unwrap();
+        fs_rename_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "a.txt".into(),
+            "sub/b.txt".into(),
+        )
+        .unwrap();
+        assert!(!root.join("a.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(root.join("sub").join("b.txt")).unwrap(),
+            "payload"
+        );
+
+        // No clobber.
+        std::fs::write(root.join("c.txt"), "x").unwrap();
+        let clobber = fs_rename_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "c.txt".into(),
+            "sub/b.txt".into(),
+        );
+        assert!(clobber.is_err(), "rename must not clobber existing dest");
+
+        // Traversal source.
+        let escape = fs_rename_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "../nope".into(),
+            "x.txt".into(),
+        );
+        assert!(escape.is_err(), "traversal rename must be rejected");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copy_workspace_entry_file_dir_and_guards() {
+        let root = make_sandbox("copy");
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        fs_copy_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "a.txt".into(),
+            "b.txt".into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "x");
+        assert_eq!(std::fs::read_to_string(root.join("b.txt")).unwrap(), "x");
+
+        // Directory needs recursive.
+        std::fs::create_dir_all(root.join("d")).unwrap();
+        std::fs::write(root.join("d").join("inner.txt"), "y").unwrap();
+        let non_recursive = fs_copy_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "d".into(),
+            "d-copy".into(),
+            None,
+        );
+        assert!(non_recursive.is_err(), "dir copy needs recursive");
+        fs_copy_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "d".into(),
+            "d-copy".into(),
+            Some(true),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("d-copy").join("inner.txt")).unwrap(),
+            "y"
+        );
+
+        // No clobber.
+        let clobber = fs_copy_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "a.txt".into(),
+            "b.txt".into(),
+            None,
+        );
+        assert!(clobber.is_err(), "copy must not clobber existing dest");
+
+        // Traversal source.
+        let escape = fs_copy_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "../nope".into(),
+            "x.txt".into(),
+            None,
+        );
+        assert!(escape.is_err(), "traversal copy must be rejected");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

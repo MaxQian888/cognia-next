@@ -4648,6 +4648,249 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/fs_list_workspace_dir:
+    post:
+      operationId: rpcFsListWorkspaceDir
+      tags: [rpc-files]
+      summary: List the immediate children of a workspace directory for the file-tree browser (read-only, sandboxed).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root],
+                    properties:
+                      {
+                        root: { type: string },
+                        relPath: { type: string },
+                        includeIgnored: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Immediate children (directories first,
+            then files).,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: array,
+                        items:
+                          {
+                            type: object,
+                            properties:
+                              {
+                                rel_path: { type: string },
+                                absolute_path: { type: string },
+                                is_dir: { type: boolean },
+                                size: { type: integer },
+                                mtime_ms: { type: integer, nullable: true },
+                              },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_stat_workspace_file:
+    post:
+      operationId: rpcFsStatWorkspaceFile
+      tags: [rpc-files]
+      summary: Metadata for a single workspace path — exists/isDir/size/mtime (read-only, sandboxed).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root, relPath],
+                    properties: { root: { type: string }, relPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Stat result (exists=false when the path is absent).,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties:
+                          {
+                            exists: { type: boolean },
+                            is_dir: { type: boolean },
+                            size: { type: integer },
+                            mtime_ms: { type: integer, nullable: true },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_create_workspace_dir:
+    post:
+      operationId: rpcFsCreateWorkspaceDir
+      tags: [rpc-files]
+      summary: Create a directory relative to a workspace root (sandboxed). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root, relPath],
+                    properties: { root: { type: string }, relPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_delete_workspace_entry:
+    post:
+      operationId: rpcFsDeleteWorkspaceEntry
+      tags: [rpc-files]
+      summary: Delete a file or directory relative to a workspace root (sandboxed). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root, relPath],
+                    properties:
+                      {
+                        root: { type: string },
+                        relPath: { type: string },
+                        recursive: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_rename_workspace_entry:
+    post:
+      operationId: rpcFsRenameWorkspaceEntry
+      tags: [rpc-files]
+      summary: Rename/move an entry within a workspace root (sandboxed, no clobber). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root, fromRelPath, toRelPath],
+                    properties:
+                      {
+                        root: { type: string },
+                        fromRelPath: { type: string },
+                        toRelPath: { type: string },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_copy_workspace_entry:
+    post:
+      operationId: rpcFsCopyWorkspaceEntry
+      tags: [rpc-files]
+      summary: Copy an entry within a workspace root (sandboxed, no clobber). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root, fromRelPath, toRelPath],
+                    properties:
+                      {
+                        root: { type: string },
+                        fromRelPath: { type: string },
+                        toRelPath: { type: string },
+                        recursive: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   # ─────────────────────────────────────────────────────────────────────────
   # rpc — terminal (Wave 4.1). Live PTY stays on /ws/v1/terminal.
   # ─────────────────────────────────────────────────────────────────────────
