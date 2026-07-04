@@ -42,6 +42,7 @@ use tauri::AppHandle;
 use tokio::sync::oneshot;
 
 use api_keys::{ApiKeyPatch, GatewayApiKey, RedactedApiKey};
+use execute::KeyRotationMap;
 use server::{RequestObserver, ServerHandle};
 use snapshot::{RoutingSnapshot, SnapshotEntry};
 use types::{GatewayConfig, GatewayError, GatewayStatus};
@@ -66,6 +67,10 @@ pub struct GatewayState {
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
     /// In-flight live-decision round-trips (server ⇄ renderer).
     decisions: Arc<DecisionRegistry>,
+    /// Per-provider upstream key-pool rotation cursors (round-robin index +
+    /// least-used counts). Shared with the running server so the cursor
+    /// advances across requests; process-local, reset on restart.
+    key_rotation: Arc<KeyRotationMap>,
 }
 
 struct GatewayInner {
@@ -100,6 +105,7 @@ impl GatewayState {
             keys: Arc::new(RwLock::new(keys)),
             snapshot: Arc::new(RwLock::new(None)),
             decisions: Arc::new(Mutex::new(HashMap::new())),
+            key_rotation: Arc::new(KeyRotationMap::default()),
         }
     }
 
@@ -193,14 +199,35 @@ impl GatewayState {
         model_allowlist: Vec<String>,
         expires_at_ms: Option<i64>,
         rate_limit_per_min: Option<u32>,
+        quota_tokens: Option<i64>,
     ) -> Result<GatewayApiKey, GatewayError> {
         let key = {
             let mut keys = self.keys.write();
-            api_keys::create_key(&mut keys, name, model_allowlist, expires_at_ms, rate_limit_per_min)
-                .map_err(GatewayError::Keyring)?
+            api_keys::create_key(
+                &mut keys,
+                name,
+                model_allowlist,
+                expires_at_ms,
+                rate_limit_per_min,
+                quota_tokens,
+            )
+            .map_err(GatewayError::Keyring)?
         };
         self.refresh_key_presence();
         Ok(key)
+    }
+
+    /// Zero a key's consumed-quota counter (the "reset usage" action) and
+    /// persist. Errors if the id is unknown.
+    pub fn reset_key_quota(&self, id: &str) -> Result<(), GatewayError> {
+        {
+            let mut keys = self.keys.write();
+            if !api_keys::reset_quota(&mut keys, id) {
+                return Err(GatewayError::InvalidConfig(format!("no such key: {id}")));
+            }
+            api_keys::save_keys(&keys).map_err(GatewayError::Keyring)?;
+        }
+        Ok(())
     }
 
     pub fn update_key(&self, id: &str, patch: ApiKeyPatch) -> Result<(), GatewayError> {
@@ -281,6 +308,7 @@ impl GatewayState {
             self.keys.clone(),
             self.snapshot.clone(),
             self.decisions.clone(),
+            self.key_rotation.clone(),
             observer,
         )
         .await?;
@@ -402,13 +430,15 @@ mod tests {
 
     #[test]
     fn key_lifecycle_toggles_presence() {
+        let _guard =
+            api_keys::STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let state = GatewayState::new();
         // Isolate from any keys other parallel tests left in the shared
         // cfg(test) secret store; this state's Arc is independent memory.
         state.keys.write().clear();
         state.refresh_key_presence();
         let created = state
-            .create_key("Tool".into(), vec!["fast".into()], None, Some(60))
+            .create_key("Tool".into(), vec!["fast".into()], None, Some(60), None)
             .unwrap();
         assert!(state.status().has_token);
         // list is redacted (no secret)
@@ -428,12 +458,40 @@ mod tests {
     }
 
     #[test]
+    fn create_key_with_quota_and_reset() {
+        let _guard =
+            api_keys::STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let state = GatewayState::new();
+        state.keys.write().clear();
+        state.refresh_key_presence();
+        let created = state
+            .create_key("q".into(), vec![], None, None, Some(1000))
+            .unwrap();
+        assert_eq!(created.quota_tokens, Some(1000));
+        assert_eq!(created.quota_used_tokens, 0);
+        // Simulate consumption, then reset.
+        api_keys::add_quota_usage(&mut state.keys.write(), &created.id, 400);
+        assert_eq!(
+            state.list_keys().iter().find(|k| k.id == created.id).unwrap().quota_used_tokens,
+            400
+        );
+        state.reset_key_quota(&created.id).unwrap();
+        assert_eq!(
+            state.list_keys().iter().find(|k| k.id == created.id).unwrap().quota_used_tokens,
+            0
+        );
+        assert!(state.reset_key_quota("missing").is_err());
+    }
+
+    #[test]
     fn hydrate_from_disk_loads_persisted_config() {
+        let _guard =
+            api_keys::STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let state = GatewayState::new();
         state.keys.write().clear();
         state.refresh_key_presence();
         // Ensure a usable key so `enabled` survives hydrate.
-        let _ = state.create_key("k".into(), vec![], None, None).unwrap();
+        let _ = state.create_key("k".into(), vec![], None, None, None).unwrap();
         let dir = std::env::temp_dir().join(format!("cognia-gw-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("gateway-config.json");

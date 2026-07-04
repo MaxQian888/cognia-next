@@ -59,12 +59,14 @@ export async function gatewayCreateKey(input: {
   modelAllowlist: string[]
   expiresAtMs: number | null
   rateLimitPerMin: number | null
+  quotaTokens?: number | null
 }): Promise<GatewayApiKey> {
   return transport.call<GatewayApiKey>("gateway_create_key", {
     name: input.name,
     modelAllowlist: input.modelAllowlist,
     expiresAtMs: input.expiresAtMs,
     rateLimitPerMin: input.rateLimitPerMin,
+    quotaTokens: input.quotaTokens ?? null,
   })
 }
 
@@ -74,6 +76,11 @@ export async function gatewayUpdateKey(id: string, patch: GatewayApiKeyPatch): P
 
 export async function gatewayDeleteKey(id: string): Promise<void> {
   await transport.call<void>("gateway_delete_key", { id })
+}
+
+/** Zero a key's consumed-quota counter (the "reset usage" action). */
+export async function gatewayResetKeyQuota(id: string): Promise<void> {
+  await transport.call<void>("gateway_reset_key_quota", { id })
 }
 
 /** Reveal a key's full secret (explicit user action). */

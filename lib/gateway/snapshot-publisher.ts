@@ -20,6 +20,7 @@ import {
 import type {
   GatewayAliasSnapshot,
   GatewayProviderSnapshot,
+  GatewayRotationStrategy,
   GatewayRoutingSnapshot,
 } from "@/types/gateway"
 import type { ModelMapping } from "@cognia/provider-types/model-mapping"
@@ -45,6 +46,63 @@ function extractCustomModels(custom: unknown): string[] {
     .filter(Boolean)
 }
 
+/**
+ * Clean a provider's multi-key pool (`UserProviderSettings.apiKeys[]`): trim,
+ * drop blanks, dedupe — matching the app-side rotation resolver's `cleanPool`
+ * so the gateway rotates over exactly the same accounts.
+ */
+function cleanKeyPool(keys: unknown): string[] {
+  if (!Array.isArray(keys)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const k of keys) {
+    const trimmed = typeof k === "string" ? k.trim() : ""
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed)
+      out.push(trimmed)
+    }
+  }
+  return out
+}
+
+/**
+ * The upstream multi-account rotation config for a provider id, read from the
+ * raw settings row (built-in or custom). Returns `null` when no usable pool /
+ * rotation is configured so the single-key path is used.
+ */
+function extractRotationPool(
+  slice: SnapshotSettingsSlice,
+  id: string
+): {
+  apiKeys: string[]
+  rotationEnabled: boolean
+  rotationStrategy?: GatewayRotationStrategy
+} | null {
+  const raw = (slice.providerSettings?.[id] ?? slice.customProviders?.find((p) => p.id === id)) as
+    | { apiKeys?: unknown; apiKeyRotationEnabled?: unknown; apiKeyRotationStrategy?: unknown }
+    | undefined
+  if (!raw?.apiKeyRotationEnabled) return null
+  const pool = cleanKeyPool(raw.apiKeys)
+  if (pool.length === 0) return null
+  const strategy =
+    typeof raw.apiKeyRotationStrategy === "string"
+      ? (raw.apiKeyRotationStrategy as GatewayRotationStrategy)
+      : undefined
+  return { apiKeys: pool, rotationEnabled: true, rotationStrategy: strategy }
+}
+
+/**
+ * Default a provider row's single `apiKey` to the first pooled key when the
+ * primary is blank — mirrors the app resolver's `single ?? pool[0]` so a
+ * provider configured with only a rotation pool still resolves protocol / base
+ * URL (and thus becomes executable through the gateway).
+ */
+function withPoolFallbackKey<T extends { apiKey?: string; apiKeys?: unknown }>(row: T): T {
+  if (row.apiKey && row.apiKey.trim()) return row
+  const pool = cleanKeyPool(row.apiKeys)
+  return pool.length > 0 ? { ...row, apiKey: pool[0] } : row
+}
+
 /** Provider ids referenced by any enabled alias, plus every configured one. */
 function providerIdsToPublish(slice: SnapshotSettingsSlice): string[] {
   const ids = new Set<string>()
@@ -63,10 +121,25 @@ function providerIdsToPublish(slice: SnapshotSettingsSlice): string[] {
  * skips them but the settings UI can still show they exist.
  */
 function buildProviders(slice: SnapshotSettingsSlice): GatewayProviderSnapshot[] {
+  // Normalize so a provider configured with only a rotation pool (blank primary
+  // key) still resolves protocol / base URL — its pool[0] stands in as the
+  // single key the resolver reads.
+  const normalizedProviderSettings = slice.providerSettings
+    ? (Object.fromEntries(
+        Object.entries(slice.providerSettings).map(([id, row]) => [
+          id,
+          withPoolFallbackKey(row as { apiKey?: string; apiKeys?: unknown }),
+        ])
+      ) as ProviderSettingsSnapshotInput["providerSettings"])
+    : slice.providerSettings
+  const normalizedCustomProviders = slice.customProviders?.map((p) =>
+    withPoolFallbackKey(p as { apiKey?: string; apiKeys?: unknown } & typeof p)
+  ) as ProviderSettingsSnapshotInput["customProviders"]
+
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: slice.defaultProvider,
-    providerSettings: slice.providerSettings,
-    customProviders: slice.customProviders,
+    providerSettings: normalizedProviderSettings,
+    customProviders: normalizedCustomProviders,
   })
   const out: GatewayProviderSnapshot[] = []
   for (const id of providerIdsToPublish(slice)) {
@@ -86,6 +159,9 @@ function buildProviders(slice: SnapshotSettingsSlice): GatewayProviderSnapshot[]
     }
     const custom = slice.customProviders?.find((p) => p.id === id)
     const models = custom ? extractCustomModels(custom) : resolution.model ? [resolution.model] : []
+    // Attach the upstream multi-account pool so the gateway rotates / fails over
+    // across the same accounts the chat pipeline does.
+    const pool = extractRotationPool(slice, id)
     out.push({
       id,
       // The gateway speaks "openai"/"anthropic"; "google"/"mistral"/"cohere"
@@ -93,6 +169,13 @@ function buildProviders(slice: SnapshotSettingsSlice): GatewayProviderSnapshot[]
       protocol: resolution.protocol,
       baseUrl: resolution.baseURL ?? "",
       ...(resolution.apiKey ? { apiKey: resolution.apiKey } : {}),
+      ...(pool
+        ? {
+            apiKeys: pool.apiKeys,
+            rotationEnabled: true,
+            ...(pool.rotationStrategy ? { rotationStrategy: pool.rotationStrategy } : {}),
+          }
+        : {}),
       enabled: true,
       models,
     })

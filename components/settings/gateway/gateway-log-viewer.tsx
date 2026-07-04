@@ -9,7 +9,7 @@
  * page equivalent.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Trash2Icon } from "lucide-react"
@@ -25,6 +25,8 @@ import {
   summarizeGatewayUsage,
   type GatewayRequestLogFilter,
 } from "@/lib/db/gateway-request-log"
+import { gatewayListKeys } from "@/lib/tauri/gateway"
+import type { GatewayApiKeyRedacted } from "@/types/gateway"
 
 type Outcome = "all" | "ok" | "errors"
 
@@ -32,14 +34,29 @@ export function GatewayLogViewer() {
   const t = useTranslations("settings.gateway")
   const [outcome, setOutcome] = useState<Outcome>("all")
   const [model, setModel] = useState("")
+  const [keyFilter, setKeyFilter] = useState("all")
+  const [keys, setKeys] = useState<GatewayApiKeyRedacted[]>([])
+
+  useEffect(() => {
+    // Key id → name map for the log's Key column + filter dropdown.
+    gatewayListKeys()
+      .then(setKeys)
+      .catch(() => {})
+  }, [])
+
+  const keyName = (id: string | null): string => {
+    if (!id) return "—"
+    return keys.find((k) => k.id === id)?.name ?? id.slice(0, 8)
+  }
 
   const rows =
     useLiveQuery(() => {
       const filter: GatewayRequestLogFilter = { limit: 100 }
       if (outcome !== "all") filter.outcome = outcome
       if (model.trim()) filter.model = model.trim()
+      if (keyFilter !== "all") filter.keyId = keyFilter
       return listGatewayRequestLog(filter)
-    }, [outcome, model]) ?? []
+    }, [outcome, model, keyFilter]) ?? []
 
   const summary = summarizeGatewayUsage(rows)
 
@@ -93,6 +110,19 @@ export function GatewayLogViewer() {
             className="h-8 w-40 text-xs"
             onChange={(e) => setModel(e.target.value)}
           />
+          <select
+            value={keyFilter}
+            aria-label={t("colKey")}
+            className="h-8 rounded-md border bg-background px-2 text-xs"
+            onChange={(e) => setKeyFilter(e.target.value)}
+          >
+            <option value="all">{t("logFilterAllKeys")}</option>
+            {keys.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Rows */}
@@ -106,6 +136,7 @@ export function GatewayLogViewer() {
                   <th className="py-1 pr-2 font-medium">{t("colTime")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colModel")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colProvider")}</th>
+                  <th className="py-1 pr-2 font-medium">{t("colKey")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colStatus")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colLatency")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colTokens")}</th>
@@ -120,6 +151,9 @@ export function GatewayLogViewer() {
                     <td className="max-w-[8rem] truncate py-1 pr-2">{r.model ?? "—"}</td>
                     <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
                       {r.providerId ?? "—"}
+                    </td>
+                    <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
+                      {keyName(r.keyId)}
                     </td>
                     <td className="py-1 pr-2">
                       <Badge variant={r.status < 400 ? "secondary" : "destructive"}>

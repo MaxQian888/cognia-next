@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
 import { GatewayKeysCard } from "./gateway-keys-card"
@@ -11,11 +11,13 @@ const mockCreate = jest.fn()
 const mockUpdate = jest.fn()
 const mockDelete = jest.fn()
 const mockReveal = jest.fn()
+const mockResetQuota = jest.fn()
 jest.mock("@/lib/tauri/gateway", () => ({
   gatewayListKeys: () => mockList(),
   gatewayCreateKey: (...a: unknown[]) => mockCreate(...a),
   gatewayUpdateKey: (...a: unknown[]) => mockUpdate(...a),
   gatewayDeleteKey: (...a: unknown[]) => mockDelete(...a),
+  gatewayResetKeyQuota: (...a: unknown[]) => mockResetQuota(...a),
   gatewayRevealKey: (...a: unknown[]) => mockReveal(...a),
 }))
 
@@ -28,6 +30,8 @@ const redacted = (over: Partial<GatewayApiKeyRedacted> = {}): GatewayApiKeyRedac
   expiresAtMs: null,
   enabled: true,
   rateLimitPerMin: null,
+  quotaTokens: null,
+  quotaUsedTokens: 0,
   createdAtMs: 0,
   lastUsedAtMs: null,
   secretPreview: "sk-cognia-…abcd",
@@ -42,6 +46,8 @@ const fullKey = (over: Partial<GatewayApiKey> = {}): GatewayApiKey => ({
   expiresAtMs: null,
   enabled: true,
   rateLimitPerMin: null,
+  quotaTokens: null,
+  quotaUsedTokens: 0,
   createdAtMs: 0,
   lastUsedAtMs: null,
   ...over,
@@ -52,6 +58,7 @@ beforeEach(() => {
   mockCreate.mockReset().mockResolvedValue(fullKey())
   mockUpdate.mockReset().mockResolvedValue(undefined)
   mockDelete.mockReset().mockResolvedValue(undefined)
+  mockResetQuota.mockReset().mockResolvedValue(undefined)
   mockReveal.mockReset().mockResolvedValue("sk-cognia-FULLSECRET0000")
   ;(toast.success as jest.Mock).mockClear()
 })
@@ -78,6 +85,7 @@ describe("GatewayKeysCard", () => {
     await user.type(screen.getByLabelText("keyName"), "Laptop")
     await user.type(screen.getByLabelText("keyModels"), "fast, gpt-4o")
     await user.type(screen.getByLabelText("keyRateLimit"), "60")
+    await user.type(screen.getByLabelText("keyQuota"), "100000")
     await user.click(screen.getByRole("button", { name: "createKey" }))
 
     expect(mockCreate).toHaveBeenCalledWith(
@@ -86,6 +94,7 @@ describe("GatewayKeysCard", () => {
         modelAllowlist: ["fast", "gpt-4o"],
         rateLimitPerMin: 60,
         expiresAtMs: null,
+        quotaTokens: 100000,
       })
     )
     expect(await screen.findByTestId("gateway-fresh-key")).toHaveTextContent(
@@ -119,5 +128,41 @@ describe("GatewayKeysCard", () => {
     await user.click(screen.getByRole("button", { name: "reveal CLI" }))
     await waitFor(() => expect(mockReveal).toHaveBeenCalledWith("k1"))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("keyCopied"))
+  })
+
+  it("edits a key and saves the patch", async () => {
+    const user = userEvent.setup()
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    await user.click(screen.getByRole("button", { name: "editKey CLI" }))
+    const panel = await screen.findByTestId("gateway-key-edit-k1")
+    const nameInput = within(panel).getByLabelText("keyName")
+    await user.clear(nameInput)
+    await user.type(nameInput, "Renamed")
+    await user.type(within(panel).getByLabelText("keyQuota"), "50000")
+    await user.click(within(panel).getByRole("button", { name: "save" }))
+    expect(mockUpdate).toHaveBeenCalledWith(
+      "k1",
+      expect.objectContaining({ name: "Renamed", quotaTokens: 50000 })
+    )
+  })
+
+  it("shows quota usage and resets it", async () => {
+    const user = userEvent.setup()
+    mockList.mockResolvedValue([redacted({ quotaTokens: 1000, quotaUsedTokens: 250 })])
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    // The quota branch (used/total) renders, not the "unlimited" branch. The
+    // label + value share one span ("keyQuota: keyQuotaUsed"), so match loosely.
+    expect(screen.getByText(/keyQuotaUsed/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "resetQuota CLI" }))
+    expect(mockResetQuota).toHaveBeenCalledWith("k1")
+  })
+
+  it("has no reset-quota control for an unlimited key", async () => {
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    expect(screen.queryByRole("button", { name: "resetQuota CLI" })).not.toBeInTheDocument()
+    expect(screen.getByText(/keyQuotaNone/)).toBeInTheDocument()
   })
 })

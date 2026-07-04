@@ -42,8 +42,9 @@ use crate::remote_control::rate_limit::FixedWindowRateLimiter;
 
 use super::api_keys::{self, GatewayApiKey};
 use super::execute::{
-    candidates_from_entries, embeddings_url, resolve_candidates, rewrite_model, upstream_headers,
-    upstream_url, Candidate, SseDeframer,
+    candidates_from_entries, embeddings_url, expand_key_pools, record_key_success,
+    resolve_candidates, rewrite_model, upstream_headers, upstream_url, Candidate, KeyRotationMap,
+    SseDeframer,
 };
 use super::keyed_rate_limit::KeyedRateLimiter;
 use super::snapshot::RoutingSnapshot;
@@ -104,6 +105,8 @@ struct AppState {
     on_request: Arc<dyn RequestObserver>,
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
     decisions: Arc<DecisionRegistry>,
+    /// Per-provider upstream key-pool rotation cursors (shared with the state).
+    key_rotation: Arc<KeyRotationMap>,
     http: reqwest::Client,
 }
 
@@ -113,6 +116,7 @@ pub async fn spawn_server(
     keys: Arc<RwLock<Vec<GatewayApiKey>>>,
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
     decisions: Arc<DecisionRegistry>,
+    key_rotation: Arc<KeyRotationMap>,
     on_request: Arc<dyn RequestObserver>,
 ) -> Result<ServerHandle, GatewayError> {
     // Snapshot the bind-time config (these apply only on start).
@@ -155,6 +159,9 @@ pub async fn spawn_server(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
+    // Clone the key handle for the periodic quota-flush task before the
+    // original moves into `AppState`.
+    let keys_for_flush = keys.clone();
     let state = AppState {
         app_handle,
         keys,
@@ -166,6 +173,7 @@ pub async fn spawn_server(
         on_request,
         snapshot,
         decisions,
+        key_rotation,
         http,
     };
 
@@ -184,6 +192,26 @@ pub async fn spawn_server(
         .with_state(state);
 
     let (tx, mut rx) = watch::channel(());
+
+    // Periodic key flush: per-key quota draw-down + last-used timestamps live on
+    // the shared in-memory key list and are otherwise only persisted on stop.
+    // A ~60s flush bounds crash-loss of quota accounting to one interval. Tied
+    // to the same shutdown signal so it exits with the listener.
+    let flush_keys = keys_for_flush;
+    let mut flush_rx = tx.subscribe();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.tick().await; // consume the immediate first tick
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let _ = api_keys::save_keys(&flush_keys.read());
+                }
+                _ = flush_rx.changed() => break,
+            }
+        }
+    });
+
     tokio::spawn(async move {
         let server = axum::serve(
             listener,
@@ -312,12 +340,28 @@ async fn middleware(
         let keys = state.keys.read();
         api_keys::match_index(&keys, supplied, now_ms).map(|i| {
             let k = &keys[i];
-            (i, k.id.clone(), k.model_allowlist.clone(), k.rate_limit_per_min)
+            (
+                i,
+                k.id.clone(),
+                k.model_allowlist.clone(),
+                k.rate_limit_per_min,
+                k.is_over_quota(),
+            )
         })
     };
-    let Some((idx, key_id, key_model_allowlist, key_rate_limit)) = matched else {
+    let Some((idx, key_id, key_model_allowlist, key_rate_limit, over_quota)) = matched else {
         return reject(StatusCode::UNAUTHORIZED, "invalid token", None);
     };
+
+    // Quota gate: a key that has drawn down its entire token budget is rejected
+    // before any upstream work (drawn down after each request; see `log_success`).
+    if over_quota {
+        return reject(
+            StatusCode::TOO_MANY_REQUESTS,
+            "insufficient_quota: key token quota exhausted",
+            Some(key_id),
+        );
+    }
 
     // Bump last-used on the shared key list (persisted on next save/stop).
     if let Some(k) = state.keys.write().get_mut(idx) {
@@ -447,18 +491,20 @@ async fn openai_embeddings(
         return resp;
     }
 
-    // Only OpenAI-compatible providers expose `/embeddings`.
+    // Only OpenAI-compatible providers expose `/embeddings`. Expand each
+    // provider's upstream key pool so a rate-limited account fails over.
     let all = resolve_candidates(&snapshot, &model);
-    let candidates: Vec<Candidate> = all
-        .into_iter()
-        .filter(|c| c.provider.protocol == "openai")
-        .collect();
+    let candidates: Vec<Candidate> = expand_key_pools(
+        all.into_iter().filter(|c| c.provider.protocol == "openai").collect(),
+        &state.key_rotation,
+    );
     if candidates.is_empty() {
         return logged_error(&state, &ctx, format, StatusCode::NOT_FOUND, "invalid_request_error", &format!("embeddings model \"{model}\" matches no enabled OpenAI-compatible provider"), Some(&model));
     }
 
     let mut failures: Vec<String> = Vec::new();
     for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
+        let started = Instant::now();
         let upstream_body = rewrite_model(&body, &candidate.model_id);
         let url = embeddings_url(&candidate.provider.base_url);
         let mut req = state.http.post(&url).json(&upstream_body);
@@ -492,7 +538,11 @@ async fn openai_embeddings(
                 return logged_error(&state, &ctx, format, StatusCode::BAD_GATEWAY, "api_error", &format!("invalid upstream JSON: {err}"), Some(&model));
             }
         };
-        emit_request_log_ctx(&state.app_handle, &ctx, Some(&model), Some(&candidate.provider.id), 200, 0, None, None, None, false);
+        // Embeddings report only prompt tokens (no completion side).
+        let input_tokens = upstream["usage"]["prompt_tokens"]
+            .as_u64()
+            .or_else(|| upstream["usage"]["total_tokens"].as_u64());
+        log_success(&state, &ctx, &model, candidate, started.elapsed().as_millis() as u64, input_tokens, None, false);
         return Json(upstream).into_response();
     }
 
@@ -528,7 +578,7 @@ async fn openai_responses(
         return resp;
     }
 
-    let candidates = resolve_candidates(&snapshot, &model);
+    let candidates = expand_key_pools(resolve_candidates(&snapshot, &model), &state.key_rotation);
     if candidates.is_empty() {
         return logged_error(&state, &ctx, format, StatusCode::NOT_FOUND, "invalid_request_error", &format!("model \"{model}\" matches no alias, provider:model, or enabled provider model"), Some(&model));
     }
@@ -583,7 +633,7 @@ async fn openai_responses(
         match response_to_ir(&candidate.provider.protocol, &upstream) {
             Ok(ir_resp) => {
                 emit_outcome(&state.app_handle, candidate, true, started, Some((Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens))), None);
-                emit_request_log_ctx(&state.app_handle, &ctx, Some(&model), Some(&candidate.provider.id), 200, started.elapsed().as_millis() as u64, Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens), None, false);
+                log_success(&state, &ctx, &model, candidate, started.elapsed().as_millis() as u64, Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens), false);
                 let created = chrono::Utc::now().timestamp();
                 return Json(responses_translate::response_from_ir(&ir_resp, &model, created)).into_response();
             }
@@ -741,10 +791,13 @@ async fn handle_chat(
     }
     let stream = body["stream"].as_bool().unwrap_or(false);
 
-    let candidates = match live_decision(&state, &snapshot, &model, &body).await {
-        Some(candidates) => candidates,
-        None => resolve_candidates(&snapshot, &model),
-    };
+    let candidates = expand_key_pools(
+        match live_decision(&state, &snapshot, &model, &body).await {
+            Some(candidates) => candidates,
+            None => resolve_candidates(&snapshot, &model),
+        },
+        &state.key_rotation,
+    );
     if candidates.is_empty() {
         return logged_error(&state, &ctx, format, StatusCode::NOT_FOUND, "invalid_request_error", &format!("model \"{model}\" matches no alias, provider:model, or enabled provider model"), Some(&model));
     }
@@ -862,14 +915,14 @@ async fn buffered_response(
             ),
         };
         emit_outcome(&state.app_handle, candidate, true, started, Some(usage), None);
-        emit_request_log_ctx(&state.app_handle, &ctx, Some(model), Some(&candidate.provider.id), 200, started.elapsed().as_millis() as u64, usage.0, usage.1, None, false);
+        log_success(&state, &ctx, model, candidate, started.elapsed().as_millis() as u64, usage.0, usage.1, false);
         return Json(upstream).into_response();
     }
 
     match response_to_ir(&candidate.provider.protocol, &upstream) {
         Ok(ir_resp) => {
             emit_outcome(&state.app_handle, candidate, true, started, Some((Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens))), None);
-            emit_request_log_ctx(&state.app_handle, &ctx, Some(model), Some(&candidate.provider.id), 200, started.elapsed().as_millis() as u64, Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens), None, false);
+            log_success(&state, &ctx, model, candidate, started.elapsed().as_millis() as u64, Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens), false);
             let created = chrono::Utc::now().timestamp();
             Json(response_from_ir(format, &ir_resp, created)).into_response()
         }
@@ -892,10 +945,45 @@ async fn stream_response(
 ) -> Response {
     let passthrough = candidate.provider.protocol == format.protocol_name();
     if passthrough {
-        emit_outcome(&state.app_handle, candidate, true, started, None, None);
-        emit_request_log_ctx(&state.app_handle, &ctx, Some(model), Some(&candidate.provider.id), 200, started.elapsed().as_millis() as u64, None, None, None, true);
-        let body = Body::from_stream(resp.bytes_stream());
-        return sse_response(body);
+        // Forward upstream bytes to the client UNCHANGED while sniffing the SSE
+        // frames for token usage, so streaming passthrough still draws down
+        // quota and records the account's success at stream end.
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+        let task_state = state.clone();
+        let candidate = candidate.clone();
+        let ctx = ctx.clone();
+        let model = model.to_string();
+        tokio::spawn(async move {
+            let mut deframer = SseDeframer::default();
+            let mut input: Option<u64> = None;
+            let mut output: Option<u64> = None;
+            let mut upstream = resp.bytes_stream();
+            'pump: while let Some(chunk) = upstream.next().await {
+                let Ok(bytes) = chunk else { break };
+                for data in deframer.push(&bytes) {
+                    if data == "[DONE]" {
+                        continue;
+                    }
+                    if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                        sniff_passthrough_usage(format, &value, &mut input, &mut output);
+                    }
+                }
+                if tx.send(Ok(bytes)).await.is_err() {
+                    break 'pump;
+                }
+            }
+            if let Some(data) = deframer.finish() {
+                if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                    sniff_passthrough_usage(format, &value, &mut input, &mut output);
+                }
+            }
+            emit_outcome(&task_state.app_handle, &candidate, true, started, Some((input, output)), None);
+            log_success(&task_state, &ctx, &model, &candidate, started.elapsed().as_millis() as u64, input, output, true);
+        });
+        let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        });
+        return sse_response(Body::from_stream(stream));
     }
 
     let direction = match format {
@@ -909,7 +997,7 @@ async fn stream_response(
     let mut transcoder = StreamTranscoder::new(direction, candidate.model_id.clone(), message_id);
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
-    let app_handle = state.app_handle.clone();
+    let task_state = state.clone();
     let candidate = candidate.clone();
     let ctx = ctx.clone();
     let model = model.to_string();
@@ -930,8 +1018,8 @@ async fn stream_response(
             }
         }
         let usage = transcoder.usage();
-        emit_outcome(&app_handle, &candidate, true, started, Some((Some(usage.input_tokens), Some(usage.output_tokens))), None);
-        emit_request_log_ctx(&app_handle, &ctx, Some(&model), Some(&candidate.provider.id), 200, started.elapsed().as_millis() as u64, Some(usage.input_tokens), Some(usage.output_tokens), None, true);
+        emit_outcome(&task_state.app_handle, &candidate, true, started, Some((Some(usage.input_tokens), Some(usage.output_tokens))), None);
+        log_success(&task_state, &ctx, &model, &candidate, started.elapsed().as_millis() as u64, Some(usage.input_tokens), Some(usage.output_tokens), true);
     });
 
     let stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -1042,6 +1130,78 @@ fn emit_request_log(
     let _ = app_handle.emit(REQUEST_LOG_EVENT, payload);
 }
 
+/// Success terminal: emit the durable log row, draw the consumed tokens down
+/// against the calling key's token quota, and record the pooled upstream key's
+/// success (feeds `least-used` rotation + the per-account usage surface). One
+/// call replaces the plain log emit at every success path.
+#[allow(clippy::too_many_arguments)]
+fn log_success(
+    state: &AppState,
+    ctx: &ReqCtx,
+    model: &str,
+    candidate: &Candidate,
+    latency_ms: u64,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    stream: bool,
+) {
+    emit_request_log_ctx(
+        &state.app_handle,
+        ctx,
+        Some(model),
+        Some(&candidate.provider.id),
+        200,
+        latency_ms,
+        input_tokens,
+        output_tokens,
+        None,
+        stream,
+    );
+    // Draw the consumed tokens down against the calling key's quota.
+    let consumed = input_tokens.unwrap_or(0).saturating_add(output_tokens.unwrap_or(0)) as i64;
+    if consumed > 0 {
+        if let Some(key_id) = ctx.key_id.as_deref() {
+            let _ = api_keys::add_quota_usage(&mut state.keys.write(), key_id, consumed);
+        }
+    }
+    // Record the upstream account's success for rotation + per-account usage.
+    record_key_success(
+        &state.key_rotation,
+        &candidate.provider.id,
+        candidate.provider.api_key.as_deref(),
+    );
+}
+
+/// Extract token usage from one passthrough SSE payload so streaming passthrough
+/// requests still draw down quota. Anthropic reports input on `message_start`
+/// and cumulative output on `message_delta`; OpenAI reports both on a trailing
+/// `usage` object (present only when the client asked for it).
+fn sniff_passthrough_usage(
+    format: InboundFormat,
+    value: &Value,
+    input: &mut Option<u64>,
+    output: &mut Option<u64>,
+) {
+    match format {
+        InboundFormat::AnthropicMessages => {
+            if let Some(v) = value["message"]["usage"]["input_tokens"].as_u64() {
+                *input = Some(v);
+            }
+            if let Some(v) = value["usage"]["output_tokens"].as_u64() {
+                *output = Some(v);
+            }
+        }
+        InboundFormat::OpenAiChat => {
+            if let Some(v) = value["usage"]["prompt_tokens"].as_u64() {
+                *input = Some(v);
+            }
+            if let Some(v) = value["usage"]["completion_tokens"].as_u64() {
+                *output = Some(v);
+            }
+        }
+    }
+}
+
 /// Convenience wrapper that pulls route/remoteIp/keyId off a [`ReqCtx`].
 #[allow(clippy::too_many_arguments)]
 fn emit_request_log_ctx(
@@ -1136,6 +1296,45 @@ mod tests {
         c.key_model_allowlist = vec!["fast".into()];
         assert!(ctx_allows(&c, "fast"));
         assert!(!ctx_allows(&c, "slow"));
+    }
+
+    #[test]
+    fn sniff_usage_reads_both_protocol_shapes() {
+        // Anthropic: input on message_start, cumulative output on message_delta.
+        let (mut i, mut o) = (None, None);
+        sniff_passthrough_usage(
+            InboundFormat::AnthropicMessages,
+            &json!({ "type": "message_start", "message": { "usage": { "input_tokens": 42 } } }),
+            &mut i,
+            &mut o,
+        );
+        sniff_passthrough_usage(
+            InboundFormat::AnthropicMessages,
+            &json!({ "type": "message_delta", "usage": { "output_tokens": 17 } }),
+            &mut i,
+            &mut o,
+        );
+        assert_eq!((i, o), (Some(42), Some(17)));
+
+        // OpenAI: both on a trailing usage object.
+        let (mut i2, mut o2) = (None, None);
+        sniff_passthrough_usage(
+            InboundFormat::OpenAiChat,
+            &json!({ "usage": { "prompt_tokens": 5, "completion_tokens": 9 } }),
+            &mut i2,
+            &mut o2,
+        );
+        assert_eq!((i2, o2), (Some(5), Some(9)));
+
+        // A frame without usage leaves the accumulators untouched.
+        let (mut i3, mut o3) = (Some(1), Some(2));
+        sniff_passthrough_usage(
+            InboundFormat::OpenAiChat,
+            &json!({ "choices": [{ "delta": { "content": "hi" } }] }),
+            &mut i3,
+            &mut o3,
+        );
+        assert_eq!((i3, o3), (Some(1), Some(2)));
     }
 
     #[test]

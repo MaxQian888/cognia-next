@@ -103,3 +103,37 @@ export function summarizeGatewayUsage(rows: GatewayRequestLogRow[]): GatewayUsag
     avgLatencyMs: Math.round(latency / rows.length),
   }
 }
+
+/** One key's rolled-up usage over the loaded log window. */
+export interface GatewayKeyUsage {
+  keyId: string
+  requests: number
+  errors: number
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * Group the log rows by their calling key id → per-key usage totals. Rows with
+ * no `keyId` (middleware rejections before auth) are skipped. Pure + testable;
+ * drives the per-key usage surface in the log viewer and keys card.
+ */
+export function summarizePerKeyUsage(rows: GatewayRequestLogRow[]): Map<string, GatewayKeyUsage> {
+  const byKey = new Map<string, GatewayKeyUsage>()
+  for (const r of rows) {
+    if (!r.keyId) continue
+    const entry = byKey.get(r.keyId) ?? {
+      keyId: r.keyId,
+      requests: 0,
+      errors: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    }
+    entry.requests += 1
+    if (r.status >= 400) entry.errors += 1
+    entry.inputTokens += r.inputTokens ?? 0
+    entry.outputTokens += r.outputTokens ?? 0
+    byKey.set(r.keyId, entry)
+  }
+  return byKey
+}

@@ -58,9 +58,10 @@ pub async fn gateway_create_key(
     model_allowlist: Vec<String>,
     expires_at_ms: Option<i64>,
     rate_limit_per_min: Option<u32>,
+    quota_tokens: Option<i64>,
 ) -> Result<GatewayApiKey, String> {
     state
-        .create_key(name, model_allowlist, expires_at_ms, rate_limit_per_min)
+        .create_key(name, model_allowlist, expires_at_ms, rate_limit_per_min, quota_tokens)
         .map_err(Into::into)
 }
 
@@ -76,6 +77,15 @@ pub async fn gateway_update_key(
 #[tauri::command]
 pub async fn gateway_delete_key(state: State<'_, GatewayState>, id: String) -> Result<(), String> {
     state.delete_key(&id).map_err(Into::into)
+}
+
+/// Zero a key's consumed-quota counter (the "reset usage" action).
+#[tauri::command]
+pub async fn gateway_reset_key_quota(
+    state: State<'_, GatewayState>,
+    id: String,
+) -> Result<(), String> {
+    state.reset_key_quota(&id).map_err(Into::into)
 }
 
 /// Reveal a key's full secret (explicit user action — copy/rotate flow).
@@ -124,10 +134,13 @@ mod tests {
 
     #[test]
     fn create_then_delete_key_via_state() {
+        let _guard = super::super::api_keys::STORE_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let state = GatewayState::new();
         state.keys.write().clear();
         state.refresh_key_presence();
-        let key = state.create_key("cli".into(), vec![], None, None).unwrap();
+        let key = state.create_key("cli".into(), vec![], None, None, None).unwrap();
         assert!(state.list_keys().iter().any(|k| k.id == key.id));
         state.delete_key(&key.id).unwrap();
         assert!(!state.list_keys().iter().any(|k| k.id == key.id));

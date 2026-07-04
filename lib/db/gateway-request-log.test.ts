@@ -6,6 +6,7 @@ import {
   GATEWAY_REQUEST_LOG_CAP,
   listGatewayRequestLog,
   summarizeGatewayUsage,
+  summarizePerKeyUsage,
 } from "./gateway-request-log"
 import { getDb } from "./schema"
 import type { GatewayRequestLogRow } from "@/types/gateway"
@@ -119,5 +120,31 @@ describe("gateway-request-log pure helpers", () => {
       outputTokens: 20,
       avgLatencyMs: 200,
     })
+  })
+
+  it("summarizePerKeyUsage groups by key id and skips keyless rows", () => {
+    const rows = [
+      row("a", "1", { keyId: "k1", status: 200, inputTokens: 10, outputTokens: 5 }),
+      row("b", "2", { keyId: "k1", status: 500, inputTokens: 2, outputTokens: 0 }),
+      row("c", "3", { keyId: "k2", status: 200, inputTokens: 7, outputTokens: 3 }),
+      row("d", "4", { keyId: null, status: 401 }), // rejected before auth → skipped
+    ]
+    const byKey = summarizePerKeyUsage(rows)
+    expect(byKey.get("k1")).toEqual({
+      keyId: "k1",
+      requests: 2,
+      errors: 1,
+      inputTokens: 12,
+      outputTokens: 5,
+    })
+    expect(byKey.get("k2")).toEqual({
+      keyId: "k2",
+      requests: 1,
+      errors: 0,
+      inputTokens: 7,
+      outputTokens: 3,
+    })
+    expect(byKey.has("")).toBe(false)
+    expect(byKey.size).toBe(2)
   })
 })

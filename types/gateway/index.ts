@@ -71,6 +71,10 @@ export interface GatewayApiKey {
   expiresAtMs: number | null
   enabled: boolean
   rateLimitPerMin: number | null
+  /** Cumulative token budget (input + output); `null` = unlimited. */
+  quotaTokens: number | null
+  /** Tokens consumed so far against `quotaTokens`. */
+  quotaUsedTokens: number
   createdAtMs: number
   lastUsedAtMs: number | null
 }
@@ -83,6 +87,8 @@ export interface GatewayApiKeyRedacted {
   expiresAtMs: number | null
   enabled: boolean
   rateLimitPerMin: number | null
+  quotaTokens: number | null
+  quotaUsedTokens: number
   createdAtMs: number
   lastUsedAtMs: number | null
   /** e.g. `sk-cognia-…a1b2` — enough to identify, not to use. */
@@ -90,13 +96,15 @@ export interface GatewayApiKeyRedacted {
 }
 
 /** Mutable fields on an existing key. Absent = unchanged; explicit `null`
- * clears an optional value (expiry / per-key rate limit). */
+ * clears an optional value (expiry / per-key rate limit / quota). */
 export interface GatewayApiKeyPatch {
   name?: string
   modelAllowlist?: string[]
   expiresAtMs?: number | null
   enabled?: boolean
   rateLimitPerMin?: number | null
+  /** Explicit `null` clears the quota (→ unlimited); never resets used. */
+  quotaTokens?: number | null
 }
 
 /** One entry in an alias's pre-ordered deployment chain. */
@@ -111,12 +119,25 @@ export interface GatewayAliasSnapshot {
   entries: GatewaySnapshotEntry[]
 }
 
-/** A provider the gateway can execute against. `apiKey` stays Rust-side. */
+/** Upstream multi-account rotation strategy — mirrors the app's
+ * `ApiKeyRotationStrategy`. */
+export type GatewayRotationStrategy = "round-robin" | "random" | "least-used"
+
+/** A provider the gateway can execute against. Credentials stay Rust-side. */
 export interface GatewayProviderSnapshot {
   id: string
   protocol: string
   baseUrl: string
+  /** Primary / single credential; the fallback when no rotation pool is set. */
   apiKey?: string
+  /** Upstream multi-account pool — mirrors the provider's
+   * `UserProviderSettings.apiKeys[]` so the gateway rotates / fails over across
+   * the same accounts the chat pipeline does. */
+  apiKeys?: string[]
+  /** Rotation strategy for the pool; `undefined` = round-robin. */
+  rotationStrategy?: GatewayRotationStrategy
+  /** Whether the pool actually rotates (mirrors `apiKeyRotationEnabled`). */
+  rotationEnabled?: boolean
   enabled: boolean
   models: string[]
 }

@@ -23,6 +23,14 @@ const SERVICE: &str = "com.cognia.gateway";
 const KEYS_ACCOUNT: &str = "api-keys";
 const LEGACY_TOKEN_ACCOUNT: &str = "bearer-token";
 
+/// Serializes tests that persist to the process-global `cfg(test)` secret store.
+/// The `api-keys` blob is shared across all test threads, so a concurrent
+/// `save_keys` in one test would otherwise clobber another's reload assertion.
+/// Every gateway test that writes the store (here + in `mod`/`commands`) takes
+/// this guard for its duration.
+#[cfg(test)]
+pub(crate) static STORE_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// One scoped bearer credential. Serialized camelCase to mirror
 /// `types/gateway/index.ts`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,6 +51,15 @@ pub struct GatewayApiKey {
     /// Per-key per-minute request budget; `None` = only the global limit.
     #[serde(default)]
     pub rate_limit_per_min: Option<u32>,
+    /// Cumulative token budget (input + output) this key may ever consume;
+    /// `None` = unlimited. The newapi "Tokens" quota — enforced at auth time
+    /// (reject when exhausted) and drawn down after each request.
+    #[serde(default)]
+    pub quota_tokens: Option<i64>,
+    /// Tokens consumed so far against `quota_tokens`. Bumped after each request
+    /// on the shared key list (persisted on save / stop / periodic flush).
+    #[serde(default)]
+    pub quota_used_tokens: i64,
     pub created_at_ms: i64,
     #[serde(default)]
     pub last_used_at_ms: Option<i64>,
@@ -58,6 +75,8 @@ pub struct RedactedApiKey {
     pub expires_at_ms: Option<i64>,
     pub enabled: bool,
     pub rate_limit_per_min: Option<u32>,
+    pub quota_tokens: Option<i64>,
+    pub quota_used_tokens: i64,
     pub created_at_ms: i64,
     pub last_used_at_ms: Option<i64>,
     /// e.g. `sk-cognia-…a1b2` — enough to identify, not to use.
@@ -74,6 +93,21 @@ impl GatewayApiKey {
         self.enabled && !self.is_expired(now_ms)
     }
 
+    /// Whether this key has drawn down its entire token quota. Keys with no
+    /// quota (`None`) are never over.
+    pub fn is_over_quota(&self) -> bool {
+        matches!(self.quota_tokens, Some(q) if self.quota_used_tokens >= q)
+    }
+
+    /// Draw `tokens` (input + output of one request) against the quota. Negative
+    /// or zero inputs are ignored; the counter saturates rather than overflows.
+    pub fn add_quota_usage(&mut self, tokens: i64) {
+        if tokens <= 0 {
+            return;
+        }
+        self.quota_used_tokens = self.quota_used_tokens.saturating_add(tokens);
+    }
+
     pub fn redacted(&self) -> RedactedApiKey {
         RedactedApiKey {
             id: self.id.clone(),
@@ -82,6 +116,8 @@ impl GatewayApiKey {
             expires_at_ms: self.expires_at_ms,
             enabled: self.enabled,
             rate_limit_per_min: self.rate_limit_per_min,
+            quota_tokens: self.quota_tokens,
+            quota_used_tokens: self.quota_used_tokens,
             created_at_ms: self.created_at_ms,
             last_used_at_ms: self.last_used_at_ms,
             secret_preview: preview_secret(&self.secret),
@@ -126,6 +162,8 @@ pub fn load_keys() -> Result<Vec<GatewayApiKey>, String> {
             expires_at_ms: None,
             enabled: true,
             rate_limit_per_min: None,
+            quota_tokens: None,
+            quota_used_tokens: 0,
             created_at_ms: now_ms(),
             last_used_at_ms: None,
         }];
@@ -150,6 +188,7 @@ pub fn create_key(
     model_allowlist: Vec<String>,
     expires_at_ms: Option<i64>,
     rate_limit_per_min: Option<u32>,
+    quota_tokens: Option<i64>,
 ) -> Result<GatewayApiKey, String> {
     let key = GatewayApiKey {
         id: uuid::Uuid::new_v4().simple().to_string(),
@@ -159,6 +198,8 @@ pub fn create_key(
         expires_at_ms,
         enabled: true,
         rate_limit_per_min,
+        quota_tokens,
+        quota_used_tokens: 0,
         created_at_ms: now_ms(),
         last_used_at_ms: None,
     };
@@ -180,6 +221,10 @@ pub struct ApiKeyPatch {
     pub enabled: Option<bool>,
     #[serde(default, deserialize_with = "double_option")]
     pub rate_limit_per_min: Option<Option<u32>>,
+    /// `Some(None)` clears the quota (→ unlimited); absent leaves it unchanged.
+    /// Editing the quota never resets the consumed counter (use `reset_quota`).
+    #[serde(default, deserialize_with = "double_option")]
+    pub quota_tokens: Option<Option<i64>>,
 }
 
 /// Distinguish "field absent" from "field present and null" during deserialize
@@ -216,7 +261,33 @@ pub fn apply_patch(
     if let Some(rl) = patch.rate_limit_per_min {
         key.rate_limit_per_min = rl;
     }
+    if let Some(quota) = patch.quota_tokens {
+        key.quota_tokens = quota;
+    }
     Ok(())
+}
+
+/// Zero a key's consumed-quota counter (the "reset usage" action). Returns
+/// whether a matching key was found.
+pub fn reset_quota(keys: &mut [GatewayApiKey], id: &str) -> bool {
+    if let Some(key) = keys.iter_mut().find(|k| k.id == id) {
+        key.quota_used_tokens = 0;
+        true
+    } else {
+        false
+    }
+}
+
+/// Add `tokens` to the matching key's consumed quota (post-request draw-down).
+/// Returns whether a matching key was found (so the caller can decide to
+/// persist).
+pub fn add_quota_usage(keys: &mut [GatewayApiKey], id: &str, tokens: i64) -> bool {
+    if let Some(key) = keys.iter_mut().find(|k| k.id == id) {
+        key.add_quota_usage(tokens);
+        true
+    } else {
+        false
+    }
 }
 
 pub fn delete_key(keys: &mut Vec<GatewayApiKey>, id: &str) -> bool {
@@ -262,6 +333,8 @@ mod tests {
             expires_at_ms: None,
             enabled: true,
             rate_limit_per_min: None,
+            quota_tokens: None,
+            quota_used_tokens: 0,
             created_at_ms: 0,
             last_used_at_ms: None,
         }
@@ -310,10 +383,12 @@ mod tests {
 
     #[test]
     fn create_and_delete_round_trip() {
-        // secret_store routes through an in-memory map under cfg(test).
+        // secret_store routes through an in-memory map under cfg(test); serialize
+        // against other store-writing tests so the reload assertion is stable.
+        let _guard = STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let mut keys = load_keys().unwrap();
         let start = keys.len();
-        let made = create_key(&mut keys, "Tool".into(), vec!["fast".into()], Some(999), Some(60))
+        let made = create_key(&mut keys, "Tool".into(), vec!["fast".into()], Some(999), Some(60), None)
             .unwrap();
         assert_eq!(keys.len(), start + 1);
         assert!(made.secret.starts_with("sk-cognia-"));
@@ -365,5 +440,66 @@ mod tests {
         assert!(!serde_json::to_string(&r).unwrap().contains("abcdef1234"));
         assert!(r.secret_preview.contains('…'));
         assert!(r.secret_preview.ends_with("1234"));
+    }
+
+    #[test]
+    fn quota_gate_and_drawdown() {
+        let mut k = key("a", "s");
+        // No quota → never over, draw-down is inert.
+        assert!(!k.is_over_quota());
+        k.add_quota_usage(1000);
+        assert!(!k.is_over_quota());
+
+        k.quota_tokens = Some(100);
+        k.quota_used_tokens = 0;
+        assert!(!k.is_over_quota());
+        k.add_quota_usage(60);
+        assert!(!k.is_over_quota());
+        k.add_quota_usage(40); // hits exactly the cap
+        assert!(k.is_over_quota());
+        // Non-positive usage is ignored.
+        let before = k.quota_used_tokens;
+        k.add_quota_usage(0);
+        k.add_quota_usage(-5);
+        assert_eq!(k.quota_used_tokens, before);
+    }
+
+    #[test]
+    fn patch_sets_and_clears_quota() {
+        let mut keys = vec![key("a", "s")];
+        let set: ApiKeyPatch =
+            serde_json::from_value(serde_json::json!({ "quotaTokens": 5000 })).unwrap();
+        apply_patch(&mut keys, "a", set).unwrap();
+        assert_eq!(keys[0].quota_tokens, Some(5000));
+
+        // Explicit null clears it (→ unlimited) without touching used counter.
+        keys[0].quota_used_tokens = 42;
+        let clear: ApiKeyPatch =
+            serde_json::from_value(serde_json::json!({ "quotaTokens": null })).unwrap();
+        apply_patch(&mut keys, "a", clear).unwrap();
+        assert_eq!(keys[0].quota_tokens, None);
+        assert_eq!(keys[0].quota_used_tokens, 42);
+    }
+
+    #[test]
+    fn reset_and_add_usage_helpers() {
+        let mut keys = vec![key("a", "s")];
+        keys[0].quota_tokens = Some(100);
+        assert!(add_quota_usage(&mut keys, "a", 30));
+        assert_eq!(keys[0].quota_used_tokens, 30);
+        assert!(!add_quota_usage(&mut keys, "missing", 10)); // no such key
+        assert!(reset_quota(&mut keys, "a"));
+        assert_eq!(keys[0].quota_used_tokens, 0);
+        assert!(!reset_quota(&mut keys, "missing"));
+    }
+
+    #[test]
+    fn redacted_carries_quota_fields() {
+        let mut k = key("a", "sk-cognia-abcdef1234");
+        k.quota_tokens = Some(1000);
+        k.quota_used_tokens = 250;
+        let r = k.redacted();
+        assert_eq!(r.quota_tokens, Some(1000));
+        assert_eq!(r.quota_used_tokens, 250);
     }
 }

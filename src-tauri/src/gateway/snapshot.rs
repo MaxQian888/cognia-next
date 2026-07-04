@@ -36,8 +36,25 @@ pub struct ProviderSnapshot {
     /// by the gateway and are skipped by the fallback walk).
     pub protocol: String,
     pub base_url: String,
+    /// The primary / single credential. Always the fallback when no rotation
+    /// pool is configured (or rotation is disabled).
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Upstream multi-account pool. Mirrors the app's per-provider
+    /// `UserProviderSettings.apiKeys[]` so the gateway rotates / fails over
+    /// across the same accounts the chat pipeline does. Empty = single-key.
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    /// Rotation strategy for the pool: "round-robin" | "random" | "least-used".
+    /// `None` defaults to round-robin. Only consulted when `rotation_enabled`
+    /// and `api_keys` is non-empty.
+    #[serde(default)]
+    pub rotation_strategy: Option<String>,
+    /// Whether the pool actually rotates. Mirrors
+    /// `UserProviderSettings.apiKeyRotationEnabled`; when false the gateway
+    /// uses `api_key` alone (matching the app's single-key send path).
+    #[serde(default)]
+    pub rotation_enabled: bool,
     pub enabled: bool,
     #[serde(default)]
     pub models: Vec<String>,
@@ -111,5 +128,28 @@ mod tests {
         assert!(s.provider("groq").is_some());
         assert!(s.provider("openai").is_none()); // disabled
         assert!(s.provider("ghost").is_none());
+    }
+
+    #[test]
+    fn provider_pool_fields_deserialize_with_defaults() {
+        // Pool fields absent → single-key defaults.
+        let single: ProviderSnapshot = serde_json::from_value(serde_json::json!({
+            "id": "p", "protocol": "openai", "baseUrl": "u", "apiKey": "sk-1", "enabled": true
+        }))
+        .unwrap();
+        assert!(single.api_keys.is_empty());
+        assert!(!single.rotation_enabled);
+        assert!(single.rotation_strategy.is_none());
+
+        // Pool fields present → carried through.
+        let pooled: ProviderSnapshot = serde_json::from_value(serde_json::json!({
+            "id": "p", "protocol": "openai", "baseUrl": "u", "enabled": true,
+            "apiKeys": ["sk-a", "sk-b"], "rotationEnabled": true,
+            "rotationStrategy": "least-used"
+        }))
+        .unwrap();
+        assert_eq!(pooled.api_keys, vec!["sk-a".to_string(), "sk-b".to_string()]);
+        assert!(pooled.rotation_enabled);
+        assert_eq!(pooled.rotation_strategy.as_deref(), Some("least-used"));
     }
 }
