@@ -17,6 +17,7 @@
 
 import type { Skill, StoredMessage, ChatSession, Character, McpServer } from "@/lib/claude/types"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
+import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { getDb } from "@/lib/db/schema"
 import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
@@ -136,6 +137,8 @@ export async function readDexieDelta(
       return readAdapterInstancesDelta(since)
     case "mcpServers":
       return readMcpServersDelta(since)
+    case "terminalHistory":
+      return readTerminalHistoryDelta(since)
     case "settings":
       return readSettingsDelta(since)
     case "conversationOverrides":
@@ -257,6 +260,24 @@ async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServer>>
   const all = await getDb().mcpServers.toArray()
   const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
   return finalizeDelta("mcpServers", rows, since)
+}
+
+/**
+ * Durable terminal command history (ADR-0039 phase 2). Unlike every other
+ * synced table, `terminalHistory` rows carry no `updatedAt`/`createdAt` — the
+ * only monotonic field is `ts` (last-execution epoch ms), which schema v74
+ * indexes. So we range-query on `ts` and ride the cursor on `ts` via the
+ * `finalizeDelta` override, exactly the way `readWorkflowRunsDelta` cursors on
+ * `max(startedAt, completedAt)`.
+ *
+ * Re-run semantics are correct as-is: re-executing a command bumps `ts` on the
+ * same `id`, so the row re-crosses the wire and the phone's `bulkPut`
+ * overwrites in place. Prune-deletions are not tombstoned (same as
+ * mcpServers/settings) — the phone ages stale rows out passively.
+ */
+async function readTerminalHistoryDelta(since: number): Promise<SyncDelta<TerminalHistoryRow>> {
+  const rows = await getDb().terminalHistory.where("ts").above(since).toArray()
+  return finalizeDelta("terminalHistory", rows, since, false, (r) => r.ts)
 }
 
 async function readConversationOverridesDelta(since: number): Promise<SyncDelta<unknown>> {

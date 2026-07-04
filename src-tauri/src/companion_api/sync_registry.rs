@@ -151,6 +151,16 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Configured MCP servers (read-only mirror for the mobile /me/mcp viewer)".to_string(),
             has_tombstones: false,
         },
+        // ADR-0039 (phase 2) — durable terminal command history. One-way
+        // read-only mirror; the phone has no shell so it never writes back.
+        // The desktop projector cursors on `ts` (no updatedAt/createdAt on the
+        // row), and prune-deletions are not tombstoned (rows age out passively
+        // on the phone), same omission class as mcpServers/settings.
+        SyncTableDescriptor {
+            name: "terminalHistory".to_string(),
+            description: "Durable terminal command history (read-only mirror for the mobile /me/command-history viewer)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -167,6 +177,7 @@ mod tests {
         assert!(r.contains("goals"));
         assert!(r.contains("memories"));
         assert!(r.contains("mcpServers"));
+        assert!(r.contains("terminalHistory"));
         assert!(r.contains("settings"));
         assert!(!r.contains("ohai"));
     }

@@ -49,6 +49,13 @@ export type SyncableTable =
   // `/me/mcp` page is a paired-only read-only viewer of the desktop's servers.
   // Mirroring this table is what lets it list the desktop's MCP config offline.
   | "mcpServers"
+  // ADR-0039 (phase 2) — durable terminal command history. Authored on the
+  // desktop by the terminal spawn-orchestrator; the phone has no shell and
+  // never writes back, so this is a one-way read-only mirror powering the
+  // mobile `/me/command-history` browse/search viewer. Rows carry no
+  // `updatedAt`/`createdAt` — recency lives on the indexed `ts`, which the
+  // desktop projector cursors on (see readTerminalHistoryDelta).
+  | "terminalHistory"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

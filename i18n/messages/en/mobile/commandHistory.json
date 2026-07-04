@@ -1,0 +1,14 @@
+{
+  "backAria": "Back to settings",
+  "copied": "Command copied to clipboard.",
+  "copyAria": "Copy command: {command}",
+  "copyError": "Clipboard unavailable in this shell.",
+  "empty": "No commands have synced from your paired desktop yet.",
+  "intro": "Terminal commands run on your paired desktop, mirrored here read-only. Tap a command to copy it.",
+  "noProject": "No project",
+  "noResults": "No commands match your search.",
+  "searchAria": "Search command history",
+  "searchPlaceholder": "Search commands",
+  "title": "Command history",
+  "uses": "{count, plural, =1 {1 run} other {# runs}}"
+}

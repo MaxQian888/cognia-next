@@ -32,6 +32,7 @@ import {
   DatabaseIcon,
   GitMergeIcon,
   HardDriveIcon,
+  HistoryIcon,
   InfoIcon,
   KeyRoundIcon,
   LinkIcon,
@@ -288,6 +289,14 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/terminal",
     section: "connection",
     keywords: ["terminal", "shell", "command", "终端", "命令行"],
+  },
+  {
+    id: "command-history",
+    icon: HistoryIcon,
+    labelKey: "commandHistoryRow",
+    href: "/me/command-history",
+    section: "connection",
+    keywords: ["command history", "terminal", "shell", "recent", "命令历史", "终端", "历史"],
   },
   {
     id: "instructions",

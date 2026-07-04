@@ -118,6 +118,7 @@
     "resourcesTitle": "Resources"
   },
   "helpRow": "Help & docs",
+  "commandHistoryRow": "Command history",
   "mcpRow": "MCP servers",
   "memoryRow": "Memory",
   "notificationsRow": "Notifications",

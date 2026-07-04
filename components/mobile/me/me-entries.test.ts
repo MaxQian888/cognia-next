@@ -40,6 +40,14 @@ describe("me-entries registry", () => {
     expect(byId("remote-sessions")?.href).toBe("/remote-sessions")
   })
 
+  it("surfaces the synced command-history viewer entry (ADR-0039)", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("command-history")).toMatchObject({
+      href: "/me/command-history",
+      section: "connection",
+    })
+  })
+
   it("surfaces the dormant-field preference pages (speech, web-search, conversation)", () => {
     const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
     expect(byId("speech")).toMatchObject({ href: "/me/speech", section: "appearance" })

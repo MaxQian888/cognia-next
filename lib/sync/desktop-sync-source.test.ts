@@ -38,6 +38,7 @@ describe("readDexieDelta", () => {
     await db.plugins.clear()
     await db.adapterInstances.clear()
     await db.mcpServers.clear()
+    await db.terminalHistory.clear()
     await db.conversationOverrides.clear()
     await db.settings.clear()
     await db.workflowRuns.clear()
@@ -279,6 +280,56 @@ describe("readDexieDelta", () => {
     expect(delta.has_more).toBe(true)
     // Oldest-activity-first paging: the first page starts at the earliest run.
     expect((delta.rows[0] as { id: string }).id).toBe("run-0")
+  })
+
+  it("returns terminalHistory rows past the cursor and rides next_since on max(ts)", async () => {
+    const db = getDb()
+    await db.terminalHistory.bulkPut([
+      // ts before the cursor — excluded.
+      {
+        id: "th-old",
+        command: "ls",
+        projectId: "",
+        shell: "pwsh.exe",
+        cwd: null,
+        exitCode: 0,
+        ts: 5,
+        uses: 1,
+        sessionId: "sess-1",
+      } as never,
+      // ts past the cursor — included.
+      {
+        id: "th-mid",
+        command: "git status",
+        projectId: "proj-a",
+        shell: "pwsh.exe",
+        cwd: "C:/repo",
+        exitCode: 0,
+        ts: 20,
+        uses: 3,
+        sessionId: "sess-1",
+      } as never,
+      // highest ts — sets next_since.
+      {
+        id: "th-new",
+        command: "pnpm test",
+        projectId: "proj-a",
+        shell: "pwsh.exe",
+        cwd: "C:/repo",
+        exitCode: 1,
+        ts: 60,
+        uses: 2,
+        sessionId: "sess-2",
+      } as never,
+    ])
+
+    const delta = await readDexieDelta("terminalHistory", 10)
+    expect(delta.rows.map((r) => (r as { id: string }).id).sort()).toEqual(["th-mid", "th-new"])
+    // Cursor rides the highest ts — without the cursorOf override it would stay
+    // at `since` forever and the phone would re-pull the same rows every sync.
+    expect(delta.next_since).toBe(60)
+    expect(delta.deleted_ids).toEqual([])
+    expect(delta.has_more).toBe(false)
   })
 
   it("emits settings with Date.now cursor when the singleton has no updatedAt", async () => {

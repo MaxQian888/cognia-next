@@ -41,6 +41,7 @@ import { syncMessages } from "./handlers/messages"
 import { syncPlugins } from "./handlers/plugins"
 import { syncSessions } from "./handlers/sessions"
 import { syncSkills } from "./handlers/skills"
+import { syncTerminalHistory } from "./handlers/terminal-history"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
 import { syncWorkflowRuns } from "./handlers/workflow-runs"
@@ -84,6 +85,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // mobile `/me/mcp` page can list the desktop's servers (the phone has no
   // MCP push RPC and the standalone engine runs no MCP).
   { table: "mcpServers", run: syncMcpServers },
+  // ADR-0039 (phase 2) — durable terminal command history. One-way read-only
+  // mirror (desktop → phone) powering the mobile `/me/command-history` browse
+  // /search viewer; the phone has no shell, so it never writes back.
+  { table: "terminalHistory", run: syncTerminalHistory },
 ]
 
 /**

@@ -118,6 +118,7 @@
     "resourcesTitle": "资源"
   },
   "helpRow": "帮助与文档",
+  "commandHistoryRow": "命令历史",
   "mcpRow": "MCP 服务器",
   "memoryRow": "记忆",
   "notificationsRow": "通知",

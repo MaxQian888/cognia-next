@@ -1,0 +1,14 @@
+{
+  "backAria": "返回设置",
+  "copied": "命令已复制到剪贴板。",
+  "copyAria": "复制命令：{command}",
+  "copyError": "当前环境无法访问剪贴板。",
+  "empty": "已配对的桌面端尚未同步任何命令。",
+  "intro": "在已配对桌面端运行的终端命令，以只读方式同步到此处。点按命令即可复制。",
+  "noProject": "无项目",
+  "noResults": "没有匹配的命令。",
+  "searchAria": "搜索命令历史",
+  "searchPlaceholder": "搜索命令",
+  "title": "命令历史",
+  "uses": "{count, plural, other {# 次运行}}"
+}
