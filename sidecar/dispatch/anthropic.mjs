@@ -31,6 +31,7 @@ import {
   stampUserServersAlwaysLoad,
 } from "./tool-search-policy.mjs"
 import { buildLspHooks } from "./lsp-hooks.mjs"
+import { buildAgentHooks, mergeHookMaps } from "./agent-hooks.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
@@ -364,7 +365,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
 
     // Diagnostics-after-edit feedback loop (Phase 2). Omitted when LSP is
     // disabled — the strip-undefined pass below removes the field.
-    hooks: lspEnabled ? buildLspHooks(lspResolver) : undefined,
+    // SDK-native hooks: the LSP diagnostics-after-edit hook (Phase 2) merged
+    // with the user's settings.json lifecycle hooks (`sendOptions.hooks`, injected
+    // HOST-side after the trust gate). Both are `Partial<Record<HookEvent,
+    // HookCallbackMatcher[]>>`; `mergeHookMaps` concatenates per event. Returns
+    // undefined when neither contributes, so the strip pass omits the key.
+    hooks: mergeHookMaps(
+      lspEnabled ? buildLspHooks(lspResolver) : undefined,
+      buildAgentHooks(sendOptions.hooks, { emit, log, sessionId, cwd: sendOptions.cwd })
+    ),
 
     canUseTool: (toolName, input, ctx) => {
       // The `ask_user` elicitation tool is the user interaction itself: the

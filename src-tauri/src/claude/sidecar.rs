@@ -531,10 +531,10 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
     Ok(())
 }
 
-/// Run PreToolUse hooks against a `permission_request` event from the
-/// sidecar. If any hook blocks, write a `permission_response` (deny) back to
-/// the sidecar without involving the frontend. Otherwise forward the event
-/// onward as usual so the user / approval store handles it.
+/// Handle a `permission_request` event from the sidecar. PreToolUse hooks
+/// (blocking + `updatedInput`) now run IN the sidecar as SDK-native hooks, so
+/// this fires only the observational `PermissionRequest` event and forwards the
+/// event onward for the user / approval store to handle.
 ///
 /// The forward at the bottom is load-bearing on headless hosts: it MUST reach
 /// the EventBus (→ `/ws/v1/events`) or every gated tool call deadlocks
@@ -542,11 +542,6 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
 async fn handle_permission_request(host: Arc<dyn SidecarHost>, state: SidecarState, value: Value) {
     let session_id = value
         .get("sessionId")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_default();
-    let request_id = value
-        .get("requestId")
         .and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_default();
@@ -583,62 +578,18 @@ async fn handle_permission_request(host: Arc<dyn SidecarHost>, state: SidecarSta
         &pr,
     );
 
-    let decision =
-        hooks::run_pre_tool_use(&settings, &session_id, cwd.as_deref(), &tool_name, &input).await;
+    // PreToolUse execution — including blocking (`permissionDecision: "deny"`),
+    // `updatedInput` rewrite, and `additionalContext` — now runs IN the sidecar
+    // as an SDK-native hook (`dispatch/agent-hooks.mjs`), which fires BEFORE
+    // `canUseTool`. Running it here as well would double-execute the user's
+    // command hooks, so this path is intentionally observational-only now: it
+    // fires `PermissionRequest` above and forwards the event for the normal
+    // approval flow. A sidecar PreToolUse deny short-circuits before any
+    // `permission_request` is emitted, so we never even reach here for it.
+    let _ = &input;
 
-    for w in &decision.warnings {
-        log::warn!("PreToolUse[{tool_name}]: {w}");
-    }
-
-    // Surface the PreToolUse fire (block / warnings) as a hook row before the
-    // block reason is moved out below. Blocked fires render in place of the
-    // dropped `type:"log"` deny line that used to be the only signal.
-    emit_hook_fire(
-        host.as_ref(),
-        &session_id,
-        &hooks::hook_event_name(hooks::HookEvent::PreToolUse),
-        Some(tool_name.as_str()),
-        &decision,
-    );
-
-    if let Some(reason) = decision.block {
-        let payload = json!({
-          "type": "permission_response",
-          "sessionId": session_id,
-          "requestId": request_id,
-          "decision": "deny",
-          "message": format!("hook denied: {reason}"),
-        });
-        if let Err(e) = state.write_command(&payload).await {
-            log::error!("failed to write hook deny: {e}");
-        }
-        // The blocked PreToolUse fire was already surfaced as a hook row above
-        // (`emit_hook_fire`), which replaces the old compact `type:"log"` deny
-        // line. The `"hook denied:"` message prefix written into the deny payload
-        // lets the adapter suppress a duplicate permission-denied notice.
-        //
-        // PermissionDenied fires after a hook-driven deny.
-        let denied = hooks::run_tool_scoped(
-            &settings,
-            hooks::HookEvent::PermissionDenied,
-            &session_id,
-            cwd.as_deref(),
-            &tool_name,
-            json!({ "tool_name": tool_name, "reason": reason }),
-        )
-        .await;
-        emit_hook_diagnostics(
-            host.as_ref(),
-            hooks::HookEvent::PermissionDenied,
-            &session_id,
-            Some(tool_name.as_str()),
-            &denied,
-        );
-        return;
-    }
-
-    // No block — forward so the normal approval flow can run (WebView
-    // approval store on desktop; `/ws/v1/events` subscribers headless).
+    // Forward so the normal approval flow can run (WebView approval store on
+    // desktop; `/ws/v1/events` subscribers headless).
     host.emit(SIDECAR_EVENT, &value);
 }
 
@@ -741,41 +692,14 @@ async fn observe_hooks(host: Arc<dyn SidecarHost>, state: SidecarState, value: V
     let raw_cwd = state.session_cwd(&session_id).await;
     let cwd = hooks::trust::resolve_trusted_cwd(raw_cwd.as_deref());
 
-    // PostToolUse / PostToolUseFailure from tool_result blocks.
+    // PostToolUse / PostToolUseFailure now execute IN the sidecar as SDK-native
+    // hooks (`dispatch/agent-hooks.mjs`), where `updatedToolOutput` can rewrite
+    // the tool result before the model sees it. We still drain the recorded
+    // tool_use map here so it doesn't leak across the turn, but no longer run the
+    // hooks — doing so would double-execute the user's command handlers.
     if let Some(evt) = value.get("event") {
-        let results = hooks::extract_tool_results(evt);
-        for (tool_use_id, is_error, result) in results {
-            let Some((tool_name, input)) = state.take_tool(&session_id, &tool_use_id).await else {
-                continue; // No recorded tool_use (e.g. resumed session) — skip.
-            };
-            let event = if is_error {
-                hooks::HookEvent::PostToolUseFailure
-            } else {
-                hooks::HookEvent::PostToolUse
-            };
-            let settings = hooks::load_effective_settings(cwd.as_deref());
-            let fields = json!({
-                "tool_name": tool_name,
-                "tool_input": input,
-                "tool_response": result,
-                "is_error": is_error,
-            });
-            let decision = hooks::run_tool_scoped(
-                &settings,
-                event,
-                &session_id,
-                cwd.as_deref(),
-                &tool_name,
-                fields,
-            )
-            .await;
-            emit_hook_diagnostics(
-                host.as_ref(),
-                event,
-                &session_id,
-                Some(tool_name.as_str()),
-                &decision,
-            );
+        for (tool_use_id, _is_error, _result) in hooks::extract_tool_results(evt) {
+            let _ = state.take_tool(&session_id, &tool_use_id).await;
         }
     }
 

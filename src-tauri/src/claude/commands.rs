@@ -226,7 +226,7 @@ pub async fn claude_send_with_host(
 ) -> Result<(), String> {
     let _perf = crate::perf::guard("claude.send");
     spawn_sidecar(Arc::clone(&host), state.clone()).await?;
-    let opts_value = match options {
+    let mut opts_value = match options {
         Some(o) => {
             o.validate()?;
             serde_json::to_value(o).map_err(|e| e.to_string())?
@@ -249,11 +249,27 @@ pub async fn claude_send_with_host(
     // resolve project/local-scope settings for this session's later events.
     state.register_session_cwd(&session_id, cwd.clone()).await;
     let prompt_text = extract_prompt_text(&prompt);
+    // Project/local hooks load only for a trusted cwd; untrusted → user scope.
+    let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
+    let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
+
+    // Convergence (ADR-0040 follow-up): hand the trusted, merged settings.json
+    // hooks to the sidecar so it runs tool-scoped hooks (PreToolUse / PostToolUse
+    // / PostToolUseFailure) as SDK-native `options.hooks` — where `updatedInput`
+    // / `updatedToolOutput` and blocking work in-process. Injected HERE, HOST-side,
+    // AFTER the trust gate, so a compromised renderer cannot smuggle untrusted
+    // project hooks in via `options`. Session-scoped events (UserPromptSubmit
+    // below, and the observational lifecycle hooks) stay HOST-run in this phase;
+    // the sidecar's `buildAgentHooks` only registers the tool-scoped events, so
+    // passing the full config causes no double-firing.
+    if let Some(hooks_value) = settings.merged.hooks.clone() {
+        if let Value::Object(map) = &mut opts_value {
+            map.insert("hooks".to_string(), hooks_value);
+        }
+    }
+
     let mut prompt = prompt;
     if !prompt_text.is_empty() {
-        // Project/local hooks load only for a trusted cwd; untrusted → user scope.
-        let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
-        let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
         let decision = hooks::run_user_prompt_submit(
             &settings,
             &session_id,
