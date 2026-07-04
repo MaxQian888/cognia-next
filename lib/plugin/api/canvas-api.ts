@@ -25,7 +25,7 @@ import type {
   PluginCanvasDocument,
   CreateCanvasDocumentOptions,
   CanvasSelection,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type {
   ArtifactLanguage,
   CanvasDocumentVersion,

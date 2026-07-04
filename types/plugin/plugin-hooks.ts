@@ -4,10 +4,9 @@
  * Additional hook definitions for deeper integration with the application.
  */
 
-import type { PluginHooks, PluginMessage } from "./plugin"
+import type { PluginHooks, PluginMessage, PluginCanvasDocument } from "./plugin"
 import type { Project, KnowledgeFile, ChatMode } from "./_compat"
 import type { Artifact } from "../artifact/artifact"
-import type { PluginCanvasDocument } from "./plugin-extended"
 
 // =============================================================================
 // Project Hooks

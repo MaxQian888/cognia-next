@@ -5,11 +5,7 @@
  */
 
 import { useProjectStore } from "@/stores/project/project-store"
-import type {
-  PluginProjectAPI,
-  ProjectFilter,
-  ProjectFileInput,
-} from "@/types/plugin/plugin-extended"
+import type { PluginProjectAPI, ProjectFilter, ProjectFileInput } from "@/types/plugin/plugin"
 import type { Project, KnowledgeFile } from "@/types"
 import { inferKnowledgeFileTypeFromFilename } from "@cognia/document"
 import { createPluginSystemLogger } from "../core/logger"

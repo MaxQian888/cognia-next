@@ -18,7 +18,7 @@ import type {
   ThemeColors,
   CustomTheme,
   ThemeState,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 
 /**
  * Per-plugin ownership of `CustomTheme` row ids created through the API. The

@@ -13,7 +13,7 @@ import tokyoNightJson from "./vscode-theme/__fixtures__/tokyo-night-dark.json"
 import githubLightJson from "./vscode-theme/__fixtures__/github-light-default.json"
 import { vscodeThemeToCustomTheme, type VscodeThemeJson } from "./vscode-theme/parse-json"
 import { deriveOppositeVariant } from "./derive-variant"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 
 /**
  * A pre-built CustomTheme produced from an inlined VSCode JSON. The parser

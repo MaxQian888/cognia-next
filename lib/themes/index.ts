@@ -13,7 +13,7 @@
  * can call it from anywhere without taking a Zustand subscription.
  */
 
-import type { ColorThemePreset, ThemeColors, CustomTheme } from "@/types/plugin/plugin-extended"
+import type { ColorThemePreset, ThemeColors, CustomTheme } from "@/types/plugin/plugin"
 
 /** Available built-in color presets. Mirrors `ColorThemePreset`. */
 export const COLOR_PRESETS: readonly ColorThemePreset[] = [

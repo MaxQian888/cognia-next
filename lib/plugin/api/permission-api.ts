@@ -4,7 +4,7 @@
  * Provides permission management capabilities to plugins.
  */
 
-import type { PluginPermissionAPI, PluginAPIPermission } from "@/types/plugin/plugin-extended"
+import type { PluginPermissionAPI, PluginAPIPermission } from "@/types/plugin/plugin"
 import { createPluginSystemLogger } from "@/lib/plugin/core/logger"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
 import {

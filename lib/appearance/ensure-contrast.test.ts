@@ -1,4 +1,4 @@
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { wcagContrast } from "./contrast"
 import { AA_NORMAL_TEXT, ensureForegroundContrast } from "./ensure-contrast"
 

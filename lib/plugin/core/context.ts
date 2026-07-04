@@ -105,7 +105,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { useA2UIStore } from "@/stores/a2ui"
 import type { PluginManager } from "./manager"
-import type { PluginContextAPI } from "@/types/plugin/plugin-extended"
+import type { PluginContextAPI } from "@/types/plugin/plugin"
 import {
   createSessionAPI,
   createProjectAPI,
@@ -362,9 +362,9 @@ export function createFullPluginContext(
     getLocale: pluginI18n.getLocale,
     hasKey: pluginI18n.hasKey,
     // Wrap onLocaleChange to match PluginI18nAPI signature (Locale instead of string)
-    onLocaleChange: (handler: (locale: import("@/types/plugin/plugin-extended").Locale) => void) =>
+    onLocaleChange: (handler: (locale: import("@/types/plugin/plugin").Locale) => void) =>
       pluginI18n.onLocaleChange((locale: string) =>
-        handler(locale as import("@/types/plugin/plugin-extended").Locale)
+        handler(locale as import("@/types/plugin/plugin").Locale)
       ),
   }
 

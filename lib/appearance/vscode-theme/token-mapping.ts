@@ -9,7 +9,7 @@
 // This is data, not logic — keep the file focused. Behavior tests live in
 // `parse-json.test.ts` so they exercise the full pipeline at once.
 
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 /**
  * For each cognia ThemeColors key, the ordered list of VSCode color keys

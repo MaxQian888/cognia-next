@@ -13,7 +13,7 @@ export type {
   CreateCanvasDocumentOptions,
   PluginCanvasAPI,
   PluginCanvasDocument,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 
 export type {
   CanvasActionConfig,

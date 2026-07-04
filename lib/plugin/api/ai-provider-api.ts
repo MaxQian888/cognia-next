@@ -19,7 +19,7 @@ import type {
   AIChatMessage,
   AIChatOptions,
   AIChatChunk,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { createPluginSystemLogger } from "../core/logger"
 import {
   registerProviderDefinition,

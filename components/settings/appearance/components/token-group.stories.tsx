@@ -5,7 +5,7 @@ import { fn } from "storybook/test"
 import { TokenGroup, TOKEN_GROUPS } from "./token-group"
 import { DEFAULT_FALLBACKS } from "@/lib/appearance"
 import { auditThemeContrast } from "@/lib/appearance/contrast-audit"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 // A collapsible cluster of `ColorTokenRow`s for one role group (Surface,
 // Primary, …). Drives a live contrast audit; flagged rows get a chip and the

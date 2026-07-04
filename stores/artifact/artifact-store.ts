@@ -33,7 +33,7 @@ import {
 function activeProjectId(): string | null {
   return useProjectStore.getState().activeProjectId
 }
-import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
+import type { PluginCanvasDocument } from "@/types/plugin/plugin"
 import {
   buildArtifactSourceMetadata,
   buildDerivedArtifactMetadata,

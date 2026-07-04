@@ -16,7 +16,7 @@
  */
 import { parse as parseCulori, formatHex } from "culori"
 import { darken, lighten, parseHex, toHex } from "@/lib/appearance/vscode-theme/color-utils"
-import type { ThemeColors as AppearanceColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors as AppearanceColors } from "@/types/plugin/plugin"
 import {
   themeRegistry,
   type EditorTheme,

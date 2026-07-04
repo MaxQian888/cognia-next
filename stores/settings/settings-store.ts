@@ -3,7 +3,7 @@
 import { create } from "zustand"
 import type { AppSettings, AppLanguage, AppTheme, BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
-import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
+import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
 import type {
   AutoModeSettings,
   BackgroundSettings,

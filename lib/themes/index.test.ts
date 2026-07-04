@@ -3,7 +3,7 @@
 // stays alive until the Task 8 Dexie v16 migration runs.
 
 import { resolveActiveThemeColors } from "./index"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 
 // 27-key fixture builder, mirroring `lib/appearance/derive-variant.test.ts`.
 function buildTokens(overrides: Partial<ThemeColors> = {}): ThemeColors {

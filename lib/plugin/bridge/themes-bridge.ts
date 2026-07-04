@@ -21,7 +21,7 @@ import type {
   PluginThemeContribution,
   PluginManifestThemeColors,
 } from "@/types/plugin/plugin"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import {
   registerPluginTheme,
   unregisterThemesByPlugin,

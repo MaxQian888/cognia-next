@@ -32,7 +32,7 @@ import type {
   AIChatMessage,
   AIChatChunk,
   AIChatOptions,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { loggers } from "@/lib/plugin/core/logger"
 import { createAIProviderAPI } from "@/lib/plugin/api/ai-provider-api"
 

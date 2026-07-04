@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Trash2Icon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import type { ImportedThemeRecord } from "@/types/appearance"
-import type { CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomTheme } from "@/types/plugin/plugin"
 import { cn } from "@/lib/utils"
 import { VscodeImportForm } from "../vscode-import-form"
 

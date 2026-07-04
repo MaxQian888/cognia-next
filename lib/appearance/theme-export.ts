@@ -1,4 +1,4 @@
-import type { CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomTheme } from "@/types/plugin/plugin"
 
 const SCHEMA_URL = "https://cognia.dev/schemas/custom-theme/v1.json"
 const FORMAT_VERSION = "v1"

@@ -20,7 +20,7 @@ import type {
   ExportData,
   ExportResult,
   CustomExporter,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type { Session, UIMessage } from "@/types"
 import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 

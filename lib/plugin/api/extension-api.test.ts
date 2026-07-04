@@ -12,7 +12,7 @@ import {
   getPluginExtensionDiagnostics,
   clearAllExtensionDiagnostics,
 } from "./extension-api"
-import type { ExtensionPoint, ExtensionProps } from "@/types/plugin/plugin-extended"
+import type { ExtensionPoint, ExtensionProps } from "@/types/plugin/plugin"
 import {
   setContextKey,
   __resetContextKeysForTesting,

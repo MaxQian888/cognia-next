@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, render, waitFor } from "@testing-library/react"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn().mockResolvedValue({

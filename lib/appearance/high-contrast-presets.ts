@@ -8,7 +8,7 @@
 // `ThemeColors` exactly so the result can be merged into the normal apply
 // path with no special-casing in `CustomThemeApplier`.
 
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import type { HighContrastMode } from "@/types/appearance"
 
 export const HIGH_CONTRAST_LIGHT: ThemeColors = {

@@ -2771,9 +2771,9 @@ export interface AppSettings {
   // =============================================================================
 
   /** Active color preset. Plugin Theme API surfaces this as `colorTheme`. */
-  colorTheme?: import("@/types/plugin/plugin-extended").ColorThemePreset
+  colorTheme?: import("@/types/plugin/plugin").ColorThemePreset
   /** User-defined custom theme palettes (UI colors, not export tokens). */
-  customThemes?: import("@/types/plugin/plugin-extended").CustomTheme[]
+  customThemes?: import("@/types/plugin/plugin").CustomTheme[]
   /** Currently active custom theme id; null when a preset is in use. */
   activeCustomThemeId?: string | null
 

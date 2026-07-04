@@ -18,11 +18,7 @@ import {
   getCodeAdapterExecutor,
   __resetProtocolAdaptersForTesting,
 } from "@cognia/provider-core/providers/protocol-adapter-registry"
-import type {
-  AIProviderDefinition,
-  AIChatChunk,
-  AIChatMessage,
-} from "@/types/plugin/plugin-extended"
+import type { AIProviderDefinition, AIChatChunk, AIChatMessage } from "@/types/plugin/plugin"
 import type { CodeAdapterChunk } from "@/types/plugin/plugin-protocol-adapter"
 
 // Mock the settings store

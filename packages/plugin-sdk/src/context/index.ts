@@ -3,7 +3,7 @@
  *
  * Re-exports `PluginContext` / `FullPluginContext` plus every per-field API
  * interface a plugin receives during `activate(ctx)`. Source of truth is
- * `types/plugin/plugin.ts` (core APIs), `types/plugin/plugin-extended.ts`
+ * `types/plugin/plugin.ts` (core APIs), `types/plugin/plugin.ts`
  * (extended context APIs available through the runtime extension surface), and
  * `lib/plugin/core/context.ts` (the full host-mounted context).
  *
@@ -14,7 +14,7 @@
  */
 
 import type { PluginContext as CtxPluginContext } from "@/types/plugin/plugin"
-import type { PluginContextAPI as CtxPluginContextAPI } from "@/types/plugin/plugin-extended"
+import type { PluginContextAPI as CtxPluginContextAPI } from "@/types/plugin/plugin"
 import type { PluginOcrAPI as CtxPluginOcrAPI } from "@/lib/plugin/api/ocr-api"
 import type { PluginWorkspaceAPI as CtxPluginWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
 import type { PluginModalAPI as CtxPluginModalAPI } from "@/lib/plugin/api/modal-api"
@@ -215,7 +215,7 @@ export type FullPluginContext = Omit<CtxPluginContext, "storage"> &
 export type { PluginSchedulerAPI } from "@/types/plugin/plugin-scheduler"
 
 // =============================================================================
-// Extended-context APIs (from types/plugin/plugin-extended.ts).
+// Extended-context APIs (from types/plugin/plugin.ts).
 // These are surfaced through the extended context wrapper; plugin authors
 // see them as additional fields on the context object when the host exposes
 // the extended surface.
@@ -279,4 +279,4 @@ export type {
   PluginExtensionAPI,
   PluginPermissionAPI,
   PluginContextAPI,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"

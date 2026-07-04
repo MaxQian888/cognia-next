@@ -52,7 +52,7 @@ import type {
 } from "@/types/plugin/plugin-hooks"
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
-import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
+import type { PluginCanvasDocument } from "@/types/plugin/plugin"
 import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
 
 // =============================================================================

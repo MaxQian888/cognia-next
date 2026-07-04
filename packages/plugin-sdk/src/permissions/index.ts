@@ -7,7 +7,7 @@
  * Sources:
  *  - `types/plugin/plugin.ts` — `PluginPermission`,
  *    `PluginPermissionDecision`, `PluginPermissionPolicy`
- *  - `types/plugin/plugin-extended.ts` — `PluginAPIPermission` (the
+ *  - `types/plugin/plugin.ts` — `PluginAPIPermission` (the
  *    extended permission union including the extension-API-only
  *    permissions added by the extended-context surface)
  *
@@ -21,4 +21,4 @@ export type {
   PluginPermissionPolicy,
 } from "@/types/plugin/plugin"
 
-export type { PluginAPIPermission } from "@/types/plugin/plugin-extended"
+export type { PluginAPIPermission } from "@/types/plugin/plugin"

@@ -48,4 +48,4 @@ export type {
   AIModel,
   AIProviderDefinition,
   PluginAIProviderAPI,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"

@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import type { ThemeColors as AppearanceColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors as AppearanceColors } from "@/types/plugin/plugin"
 import {
   buildCogniaActiveEditorTheme,
   COGNIA_ACTIVE_THEME_ID,

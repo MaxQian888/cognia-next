@@ -23,7 +23,7 @@ import type {
   SessionFilter,
   MessageQueryOptions,
   SendMessageOptions,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type { Session, UIMessage } from "@/types"
 import { createPluginSystemLogger } from "../core/logger"
 import { nanoid } from "nanoid"

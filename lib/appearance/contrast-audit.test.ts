@@ -6,7 +6,7 @@ import {
   targetRatio,
 } from "./contrast-audit"
 import { wcagContrast } from "./contrast"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 // Tokens chosen so every critical pair clears WCAG AA (4.5:1) by default.
 // Tailwind's mid-blue/red brand colors fail AA against white, so we use

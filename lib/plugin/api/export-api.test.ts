@@ -4,7 +4,7 @@
 
 import { createExportAPI, clearCustomExporters } from "./export-api"
 import { getPluginEventHooks } from "../messaging/hooks-system"
-import type { CustomExporter, ExportData } from "@/types/plugin/plugin-extended"
+import type { CustomExporter, ExportData } from "@/types/plugin/plugin"
 
 // Mock stores and dependencies
 const mockSessions = [

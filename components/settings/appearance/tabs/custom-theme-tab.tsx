@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Trash2Icon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 import { THEME_COLOR_KEYS, DEFAULT_FALLBACKS } from "@/lib/appearance"
 import { auditThemeContrast } from "@/lib/appearance/contrast-audit"
 import { exportThemeToJson, importThemeFromJson } from "@/lib/appearance/theme-export"

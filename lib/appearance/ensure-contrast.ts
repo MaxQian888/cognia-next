@@ -7,7 +7,7 @@
 // call site, `CustomThemeApplier` runs the resolved palette through this pass
 // so every surface in any active theme stays readable.
 
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { adjustForegroundLightnessToTarget, wcagContrast } from "./contrast"
 
 /** WCAG 2.1 AA contrast threshold for normal-size text. */

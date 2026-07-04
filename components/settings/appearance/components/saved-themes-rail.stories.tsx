@@ -3,7 +3,7 @@ import { fn } from "storybook/test"
 
 import { SavedThemesRail, type SavedThemesRailLabels } from "./saved-themes-rail"
 import { DEFAULT_FALLBACKS } from "@/lib/appearance"
-import type { CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomTheme } from "@/types/plugin/plugin"
 
 // Rail of saved custom themes with per-row activate / duplicate / export /
 // delete actions and a "start new" empty state. Pure props.
