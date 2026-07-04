@@ -58,7 +58,7 @@ const CORS_HEADERS: Record<string, string> = {
   // The bearer secret — not cookies — is the gate, so a wildcard origin is safe.
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Owner-Token",
   "Access-Control-Max-Age": "86400",
 }
 
@@ -269,6 +269,10 @@ async function handleStats(request: Request, env: Env, code: string): Promise<Re
   // Ownership is checked against the share's own token, so a missing share is
   // a 404 regardless of credentials (no oracle for which codes exist).
   if (!meta) return json({ error: "not found" }, 404)
+  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+    await deleteShare(env, code)
+    return json({ error: "not found" }, 404)
+  }
   if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
   return json({
     viewCount: meta.viewCount,
@@ -283,6 +287,10 @@ async function handleDelete(request: Request, env: Env, code: string): Promise<R
   // Already gone (expired / burned / never existed) → idempotent success
   // without leaking existence or requiring a credential.
   if (!meta) return new Response(null, { status: 204, headers: CORS_HEADERS })
+  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+    await deleteShare(env, code)
+    return new Response(null, { status: 204, headers: CORS_HEADERS })
+  }
   if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
   await deleteShare(env, code)
   return new Response(null, { status: 204, headers: CORS_HEADERS })
