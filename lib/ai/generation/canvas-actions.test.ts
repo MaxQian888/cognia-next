@@ -19,6 +19,7 @@ import {
   type CanvasActionType,
 } from "./canvas-actions"
 import { generateText, streamText } from "ai"
+import { getProviderModel } from "@cognia/provider-core/core/client"
 
 describe("ACTION_PROMPTS / getActionDescription", () => {
   it("includes prompts for every action type", () => {
@@ -105,6 +106,27 @@ describe("executeCanvasAction", () => {
       { language: "ts" }
     )
     expect(generateText).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.3 }))
+  })
+
+  it("forwards apiFlavor and headers to getProviderModel", async () => {
+    ;(generateText as jest.Mock).mockResolvedValue({ text: "ok" })
+    await executeCanvasAction("custom", "doc", {
+      provider: "openai",
+      model: "gpt-proxy",
+      apiKey: "sk",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "responses",
+      headers: { "OpenAI-Beta": "responses=experimental" },
+    })
+
+    expect(getProviderModel).toHaveBeenCalledWith({
+      provider: "openai",
+      model: "gpt-proxy",
+      apiKey: "sk",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "responses",
+      headers: { "OpenAI-Beta": "responses=experimental" },
+    })
   })
 
   it("returns success without explanation for content-replacement actions", async () => {
@@ -221,6 +243,37 @@ describe("executeCanvasActionStreaming", () => {
     expect(onToken).toHaveBeenCalledTimes(2)
     expect(onComplete).toHaveBeenCalledWith("Hello")
     expect(onError).not.toHaveBeenCalled()
+  })
+
+  it("forwards apiFlavor and headers to getProviderModel for streaming actions", async () => {
+    ;(streamText as jest.Mock).mockReturnValue({
+      textStream: (async function* () {
+        yield "ok"
+      })(),
+    })
+
+    await executeCanvasActionStreaming(
+      "custom",
+      "doc",
+      {
+        provider: "openai",
+        model: "gpt-proxy",
+        apiKey: "sk",
+        baseURL: "https://gateway.example/v1",
+        apiFlavor: "chat",
+        headers: { "x-provider": "proxy" },
+      },
+      { onToken: () => {}, onComplete: () => {}, onError: () => {} }
+    )
+
+    expect(getProviderModel).toHaveBeenCalledWith({
+      provider: "openai",
+      model: "gpt-proxy",
+      apiKey: "sk",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "chat",
+      headers: { "x-provider": "proxy" },
+    })
   })
 
   it("invokes onError on Error throws", async () => {

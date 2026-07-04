@@ -4,6 +4,7 @@
 import type { UIMessage } from "ai"
 import type {
   BetaContentBlock,
+  BetaFileBlock,
   BetaMessage,
   BetaToolResultBlock,
   BetaToolUseBlock,
@@ -101,6 +102,15 @@ function buildAssistantParts(message: BetaMessage): Parts {
   return parts
 }
 
+function preserveStepStartParts(preview: UIMessage | undefined, finalParts: Parts): Parts {
+  if (!preview) return finalParts
+  const stepStarts = preview.parts.filter(
+    (part) => (part as { type?: string }).type === "step-start"
+  )
+  if (stepStarts.length === 0) return finalParts
+  return [...stepStarts, ...finalParts]
+}
+
 /**
  * Walk every text block of the assistant message and combine
  *  - Anthropic Citations API entries
@@ -143,22 +153,25 @@ function blockToParts(block: BetaContentBlock): Part[] {
     // consumers expect every text block to map to at least one Part — fall
     // back to an empty-string text Part to preserve that 1:1 contract.
     if (!text) {
-      return [{ type: "text", text: "", state: "done" } as unknown as Part]
+      return [textPart("", b.providerMetadata)]
     }
-    return splitTextForA2UI(text)
+    return splitTextForA2UI(text, b.providerMetadata)
   }
   const single = blockToPart(block)
   return single ? [single] : []
 }
 
-function splitTextForA2UI(text: string): Part[] {
+function splitTextForA2UI(
+  text: string,
+  providerMetadata?: Record<string, Record<string, unknown>>
+): Part[] {
   if (!text) return []
   // Fast-path: skip the regex if no a2ui marker in sight.
   if (!/```a2ui|"createSurface"|"updateComponents"|"surface"\s*:/i.test(text)) {
-    return [textPart(text)]
+    return [textPart(text, providerMetadata)]
   }
   const extracted = extractA2UIFromResponse(text)
-  if (!extracted) return [textPart(text)]
+  if (!extracted) return [textPart(text, providerMetadata)]
   // We don't get back the exact span the parser consumed, so we strip the
   // first ```a2ui|json fence (if any) to expose surrounding prose. When the
   // payload is raw JSON without a fence we keep the plain text part empty.
@@ -173,14 +186,25 @@ function splitTextForA2UI(text: string): Part[] {
     source: "codeblock",
   }
   const out: Part[] = []
-  if (before.trim()) out.push(textPart(before))
+  if (before.trim()) out.push(textPart(before, providerMetadata))
   out.push(a2ui as unknown as Part)
-  if (after.trim()) out.push(textPart(after))
+  if (after.trim()) out.push(textPart(after, providerMetadata))
   return out
 }
 
-function textPart(text: string): Part {
-  return { type: "text", text, state: "done" } as unknown as Part
+function textPart(text: string, providerMetadata?: Record<string, Record<string, unknown>>): Part {
+  return {
+    type: "text",
+    text,
+    state: "done",
+    ...providerMetadataPart({ providerMetadata }),
+  } as unknown as Part
+}
+
+function providerMetadataPart(block: {
+  providerMetadata?: Record<string, Record<string, unknown>>
+}): { providerMetadata?: Record<string, Record<string, unknown>> } {
+  return block.providerMetadata ? { providerMetadata: block.providerMetadata } : {}
 }
 
 function blockToPart(block: BetaContentBlock): Part | null {
@@ -191,14 +215,42 @@ function blockToPart(block: BetaContentBlock): Part | null {
         type: "text",
         text: b.text ?? "",
         state: "done",
+        ...providerMetadataPart(b),
       } as unknown as Part
     }
     case "thinking": {
-      const b = block as { type: "thinking"; thinking?: string }
+      const b = block as Extract<BetaContentBlock, { type: "thinking" }>
       return {
         type: "reasoning",
         text: b.thinking ?? "",
         state: "done",
+        ...providerMetadataPart(b),
+      } as unknown as Part
+    }
+    case "file": {
+      const b = block as BetaFileBlock
+      const source = b.source
+      if (typeof b.url === "string" && typeof b.media_type === "string") {
+        return {
+          type: "file",
+          url: b.url,
+          mediaType: b.media_type,
+          ...(b.filename ? { filename: b.filename } : {}),
+        } as unknown as Part
+      }
+      if (
+        !source ||
+        source.type !== "base64" ||
+        typeof source.media_type !== "string" ||
+        typeof source.data !== "string"
+      ) {
+        return null
+      }
+      return {
+        type: "file",
+        url: `data:${source.media_type};base64,${source.data}`,
+        mediaType: source.media_type,
+        ...(b.filename ? { filename: b.filename } : {}),
       } as unknown as Part
     }
     case "tool_use": {
@@ -207,11 +259,23 @@ function blockToPart(block: BetaContentBlock): Part | null {
       if (artifactPart) {
         return artifactPart as unknown as Part
       }
+      const state =
+        b.state === "input-streaming" || b.state === "approval-requested"
+          ? b.state
+          : "input-available"
       return {
         type: `tool-${b.name}`,
         toolCallId: b.id,
-        state: "input-available",
+        state,
         input: b.input,
+        ...(b.providerExecuted !== undefined ? { providerExecuted: b.providerExecuted } : {}),
+        ...(b.providerMetadata ? { providerMetadata: b.providerMetadata } : {}),
+        ...(b.toolMetadata ? { toolMetadata: b.toolMetadata } : {}),
+        ...(b.dynamic !== undefined ? { dynamic: b.dynamic } : {}),
+        ...(b.title ? { title: b.title } : {}),
+        ...(b.invalid !== undefined ? { invalid: b.invalid } : {}),
+        ...(b.error !== undefined ? { error: b.error } : {}),
+        ...(b.approval ? { approval: b.approval } : {}),
       } as unknown as Part
     }
     default:
@@ -509,15 +573,16 @@ function appendCompactBoundary(
 }
 
 function appendAssistantMessage(messages: UIMessage[], evt: SDKAssistantMessage): UIMessage[] {
-  const parts = buildAssistantParts(evt.message)
   // We key UI messages by the Anthropic message id. If a prior partial-stream
   // version is in the list, replace it with the canonical full version.
   const id = evt.message.id ?? evt.uuid
   const idx = messages.findIndex((m) => m.id === id)
+  const parts = preserveStepStartParts(messages[idx], buildAssistantParts(evt.message))
   const next: UIMessage = {
     id,
     role: "assistant",
     parts,
+    ...(evt.message.metadata !== undefined ? { metadata: evt.message.metadata } : {}),
   }
   if (idx >= 0) {
     const copy = messages.slice()
@@ -668,6 +733,18 @@ function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage
     // it into the live usage so the ctx% window figure grows as the reply streams.
     const live = liveUsageFromStreamEvent(raw)
     return live ? mergeLiveUsage(messages, live) : messages
+  }
+
+  if (raw.type === "step_start") {
+    const idx = findLastAssistantIndex(messages)
+    if (idx < 0 || idx < findLastUserIndex(messages)) return messages
+    const msg = messages[idx]
+    const out = messages.slice()
+    out[idx] = {
+      ...msg,
+      parts: [...msg.parts, { type: "step-start" } as unknown as Part],
+    }
+    return out
   }
 
   if (raw.type === "content_block_delta") {

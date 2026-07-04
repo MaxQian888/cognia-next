@@ -95,6 +95,32 @@ describe("executeAiPromptV2 — explicit mode", () => {
     )
   })
 
+  it("forwards explicit provider protocol metadata to the LLM client", async () => {
+    const headers = { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" }
+    const ctx = makeCtx({
+      provider: "openrouter",
+      model: "openai/gpt-4.1-mini",
+      apiKey: "k",
+      baseURL: "https://openrouter.ai/api/v1",
+      apiFlavor: "chat",
+      headers,
+      userPrompt: "hi",
+    })
+
+    await executeAiPromptV2(ctx)
+
+    expect(mockCreateLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers,
+      })
+    )
+  })
+
   it("injects twin context into the system prompt for a twin-bound character", async () => {
     injectTwinContextMock.mockResolvedValue({ systemPrompt: "TWIN-WRAPPED", applied: true })
     const ctx = makeCtx({

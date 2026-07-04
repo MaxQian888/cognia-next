@@ -28,6 +28,8 @@ export interface OpenAiCompatibleVariantResponsePaths {
     input?: string
     output?: string
     cacheRead?: string
+    cacheCreation?: string
+    reasoning?: string
   }
 }
 
@@ -72,16 +74,337 @@ export interface SidecarCodeAdapterSpec {
 /** Normalized request a code executor receives (mirrors the sidecar shape). */
 export interface CodeAdapterRequest {
   model: string
-  messages: Array<{ role: string; content: unknown }>
+  messages: Array<{ role: string; content: unknown; providerOptions?: unknown }>
   modelParams: Record<string, unknown>
-  credentials: { apiKey?: string; baseURL?: string; protocol?: string }
+  credentials: {
+    apiKey?: string
+    baseURL?: string
+    protocol?: string
+    apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+    headers?: Record<string, string>
+  }
+  reasoning?: { effort?: string; maxThinkingTokens?: number }
+  maxSteps?: number
+  abortSignal?: AbortSignal
+}
+
+export interface CodeAdapterUsage {
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  inputTokenDetails?: {
+    noCacheTokens?: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+  }
+  outputTokenDetails?: {
+    textTokens?: number
+    reasoningTokens?: number
+  }
+  cachedInputTokens?: number
+  cacheCreationInputTokens?: number
+  reasoningTokens?: number
+  [key: string]: number | Record<string, number | undefined> | undefined
+}
+
+export type CodeAdapterProviderMetadata = Record<string, Record<string, unknown>>
+export type CodeAdapterToolMetadata = Record<string, unknown>
+
+export interface CodeAdapterStartChunk {
+  type: "start"
+  messageId?: string
+  messageMetadata?: unknown
+}
+
+export interface CodeAdapterMessageMetadataChunk {
+  type: "message-metadata"
+  messageMetadata: unknown
+}
+
+export interface CodeAdapterTextStartChunk {
+  type: "text-start"
+  id: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterTextEndChunk {
+  type: "text-end"
+  id: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterTextDeltaChunk {
+  type: "text-delta"
+  id?: string
+  text: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterReasoningStartChunk {
+  type: "reasoning-start"
+  id: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterReasoningEndChunk {
+  type: "reasoning-end"
+  id: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterReasoningDeltaChunk {
+  type: "reasoning-delta"
+  id?: string
+  text: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterToolCallChunk {
+  type: "tool-call"
+  toolCallId: string
+  toolName: string
+  args?: unknown
+  input?: unknown
+  providerExecuted?: boolean
+  providerMetadata?: CodeAdapterProviderMetadata
+  toolMetadata?: CodeAdapterToolMetadata
+  dynamic?: boolean
+  title?: string
+  invalid?: boolean
+  error?: unknown
+}
+
+export interface CodeAdapterFullStreamToolApprovalRequestChunk {
+  type: "tool-approval-request"
+  approvalId: string
+  signature?: string
+  toolCall: CodeAdapterToolCallChunk
+}
+
+export interface CodeAdapterUiToolApprovalRequestChunk {
+  type: "tool-approval-request"
+  approvalId: string
+  toolCallId: string
+  signature?: string
+}
+
+export type CodeAdapterToolApprovalRequestChunk =
+  | CodeAdapterFullStreamToolApprovalRequestChunk
+  | CodeAdapterUiToolApprovalRequestChunk
+
+export interface CodeAdapterToolResultChunk {
+  type: "tool-result"
+  toolCallId: string
+  toolName?: string
+  input?: unknown
+  output?: unknown
+  result?: unknown
+  isError?: boolean
+  providerExecuted?: boolean
+  providerMetadata?: CodeAdapterProviderMetadata
+  toolMetadata?: CodeAdapterToolMetadata
+  dynamic?: boolean
+  preliminary?: boolean
+  title?: string
+}
+
+export interface CodeAdapterToolErrorChunk {
+  type: "tool-error"
+  toolCallId: string
+  toolName?: string
+  input?: unknown
+  error: unknown
+  providerExecuted?: boolean
+  providerMetadata?: CodeAdapterProviderMetadata
+  toolMetadata?: CodeAdapterToolMetadata
+  dynamic?: boolean
+  title?: string
+}
+
+export interface CodeAdapterToolInputAvailableChunk {
+  type: "tool-input-available"
+  toolCallId: string
+  toolName: string
+  input: unknown
+  providerExecuted?: boolean
+  providerMetadata?: CodeAdapterProviderMetadata
+  toolMetadata?: CodeAdapterToolMetadata
+  dynamic?: boolean
+  title?: string
+}
+
+export interface CodeAdapterToolInputErrorChunk {
+  type: "tool-input-error"
+  toolCallId: string
+  toolName: string
+  input: unknown
+  providerExecuted?: boolean
+  providerMetadata?: CodeAdapterProviderMetadata
+  toolMetadata?: CodeAdapterToolMetadata
+  dynamic?: boolean
+  errorText: string
+  title?: string
+}
+
+export interface CodeAdapterToolOutputAvailableChunk {
+  type: "tool-output-available"
+  toolCallId: string
+  output: unknown
+  providerExecuted?: boolean
+  providerMetadata?: CodeAdapterProviderMetadata
+  toolMetadata?: CodeAdapterToolMetadata
+  dynamic?: boolean
+  preliminary?: boolean
+}
+
+export interface CodeAdapterToolOutputErrorChunk {
+  type: "tool-output-error"
+  toolCallId: string
+  errorText: string
+  providerExecuted?: boolean
+  providerMetadata?: CodeAdapterProviderMetadata
+  toolMetadata?: CodeAdapterToolMetadata
+  dynamic?: boolean
+}
+
+export interface CodeAdapterStartStepChunk {
+  type: "start-step"
+  request?: unknown
+  warnings?: unknown[]
+}
+
+export interface CodeAdapterFinishStepChunk {
+  type: "finish-step"
+  usage?: CodeAdapterUsage
+  finishReason?: string
+  rawFinishReason?: string
+  response?: unknown
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterAbortChunk {
+  type: "abort"
+  reason?: string
+}
+
+export interface CodeAdapterRawChunk {
+  /** Raw AI SDK provider frame. Accepted for type parity, not rendered or persisted by chat mappers. */
+  type: "raw"
+  rawValue: unknown
+}
+
+export interface CodeAdapterFinishChunk {
+  type: "finish"
+  finishReason?: string
+  usage?: CodeAdapterUsage
+  totalUsage?: CodeAdapterUsage
+  messageMetadata?: unknown
+}
+
+export interface CodeAdapterGeneratedFileChunk {
+  type: "file"
+  file: { base64: string; mediaType: string }
+  filename?: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterUrlFileChunk {
+  type: "file"
+  url: string
+  mediaType: string
+  filename?: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterSourceUrlChunk {
+  type: "source-url"
+  sourceId: string
+  url: string
+  title?: string
+  providerMetadata?: CodeAdapterProviderMetadata
+}
+
+export interface CodeAdapterSourceDocumentChunk {
+  type: "source-document"
+  sourceId: string
+  mediaType: string
+  title: string
+  filename?: string
+  providerMetadata?: CodeAdapterProviderMetadata
 }
 
 /** AI-SDK-fullStream-shaped chunk a code executor yields. */
 export type CodeAdapterChunk =
-  | { type: "text-delta"; id?: string; text: string }
-  | { type: "reasoning-delta"; id?: string; text: string }
-  | { type: "finish"; finishReason?: string; usage?: Record<string, number> }
+  | CodeAdapterStartChunk
+  | CodeAdapterTextStartChunk
+  | CodeAdapterTextEndChunk
+  | CodeAdapterTextDeltaChunk
+  | CodeAdapterReasoningStartChunk
+  | CodeAdapterReasoningEndChunk
+  | CodeAdapterReasoningDeltaChunk
+  | {
+      type: "tool-input-start"
+      id: string
+      toolName: string
+      providerExecuted?: boolean
+      providerMetadata?: CodeAdapterProviderMetadata
+      toolMetadata?: CodeAdapterToolMetadata
+      dynamic?: boolean
+      title?: string
+    }
+  | {
+      type: "tool-input-start"
+      toolCallId: string
+      toolName: string
+      providerExecuted?: boolean
+      providerMetadata?: CodeAdapterProviderMetadata
+      toolMetadata?: CodeAdapterToolMetadata
+      dynamic?: boolean
+      title?: string
+    }
+  | {
+      type: "tool-input-delta"
+      id: string
+      delta: string
+      providerMetadata?: CodeAdapterProviderMetadata
+    }
+  | { type: "tool-input-delta"; toolCallId: string; inputTextDelta: string }
+  | { type: "tool-input-end"; id: string; providerMetadata?: CodeAdapterProviderMetadata }
+  | CodeAdapterToolCallChunk
+  | CodeAdapterToolResultChunk
+  | CodeAdapterToolErrorChunk
+  | CodeAdapterToolApprovalRequestChunk
+  | CodeAdapterToolInputAvailableChunk
+  | CodeAdapterToolInputErrorChunk
+  | CodeAdapterToolOutputAvailableChunk
+  | CodeAdapterToolOutputErrorChunk
+  | CodeAdapterStartStepChunk
+  | CodeAdapterFinishStepChunk
+  | CodeAdapterAbortChunk
+  | CodeAdapterRawChunk
+  | CodeAdapterMessageMetadataChunk
+  | {
+      type: "tool-output-denied"
+      toolCallId: string
+      toolName?: string
+      providerExecuted?: boolean
+      dynamic?: false
+    }
+  | CodeAdapterGeneratedFileChunk
+  | CodeAdapterUrlFileChunk
+  | CodeAdapterSourceUrlChunk
+  | CodeAdapterSourceDocumentChunk
+  | {
+      type: "source"
+      sourceType?: "url" | "document"
+      url?: string
+      title?: string
+      filename?: string
+    }
+  | { type: "error"; error: unknown }
+  | CodeAdapterFinishChunk
   | { type: string; [k: string]: unknown }
 
 /** A plugin's code adapter: yields chunks for one turn. MUST NOT throw the

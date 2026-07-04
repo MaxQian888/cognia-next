@@ -18,6 +18,7 @@ import {
   subscribePluginToolExec,
   sendPluginToolResponse,
   subscribeProtocolAdapterExec,
+  subscribeProtocolAdapterCancel,
   sendProtocolAdapterMessage,
 } from "@/lib/claude/ipc"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
@@ -59,26 +60,45 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | null = null
+    const executions = new Map<string, ReturnType<typeof dispatchProtocolAdapterExec>>()
 
     void subscribeProtocolAdapterExec((req) => {
-      void dispatchProtocolAdapterExec(req, { writeCommand: sendProtocolAdapterMessage }).catch(
-        (err) => {
+      const handle = dispatchProtocolAdapterExec(req, { writeCommand: sendProtocolAdapterMessage })
+      executions.set(`${req.sessionId}:${req.execId}`, handle)
+      void handle.done
+        .catch((err) => {
           loggers.app.error("protocol_adapter dispatch failed", {
             execId: req.execId,
             error: String(err),
           })
-        }
-      )
+        })
+        .finally(() => {
+          executions.delete(`${req.sessionId}:${req.execId}`)
+        })
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn
     })
 
+    let cancelUnlisten: (() => void) | null = null
+    void subscribeProtocolAdapterCancel((req) => {
+      executions.get(`${req.sessionId}:${req.execId}`)?.cancel(req.reason)
+    }).then((fn) => {
+      if (cancelled) fn()
+      else cancelUnlisten = fn
+    })
+
     return () => {
       cancelled = true
+      for (const handle of executions.values()) handle.cancel("renderer unmounted")
+      executions.clear()
       if (unlisten) {
         unlisten()
         unlisten = null
+      }
+      if (cancelUnlisten) {
+        cancelUnlisten()
+        cancelUnlisten = null
       }
     }
   }, [])

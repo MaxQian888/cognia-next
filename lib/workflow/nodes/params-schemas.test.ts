@@ -789,15 +789,71 @@ describe("ai schemas", () => {
     ).toBe(false)
   })
 
+  it("ai.prompt accepts explicit provider protocol metadata", () => {
+    expect(
+      PARAMS_SCHEMAS["ai.prompt"].safeParse({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers: { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" },
+        userPrompt: "x",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["ai.prompt"].safeParse({
+        userPrompt: "x",
+        apiFlavor: "legacy-completions",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["ai.prompt"].safeParse({
+        userPrompt: "x",
+        headers: { "X-Title": 123 },
+      }).success
+    ).toBe(false)
+  })
+
   it("ai.classify requires input + labelsRaw", () => {
     const s = PARAMS_SCHEMAS["ai.classify"]
     expect(s.safeParse({}).success).toBe(false)
     expect(s.safeParse({ input: "x", labelsRaw: "a,b" }).success).toBe(true)
   })
 
+  it("ai.classify accepts explicit provider protocol metadata", () => {
+    const s = PARAMS_SCHEMAS["ai.classify"]
+    expect(
+      s.safeParse({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers: { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" },
+        input: "x",
+        labelsRaw: "a,b",
+      }).success
+    ).toBe(true)
+  })
+
   it("ai.extract requires input", () => {
     expect(PARAMS_SCHEMAS["ai.extract"].safeParse({}).success).toBe(false)
     expect(PARAMS_SCHEMAS["ai.extract"].safeParse({ input: "x" }).success).toBe(true)
+  })
+
+  it("ai.extract accepts explicit provider protocol metadata", () => {
+    expect(
+      PARAMS_SCHEMAS["ai.extract"].safeParse({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers: { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" },
+        input: "x",
+      }).success
+    ).toBe(true)
   })
 
   it("ai.embed requires input + dimension range", () => {

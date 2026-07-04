@@ -1004,19 +1004,23 @@ const DesktopEventTriggerParams = z.object({
 
 // ── AI primitives ──────────────────────────────────────────────────────────
 
-// ai.prompt v2 additions, also accepted by the classify/extract delegators.
+// ai.prompt v2/provider additions, also accepted by the classify/extract delegators.
 // All optional — v1 nodes validate against the same (superset) schema.
-const aiRoutedFields = {
+const aiProviderFields = {
   /** "routed" consults the provider-routing engine instead of explicit creds. */
   mode: z.enum(["explicit", "routed"]).optional(),
   /** Routed mode: model alias resolved through the mapping registry. */
   modelAlias: optionalString,
+  /** Explicit mode: OpenAI endpoint family override for compatible providers. */
+  apiFlavor: z.enum(["auto", "responses", "chat"]).optional(),
+  /** Explicit mode: provider-specific static headers passed to the model factory. */
+  headers: z.record(z.string(), z.string()).optional(),
   /** PII gate applied before any text egress. */
   piiGate: z.enum(["off", "block", "redact"]).optional(),
 }
 
 const AiPromptParams = z.object({
-  ...aiRoutedFields,
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -1036,7 +1040,7 @@ const AiPromptParams = z.object({
 })
 
 const AiClassifyParams = z.object({
-  ...aiRoutedFields,
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -1048,7 +1052,7 @@ const AiClassifyParams = z.object({
 })
 
 const AiExtractParams = z.object({
-  ...aiRoutedFields,
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,

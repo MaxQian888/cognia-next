@@ -15,6 +15,7 @@
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
+import type { ApiFlavor } from "@cognia/provider-types/provider"
 import { applyPiiGate, type PiiGateMode } from "./pii-gate"
 import { buildJsonInstruction, parseStructured } from "./structured"
 
@@ -27,6 +28,8 @@ export interface AiPromptV2Params {
   model?: string
   apiKey?: string
   baseURL?: string
+  apiFlavor?: ApiFlavor
+  headers?: Record<string, string>
   systemPrompt?: string
   /**
    * Optional twin-bound character. When set and the character has a `twinId`,
@@ -206,6 +209,8 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     model: params.model,
     apiKey,
     baseURL: params.baseURL,
+    apiFlavor: params.apiFlavor,
+    headers: params.headers,
     defaultTemperature: params.temperature,
   })
 

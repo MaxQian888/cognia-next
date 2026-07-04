@@ -13,6 +13,7 @@ import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
 import type { LanguageModel } from "ai"
 import type { ProviderName } from "@cognia/provider-types"
+import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 // Single source of truth for the OpenAI Responses-vs-Chat decision and the
 // provider→protocol map (shared with the sidecar; the file lives under
 // `sidecar/` because the sidecar ships standalone and can't import TS).
@@ -58,8 +59,13 @@ export interface ProviderModelOptions {
  * `getEmbeddingModel`, rather than silently falling back to Anthropic.
  */
 export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
-  const { apiKey, baseURL } = opts
   const provider = opts.provider as string
+  const apiKey = opts.apiKey
+  // Catalog `defaultBaseURL`s are OpenAI-compat endpoints (e.g. Cohere's
+  // `/compatibility/v1`) — they are only valid for the OpenAI-compatible
+  // branch below. Native `@ai-sdk/*` clients must keep their own built-in
+  // defaults unless the caller passed an explicit override.
+  const baseURL = opts.baseURL
 
   switch (provider) {
     case "anthropic": {
@@ -101,10 +107,11 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
         // for every one of them. The shared decision picks the family — honoring
         // an explicit `apiFlavor` and otherwise the host/id heuristic — exactly
         // as the sidecar's ai-sdk dispatch path does.
-        const client = createOpenAI({ apiKey, baseURL, headers: opts.headers })
+        const compatBaseURL = baseURL ?? getBuiltInProviderDefaultBaseURL(provider)
+        const client = createOpenAI({ apiKey, baseURL: compatBaseURL, headers: opts.headers })
         const flavor = decideOpenAiEndpointFlavor({
           apiFlavor: opts.apiFlavor,
-          baseURL,
+          baseURL: compatBaseURL,
           providerId: provider,
         })
         return (

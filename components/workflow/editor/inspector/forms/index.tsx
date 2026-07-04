@@ -21,6 +21,7 @@ import { Plus, Trash2 } from "lucide-react"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -51,6 +52,7 @@ import { TypedOutputFields, OutputSchemaField } from "./output-schema-field"
 
 type Params = Record<string, unknown>
 type ChangeFn = (next: Params) => void
+type TranslationFn = ReturnType<typeof useTranslations>
 
 interface ConfigProps {
   params: Params
@@ -87,6 +89,14 @@ function clampNumberInput(raw: string, min: number, max: number, fallback: numbe
   const parsed = Math.floor(Number(raw))
   if (!Number.isFinite(parsed)) return fallback
   return Math.max(min, Math.min(max, parsed))
+}
+
+function stringifyJsonForTextarea(value: unknown, fallback: unknown): string {
+  try {
+    return JSON.stringify(value ?? fallback, null, 2)
+  } catch {
+    return JSON.stringify(fallback, null, 2)
+  }
 }
 
 // ── trigger.manual ────────────────────────────────────────────────────────
@@ -1504,6 +1514,163 @@ function patchJsonObjectField(
   return next
 }
 
+function readStringRecordJsonParam(params: Params, rawKey: string, objectKey: string): string {
+  const raw = readString(params, rawKey)
+  if (raw) return raw
+  return stringifyJsonForTextarea(params[objectKey], {})
+}
+
+/**
+ * Raw-first read for a JSON-array textarea (array analogue of
+ * {@link readStringRecordJsonParam}). Returns the raw `rawKey` string verbatim
+ * when present so partially-typed / invalid intermediate JSON survives editing;
+ * binding the textarea to a re-stringification of the parsed array instead would
+ * revert every structural keystroke (the field becomes uneditable by hand).
+ */
+function readArrayJsonParam(
+  params: Params,
+  rawKey: string,
+  objectKey: string,
+  fallback: unknown
+): string {
+  const raw = readString(params, rawKey)
+  if (raw) return raw
+  const value = params[objectKey]
+  return stringifyJsonForTextarea(Array.isArray(value) ? value : fallback, fallback)
+}
+
+function patchJsonStringRecordField(
+  params: Params,
+  rawKey: string,
+  rawValue: string,
+  objectKey: string
+): Params {
+  const next = patchParam(params, rawKey, rawValue) as Record<string, unknown>
+  const parsed = parseObjectJson(rawValue)
+  if (parsed && Object.values(parsed).every((value) => typeof value === "string")) {
+    next[objectKey] = parsed as Record<string, string>
+  } else {
+    delete next[objectKey]
+  }
+  return next
+}
+
+function AiExplicitProviderFields({
+  params,
+  onChange,
+  t,
+  idPrefix,
+}: {
+  params: Params
+  onChange: ChangeFn
+  t: TranslationFn
+  idPrefix: string
+}) {
+  const provider = readString(params, "provider")
+  const model = readString(params, "model")
+  const apiKey = readString(params, "apiKey")
+  const baseURL = readString(params, "baseURL")
+  const apiFlavor = readString(params, "apiFlavor") || "auto"
+  const headersJson = readStringRecordJsonParam(params, "headersJson", "headers")
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("provider.label")}
+          htmlFor={`${idPrefix}-provider`}
+          hint={t("provider.hint")}
+          name="provider"
+        >
+          <Input
+            id={`${idPrefix}-provider`}
+            value={provider}
+            onChange={(e) => onChange(patchParam(params, "provider", e.target.value))}
+            placeholder={t("provider.placeholder")}
+          />
+        </Field>
+        <Field
+          label={t("model.label")}
+          htmlFor={`${idPrefix}-model`}
+          hint={t("model.hint")}
+          name="model"
+        >
+          <Input
+            id={`${idPrefix}-model`}
+            value={model}
+            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+            placeholder={t("model.placeholder")}
+          />
+        </Field>
+      </div>
+      <Field
+        label={t("apiKey.label")}
+        htmlFor={`${idPrefix}-key`}
+        hint={t("apiKey.hint")}
+        name="apiKey"
+      >
+        <Input
+          id={`${idPrefix}-key`}
+          type="password"
+          value={apiKey}
+          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("baseURL.label")}
+        htmlFor={`${idPrefix}-base`}
+        hint={t("baseURL.hint")}
+        name="baseURL"
+      >
+        <Input
+          id={`${idPrefix}-base`}
+          value={baseURL}
+          onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
+          placeholder={t("baseURL.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("apiFlavor.label")}
+        htmlFor={`${idPrefix}-api-flavor`}
+        hint={t("apiFlavor.hint")}
+        name="apiFlavor"
+      >
+        <Select
+          value={apiFlavor}
+          onValueChange={(value) => onChange(patchParam(params, "apiFlavor", value))}
+        >
+          <SelectTrigger id={`${idPrefix}-api-flavor`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="auto">{t("apiFlavor.auto")}</SelectItem>
+              <SelectItem value="chat">{t("apiFlavor.chat")}</SelectItem>
+              <SelectItem value="responses">{t("apiFlavor.responses")}</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("headersJson.label")}
+        htmlFor={`${idPrefix}-headers`}
+        hint={t("headersJson.hint")}
+        name="headersJson"
+      >
+        <Textarea
+          id={`${idPrefix}-headers`}
+          value={headersJson}
+          onChange={(e) =>
+            onChange(patchJsonStringRecordField(params, "headersJson", e.target.value, "headers"))
+          }
+          rows={3}
+          className="font-mono text-xs"
+          placeholder={t("headersJson.placeholder")}
+        />
+      </Field>
+    </>
+  )
+}
+
 function SchedulerTaskIdField({
   params,
   onChange,
@@ -2667,10 +2834,6 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
   const routed = v2 && mode === "routed"
   const modelAlias = readString(params, "modelAlias")
   const piiGate = readString(params, "piiGate") || "off"
-  const provider = readString(params, "provider")
-  const model = readString(params, "model")
-  const apiKey = readString(params, "apiKey")
-  const baseURL = readString(params, "baseURL")
   const systemPrompt = readString(params, "systemPrompt")
   const userPrompt = readString(params, "userPrompt")
   const temperature = readNumber(params, "temperature", 0.7)
@@ -2706,56 +2869,7 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
           />
         </Field>
       ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t("provider.label")} htmlFor="ai-provider" name="provider">
-              <Select
-                value={provider || undefined}
-                onValueChange={(v) => onChange(patchParam(params, "provider", v))}
-              >
-                <SelectTrigger id="ai-provider">
-                  <SelectValue placeholder={t("provider.placeholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="google">Google</SelectItem>
-                  <SelectItem value="mistral">Mistral</SelectItem>
-                  <SelectItem value="cohere">Cohere</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label={t("model.label")} htmlFor="ai-model" hint={t("model.hint")} name="model">
-              <Input
-                id="ai-model"
-                value={model}
-                onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
-                placeholder={t("model.placeholder")}
-              />
-            </Field>
-          </div>
-          <Field label={t("apiKey.label")} htmlFor="ai-key" hint={t("apiKey.hint")} name="apiKey">
-            <Input
-              id="ai-key"
-              type="password"
-              value={apiKey}
-              onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
-            />
-          </Field>
-          <Field
-            label={t("baseURL.label")}
-            htmlFor="ai-base"
-            hint={t("baseURL.hint")}
-            name="baseURL"
-          >
-            <Input
-              id="ai-base"
-              value={baseURL}
-              onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
-              placeholder={t("baseURL.placeholder")}
-            />
-          </Field>
-        </>
+        <AiExplicitProviderFields params={params} onChange={onChange} t={t} idPrefix="ai" />
       )}
       {v2 ? (
         <Field label={t("piiGate.label")} htmlFor="ai-pii" hint={t("piiGate.hint")} name="piiGate">
@@ -2844,6 +2958,167 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
       {responseFormat === "json" ? (
         <TypedOutputFields params={params} onChange={onChange} idPrefix="ai" />
       ) : null}
+    </FieldGroup>
+  )
+}
+
+// ── ai.council ────────────────────────────────────────────────────────────
+const DEFAULT_COUNCILLORS = [
+  { name: "Reviewer", modelAlias: "smart" },
+  { name: "Fast pass", modelAlias: "fast" },
+]
+
+export function AiCouncilConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.aiCouncil")
+  const prompt = readString(params, "prompt")
+  const synthesizerAlias = readString(params, "synthesizerAlias")
+  const synthesisInstructions = readString(params, "synthesisInstructions")
+  const executionMode = readString(params, "executionMode", "parallel")
+  const timeoutMs = readNumber(params, "timeoutMs", 60000)
+  const maxConcurrency = readNumber(params, "maxConcurrency", 4)
+  const piiGate = readString(params, "piiGate", "off")
+  // Raw-first so hand-typing (which transits invalid intermediate JSON) isn't
+  // reverted every keystroke — mirrors the headers field's readStringRecordJsonParam.
+  const councillorsJson = readArrayJsonParam(
+    params,
+    "councillorsJson",
+    "councillors",
+    DEFAULT_COUNCILLORS
+  )
+
+  return (
+    <FieldGroup>
+      <Field label={t("prompt.label")} htmlFor="council-prompt" name="prompt" required>
+        <ExpressionField
+          id="council-prompt"
+          value={prompt}
+          onChange={(v) => onChange(patchParam(params, "prompt", v))}
+          multiline
+          rows={5}
+        />
+      </Field>
+      <Field
+        label={t("councillorsJson.label")}
+        htmlFor="council-councillors"
+        hint={t("councillorsJson.hint")}
+        name="councillors"
+        required
+      >
+        <Textarea
+          id="council-councillors"
+          value={councillorsJson}
+          onChange={(e) => {
+            const next = patchParam(params, "councillorsJson", e.target.value) as Record<
+              string,
+              unknown
+            >
+            const parsed = parseArrayJson(e.target.value)
+            if (parsed) next.councillors = parsed
+            onChange(next)
+          }}
+          rows={6}
+          className="font-mono text-xs"
+          placeholder={t("councillorsJson.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("synthesizerAlias.label")}
+        htmlFor="council-synth"
+        hint={t("synthesizerAlias.hint")}
+        name="synthesizerAlias"
+        required
+      >
+        <Input
+          id="council-synth"
+          value={synthesizerAlias}
+          onChange={(e) => onChange(patchParam(params, "synthesizerAlias", e.target.value))}
+          placeholder={t("synthesizerAlias.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("synthesisInstructions.label")}
+        htmlFor="council-instructions"
+        hint={t("synthesisInstructions.hint")}
+        name="synthesisInstructions"
+      >
+        <Textarea
+          id="council-instructions"
+          value={synthesisInstructions}
+          onChange={(e) => onChange(patchParam(params, "synthesisInstructions", e.target.value))}
+          rows={3}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("executionMode.label")} htmlFor="council-mode" name="executionMode">
+          <Select
+            value={executionMode}
+            onValueChange={(v) => onChange(patchParam(params, "executionMode", v))}
+          >
+            <SelectTrigger id="council-mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="parallel">{t("executionMode.options.parallel")}</SelectItem>
+              <SelectItem value="serial">{t("executionMode.options.serial")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          label={t("maxConcurrency.label")}
+          htmlFor="council-concurrency"
+          hint={t("maxConcurrency.hint")}
+          name="maxConcurrency"
+        >
+          <Input
+            id="council-concurrency"
+            type="number"
+            min={1}
+            max={16}
+            value={maxConcurrency}
+            onChange={(e) =>
+              onChange(
+                patchParam(params, "maxConcurrency", clampNumberInput(e.target.value, 1, 16, 4))
+              )
+            }
+          />
+        </Field>
+      </div>
+      <Field
+        label={t("timeoutMs.label")}
+        htmlFor="council-timeout"
+        hint={t("timeoutMs.hint")}
+        name="timeoutMs"
+      >
+        <Input
+          id="council-timeout"
+          type="number"
+          min={1000}
+          max={600000}
+          value={timeoutMs}
+          onChange={(e) =>
+            onChange(
+              patchParam(params, "timeoutMs", clampNumberInput(e.target.value, 1000, 600000, 60000))
+            )
+          }
+        />
+      </Field>
+      <Field
+        label={t("piiGate.label")}
+        htmlFor="council-pii"
+        hint={t("piiGate.hint")}
+        name="piiGate"
+      >
+        <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
+          <SelectTrigger id="council-pii">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="off">{t("piiGate.off")}</SelectItem>
+            <SelectItem value="block">{t("piiGate.block")}</SelectItem>
+            <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
     </FieldGroup>
   )
 }
@@ -4741,57 +5016,12 @@ export function MobileNotifyConfig({ params, onChange }: ConfigProps) {
 // ── ai.classify ───────────────────────────────────────────────────────────
 export function AiClassifyConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.aiClassify")
-  const provider = readString(params, "provider")
-  const model = readString(params, "model")
-  const apiKey = readString(params, "apiKey")
-  const baseURL = readString(params, "baseURL")
   const input = readString(params, "input")
   const labelsRaw = readString(params, "labelsRaw")
   const hint = readString(params, "hint")
   return (
     <FieldGroup>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={t("provider.label")} htmlFor="ac-provider" name="provider">
-          <Select
-            value={provider || undefined}
-            onValueChange={(v) => onChange(patchParam(params, "provider", v))}
-          >
-            <SelectTrigger id="ac-provider">
-              <SelectValue placeholder={t("provider.placeholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="anthropic">Anthropic</SelectItem>
-              <SelectItem value="openai">OpenAI</SelectItem>
-              <SelectItem value="google">Google</SelectItem>
-              <SelectItem value="mistral">Mistral</SelectItem>
-              <SelectItem value="cohere">Cohere</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label={t("model.label")} htmlFor="ac-model" name="model">
-          <Input
-            id="ac-model"
-            value={model}
-            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
-            placeholder={t("model.placeholder")}
-          />
-        </Field>
-      </div>
-      <Field label={t("apiKey.label")} htmlFor="ac-key" name="apiKey">
-        <Input
-          id="ac-key"
-          type="password"
-          value={apiKey}
-          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
-        />
-      </Field>
-      <Field label={t("baseURL.label")} htmlFor="ac-base" name="baseURL">
-        <Input
-          id="ac-base"
-          value={baseURL}
-          onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
-        />
-      </Field>
+      <AiExplicitProviderFields params={params} onChange={onChange} t={t} idPrefix="ac" />
       <Field
         label={t("labelsRaw.label")}
         htmlFor="ac-labels"
@@ -4841,57 +5071,13 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
 // ── ai.extract ────────────────────────────────────────────────────────────
 export function AiExtractConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.aiExtract")
-  const provider = readString(params, "provider")
-  const model = readString(params, "model")
-  const apiKey = readString(params, "apiKey")
-  const baseURL = readString(params, "baseURL")
   const input = readString(params, "input")
   const schemaJson = readString(params, "schemaJson", "{}")
   const hint = readString(params, "hint")
   const requiredStr = Array.isArray(params.required) ? (params.required as string[]).join(", ") : ""
   return (
     <FieldGroup>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={t("provider.label")} htmlFor="ae-provider" name="provider">
-          <Select
-            value={provider || undefined}
-            onValueChange={(v) => onChange(patchParam(params, "provider", v))}
-          >
-            <SelectTrigger id="ae-provider">
-              <SelectValue placeholder={t("provider.placeholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="anthropic">Anthropic</SelectItem>
-              <SelectItem value="openai">OpenAI</SelectItem>
-              <SelectItem value="google">Google</SelectItem>
-              <SelectItem value="mistral">Mistral</SelectItem>
-              <SelectItem value="cohere">Cohere</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label={t("model.label")} htmlFor="ae-model" name="model">
-          <Input
-            id="ae-model"
-            value={model}
-            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
-          />
-        </Field>
-      </div>
-      <Field label={t("apiKey.label")} htmlFor="ae-key" name="apiKey">
-        <Input
-          id="ae-key"
-          type="password"
-          value={apiKey}
-          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
-        />
-      </Field>
-      <Field label={t("baseURL.label")} htmlFor="ae-base" name="baseURL">
-        <Input
-          id="ae-base"
-          value={baseURL}
-          onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
-        />
-      </Field>
+      <AiExplicitProviderFields params={params} onChange={onChange} t={t} idPrefix="ae" />
       <Field
         label={t("schemaJson.label")}
         htmlFor="ae-schema"
@@ -6082,6 +6268,109 @@ export function DesktopEventTriggerConfig({ params, onChange }: ConfigProps) {
           onChange={(e) =>
             onChange(patchParam(params, "cooldownMs", Math.max(0, Number(e.target.value) || 0)))
           }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── trigger.pet.event ─────────────────────────────────────────────────────
+// Pet lifecycle event bridge. Mirrors `lib/workflow/runtime/pet-event-trigger.ts`.
+const PET_EVENT_KINDS = ["levelUp", "evolved", "achievementUnlocked", "unwell"] as const
+
+export function PetEventTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.petEventTrigger")
+  const selected = Array.isArray(params.kinds) ? (params.kinds as string[]) : []
+  const cooldownMs = readNumber(params, "cooldownMs", 2000)
+  const toggle = (kind: string) => {
+    const next = selected.includes(kind) ? selected.filter((k) => k !== kind) : [...selected, kind]
+    onChange(patchParam(params, "kinds", next))
+  }
+  return (
+    <FieldGroup>
+      <p className="text-xs text-muted-foreground">{t("intro")}</p>
+      <Field label={t("kinds.label")} hint={t("kinds.hint")} name="kinds">
+        <div className="space-y-1.5">
+          {PET_EVENT_KINDS.map((kind) => (
+            <label
+              key={kind}
+              className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-sm hover:bg-muted/40"
+            >
+              <Checkbox
+                checked={selected.includes(kind)}
+                onCheckedChange={() => toggle(kind)}
+                data-testid={`pet-event-${kind}`}
+              />
+              <span>{t(`kinds.options.${kind}` as never)}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+      <Field
+        label={t("cooldownMs.label")}
+        htmlFor="pet-event-cooldown"
+        hint={t("cooldownMs.hint")}
+        name="cooldownMs"
+      >
+        <Input
+          id="pet-event-cooldown"
+          type="number"
+          min={0}
+          max={300000}
+          value={cooldownMs}
+          onChange={(e) =>
+            onChange(
+              patchParam(params, "cooldownMs", clampNumberInput(e.target.value, 0, 300000, 2000))
+            )
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.pet.interact ───────────────────────────────────────────────────
+const PET_INTERACTION_KINDS = [
+  "fed",
+  "played",
+  "petted",
+  "talked",
+  "slept",
+  "cleaned",
+  "treated",
+] as const
+
+export function PetInteractConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.petInteract")
+  const kind = readString(params, "kind", "fed")
+  const itemId = readString(params, "itemId")
+  return (
+    <FieldGroup>
+      <Field label={t("kind.label")} htmlFor="pet-interact-kind" name="kind" required>
+        <Select value={kind} onValueChange={(v) => onChange(patchParam(params, "kind", v))}>
+          <SelectTrigger id="pet-interact-kind">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PET_INTERACTION_KINDS.map((option) => (
+              <SelectItem key={option} value={option}>
+                {t(`kind.options.${option}` as never)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("itemId.label")}
+        htmlFor="pet-interact-item"
+        hint={t("itemId.hint")}
+        name="itemId"
+      >
+        <Input
+          id="pet-interact-item"
+          value={itemId}
+          onChange={(e) => onChange(patchParam(params, "itemId", e.target.value))}
+          placeholder={t("itemId.placeholder")}
         />
       </Field>
     </FieldGroup>

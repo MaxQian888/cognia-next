@@ -27,7 +27,7 @@ export function isBuiltinProtocol(protocol) {
 /**
  * @param {string|null|undefined} protocol  Resolved protocol id.
  * @param {any} [spec]  Adapter spec from sendOptions, if any.
- * @param {{ emit: Function, sessionId: string, pendingProtocolExecs: Map<string, any> }} [codeBridge]
+ * @param {{ emit: Function, sessionId: string, pendingProtocolExecs: Map<string, any>, onCancel?: Function }} [codeBridge]
  *   Runtime deps required to execute a `kind: "code"` adapter (renderer
  *   round-trip). Absent for builtin / declarative resolution.
  * @returns {import("./types.mjs").ProtocolAdapter | null}

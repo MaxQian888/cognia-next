@@ -78,10 +78,15 @@ import {
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@cognia/provider-core/providers/inference-params"
 import { selectApiKey, recordKeyUse } from "@cognia/provider-core/providers/api-key-rotation"
+import { isLocalProvider } from "@cognia/provider-core/providers/local-providers"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
-import { isCodexChatProviderId, isOpencodeChatProviderId } from "@/types/subscription"
+import {
+  CODEX_CHATGPT_BASE_URL,
+  isCodexChatProviderId,
+  isOpencodeChatProviderId,
+} from "@/types/subscription"
 import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import { getModelConfig } from "@cognia/provider-types/provider"
 import { getModelContextWindow } from "@/lib/claude/usage"
@@ -119,6 +124,146 @@ export const BRIEF_OUTPUT_SNIPPET =
  * the ACP route and tests.
  */
 export const PLAN_MODE_SNIPPET = PLAN_MODE_PROMPT
+
+type SummaryCredentials = NonNullable<
+  NonNullable<NonNullable<SendOptions["compaction"]>["summary"]>["credentials"]
+>
+
+interface SummaryProviderResolution {
+  model?: string
+  protocol: string
+  credentials: SummaryCredentials
+  protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
+}
+
+function buildProtocolAdapterSpec(
+  protocol: string
+): Promise<SendOptions["protocolAdapterSpec"] | undefined> {
+  return (async () => {
+    const { getProtocolAdapter } =
+      await import("@cognia/provider-core/providers/protocol-adapter-registry")
+    const adapterDef = getProtocolAdapter(protocol)
+    if (!adapterDef) return undefined
+    if (adapterDef.spec.kind === "code") {
+      const sep = protocol.indexOf(":")
+      return {
+        kind: "code",
+        pluginId: sep > 0 ? protocol.slice(0, sep) : protocol,
+        adapterId: protocol,
+      }
+    }
+    return adapterDef.spec
+  })()
+}
+
+async function resolveSubscriptionBackedSummaryCredentials(
+  providerId: string,
+  resolved?: { apiKey?: string; baseURL?: string }
+): Promise<SummaryCredentials | null> {
+  if (isOpencodeChatProviderId(providerId) && !resolved?.apiKey) {
+    const vaultCred = await resolveOpencodeVaultCredential(providerId)
+    if (!vaultCred) return null
+    return {
+      apiKey: vaultCred.apiKey,
+      baseURL: resolved?.baseURL ?? vaultCred.baseURL,
+    }
+  }
+
+  if (isCodexChatProviderId(providerId)) {
+    const vaultCred = await resolveCodexVaultCredential(providerId)
+    if (!vaultCred) return null
+    if (!resolved?.apiKey) {
+      return {
+        apiKey: vaultCred.apiKey,
+        baseURL: vaultCred.baseURL,
+        ...(vaultCred.headers ? { headers: vaultCred.headers } : {}),
+      }
+    }
+    const configuredBase = resolved.baseURL?.replace(/\/+$/, "")
+    const vaultBase = vaultCred.baseURL.replace(/\/+$/, "")
+    const chatGptBase = CODEX_CHATGPT_BASE_URL.replace(/\/+$/, "")
+    const configuredUsesChatGptBackend =
+      configuredBase === chatGptBase || configuredBase === vaultBase
+    return {
+      apiKey: resolved.apiKey,
+      baseURL: resolved.baseURL,
+      ...(configuredUsesChatGptBackend && vaultCred.headers ? { headers: vaultCred.headers } : {}),
+    }
+  }
+
+  return null
+}
+
+async function resolveSummaryProviderForCompaction(args: {
+  providerId: string
+  summaryModel?: string
+  appSettings: AppSettings
+}): Promise<SummaryProviderResolution | null> {
+  const snapshot = createProviderSettingsSnapshot({
+    defaultProvider: args.appSettings.defaultProvider,
+    providerSettings: args.appSettings.providerSettings as
+      | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
+      | undefined,
+    customProviders: args.appSettings.customProviders as
+      | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
+      | undefined,
+  })
+  const r = resolveFeatureProvider(
+    {
+      featureId: "chat-compaction-summary",
+      routeProfile: "general-text",
+      selectionMode: "explicit-provider",
+      providerId: args.providerId,
+      fallbackMode: "none",
+    },
+    snapshot
+  )
+
+  if (r.kind === "resolved") {
+    const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId, {
+      apiKey: r.apiKey,
+      baseURL: r.baseURL,
+    })
+    const credentials: SummaryCredentials = vaultCredentials ?? {
+      apiKey: r.apiKey,
+      baseURL: r.baseURL,
+    }
+    // A summary credential with no API key is only legitimate for a genuinely
+    // keyless provider: a local inference engine (Ollama / LM Studio / …) or a
+    // user-configured custom provider (self-hosted, base URL typed by hand). For
+    // a cloud built-in (OpenRouter / DeepSeek / Groq / …) whose base URL was
+    // merely auto-filled from the catalog, a missing key means the provider is
+    // not fully configured — fall back to the main (authenticated) model instead
+    // of firing an unauthenticated request that 401s at compaction time.
+    const keylessAllowed = isLocalProvider(args.providerId) || r.isCustomProvider
+    if (!credentials.apiKey && !keylessAllowed) return null
+    if (!credentials.apiKey && !credentials.baseURL) return null
+    if (r.apiFlavor) credentials.apiFlavor = r.apiFlavor
+    const protocolAdapterSpec = await buildProtocolAdapterSpec(r.protocol)
+    return {
+      model: args.summaryModel ?? r.model,
+      protocol: r.protocol,
+      credentials,
+      ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
+    }
+  }
+
+  if (r.nextAction === "enable_provider") return null
+
+  if (isOpencodeChatProviderId(args.providerId) || isCodexChatProviderId(args.providerId)) {
+    const credentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId)
+    if (!credentials) return null
+    const protocolAdapterSpec = await buildProtocolAdapterSpec("openai")
+    return {
+      model: args.summaryModel ?? getBuiltInProviderDefaultModel(args.providerId),
+      protocol: "openai",
+      credentials,
+      ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
+    }
+  }
+
+  return null
+}
 
 /**
  * Build the workflow-editor system-prompt snapshot block.
@@ -510,6 +655,13 @@ export interface TwinRuntimeDepsForBuild {
       candidates: readonly { id: string; content: string; score: number; sourceTitle?: string }[]
     ) => number[] | Promise<number[]>
   }
+  /**
+   * Optional LLM query-expansion (HyDE / step-back). Structural mirror of
+   * `apply-twin-context:ApplyTwinContextDeps.expansion`; the ai-sdk model handle
+   * is typed as `unknown` here so build-options stays decoupled from the twin
+   * module (the `applyTwinContext` cast bridges it).
+   */
+  expansion?: { model: unknown; strategy: "hyde" | "stepback" }
 }
 
 /**
@@ -1168,6 +1320,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             tone: s.tone,
           })),
           degraded: result.degraded,
+          ...(result.citations ? { citations: result.citations } : {}),
         }
       }
       // Record the call in the M6 inject-log ring buffer so the Settings
@@ -1211,6 +1364,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           topK: memoryConfig.retrievalTopK,
           relevanceFloor: memoryConfig.relevanceFloor,
           twinChunkTexts,
+          enableQueryExpansion: memoryConfig.enableQueryExpansion,
           // Reuse the turn's query embedding (memory's vector backend shares the
           // twin embedding model via resolveMemoryBackend) — no re-embed.
           precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
@@ -2323,51 +2477,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (resolved.enabled && appSettings) {
       try {
         if (summaryProvider && summaryProvider !== providerId) {
-          const snapshot = createProviderSettingsSnapshot({
-            defaultProvider: appSettings.defaultProvider,
-            providerSettings: appSettings.providerSettings as
-              | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
-              | undefined,
-            customProviders: appSettings.customProviders as
-              | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
-              | undefined,
+          const summary = await resolveSummaryProviderForCompaction({
+            providerId: summaryProvider,
+            summaryModel,
+            appSettings,
           })
-          const r = resolveFeatureProvider(
-            {
-              featureId: "chat-compaction-summary",
-              routeProfile: "general-text",
-              selectionMode: "explicit-provider",
-              providerId: summaryProvider,
-              fallbackMode: "none",
-            },
-            snapshot
-          )
-          if (r.kind === "resolved" && r.apiKey) {
-            let protocolAdapterSpec: SendOptions["protocolAdapterSpec"] | undefined
-            const { getProtocolAdapter } =
-              await import("@cognia/provider-core/providers/protocol-adapter-registry")
-            const adapterDef = getProtocolAdapter(r.protocol)
-            if (adapterDef) {
-              if (adapterDef.spec.kind === "code") {
-                const sep = r.protocol.indexOf(":")
-                protocolAdapterSpec = {
-                  kind: "code",
-                  pluginId: sep > 0 ? r.protocol.slice(0, sep) : r.protocol,
-                  adapterId: r.protocol,
-                }
-              } else {
-                protocolAdapterSpec = adapterDef.spec
-              }
-            }
+          if (summary) {
             resolved.summary = {
-              model: summaryModel ?? r.model,
-              protocol: r.protocol,
-              credentials: {
-                apiKey: r.apiKey,
-                baseURL: r.baseURL,
-                ...(r.apiFlavor ? { apiFlavor: r.apiFlavor } : {}),
-              },
-              ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
+              model: summary.model,
+              protocol: summary.protocol,
+              credentials: summary.credentials,
+              ...(summary.protocolAdapterSpec
+                ? { protocolAdapterSpec: summary.protocolAdapterSpec }
+                : {}),
             }
           }
         } else if (summaryModel) {

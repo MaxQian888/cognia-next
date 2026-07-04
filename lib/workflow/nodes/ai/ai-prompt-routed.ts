@@ -17,11 +17,13 @@ import type { LlmClient, LlmConfig } from "@/lib/twin/distill/llm"
 import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import type { ProviderOutcome } from "@/lib/claude/provider-telemetry"
 import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
+import type { ApiFlavor } from "@cognia/provider-types/provider"
 
 export interface ResolvedCreds {
   protocol: LlmConfig["provider"]
   apiKey?: string
   baseURL?: string
+  apiFlavor?: ApiFlavor
 }
 
 export interface RoutingSelection {
@@ -140,13 +142,24 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
       // Plugin-contributed protocol ids execute only in the sidecar's
       // declarative adapter — the workflow node's renderer client can't run
       // them, so treat the route as creds-unresolved (next candidate tries).
-      if (!["anthropic", "openai", "google", "mistral", "cohere"].includes(resolution.protocol)) {
+      if (
+        !["anthropic", "openai", "azure", "google", "mistral", "cohere"].includes(
+          resolution.protocol
+        )
+      ) {
         return null
       }
       return {
-        protocol: resolution.protocol as "anthropic" | "openai" | "google" | "mistral" | "cohere",
+        protocol: resolution.protocol as
+          | "anthropic"
+          | "openai"
+          | "azure"
+          | "google"
+          | "mistral"
+          | "cohere",
         apiKey: resolution.apiKey,
         baseURL: resolution.baseURL,
+        apiFlavor: resolution.apiFlavor,
       }
     },
     makeClient: createLlmClient,
@@ -233,6 +246,7 @@ export async function runRoutedPrompt(
         model: entry.modelId,
         apiKey: creds.apiKey ?? "",
         baseURL: creds.baseURL,
+        apiFlavor: creds.apiFlavor,
         defaultTemperature: input.temperature,
       })
       const completion = await complete(client, input)

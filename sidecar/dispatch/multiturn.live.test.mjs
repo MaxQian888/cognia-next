@@ -23,9 +23,24 @@ import assert from "node:assert/strict"
 import { startMockAnthropic, spawnSidecar, assistantText } from "./live-harness.mjs"
 
 test("anthropic dispatch handles two sequential turns on one session without stalling", async () => {
-  // Echo a distinct reply per call so each turn's assistant frame is identifiable.
+  // Key each reply on the request CONTENT, not the call index: depending on the
+  // claude-code CLI version, auxiliary /v1/messages calls (title generation,
+  // model probes, …) can land before/around the main turn, shifting any
+  // index-based mapping and streaming the wrong reply into the wrong turn.
+  // Turn 2 is matched FIRST because a resumed request may replay turn 1's
+  // transcript (so it can contain both prompts); turn 1 can never contain
+  // turn 2's prompt.
+  const flatMessages = (body) => JSON.stringify(body?.messages ?? [])
+  const isTurn1 = (body) => flatMessages(body).includes("First question.")
+  const isTurn2 = (body) => flatMessages(body).includes("Second question.")
   const mock = startMockAnthropic({
-    replyFor: (_body, callIndex) => [callIndex === 0 ? "first-reply" : "second-reply"],
+    replyFor: (body) => {
+      if (isTurn2(body)) return ["second-reply"]
+      if (isTurn1(body)) return ["first-reply"]
+      // Auxiliary CLI traffic — its response never surfaces as an assistant
+      // event, so a neutral reply keeps it out of every assertion below.
+      return ["aux-reply"]
+    },
   })
   await mock.listen()
   const sidecar = spawnSidecar({ baseUrl: mock.baseUrl })
@@ -47,8 +62,9 @@ test("anthropic dispatch handles two sequential turns on one session without sta
       label: "result#1",
     })
     assert.equal(result1.event.subtype, "success")
-    const callsAfterTurn1 = mock.messagesCalls.length
-    assert.ok(callsAfterTurn1 >= 1, "turn 1 hit the mock")
+    // Content-matched (not a raw call count): auxiliary CLI calls must not
+    // count as "the turn hit the mock".
+    assert.ok(mock.messagesCalls.some(isTurn1), "turn 1 hit the mock with its own prompt")
 
     // ── Turn 2 (same session, threading `resume` exactly like the renderer) ──
     // Cursor so the turn-2 waits don't re-match turn 1's frames.
@@ -73,7 +89,7 @@ test("anthropic dispatch handles two sequential turns on one session without sta
     assert.equal(result2.event.subtype, "success")
     assert.equal(result2.event.is_error, false)
     assert.ok(
-      mock.messagesCalls.length > callsAfterTurn1,
+      mock.messagesCalls.some(isTurn2),
       "turn 2 must make its own upstream request (didn't stall or short-circuit)"
     )
   } finally {

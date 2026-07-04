@@ -658,6 +658,19 @@ export interface SendOptions {
       tone: string[]
     }>
     degraded: boolean
+    /**
+     * Optional formatted source citations for the retrieved chunks — metadata
+     * only, never part of the assembled prompt. Present when the character has
+     * `enableCitations` on. Structural mirror of `@cognia/rag` `Citation`.
+     */
+    citations?: Array<{
+      id: string
+      marker: string
+      fullCitation: string
+      source: string
+      title?: string
+      relevanceScore?: number
+    }>
   }
 
   /**
@@ -825,6 +838,17 @@ export function isPluginToolExecEvent(evt: ClaudeEvent): evt is PluginToolExecEv
   return evt.type === "plugin_tool_exec"
 }
 
+export interface ProtocolAdapterCancelEvent {
+  type: "protocol_adapter_cancel"
+  sessionId: string
+  execId: string
+  reason?: string
+}
+
+export function isProtocolAdapterCancelEvent(evt: ClaudeEvent): evt is ProtocolAdapterCancelEvent {
+  return evt.type === "protocol_adapter_cancel"
+}
+
 /**
  * Emitted by the ai-sdk dispatcher when `sendOptions.toolResultReviewEnabled`
  * is set: before a tool result is fed to the model, the sidecar pauses and asks
@@ -933,6 +957,28 @@ export interface SdkSlashCommand {
   aliases?: string[]
 }
 
+/**
+ * Per-MCP-server diagnostic line emitted by the sidecar while it connects out
+ * to user-configured MCP servers (connect success/failure, `tools()` failures,
+ * captured child `stderr`). Mirror of `buildMcpLogEvent` in
+ * `sidecar/dispatch/mcp-log.mjs`. `server` is absent when a line can't be
+ * attributed to a named server. Consumed on the GUI side by the MCP log bridge
+ * (`lib/mcp/log-bridge.ts`), which forwards each into the unified logger.
+ */
+export interface McpLogEvent {
+  type: "mcp_log"
+  sessionId: string
+  ts: number
+  level: "error" | "warn" | "info" | "debug"
+  message: string
+  source?: "stderr" | "diagnostic" | "status"
+  server?: string
+}
+
+export function isMcpLogEvent(evt: ClaudeEvent): evt is McpLogEvent {
+  return evt.type === "mcp_log"
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -943,8 +989,10 @@ export type ClaudeEvent =
   | SDKEventEnvelope
   | UsageHeadersEvent
   | PluginToolExecEvent
+  | ProtocolAdapterCancelEvent
   | ToolResultReviewEvent
   | ControlResponseEvent
+  | McpLogEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
@@ -954,12 +1002,14 @@ export interface BetaTextBlock {
   type: "text"
   text: string
   citations?: unknown
+  providerMetadata?: Record<string, Record<string, unknown>>
 }
 
 export interface BetaThinkingBlock {
   type: "thinking"
   thinking: string
   signature?: string
+  providerMetadata?: Record<string, Record<string, unknown>>
 }
 
 export interface BetaToolUseBlock {
@@ -967,6 +1017,18 @@ export interface BetaToolUseBlock {
   id: string
   name: string
   input: Record<string, unknown>
+  state?: "input-streaming" | "approval-requested"
+  providerExecuted?: boolean
+  providerMetadata?: Record<string, Record<string, unknown>>
+  toolMetadata?: Record<string, unknown>
+  dynamic?: boolean
+  title?: string
+  invalid?: boolean
+  error?: unknown
+  approval?: {
+    id: string
+    signature?: string
+  }
 }
 
 export interface BetaToolResultBlock {
@@ -976,11 +1038,24 @@ export interface BetaToolResultBlock {
   is_error?: boolean
 }
 
+export interface BetaFileBlock {
+  type: "file"
+  source?: {
+    type: "base64"
+    media_type: string
+    data: string
+  }
+  url?: string
+  media_type?: string
+  filename?: string
+}
+
 export type BetaContentBlock =
   | BetaTextBlock
   | BetaThinkingBlock
   | BetaToolUseBlock
   | BetaToolResultBlock
+  | BetaFileBlock
   | { type: string; [k: string]: unknown }
 
 export interface BetaMessage {
@@ -990,6 +1065,7 @@ export interface BetaMessage {
   stop_reason?: string | null
   model?: string
   usage?: Record<string, unknown>
+  metadata?: unknown
 }
 
 export interface SDKAssistantMessage {
@@ -1146,11 +1222,23 @@ export interface ChatSession {
   disabledSkillIds?: string[]
   pinned?: boolean
   /**
-   * Manual sort position within the Pinned section (ascending). Written by the
-   * ChannelList drag-reorder; `undefined` sorts by recency after ordered rows.
-   * Non-indexed optional column — no Dexie schema bump.
+   * Manual sort position within this session's ChannelList section — the
+   * Pinned block, a date bucket, a folder, or the flat "recent" list
+   * (ascending). Written by the ChannelList drag-reorder; `undefined` sorts by
+   * recency after manually-ordered rows. The order is per-section: two rows in
+   * different sections may share an index, only their relative order within one
+   * section is meaningful. Non-indexed optional column — no Dexie schema bump.
    */
-  pinnedOrder?: number
+  manualOrder?: number
+  /**
+   * Section the manual order was dragged in (see `conversationSectionKey` in
+   * `lib/chat/conversation-list-model.ts` — e.g. `"pinned"`, `"date:today"`,
+   * `"folder:<id>"`, `"recent"`). The order is honored only inside that
+   * section, so a session migrating to another date bucket falls back to
+   * recency instead of dragging its old rank along. Absent on legacy rows
+   * (pre-section-key orders apply wherever the row sits).
+   */
+  manualOrderSection?: string
   /**
    * Denormalized text preview of this session's most-recent message, written by
    * `persistMessages` (only when it changes) so the ChannelList can render a
@@ -3469,6 +3557,11 @@ export interface Character {
     styleSamplesK?: number
     enableHybrid?: boolean
     hybridKeywordWeight?: number
+    enableQueryExpansion?: boolean
+    enableCorrectiveFilter?: boolean
+    correctiveMinKeep?: number
+    enableCitations?: boolean
+    citationStyle?: import("@/types/twin").TwinCitationStyle
   }
   platformDefaults?: import("@/types/connectors/binding").CharacterPlatformDefaults
   /**

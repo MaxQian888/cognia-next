@@ -61,6 +61,7 @@ import {
   MobileShareConfig,
   MobileNotifyConfig,
   AiClassifyConfig,
+  AiCouncilConfig,
   AiEmbedConfig,
   AiExtractConfig,
   AiPromptConfig,
@@ -77,6 +78,8 @@ import {
   ConnectorSendConfig,
   CronConfig,
   DesktopEventTriggerConfig,
+  PetEventTriggerConfig,
+  PetInteractConfig,
   GenericJsonConfig,
   GoalAnalyticsConfig,
   GoalCompletedTriggerConfig,
@@ -173,12 +176,14 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "trigger.webhook": WebhookTriggerConfig,
   "trigger.team": TeamTriggerConfig,
   "trigger.desktop.event": DesktopEventTriggerConfig,
+  "trigger.pet.event": PetEventTriggerConfig,
   // Actions: characters
   "action.character.send": CharacterSendConfig,
   "action.character.create": CharacterCreateConfig,
   "action.character.update": CharacterUpdateConfig,
   // Actions: agent
   "action.agent.turn": AgentTurnConfig,
+  "action.pet.interact": PetInteractConfig,
   // Actions: human-in-the-loop (ADR 0061 P2)
   "action.approval.request": ApprovalRequestConfig,
   // Actions: remote device steps (ADR 0061 P3)
@@ -298,6 +303,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "ai.classify": AiClassifyConfig,
   "ai.extract": AiExtractConfig,
   "ai.embed": AiEmbedConfig,
+  "ai.council": AiCouncilConfig,
   "ai.ensemble": EnsembleConfig,
   // Flow
   "flow.branch": BranchConfig,

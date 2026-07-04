@@ -139,6 +139,22 @@ describe("getProviderModel", () => {
     }
   )
 
+  it("fills the catalog base URL for built-in OpenAI-compatible providers", () => {
+    const m = getProviderModel({
+      provider: "openrouter" as never,
+      model: "anthropic/claude-sonnet-4",
+      apiKey: "sk-or-v1-test",
+    }) as ResolvedModel
+
+    expect(m.provider).toBe("openai.chat")
+    expect(m.modelId).toBe("anthropic/claude-sonnet-4")
+    expect(mockOpenAI).toHaveBeenCalledWith({
+      apiKey: "sk-or-v1-test",
+      baseURL: "https://openrouter.ai/api/v1",
+      headers: undefined,
+    })
+  })
+
   it("routes codex through the Responses API even on the ChatGPT backend (not *.openai.com)", () => {
     const m = getProviderModel({
       provider: "codex" as never,

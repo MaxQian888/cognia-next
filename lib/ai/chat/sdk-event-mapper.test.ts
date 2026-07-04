@@ -16,7 +16,12 @@ afterEach(() => jest.restoreAllMocks())
 type AnyMsg = {
   type: string
   subtype?: string
-  message?: { id?: string; content?: Array<Record<string, unknown>>; role?: string }
+  message?: {
+    id?: string
+    content?: Array<Record<string, unknown>>
+    role?: string
+    metadata?: unknown
+  }
   usage?: Record<string, number>
   event?: { type?: string; delta?: Record<string, unknown>; message?: { id?: string } }
 }
@@ -78,6 +83,15 @@ describe("createSdkEventMapper", () => {
     expect(delta).toEqual({ type: "thinking_delta", thinking: "hmm" })
   })
 
+  it("maps AI SDK step boundaries to stream events", () => {
+    const m = createSdkEventMapper(ctx)
+    const start = m.handle({ type: "start-step" }) as AnyMsg[]
+    expect(start.map((x) => x.event?.type).filter(Boolean)).toEqual(["message_start", "step_start"])
+
+    const finish = m.handle({ type: "finish-step" }) as AnyMsg[]
+    expect(finish.map((x) => x.event?.type).filter(Boolean)).toEqual(["step_finish"])
+  })
+
   it("sealAssistant() returns [] when nothing is buffered", () => {
     const m = createSdkEventMapper(ctx)
     expect(m.sealAssistant()).toEqual([])
@@ -98,12 +112,162 @@ describe("createSdkEventMapper", () => {
     expect(asst2.message!.id).toBe(asst.message!.id)
   })
 
+  it("uses the AI SDK start.messageId for streamed and sealed assistant ids", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({ type: "start", messageId: "sdk-message-1" })
+    const start = m.handle({ type: "text-delta", text: "Hello" }) as AnyMsg[]
+    expect(start.find((x) => x.event?.type === "message_start")!.event!.message!.id).toBe(
+      "sdk-message-1"
+    )
+    const asst = (m.sealAssistant() as AnyMsg[]).find((x) => x.type === "assistant")!
+    expect(asst.message!.id).toBe("sdk-message-1")
+  })
+
+  it("preserves start, message-metadata, and finish messageMetadata on the sealed assistant", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "start",
+      messageId: "sdk-message-1",
+      messageMetadata: { phase: "start" },
+    })
+    m.handle({ type: "text-delta", text: "Hello" })
+    m.handle({ type: "message-metadata", messageMetadata: { phase: "mid" } })
+    m.handle({
+      type: "finish",
+      finishReason: "stop",
+      messageMetadata: { phase: "finish" },
+    })
+    const asst = (m.sealAssistant() as AnyMsg[]).find((x) => x.type === "assistant")!
+    expect(asst.message).toMatchObject({
+      id: "sdk-message-1",
+      metadata: { phase: "finish" },
+    })
+  })
+
+  it("deep-merges non-null messageMetadata updates like AI SDK UI streams", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "start",
+      messageMetadata: {
+        phase: "start",
+        nested: { keep: true, replace: "start" },
+        list: ["start"],
+      },
+    })
+    m.handle({
+      type: "message-metadata",
+      messageMetadata: {
+        nested: { replace: "mid", add: 1 },
+        list: ["mid"],
+        unsafe: "kept",
+      },
+    })
+    m.handle({ type: "message-metadata", messageMetadata: null })
+    m.handle({ type: "message-metadata", messageMetadata: undefined })
+    m.handle({ type: "text-delta", text: "Hello" })
+    m.handle({
+      type: "finish",
+      messageMetadata: {
+        phase: "finish",
+        nested: { add: 2 },
+        __proto__: { polluted: true },
+      },
+    })
+
+    const asst = (m.sealAssistant() as AnyMsg[]).find((x) => x.type === "assistant")!
+    expect(asst.message.metadata).toEqual({
+      phase: "finish",
+      nested: { keep: true, replace: "mid", add: 2 },
+      list: ["mid"],
+      unsafe: "kept",
+    })
+    expect(Object.prototype).not.toHaveProperty("polluted")
+  })
+
+  it("preserves the latest provider metadata on sealed text blocks", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "text-delta",
+      text: "Hello",
+      providerMetadata: { provider: { phase: "start" } },
+    })
+    m.handle({
+      type: "text-delta",
+      text: " world",
+      providerMetadata: { provider: { phase: "final" } },
+    })
+    expect(assistantContent(m.sealAssistant() as AnyMsg[])[0]).toEqual({
+      type: "text",
+      text: "Hello world",
+      providerMetadata: { provider: { phase: "final" } },
+    })
+  })
+
+  it("uses text-start and text-end provider metadata when sealing text blocks", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "text-start",
+      id: "text-1",
+      providerMetadata: { provider: { phase: "start" } },
+    })
+    m.handle({ type: "text-delta", id: "text-1", text: "Hello" })
+    m.handle({
+      type: "text-end",
+      id: "text-1",
+      providerMetadata: { provider: { phase: "end" } },
+    })
+    expect(assistantContent(m.sealAssistant() as AnyMsg[])[0]).toEqual({
+      type: "text",
+      text: "Hello",
+      providerMetadata: { provider: { phase: "end" } },
+    })
+  })
+
   it("maps reasoning-delta to a thinking block once sealed", () => {
     const m = createSdkEventMapper(ctx)
     m.handle({ type: "reasoning-delta", text: "thinking…" })
     expect(assistantContent(m.sealAssistant() as AnyMsg[])).toContainEqual({
       type: "thinking",
       thinking: "thinking…",
+    })
+  })
+
+  it("preserves the latest provider metadata on sealed reasoning blocks", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "reasoning-delta",
+      text: "first ",
+      providerMetadata: { provider: { phase: "start" } },
+    })
+    m.handle({
+      type: "reasoning-delta",
+      text: "second",
+      providerMetadata: { provider: { phase: "final" } },
+    })
+    expect(assistantContent(m.sealAssistant() as AnyMsg[])).toContainEqual({
+      type: "thinking",
+      thinking: "first second",
+      providerMetadata: { provider: { phase: "final" } },
+    })
+  })
+
+  it("uses reasoning-start and reasoning-end provider metadata when sealing thinking blocks", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "reasoning-start",
+      id: "reasoning-1",
+      providerMetadata: { provider: { phase: "start" } },
+    })
+    m.handle({ type: "reasoning-delta", id: "reasoning-1", text: "thinking" })
+    m.handle({
+      type: "reasoning-end",
+      id: "reasoning-1",
+      providerMetadata: { provider: { phase: "end" } },
+    })
+    expect(assistantContent(m.sealAssistant() as AnyMsg[])).toContainEqual({
+      type: "thinking",
+      thinking: "thinking",
+      providerMetadata: { provider: { phase: "end" } },
     })
   })
 
@@ -160,6 +324,279 @@ describe("createSdkEventMapper", () => {
     })
   })
 
+  it("maps tool-output-denied to an errored tool_result for the denied call", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "tool-call",
+      toolCallId: "tc-denied",
+      toolName: "write",
+      args: { path: "secret.txt" },
+    })
+    const out = m.handle({
+      type: "tool-output-denied",
+      toolCallId: "tc-denied",
+      toolName: "write",
+    }) as AnyMsg[]
+    expect(out.find((x) => x.type === "user")!.message?.content?.[0]).toMatchObject({
+      type: "tool_result",
+      tool_use_id: "tc-denied",
+      is_error: true,
+    })
+    const content = out.find((x) => x.type === "user")!.message?.content?.[0].content
+    expect(content).toEqual(expect.stringContaining("write"))
+    expect(content).toEqual(expect.stringMatching(/denied/i))
+  })
+
+  it("emits a generated file part as its own one-shot assistant message", () => {
+    const m = createSdkEventMapper(ctx)
+    const out = m.handle({
+      type: "file",
+      file: { base64: "QUJD", mediaType: "image/png" },
+      filename: "chart.png",
+    }) as AnyMsg[]
+    expect(assistantContent(out)).toEqual([
+      {
+        type: "file",
+        source: { type: "base64", media_type: "image/png", data: "QUJD" },
+        filename: "chart.png",
+      },
+    ])
+    // The base64 payload crosses the pipe exactly once: later snapshots do
+    // NOT re-embed it (the previous accumulate-into-every-snapshot behavior
+    // was O(N²) bytes over the wire).
+    expect(m.sealAssistant()).toEqual([])
+    m.handle({ type: "text-delta", text: "done" })
+    expect(assistantContent(m.sealAssistant() as AnyMsg[])).toEqual([
+      { type: "text", text: "done" },
+    ])
+  })
+
+  it("maps a url file part onto a one-shot assistant message", () => {
+    const m = createSdkEventMapper(ctx)
+    const out = m.handle({
+      type: "file",
+      url: "https://files.example/chart.png",
+      mediaType: "image/png",
+    }) as AnyMsg[]
+    expect(assistantContent(out)).toEqual([
+      {
+        type: "file",
+        url: "https://files.example/chart.png",
+        media_type: "image/png",
+      },
+    ])
+  })
+
+  it("maps streamed tool input to one pending tool_use block then finalizes it", () => {
+    const m = createSdkEventMapper(ctx)
+    const started = m.handle({
+      type: "tool-input-start",
+      id: "tc-stream",
+      toolName: "write",
+    }) as AnyMsg[]
+    expect(assistantContent(started).find((b) => b.type === "tool_use")).toEqual({
+      type: "tool_use",
+      id: "tc-stream",
+      name: "write",
+      input: {},
+      state: "input-streaming",
+    })
+
+    // Deltas accumulate silently — no whole-buffer re-parse and no full
+    // assistant snapshot per chunk (the O(n²) fix). Split the JSON across two
+    // deltas to prove reassembly happens once, at tool-input-end.
+    const delta1 = m.handle({
+      type: "tool-input-delta",
+      id: "tc-stream",
+      delta: '{"path":"secr',
+    }) as AnyMsg[]
+    const delta2 = m.handle({
+      type: "tool-input-delta",
+      id: "tc-stream",
+      delta: 'et.txt"}',
+    }) as AnyMsg[]
+    expect(delta1.find((msg) => msg.type === "assistant")).toBeUndefined()
+    expect(delta2.find((msg) => msg.type === "assistant")).toBeUndefined()
+
+    // tool-input-end finalizes the input: the transient "input-streaming"
+    // state is dropped so the block never sticks in-flight when no
+    // tool-call / tool-input-available follows.
+    const ended = m.handle({ type: "tool-input-end", id: "tc-stream" }) as AnyMsg[]
+    expect(assistantContent(ended).find((b) => b.type === "tool_use")).toEqual({
+      type: "tool_use",
+      id: "tc-stream",
+      name: "write",
+      input: { path: "secret.txt" },
+    })
+
+    const final = m.handle({
+      type: "tool-call",
+      toolCallId: "tc-stream",
+      toolName: "write",
+      input: { path: "final.txt" },
+      providerExecuted: false,
+      providerMetadata: { provider: { traceId: "trace-tool" } },
+      toolMetadata: { display: "Write file" },
+      dynamic: false,
+      title: "Write file",
+    }) as AnyMsg[]
+    expect(assistantContent(final).filter((b) => b.type === "tool_use")).toEqual([
+      {
+        type: "tool_use",
+        id: "tc-stream",
+        name: "write",
+        input: { path: "final.txt" },
+        providerExecuted: false,
+        providerMetadata: { provider: { traceId: "trace-tool" } },
+        toolMetadata: { display: "Write file" },
+        dynamic: false,
+        title: "Write file",
+      },
+    ])
+  })
+
+  it("maps tool-approval-request to an approval-requested tool_use block", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "tool-call",
+      toolCallId: "tc-approval",
+      toolName: "write",
+      input: { path: "secret.txt" },
+    })
+    const out = m.handle({
+      type: "tool-approval-request",
+      approvalId: "approval-1",
+      signature: "sig-1",
+      toolCall: {
+        type: "tool-call",
+        toolCallId: "tc-approval",
+        toolName: "write",
+        input: { path: "secret.txt" },
+      },
+    }) as AnyMsg[]
+    expect(assistantContent(out).filter((b) => b.type === "tool_use")).toEqual([
+      {
+        type: "tool_use",
+        id: "tc-approval",
+        name: "write",
+        input: { path: "secret.txt" },
+        state: "approval-requested",
+        approval: { id: "approval-1", signature: "sig-1" },
+      },
+    ])
+  })
+
+  it("maps nested toolCall metadata from tool-approval-request", () => {
+    const m = createSdkEventMapper(ctx)
+    const out = m.handle({
+      type: "tool-approval-request",
+      approvalId: "approval-meta",
+      toolCall: {
+        type: "tool-call",
+        toolCallId: "tc-approval-meta",
+        toolName: "write",
+        input: { path: "secret.txt" },
+        providerExecuted: false,
+        providerMetadata: { provider: { traceId: "trace-approval" } },
+        toolMetadata: { display: "Write file" },
+        dynamic: false,
+        title: "Write file",
+      },
+    }) as AnyMsg[]
+    expect(assistantContent(out).filter((b) => b.type === "tool_use")).toEqual([
+      {
+        type: "tool_use",
+        id: "tc-approval-meta",
+        name: "write",
+        input: { path: "secret.txt" },
+        state: "approval-requested",
+        providerExecuted: false,
+        providerMetadata: { provider: { traceId: "trace-approval" } },
+        toolMetadata: { display: "Write file" },
+        dynamic: false,
+        title: "Write file",
+        approval: { id: "approval-meta" },
+      },
+    ])
+  })
+
+  it("maps UI-message tool-input-available to a finalized tool_use block", () => {
+    const m = createSdkEventMapper(ctx)
+    const out = m.handle({
+      type: "tool-input-available",
+      toolCallId: "tc-input-ready",
+      toolName: "write",
+      input: { path: "ready.txt" },
+      providerExecuted: false,
+      providerMetadata: { provider: { traceId: "trace-ready" } },
+      toolMetadata: { display: "Write file" },
+      dynamic: true,
+      title: "Write file",
+    }) as AnyMsg[]
+
+    expect(assistantContent(out).filter((b) => b.type === "tool_use")).toEqual([
+      {
+        type: "tool_use",
+        id: "tc-input-ready",
+        name: "write",
+        input: { path: "ready.txt" },
+        providerExecuted: false,
+        providerMetadata: { provider: { traceId: "trace-ready" } },
+        toolMetadata: { display: "Write file" },
+        dynamic: true,
+        title: "Write file",
+      },
+    ])
+  })
+
+  it("maps UI-message tool output and input errors to tool_result messages", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({
+      type: "tool-input-available",
+      toolCallId: "tc-output",
+      toolName: "write",
+      input: { path: "ready.txt" },
+    })
+
+    const available = m.handle({
+      type: "tool-output-available",
+      toolCallId: "tc-output",
+      output: { ok: true },
+    }) as AnyMsg[]
+    expect(available.find((x) => x.type === "user")!.message?.content?.[0]).toMatchObject({
+      type: "tool_result",
+      tool_use_id: "tc-output",
+      content: JSON.stringify({ ok: true }),
+      is_error: false,
+    })
+
+    const outputError = m.handle({
+      type: "tool-output-error",
+      toolCallId: "tc-output",
+      errorText: "write failed",
+    }) as AnyMsg[]
+    expect(outputError.find((x) => x.type === "user")!.message?.content?.[0]).toMatchObject({
+      type: "tool_result",
+      tool_use_id: "tc-output",
+      content: "write failed",
+      is_error: true,
+    })
+
+    const inputError = m.handle({
+      type: "tool-input-error",
+      toolCallId: "tc-input-error",
+      toolName: "write",
+      input: { path: "bad.txt" },
+      errorText: "invalid input",
+    }) as AnyMsg[]
+    expect(inputError.find((x) => x.type === "user")!.message?.content?.[0]).toMatchObject({
+      type: "tool_result",
+      tool_use_id: "tc-input-error",
+      content: "invalid input",
+      is_error: true,
+    })
+  })
+
   it("projects a source-url part as a deduped citation on the text block", () => {
     const m = createSdkEventMapper(ctx)
     m.handle({ type: "text-delta", text: "answer" })
@@ -188,6 +625,22 @@ describe("createSdkEventMapper", () => {
     })
   })
 
+  it("maps AI SDK finish.totalUsage when the finish stream part is handled directly", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({ type: "text-delta", text: "x" })
+    m.handle({
+      type: "finish",
+      totalUsage: { inputTokens: 8, outputTokens: 3, reasoningTokens: 1 },
+    })
+    const out = m.finish() as AnyMsg[]
+    const result = out.find((x) => x.type === "result")!
+    expect(result.usage).toMatchObject({
+      input_tokens: 8,
+      output_tokens: 3,
+      reasoning_tokens: 1,
+    })
+  })
+
   it("setModel updates subsequent assistant snapshots", () => {
     const m = createSdkEventMapper(ctx)
     m.setModel("gpt-5")
@@ -205,6 +658,14 @@ describe("createSdkEventMapper", () => {
     ])
     expect(m.handle({ type: "totally-unknown" })).toEqual([])
     expect(m.handle(undefined)).toEqual([])
+  })
+
+  it("ignores raw provider frames without rendering or sealing them", () => {
+    const m = createSdkEventMapper(ctx)
+    expect(m.handle({ type: "raw", rawValue: { vendor: "frame" } })).toEqual([
+      expect.objectContaining({ type: "system" }),
+    ])
+    expect(m.sealAssistant()).toEqual([])
   })
 
   it("accepts v4 `textDelta` and low-level `delta` field names", () => {
@@ -242,6 +703,15 @@ describe("createSdkEventMapper", () => {
     ])
   })
 
+  it("dedupes source-document parts by title", () => {
+    const m = createSdkEventMapper(ctx)
+    m.handle({ type: "text-delta", text: "x" })
+    m.handle({ type: "source-document", id: "d1", title: "Spec.pdf" })
+    const out = m.handle({ type: "source-document", id: "d2", title: "Spec.pdf" }) as AnyMsg[]
+    const textBlock = assistantContent(out).find((b) => b.type === "text")!
+    expect((textBlock.citations as unknown[]).length).toBe(1)
+  })
+
   it("ignores a source part with neither url nor title", () => {
     const m = createSdkEventMapper(ctx)
     m.handle({ type: "text-delta", text: "x" })
@@ -270,6 +740,29 @@ describe("createSdkEventMapper", () => {
       context_input_tokens: 3,
       cache_read_input_tokens: 2,
       cache_creation_input_tokens: 1,
+    })
+  })
+
+  it("maps exact AI SDK LanguageModelUsage nested token details in finish()", () => {
+    const m = createSdkEventMapper(ctx)
+    const out = m.finish({
+      usage: {
+        inputTokens: 10,
+        outputTokens: 6,
+        inputTokenDetails: {
+          cacheReadTokens: 4,
+          cacheWriteTokens: 2,
+        },
+        outputTokenDetails: {
+          reasoningTokens: 3,
+        },
+      },
+    }) as AnyMsg[]
+    const result = out.find((x) => x.type === "result")!
+    expect(result.usage).toMatchObject({
+      cache_read_input_tokens: 4,
+      cache_creation_input_tokens: 2,
+      reasoning_tokens: 3,
     })
   })
 

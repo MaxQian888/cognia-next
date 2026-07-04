@@ -25,8 +25,9 @@ import { makeInputStream } from "../input-stream.mjs"
  *
  * @param {Map<string, any>} pending
  * @param {string} execId
+ * @param {{ onCancel?: (execId: string, reason?: string) => void }} [options]
  */
-export function registerProtocolExec(pending, execId) {
+export function registerProtocolExec(pending, execId, options = {}) {
   const input = makeInputStream()
   let resolveUsage
   const usage = new Promise((resolve) => {
@@ -55,6 +56,11 @@ export function registerProtocolExec(pending, execId) {
       settleUsage(null)
       input.close()
     },
+    cancel: (reason) => {
+      settleUsage(null)
+      input.close()
+      options.onCancel?.(execId, reason)
+    },
   }
   pending.set(execId, channel)
   return channel
@@ -75,7 +81,9 @@ export function makeCodeAdapter(spec, bridge) {
     id: `code:${spec.pluginId}:${spec.adapterId}`,
     async start(req) {
       const execId = (bridge.makeExecId ?? randomUUID)()
-      const channel = registerProtocolExec(bridge.pendingProtocolExecs, execId)
+      const channel = registerProtocolExec(bridge.pendingProtocolExecs, execId, {
+        onCancel: bridge.onCancel,
+      })
       bridge.emit({
         type: "protocol_adapter_exec",
         sessionId: bridge.sessionId,
@@ -87,6 +95,8 @@ export function makeCodeAdapter(spec, bridge) {
           messages: req.messages,
           modelParams: req.modelParams ?? {},
           credentials: req.credentials ?? {},
+          ...(req.reasoning ? { reasoning: req.reasoning } : {}),
+          ...(typeof req.maxSteps === "number" ? { maxSteps: req.maxSteps } : {}),
         },
       })
       return { fullStream: channel.fullStream, usage: channel.usage, response: null }

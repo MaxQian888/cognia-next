@@ -6,9 +6,11 @@
 // Vercel AI SDK events we care about (subset of `result.fullStream`):
 //   { type: "text-delta", textDelta: string }
 //   { type: "reasoning", textDelta: string }     // o1/o3 / claude thinking
+//   { type: "file", file: GeneratedFile }
+//   { type: "tool-input-start"|"tool-input-delta"|"tool-input-end", id, ... }
 //   { type: "tool-call", toolCallId, toolName, args }
 //   { type: "tool-result", toolCallId, result }
-//   { type: "finish", finishReason, usage: { promptTokens, completionTokens, totalTokens } }
+//   { type: "finish", finishReason, usage|totalUsage: { promptTokens, completionTokens, totalTokens } }
 //   { type: "error", error }
 //
 // SDKMessage shapes we emit (mirrors @anthropic-ai/claude-agent-sdk):
@@ -48,6 +50,36 @@ export function shapeToolResultContent(payload) {
   return typeof payload === "string" ? payload : JSON.stringify(payload)
 }
 
+function isMergeableMetadataObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    !(value instanceof Date) &&
+    !(value instanceof RegExp)
+  )
+}
+
+function mergeMessageMetadata(base, overrides) {
+  if (overrides == null) return base
+  if (!isMergeableMetadataObject(base) || !isMergeableMetadataObject(overrides)) return overrides
+
+  const result = { ...base }
+  for (const key of Object.keys(overrides)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue
+
+    const overrideValue = overrides[key]
+    if (overrideValue === undefined) continue
+
+    const baseValue = base[key]
+    result[key] =
+      isMergeableMetadataObject(baseValue) && isMergeableMetadataObject(overrideValue)
+        ? mergeMessageMetadata(baseValue, overrideValue)
+        : overrideValue
+  }
+  return result
+}
+
 /**
  * Build a stateful translator. Call `.handle(event)` for each Vercel-AI-SDK
  * event; it returns zero or more SDKMessage objects to emit. Call `.finish(usage?)`
@@ -76,8 +108,15 @@ export function createEventAdapter(ctx) {
   let textBuf = ""
   /** @type {string} */
   let reasoningBuf = ""
-  /** @type {Array<{ type: "tool_use", id: string, name: string, input: any }>} */
+  /** @type {Record<string, Record<string, unknown>> | undefined} */
+  let textProviderMetadata = undefined
+  /** @type {Record<string, Record<string, unknown>> | undefined} */
+  let reasoningProviderMetadata = undefined
+  /** @type {unknown} */
+  let messageMetadata = undefined
+  /** @type {Array<{ type: "tool_use", id: string, name: string, input: any, state?: string, approval?: { id: string, signature?: string } }>} */
   const completedToolUses = []
+  const streamedToolInputs = new Map()
   // Provider citations (web-search / url / document sources) accumulated from
   // AI SDK `source`/`source-url`/`source-document` stream parts and projected
   // onto the assistant text block in the Anthropic `citations` shape, so the
@@ -159,6 +198,178 @@ export function createEventAdapter(ctx) {
     }
   }
 
+  function generatedFileToBlock(event) {
+    const file = event?.file && typeof event.file === "object" ? event.file : null
+    const hostedUrl = typeof event?.url === "string" && event.url ? event.url : undefined
+    const hostedMediaType =
+      typeof event?.mediaType === "string" && event.mediaType ? event.mediaType : undefined
+    if (hostedUrl && hostedMediaType) {
+      return { type: "file", url: hostedUrl, media_type: hostedMediaType }
+    }
+    const base64 =
+      file && typeof file.base64 === "string"
+        ? file.base64
+        : typeof event?.data === "string"
+          ? event.data
+          : undefined
+    const mediaType =
+      file && typeof file.mediaType === "string"
+        ? file.mediaType
+        : typeof event?.mediaType === "string"
+          ? event.mediaType
+          : undefined
+    if (!base64 || !mediaType) return null
+    const block = {
+      type: "file",
+      source: { type: "base64", media_type: mediaType, data: base64 },
+    }
+    if (typeof event.filename === "string" && event.filename) {
+      block.filename = event.filename
+    }
+    return block
+  }
+
+  function getToolCallId(event) {
+    return typeof event?.toolCallId === "string"
+      ? event.toolCallId
+      : typeof event?.id === "string"
+        ? event.id
+        : typeof event?.toolCall?.toolCallId === "string"
+          ? event.toolCall.toolCallId
+          : undefined
+  }
+
+  function getToolName(event, fallback = "unknown") {
+    return typeof event?.toolName === "string"
+      ? event.toolName
+      : typeof event?.toolCall?.toolName === "string"
+        ? event.toolCall.toolName
+        : fallback
+  }
+
+  function getToolInput(event, fallback = {}) {
+    return (
+      event?.args ?? event?.input ?? event?.toolCall?.args ?? event?.toolCall?.input ?? fallback
+    )
+  }
+
+  function getToolMetadata(event) {
+    const metadata = {}
+    const toolCall = event?.toolCall
+    const providerExecuted =
+      typeof event?.providerExecuted === "boolean"
+        ? event.providerExecuted
+        : typeof toolCall?.providerExecuted === "boolean"
+          ? toolCall.providerExecuted
+          : undefined
+    if (typeof providerExecuted === "boolean") metadata.providerExecuted = providerExecuted
+    const providerMetadata =
+      event?.providerMetadata && typeof event.providerMetadata === "object"
+        ? event.providerMetadata
+        : toolCall?.providerMetadata && typeof toolCall.providerMetadata === "object"
+          ? toolCall.providerMetadata
+          : undefined
+    if (providerMetadata) {
+      metadata.providerMetadata = providerMetadata
+    }
+    const toolMetadata =
+      event?.toolMetadata && typeof event.toolMetadata === "object"
+        ? event.toolMetadata
+        : toolCall?.toolMetadata && typeof toolCall.toolMetadata === "object"
+          ? toolCall.toolMetadata
+          : undefined
+    if (toolMetadata) {
+      metadata.toolMetadata = toolMetadata
+    }
+    const dynamic =
+      typeof event?.dynamic === "boolean"
+        ? event.dynamic
+        : typeof toolCall?.dynamic === "boolean"
+          ? toolCall.dynamic
+          : undefined
+    if (typeof dynamic === "boolean") metadata.dynamic = dynamic
+    const title = typeof event?.title === "string" ? event.title : toolCall?.title
+    if (typeof title === "string") metadata.title = title
+    const invalid =
+      typeof event?.invalid === "boolean"
+        ? event.invalid
+        : typeof toolCall?.invalid === "boolean"
+          ? toolCall.invalid
+          : undefined
+    if (typeof invalid === "boolean") metadata.invalid = invalid
+    if (Object.prototype.hasOwnProperty.call(event ?? {}, "error") && event.error !== undefined) {
+      metadata.error = event.error
+    } else if (
+      Object.prototype.hasOwnProperty.call(toolCall ?? {}, "error") &&
+      toolCall.error !== undefined
+    ) {
+      metadata.error = toolCall.error
+    }
+    return metadata
+  }
+
+  function getProviderMetadata(event) {
+    return event?.providerMetadata && typeof event.providerMetadata === "object"
+      ? event.providerMetadata
+      : undefined
+  }
+
+  function tryParseToolInput(text) {
+    if (typeof text !== "string" || !text.trim()) return undefined
+    try {
+      return JSON.parse(text)
+    } catch {
+      return undefined
+    }
+  }
+
+  function upsertToolUse(block) {
+    const idx = completedToolUses.findIndex((tu) => tu.id === block.id)
+    if (idx >= 0) {
+      completedToolUses[idx] = block
+    } else {
+      completedToolUses.push(block)
+    }
+  }
+
+  /**
+   * A tool result closes its tool_use: drop any lingering transient state
+   * ("input-streaming" / "approval-requested") so later assistant snapshots
+   * don't clobber the renderer's view back to an in-flight look.
+   */
+  function finalizeToolUseState(id) {
+    if (!id) return
+    const tu = completedToolUses.find((t) => t.id === id)
+    if (tu && tu.state) delete tu.state
+  }
+
+  function updateMessageMetadata(metadata) {
+    messageMetadata = mergeMessageMetadata(messageMetadata, metadata)
+  }
+
+  /**
+   * Clear the per-message content accumulators (text / reasoning / tool_use and
+   * their metadata + citations). Shared by `reset()` (turn boundary) and the
+   * tool_use→text split below: when a new `messageId` starts a fresh assistant
+   * message, the blocks accumulated so far were ALREADY sealed into the previous
+   * message via boundary snapshots, so leaving them populated makes the new
+   * message's snapshot re-emit all prior text and every prior tool_use under the
+   * new id — the duplicate-output regression on multi-step tool turns. Does NOT
+   * touch session-scoped state (`messageMetadata`, `lastUsage`, `initEmitted`,
+   * `messageId`, `streamStartId`), which the callers manage themselves.
+   */
+  function clearMessageContent() {
+    activeBlockKind = null
+    textBuf = ""
+    reasoningBuf = ""
+    textProviderMetadata = undefined
+    reasoningProviderMetadata = undefined
+    completedToolUses.length = 0
+    streamedToolInputs.clear()
+    sourceCitations.length = 0
+    sourceKeys.clear()
+  }
+
   // --- Incremental stream frames --------------------------------------------
   // Text / reasoning deltas are emitted as `stream_event` partial-message frames
   // (the same shape the Anthropic `includePartialMessages` path uses) instead of
@@ -203,10 +414,15 @@ export function createEventAdapter(ctx) {
     // citations in the Anthropic shape the renderer already understands.
     if (textBuf || sourceCitations.length) {
       const textBlock = { type: "text", text: textBuf }
+      if (textProviderMetadata) textBlock.providerMetadata = textProviderMetadata
       if (sourceCitations.length) textBlock.citations = sourceCitations.slice()
       content.push(textBlock)
     }
-    if (reasoningBuf) content.push({ type: "thinking", thinking: reasoningBuf })
+    if (reasoningBuf) {
+      const thinkingBlock = { type: "thinking", thinking: reasoningBuf }
+      if (reasoningProviderMetadata) thinkingBlock.providerMetadata = reasoningProviderMetadata
+      content.push(thinkingBlock)
+    }
     for (const tu of completedToolUses) content.push(tu)
     return {
       type: "assistant",
@@ -221,6 +437,7 @@ export function createEventAdapter(ctx) {
         content,
         stop_reason: null,
         stop_sequence: null,
+        ...(messageMetadata !== undefined ? { metadata: messageMetadata } : {}),
       },
     }
   }
@@ -239,12 +456,8 @@ export function createEventAdapter(ctx) {
      */
     reset() {
       messageId = randomUUID()
-      activeBlockKind = null
-      textBuf = ""
-      reasoningBuf = ""
-      completedToolUses.length = 0
-      sourceCitations.length = 0
-      sourceKeys.clear()
+      clearMessageContent()
+      messageMetadata = undefined
       lastUsage = null
       streamStartId = null
     },
@@ -295,20 +508,48 @@ export function createEventAdapter(ctx) {
       emitInitIfNeeded(out)
 
       switch (event?.type) {
+        case "start": {
+          if (typeof event?.messageId === "string" && event.messageId) {
+            messageId = event.messageId
+            streamStartId = null
+          }
+          updateMessageMetadata(event?.messageMetadata)
+          return out
+        }
+        case "message-metadata": {
+          updateMessageMetadata(event?.messageMetadata)
+          return out
+        }
+        case "text-start": {
+          textProviderMetadata = getProviderMetadata(event) ?? textProviderMetadata
+          return out
+        }
         case "text-delta": {
           if (activeBlockKind === "tool_use") {
-            // Boundary change — start a new message id so the renderer
-            // doesn't merge text after a tool_use into the same block.
+            // Boundary change — start a new message id so the renderer doesn't
+            // merge text after a tool_use into the same block, AND clear the
+            // already-sealed content buffers so this fresh message doesn't
+            // re-emit the prior text + every prior tool_use under the new id.
             messageId = randomUUID()
             streamStartId = null
+            clearMessageContent()
           }
           activeBlockKind = "text"
           // v6 high-level fullStream uses `text`; v4 used `textDelta`; the
           // low-level model stream uses `delta`. Accept all three.
           const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
           textBuf += chunk
+          textProviderMetadata = getProviderMetadata(event) ?? textProviderMetadata
           emitStreamStartIfNeeded(out)
           if (chunk) out.push(streamDelta("text_delta", chunk))
+          return out
+        }
+        case "text-end": {
+          textProviderMetadata = getProviderMetadata(event) ?? textProviderMetadata
+          return out
+        }
+        case "reasoning-start": {
+          reasoningProviderMetadata = getProviderMetadata(event) ?? reasoningProviderMetadata
           return out
         }
         case "reasoning":
@@ -316,18 +557,136 @@ export function createEventAdapter(ctx) {
           activeBlockKind = "reasoning"
           const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
           reasoningBuf += chunk
+          reasoningProviderMetadata = getProviderMetadata(event) ?? reasoningProviderMetadata
           emitStreamStartIfNeeded(out)
           if (chunk) out.push(streamDelta("thinking_delta", chunk))
           return out
         }
+        case "reasoning-end": {
+          reasoningProviderMetadata = getProviderMetadata(event) ?? reasoningProviderMetadata
+          return out
+        }
+        case "start-step": {
+          emitStreamStartIfNeeded(out)
+          out.push(streamEnvelope({ type: "step_start" }))
+          return out
+        }
+        case "finish-step": {
+          out.push(streamEnvelope({ type: "step_finish" }))
+          return out
+        }
+        case "tool-input-start": {
+          activeBlockKind = "tool_use"
+          const id = getToolCallId(event) ?? randomUUID()
+          const name = getToolName(event)
+          streamedToolInputs.set(id, { text: "", name, input: {} })
+          upsertToolUse({
+            type: "tool_use",
+            id,
+            name,
+            input: {},
+            state: "input-streaming",
+            ...getToolMetadata(event),
+          })
+          out.push(buildAssistantSnapshot())
+          return out
+        }
+        case "tool-input-delta": {
+          activeBlockKind = "tool_use"
+          const id = getToolCallId(event)
+          if (!id) return out
+          const prior = streamedToolInputs.get(id) ?? { text: "", name: "unknown", input: {} }
+          // O(1) accumulation only. The old per-delta `JSON.parse(wholeBuffer)`
+          // + full-assistant-snapshot pair was the same O(n²) shape the
+          // text-delta path above was cured of — and the mid-stream parse
+          // virtually never succeeds (the JSON is incomplete), so every one of
+          // those snapshots carried `input: {}` over stdio for nothing. The
+          // buffer is parsed exactly once, at tool-input-end (or by the
+          // tool-call / tool-input-available finalizers).
+          prior.text += event.delta ?? event.inputTextDelta ?? ""
+          streamedToolInputs.set(id, prior)
+          return out
+        }
+        case "tool-input-end": {
+          const id = getToolCallId(event)
+          const prior = id ? streamedToolInputs.get(id) : undefined
+          if (!prior) return out
+          const parsed = tryParseToolInput(prior.text)
+          if (parsed !== undefined) prior.input = parsed
+          // Input streaming is over — no `state` here, or the block would
+          // stay stuck on "input-streaming" (and later snapshots would keep
+          // re-asserting it) when the provider never follows up with a
+          // tool-call / tool-input-available finalizer.
+          upsertToolUse({
+            type: "tool_use",
+            id,
+            name: prior.name,
+            input: prior.input ?? {},
+            ...getToolMetadata(event),
+          })
+          out.push(buildAssistantSnapshot())
+          return out
+        }
+        case "tool-input-available": {
+          activeBlockKind = "tool_use"
+          const id = getToolCallId(event) ?? randomUUID()
+          upsertToolUse({
+            type: "tool_use",
+            id,
+            name: getToolName(event),
+            input: getToolInput(event),
+            ...getToolMetadata(event),
+          })
+          streamedToolInputs.delete(id)
+          out.push(buildAssistantSnapshot())
+          return out
+        }
+        case "tool-input-error": {
+          const message =
+            typeof event.errorText === "string" && event.errorText
+              ? event.errorText
+              : "tool input error"
+          out.push(buildToolResultMessage(getToolCallId(event), message, true))
+          return out
+        }
         case "tool-call": {
           activeBlockKind = "tool_use"
-          completedToolUses.push({
+          const id = getToolCallId(event) ?? randomUUID()
+          const prior = streamedToolInputs.get(id)
+          upsertToolUse({
             type: "tool_use",
-            id: event.toolCallId ?? randomUUID(),
-            name: event.toolName ?? "unknown",
-            input: event.args ?? event.input ?? {},
+            id,
+            name: getToolName(event, prior?.name ?? "unknown"),
+            input: getToolInput(event, prior?.input ?? {}),
+            ...getToolMetadata(event),
           })
+          streamedToolInputs.delete(id)
+          out.push(buildAssistantSnapshot())
+          return out
+        }
+        case "tool-approval-request": {
+          activeBlockKind = "tool_use"
+          const id = getToolCallId(event) ?? randomUUID()
+          const prior = completedToolUses.find((tu) => tu.id === id) ?? streamedToolInputs.get(id)
+          const approval =
+            typeof event.approvalId === "string" && event.approvalId
+              ? {
+                  id: event.approvalId,
+                  ...(typeof event.signature === "string" && event.signature
+                    ? { signature: event.signature }
+                    : {}),
+                }
+              : undefined
+          upsertToolUse({
+            type: "tool_use",
+            id,
+            name: getToolName(event, prior?.name ?? "unknown"),
+            input: getToolInput(event, prior?.input ?? {}),
+            state: "approval-requested",
+            ...getToolMetadata(event),
+            ...(approval ? { approval } : {}),
+          })
+          streamedToolInputs.delete(id)
           out.push(buildAssistantSnapshot())
           return out
         }
@@ -339,6 +698,7 @@ export function createEventAdapter(ctx) {
           // them inline instead of dumping a base64 wall.
           const payload = event.output ?? event.result
           const shaped = shapeToolResultContent(payload)
+          finalizeToolUseState(getToolCallId(event))
           out.push(buildToolResultMessage(event.toolCallId, shaped, Boolean(event.isError)))
           return out
         }
@@ -349,7 +709,62 @@ export function createEventAdapter(ctx) {
           const err = event.error
           const msg =
             err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err)
+          finalizeToolUseState(getToolCallId(event))
           out.push(buildToolResultMessage(event.toolCallId, msg, true))
+          return out
+        }
+        case "tool-output-available": {
+          const payload = event.output ?? event.result
+          finalizeToolUseState(getToolCallId(event))
+          out.push(
+            buildToolResultMessage(getToolCallId(event), shapeToolResultContent(payload), false)
+          )
+          return out
+        }
+        case "tool-output-error": {
+          const message =
+            typeof event.errorText === "string" && event.errorText
+              ? event.errorText
+              : "tool output error"
+          finalizeToolUseState(getToolCallId(event))
+          out.push(buildToolResultMessage(getToolCallId(event), message, true))
+          return out
+        }
+        case "tool-output-denied": {
+          // v6 emits this when an approval gate denies a tool after the model
+          // already produced the tool call. Answer the tool_use with an errored
+          // tool_result so the renderer closes the call and the model can
+          // continue from an explicit denial instead of a dangling invocation.
+          const name =
+            typeof event.toolName === "string" && event.toolName ? event.toolName : "tool"
+          finalizeToolUseState(getToolCallId(event))
+          out.push(buildToolResultMessage(event.toolCallId, `${name} output denied`, true))
+          return out
+        }
+        case "file": {
+          // Generated files are emitted as their own one-shot assistant
+          // message (fresh id, never re-emitted) instead of being accumulated
+          // into every subsequent snapshot — N files previously cost O(N²)
+          // base64 bytes over the sidecar stdio pipe, one full re-embed per
+          // file/tool/source event.
+          const block = generatedFileToBlock(event)
+          if (block) {
+            out.push({
+              type: "assistant",
+              session_id: ctx.sdkSessionId,
+              uuid: randomUUID(),
+              parent_tool_use_id: null,
+              message: {
+                id: randomUUID(),
+                type: "message",
+                role: "assistant",
+                model: ctx.model,
+                content: [block],
+                stop_reason: null,
+                stop_sequence: null,
+              },
+            })
+          }
           return out
         }
         case "source":
@@ -370,7 +785,8 @@ export function createEventAdapter(ctx) {
           return out
         }
         case "finish": {
-          lastUsage = event.usage ?? null
+          lastUsage = event.usage ?? event.totalUsage ?? null
+          updateMessageMetadata(event?.messageMetadata)
           // Don't emit `result` here — `finish` is the closing event of the
           // fullStream; the caller invokes `.finish()` to emit the SDK
           // result message after the loop exits cleanly.
@@ -417,7 +833,8 @@ export function createEventAdapter(ctx) {
           ...(typeof usage.contextInputTokens === "number"
             ? { context_input_tokens: usage.contextInputTokens }
             : {}),
-          cache_creation_input_tokens: usage.cacheCreationInputTokens ?? 0,
+          cache_creation_input_tokens:
+            usage.cacheCreationInputTokens ?? usage.inputTokenDetails?.cacheWriteTokens ?? 0,
           // Cache-read candidates, most-normalized first: AI SDK v6 maps
           // OpenAI-compatible `prompt_tokens_details.cached_tokens` to
           // `cachedInputTokens`; DeepSeek additionally reports raw
@@ -427,6 +844,7 @@ export function createEventAdapter(ctx) {
           cache_read_input_tokens:
             usage.cacheReadInputTokens ??
             usage.cachedInputTokens ??
+            usage.inputTokenDetails?.cacheReadTokens ??
             usage.prompt_cache_hit_tokens ??
             usage.promptCacheHitTokens ??
             0,
@@ -434,7 +852,11 @@ export function createEventAdapter(ctx) {
           // (AI SDK v6 surfaces `reasoningTokens` for OpenAI o-series/gpt-5,
           // DeepSeek-reasoner, …). A SUBSET of output_tokens — already billed
           // at the output rate — surfaced for observability. 0 when absent.
-          reasoning_tokens: usage.reasoningTokens ?? usage.reasoning_tokens ?? 0,
+          reasoning_tokens:
+            usage.reasoningTokens ??
+            usage.reasoning_tokens ??
+            usage.outputTokenDetails?.reasoningTokens ??
+            0,
         },
       }
       out.push(result)

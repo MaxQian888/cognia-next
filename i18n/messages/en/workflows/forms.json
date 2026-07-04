@@ -103,11 +103,25 @@
     }
   },
   "aiClassify": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "label": "API key"
     },
     "baseURL": {
-      "label": "Base URL (optional)"
+      "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+      "label": "Base URL (optional)",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
     },
     "hint": {
       "label": "Guidance (optional)"
@@ -122,12 +136,14 @@
       "placeholder": "urgent, normal, spam"
     },
     "model": {
+      "hint": "Provider-specific model id.",
       "label": "Model",
       "placeholder": "claude-haiku-4-5-20251001"
     },
     "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
       "label": "Provider",
-      "placeholder": "Provider"
+      "placeholder": "openrouter"
     }
   },
   "aiEmbed": {
@@ -154,11 +170,25 @@
     }
   },
   "aiExtract": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "label": "API key"
     },
     "baseURL": {
-      "label": "Base URL (optional)"
+      "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+      "label": "Base URL (optional)",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
     },
     "hint": {
       "label": "Guidance (optional)"
@@ -167,11 +197,14 @@
       "label": "Input"
     },
     "model": {
-      "label": "Model"
+      "hint": "Provider-specific model id.",
+      "label": "Model",
+      "placeholder": "claude-haiku-4-5-20251001"
     },
     "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
       "label": "Provider",
-      "placeholder": "Provider"
+      "placeholder": "openrouter"
     },
     "required": {
       "hint": "Comma-separated. output.valid is false if any are missing.",
@@ -184,6 +217,13 @@
     }
   },
   "aiPrompt": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "hint": "Embedded inline. For shared workflows, use a credential ref instead.",
       "label": "API key"
@@ -197,6 +237,11 @@
       "hint": "A sample shape the model should match. Injected into the prompt.",
       "label": "JSON shape (optional)",
       "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" }"
     },
     "mode": {
       "explicit": "Explicit provider",
@@ -222,8 +267,9 @@
       "redact": "Redact placeholders"
     },
     "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
       "label": "Provider",
-      "placeholder": "(stub)"
+      "placeholder": "openrouter"
     },
     "responseFormat": {
       "hint": "JSON parses the reply into structured output for downstream nodes.",
@@ -240,6 +286,47 @@
     },
     "userPrompt": {
       "label": "User prompt"
+    }
+  },
+  "aiCouncil": {
+    "councillorsJson": {
+      "hint": "Array of { name, modelAlias, systemPrompt? } objects. modelAlias uses Settings -> Routing aliases.",
+      "label": "Councillors JSON",
+      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+    },
+    "executionMode": {
+      "label": "Execution mode",
+      "options": {
+        "parallel": "Parallel",
+        "serial": "Serial"
+      }
+    },
+    "maxConcurrency": {
+      "hint": "Maximum councillor calls running at once in parallel mode.",
+      "label": "Max concurrency"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Runs before the prompt egresses to every councillor and the synthesizer.",
+      "label": "PII gate",
+      "off": "Off",
+      "redact": "Redact"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "synthesisInstructions": {
+      "hint": "Optional guidance for the final synthesis pass.",
+      "label": "Synthesis instructions"
+    },
+    "synthesizerAlias": {
+      "hint": "Routing alias for the model that merges councillor responses.",
+      "label": "Synthesizer alias",
+      "placeholder": "quality"
+    },
+    "timeoutMs": {
+      "hint": "Per-councillor timeout. Valid range: 1000-600000 ms.",
+      "label": "Timeout (ms)"
     }
   },
   "branch": {
@@ -2523,6 +2610,42 @@
       "off": "Off",
       "block": "Block (fail the step)",
       "redact": "Redact"
+    }
+  },
+  "petEventTrigger": {
+    "cooldownMs": {
+      "hint": "Minimum time between fires for the same workflow. Prevents workflows from retriggering themselves.",
+      "label": "Cooldown (ms)"
+    },
+    "intro": "Fires when the desktop pet reaches a supported lifecycle event.",
+    "kinds": {
+      "hint": "Leave all off to fire on every supported pet lifecycle event.",
+      "label": "Pet events",
+      "options": {
+        "achievementUnlocked": "Achievement unlocked",
+        "evolved": "Evolved",
+        "levelUp": "Level up",
+        "unwell": "Unwell"
+      }
+    }
+  },
+  "petInteract": {
+    "itemId": {
+      "hint": "Optional shop item id consumed by the pet controller.",
+      "label": "Item id",
+      "placeholder": "pet_item_..."
+    },
+    "kind": {
+      "label": "Interaction",
+      "options": {
+        "cleaned": "Clean",
+        "fed": "Feed",
+        "petted": "Pet",
+        "played": "Play",
+        "slept": "Sleep",
+        "talked": "Talk",
+        "treated": "Treat"
+      }
     }
   },
   "output": {

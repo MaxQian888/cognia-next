@@ -133,6 +133,23 @@ describe("nodeCatalogEntry", () => {
     expect(e.iconName).toBe("Wand")
     __resetPluginCatalogForTesting()
   })
+
+  it("keeps plugin default params on the registered catalog entry", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.format" as never,
+      category: "plugin",
+      label: "Format",
+      description: "Format text",
+      iconName: "Wand",
+      keywords: [],
+      pluginId: "demo",
+      defaultParams: { mode: "markdown", retries: 2 },
+    })
+    const e = nodeCatalogEntry("demo.action.format" as Parameters<typeof nodeCatalogEntry>[0])
+    expect(e.defaultParams).toEqual({ mode: "markdown", retries: 2 })
+    __resetPluginCatalogForTesting()
+  })
 })
 
 describe("capability requirements (ADR 0060)", () => {

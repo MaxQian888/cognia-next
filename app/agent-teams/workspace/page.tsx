@@ -57,7 +57,7 @@ import { usePlatform } from "@/hooks/use-platform"
 import { TeamWorkspaceMobile } from "@/components/mobile/agent-teams/team-workspace-mobile"
 import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availability"
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
-import { getProviderModel } from "@cognia/provider-core/core/client"
+import { buildTeamClaudeRuntimeModel } from "@/lib/agent-team/provider-model"
 import type {
   AgentTeam,
   AgentTeamEvent,
@@ -147,14 +147,8 @@ function AgentTeamWorkspaceInner() {
         return
       }
 
-      const apiKey = settings?.apiKey ?? ""
-      const model = getProviderModel({
-        provider: "anthropic",
-        model: settings?.defaultModel ?? "claude-sonnet-4-5",
-        apiKey,
-      })
       const streamer = createCompositeStreamer({
-        claude: { model },
+        claude: { model: buildTeamClaudeRuntimeModel(settings) },
         external: {
           setActiveAgent,
           executeStreaming,

@@ -822,6 +822,128 @@ describe("resolveSendOptions — compaction config", () => {
     expect(opts.compaction?.summary?.credentials?.apiKey).toBe("sk-summary")
   })
 
+  it("does not emit an unauthenticated summary credential for a keyless CLOUD provider", async () => {
+    // deepseek is a cloud built-in (apiKeyRequired) whose base URL auto-fills
+    // from the catalog. With no key configured, the summary must fall back to
+    // the main model instead of firing an unauthenticated request that 401s at
+    // compaction time.
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { deepseek: { enabled: true } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "deepseek", model: "deepseek-chat" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary).toBeUndefined()
+  })
+
+  it("allows a keyless LOCAL summary provider (Ollama) to resolve with just a base URL", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { ollama: { enabled: true } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "ollama", model: "llama3" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary?.model).toBe("llama3")
+    expect(opts.compaction?.summary?.credentials?.baseURL).toBeTruthy()
+    expect(opts.compaction?.summary?.credentials?.apiKey).toBeUndefined()
+  })
+
+  it("resolves a Codex summary provider from the subscription vault when settings have no key", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.2-codex" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.compaction?.summary).toEqual({
+      model: "gpt-5.2-codex",
+      protocol: "openai",
+      credentials: {
+        apiKey: "chatgpt-bearer",
+        baseURL: "https://chatgpt.com/backend-api/codex",
+        headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+      },
+    })
+  })
+
+  it("backfills Codex summary provider headers from the vault when settings provide the key", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {
+          codex: {
+            apiKey: "chatgpt-bearer",
+            baseURL: "https://chatgpt.com/backend-api/codex",
+          },
+        },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.2-codex" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.compaction?.summary?.credentials).toEqual({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+  })
+
+  it("resolves an OpenCode summary provider from the subscription vault when settings have no key", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue({
+      apiKey: "sk-go-vault",
+      baseURL: "https://opencode.ai/zen/go/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "opencode-go", model: "kimi-k2.6" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(opts.compaction?.summary).toEqual({
+      model: "kimi-k2.6",
+      protocol: "openai",
+      credentials: {
+        apiKey: "sk-go-vault",
+        baseURL: "https://opencode.ai/zen/go/v1",
+      },
+    })
+  })
+
   it("reuses the turn provider when only a summary model is configured", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o" }),

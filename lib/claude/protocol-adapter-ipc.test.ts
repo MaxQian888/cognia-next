@@ -19,6 +19,18 @@ function writer() {
   return { calls, writeCommand: (m: Record<string, unknown>) => void calls.push(m) }
 }
 
+async function runExec(...args: Parameters<typeof dispatchProtocolAdapterExec>): Promise<void> {
+  await dispatchProtocolAdapterExec(...args).done
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let i = 0; i < 50; i++) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error("condition was not met")
+}
+
 describe("dispatchProtocolAdapterExec", () => {
   it("streams chunks then done with harvested usage", async () => {
     const factory: CodeProtocolAdapterFactory = () => ({
@@ -29,7 +41,7 @@ describe("dispatchProtocolAdapterExec", () => {
       },
     })
     const { calls, writeCommand } = writer()
-    await dispatchProtocolAdapterExec(event, { writeCommand, resolveExecutor: () => factory })
+    await runExec(event, { writeCommand, resolveExecutor: () => factory })
 
     const types = calls.map((c) => c.type)
     expect(types).toEqual([
@@ -45,9 +57,25 @@ describe("dispatchProtocolAdapterExec", () => {
     })
   })
 
+  it("harvests AI SDK finish.totalUsage from code-adapter streams", async () => {
+    const factory: CodeProtocolAdapterFactory = () => ({
+      stream: async function* () {
+        yield { type: "finish", totalUsage: { inputTokens: 8, outputTokens: 3 } }
+      },
+    })
+    const { calls, writeCommand } = writer()
+    await runExec(event, { writeCommand, resolveExecutor: () => factory })
+
+    expect(calls.at(-1)).toMatchObject({
+      type: "protocol_adapter_done",
+      execId: "ex1",
+      usage: { inputTokens: 8, outputTokens: 3 },
+    })
+  })
+
   it("errors when no executor is registered", async () => {
     const { calls, writeCommand } = writer()
-    await dispatchProtocolAdapterExec(event, { writeCommand, resolveExecutor: () => undefined })
+    await runExec(event, { writeCommand, resolveExecutor: () => undefined })
     expect(calls).toEqual([
       expect.objectContaining({
         type: "protocol_adapter_error",
@@ -66,7 +94,7 @@ describe("dispatchProtocolAdapterExec", () => {
       },
     })
     const { calls, writeCommand } = writer()
-    await dispatchProtocolAdapterExec(event, { writeCommand, resolveExecutor: () => factory })
+    await runExec(event, { writeCommand, resolveExecutor: () => factory })
     expect(calls.map((c) => c.type)).toEqual(["protocol_adapter_chunk", "protocol_adapter_error"])
     expect(calls.at(-1)).toMatchObject({ error: "HTTP 429" })
   })
@@ -78,7 +106,7 @@ describe("dispatchProtocolAdapterExec", () => {
       },
     })
     const { calls, writeCommand } = writer()
-    await dispatchProtocolAdapterExec(event, { writeCommand, resolveExecutor: () => factory })
+    await runExec(event, { writeCommand, resolveExecutor: () => factory })
     expect(calls).toEqual([
       expect.objectContaining({ type: "protocol_adapter_error", error: "executor exploded" }),
     ])
@@ -91,8 +119,38 @@ describe("dispatchProtocolAdapterExec", () => {
       },
     })
     const { calls, writeCommand } = writer()
-    await dispatchProtocolAdapterExec(event, { writeCommand, resolveExecutor: () => factory })
+    await runExec(event, { writeCommand, resolveExecutor: () => factory })
     expect(calls.at(-1)).toMatchObject({ type: "protocol_adapter_done" })
     expect(calls.at(-1)).not.toHaveProperty("usage")
+  })
+
+  it("passes an abortSignal into the executor request and suppresses completion after cancel", async () => {
+    let capturedSignal: AbortSignal | undefined
+    const factory: CodeProtocolAdapterFactory = () => ({
+      stream: async function* (req) {
+        capturedSignal = req.abortSignal
+        yield { type: "text-delta", text: "partial" }
+        await new Promise<void>((resolve) =>
+          req.abortSignal?.addEventListener("abort", () => resolve())
+        )
+        yield { type: "text-delta", text: "never" }
+      },
+    })
+    const { calls, writeCommand } = writer()
+    const handle = dispatchProtocolAdapterExec(event, {
+      writeCommand,
+      resolveExecutor: () => factory,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(capturedSignal).toBeInstanceOf(AbortSignal)
+    expect(capturedSignal?.aborted).toBe(false)
+    await waitFor(() => calls.length === 1)
+    handle.cancel("interrupted")
+    expect(capturedSignal?.aborted).toBe(true)
+    await handle.done
+
+    expect(calls.map((c) => c.type)).toEqual(["protocol_adapter_chunk"])
   })
 })

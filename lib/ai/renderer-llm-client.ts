@@ -94,12 +94,14 @@ export function buildRendererLlmClient({
     model,
     apiKey: resolution.apiKey,
     baseURL: resolution.baseURL,
+    apiFlavor: resolution.apiFlavor,
   })
 }
 
 const RENDERER_EXECUTABLE_PROTOCOLS = new Set([
   "anthropic",
   "openai",
+  "azure",
   "google",
   "mistral",
   "cohere",
@@ -107,8 +109,8 @@ const RENDERER_EXECUTABLE_PROTOCOLS = new Set([
 
 function isRendererExecutableProtocol(
   protocol: string
-): protocol is "anthropic" | "openai" | "google" | "mistral" | "cohere" {
+): protocol is "anthropic" | "openai" | "azure" | "google" | "mistral" | "cohere" {
   return RENDERER_EXECUTABLE_PROTOCOLS.has(
-    protocol as "anthropic" | "openai" | "google" | "mistral" | "cohere"
+    protocol as "anthropic" | "openai" | "azure" | "google" | "mistral" | "cohere"
   )
 }

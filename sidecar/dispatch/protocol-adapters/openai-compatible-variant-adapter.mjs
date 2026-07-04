@@ -58,6 +58,18 @@ async function* sseDataLines(body) {
   if (tail.startsWith("data:")) yield tail.slice(5).trim()
 }
 
+function mayBeIncompleteJson(payload) {
+  const trimmed = payload.trim()
+  return trimmed.startsWith("{") || (trimmed.startsWith("[") && trimmed !== "[DONE]")
+}
+
+/**
+ * Hard ceiling on the multi-line-JSON reassembly buffer. A real SSE event is
+ * a few KB of delta text; anything past this is a poisoned buffer (a garbage
+ * `{`-prefixed line that will never parse), not a legitimate continuation.
+ */
+const MAX_PENDING_SSE_BYTES = 1024 * 1024
+
 /**
  * @param {any} spec  Validated openai-compatible-variant spec.
  * @returns {import("./types.mjs").ProtocolAdapter}
@@ -92,6 +104,7 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: req.abortSignal,
       })
       if (!res.ok) {
         // Surface status + body text so the renderer's error classifier can
@@ -115,14 +128,38 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         let promptTokens
         let completionTokens
         let cachedInputTokens
+        let cacheCreationInputTokens
+        let reasoningTokens
+        let pendingData = null
         try {
           for await (const data of sseDataLines(res.body)) {
             if (data === "[DONE]") break
+            const payload = pendingData ? `${pendingData}${data}` : data
             let parsed
+            let hasParsed = false
             try {
-              parsed = JSON.parse(data)
+              parsed = JSON.parse(payload)
+              hasParsed = true
+              pendingData = null
             } catch {
-              continue // tolerate keep-alive/comment payloads
+              // The glued payload didn't parse. If this line parses on its
+              // own, the stashed prefix was garbage (a malformed frame that
+              // will never complete) — drop it and recover with the line,
+              // instead of letting the poisoned buffer eat the whole stream.
+              if (pendingData !== null) {
+                try {
+                  parsed = JSON.parse(data)
+                  hasParsed = true
+                  pendingData = null
+                } catch {
+                  // Still ambiguous: genuine multi-line continuation.
+                }
+              }
+              if (!hasParsed) {
+                const stash = mayBeIncompleteJson(payload) ? payload : null
+                pendingData = stash !== null && stash.length <= MAX_PENDING_SSE_BYTES ? stash : null
+                continue // tolerate keep-alive/comment payloads
+              }
             }
             const text = getPath(parsed, paths.textDelta)
             if (typeof text === "string" && text.length > 0) {
@@ -144,15 +181,25 @@ export function makeOpenAiCompatVariantAdapter(spec) {
               const cacheRead = paths.usage.cacheRead
                 ? getPath(parsed, paths.usage.cacheRead)
                 : undefined
+              const cacheCreation = paths.usage.cacheCreation
+                ? getPath(parsed, paths.usage.cacheCreation)
+                : undefined
+              const reasoning = paths.usage.reasoning
+                ? getPath(parsed, paths.usage.reasoning)
+                : undefined
               if (typeof input === "number") promptTokens = input
               if (typeof output === "number") completionTokens = output
               if (typeof cacheRead === "number") cachedInputTokens = cacheRead
+              if (typeof cacheCreation === "number") cacheCreationInputTokens = cacheCreation
+              if (typeof reasoning === "number") reasoningTokens = reasoning
             }
           }
           const finalUsage = {
             ...(promptTokens !== undefined ? { promptTokens } : {}),
             ...(completionTokens !== undefined ? { completionTokens } : {}),
             ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+            ...(cacheCreationInputTokens !== undefined ? { cacheCreationInputTokens } : {}),
+            ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
           }
           yield { type: "finish", finishReason: finishReason ?? "stop", usage: finalUsage }
           resolveUsage(finalUsage)

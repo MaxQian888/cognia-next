@@ -493,15 +493,15 @@ function handleProtocolAdapterError(msg) {
   s.pendingProtocolExecs.delete(execId)
 }
 
-function handleClose(msg) {
+export function routeClose(sessionsMap, msg, logFn = () => {}) {
   const { sessionId } = msg
-  const s = sessions.get(sessionId)
-  if (!s) return
+  const s = sessionsMap.get(sessionId)
+  if (!s) return false
   try {
     s.closeInput()
-    s.q.close()
+    if (typeof s.q?.close === "function") s.q.close()
   } catch (err) {
-    log("error", `close failed: ${err?.message ?? err}`)
+    logFn("error", `close failed: ${err?.message ?? err}`)
   }
   // Settle any pending tool/approval round-trips so a renderer that never
   // answers can't keep promises (and the agent loop) alive past teardown. The
@@ -510,9 +510,14 @@ function handleClose(msg) {
   try {
     s.drainPending?.("session closed")
   } catch (err) {
-    log("error", `drainPending (close) failed: ${err?.message ?? err}`)
+    logFn("error", `drainPending (close) failed: ${err?.message ?? err}`)
   }
-  sessions.delete(sessionId)
+  sessionsMap.delete(sessionId)
+  return true
+}
+
+function handleClose(msg) {
+  routeClose(sessions, msg, log)
 }
 
 // ---- Main read loop -------------------------------------------------------

@@ -103,11 +103,25 @@
     }
   },
   "aiClassify": {
+    "apiFlavor": {
+      "auto": "自动",
+      "chat": "Chat Completions",
+      "hint": "仅影响 OpenAI 兼容提供方。自动模式会按 Base URL / provider 启发式判断。",
+      "label": "OpenAI 端点",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "label": "API Key"
     },
     "baseURL": {
-      "label": "Base URL（可选）"
+      "hint": "用于代理或自建 OpenAI 兼容端点。",
+      "label": "Base URL（可选）",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
+      "label": "Headers JSON（可选）",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
     },
     "hint": {
       "label": "辅助说明（可选）"
@@ -122,12 +136,14 @@
       "placeholder": "urgent, normal, spam"
     },
     "model": {
+      "hint": "提供方专属的模型 ID。",
       "label": "模型",
       "placeholder": "claude-haiku-4-5-20251001"
     },
     "provider": {
+      "hint": "Provider id，可填写 openrouter、deepseek、groq、codex、azure 等 OpenAI 兼容 id。",
       "label": "提供方",
-      "placeholder": "提供方"
+      "placeholder": "openrouter"
     }
   },
   "aiEmbed": {
@@ -154,11 +170,25 @@
     }
   },
   "aiExtract": {
+    "apiFlavor": {
+      "auto": "自动",
+      "chat": "Chat Completions",
+      "hint": "仅影响 OpenAI 兼容提供方。自动模式会按 Base URL / provider 启发式判断。",
+      "label": "OpenAI 端点",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "label": "API Key"
     },
     "baseURL": {
-      "label": "Base URL（可选）"
+      "hint": "用于代理或自建 OpenAI 兼容端点。",
+      "label": "Base URL（可选）",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
+      "label": "Headers JSON（可选）",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
     },
     "hint": {
       "label": "辅助说明（可选）"
@@ -167,11 +197,14 @@
       "label": "输入"
     },
     "model": {
-      "label": "模型"
+      "hint": "提供方专属的模型 ID。",
+      "label": "模型",
+      "placeholder": "claude-haiku-4-5-20251001"
     },
     "provider": {
+      "hint": "Provider id，可填写 openrouter、deepseek、groq、codex、azure 等 OpenAI 兼容 id。",
       "label": "提供方",
-      "placeholder": "提供方"
+      "placeholder": "openrouter"
     },
     "required": {
       "hint": "逗号分隔。任一缺失则 output.valid 为 false。",
@@ -184,6 +217,13 @@
     }
   },
   "aiPrompt": {
+    "apiFlavor": {
+      "auto": "自动",
+      "chat": "Chat Completions",
+      "hint": "仅影响 OpenAI 兼容提供方。自动模式会按 Base URL / provider 启发式判断。",
+      "label": "OpenAI 端点",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "hint": "明文存入工作流。分享给他人时建议使用凭证引用。",
       "label": "API Key"
@@ -197,6 +237,11 @@
       "hint": "希望模型匹配的示例形状，会注入到提示词中。",
       "label": "JSON 形状（可选）",
       "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
+    },
+    "headersJson": {
+      "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
+      "label": "Headers JSON（可选）",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" }"
     },
     "mode": {
       "explicit": "指定提供方",
@@ -222,8 +267,9 @@
       "redact": "脱敏占位符"
     },
     "provider": {
+      "hint": "Provider id，可填写 openrouter、deepseek、groq、codex、azure 等 OpenAI 兼容 id。",
       "label": "提供方",
-      "placeholder": "（占位）"
+      "placeholder": "openrouter"
     },
     "responseFormat": {
       "hint": "选 JSON 会把回复解析为结构化输出，供下游节点引用。",
@@ -240,6 +286,47 @@
     },
     "userPrompt": {
       "label": "用户提示词"
+    }
+  },
+  "aiCouncil": {
+    "councillorsJson": {
+      "hint": "{ name, modelAlias, systemPrompt? } 对象数组。modelAlias 使用「设置 -> 路由」中的别名。",
+      "label": "议会成员 JSON",
+      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+    },
+    "executionMode": {
+      "label": "执行模式",
+      "options": {
+        "parallel": "并行",
+        "serial": "串行"
+      }
+    },
+    "maxConcurrency": {
+      "hint": "并行模式下同时运行的议会成员调用数上限。",
+      "label": "最大并发"
+    },
+    "piiGate": {
+      "block": "拦截（让步骤失败）",
+      "hint": "在提示词外发到每个议会成员和综合器前运行。",
+      "label": "PII 闸",
+      "off": "关闭",
+      "redact": "脱敏"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "synthesisInstructions": {
+      "hint": "终审综合步骤的可选指导。",
+      "label": "综合指导"
+    },
+    "synthesizerAlias": {
+      "hint": "用于合并各模型回答的路由模型别名。",
+      "label": "综合器别名",
+      "placeholder": "quality"
+    },
+    "timeoutMs": {
+      "hint": "单个议会成员的超时时间。有效范围：1000-600000 毫秒。",
+      "label": "超时（毫秒）"
     }
   },
   "branch": {
@@ -2523,6 +2610,42 @@
       "off": "关闭",
       "block": "拦截（让步骤失败）",
       "redact": "脱敏"
+    }
+  },
+  "petEventTrigger": {
+    "cooldownMs": {
+      "hint": "同一工作流两次触发之间的最短间隔，避免工作流自触发循环。",
+      "label": "冷却时间（毫秒）"
+    },
+    "intro": "当桌面宠物进入受支持的生命周期事件时触发。",
+    "kinds": {
+      "hint": "全部不选时会监听所有受支持的宠物生命周期事件。",
+      "label": "宠物事件",
+      "options": {
+        "achievementUnlocked": "解锁成就",
+        "evolved": "进化",
+        "levelUp": "升级",
+        "unwell": "不适"
+      }
+    }
+  },
+  "petInteract": {
+    "itemId": {
+      "hint": "可选的商店物品 ID，由宠物控制器消耗。",
+      "label": "物品 ID",
+      "placeholder": "pet_item_..."
+    },
+    "kind": {
+      "label": "互动",
+      "options": {
+        "cleaned": "清洁",
+        "fed": "喂食",
+        "petted": "抚摸",
+        "played": "玩耍",
+        "slept": "休息",
+        "talked": "聊天",
+        "treated": "治疗"
+      }
     }
   },
   "output": {

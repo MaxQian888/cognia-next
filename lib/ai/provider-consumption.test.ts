@@ -1,4 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic"
+import { createAzure } from "@ai-sdk/azure"
+import { createOpenAI } from "@ai-sdk/openai"
 
 import {
   createProviderSettingsSnapshot,
@@ -19,6 +21,31 @@ jest.mock("@ai-sdk/anthropic", () => ({
     ;(fn as { chat?: unknown }).chat = (id: string) => make(id)
     return fn
   }),
+}))
+
+function makeEndpointFamilyFactory(provider: string) {
+  return jest.fn((settings: unknown) => {
+    const fn = Object.assign(
+      jest.fn((id: string) => ({ __provider: provider, id, settings })),
+      {
+        chat: jest.fn((id: string) => ({ __provider: `${provider}.chat`, id, settings })),
+        responses: jest.fn((id: string) => ({
+          __provider: `${provider}.responses`,
+          id,
+          settings,
+        })),
+      }
+    )
+    return fn
+  })
+}
+
+jest.mock("@ai-sdk/openai", () => ({
+  createOpenAI: makeEndpointFamilyFactory("openai"),
+}))
+
+jest.mock("@ai-sdk/azure", () => ({
+  createAzure: makeEndpointFamilyFactory("azure"),
 }))
 
 describe("createProviderSettingsSnapshot", () => {
@@ -538,6 +565,11 @@ describe("resolveFeatureProvider — selection + fallback modes", () => {
 })
 
 describe("createFeatureProviderClient / createFeatureProviderModel", () => {
+  beforeEach(() => {
+    ;(createOpenAI as jest.Mock).mockClear()
+    ;(createAzure as jest.Mock).mockClear()
+  })
+
   const base = {
     providerId: "p",
     apiKey: "k",
@@ -591,6 +623,76 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
       useProxy: false,
     }
     expect(createFeatureProviderModel(resolved)).toBeDefined()
+  })
+
+  it("routes OpenAI-compatible gateways to Chat Completions by default", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "openrouter",
+      protocol: "openai",
+      apiKey: "sk-or-v1",
+      baseURL: "https://openrouter.ai/api/v1",
+      model: "openrouter/auto",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string; id?: string }
+    expect(model.__provider).toBe("openai.chat")
+    expect(model.id).toBe("openrouter/auto")
+  })
+
+  it("honors apiFlavor when building an OpenAI-compatible feature model", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "openai",
+      protocol: "openai",
+      apiFlavor: "responses",
+      apiKey: "sk-test",
+      baseURL: "https://gateway.example/v1",
+      model: "gpt-4o",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    expect(model.__provider).toBe("openai.responses")
+  })
+
+  it("routes Codex feature models through Responses on the ChatGPT backend", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "codex",
+      protocol: "openai",
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      model: "gpt-5.2-codex",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    expect(model.__provider).toBe("openai.responses")
+  })
+
+  it("routes Azure feature models with the shared endpoint-family decision", () => {
+    const auto = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "azure",
+      protocol: "azure",
+      apiKey: "sk-azure",
+      baseURL: "https://x.openai.azure.com",
+      model: "gpt-5",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    const responses = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "azure",
+      protocol: "azure",
+      apiFlavor: "responses",
+      apiKey: "sk-azure",
+      baseURL: "https://x.openai.azure.com",
+      model: "gpt-5",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    expect(auto.__provider).toBe("azure.chat")
+    expect(responses.__provider).toBe("azure.responses")
   })
 })
 

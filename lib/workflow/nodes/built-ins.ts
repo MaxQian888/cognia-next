@@ -346,6 +346,8 @@ registerNodeExecutor({
       model?: string
       apiKey?: string
       baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
       systemPrompt?: string
       userPrompt?: string
       temperature?: number
@@ -435,6 +437,8 @@ registerNodeExecutor({
       model: params.model,
       apiKey,
       baseURL: params.baseURL,
+      apiFlavor: params.apiFlavor,
+      headers: params.headers,
       defaultTemperature: params.temperature,
     })
     // Emit a `chat` span for the LLM call so eval (and observability) can
@@ -2243,6 +2247,8 @@ registerNodeExecutor({
       model?: string
       apiKey?: string
       baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
       input?: string
       labels?: string[]
       hint?: string
@@ -2273,6 +2279,8 @@ registerNodeExecutor({
         model: params.model,
         apiKey: params.apiKey,
         baseURL: params.baseURL,
+        apiFlavor: params.apiFlavor,
+        headers: params.headers,
         systemPrompt,
         userPrompt: input,
         temperature: 0,
@@ -2316,6 +2324,8 @@ registerNodeExecutor({
       model?: string
       apiKey?: string
       baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
       input?: string
       schema?: Record<string, string>
       /** Field names that must be present + non-null for `valid` to be true. */
@@ -2345,6 +2355,8 @@ registerNodeExecutor({
         model: params.model,
         apiKey: params.apiKey,
         baseURL: params.baseURL,
+        apiFlavor: params.apiFlavor,
+        headers: params.headers,
         systemPrompt,
         userPrompt: input,
         temperature: 0,

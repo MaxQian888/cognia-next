@@ -15,6 +15,7 @@
 
 import { generateText } from "ai"
 import { getProviderModel } from "@cognia/provider-core/core/client"
+import type { ApiFlavor } from "@cognia/provider-types/provider"
 
 /**
  * Vision-capable providers we wire up. Declared as a literal union directly
@@ -37,6 +38,10 @@ export interface ImageCaptionOptions {
   maxTokens?: number
   /** Custom base URL (e.g. for OpenAI-compatible proxies). */
   baseURL?: string
+  /** OpenAI endpoint family override for compatible proxies / Azure-like gateways. */
+  apiFlavor?: ApiFlavor
+  /** Extra provider headers (e.g. Codex/ChatGPT-login account headers). */
+  headers?: Record<string, string>
 }
 
 const DEFAULT_MODELS: Record<"openai" | "anthropic" | "google", string> = {
@@ -73,6 +78,8 @@ export async function generateImageCaption(
     model,
     apiKey: options.apiKey,
     baseURL: options.baseURL,
+    apiFlavor: options.apiFlavor,
+    headers: options.headers,
   })
 
   const imagePart = toImagePart(image)

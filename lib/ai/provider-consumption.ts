@@ -34,6 +34,7 @@ import type { ApiFlavor, ApiProtocol, ResolverProtocol } from "@cognia/provider-
 import {
   resolveProviderProtocol,
   normalizeProtocol,
+  decideOpenAiEndpointFlavor,
 } from "../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
 
 // =============================================================================
@@ -232,6 +233,7 @@ export interface FeatureClientConfig {
   apiKey: string | undefined
   baseURL: string | undefined
   protocol: ResolvedProvider["protocol"]
+  apiFlavor?: ApiFlavor
   isCustomProvider: boolean
   useProxy: boolean
   /**
@@ -494,6 +496,7 @@ export function createFeatureProviderModel(
     apiKey: resolved.apiKey,
     baseURL: resolved.baseURL,
     protocol: resolved.protocol,
+    apiFlavor: resolved.apiFlavor,
     isCustomProvider: resolved.isCustomProvider,
     useProxy: resolved.useProxy,
     fetch: transport?.fetch,
@@ -506,6 +509,19 @@ export function createFeatureProviderModel(
   // without TS narrowing the union to `never` after the first branch.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handle = client as any
+  if (resolved.protocol === "openai" || resolved.protocol === "azure") {
+    const flavor = decideOpenAiEndpointFlavor({
+      apiFlavor: resolved.apiFlavor,
+      baseURL: resolved.baseURL,
+      providerId: resolved.providerId,
+    })
+    if (flavor === "responses" && typeof handle?.responses === "function") {
+      return handle.responses(modelId)
+    }
+    if (typeof handle?.chat === "function") {
+      return handle.chat(modelId)
+    }
+  }
   if (typeof handle === "function") return handle(modelId)
   if (typeof handle?.chat === "function") return handle.chat(modelId)
   throw new Error(

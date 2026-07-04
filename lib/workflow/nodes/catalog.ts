@@ -58,6 +58,13 @@ export interface NodeCatalogEntry {
    * auto-generated `SchemaForm` instead of the raw-JSON fallback.
    */
   paramsSchema?: Record<string, unknown>
+  /**
+   * Params inserted when a node is dropped from the palette. Built-ins use
+   * code defaults; plugin entries carry their `PluginNodeDef.defaultParams`
+   * or `PluginTriggerDef.defaultParams` here so the editor can preserve the
+   * author-provided starter config without knowing plugin internals.
+   */
+  defaultParams?: Record<string, unknown>
 }
 
 // `Partial` because not every `WorkflowNodeKind` ships palette metadata: some
@@ -813,7 +820,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   "trigger.desktop.event": {
     label: "On UIA event",
     description:
-      "Fire on live desktop UI events. v1: focus-changed on Windows (structure/property pending). A per-workflow cooldown guards against a workflow's own desktop actions re-triggering it.",
+      "Experimental: fire on live desktop UI events. v1: focus-changed on Windows (structure/property pending). A per-workflow cooldown guards against a workflow's own desktop actions re-triggering it.",
     iconName: "Bell",
     keywords: ["desktop", "trigger", "event", "uia", "focus"],
     desktopOnly: true,

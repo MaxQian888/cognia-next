@@ -62,6 +62,8 @@ describe("protocol-adapter renderer ↔ sidecar parity", () => {
           input: "usage.prompt_tokens",
           output: "usage.completion_tokens",
           cacheRead: "usage.prompt_tokens_details.cached_tokens",
+          cacheCreation: "usage.prompt_tokens_details.cache_creation_tokens",
+          reasoning: "usage.completion_tokens_details.reasoning_tokens",
         },
       },
     }

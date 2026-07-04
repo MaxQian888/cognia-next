@@ -24,4 +24,12 @@ describe("agent-teams workspace page wiring", () => {
     )
     expect(src).toMatch(/<TeamRunsList\s+teamId=/)
   })
+
+  it("builds the Claude virtual runtime model through the provider-resolution helper", () => {
+    expect(src).toMatch(
+      /import\s*{\s*buildTeamClaudeRuntimeModel\s*}\s*from\s*"@\/lib\/agent-team\/provider-model"/
+    )
+    expect(src).toMatch(/claude:\s*{\s*model:\s*buildTeamClaudeRuntimeModel\(settings\)\s*}/)
+    expect(src).not.toMatch(/getProviderModel\(\{\s*provider:\s*"anthropic"/s)
+  })
 })

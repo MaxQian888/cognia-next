@@ -16,7 +16,13 @@ const SPEC = {
     textDelta: "choices[0].delta.content",
     reasoningDelta: "choices[0].delta.reasoning_content",
     finishReason: "choices[0].finish_reason",
-    usage: { input: "usage.prompt_tokens", output: "usage.completion_tokens" },
+    usage: {
+      input: "usage.prompt_tokens",
+      output: "usage.completion_tokens",
+      cacheRead: "usage.prompt_tokens_details.cached_tokens",
+      cacheCreation: "usage.prompt_tokens_details.cache_creation_tokens",
+      reasoning: "usage.completion_tokens_details.reasoning_tokens",
+    },
   },
 }
 
@@ -88,6 +94,17 @@ test("interpolates url + headers, renames params, injects extras", async () => {
   assert.deepEqual(body.stream_options, { include_usage: true }) // injected
 })
 
+test("threads abortSignal into fetch so declarative provider calls can be cancelled", async () => {
+  const fetchFn = fakeFetch(["data: [DONE]"])
+  const adapter = makeOpenAiCompatVariantAdapter(SPEC)
+  const abortController = new AbortController()
+
+  const result = await adapter.start({ ...REQ(fetchFn), abortSignal: abortController.signal })
+  await collect(result.fullStream)
+
+  assert.equal(fetchFn.calls[0].init.signal, abortController.signal)
+})
+
 test("maps SSE chunks to fullStream-shaped events matching the builtin path", async () => {
   const fetchFn = fakeFetch([
     `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "hmm" } }] })}`,
@@ -96,7 +113,12 @@ test("maps SSE chunks to fullStream-shaped events matching the builtin path", as
     `data: ${JSON.stringify({ choices: [{ delta: { content: " world" } }] })}`,
     `data: ${JSON.stringify({
       choices: [{ delta: {}, finish_reason: "stop" }],
-      usage: { prompt_tokens: 9, completion_tokens: 4 },
+      usage: {
+        prompt_tokens: 9,
+        completion_tokens: 4,
+        prompt_tokens_details: { cached_tokens: 3, cache_creation_tokens: 2 },
+        completion_tokens_details: { reasoning_tokens: 1 },
+      },
     })}`,
     "data: [DONE]",
   ])
@@ -111,10 +133,66 @@ test("maps SSE chunks to fullStream-shaped events matching the builtin path", as
     {
       type: "finish",
       finishReason: "stop",
-      usage: { promptTokens: 9, completionTokens: 4 },
+      usage: {
+        promptTokens: 9,
+        completionTokens: 4,
+        cachedInputTokens: 3,
+        cacheCreationInputTokens: 2,
+        reasoningTokens: 1,
+      },
     },
   ])
-  assert.deepEqual(await result.usage, { promptTokens: 9, completionTokens: 4 })
+  assert.deepEqual(await result.usage, {
+    promptTokens: 9,
+    completionTokens: 4,
+    cachedInputTokens: 3,
+    cacheCreationInputTokens: 2,
+    reasoningTokens: 1,
+  })
+})
+
+test("parses one SSE event assembled from multiple data lines", async () => {
+  const fetchFn = fakeFetch([
+    'data: {"choices":[{"delta":{"content":"multi"',
+    'data: },"finish_reason":"stop"}]',
+    "data: }",
+    "",
+    "data: [DONE]",
+  ])
+  const adapter = makeOpenAiCompatVariantAdapter(SPEC)
+  const result = await adapter.start(REQ(fetchFn))
+  const events = await collect(result.fullStream)
+
+  assert.deepEqual(events, [
+    { type: "text-delta", id: "0", text: "multi" },
+    { type: "finish", finishReason: "stop", usage: {} },
+  ])
+})
+
+test("a poisoned '{'-prefixed frame does not swallow the rest of the stream", async () => {
+  const fetchFn = fakeFetch([
+    // Malformed frame that starts like JSON but can never parse — without the
+    // recovery path it would be prepended to every later line forever.
+    'data: {"choices":[{"delta":{"content":"trunca',
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "recovered" } }] })}`,
+    `data: ${JSON.stringify({
+      choices: [{ delta: {}, finish_reason: "stop" }],
+      usage: { prompt_tokens: 2, completion_tokens: 1 },
+    })}`,
+    "data: [DONE]",
+  ])
+  const adapter = makeOpenAiCompatVariantAdapter(SPEC)
+  const result = await adapter.start(REQ(fetchFn))
+  const events = await collect(result.fullStream)
+
+  assert.deepEqual(events, [
+    { type: "text-delta", id: "0", text: "recovered" },
+    {
+      type: "finish",
+      finishReason: "stop",
+      usage: { promptTokens: 2, completionTokens: 1 },
+    },
+  ])
 })
 
 test("tolerates unparseable data payloads and missing finish reason", async () => {

@@ -19,9 +19,14 @@ import type {
   SendOptions,
   SessionControlMethod,
 } from "./types"
-import { isControlResponseEvent, isPluginToolExecEvent } from "./types"
+import {
+  isControlResponseEvent,
+  isPluginToolExecEvent,
+  isProtocolAdapterCancelEvent,
+} from "./types"
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
+import type { ProtocolAdapterCancelEvent } from "./types"
 
 const SIDECAR_EVENT = "claude://message"
 
@@ -441,6 +446,14 @@ export async function subscribeProtocolAdapterExec(
     if ((evt as { type?: string }).type === "protocol_adapter_exec") {
       handler(evt as unknown as ProtocolAdapterExecEvent)
     }
+  })
+}
+
+export async function subscribeProtocolAdapterCancel(
+  handler: (req: ProtocolAdapterCancelEvent) => void
+): Promise<UnlistenFn> {
+  return onClaudeMessage((evt) => {
+    if (isProtocolAdapterCancelEvent(evt)) handler(evt)
   })
 }
 

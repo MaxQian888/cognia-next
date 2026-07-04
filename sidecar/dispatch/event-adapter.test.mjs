@@ -45,6 +45,15 @@ test("text/reasoning deltas stream as message_start + content_block_delta frames
   assert.deepEqual(rDelta, { type: "thinking_delta", thinking: "hmm" })
 })
 
+test("AI SDK step boundaries stream as step events", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const start = adapter.handle({ type: "start-step" })
+  assert.deepEqual(start.map((m) => m.event?.type).filter(Boolean), ["message_start", "step_start"])
+
+  const finish = adapter.handle({ type: "finish-step" })
+  assert.deepEqual(finish.map((m) => m.event?.type).filter(Boolean), ["step_finish"])
+})
+
 test("sealAssistant() returns [] when nothing is buffered", () => {
   const adapter = createEventAdapter(baseCtx())
   assert.deepEqual(adapter.sealAssistant(), [])
@@ -57,6 +66,158 @@ test("sealAssistant() seals streamed text into a canonical assistant sharing the
   const sealed = adapter.sealAssistant().find((m) => m.type === "assistant")
   assert.equal(sealed.message.id, streamId)
   assert.equal(sealed.message.content[0].text, "hi")
+})
+
+test("AI SDK start.messageId controls streamed and sealed assistant ids", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "start", messageId: "sdk-message-1" })
+  const start = adapter.handle({ type: "text-delta", text: "hi" })
+  assert.equal(
+    start.find((m) => m.event?.type === "message_start").event.message.id,
+    "sdk-message-1"
+  )
+  assert.equal(
+    adapter.sealAssistant().find((m) => m.type === "assistant").message.id,
+    "sdk-message-1"
+  )
+})
+
+test("AI SDK message metadata chunks update the sealed assistant metadata", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({
+    type: "start",
+    messageId: "sdk-message-1",
+    messageMetadata: { phase: "start" },
+  })
+  adapter.handle({ type: "text-delta", text: "hi" })
+  adapter.handle({ type: "message-metadata", messageMetadata: { phase: "mid" } })
+  adapter.handle({
+    type: "finish",
+    finishReason: "stop",
+    messageMetadata: { phase: "finish" },
+  })
+  const sealed = adapter.sealAssistant().find((m) => m.type === "assistant")
+  assert.equal(sealed.message.id, "sdk-message-1")
+  assert.deepEqual(sealed.message.metadata, { phase: "finish" })
+})
+
+test("AI SDK message metadata chunks deep-merge non-null updates", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({
+    type: "start",
+    messageMetadata: {
+      phase: "start",
+      nested: { keep: true, replace: "start" },
+      list: ["start"],
+    },
+  })
+  adapter.handle({
+    type: "message-metadata",
+    messageMetadata: {
+      nested: { replace: "mid", add: 1 },
+      list: ["mid"],
+      unsafe: "kept",
+    },
+  })
+  adapter.handle({ type: "message-metadata", messageMetadata: null })
+  adapter.handle({ type: "message-metadata", messageMetadata: undefined })
+  adapter.handle({ type: "text-delta", text: "hi" })
+  adapter.handle({
+    type: "finish",
+    messageMetadata: {
+      phase: "finish",
+      nested: { add: 2 },
+      __proto__: { polluted: true },
+    },
+  })
+
+  const sealed = adapter.sealAssistant().find((m) => m.type === "assistant")
+  assert.deepEqual(sealed.message.metadata, {
+    phase: "finish",
+    nested: { keep: true, replace: "mid", add: 2 },
+    list: ["mid"],
+    unsafe: "kept",
+  })
+  assert.equal({}.polluted, undefined)
+})
+
+test("sealAssistant() preserves latest text and reasoning provider metadata", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({
+    type: "text-delta",
+    text: "Hello",
+    providerMetadata: { provider: { phase: "start" } },
+  })
+  adapter.handle({
+    type: "text-delta",
+    text: " world",
+    providerMetadata: { provider: { phase: "final-text" } },
+  })
+  adapter.handle({
+    type: "reasoning-delta",
+    text: "think",
+    providerMetadata: { provider: { phase: "final-reasoning" } },
+  })
+  const content = adapter.sealAssistant().find((m) => m.type === "assistant").message.content
+  assert.deepEqual(
+    content.find((b) => b.type === "text"),
+    {
+      type: "text",
+      text: "Hello world",
+      providerMetadata: { provider: { phase: "final-text" } },
+    }
+  )
+  assert.deepEqual(
+    content.find((b) => b.type === "thinking"),
+    {
+      type: "thinking",
+      thinking: "think",
+      providerMetadata: { provider: { phase: "final-reasoning" } },
+    }
+  )
+})
+
+test("text/reasoning start and end chunks can set sealed provider metadata", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({
+    type: "text-start",
+    id: "text-1",
+    providerMetadata: { provider: { phase: "text-start" } },
+  })
+  adapter.handle({ type: "text-delta", id: "text-1", text: "Hello" })
+  adapter.handle({
+    type: "text-end",
+    id: "text-1",
+    providerMetadata: { provider: { phase: "text-end" } },
+  })
+  adapter.handle({
+    type: "reasoning-start",
+    id: "reasoning-1",
+    providerMetadata: { provider: { phase: "reasoning-start" } },
+  })
+  adapter.handle({ type: "reasoning-delta", id: "reasoning-1", text: "think" })
+  adapter.handle({
+    type: "reasoning-end",
+    id: "reasoning-1",
+    providerMetadata: { provider: { phase: "reasoning-end" } },
+  })
+  const content = adapter.sealAssistant().find((m) => m.type === "assistant").message.content
+  assert.deepEqual(
+    content.find((b) => b.type === "text"),
+    {
+      type: "text",
+      text: "Hello",
+      providerMetadata: { provider: { phase: "text-end" } },
+    }
+  )
+  assert.deepEqual(
+    content.find((b) => b.type === "thinking"),
+    {
+      type: "thinking",
+      thinking: "think",
+      providerMetadata: { provider: { phase: "reasoning-end" } },
+    }
+  )
 })
 
 test("setModel retags subsequent assistant snapshots without touching the init message", () => {
@@ -162,6 +323,308 @@ test("v6 tool-error projects an errored tool_result the model can recover from",
   assert.match(user.message.content[0].content, /nope/)
 })
 
+test("v6 tool-output-denied projects an errored tool_result for the denied call", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({
+    type: "tool-call",
+    toolCallId: "c-denied",
+    toolName: "write",
+    args: { path: "secret.txt" },
+  })
+  const out = adapter.handle({
+    type: "tool-output-denied",
+    toolCallId: "c-denied",
+    toolName: "write",
+  })
+  const user = out.find((m) => m.type === "user")
+  assert.equal(user.message.content[0].type, "tool_result")
+  assert.equal(user.message.content[0].tool_use_id, "c-denied")
+  assert.equal(user.message.content[0].is_error, true)
+  assert.match(user.message.content[0].content, /write/)
+  assert.match(user.message.content[0].content, /denied/i)
+})
+
+test("v6 file part emits a generated file as its own one-shot assistant message", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({
+    type: "file",
+    file: { base64: "QUJD", mediaType: "image/png" },
+    filename: "chart.png",
+  })
+  const assistant = out.find((m) => m.type === "assistant")
+  assert.ok(assistant)
+  assert.deepEqual(assistant.message.content, [
+    {
+      type: "file",
+      source: { type: "base64", media_type: "image/png", data: "QUJD" },
+      filename: "chart.png",
+    },
+  ])
+  // The base64 payload crosses the stdio pipe exactly once: later snapshots
+  // do NOT re-embed it (the accumulate-into-every-snapshot behavior was
+  // O(N²) bytes over the wire).
+  assert.deepEqual(adapter.sealAssistant(), [])
+  adapter.handle({ type: "text-delta", text: "done" })
+  assert.deepEqual(adapter.sealAssistant().find((m) => m.type === "assistant").message.content, [
+    { type: "text", text: "done" },
+  ])
+})
+
+test("v6 url file part projects a hosted file onto the assistant snapshot", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({
+    type: "file",
+    url: "https://files.example/chart.png",
+    mediaType: "image/png",
+  })
+  const assistant = out.find((m) => m.type === "assistant")
+  assert.ok(assistant)
+  assert.deepEqual(assistant.message.content, [
+    {
+      type: "file",
+      url: "https://files.example/chart.png",
+      media_type: "image/png",
+    },
+  ])
+})
+
+test("v6 streamed tool input creates and upgrades a single tool_use block", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const started = adapter.handle({
+    type: "tool-input-start",
+    id: "call-stream",
+    toolName: "write",
+  })
+  const pending = started
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "tool_use")
+  assert.deepEqual(pending, {
+    type: "tool_use",
+    id: "call-stream",
+    name: "write",
+    input: {},
+    state: "input-streaming",
+  })
+
+  // Deltas accumulate silently — no whole-buffer re-parse and no full
+  // assistant snapshot per chunk (the O(n²) fix). Split the JSON across two
+  // deltas to prove reassembly happens once, at tool-input-end.
+  const delta1 = adapter.handle({
+    type: "tool-input-delta",
+    id: "call-stream",
+    delta: '{"path":"secr',
+  })
+  const delta2 = adapter.handle({
+    type: "tool-input-delta",
+    id: "call-stream",
+    delta: 'et.txt"}',
+  })
+  assert.equal(
+    delta1.find((m) => m.type === "assistant"),
+    undefined
+  )
+  assert.equal(
+    delta2.find((m) => m.type === "assistant"),
+    undefined
+  )
+
+  // tool-input-end finalizes the input: the transient "input-streaming"
+  // state is dropped so the block never sticks in-flight when no
+  // tool-call / tool-input-available follows.
+  const ended = adapter.handle({ type: "tool-input-end", id: "call-stream" })
+  const streamed = ended
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "tool_use")
+  assert.deepEqual(streamed, {
+    type: "tool_use",
+    id: "call-stream",
+    name: "write",
+    input: { path: "secret.txt" },
+  })
+
+  const final = adapter.handle({
+    type: "tool-call",
+    toolCallId: "call-stream",
+    toolName: "write",
+    input: { path: "final.txt" },
+    providerExecuted: false,
+    providerMetadata: { provider: { traceId: "trace-tool" } },
+    toolMetadata: { display: "Write file" },
+    dynamic: false,
+    title: "Write file",
+  })
+  const toolUses = final
+    .find((m) => m.type === "assistant")
+    .message.content.filter((b) => b.type === "tool_use")
+  assert.deepEqual(toolUses, [
+    {
+      type: "tool_use",
+      id: "call-stream",
+      name: "write",
+      input: { path: "final.txt" },
+      providerExecuted: false,
+      providerMetadata: { provider: { traceId: "trace-tool" } },
+      toolMetadata: { display: "Write file" },
+      dynamic: false,
+      title: "Write file",
+    },
+  ])
+})
+
+test("v6 tool-approval-request marks the tool_use as awaiting approval", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({
+    type: "tool-call",
+    toolCallId: "call-approval",
+    toolName: "write",
+    input: { path: "secret.txt" },
+  })
+
+  const out = adapter.handle({
+    type: "tool-approval-request",
+    approvalId: "approval-1",
+    signature: "sig-1",
+    toolCall: {
+      type: "tool-call",
+      toolCallId: "call-approval",
+      toolName: "write",
+      input: { path: "secret.txt" },
+    },
+  })
+  const toolUses = out
+    .find((m) => m.type === "assistant")
+    .message.content.filter((b) => b.type === "tool_use")
+  assert.deepEqual(toolUses, [
+    {
+      type: "tool_use",
+      id: "call-approval",
+      name: "write",
+      input: { path: "secret.txt" },
+      state: "approval-requested",
+      approval: { id: "approval-1", signature: "sig-1" },
+    },
+  ])
+})
+
+test("v6 tool-approval-request maps metadata from nested toolCall", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({
+    type: "tool-approval-request",
+    approvalId: "approval-meta",
+    toolCall: {
+      type: "tool-call",
+      toolCallId: "call-approval-meta",
+      toolName: "write",
+      input: { path: "secret.txt" },
+      providerExecuted: false,
+      providerMetadata: { provider: { traceId: "trace-approval" } },
+      toolMetadata: { display: "Write file" },
+      dynamic: false,
+      title: "Write file",
+    },
+  })
+  const toolUses = out
+    .find((m) => m.type === "assistant")
+    .message.content.filter((b) => b.type === "tool_use")
+  assert.deepEqual(toolUses, [
+    {
+      type: "tool_use",
+      id: "call-approval-meta",
+      name: "write",
+      input: { path: "secret.txt" },
+      state: "approval-requested",
+      providerExecuted: false,
+      providerMetadata: { provider: { traceId: "trace-approval" } },
+      toolMetadata: { display: "Write file" },
+      dynamic: false,
+      title: "Write file",
+      approval: { id: "approval-meta" },
+    },
+  ])
+})
+
+test("UI-message tool-input-available finalizes a tool_use block", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({
+    type: "tool-input-available",
+    toolCallId: "call-input-ready",
+    toolName: "write",
+    input: { path: "ready.txt" },
+    providerExecuted: false,
+    providerMetadata: { provider: { traceId: "trace-ready" } },
+    toolMetadata: { display: "Write file" },
+    dynamic: true,
+    title: "Write file",
+  })
+  const toolUses = out
+    .find((m) => m.type === "assistant")
+    .message.content.filter((b) => b.type === "tool_use")
+  assert.deepEqual(toolUses, [
+    {
+      type: "tool_use",
+      id: "call-input-ready",
+      name: "write",
+      input: { path: "ready.txt" },
+      providerExecuted: false,
+      providerMetadata: { provider: { traceId: "trace-ready" } },
+      toolMetadata: { display: "Write file" },
+      dynamic: true,
+      title: "Write file",
+    },
+  ])
+})
+
+test("UI-message tool output and input errors emit tool_result messages", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({
+    type: "tool-input-available",
+    toolCallId: "call-output",
+    toolName: "write",
+    input: { path: "ready.txt" },
+  })
+
+  const available = adapter.handle({
+    type: "tool-output-available",
+    toolCallId: "call-output",
+    output: { ok: true },
+  })
+  const availableResult = available.find((m) => m.type === "user").message.content[0]
+  assert.deepEqual(availableResult, {
+    type: "tool_result",
+    tool_use_id: "call-output",
+    content: JSON.stringify({ ok: true }),
+    is_error: false,
+  })
+
+  const outputError = adapter.handle({
+    type: "tool-output-error",
+    toolCallId: "call-output",
+    errorText: "write failed",
+  })
+  const outputErrorResult = outputError.find((m) => m.type === "user").message.content[0]
+  assert.deepEqual(outputErrorResult, {
+    type: "tool_result",
+    tool_use_id: "call-output",
+    content: "write failed",
+    is_error: true,
+  })
+
+  const inputError = adapter.handle({
+    type: "tool-input-error",
+    toolCallId: "call-input-error",
+    toolName: "write",
+    input: { path: "bad.txt" },
+    errorText: "invalid input",
+  })
+  const inputErrorResult = inputError.find((m) => m.type === "user").message.content[0]
+  assert.deepEqual(inputErrorResult, {
+    type: "tool_result",
+    tool_use_id: "call-input-error",
+    content: "invalid input",
+    is_error: true,
+  })
+})
+
 test("init message is only emitted once across many events", () => {
   const adapter = createEventAdapter(baseCtx())
   const a = adapter.handle({ type: "text-delta", textDelta: "h" })
@@ -258,6 +721,20 @@ test("finish() emits a result message with mapped usage tokens", () => {
   assert.equal(result.usage.reasoning_tokens, 0) // not reported this turn
 })
 
+test("handled finish event uses AI SDK totalUsage when present", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  adapter.handle({
+    type: "finish",
+    totalUsage: { inputTokens: 8, outputTokens: 3, reasoningTokens: 1 },
+  })
+  const out = adapter.finish()
+  const result = out.find((m) => m.type === "result")
+  assert.equal(result.usage.input_tokens, 8)
+  assert.equal(result.usage.output_tokens, 3)
+  assert.equal(result.usage.reasoning_tokens, 1)
+})
+
 test("finish() surfaces contextInputTokens as context_input_tokens (window prompt)", () => {
   const adapter = createEventAdapter(baseCtx())
   adapter.handle({ type: "text-delta", textDelta: "ok" })
@@ -289,6 +766,28 @@ test("finish() surfaces AI SDK v6 reasoningTokens as reasoning_tokens", () => {
   assert.equal(result.usage.output_tokens, 40)
   // reasoning tokens are a SUBSET of output — surfaced for observability.
   assert.equal(result.usage.reasoning_tokens, 32)
+})
+
+test("finish() maps exact AI SDK LanguageModelUsage nested token details", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  const out = adapter.finish({
+    usage: {
+      inputTokens: 10,
+      outputTokens: 6,
+      inputTokenDetails: {
+        cacheReadTokens: 4,
+        cacheWriteTokens: 2,
+      },
+      outputTokenDetails: {
+        reasoningTokens: 3,
+      },
+    },
+  })
+  const result = out.find((m) => m.type === "result")
+  assert.equal(result.usage.cache_read_input_tokens, 4)
+  assert.equal(result.usage.cache_creation_input_tokens, 2)
+  assert.equal(result.usage.reasoning_tokens, 3)
 })
 
 test("finish() maps AI SDK v6 cachedInputTokens to cache_read_input_tokens", () => {
@@ -337,6 +836,12 @@ test("unknown event types are ignored after init", () => {
   assert.deepEqual(out.length, 0)
 })
 
+test("raw provider frames are accepted but not rendered or sealed", () => {
+  const adapter = createEventAdapter(baseCtx())
+  assert.equal(adapter.handle({ type: "raw", rawValue: { vendor: "frame" } }).length, 1)
+  assert.deepEqual(adapter.sealAssistant(), [])
+})
+
 test("text after a tool_use starts a fresh message id", () => {
   const adapter = createEventAdapter(baseCtx())
   const a = adapter.handle({ type: "text-delta", textDelta: "before" })
@@ -352,6 +857,24 @@ test("text after a tool_use starts a fresh message id", () => {
   // Different message ids signal the renderer's id-keyed dedup that this is
   // a new assistant message.
   assert.notEqual(idA, idC)
+})
+
+test("text after a tool_use does not duplicate prior text/tool_use in the sealed message", () => {
+  // Regression: a single leg (default STEP_CHUNK, no reset() between steps) that
+  // streams text → tool_use → more text. The tool→text boundary rotates the
+  // messageId; before the fix it left textBuf + completedToolUses populated, so
+  // the post-boundary snapshot re-emitted "before" and the tool_use under the
+  // new id (duplicate output). The fresh message must carry ONLY the new text.
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "before" })
+  adapter.handle({ type: "tool-call", toolCallId: "call-1", toolName: "Read", args: {} })
+  adapter.handle({ type: "text-delta", textDelta: "after" })
+  const assistant = adapter.sealAssistant().find((m) => m.type === "assistant")
+  assert.ok(assistant)
+  // No re-emitted tool_use, no "beforeafter" concatenation.
+  assert.equal(assistant.message.content.length, 1)
+  assert.equal(assistant.message.content[0].type, "text")
+  assert.equal(assistant.message.content[0].text, "after")
 })
 
 // ── Multi-turn reset (duplicate-output regression) ─────────────────────────
@@ -460,6 +983,17 @@ test("source-document part becomes a document citation", () => {
   assert.deepEqual(textBlock.citations, [
     { type: "document", document_title: "Spec.pdf", title: "Spec.pdf" },
   ])
+})
+
+test("duplicate document sources collapse to a single citation", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "answer" })
+  adapter.handle({ type: "source-document", id: "d1", title: "Spec.pdf" })
+  const out = adapter.handle({ type: "source-document", id: "d1b", title: "Spec.pdf" })
+  const textBlock = out
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "text")
+  assert.equal(textBlock.citations.length, 1)
 })
 
 test("duplicate sources (same url) collapse to a single citation", () => {
