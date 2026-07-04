@@ -1,0 +1,29 @@
+{
+  "title": "Import agent sessions",
+  "description": "Bring your Claude Code, Codex, and OpenCode command-line histories into Cognia as continuable conversations.",
+  "cardTitle": "Coding-agent sessions",
+  "cardBody": "Import past sessions from Claude Code, Codex, or OpenCode.",
+  "scanButton": "Scan installed agents",
+  "pickButton": "Choose files…",
+  "scanning": "Looking for sessions…",
+  "importing": "Importing…",
+  "empty": "No sessions found.",
+  "emptyHint": "Nothing was found on disk. Try choosing session files manually.",
+  "unrecognized": "These files weren't recognized as a supported agent session.",
+  "webHint": "Auto-scan needs the desktop app. On the web, choose session files manually.",
+  "errorTitle": "Import failed",
+  "selectAll": "Select all",
+  "deselectAll": "Clear selection",
+  "importSelected": "Import {count} selected",
+  "close": "Close",
+  "back": "Back",
+  "retry": "Try again",
+  "messagesLabel": "{count, plural, one {# message} other {# messages}}",
+  "doneTitle": "Import complete",
+  "doneBody": "Added {sessions, plural, one {# conversation} other {# conversations}} with {messages, plural, one {# message} other {# messages}}.",
+  "sources": {
+    "claude-code": "Claude Code",
+    "codex": "Codex CLI",
+    "opencode": "OpenCode"
+  }
+}

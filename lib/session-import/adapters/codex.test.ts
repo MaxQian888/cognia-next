@@ -1,0 +1,112 @@
+import { codexSessionSource, parseCodexRollout } from "./codex"
+import type { SessionScanInput } from "../types"
+
+const LINES = [
+  {
+    timestamp: "2025-01-03T12:00:00Z",
+    type: "session_meta",
+    payload: { id: "cx-1", cwd: "/work", model: "gpt-5", source: "cli" },
+  },
+  {
+    timestamp: "2025-01-03T12:00:01Z",
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "fix the bug" }],
+    },
+  },
+  {
+    timestamp: "2025-01-03T12:00:02Z",
+    type: "response_item",
+    payload: { type: "reasoning", summary: "thinking about it" },
+  },
+  {
+    timestamp: "2025-01-03T12:00:03Z",
+    type: "response_item",
+    payload: { type: "function_call", name: "shell", arguments: '{"cmd":"ls"}', call_id: "c1" },
+  },
+  {
+    timestamp: "2025-01-03T12:00:04Z",
+    type: "response_item",
+    payload: { type: "function_call_output", call_id: "c1", output: "a.txt\nb.txt" },
+  },
+  {
+    timestamp: "2025-01-03T12:00:05Z",
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "done" }],
+    },
+  },
+  { timestamp: "2025-01-03T12:00:06Z", type: "response_item", payload: { type: "ghost_snapshot" } },
+]
+
+const CONTENT = LINES.map((l) => JSON.stringify(l)).join("\n")
+
+describe("parseCodexRollout", () => {
+  it("reconstructs messages, reasoning, and tool calls with outputs", () => {
+    const parsed = parseCodexRollout(CONTENT, "rollout.jsonl")
+    expect(parsed.originalSessionId).toBe("cx-1")
+    expect(parsed.cwd).toBe("/work")
+    expect(parsed.model).toBe("gpt-5")
+    expect(parsed.title).toBe("fix the bug")
+    // user, reasoning, tool, assistant — ghost_snapshot filtered.
+    expect(parsed.messages).toHaveLength(4)
+
+    const types = parsed.messages.map((m) => (m.parts[0] as Record<string, unknown>).type)
+    expect(types).toEqual(["text", "reasoning", "tool-shell", "text"])
+
+    const tool = parsed.messages[2].parts[0] as Record<string, unknown>
+    expect(tool.state).toBe("output-available")
+    expect(tool.output).toBe("a.txt\nb.txt")
+    expect(tool.input).toEqual({ cmd: "ls" })
+  })
+
+  it("skips corrupt lines and still parses", () => {
+    const parsed = parseCodexRollout(CONTENT + "\n{oops", "r.jsonl")
+    expect(parsed.messages.length).toBeGreaterThan(0)
+  })
+})
+
+describe("codexSessionSource", () => {
+  const fs = {
+    exists: async () => false,
+    readDir: async () => [],
+    stat: async () => ({ size: 0, isFile: true }),
+    readTextFile: async () => "",
+  }
+
+  it("advertises the sessions scan root", () => {
+    expect(codexSessionSource.scanRoots("/home/u")[0]).toContain(".codex")
+    expect(codexSessionSource.scanRoots("")).toEqual([])
+  })
+
+  it("detects by rollout filename and path hint", () => {
+    expect(
+      codexSessionSource.detect([
+        { name: "rollout-x.jsonl", path: "/a/rollout-x.jsonl", content: "" },
+      ])
+    ).toBe("match")
+    expect(
+      codexSessionSource.detect([
+        { name: "s.jsonl", path: "/home/.codex/sessions/2025/s.jsonl", content: "" },
+      ])
+    ).toBe("match")
+    expect(codexSessionSource.detect([])).toBe("no")
+  })
+
+  it("lists and parses from picked files", async () => {
+    const input: SessionScanInput = {
+      fs,
+      home: "",
+      pickedFiles: [{ name: "rollout.jsonl", path: "/p/rollout.jsonl", content: CONTENT }],
+    }
+    const list = await codexSessionSource.listSessions(input)
+    expect(list[0].cwd).toBe("/work")
+    const conv = await codexSessionSource.parseSession(list[0].ref, input)
+    expect(conv.session.id).toBe("import:codex:cx-1")
+    expect(conv.messages).toHaveLength(4)
+  })
+})

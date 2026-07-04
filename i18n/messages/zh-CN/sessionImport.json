@@ -1,0 +1,29 @@
+{
+  "title": "导入 Agent 会话",
+  "description": "将你的 Claude Code、Codex 和 OpenCode 命令行历史导入 Cognia，作为可继续的对话。",
+  "cardTitle": "编程 Agent 会话",
+  "cardBody": "从 Claude Code、Codex 或 OpenCode 导入历史会话。",
+  "scanButton": "扫描已安装的 Agent",
+  "pickButton": "选择文件…",
+  "scanning": "正在查找会话…",
+  "importing": "正在导入…",
+  "empty": "未找到会话。",
+  "emptyHint": "磁盘上没有找到内容。可尝试手动选择会话文件。",
+  "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
+  "webHint": "自动扫描需要桌面应用。在网页端请手动选择会话文件。",
+  "errorTitle": "导入失败",
+  "selectAll": "全选",
+  "deselectAll": "清除选择",
+  "importSelected": "导入选中的 {count} 项",
+  "close": "关闭",
+  "back": "返回",
+  "retry": "重试",
+  "messagesLabel": "{count, plural, one {# 条消息} other {# 条消息}}",
+  "doneTitle": "导入完成",
+  "doneBody": "已添加 {sessions, plural, one {# 个对话} other {# 个对话}}，共 {messages, plural, one {# 条消息} other {# 条消息}}。",
+  "sources": {
+    "claude-code": "Claude Code",
+    "codex": "Codex CLI",
+    "opencode": "OpenCode"
+  }
+}

@@ -38,6 +38,7 @@ mod remote_control;
 pub mod sandbox;
 mod scheduler;
 mod secret_store;
+mod session_import;
 mod settings;
 mod shell;
 mod skills;
@@ -387,6 +388,9 @@ pub fn run() {
             hooks::commands::set_trusted_workspaces,
             agents::commands::read_agent_config,
             agents::commands::write_agent_config,
+            // ADR-0062 — external-agent session-history import. Reads OpenCode's
+            // local SQLite store read-only for the session importer.
+            session_import::opencode_sessions_read,
             ccswitch::commands::ccswitch_status,
             ccswitch::commands::ccswitch_list_providers,
             ccswitch::commands::ccswitch_list_mcp_servers,
