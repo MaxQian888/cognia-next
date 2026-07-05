@@ -110,6 +110,28 @@ describe("resolveAllSubagents — direct context", () => {
       useSubagentRuntimeStore.getState().deleteTemplate("user-direct-1")
     }
   })
+
+  it("projects a template's externalPresetId onto the AgentDefinition (A2 external backing)", () => {
+    const extTpl: SubAgentTemplate = {
+      id: "user-ext-1",
+      name: "External Coder",
+      description: "codes via an external CLI",
+      category: "coding",
+      taskTemplate: "build {{x}}",
+      config: { systemPrompt: "You code.", externalPresetId: "claude-code" },
+      isBuiltIn: false,
+    }
+    useSubagentRuntimeStore.getState().addTemplate(extTpl)
+    try {
+      const direct = resolveAllSubagents({ context: "direct" })
+      expect(direct["template:external-coder"]).toMatchObject({
+        prompt: "You code.",
+        externalPresetId: "claude-code",
+      })
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("user-ext-1")
+    }
+  })
 })
 
 describe("resolveDispatchableSubagents — built-in dispatch targets", () => {

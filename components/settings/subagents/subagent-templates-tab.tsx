@@ -65,8 +65,15 @@ import { SubagentImportDialog } from "./subagent-import-dialog"
 import { ProviderModelCombobox } from "@/components/settings/provider/routing/provider-model-combobox"
 import type { ProviderName } from "@cognia/provider-types/provider"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
+import {
+  BUILTIN_EXECUTABLE_PRESET_IDS,
+  getPresetDisplayInfo,
+} from "@/lib/ai/agent/external/presets"
 
 const log = createLogger("settings.subagents.templates")
+
+/** Sentinel for the "built-in engine" option (Radix reserves the empty string). */
+const EXTERNAL_NONE_VALUE = "__builtin__"
 
 const CATEGORIES: SubAgentTemplate["category"][] = [
   "research",
@@ -795,6 +802,29 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
             placeholder={t("editorSystemPromptPlaceholder")}
             data-testid="editor-system-prompt"
           />
+        </div>
+        {/* External CLI backing (A2): run this subagent on Claude Code / Codex / … */}
+        <div className="space-y-1">
+          <Label className="text-xs">{t("editorExternalRuntime")}</Label>
+          <Select
+            value={draft.config?.externalPresetId ?? EXTERNAL_NONE_VALUE}
+            onValueChange={(v) =>
+              updateConfig("externalPresetId", v === EXTERNAL_NONE_VALUE ? undefined : v)
+            }
+          >
+            <SelectTrigger className="h-8 text-xs" data-testid="editor-external-runtime">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={EXTERNAL_NONE_VALUE}>{t("externalRuntimeNone")}</SelectItem>
+              {BUILTIN_EXECUTABLE_PRESET_IDS.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {getPresetDisplayInfo(id)?.name ?? id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">{t("editorExternalRuntimeHint")}</p>
         </div>
         <div className="flex items-start gap-2">
           <Checkbox

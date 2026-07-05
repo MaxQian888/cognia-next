@@ -1,5 +1,6 @@
 import {
   EXTERNAL_AGENT_PRESETS,
+  BUILTIN_EXECUTABLE_PRESET_IDS,
   getAvailablePresets,
   getPresetConfig,
   createAgentFromPreset,
@@ -42,6 +43,28 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
     expect(codex.supportTier).toBe("executable")
     expect(codex.process).toBeDefined()
     expect(codex.tags.length).toBeGreaterThan(0)
+  })
+})
+
+describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
+  it("is every builtin preset except the custom sentinel", () => {
+    const expected = (
+      Object.keys(EXTERNAL_AGENT_PRESETS) as Array<keyof typeof EXTERNAL_AGENT_PRESETS>
+    ).filter((id) => id !== "custom" && EXTERNAL_AGENT_PRESETS[id] !== null)
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toEqual(expected)
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain("custom")
+  })
+
+  it("includes both Claude Code and Codex (the named external agents)", () => {
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toEqual(
+      expect.arrayContaining(["claude-code", "codex", "codex-app-server"])
+    )
+  })
+
+  it("only lists ids that resolve to a real preset config", () => {
+    for (const id of BUILTIN_EXECUTABLE_PRESET_IDS) {
+      expect(getPresetConfig(id)).not.toBeNull()
+    }
   })
 })
 
@@ -154,7 +177,7 @@ describe("createAgentFromPreset", () => {
   it("falls back to preset defaults when overrides are missing", () => {
     const cfg = createAgentFromPreset("gemini-cli")!
     expect(cfg.name).toBeDefined()
-    expect(cfg.process?.args).toEqual(["-y", "@google/gemini-cli", "--stdio"])
+    expect(cfg.process?.args).toEqual(["-y", "@google/gemini-cli", "--experimental-acp"])
   })
 
   it("preserves network field when preset has one (synthetic)", () => {

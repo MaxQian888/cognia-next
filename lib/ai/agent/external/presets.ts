@@ -271,6 +271,21 @@ export function listDynamicPresetEntries(): Array<{
 // ============================================================================
 
 /**
+ * The builtin *executable* external-agent preset ids — every static preset
+ * except the `custom` sentinel (all shipping presets are directly executable).
+ * These are exactly the ids a teammate `runtime` or a subagent `externalPresetId`
+ * may name; plugin-contributed presets stay outside this closed set and are
+ * reached through the capability overlay instead. Derived from the record so it
+ * can never drift from `EXTERNAL_AGENT_PRESETS`.
+ */
+export const BUILTIN_EXECUTABLE_PRESET_IDS = (
+  Object.keys(EXTERNAL_AGENT_PRESETS) as ExternalAgentPresetId[]
+).filter(
+  (id): id is Exclude<ExternalAgentPresetId, "custom"> =>
+    id !== "custom" && EXTERNAL_AGENT_PRESETS[id] !== null
+)
+
+/**
  * Get all available preset IDs (excluding `custom`). The result merges the
  * builtin static IDs with every dynamic id contributed by a plugin. The
  * return type is `string[]` rather than `ExternalAgentPresetId[]` because

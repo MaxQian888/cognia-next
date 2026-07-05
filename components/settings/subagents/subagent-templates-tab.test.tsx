@@ -155,6 +155,21 @@ describe("SubagentTemplatesTab", () => {
     expect(toastSuccess).toHaveBeenCalled()
   })
 
+  it("New template can back a subagent with an external CLI runtime (A2)", () => {
+    render(<SubagentTemplatesTab />)
+    fireEvent.click(screen.getByTestId("subagent-template-new"))
+    fireEvent.change(screen.getByTestId("editor-name"), { target: { value: "Ext Coder" } })
+    // The mocked Select shares a testid across all selects, so locate the
+    // external-runtime one by the unique "Claude Code" option it renders.
+    const claudeOption = screen.getByRole("option", { name: "Claude Code" }) as HTMLOptionElement
+    const select = claudeOption.closest("select") as HTMLSelectElement
+    fireEvent.change(select, { target: { value: "claude-code" } })
+    fireEvent.click(screen.getByTestId("editor-submit"))
+    expect(useSubagentRuntimeStore.getState().templates["fixed-id"]?.config.externalPresetId).toBe(
+      "claude-code"
+    )
+  })
+
   it("New template refuses an empty name (toast.error)", () => {
     render(<SubagentTemplatesTab />)
     fireEvent.click(screen.getByTestId("subagent-template-new"))

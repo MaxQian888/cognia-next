@@ -102,6 +102,10 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
   if (tpl.config.tools) def.tools = tpl.config.tools
   if (tpl.config.model) def.model = tpl.config.model
   if (tpl.config.maxSteps !== undefined) def.maxTurns = tpl.config.maxSteps
+  // External-CLI backing (A2): route this subagent to an external agent when the
+  // template names a preset, so the dispatching model runs it on Claude Code /
+  // Codex / … instead of the built-in executor.
+  if (tpl.config.externalPresetId) def.externalPresetId = tpl.config.externalPresetId
   return { id: `template:${slugifySubagentName(tpl.name)}`, def }
 }
 

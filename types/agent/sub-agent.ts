@@ -168,6 +168,14 @@ export interface SubAgentConfig {
   externalAgentId?: string
   /** Permission mode for external agent execution */
   externalAgentPermissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan"
+  /**
+   * Back this sub-agent with an external CLI agent (Claude Code / Codex / …) by
+   * preset id. Projected onto `AgentDefinition.externalPresetId` so `dispatch_agent`
+   * routes the run to the external CLI instead of the built-in executor. The
+   * `systemPrompt`/`tools` remain advisory on the external path. See
+   * `lib/plugin/agent-sdk/dispatch.ts` + `lib/ai/agent/external/presets.ts`.
+   */
+  externalPresetId?: string
 
   // === Nested Dispatch (depth-N subagents) ===
   /** Opt this sub-agent into dispatching its own sub-agents when it runs. */
