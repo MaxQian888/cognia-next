@@ -218,14 +218,23 @@ async function runToolEnabled(
 async function runExternalBacked(
   teamCtx: TeamRunContext,
   teammate: AgentTeammate,
+  resolvedCaps: ResolvedCapabilities,
   agentId: string,
   prompt: string,
   systemPrompt: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onCaptureEvent?: (event: CaptureStreamEvent) => void
 ): Promise<{ text: string; usage?: TokenUsage }> {
-  const [{ getExternalAgentManager }, { deriveExternalSessionPermission }] = await Promise.all([
+  const [
+    { getExternalAgentManager },
+    { deriveExternalSessionPermission },
+    { resolveAcpMcpServers },
+    { pipeExternalEventsToCapture },
+  ] = await Promise.all([
     import("@/lib/ai/agent/external/manager"),
     import("@/lib/ai/agent/external/permission-cascade"),
+    import("@/lib/ai/agent/external/resolve-acp-mcp-servers"),
+    import("@/lib/ai/agent/external/external-event-progress"),
   ])
   const manager = getExternalAgentManager()
 
@@ -237,12 +246,22 @@ async function runExternalBacked(
     teammate.config?.tools ? { allowedTools: teammate.config.tools } : {}
   )
 
+  // Forward the teammate's explicitly-resolved MCP servers into the external
+  // agent's ACP session so it can call the same tools a built-in teammate would
+  // (the external CLI keeps its own MCP config in addition to these).
+  const mcpServers = await resolveAcpMcpServers(resolvedCaps.mcpServerIds)
+
   const result = await manager.execute(agentId, prompt, {
     systemPrompt,
     ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
     ...(teamCtx.team.config?.workingDir
       ? { workingDirectory: teamCtx.team.config.workingDir }
       : {}),
+    ...(mcpServers.length > 0 ? { context: { custom: { mcpServers } } } : {}),
+    // Live progress: translate the external protocol stream into the same
+    // CaptureStreamEvent frames the sidecar channel emits, so an external
+    // teammate streams tool-calls/text into the activity panel too.
+    ...(onCaptureEvent ? { onEvent: pipeExternalEventsToCapture(onCaptureEvent) } : {}),
     signal,
   })
 
@@ -407,6 +426,27 @@ export async function dispatchTeammate(
       dedupeKey: `text-fallback:${teamCtx.runId}:${teammate.id}`,
     })
   }
+  if (
+    (runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0) &&
+    channel !== "external"
+  ) {
+    // An external-CLI-backed teammate (e.g. runtime "codex"/"claude-code", or a
+    // teammate carrying an external-agent preset) could not reach its external
+    // agent — the browser/mobile shell has no external-agent host, or the CLI is
+    // not installed. Rather than SILENTLY running the task on the built-in engine
+    // (wrong model + wrong tools than the user asked for), surface the fallback.
+    const wantedAgent =
+      runtime !== "claude" ? runtime : (resolvedCaps.externalAgentPresetIds[0] ?? "external agent")
+    teamCtx.notifier.notify({
+      level: "warn",
+      title: "External runtime unavailable",
+      body: `${teammate.name} is configured to run on "${wantedAgent}", but that external agent is unavailable here — falling back to the built-in engine.`,
+      runId: teamCtx.runId,
+      teamId: teamCtx.teamId,
+      taskId: args.taskId,
+      dedupeKey: `external-fallback:${teamCtx.runId}:${teammate.id}`,
+    })
+  }
 
   // Live progress streaming → workspace activity panel. Built only when the
   // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
@@ -449,10 +489,12 @@ export async function dispatchTeammate(
       turn = await runExternalBacked(
         teamCtx,
         teammate,
+        resolvedCaps,
         externalAgentId,
         promptText,
         systemPrompt,
-        combinedSignal
+        combinedSignal,
+        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined
       )
     } else if (channel === "sidecar") {
       turn = await runToolEnabled(

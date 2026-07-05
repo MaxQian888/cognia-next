@@ -9,6 +9,11 @@ const mockedBusEmit = emitSystemBusEvent as jest.Mock
 const isTauriMock = jest.fn<boolean, []>(() => false)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
+const resolveAcpMcpMock = jest.fn<Promise<unknown[]>, unknown[]>(async () => [])
+jest.mock("@/lib/ai/agent/external/resolve-acp-mcp-servers", () => ({
+  resolveAcpMcpServers: (...a: unknown[]) => resolveAcpMcpMock(...a),
+}))
+
 const executeAgentMock = jest.fn()
 jest.mock("../agent-executor", () => ({
   executeAgent: (...a: unknown[]) => executeAgentMock(...a),
@@ -360,6 +365,85 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
 
     expect(result.channel).toBe("text")
     expect(runAndCaptureMock).not.toHaveBeenCalled()
+  })
+
+  it("warns (never silently) and falls back when the external runtime is unavailable", async () => {
+    // Non-claude runtime, but no external agent resolves (web/mobile or the CLI
+    // is not installed). The task must NOT silently run as the built-in engine
+    // without telling the user their chosen runtime was dropped.
+    isTauriMock.mockReturnValue(false)
+    resolveExternalMock.mockResolvedValue(null)
+    executeAgentMock.mockResolvedValue({ text: "fallback answer" })
+    const { ctx, notifier } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    expect(result.channel).toBe("text")
+    expect(notifier.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        title: "External runtime unavailable",
+        dedupeKey: "external-fallback:run1:tm1",
+      })
+    )
+  })
+
+  it("forwards the teammate's resolved MCP servers into the external session", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    resolveAcpMcpMock.mockResolvedValue([{ name: "fs", command: "fs", args: [] }])
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    expect(externalExecuteMock.mock.calls[0][2]).toMatchObject({
+      context: { custom: { mcpServers: [{ name: "fs", command: "fs", args: [] }] } },
+    })
+  })
+
+  it("omits the MCP context when the teammate resolves no servers", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    resolveAcpMcpMock.mockResolvedValue([])
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    expect(externalExecuteMock.mock.calls[0][2]).not.toHaveProperty("context")
+  })
+
+  it("streams external tool activity into the progress reporter", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    resolveAcpMcpMock.mockResolvedValue([])
+    externalExecuteMock.mockImplementation(async (_id: unknown, _p: unknown, opts: unknown) => {
+      ;(opts as { onEvent?: (e: unknown) => void }).onEvent?.({
+        type: "tool_use_start",
+        timestamp: new Date(),
+        toolUseId: "x",
+        toolName: "Bash",
+      })
+      return { success: true, finalResponse: "done" }
+    })
+    const { ctx, storeWriter } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+    const addEvent = jest.fn()
+    ;(storeWriter as { addEvent?: unknown }).addEvent = addEvent
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    const frames = addEvent.mock.calls.map(
+      (c) => c[0] as { type: string; data?: { channel?: string; toolCount?: number } }
+    )
+    expect(
+      frames.some(
+        (f) =>
+          f.type === "progress_update" &&
+          f.data?.channel === "external" &&
+          (f.data?.toolCount ?? 0) >= 1
+      )
+    ).toBe(true)
   })
 })
 
