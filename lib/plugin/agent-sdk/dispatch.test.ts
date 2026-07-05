@@ -39,6 +39,11 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
   createAgentFromPreset: (...a: unknown[]) => externalCreatePreset(...a),
   isFromPreset: (...a: unknown[]) => externalIsFromPreset(...a),
 }))
+const externalSupported = jest.fn<boolean, unknown[]>(() => true)
+jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
+  __esModule: true,
+  supportsExternalAgents: (...a: unknown[]) => externalSupported(...a),
+}))
 
 const mockExecute = executeAgent as jest.MockedFunction<typeof executeAgent>
 const mockGetSubagent = getSubagent as jest.MockedFunction<typeof getSubagent>
@@ -69,6 +74,7 @@ beforeEach(() => {
   mockTeam.start.mockResolvedValue(undefined)
   externalGetAllAgents.mockReturnValue([])
   externalIsFromPreset.mockReturnValue(null)
+  externalSupported.mockReturnValue(true)
 })
 
 describe("dispatchSubagent", () => {
@@ -280,6 +286,40 @@ describe("dispatchSubagent — external backing (A2)", () => {
     externalCreatePreset.mockReturnValue({ id: "ext-3", metadata: { preset: "claude-code" } })
     externalExecute.mockResolvedValue({ success: false, error: "connect refused" })
     await expect(dispatchSubagent(externalDef, "go")).rejects.toThrow("connect refused")
+  })
+
+  it("fails loudly (never silently) when external agents are unsupported", async () => {
+    externalSupported.mockReturnValue(false)
+    await expect(dispatchSubagent(externalDef, "go")).rejects.toThrow(/desktop app/)
+    expect(externalExecute).not.toHaveBeenCalled()
+    expect(mockExecute).not.toHaveBeenCalled() // did NOT fall back to the built-in engine
+  })
+
+  it("derives the external permission mode from the parent ceiling", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-4", metadata: { preset: "claude-code" } })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    await dispatchSubagent(externalDef, "go", {
+      _permissionCeiling: { permissionMode: "plan" },
+    })
+    expect(externalExecute.mock.calls[0][2]).toMatchObject({ permissionMode: "plan" })
+  })
+
+  it("streams external protocol events into _onEvent as CaptureStreamEvents", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-5", metadata: { preset: "claude-code" } })
+    externalExecute.mockImplementation(async (_id: unknown, _prompt: unknown, opts: unknown) => {
+      const onEvent = (opts as { onEvent?: (e: unknown) => void }).onEvent
+      onEvent?.({
+        type: "message_delta",
+        timestamp: new Date(),
+        delta: { type: "text", text: "hi" },
+      })
+      onEvent?.({ type: "done", timestamp: new Date(), success: true })
+      return { success: true, finalResponse: "hi" }
+    })
+    const sink = jest.fn()
+    await dispatchSubagent(externalDef, "go", { _onEvent: sink })
+    expect(sink).toHaveBeenCalledWith({ type: "text-delta", delta: "hi" })
+    expect(sink).toHaveBeenCalledTimes(1) // `done` produces no capture event
   })
 })
 
