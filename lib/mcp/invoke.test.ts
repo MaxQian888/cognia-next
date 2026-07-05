@@ -117,6 +117,73 @@ describe("invokeMcpTool", () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it("retries a failed first connect once and succeeds", async () => {
+    const callTool = jest.fn(async () => ({ content: [], isError: false }))
+    let calls = 0
+    const open = (async () => {
+      calls++
+      if (calls === 1) throw new Error("cold start")
+      return { client: { callTool } as never, transport: {}, close: async () => undefined }
+    }) as unknown as InvokeMcpToolDeps["open"]
+    const res = await invokeMcpTool(
+      { serverId: "mcp_s", toolName: "do" },
+      { getServer: async () => srv("http", { url: "https://x" }), open, retryDelayMs: 0 }
+    )
+    expect(calls).toBe(2)
+    expect(res.isError).toBe(false)
+  })
+
+  it("surfaces the connect error after exhausting attempts", async () => {
+    let calls = 0
+    const open = (async () => {
+      calls++
+      throw new Error("ECONNREFUSED")
+    }) as unknown as InvokeMcpToolDeps["open"]
+    await expect(
+      invokeMcpTool(
+        { serverId: "mcp_s", toolName: "do" },
+        { getServer: async () => srv("http", { url: "https://x" }), open, retryDelayMs: 0 }
+      )
+    ).rejects.toThrow("ECONNREFUSED")
+    expect(calls).toBe(2)
+  })
+
+  it("does not retry the connect when the caller already aborted", async () => {
+    const ac = new AbortController()
+    let calls = 0
+    const open = (async () => {
+      calls++
+      ac.abort()
+      throw new Error("aborted")
+    }) as unknown as InvokeMcpToolDeps["open"]
+    await expect(
+      invokeMcpTool(
+        { serverId: "mcp_s", toolName: "do", signal: ac.signal },
+        { getServer: async () => srv("http", { url: "https://x" }), open, retryDelayMs: 0 }
+      )
+    ).rejects.toThrow("aborted")
+    expect(calls).toBe(1)
+  })
+
+  it("does not retry tool-call errors (tool may not be idempotent)", async () => {
+    let opens = 0
+    const callTool = jest.fn(async () => {
+      throw new Error("tool boom")
+    })
+    const open = (async () => {
+      opens++
+      return { client: { callTool } as never, transport: {}, close: async () => undefined }
+    }) as unknown as InvokeMcpToolDeps["open"]
+    await expect(
+      invokeMcpTool(
+        { serverId: "mcp_s", toolName: "do" },
+        { getServer: async () => srv("http", { url: "https://x" }), open, retryDelayMs: 0 }
+      )
+    ).rejects.toThrow("tool boom")
+    expect(opens).toBe(1)
+    expect(callTool).toHaveBeenCalledTimes(1)
+  })
+
   it("validates serverId and toolName", async () => {
     await expect(invokeMcpTool({ serverId: "  ", toolName: "x" })).rejects.toThrow("serverId")
     await expect(invokeMcpTool({ serverId: "s", toolName: " " })).rejects.toThrow("toolName")

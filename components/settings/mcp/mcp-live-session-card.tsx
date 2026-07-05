@@ -63,31 +63,6 @@ export function McpLiveSessionCard() {
   // guarded against this ref, which the load effect keeps in sync.
   const shownSessionRef = useRef<string | null>(null)
 
-  // Initial / on-session-change load. State is written only in the promise
-  // callbacks (never synchronously in the effect body) — mirrors mcp-health-tab.
-  useEffect(() => {
-    if (!(isTauri() && sessionId)) return
-    shownSessionRef.current = sessionId
-    let cancelled = false
-    getSessionMcpStatus(sessionId)
-      .then((r) => {
-        if (cancelled) return
-        setRows(r)
-        setAvailable(true)
-      })
-      .catch(() => {
-        if (cancelled) return
-        // no_active_session / unsupported_provider / timeout → hide the card.
-        setAvailable(false)
-        setRows(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [sessionId])
-
-  if (!isTauri() || !sessionId || !available) return null
-
   // Fetch fresh rows and apply them only if the shown session hasn't changed
   // since this operation began — otherwise the result belongs to a now-hidden
   // session and must be dropped.
@@ -98,6 +73,57 @@ export function McpLiveSessionCard() {
       setAvailable(true)
     }
   }
+
+  // Initial / on-session-change load, followed by a BOUNDED settle poll: first
+  // connections resolve asynchronously (a `pending` server finishing its
+  // handshake, a `failed` one being auto-reconnected by the sidecar), so while
+  // any server is still pending/failed the card re-polls up to 6 times (~15s)
+  // and converges on the real status without the user hammering refresh. A
+  // permanently failed server stops generating traffic once the budget is
+  // spent. State is written only in async callbacks (never synchronously in
+  // the effect body) — mirrors mcp-health-tab.
+  useEffect(() => {
+    if (!(isTauri() && sessionId)) return
+    shownSessionRef.current = sessionId
+    let cancelled = false
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    const unsettled = (r: SdkMcpServerStatus[]) =>
+      r.some((s) => s.status === "pending" || s.status === "failed")
+    ;(async () => {
+      let current: SdkMcpServerStatus[]
+      try {
+        current = await getSessionMcpStatus(sessionId)
+      } catch {
+        if (!cancelled) {
+          // no_active_session / unsupported_provider / timeout → hide the card.
+          setAvailable(false)
+          setRows(null)
+        }
+        return
+      }
+      if (cancelled) return
+      setRows(current)
+      setAvailable(true)
+      for (let i = 0; i < 6 && !cancelled && unsettled(current); i++) {
+        await sleep(2500)
+        if (cancelled || shownSessionRef.current !== sessionId) return
+        try {
+          current = await getSessionMcpStatus(sessionId)
+        } catch {
+          // A settle-poll failure is not a reason to hide an already-rendered
+          // card — just stop polling; the user can still refresh manually.
+          return
+        }
+        if (cancelled || shownSessionRef.current !== sessionId) return
+        setRows(current)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
+  if (!isTauri() || !sessionId || !available) return null
 
   const refresh = async () => {
     const forSession = sessionId

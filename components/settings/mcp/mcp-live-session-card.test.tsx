@@ -34,7 +34,7 @@ jest.mock("@/hooks/mcp/use-mcp-server-logs", () => ({
 
 const EMPTY_LOGS = { logs: [], lastEntry: null, lastError: null, errorCount: 0, isLoading: false }
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 import type { SdkMcpServerStatus } from "@/lib/claude/types"
 import { McpLiveSessionCard } from "./mcp-live-session-card"
@@ -209,6 +209,75 @@ describe("McpLiveSessionCard", () => {
     render(<McpLiveSessionCard />)
     await waitFor(() => expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument())
     expect(screen.getByTitle("stderr boom")).toBeInTheDocument()
+  })
+
+  it("self-refreshes a pending server until it settles (no manual refresh needed)", async () => {
+    jest.useFakeTimers()
+    try {
+      getSessionMcpStatus
+        .mockResolvedValueOnce([{ name: "warm", status: "pending" } as SdkMcpServerStatus])
+        .mockResolvedValueOnce([{ name: "warm", status: "connected" } as SdkMcpServerStatus])
+      render(<McpLiveSessionCard />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByText("status.pending")).toBeInTheDocument()
+      // The bounded poll fires after ~2.5s and picks up the settled status.
+      await act(async () => {
+        jest.advanceTimersByTime(2600)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByText("status.connected")).toBeInTheDocument()
+      expect(getSessionMcpStatus).toHaveBeenCalledTimes(2)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("stops self-refreshing a permanently failed server once the poll budget is spent", async () => {
+    jest.useFakeTimers()
+    try {
+      getSessionMcpStatus.mockResolvedValue([failedRow])
+      render(<McpLiveSessionCard />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByTestId("mcp-live-row-github")).toBeInTheDocument()
+      // Burn well past the 6-poll budget.
+      for (let i = 0; i < 10; i++) {
+        await act(async () => {
+          jest.advanceTimersByTime(2600)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+      }
+      // 1 initial load + at most 6 budgeted polls.
+      expect(getSessionMcpStatus.mock.calls.length).toBeLessThanOrEqual(7)
+      expect(getSessionMcpStatus.mock.calls.length).toBe(7)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not self-refresh when every server is settled", async () => {
+    jest.useFakeTimers()
+    try {
+      getSessionMcpStatus.mockResolvedValue([okRow])
+      render(<McpLiveSessionCard />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument()
+      await act(async () => {
+        jest.advanceTimersByTime(10_000)
+      })
+      expect(getSessionMcpStatus).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("toasts an error when toggle fails", async () => {
