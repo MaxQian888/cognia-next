@@ -191,10 +191,13 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         defaultPermissionMode: "default",
         tags: ["coding", "anthropic", "claude"],
         docsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
-        envVarHint: "Requires ANTHROPIC_API_KEY environment variable",
+        envVarHint:
+          "Reuses your active Claude subscription (Claude Code sign-in) or ANTHROPIC_API_KEY automatically.",
+        setupHint:
+          "Runs Claude Code over ACP via the official Zed adapter (`npx -y @zed-industries/claude-code-acp`) — no local install needed; it wraps the Claude Agent SDK.",
         process: {
           command: "npx",
-          args: ["-y", "@anthropics/claude-code", "--stdio"],
+          args: ["-y", "@zed-industries/claude-code-acp"],
         },
         icon: "anthropic",
       },
@@ -220,9 +223,11 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         tags: ["coding", "google", "gemini"],
         docsUrl: "https://github.com/google-gemini/gemini-cli",
         envVarHint: "Requires GOOGLE_API_KEY environment variable",
+        setupHint:
+          "Launches Gemini CLI in ACP mode (`gemini --experimental-acp`); the bare `--stdio` flag would drop it into interactive mode and hang.",
         process: {
           command: "npx",
-          args: ["-y", "@google/gemini-cli", "--stdio"],
+          args: ["-y", "@google/gemini-cli", "--experimental-acp"],
         },
         icon: "google",
       },
@@ -398,12 +403,12 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         executionMode: "direct",
         defaultPermissionMode: "default",
         tags: ["coding", "cursor", "local"],
-        docsUrl: "https://docs.cursor.com/en/cli/overview",
+        docsUrl: "https://docs.cursor.com/en/cli/acp",
         setupHint:
-          "Install Cursor CLI and ensure `cursor-agent` is available on PATH before connecting.",
+          "Install Cursor CLI and ensure `cursor-agent` is on PATH; Cognia launches its ACP server via `cursor-agent acp`.",
         process: {
           command: "cursor-agent",
-          args: [],
+          args: ["acp"],
         },
         icon: "cursor",
       },

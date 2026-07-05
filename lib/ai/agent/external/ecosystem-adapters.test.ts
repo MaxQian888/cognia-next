@@ -45,6 +45,17 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
 
 describe("new ACP agent surfaces", () => {
   const cases: Array<{ presetId: string; command: string; args: string[] }> = [
+    // The Claude Code / Gemini / Cursor ACP entrypoints are easy to get wrong
+    // (a bare `--stdio` drops Gemini into interactive mode and hangs; Claude
+    // Code has no native ACP flag and must run through the Zed adapter). Lock
+    // the exact launch commands so a regression can't silently break them.
+    { presetId: "claude-code", command: "npx", args: ["-y", "@zed-industries/claude-code-acp"] },
+    {
+      presetId: "gemini-cli",
+      command: "npx",
+      args: ["-y", "@google/gemini-cli", "--experimental-acp"],
+    },
+    { presetId: "cursor-cli", command: "cursor-agent", args: ["acp"] },
     { presetId: "copilot-cli", command: "copilot", args: ["--acp"] },
     { presetId: "kiro", command: "kiro-cli", args: ["acp"] },
     { presetId: "qwen-code", command: "npx", args: ["-y", "@qwen-code/qwen-code", "--acp"] },
