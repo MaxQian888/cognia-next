@@ -107,6 +107,67 @@ describe("parseClaudeTranscript", () => {
     expect(tool.state).toBe("output-error")
     expect(tool.errorText).toBe("denied")
   })
+
+  it("captures assistant usage + model into metadata", () => {
+    const lines = [
+      {
+        type: "user",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:00Z",
+        message: { role: "user", content: "hi" },
+      },
+      {
+        type: "assistant",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        costUSD: 0.03,
+        durationMs: 1200,
+        message: {
+          role: "assistant",
+          model: "claude-opus",
+          content: [{ type: "text", text: "ok" }],
+          usage: {
+            input_tokens: 100,
+            output_tokens: 40,
+            cache_creation_input_tokens: 5,
+            cache_read_input_tokens: 200,
+          },
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseClaudeTranscript(lines, "s.jsonl")
+    const meta = parsed.messages[1].metadata as {
+      usage?: Record<string, number>
+      model?: string
+    }
+    expect(meta.usage).toMatchObject({
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheCreationInputTokens: 5,
+      cacheReadInputTokens: 200,
+      totalCostUsd: 0.03,
+      durationMs: 1200,
+    })
+    expect(meta.model).toBe("claude-opus")
+    // A user turn carries no usage metadata.
+    expect(parsed.messages[0].metadata).toBeUndefined()
+  })
+
+  it("omits usage metadata for an all-zero usage block", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      sessionId: "s",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    })
+    const parsed = parseClaudeTranscript(line, "s.jsonl")
+    expect(parsed.messages[0].metadata).toBeUndefined()
+  })
 })
 
 describe("claudeCodeSessionSource", () => {

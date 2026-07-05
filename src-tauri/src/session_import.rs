@@ -111,6 +111,32 @@ fn nested_num(map: &Map<String, Value>, obj: &str, key: &str, flat: &[&str]) -> 
     0
 }
 
+/// Project an assistant message's `tokens` block into the normalized shape the
+/// TS `OpencodeTokens` expects. Returns `None` when the turn carries no counts.
+fn message_tokens(map: &Map<String, Value>) -> Option<Value> {
+    let obj = map.get("tokens").and_then(|t| t.as_object())?;
+    let cache = obj.get("cache").and_then(|c| c.as_object());
+    let input = obj.get("input").and_then(|v| v.as_i64()).unwrap_or(0);
+    let output = obj.get("output").and_then(|v| v.as_i64()).unwrap_or(0);
+    let cache_read = cache
+        .and_then(|c| c.get("read"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let cache_write = cache
+        .and_then(|c| c.get("write"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    if input == 0 && output == 0 && cache_read == 0 && cache_write == 0 {
+        return None;
+    }
+    Some(json!({
+        "input": input,
+        "output": output,
+        "cacheRead": cache_read,
+        "cacheWrite": cache_write,
+    }))
+}
+
 /// The list of table names in the DB (lowercased), for name-tolerant lookup.
 fn table_names(conn: &Connection) -> Vec<String> {
     let mut stmt = match conn.prepare("SELECT name FROM sqlite_master WHERE type='table'") {
@@ -180,11 +206,23 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
         let role = first_str(m, &["role"]).unwrap_or("user").to_string();
         let created = nested_num(m, "time", "created", &["created", "time_created"]);
         let part_values = parts_by_msg.get(&mid).cloned().unwrap_or_default();
-        msgs_by_session.entry(sid).or_default().push(json!({
+        let mut msg = json!({
             "role": role,
             "createdAt": created,
             "parts": part_values,
-        }));
+        });
+        // Project the per-turn usage the assistant `data` carries so the TS
+        // adapter can reconstruct token/cost stats (see opencode.ts).
+        if let Some(model) = first_str(m, &["modelID", "model"]) {
+            msg["model"] = json!(model);
+        }
+        if let Some(cost) = m.get("cost").and_then(|v| v.as_f64()) {
+            msg["cost"] = json!(cost);
+        }
+        if let Some(tokens) = message_tokens(m) {
+            msg["tokens"] = tokens;
+        }
+        msgs_by_session.entry(sid).or_default().push(msg);
     }
 
     let mut out = Vec::new();
@@ -241,7 +279,7 @@ mod tests {
             CREATE TABLE part (id TEXT, message_id TEXT, type TEXT, data TEXT);
             INSERT INTO session VALUES ('s1', 'Fix bug', '{"directory":"/repo","time":{"created":10,"updated":20}}');
             INSERT INTO message VALUES ('m1', 's1', 'user', '{"time":{"created":10}}');
-            INSERT INTO message VALUES ('m2', 's1', 'assistant', '{"time":{"created":15}}');
+            INSERT INTO message VALUES ('m2', 's1', 'assistant', '{"time":{"created":15},"modelID":"claude-sonnet","cost":0.02,"tokens":{"input":100,"output":50,"cache":{"read":200,"write":10}}}');
             INSERT INTO part VALUES ('p1', 'm1', 'text', '{"type":"text","text":"hello"}');
             INSERT INTO part VALUES ('p2', 'm2', 'tool', '{"type":"tool","tool":"edit","callID":"c1","state":{"status":"completed","output":"ok"}}');
             "#,
@@ -268,6 +306,13 @@ mod tests {
         assert_eq!(user["parts"][0]["text"], "hello");
         let asst = msgs.iter().find(|m| m["role"] == "assistant").unwrap();
         assert_eq!(asst["parts"][0]["tool"], "edit");
+        // The assistant turn's usage is projected in the normalized shape.
+        assert_eq!(asst["model"], "claude-sonnet");
+        assert_eq!(asst["cost"], 0.02);
+        assert_eq!(asst["tokens"]["input"], 100);
+        assert_eq!(asst["tokens"]["output"], 50);
+        assert_eq!(asst["tokens"]["cacheRead"], 200);
+        assert_eq!(asst["tokens"]["cacheWrite"], 10);
     }
 
     #[test]

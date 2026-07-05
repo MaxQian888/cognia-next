@@ -83,6 +83,7 @@ import { runInit } from "./init-controller"
 import { permissionsClear, permissionsList, permissionsRemove } from "./permissions-controller"
 import { runStatus } from "./status-controller"
 import { runLimits } from "./limits-controller"
+import { runAgentStats } from "./agent-stats-controller"
 import { runContextReport } from "./context-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 import { viewFile } from "./view-controller"
@@ -211,6 +212,7 @@ export interface RuntimeImpl {
   permissionsRemove: typeof permissionsRemove
   runStatus: typeof runStatus
   runLimits: typeof runLimits
+  runAgentStats: typeof runAgentStats
   runContextReport: typeof runContextReport
   tasksList: typeof tasksList
   tasksShow: typeof tasksShow
@@ -309,6 +311,7 @@ const REAL: RuntimeImpl = {
   permissionsRemove,
   runStatus,
   runLimits,
+  runAgentStats,
   runContextReport,
   tasksList,
   tasksShow,
@@ -558,6 +561,12 @@ export async function runRuntimeRequest(
         usageHistory: deps.usageHistory,
         toolStats: deps.toolStats,
         rateLimits: deps.rateLimits,
+      })
+    case "agentStats":
+      return impl.runAgentStats({
+        dispatch,
+        osHome: deps.osHome ?? os.homedir(),
+        ...(signal ? { signal } : {}),
       })
     case "context":
       return impl.runContextReport({

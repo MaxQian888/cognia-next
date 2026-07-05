@@ -17,6 +17,7 @@ import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@/lib/claude/types"
 import { walkFiles } from "../fs"
+import { importedUsageMetadata } from "../usage"
 import {
   buildMessage,
   buildSession,
@@ -38,6 +39,14 @@ import type {
 
 type Part = StoredMessage["parts"][number]
 
+/** Anthropic per-turn usage block carried on assistant records. */
+interface ClaudeUsage {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}
+
 interface ClaudeLine {
   type?: string
   uuid?: string
@@ -50,9 +59,40 @@ interface ClaudeLine {
     role?: string
     model?: string
     content?: unknown
+    usage?: ClaudeUsage
   }
+  /** SDK-estimated turn cost (present on some Claude Code builds). */
+  costUSD?: number
+  /** Wall-clock turn duration in ms (present on some builds). */
+  durationMs?: number
   toolUseResult?: unknown
   summary?: string
+}
+
+/**
+ * Build the imported-usage metadata for one assistant record, or `undefined`
+ * when the record carries no usable token counts. Cost/duration are folded in
+ * only when the transcript reports them.
+ */
+function claudeUsageMeta(rec: ClaudeLine): StoredMessage["metadata"] | undefined {
+  const u = rec.message?.usage
+  if (!u) return undefined
+  const input = u.input_tokens ?? 0
+  const output = u.output_tokens ?? 0
+  const cacheCreation = u.cache_creation_input_tokens ?? 0
+  const cacheRead = u.cache_read_input_tokens ?? 0
+  if (input === 0 && output === 0 && cacheCreation === 0 && cacheRead === 0) return undefined
+  return importedUsageMetadata(
+    {
+      inputTokens: input,
+      outputTokens: output,
+      cacheCreationInputTokens: cacheCreation,
+      cacheReadInputTokens: cacheRead,
+      ...(typeof rec.costUSD === "number" ? { totalCostUsd: rec.costUSD } : {}),
+      ...(typeof rec.durationMs === "number" ? { durationMs: rec.durationMs } : {}),
+    },
+    rec.message?.model
+  )
 }
 
 interface ParsedSession {
@@ -147,6 +187,7 @@ export function parseClaudeTranscript(
       firstUserText = plainTextOf(parts)
     }
 
+    const metadata = role === "assistant" ? claudeUsageMeta(rec) : undefined
     messages.push(
       buildMessage({
         sessionId: sid(),
@@ -155,6 +196,7 @@ export function parseClaudeTranscript(
         role,
         parts,
         createdAt: ms,
+        ...(metadata ? { metadata } : {}),
       })
     )
   }

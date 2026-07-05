@@ -29,6 +29,8 @@ import { DoctorPanel } from "../overlays/DoctorPanel"
 import { DocumentViewer } from "../overlays/DocumentViewer"
 import { InspectOverlay } from "../overlays/InspectOverlay"
 import { AgentsPanel } from "../overlays/AgentsPanel"
+import { AgentStatsPanel } from "../overlays/AgentStatsPanel"
+import { AgentStatsDetailPanel } from "../overlays/AgentStatsDetailPanel"
 import { AgentRunPage } from "../overlays/AgentRunPage"
 import { SubagentModelsPanel } from "../overlays/SubagentModelsPanel"
 import { ConfirmOverlay } from "../overlays/ConfirmOverlay"
@@ -68,6 +70,7 @@ import {
 import { getLiveSubagent, listLiveSubagents } from "../../../agent/subagent-live-output"
 import { listCliBackgroundRuns } from "../../../agent/subagent-background-tasks"
 import { refreshAgentPanelRows } from "../../runtime/agents-panel-model"
+import { buildConvDetail } from "../../runtime/agent-stats-model"
 import { formatToolResultBody } from "../../commands/expand-command"
 import { cycleEnum, applyTargetDefault } from "../../runtime/settings-sections"
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES } from "../../../config/schema"
@@ -688,6 +691,39 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             }
           }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "agentStats" && (
+        <AgentStatsPanel
+          overview={state.overlay.overview}
+          rows={state.overlay.rows}
+          width={columns}
+          maxRows={overlayRows}
+          onView={(row) => {
+            if (state.overlay.kind !== "agentStats") return
+            const item = state.overlay.items.find((it) => it.conv.session.id === row.id)
+            if (!item) return
+            dispatch({
+              type: "OVERLAY_OPEN",
+              overlay: {
+                kind: "agentStatsDetail",
+                report: buildConvDetail(item),
+                title: row.title,
+                back: state.overlay,
+              },
+            })
+          }}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "agentStatsDetail" && (
+        <AgentStatsDetailPanel
+          report={state.overlay.report}
+          title={state.overlay.title}
+          onClose={() => {
+            if (state.overlay.kind !== "agentStatsDetail") return
+            dispatch({ type: "OVERLAY_OPEN", overlay: state.overlay.back })
+          }}
         />
       )}
       {state.overlay.kind === "quickActions" &&

@@ -5,6 +5,7 @@
  * / renders never double-register (the registry throws on duplicates).
  */
 import { registerCommands } from "./registry"
+import { AGENT_STATS_COMMANDS } from "./agent-stats-commands"
 import { COGNIA_COMMANDS } from "./cognia-commands"
 import { DEV_WORKFLOW_COMMANDS } from "./dev-workflow-commands"
 import { MCP_COMMANDS } from "./mcp-commands"
@@ -26,6 +27,7 @@ export function registerFeatureCommands(): void {
   registered = true
   registerCommands([
     ...COGNIA_COMMANDS,
+    ...AGENT_STATS_COMMANDS,
     ...DEV_WORKFLOW_COMMANDS,
     ...MCP_COMMANDS,
     ...SKILL_COMMANDS,

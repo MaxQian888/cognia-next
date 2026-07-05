@@ -57,4 +57,19 @@ describe("useSessionReport", () => {
     const { result } = renderHook(() => useSessionReport(null))
     expect(result.current.report).toBeNull()
   })
+
+  it("falls back to imported metadata.usage when there are no live usage rows", () => {
+    const assistantWithUsage = {
+      id: "a1",
+      role: "assistant",
+      createdAt: 1000,
+      parts: [{ type: "text", text: "ok" }],
+      metadata: { usage: { inputTokens: 100, outputTokens: 40 }, model: "opus" },
+    } as unknown as UIMessage
+    setLive([msg("u1", "user"), assistantWithUsage], [])
+    const { result } = renderHook(() => useSessionReport("s1"))
+    expect(result.current.report?.turns).toBe(1)
+    expect(result.current.report?.totalInputTokens).toBe(100)
+    expect(result.current.report?.totalOutputTokens).toBe(40)
+  })
 })

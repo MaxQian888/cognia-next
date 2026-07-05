@@ -40,6 +40,31 @@ describe("opencodeToConversation", () => {
     expect(asstParts[1].output).toBe("ok")
   })
 
+  it("maps assistant tokens/cost/model into usage metadata", () => {
+    const conv = opencodeToConversation({
+      ...SESSION,
+      messages: [
+        {
+          role: "assistant",
+          createdAt: 1500,
+          model: "claude-x",
+          cost: 0.05,
+          tokens: { input: 120, output: 60, cacheRead: 300, cacheWrite: 8 },
+          parts: [{ type: "text", text: "done" }],
+        },
+      ],
+    })
+    const meta = conv.messages[0].metadata as { usage?: Record<string, number>; model?: string }
+    expect(meta.usage).toMatchObject({
+      inputTokens: 120,
+      outputTokens: 60,
+      cacheReadInputTokens: 300,
+      cacheCreationInputTokens: 8,
+      totalCostUsd: 0.05,
+    })
+    expect(meta.model).toBe("claude-x")
+  })
+
   it("marks an errored tool part", () => {
     const conv = opencodeToConversation({
       ...SESSION,
@@ -79,6 +104,29 @@ describe("parseOpencodeExport", () => {
 
   it("returns [] on invalid json", () => {
     expect(parseOpencodeExport("not json")).toEqual([])
+  })
+
+  it("projects tokens/cost/model from a share-export message", () => {
+    const records = [
+      { key: "session/oc-9", content: { id: "oc-9", title: "T", time: { created: 1 } } },
+      {
+        key: "message/m9",
+        content: {
+          id: "m9",
+          sessionID: "oc-9",
+          role: "assistant",
+          modelID: "gpt-x",
+          cost: 0.02,
+          tokens: { input: 10, output: 5, cache: { read: 20, write: 1 } },
+        },
+      },
+      { key: "part/p9", content: { messageID: "m9", type: "text", text: "hi" } },
+    ]
+    const sessions = parseOpencodeExport(JSON.stringify(records))
+    const msg = sessions[0].messages[0]
+    expect(msg.model).toBe("gpt-x")
+    expect(msg.cost).toBe(0.02)
+    expect(msg.tokens).toMatchObject({ input: 10, output: 5, cacheRead: 20, cacheWrite: 1 })
   })
 })
 

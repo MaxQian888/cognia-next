@@ -18,6 +18,8 @@ import type { MarketplaceBrowseEntry } from "../runtime/marketplace-filter"
 import type { McpPanelServer, McpPanelTool } from "../runtime/mcp-panel-model"
 import type { SkillPanelRow } from "../runtime/skill-panel-model"
 import type { AgentPanelRow } from "../runtime/agents-panel-model"
+import type { AgentStatsOverview, ConvStatRow, ConvWithUsage } from "../runtime/agent-stats-model"
+import type { SessionReport } from "@/lib/analysis/session-report"
 import type { SubagentModelRow } from "../runtime/subagent-models-model"
 
 import type {
@@ -378,6 +380,15 @@ export interface McpLogEntry {
   message: string
 }
 
+/** `/agent-stats` overview overlay (named so `agentStatsDetail.back` can reuse it). */
+export interface AgentStatsOverlay {
+  kind: "agentStats"
+  overview: AgentStatsOverview
+  rows: ConvStatRow[]
+  items: ConvWithUsage[]
+  index: number
+}
+
 export type Overlay =
   | { kind: "none" }
   | { kind: "permission"; req: PermissionRequestEvent; choices: PermissionChoice[]; index: number }
@@ -505,6 +516,19 @@ export type Overlay =
   // from the journal). Index/highlight live in the component (like `mcp`); Enter
   // opens a settled background run's output in the document pager, Esc closes.
   | { kind: "agents"; rows: AgentPanelRow[] }
+  // `/agent-stats` overview: aggregate statistics over other coding agents'
+  // conversation histories (Claude Code / Codex / OpenCode), read live off disk
+  // by the agent-stats controller. `items` carries the parsed conversations so a
+  // row can be drilled into (`agentStatsDetail`) without re-parsing.
+  | AgentStatsOverlay
+  // One conversation's health report (the CLI render of `SessionReport`). `back`
+  // carries the overview overlay so Esc/Enter returns to it.
+  | {
+      kind: "agentStatsDetail"
+      report: SessionReport
+      title: string
+      back: AgentStatsOverlay
+    }
   // The live "agent run page" — switch into one sub-agent's run and watch its
   // streamed text / reasoning / tool activity token-by-token (read from the
   // live-output store by `liveId`; the title/task are the static identity). Esc

@@ -211,6 +211,7 @@ export interface RuntimeRequest {
     | "tasks"
     | "status"
     | "limits"
+    | "agentStats"
     | "context"
     | "view"
     | "plan"

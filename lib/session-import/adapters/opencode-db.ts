@@ -22,10 +22,24 @@ export interface OpencodePart {
   url?: string
 }
 
+/** Normalized per-turn token counts projected by the readers. */
+export interface OpencodeTokens {
+  input?: number
+  output?: number
+  cacheRead?: number
+  cacheWrite?: number
+}
+
 export interface OpencodeMessage {
   role: string
   parts: OpencodePart[]
   createdAt: number
+  /** Per-message model id (assistant turns). */
+  model?: string
+  /** OpenCode's own USD cost estimate for the turn. */
+  cost?: number
+  /** Token counts for the turn (assistant messages). */
+  tokens?: OpencodeTokens
 }
 
 export interface OpencodeSession {
@@ -38,14 +52,21 @@ export interface OpencodeSession {
   messages: OpencodeMessage[]
 }
 
-type Reader = (home: string) => Promise<OpencodeSession[]>
+export type OpencodeReader = (home: string) => Promise<OpencodeSession[]>
 
-let reader: Reader | null = null
+let reader: OpencodeReader | null = null
 
-/** Override the SQLite reader (tests). Pass null to restore the default. */
-export function __setOpencodeReaderForTesting(fn: Reader | null): void {
+/**
+ * Inject the SQLite reader. Desktop leaves this unset (falls through to the Rust
+ * command); the standalone CLI installs a Node `node:sqlite` reader; tests stub
+ * it. Pass `null` to restore the default path.
+ */
+export function setOpencodeReader(fn: OpencodeReader | null): void {
   reader = fn
 }
+
+/** @deprecated Test alias for {@link setOpencodeReader}. */
+export const __setOpencodeReaderForTesting = setOpencodeReader
 
 /** Read every OpenCode session from the SQLite store. [] off-desktop. */
 export async function readOpencodeSessions(home: string): Promise<OpencodeSession[]> {

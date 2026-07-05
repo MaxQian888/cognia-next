@@ -14,6 +14,7 @@ import type { UIMessage } from "ai"
 import { listMessages } from "@/lib/db/messages"
 import { listUsageForSession, type SessionUsageRow } from "@/lib/db/session-usage"
 import { analyzeSession, type SessionReport } from "@/lib/analysis/session-report"
+import { deriveImportedUsageRows, type ImportedMessageLike } from "@/lib/session-import/usage"
 
 export interface UseSessionReport {
   report: SessionReport | null
@@ -37,10 +38,15 @@ export function useSessionReport(
 
   const report = useMemo<SessionReport | null>(() => {
     if (!sessionId || loading) return null
-    return analyzeSession(
-      { messages: messages ?? [], usageRows: usageRows ?? [], sessionMeta: meta },
-      {}
-    )
+    const msgs = messages ?? []
+    // Imported external-agent sessions never emit live SDK `result` events, so
+    // they carry no `sessionUsage` rows — fall back to the token/cost figures
+    // the importer stamped onto each assistant message's `metadata.usage`.
+    const rows =
+      usageRows && usageRows.length > 0
+        ? usageRows
+        : deriveImportedUsageRows(msgs as unknown as ImportedMessageLike[])
+    return analyzeSession({ messages: msgs, usageRows: rows, sessionMeta: meta }, {})
   }, [sessionId, loading, messages, usageRows, meta])
 
   return { report, loading }

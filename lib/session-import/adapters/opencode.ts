@@ -13,6 +13,8 @@
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@/lib/claude/types"
+import type { UsageInfo } from "@/lib/claude/adapter"
+import { importedUsageMetadata } from "../usage"
 import {
   buildMessage,
   buildSession,
@@ -74,6 +76,21 @@ function mapPart(part: OpencodePart): Part | null {
   }
 }
 
+/** Imported-usage metadata for an assistant OpenCode message, or `undefined`. */
+function opencodeUsageMeta(msg: OpencodeMessage): StoredMessage["metadata"] | undefined {
+  const t = msg.tokens
+  const hasTokens = !!t && !!(t.input || t.output || t.cacheRead || t.cacheWrite)
+  if (!hasTokens && typeof msg.cost !== "number") return undefined
+  const usage: UsageInfo = {
+    inputTokens: t?.input ?? 0,
+    outputTokens: t?.output ?? 0,
+    cacheReadInputTokens: t?.cacheRead ?? 0,
+    cacheCreationInputTokens: t?.cacheWrite ?? 0,
+    ...(typeof msg.cost === "number" ? { totalCostUsd: msg.cost } : {}),
+  }
+  return importedUsageMetadata(usage, msg.model)
+}
+
 function mapMessage(
   msg: OpencodeMessage,
   sessionId: string,
@@ -84,6 +101,7 @@ function mapMessage(
   if (parts.length === 0) return null
   const role: StoredMessage["role"] =
     msg.role === "assistant" ? "assistant" : msg.role === "system" ? "system" : "user"
+  const metadata = role === "assistant" ? opencodeUsageMeta(msg) : undefined
   return buildMessage({
     sessionId,
     projectId,
@@ -91,6 +109,7 @@ function mapMessage(
     role,
     parts,
     createdAt: msg.createdAt,
+    ...(metadata ? { metadata } : {}),
   })
 }
 
@@ -132,6 +151,33 @@ export function opencodeToConversation(
 interface ShareRecord {
   key?: string
   content?: Record<string, unknown>
+}
+
+function numOr(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Pull model/cost/tokens off a raw OpenCode message `data` object. */
+function readOpencodeUsage(
+  c: Record<string, unknown>
+): Pick<OpencodeMessage, "model" | "cost" | "tokens"> {
+  const out: Pick<OpencodeMessage, "model" | "cost" | "tokens"> = {}
+  const model = c.modelID ?? c.model
+  if (typeof model === "string" && model) out.model = model
+  if (typeof c.cost === "number") out.cost = c.cost
+  const tk = c.tokens
+  if (tk && typeof tk === "object") {
+    const t = tk as Record<string, unknown>
+    const cache = (t.cache as Record<string, unknown>) ?? {}
+    out.tokens = {
+      input: numOr(t.input),
+      output: numOr(t.output),
+      cacheRead: numOr(cache.read),
+      cacheWrite: numOr(cache.write),
+    }
+  }
+  return out
 }
 
 /**
@@ -187,6 +233,7 @@ export function parseOpencodeExport(content: string): OpencodeSession[] {
         parts: [],
         createdAt: Number((c.time as Record<string, unknown>)?.created ?? 0),
         sort: messages.size,
+        ...readOpencodeUsage(c),
       })
     } else if (key.startsWith("part") || (c.messageID && c.type)) {
       const mid = String(c.messageID)
@@ -216,6 +263,7 @@ function normalizeNested(obj: Record<string, unknown>): OpencodeSession | null {
       role: String(mm.role ?? "user"),
       parts: Array.isArray(mm.parts) ? (mm.parts as OpencodePart[]) : [],
       createdAt: Number((mm.time as Record<string, unknown>)?.created ?? 0),
+      ...readOpencodeUsage(mm),
     }
   })
   return {

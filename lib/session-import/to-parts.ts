@@ -91,6 +91,12 @@ export function buildMessage(opts: {
   role: StoredMessage["role"]
   parts: Part[]
   createdAt: number
+  /**
+   * Optional metadata attached verbatim (spread-guarded). Imported assistant
+   * turns carry `{ usage, model }` here so `deriveImportedUsageRows`
+   * (`./usage`) can reconstruct token/cost stats the raw transcripts hold.
+   */
+  metadata?: StoredMessage["metadata"]
 }): StoredMessage {
   return {
     id: importedMessageId(opts.sessionId, opts.index),
@@ -98,6 +104,7 @@ export function buildMessage(opts: {
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     role: opts.role,
     parts: opts.parts,
+    ...(opts.metadata ? { metadata: opts.metadata } : {}),
     createdAt: opts.createdAt,
   }
 }

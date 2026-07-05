@@ -17,7 +17,9 @@
 import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@/lib/claude/types"
+import type { UsageInfo } from "@/lib/claude/adapter"
 import { walkFiles } from "../fs"
+import { importedUsageMetadata } from "../usage"
 import {
   buildMessage,
   buildSession,
@@ -60,6 +62,67 @@ function tsToMs(ts: string | undefined, fallback: number): number {
   if (!ts) return fallback
   const n = Date.parse(ts)
   return Number.isNaN(n) ? fallback : n
+}
+
+/** Codex token accounting block (fields best-effort; names vary by version). */
+interface CodexTokenUsage {
+  input_tokens?: number
+  cached_input_tokens?: number
+  output_tokens?: number
+  reasoning_output_tokens?: number
+  total_tokens?: number
+}
+
+/** Cumulative token totals threaded across the rollout to derive per-turn deltas. */
+interface CumulativeTokens {
+  input: number
+  output: number
+  cacheRead: number
+}
+
+const ZERO_CUMULATIVE: CumulativeTokens = { input: 0, output: 0, cacheRead: 0 }
+
+function numOf(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0
+}
+
+function toUsageInfo(u: CodexTokenUsage): UsageInfo {
+  return {
+    inputTokens: numOf(u.input_tokens),
+    outputTokens: numOf(u.output_tokens),
+    cacheReadInputTokens: numOf(u.cached_input_tokens),
+    ...(u.reasoning_output_tokens ? { reasoningTokens: numOf(u.reasoning_output_tokens) } : {}),
+  }
+}
+
+/**
+ * Resolve one `token_count` event to per-turn usage. Prefers the event's own
+ * `last_token_usage`; otherwise derives the turn's delta from the running
+ * `total_token_usage`. Returns `null` (and leaves `prev` untouched) when the
+ * event carries no usable counts. Mutates `prev` to the new cumulative totals.
+ */
+function codexTurnUsage(info: Record<string, unknown>, prev: CumulativeTokens): UsageInfo | null {
+  const last = info.last_token_usage as CodexTokenUsage | undefined
+  const total = info.total_token_usage as CodexTokenUsage | undefined
+  if (last && (last.input_tokens || last.output_tokens || last.cached_input_tokens)) {
+    return toUsageInfo(last)
+  }
+  if (total) {
+    const input = numOf(total.input_tokens)
+    const output = numOf(total.output_tokens)
+    const cacheRead = numOf(total.cached_input_tokens)
+    const delta: UsageInfo = {
+      inputTokens: Math.max(0, input - prev.input),
+      outputTokens: Math.max(0, output - prev.output),
+      cacheReadInputTokens: Math.max(0, cacheRead - prev.cacheRead),
+    }
+    prev.input = input
+    prev.output = output
+    prev.cacheRead = cacheRead
+    if (!delta.inputTokens && !delta.outputTokens && !delta.cacheReadInputTokens) return null
+    return delta
+  }
+  return null
 }
 
 function asString(v: unknown): string {
@@ -112,6 +175,10 @@ export function parseCodexRollout(
   let createdAt = 0
   let updatedAt = 0
   let msgCounter = 0
+  // Codex emits token accounting as a standalone `event_msg` after each turn,
+  // so we attach it to the turn's last-seen assistant message.
+  let lastAssistantIndex = -1
+  const prevTotal: CumulativeTokens = { ...ZERO_CUMULATIVE }
 
   const sid = () => importedSessionId("codex", sessionId || locatorId)
 
@@ -139,6 +206,21 @@ export function parseCodexRollout(
       model = asString(payload.model) || model
       continue
     }
+    if (rec.type === "event_msg") {
+      if (asString(payload.type) === "token_count") {
+        const info = (
+          payload.info && typeof payload.info === "object" ? payload.info : payload
+        ) as Record<string, unknown>
+        const usage = codexTurnUsage(info, prevTotal)
+        if (usage && lastAssistantIndex >= 0) {
+          messages[lastAssistantIndex] = {
+            ...messages[lastAssistantIndex],
+            metadata: importedUsageMetadata(usage, model),
+          }
+        }
+      }
+      continue
+    }
     if (rec.type !== "response_item") continue
 
     const itemType = asString(payload.type)
@@ -159,6 +241,7 @@ export function parseCodexRollout(
           createdAt: ms,
         })
       )
+      if (role === "assistant") lastAssistantIndex = messages.length - 1
       continue
     }
 
@@ -175,6 +258,7 @@ export function parseCodexRollout(
           createdAt: ms,
         })
       )
+      lastAssistantIndex = messages.length - 1
       continue
     }
 
@@ -194,6 +278,7 @@ export function parseCodexRollout(
           createdAt: ms,
         })
       )
+      lastAssistantIndex = messages.length - 1
       toolIndex.set(callId, { m: messages.length - 1, p: 0 })
       continue
     }

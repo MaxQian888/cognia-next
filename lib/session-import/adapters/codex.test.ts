@@ -68,6 +68,77 @@ describe("parseCodexRollout", () => {
     const parsed = parseCodexRollout(CONTENT + "\n{oops", "r.jsonl")
     expect(parsed.messages.length).toBeGreaterThan(0)
   })
+
+  it("attaches a token_count event's per-turn usage to the last assistant message", () => {
+    const lines = [
+      {
+        timestamp: "2025-01-03T12:00:00Z",
+        type: "session_meta",
+        payload: { id: "cx", model: "gpt-5" },
+      },
+      {
+        timestamp: "2025-01-03T12:00:01Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "done" }],
+        },
+      },
+      {
+        timestamp: "2025-01-03T12:00:02Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: { input_tokens: 80, output_tokens: 20, cached_input_tokens: 40 },
+          },
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseCodexRollout(lines, "r.jsonl")
+    const meta = parsed.messages[parsed.messages.length - 1].metadata as {
+      usage?: Record<string, number>
+      model?: string
+    }
+    expect(meta.usage).toMatchObject({
+      inputTokens: 80,
+      outputTokens: 20,
+      cacheReadInputTokens: 40,
+    })
+    expect(meta.model).toBe("gpt-5")
+  })
+
+  it("derives per-turn deltas from cumulative total_token_usage", () => {
+    const tc = (total: Record<string, number>) => ({
+      timestamp: "2025-01-03T12:00:09Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: { total_token_usage: total } },
+    })
+    const asst = (text: string) => ({
+      timestamp: "2025-01-03T12:00:01Z",
+      type: "response_item",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+    })
+    const lines = [
+      { timestamp: "2025-01-03T12:00:00Z", type: "session_meta", payload: { id: "cx" } },
+      asst("one"),
+      tc({ input_tokens: 100, output_tokens: 30 }),
+      asst("two"),
+      tc({ input_tokens: 250, output_tokens: 70 }),
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseCodexRollout(lines, "r.jsonl")
+    const usages = parsed.messages
+      .map((m) => (m.metadata as { usage?: Record<string, number> })?.usage)
+      .filter(Boolean)
+    expect(usages[0]).toMatchObject({ inputTokens: 100, outputTokens: 30 })
+    // Second turn = cumulative delta (250-100, 70-30).
+    expect(usages[1]).toMatchObject({ inputTokens: 150, outputTokens: 40 })
+  })
 })
 
 describe("codexSessionSource", () => {
