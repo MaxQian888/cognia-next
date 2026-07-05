@@ -37,7 +37,8 @@ import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
-import { createStderrLogSink } from "./mcp-log.mjs"
+import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
+import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
 
 /** Bare name of the `ask_user` elicitation tool (namespaced by the sidecar as
  * `mcp__cognia-plugin-tools__ask_user`). */
@@ -404,17 +405,22 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       // normal round-trip so the renderer's richer Auto-mode (Layer B) and the
       // manual approval modal still run. Fail-open on any resolver error.
       const ruleset = sendOptions.permissionRuleset
-      if (ruleset && !doomed) {
+      if (ruleset) {
         try {
           const verdict = resolveForToolCall(ruleset, toolName, input)
-          if (verdict === "allow") {
-            return Promise.resolve({ behavior: "allow", updatedInput: input })
-          }
+          // An explicit DENY outranks the doom-loop escalation: a doom-looped
+          // call to a user-denied tool must stay denied, not downgrade to an
+          // approval prompt the user could accept.
           if (verdict === "deny") {
             return Promise.resolve({
               behavior: "deny",
               message: "denied by permission ruleset",
             })
+          }
+          // The silent ALLOW short-circuit is what the doom guard exists to
+          // suspend — a doomed call falls through to the approval round-trip.
+          if (verdict === "allow" && !doomed) {
+            return Promise.resolve({ behavior: "allow", updatedInput: input })
           }
         } catch {
           // fall through to the approval round-trip
@@ -451,7 +457,13 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         )
       }
       return new Promise((resolve) => {
+        let onAbort = null
         const settle = (result) => {
+          // Symmetric cleanup: drop the abort listener when the approval
+          // settles normally so listeners don't accumulate on a shared signal.
+          if (onAbort && ctx.signal && typeof ctx.signal.removeEventListener === "function") {
+            ctx.signal.removeEventListener("abort", onAbort)
+          }
           if (CANUSETOOL_DEBUG) {
             log(
               "info",
@@ -465,7 +477,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         // requires `updatedInput` to be a record on an allow.
         pendingApprovals.set(requestId, { resolve: settle, input })
         if (ctx.signal) {
-          const onAbort = () => {
+          onAbort = () => {
             if (pendingApprovals.delete(requestId)) {
               settle({ behavior: "deny", message: "aborted" })
             }
@@ -485,15 +497,34 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
 
   const q = query({ prompt: inputStream.iterable, options })
 
+  // First-connection self-healing: the SDK's `system/init` event reports each
+  // MCP server's connect status; a server that failed its FIRST connect (cold
+  // npx install, waking remote endpoint) is auto-reconnected once instead of
+  // staying failed until the user finds the reconnect button. `needs-auth`
+  // servers are left alone (reconnecting can't mint a token).
+  const mcpAutoReconnect = createMcpAutoReconnector({
+    reconnect: (name) => q.reconnectMcpServer(name),
+    log,
+    emitMcpLog: ({ level, message, server, source }) =>
+      emit(buildMcpLogEvent({ sessionId, ts: Date.now(), level, message, server, source })),
+  })
+
   const session = {
     q,
-    pushUserMessage: (content) =>
+    pushUserMessage: (content) => {
+      // Per-turn doom-guard reset (parity with the ai-sdk path, which builds a
+      // fresh guard each turn). Without this, a legitimate identical call made
+      // once per turn — e.g. reading the same config at each turn's start —
+      // crosses the threshold on the 3rd TURN of a multi-turn session and
+      // forces approval prompts forever after.
+      doomGuard.reset()
       inputStream.push({
         type: "user",
         message: { role: "user", content },
         parent_tool_use_id: null,
         session_id: sessionId,
-      }),
+      })
+    },
     // Manual compaction: the Agent SDK owns compaction and intercepts a
     // `/compact [focus]` user turn (emitting its own `compact_boundary`). We
     // unify the manual entry point by pushing that turn — no bespoke summary.
@@ -530,6 +561,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
             sdkSessionId: evt.session_id,
           })
         }
+        mcpAutoReconnect.onEvent(evt)
         emit({ type: "event", sessionId, event: evt })
       }
       emit({ type: "session_ended", sessionId })

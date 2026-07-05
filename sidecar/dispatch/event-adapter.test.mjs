@@ -1026,3 +1026,41 @@ test("text blocks without sources carry no citations field", () => {
     .message.content.find((b) => b.type === "text")
   assert.equal(textBlock.citations, undefined)
 })
+
+test("reasoning after a sealed tool_use rotates the message boundary (no re-emitted tool_uses)", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "tool-call", toolCallId: "t1", toolName: "grep", input: {} })
+  // Interleaved thinking: reasoning arrives AFTER the tool_use was sealed.
+  const reasoningOut = adapter.handle({ type: "reasoning-delta", text: "thinking..." })
+  // Then text — the fresh message must NOT carry the prior tool_use.
+  adapter.handle({ type: "text-delta", text: "answer" })
+  const sealed = adapter.sealAssistant()
+  const assistant = sealed.find((m) => m.type === "assistant")
+  assert.ok(assistant, "expected a sealed assistant snapshot")
+  const kinds = assistant.message.content.map((b) => b.type)
+  assert.ok(!kinds.includes("tool_use"), `sealed message re-emitted tool_use: ${kinds}`)
+  // And the reasoning stream started a new message id (message_start again).
+  const types = reasoningOut.map((m) => m.event?.type).filter(Boolean)
+  assert.ok(types.includes("message_start"))
+})
+
+test("tool-result with only a nested toolCall id still pairs the result", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "tool-call", toolCallId: "t9", toolName: "read", input: {} })
+  const out = adapter.handle({
+    type: "tool-result",
+    toolCall: { toolCallId: "t9" },
+    output: "body",
+  })
+  const result = out.find((m) => m.type === "user")
+  assert.ok(result)
+  assert.equal(result.message.content[0].tool_use_id, "t9")
+})
+
+test("circular tool output does not throw out of handle()", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "tool-call", toolCallId: "c1", toolName: "x", input: {} })
+  const loop = {}
+  loop.self = loop
+  assert.doesNotThrow(() => adapter.handle({ type: "tool-error", toolCallId: "c1", error: loop }))
+})

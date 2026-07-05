@@ -78,6 +78,22 @@ function resolveProtocol(provider, credentials) {
  * cache prefix. Assistant messages whose content becomes empty after the
  * filter are dropped entirely; non-assistant messages pass through untouched.
  */
+/**
+ * Best-effort human-readable message from an arbitrary thrown/streamed error
+ * value. Guards `JSON.stringify` — a circular provider error object must not
+ * throw inside an error-reporting path.
+ */
+function errorToMessage(err) {
+  if (err instanceof Error) return err.message
+  if (typeof err === "string") return err
+  if (err && typeof err.message === "string") return err.message
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return String(err)
+  }
+}
+
 function stripReasoningParts(messages) {
   const out = []
   for (const msg of messages) {
@@ -493,8 +509,6 @@ export function dispatchAiSdk({
   // against this Map. Engaged only when `sendOptions.toolResultReviewEnabled`.
   const pendingToolResultReviews = new Map()
   const toolResultReviewEnabled = sendOptions.toolResultReviewEnabled === true
-  // Correlate tool-call ids → names so a tool-result review names its tool.
-  const toolNamesById = new Map()
   // Tools are stable for the session — build once, reuse across turns.
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache
@@ -554,41 +568,40 @@ export function dispatchAiSdk({
     }
   }
 
-  // Pause before a tool result reaches the model: emit a `tool_result_review`
-  // and await the renderer's `tool_result_decision`. A returned
-  // `updatedToolOutput` rewrites the output; `undefined`/`null` (no responder,
-  // no change, or timeout) passes the original through. Returns a possibly-new
-  // stream event with the output replaced.
-  async function reviewToolResult(evt) {
-    const isError = evt?.type === "tool-error"
-    const current = isError
-      ? evt.error instanceof Error
-        ? evt.error.message
-        : typeof evt.error === "string"
-          ? evt.error
-          : JSON.stringify(evt.error)
-      : (evt.output ?? evt.result)
+  // PostToolUse review round-trip, applied at the tool EXECUTE layer (threaded
+  // into `buildAiSdkTools` / `buildAiSdkMcpTools` below): emit a
+  // `tool_result_review` and await the renderer's `tool_result_decision`.
+  // Returns the updated output, or `undefined` (no responder, no change, or
+  // timeout) to pass the original through. Rewriting at the execute layer is
+  // what makes the review reach the MODEL — streamText persists the execute
+  // return into the conversation, so a rewrite applied to the fullStream
+  // tool-result event afterwards would be display-only.
+  async function reviewToolOutput(toolName, toolUseId, current, isError) {
+    if (closing || cancelled) return undefined
     const reviewId = randomUUID()
-    const updated = await new Promise((resolve) => {
-      pendingToolResultReviews.set(reviewId, { resolve })
-      emit({
-        type: "tool_result_review",
-        sessionId,
-        reviewId,
-        toolUseId: evt.toolCallId ?? "",
-        toolName: toolNamesById.get(evt.toolCallId) ?? "",
-        result: current,
-        isError,
-      })
-      setTimeout(() => {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
         if (pendingToolResultReviews.has(reviewId)) {
           pendingToolResultReviews.delete(reviewId)
           resolve(undefined)
         }
       }, TOOL_RESULT_REVIEW_TIMEOUT_MS)
+      pendingToolResultReviews.set(reviewId, {
+        resolve: (v) => {
+          clearTimeout(timer)
+          resolve(v)
+        },
+      })
+      emit({
+        type: "tool_result_review",
+        sessionId,
+        reviewId,
+        toolUseId: toolUseId ?? "",
+        toolName: toolName ?? "",
+        result: current,
+        isError: isError === true,
+      })
     })
-    if (updated === undefined || updated === null) return evt
-    return isError ? { ...evt, error: updated } : { ...evt, output: updated, result: updated }
   }
 
   // Build a flat conversation from accumulated user/assistant turns.
@@ -724,6 +737,9 @@ export function dispatchAiSdk({
       importanceThreshold: comp.importanceThreshold,
       retainedFraction: comp.retainedFraction,
       modelId: model,
+      // Authoritative catalog-resolved window (same source `shouldCompact`
+      // uses) so the drain-line budget doesn't fall back to the regex table.
+      ...(typeof comp.contextWindow === "number" ? { contextWindow: comp.contextWindow } : {}),
     })
     if (plan.kind === "none") return
 
@@ -775,6 +791,10 @@ export function dispatchAiSdk({
           tools: undefined,
           maxSteps: 1,
           credentials: summaryCreds,
+          // Interruptible: a hung summary provider must not stall the turn
+          // head forever. Absent for a between-turns manual compaction (no
+          // active controller) — that call has no turn to stall.
+          ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
           streamTextFn: streamTextOverride,
         })
         let out = ""
@@ -807,11 +827,11 @@ export function dispatchAiSdk({
     } else {
       let summaryText
       if (plan.kind === "chunked") {
-        const parts = []
-        for (const chunk of plan.chunks) {
-          const s = await summarize(chunk)
-          if (s) parts.push(s)
-        }
+        // Chunks are independent — summarize them concurrently (order is
+        // preserved by Promise.all's positional results).
+        const parts = (await Promise.all(plan.chunks.map((chunk) => summarize(chunk)))).filter(
+          Boolean
+        )
         if (regenerate && frozen.length) parts.unshift(renderForSummary(frozen))
         if (parts.length === 0) return
         summaryText =
@@ -894,6 +914,12 @@ export function dispatchAiSdk({
       lastCreds = creds
       lastModelParams = modelParams
 
+      // Created BEFORE any compaction so `interrupt()` can abort the one-shot
+      // summary call too (previously the controller was created after
+      // `maybeCompact`, leaving the summary request un-abortable).
+      const abortController = new AbortController()
+      activeAbortController = abortController
+
       // Honour a manual `/compact` that arrived mid-turn (deferred so we never
       // run two summary calls concurrently), then the automatic threshold.
       if (manualCompactPending) {
@@ -925,6 +951,9 @@ export function dispatchAiSdk({
           readTracker,
           bgShells,
           doomGuard: toolDoomGuard,
+          // PostToolUse rewrite at the execute layer (opt-in) — see
+          // `reviewToolOutput` above.
+          ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
         })
 
         // External MCP servers (parity with the Anthropic path, which passes
@@ -951,6 +980,7 @@ export function dispatchAiSdk({
             const mcp = await buildAiSdkMcpTools({
               mcpServers: sendOptions.mcpServers,
               gate: mcpGate,
+              ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
               // A routed `@agent` narrows the allowlist to its own tools and
               // unions its deny-list (parity with the built-in tool path above).
               allowedTools: agentScopedSendOptions.allowedTools,
@@ -978,9 +1008,6 @@ export function dispatchAiSdk({
           }
         }
       }
-
-      const abortController = new AbortController()
-      activeAbortController = abortController
 
       // ── Manual agent loop ────────────────────────────────────────────────
       // The AI SDK-blessed pattern (docs: "manual agent loop"): each `streamText`
@@ -1100,16 +1127,10 @@ export function dispatchAiSdk({
           if (cancelled) break
           if (evt?.type === "error") streamError = evt.error
           if (evt?.type === "finish") finishReason = evt.finishReason ?? finishReason
-          if (evt?.type === "tool-call" && evt.toolCallId) {
-            toolNamesById.set(evt.toolCallId, evt.toolName ?? "")
-          }
-          // PostToolUse rewrite: let the renderer review/rewrite tool output
-          // before the model sees it (opt-in; ai-sdk channel only).
-          const handled =
-            toolResultReviewEnabled && (evt?.type === "tool-result" || evt?.type === "tool-error")
-              ? await reviewToolResult(evt)
-              : evt
-          const out = adapter.handle(handled)
+          // NB: the PostToolUse review no longer intercepts here — it runs at
+          // the tool EXECUTE layer (see `reviewToolOutput`), so tool-result
+          // events already carry the reviewed output the model will see.
+          const out = adapter.handle(evt)
           flushAdapter(out)
           if (evt?.type === "text-delta") {
             legText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
@@ -1128,12 +1149,7 @@ export function dispatchAiSdk({
         // here also skips the `result.response`/`result.usage` reads below, whose
         // getters reject on a hard error.
         if (streamError && !assistantText && !cancelled) {
-          const msg =
-            streamError instanceof Error
-              ? streamError.message
-              : typeof streamError === "string"
-                ? streamError
-                : (streamError?.message ?? JSON.stringify(streamError))
+          const msg = errorToMessage(streamError)
           emit({
             type: "session_ended",
             sessionId,
@@ -1275,12 +1291,7 @@ export function dispatchAiSdk({
         // reply as a successful turn. Symmetric with the pre-text error branch
         // above — forward the real HTTP status + Retry-After so the renderer
         // classifies off authoritative data.
-        const msg =
-          turnError instanceof Error
-            ? turnError.message
-            : typeof turnError === "string"
-              ? turnError
-              : (turnError?.message ?? JSON.stringify(turnError))
+        const msg = errorToMessage(turnError)
         emit({
           type: "session_ended",
           sessionId,
@@ -1300,6 +1311,11 @@ export function dispatchAiSdk({
           type: "session_ended",
           sessionId,
           error: err?.message ?? String(err),
+          // Thrown (non-streamed) failures — buildModel errors, the variant
+          // adapter's HTTP throw, getter rejections — carry status/Retry-After
+          // too; forward it so the renderer's breaker doesn't fall back to
+          // string matching. `{}` when the error has no HTTP metadata.
+          ...extractHttpErrorMeta(err),
         })
       }
     } finally {
@@ -1463,6 +1479,10 @@ export function dispatchAiSdk({
     pendingPluginToolCalls,
     pendingProtocolExecs,
     pendingToolResultReviews,
+    // Exposed for tests: the execute-layer PostToolUse review round-trip that
+    // `buildAiSdkTools` / `buildAiSdkMcpTools` invoke before a tool's output
+    // reaches the model.
+    reviewToolOutput,
     sendOptions,
   }
 }

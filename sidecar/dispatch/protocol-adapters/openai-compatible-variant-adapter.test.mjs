@@ -247,3 +247,42 @@ test("works without optional spec fields (minimal spec)", async () => {
   assert.equal(events[0].text, "min")
   assert.deepEqual(await result.usage, {}) // no usage paths configured
 })
+
+test("usage promise settles when fullStream is closed early (interrupt)", async () => {
+  const fetchFn = fakeFetch([
+    'data: {"choices":[{"delta":{"content":"one"}}]}',
+    'data: {"choices":[{"delta":{"content":"two"}}]}',
+    "data: [DONE]",
+  ])
+  const adapter = makeOpenAiCompatVariantAdapter(SPEC)
+  const run = await adapter.start(REQ(fetchFn))
+  // Consume ONE event, then close the generator the way an interrupted
+  // dispatcher does (break → .return()).
+  const it = run.fullStream[Symbol.asyncIterator]()
+  await it.next()
+  await it.return()
+  // Previously this hung forever: the generator's resolveUsage only ran on the
+  // success/catch paths, never on early close.
+  const usage = await Promise.race([
+    run.usage,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("usage hung")), 1000)),
+  ])
+  assert.equal(usage, null)
+})
+
+test("non-2xx throws a structured error extractHttpErrorMeta can read", async () => {
+  const fetchFn = fakeFetch(["ignored"], {
+    status: 429,
+    headers: new Map([["retry-after", "7"]]),
+  })
+  const adapter = makeOpenAiCompatVariantAdapter(SPEC)
+  await assert.rejects(
+    () => adapter.start(REQ(fetchFn)),
+    (err) => {
+      assert.match(err.message, /HTTP 429/)
+      assert.equal(err.statusCode, 429)
+      assert.equal(err.responseHeaders["retry-after"], "7")
+      return true
+    }
+  )
+})

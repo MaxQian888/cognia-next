@@ -76,9 +76,11 @@ function isMcpToolPermitted(namespaced, server, allowSet, disallowedSet) {
  *
  * Servers are connected CONCURRENTLY (previously serial), so a slow or cold
  * remote MCP endpoint no longer blocks the others from being ready for the turn.
- * Each connection gets ONE retry with a short backoff — remote MCP endpoints are
- * frequently cold on first hit. Results merge in input order for a deterministic
- * tool map. OAuth is already applied upstream: `resolveSendOptions`
+ * Each connection gets up to `maxAttempts` tries (default 3) with exponential
+ * backoff — remote MCP endpoints and npx-installed stdio servers are frequently
+ * cold on first hit — and each attempt is capped by `connectTimeoutMs` so a
+ * hung connect can't stall the turn. Results merge in input order for a
+ * deterministic tool map. OAuth is already applied upstream: `resolveSendOptions`
  * (`build-options.ts`) injects the bearer token into each server's
  * `headers.Authorization`, which `toMcpTransport` forwards verbatim.
  *
@@ -91,13 +93,16 @@ function isMcpToolPermitted(namespaced, server, allowSet, disallowedSet) {
  *   emitMcpLog?: (entry: { level: "error"|"warn"|"info"|"debug", message: string, server?: string, source?: "stderr"|"diagnostic" }) => void,
  *   createClient?: (config: any) => Promise<any>,   // injected in tests
  *   StdioTransport?: any,                            // injected in tests
- *   retryDelayMs?: number,                           // backoff before the 1 retry
+ *   retryDelayMs?: number,                           // base backoff (doubles per retry)
+ *   maxAttempts?: number,                             // total connect attempts per server
+ *   connectTimeoutMs?: number,                        // per-attempt connect cap (0 = none)
  * }} params
  * @returns {Promise<{ tools: Record<string, any>, close: () => Promise<void> }>}
  */
 export async function buildAiSdkMcpTools({
   mcpServers,
   gate,
+  reviewToolOutput,
   allowedTools,
   disallowedTools,
   log,
@@ -105,6 +110,8 @@ export async function buildAiSdkMcpTools({
   createClient,
   StdioTransport,
   retryDelayMs = 200,
+  maxAttempts = 3,
+  connectTimeoutMs = 15_000,
 }) {
   /** @type {Record<string, any>} */
   const tools = {}
@@ -178,18 +185,53 @@ export async function buildAiSdkMcpTools({
   }
 
   /**
-   * Connect one server (one retry on connect failure), returning its client,
-   * namespaced/gated tools, and any stderr capture — or `null` when the server
-   * can't be reached / has an unsupported transport. A fresh transport (and
-   * capture) is built per attempt: a spawned stdio transport that failed to
-   * connect can't be reused, and its stderr stream must be torn down.
+   * One connect attempt, capped by `connectTimeoutMs`. A connect that resolves
+   * AFTER the timeout fired is closed immediately — the abandoned client would
+   * otherwise leak a socket / child process for the rest of the session.
+   */
+  const connectOnce = (transport) => {
+    if (!connectTimeoutMs || connectTimeoutMs <= 0) return make({ transport })
+    return new Promise((resolve, reject) => {
+      let done = false
+      const timer = setTimeout(() => {
+        done = true
+        reject(new Error(`connect timed out after ${connectTimeoutMs}ms`))
+      }, connectTimeoutMs)
+      make({ transport }).then(
+        (client) => {
+          if (done) {
+            // Late winner of a lost race — tear it down, best-effort.
+            void Promise.resolve(client?.close?.()).catch(() => undefined)
+            return
+          }
+          clearTimeout(timer)
+          resolve(client)
+        },
+        (err) => {
+          if (done) return
+          clearTimeout(timer)
+          reject(err)
+        }
+      )
+    })
+  }
+
+  /**
+   * Connect one server (up to `maxAttempts` tries with exponential backoff),
+   * returning its client, namespaced/gated tools, and any stderr capture — or
+   * `null` when the server can't be reached / has an unsupported transport. A
+   * fresh transport (and capture) is built per attempt: a spawned stdio
+   * transport that failed to connect can't be reused, and its stderr stream
+   * must be torn down.
    */
   const connectServer = async (server, entry) => {
     const isStdio = entry?.type === "stdio"
+    const attempts = Math.max(1, maxAttempts)
     let client = null
     let capture = null
-    for (let attempt = 0; attempt < 2 && !client; attempt++) {
-      if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs)
+    for (let attempt = 0; attempt < attempts && !client; attempt++) {
+      // Exponential backoff: retryDelayMs, 2×, 4×, …
+      if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs * 2 ** (attempt - 1))
       const thisCapture = isStdio ? makeStderrCapture(server) : null
       const transport = buildTransport(entry, thisCapture?.stream)
       if (!transport) {
@@ -201,21 +243,41 @@ export async function buildAiSdkMcpTools({
         return null
       }
       try {
-        client = await make({ transport })
+        client = await connectOnce(transport)
         capture = thisCapture
       } catch (err) {
         thisCapture?.end()
         thisCapture?.stream.destroy()
-        if (attempt === 1) {
+        if (attempt === attempts - 1) {
           log?.("warn", `mcp "${server}" failed to connect: ${err?.message ?? err}`)
           diag(server, "warn", `failed to connect: ${err?.message ?? err}`)
           return null
         }
+        diag(
+          server,
+          "info",
+          `connect attempt ${attempt + 1}/${attempts} failed (${err?.message ?? err}) — retrying`
+        )
       }
     }
     let serverTools
     try {
-      serverTools = await client.tools()
+      // Same deadline as connect: a server that connected but never answers
+      // `tools/list` (cold remote, wedged stdio child) must not stall the
+      // first turn indefinitely.
+      serverTools =
+        connectTimeoutMs && connectTimeoutMs > 0
+          ? await Promise.race([
+              client.tools(),
+              new Promise((_, reject) => {
+                const t = setTimeout(
+                  () => reject(new Error(`tools() timed out after ${connectTimeoutMs}ms`)),
+                  connectTimeoutMs
+                )
+                if (typeof t.unref === "function") t.unref()
+              }),
+            ])
+          : await client.tools()
     } catch (err) {
       log?.("warn", `mcp "${server}" tools() failed: ${err?.message ?? err}`)
       diag(server, "warn", `tools() failed: ${err?.message ?? err}`)
@@ -227,7 +289,7 @@ export async function buildAiSdkMcpTools({
     for (const [toolName, toolDef] of Object.entries(serverTools ?? {})) {
       const namespaced = `mcp__${server}__${toolName}`
       if (!isMcpToolPermitted(namespaced, server, allowSet, disallowedSet)) continue
-      collected[namespaced] = wrapMcpToolWithGate(toolDef, namespaced, gate)
+      collected[namespaced] = wrapMcpToolWithGate(toolDef, namespaced, gate, reviewToolOutput)
     }
     diag(server, "info", `connected · ${Object.keys(collected).length} tool(s) exposed`)
     return { client, tools: collected, capture }
@@ -255,14 +317,37 @@ export async function buildAiSdkMcpTools({
  * may rewrite the input; all other tool fields (description / inputSchema) are
  * preserved. When no gate is supplied the tool is returned unchanged.
  */
-export function wrapMcpToolWithGate(toolDef, namespaced, gate) {
-  if (!gate || !toolDef || typeof toolDef.execute !== "function") return toolDef
+export function wrapMcpToolWithGate(toolDef, namespaced, gate, reviewToolOutput) {
+  if ((!gate && !reviewToolOutput) || !toolDef || typeof toolDef.execute !== "function") {
+    return toolDef
+  }
   const originalExecute = toolDef.execute.bind(toolDef)
+  const review = async (toolCallId, output, isError) => {
+    if (typeof reviewToolOutput !== "function") return output
+    try {
+      const updated = await reviewToolOutput(namespaced, toolCallId, output, isError)
+      return updated === undefined || updated === null ? output : updated
+    } catch {
+      return output // fail-open: a broken reviewer never loses a tool result
+    }
+  }
   return {
     ...toolDef,
     execute: async (args, options) => {
-      const effective = await gate(namespaced, args ?? {})
-      return originalExecute(effective, options)
+      const effective = gate
+        ? await gate(namespaced, args ?? {}, options?.abortSignal)
+        : (args ?? {})
+      let out
+      try {
+        out = await originalExecute(effective, options)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        const reviewed = await review(options?.toolCallId, msg, true)
+        throw reviewed === msg ? err : new Error(String(reviewed))
+      }
+      // Rewrite at the EXECUTE layer so the model actually sees the reviewed
+      // output (a fullStream-level rewrite is display-only).
+      return review(options?.toolCallId, out, false)
     },
   }
 }

@@ -188,7 +188,15 @@ export function createToolPermissionGate({
     : null
   const canPrompt = typeof emit === "function" && pendingApprovals instanceof Map
 
-  return async function gate(toolName, input) {
+  /**
+   * @param {string} toolName   namespaced tool name
+   * @param {any} input         tool args
+   * @param {AbortSignal} [signal]  the step's abort signal (AI SDK execute
+   *   options) — settles a pending approval as denied on interrupt so the tool
+   *   execute (and the whole streamText leg) can't hang on a renderer that
+   *   never answers.
+   */
+  return async function gate(toolName, input, signal) {
     // The `ask_user` elicitation tool is the user interaction itself: the
     // renderer's AskUserDialog blocks until the user answers, so it must never
     // be routed through the generic tool-approval modal — in ANY mode. Each
@@ -334,9 +342,27 @@ export function createToolPermissionGate({
       input,
     })
     const decision = await new Promise((resolve) => {
+      let onAbort = null
+      const settle = (result) => {
+        if (onAbort && signal && typeof signal.removeEventListener === "function") {
+          signal.removeEventListener("abort", onAbort)
+        }
+        resolve(result)
+      }
       // Stash the original input so an approved-unmodified call resolves with a
       // concrete `updatedInput` (parity with the Agent-SDK path's host handler).
-      pendingApprovals.set(requestId, { resolve, input })
+      pendingApprovals.set(requestId, { resolve: settle, input })
+      if (signal) {
+        onAbort = () => {
+          if (pendingApprovals.delete(requestId)) {
+            settle({ behavior: "deny", message: "aborted" })
+          }
+        }
+        if (signal.aborted) onAbort()
+        else if (typeof signal.addEventListener === "function") {
+          signal.addEventListener("abort", onAbort, { once: true })
+        }
+      }
     })
     if (decision && decision.behavior === "deny") {
       throw new Error(decision.message ?? `denied: ${toolName}`)
@@ -386,20 +412,61 @@ function builtinToModelOutput({ output }) {
   return { type: "content", value }
 }
 
-function builtinDefToAiSdkTool(def, gate, timeoutMs) {
+/**
+ * Apply the PostToolUse review (renderer round-trip) to a tool's EXECUTE-layer
+ * output — this is the only layer where a rewrite actually reaches the model:
+ * streamText persists the execute return into the conversation, so a rewrite
+ * applied later (e.g. on the fullStream tool-result event) is display-only.
+ * `review` returns the updated output, or undefined/null to pass through.
+ */
+async function applyOutputReview(review, namespaced, toolCallId, output, isError) {
+  if (typeof review !== "function") return output
+  try {
+    const updated = await review(namespaced, toolCallId, output, isError)
+    return updated === undefined || updated === null ? output : updated
+  } catch {
+    return output // fail-open: a broken reviewer never loses a tool result
+  }
+}
+
+function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
   const namespaced = `mcp__${SERVER_NAME}__${def.name}`
   return tool({
     description: def.description ?? "",
     inputSchema: z.object(def.inputSchema ?? {}),
-    execute: async (args) => {
-      const effective = gate ? await gate(namespaced, args ?? {}) : (args ?? {})
-      const result = await runBuiltinHandler(def, effective, timeoutMs)
+    execute: async (args, options) => {
+      const effective = gate
+        ? await gate(namespaced, args ?? {}, options?.abortSignal)
+        : (args ?? {})
+      let result
+      try {
+        result = await runBuiltinHandler(def, effective, timeoutMs)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        const reviewed = await applyOutputReview(
+          reviewToolOutput,
+          namespaced,
+          options?.toolCallId,
+          msg,
+          true
+        )
+        throw reviewed === msg ? err : new Error(String(reviewed))
+      }
       if (result && result.isError) {
-        throw new Error(callToolResultToText(result) || `${def.name} failed`)
+        const msg = callToolResultToText(result) || `${def.name} failed`
+        const reviewed = await applyOutputReview(
+          reviewToolOutput,
+          namespaced,
+          options?.toolCallId,
+          msg,
+          true
+        )
+        throw new Error(String(reviewed))
       }
       // Image results pass through as the raw MCP object for toModelOutput;
       // every other result flattens to text (unchanged).
-      return hasImageBlock(result) ? result : callToolResultToText(result)
+      const out = hasImageBlock(result) ? result : callToolResultToText(result)
+      return applyOutputReview(reviewToolOutput, namespaced, options?.toolCallId, out, false)
     },
     toModelOutput: builtinToModelOutput,
   })
@@ -411,13 +478,18 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs) {
  * awaits a `plugin_tool_response` resolved via `pendingPluginToolCalls` (the
  * same Map claude-host populates for the Anthropic path). Execution is gated.
  */
-function pluginToolToAiSdkTool(manifest, { emit, sessionId, pendingPluginToolCalls, gate }) {
+function pluginToolToAiSdkTool(
+  manifest,
+  { emit, sessionId, pendingPluginToolCalls, gate, reviewToolOutput }
+) {
   const namespaced = `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`
   return tool({
     description: manifest.description ?? "",
     inputSchema: jsonSchema(manifest.jsonSchema ?? { type: "object", properties: {} }),
-    execute: async (args) => {
-      const effective = gate ? await gate(namespaced, args ?? {}) : (args ?? {})
+    execute: async (args, options) => {
+      const effective = gate
+        ? await gate(namespaced, args ?? {}, options?.abortSignal)
+        : (args ?? {})
       const toolUseId = randomUUID()
       const pending = awaitPluginToolResponse(pendingPluginToolCalls, toolUseId, manifest.name)
       emit({
@@ -428,9 +500,20 @@ function pluginToolToAiSdkTool(manifest, { emit, sessionId, pendingPluginToolCal
         args: effective,
       })
       const response = await pending
-      if (response && response.error) throw new Error(String(response.error))
+      if (response && response.error) {
+        const msg = String(response.error)
+        const reviewed = await applyOutputReview(
+          reviewToolOutput,
+          namespaced,
+          options?.toolCallId,
+          msg,
+          true
+        )
+        throw new Error(String(reviewed))
+      }
       const payload = response ? response.result : null
-      return typeof payload === "string" ? payload : JSON.stringify(payload ?? null)
+      const out = typeof payload === "string" ? payload : JSON.stringify(payload ?? null)
+      return applyOutputReview(reviewToolOutput, namespaced, options?.toolCallId, out, false)
     },
   })
 }
@@ -464,6 +547,7 @@ export function buildAiSdkTools({
   readTracker,
   bgShells,
   doomGuard: providedDoomGuard,
+  reviewToolOutput,
 }) {
   /** @type {Record<string, ReturnType<typeof tool>>} */
   const tools = {}
@@ -526,7 +610,7 @@ export function buildAiSdkTools({
     const alias = CLAUDE_TOOL_NAME_BY_COGNIA_BARE[def.name]
     if (alias) candidates.push(alias)
     if (!passesAllowList(allowSet, candidates)) continue
-    tools[def.name] = builtinDefToAiSdkTool(def, gate, builtinToolTimeoutMs)
+    tools[def.name] = builtinDefToAiSdkTool(def, gate, builtinToolTimeoutMs, reviewToolOutput)
   }
 
   if (Array.isArray(sendOptions.pluginTools) && pendingPluginToolCalls) {
@@ -551,6 +635,7 @@ export function buildAiSdkTools({
         sessionId,
         pendingPluginToolCalls,
         gate,
+        reviewToolOutput,
       })
     }
   }
@@ -568,6 +653,7 @@ export function buildAiSdkTools({
 export const __testing__ = {
   builtinDefToAiSdkTool,
   pluginToolToAiSdkTool,
+  applyOutputReview,
   callToolResultToText,
   runBuiltinHandler,
   builtinToModelOutput,

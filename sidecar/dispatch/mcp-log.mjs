@@ -19,10 +19,15 @@ export function createLineBuffer() {
   return {
     push(chunk) {
       held += typeof chunk === "string" ? chunk : String(chunk ?? "")
-      // Normalise CRLF so a Windows child doesn't leave stray \r on each line.
-      const normalised = held.replace(/\r\n/g, "\n")
-      const parts = normalised.split("\n")
-      held = parts.pop() ?? ""
+      // Split on \r\n, \n, AND lone \r (terminal-style: spinners / progress
+      // bars emit \r-terminated updates). Treating lone \r as a break also
+      // stops a CR-only stream from growing `held` unbounded with an O(n²)
+      // rescan per chunk. A \r that is the LAST byte is held — it may be the
+      // first half of a \r\n split across chunks.
+      const endsWithCr = held.endsWith("\r")
+      const splittable = endsWithCr ? held.slice(0, -1) : held
+      const parts = splittable.split(/\r\n|\n|\r/)
+      held = (parts.pop() ?? "") + (endsWithCr ? "\r" : "")
       return parts.filter((l) => l.length > 0)
     },
     flush() {
@@ -98,7 +103,10 @@ export function extractServerName(line) {
     const low = b.toLowerCase()
     if (low === "mcp") continue
     if (LOG_LEVEL_WORDS.has(low)) continue
-    // A plausible server token: no spaces, alnum/._- only.
+    // A plausible server token: no spaces, alnum/._- only. Reject tokens made
+    // entirely of digits/date punctuation (`[2026-07-05]`, `[12:30:45.123]`)
+    // — timestamp prefixes would otherwise spawn phantom servers in the panel.
+    if (/^[\d.:_-]+$/.test(b)) continue
     if (/^[a-z0-9][a-z0-9._-]*$/i.test(b)) return b
   }
   return undefined

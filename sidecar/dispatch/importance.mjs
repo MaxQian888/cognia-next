@@ -63,9 +63,15 @@ function isToolMessage(message) {
  * @param {{ index?: number, total?: number }} [pos]
  * @returns {{ score: number, signals: string[] }}
  */
+/** Cap the text fed to the signal regexes: STRUCTURED_RE has two unbounded
+ * `[\s\S]*` segments, so a multi-hundred-KB tool body with an unmatched `{`
+ * scans quadratically. The signals are prefix-detectable; 20 KB is plenty. */
+const SIGNAL_SCAN_CAP = 20_000
+
 export function scoreMessage(message, { index = 0, total = 1 } = {}) {
   const signals = []
-  const text = messageText(message)
+  const fullText = messageText(message)
+  const text = fullText.length > SIGNAL_SCAN_CAP ? fullText.slice(0, SIGNAL_SCAN_CAP) : fullText
 
   if (message?.role === "system") signals.push("system")
   if (isToolMessage(message)) signals.push("tool-call")

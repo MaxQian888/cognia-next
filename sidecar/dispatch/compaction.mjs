@@ -50,6 +50,28 @@ export function getContextWindow(modelId) {
   return DEFAULT_CONTEXT_WINDOW
 }
 
+/** Character size of a structured tool-result body (string | text-part array |
+ * arbitrary object). Bounded, non-throwing. */
+function toolBodyLength(body) {
+  if (body == null) return 0
+  if (typeof body === "string") return body.length
+  if (Array.isArray(body)) {
+    let n = 0
+    for (const b of body) n += toolBodyLength(b)
+    return n
+  }
+  if (typeof body === "object") {
+    if (typeof body.text === "string") return body.text.length
+    if ("value" in body) return toolBodyLength(body.value)
+    try {
+      return JSON.stringify(body).length
+    } catch {
+      return 0
+    }
+  }
+  return String(body).length
+}
+
 function textLength(content) {
   if (typeof content === "string") return content.length
   if (Array.isArray(content)) {
@@ -57,6 +79,12 @@ function textLength(content) {
     for (const part of content) {
       if (typeof part === "string") n += part.length
       else if (part && typeof part.text === "string") n += part.text.length
+      else if (part && typeof part === "object") {
+        // Tool-result parts keep their body in `output` / `result` / `content`
+        // rather than `text`; counting them 0 systematically undercounted
+        // tool-heavy conversations (the drain-line then evicted too little).
+        n += toolBodyLength(part.output ?? part.result ?? part.content)
+      }
     }
     return n
   }

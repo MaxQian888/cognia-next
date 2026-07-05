@@ -140,3 +140,22 @@ test("createStderrLogSink swallows emit failures (never faults the producer)", (
 test("MCP_LOG_LEVELS is severity-ordered", () => {
   assert.deepEqual(MCP_LOG_LEVELS, ["error", "warn", "info", "debug"])
 })
+
+test("createLineBuffer: lone \r (terminal-style progress) breaks lines", () => {
+  const buf = createLineBuffer()
+  assert.deepEqual(buf.push("step 1\rstep 2\r"), ["step 1"])
+  assert.deepEqual(buf.push("step 3\n"), ["step 2", "step 3"])
+  assert.deepEqual(buf.flush(), [])
+})
+
+test("createLineBuffer: trailing \r held so a split \r\n stays one break", () => {
+  const buf = createLineBuffer()
+  assert.deepEqual(buf.push("line a\r"), [])
+  assert.deepEqual(buf.push("\nline b\n"), ["line a", "line b"])
+})
+
+test("extractServerName: timestamp-only bracket tokens are not servers", () => {
+  assert.equal(extractServerName("[2026-07-05] starting up"), undefined)
+  assert.equal(extractServerName("[12:30:45.123] tick"), undefined)
+  assert.equal(extractServerName("[2026-07-05] [github] ready"), "github")
+})

@@ -53,15 +53,31 @@ function capMessage(message, maxChars, preserveMeta) {
       if (!part || typeof part !== "object") return part
       const isToolResult = part.type === "tool-result" || part.type === "tool_result"
       if (!isToolResult) return part
+      const header = preserveMeta ? toolHeader(nameOf(part, message), statusOf(part, message)) : ""
       for (const field of ["output", "result", "text", "content"]) {
         if (typeof part[field] === "string") {
-          const header = preserveMeta
-            ? toolHeader(nameOf(part, message), statusOf(part, message))
-            : ""
           const { text, truncated } = capBody(part[field], maxChars, header)
           if (truncated) {
             changed = true
             return { ...part, [field]: text }
+          }
+          return part
+        }
+        // Anthropic-shaped nested body: `content: [{ type:"text", text }, …]`
+        // (exactly what buildToolResultMessage emits). Cap each text block —
+        // previously the LARGEST results escaped the cap entirely.
+        if (Array.isArray(part[field])) {
+          let blockChanged = false
+          const blocks = part[field].map((b) => {
+            if (!b || b.type !== "text" || typeof b.text !== "string") return b
+            const { text, truncated } = capBody(b.text, maxChars, header)
+            if (!truncated) return b
+            blockChanged = true
+            return { ...b, text }
+          })
+          if (blockChanged) {
+            changed = true
+            return { ...part, [field]: blocks }
           }
           return part
         }

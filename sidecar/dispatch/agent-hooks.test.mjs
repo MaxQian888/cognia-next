@@ -397,3 +397,52 @@ test("mergeHookMaps: concatenates arrays per event, skips undefined, undefined w
   assert.equal(merged.PostToolUse.length, 2)
   assert.equal(merged.PreToolUse.length, 1)
 })
+
+test("runCommandHandler: runs the hook in the session cwd when provided", async () => {
+  const os = await import("node:os")
+  const cwd = os.tmpdir()
+  const out = await runCommandHandler(
+    nodeCmd("console.log(JSON.stringify({additionalContext: process.cwd()}))"),
+    undefined,
+    "{}",
+    undefined,
+    cwd
+  )
+  const fs = await import("node:fs")
+  assert.equal(fs.realpathSync(out.additionalContext), fs.realpathSync(cwd))
+})
+
+test("runCommandHandler: a hook that exits without reading stdin does not crash (EPIPE)", async () => {
+  // Large payload forces the write past the pipe buffer while the child has
+  // already exited — the async EPIPE on child.stdin must be swallowed, not
+  // become an uncaughtException.
+  const payload = JSON.stringify({ pad: "x".repeat(1024 * 1024) })
+  const out = await runCommandHandler(nodeCmd("process.exit(0)"), undefined, payload)
+  assert.deepEqual(out, {})
+})
+
+test("runGroups: handlers run in parallel but merge deterministically in config order", async () => {
+  // The FIRST handler is slow and blocks; the second is fast and allows.
+  // Parallel execution + array-order merge ⇒ the slow handler's block wins.
+  const groups = [
+    {
+      hooks: [
+        {
+          type: "command",
+          command: nodeCmd(
+            "setTimeout(()=>{process.stderr.write('slow-block');process.exit(2)},300)"
+          ),
+        },
+        {
+          type: "command",
+          command: nodeCmd("console.log(JSON.stringify({additionalContext:'fast'}))"),
+        },
+      ],
+    },
+  ]
+  const started = Date.now()
+  const dec = await runGroups(groups, "Bash", "{}")
+  assert.equal(dec.block, "slow-block")
+  // Parallel: total ≈ max(300, fast), well under the serial sum with margin.
+  assert.ok(Date.now() - started < 5000)
+})

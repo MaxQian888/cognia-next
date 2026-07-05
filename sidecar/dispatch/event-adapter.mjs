@@ -47,7 +47,13 @@ export function shapeToolResultContent(payload) {
   ) {
     return /** @type {any} */ (payload).content
   }
-  return typeof payload === "string" ? payload : JSON.stringify(payload)
+  if (typeof payload === "string") return payload
+  try {
+    return JSON.stringify(payload)
+  } catch {
+    // Circular tool output must not abort the dispatcher's stream loop.
+    return String(payload)
+  }
 }
 
 function isMergeableMetadataObject(value) {
@@ -554,6 +560,16 @@ export function createEventAdapter(ctx) {
         }
         case "reasoning":
         case "reasoning-delta": {
+          if (activeBlockKind === "tool_use") {
+            // Same boundary split the text-delta case does: reasoning after a
+            // sealed tool_use starts a fresh message. Without it, interleaved-
+            // thinking models (tool_use → reasoning → text) accumulate new
+            // reasoning/text into the sealed message and every snapshot
+            // re-emits all prior tool_uses (the "duplicate output" bug).
+            messageId = randomUUID()
+            streamStartId = null
+            clearMessageContent()
+          }
           activeBlockKind = "reasoning"
           const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
           reasoningBuf += chunk
@@ -698,8 +714,12 @@ export function createEventAdapter(ctx) {
           // them inline instead of dumping a base64 wall.
           const payload = event.output ?? event.result
           const shaped = shapeToolResultContent(payload)
-          finalizeToolUseState(getToolCallId(event))
-          out.push(buildToolResultMessage(event.toolCallId, shaped, Boolean(event.isError)))
+          const id = getToolCallId(event)
+          finalizeToolUseState(id)
+          // Use the same tolerant id extraction as the finalizer — a v4/nested
+          // shape carrying only `toolCall.toolCallId` previously closed the
+          // tool_use state but emitted `tool_use_id: ""` (an orphan result).
+          out.push(buildToolResultMessage(id, shaped, Boolean(event.isError)))
           return out
         }
         case "tool-error": {
@@ -707,10 +727,19 @@ export function createEventAdapter(ctx) {
           // as an errored tool_result so the model can recover and the renderer
           // styles it as a failure.
           const err = event.error
-          const msg =
-            err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err)
-          finalizeToolUseState(getToolCallId(event))
-          out.push(buildToolResultMessage(event.toolCallId, msg, true))
+          let msg
+          if (err instanceof Error) msg = err.message
+          else if (typeof err === "string") msg = err
+          else {
+            try {
+              msg = JSON.stringify(err)
+            } catch {
+              msg = String(err) // circular error object — never throw here
+            }
+          }
+          const errId = getToolCallId(event)
+          finalizeToolUseState(errId)
+          out.push(buildToolResultMessage(errId, msg, true))
           return out
         }
         case "tool-output-available": {

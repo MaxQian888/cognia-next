@@ -31,6 +31,8 @@ const SUPPORTED_EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
  *   - alphanumeric + `_` + `|` → exact-string-or-pipe-set match
  *   - anything else → JS regex (unanchored)
  */
+const matcherRegexCache = new Map()
+
 export function matcherMatches(matcher, target) {
   if (matcher == null) return true
   const m = String(matcher).trim()
@@ -38,11 +40,17 @@ export function matcherMatches(matcher, target) {
   if (/^[A-Za-z0-9_|]+$/.test(m)) {
     return m.split("|").some((alt) => alt === target)
   }
-  try {
-    return new RegExp(m).test(target)
-  } catch {
-    return false
+  // Compiled once per pattern — this runs for every tool call of the session.
+  let re = matcherRegexCache.get(m)
+  if (re === undefined) {
+    try {
+      re = new RegExp(m)
+    } catch {
+      re = null
+    }
+    matcherRegexCache.set(m, re)
   }
+  return re ? re.test(target) : false
 }
 
 // --- Decision parsing (port of command.rs:parse_zero_exit_output/extract_decision)
@@ -162,7 +170,7 @@ export function mergeOutcome(dec, outcome) {
  *
  * @returns {Promise<object>} an outcome (see extractDecision) or `{ warning }`.
  */
-export function runCommandHandler(command, configuredTimeout, payloadJson, signal) {
+export function runCommandHandler(command, configuredTimeout, payloadJson, signal, cwd) {
   const timeoutSecs = Math.min(
     typeof configuredTimeout === "number" && configuredTimeout > 0
       ? configuredTimeout
@@ -177,7 +185,13 @@ export function runCommandHandler(command, configuredTimeout, payloadJson, signa
       // (`cmd /d /s /c` on Windows, `/bin/sh -c` on POSIX) so pipes, quoting,
       // and `$VAR` expansion behave like the retired Rust `cmd /C` / `sh -c`
       // path — without Node's per-arg quoting mangling nested quotes.
-      child = spawn(command, { shell: true, windowsHide: true })
+      // `cwd` is the SESSION working directory, not the sidecar's — hooks that
+      // run `git diff` / relative-path checks must see the chat's workspace.
+      child = spawn(command, {
+        shell: true,
+        windowsHide: true,
+        ...(typeof cwd === "string" && cwd ? { cwd } : {}),
+      })
     } catch (e) {
       resolve({ warning: `hook crashed: spawn failed: ${e?.message ?? e}` })
       return
@@ -202,7 +216,17 @@ export function runCommandHandler(command, configuredTimeout, payloadJson, signa
     }
     const kill = () => {
       try {
-        child.kill()
+        if (process.platform === "win32" && child.pid) {
+          // `child.kill()` only terminates the `cmd.exe` wrapper spawned by
+          // `shell: true`; the actual hook process survives the timeout and
+          // leaks. taskkill /T fells the whole tree.
+          spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+            windowsHide: true,
+            stdio: "ignore",
+          }).on("error", () => {})
+        } else {
+          child.kill()
+        }
       } catch {
         // best-effort
       }
@@ -247,6 +271,11 @@ export function runCommandHandler(command, configuredTimeout, payloadJson, signa
       }
     })
 
+    // A hook that exits without reading stdin (very common) fails the write
+    // ASYNCHRONOUSLY with EPIPE, emitted as an 'error' event on the stdin
+    // stream — NOT on the child (so `child.on("error")` never sees it) and NOT
+    // in the sync try/catch below. Unhandled, it crashes the whole sidecar.
+    child.stdin?.on("error", () => {})
     try {
       child.stdin?.write(payloadJson)
       child.stdin?.end()
@@ -296,10 +325,10 @@ export async function runWebhookHandler(url, headers, configuredTimeout, payload
   }
 }
 
-function runHandler(handler, payloadJson, signal) {
+function runHandler(handler, payloadJson, signal, cwd) {
   if (!handler || typeof handler !== "object") return Promise.resolve({})
   if (handler.type === "command" && typeof handler.command === "string") {
-    return runCommandHandler(handler.command, handler.timeout, payloadJson, signal)
+    return runCommandHandler(handler.command, handler.timeout, payloadJson, signal, cwd)
   }
   if (handler.type === "webhook" && typeof handler.url === "string") {
     return runWebhookHandler(handler.url, handler.headers, handler.timeout, payloadJson, signal)
@@ -314,17 +343,27 @@ function groupsForEvent(hooksConfig, eventName) {
   return Array.isArray(arr) ? arr : []
 }
 
-/** Run every matching handler for an event, folding into one decision. */
-export async function runGroups(groups, target, payloadJson, signal) {
-  const dec = emptyDecision()
+/**
+ * Run every matching handler for an event, folding into one decision.
+ *
+ * Handlers run in PARALLEL (matching Claude Code, where N matching hooks cost
+ * max(runtime) not sum — this sits inside the canUseTool-blocking path), but
+ * outcomes are merged in ARRAY order so the result is deterministic: first
+ * block in config order wins, last mutation in config order wins.
+ */
+export async function runGroups(groups, target, payloadJson, signal, cwd) {
+  const pending = []
   for (const group of groups) {
     if (!group || typeof group !== "object") continue
     if (!matcherMatches(group.matcher, target)) continue
     for (const handler of Array.isArray(group.hooks) ? group.hooks : []) {
-      const outcome = await runHandler(handler, payloadJson, signal)
-      mergeOutcome(dec, outcome)
-      if (dec.block !== undefined) return dec // first block wins, short-circuit
+      pending.push(runHandler(handler, payloadJson, signal, cwd))
     }
+  }
+  const dec = emptyDecision()
+  for (const outcome of await Promise.all(pending)) {
+    if (dec.block !== undefined) break // first block (in config order) wins
+    mergeOutcome(dec, outcome)
   }
   return dec
 }
@@ -435,7 +474,11 @@ function makeEventCallback(eventName, hooksConfig, deps) {
     if (groups.length === 0) return {}
     const target = typeof input?.tool_name === "string" ? input.tool_name : ""
     const payloadJson = safeStringify(input)
-    const dec = await runGroups(groups, target, payloadJson, ctx?.signal)
+    const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd)
+    if (dec.warnings.length > 0 && typeof deps?.log === "function") {
+      // Host log signature: (level, message).
+      for (const w of dec.warnings) deps.log("warn", `agent-hook ${eventName}: ${w}`)
+    }
     const fire = buildHookFirePayload(deps?.sessionId, eventName, input?.tool_name ?? null, dec)
     if (fire && typeof deps?.emit === "function") deps.emit(fire)
     return mapDecisionToOutput(eventName, dec)

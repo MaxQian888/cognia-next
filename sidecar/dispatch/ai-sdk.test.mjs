@@ -595,13 +595,15 @@ test("tool_result_review round-trip rewrites the tool output the model sees", as
     },
     emit,
     log: () => {},
-    streamText: makeFakeStream([
-      { type: "tool-call", toolCallId: "c1", toolName: "web_fetch", args: { url: "x" } },
-      { type: "tool-result", toolCallId: "c1", output: "RAW SECRET" },
-      { type: "finish", finishReason: "stop" },
-    ]),
+    streamText: makeFakeStream([{ type: "finish", finishReason: "stop" }]),
   })
-  // Wait for the review request, then resolve it with a rewrite (the renderer's job).
+  // The review now runs at the tool EXECUTE layer: `buildAiSdkTools` /
+  // `buildAiSdkMcpTools` call `reviewToolOutput` before a tool's output reaches
+  // the model (the fullStream interception was removed — see ai-sdk.mjs). Drive
+  // that round-trip directly; the execute-layer application is covered by
+  // ai-sdk-tools.test.mjs.
+  const reviewed = session.reviewToolOutput("web_fetch", "c1", "RAW SECRET", false)
+  // Wait for the review request, then resolve it with a rewrite (renderer's job).
   await new Promise((resolve) => {
     const tick = () => {
       const review = events.find((e) => e.type === "tool_result_review")
@@ -613,21 +615,14 @@ test("tool_result_review round-trip rewrites the tool output the model sees", as
     }
     tick()
   })
-  await new Promise((resolve) => {
-    const tick = () => {
-      if (events.some((e) => e.type === "session_ended")) return resolve()
-      setTimeout(tick, 5)
-    }
-    tick()
-  })
+  // The renderer's rewrite is what the tool execute returns → what the model sees.
+  assert.equal(await reviewed, "CLEAN")
   const review = events.find((e) => e.type === "tool_result_review")
   assert.equal(review.toolName, "web_fetch")
   assert.equal(review.toolUseId, "c1")
   assert.equal(review.result, "RAW SECRET")
-  // The emitted tool_result (synthetic user message) carries the rewritten output.
-  const userMsg = events.find((e) => e.type === "event" && e.event.type === "user")
-  assert.ok(userMsg, "tool_result user message emitted")
-  assert.equal(userMsg.event.message.content[0].content, "CLEAN")
+  assert.equal(review.isError, false)
+  session.closeInput()
 })
 
 test("no tool_result_review is emitted when review is not enabled", async () => {

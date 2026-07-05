@@ -172,8 +172,8 @@ test("buildAiSdkMcpTools skips a server that fails to connect, keeps the rest", 
     warnings.some((w) => w.includes('mcp "bad" failed to connect')),
     "bad server logged after both attempts"
   )
-  // The down server was retried once (two connect attempts) before giving up.
-  assert.equal(attempts["https://down"], 2, "connect retried once")
+  // The down server exhausted all three attempts before giving up.
+  assert.equal(attempts["https://down"], 3, "connect retried until maxAttempts")
   assert.equal(attempts["https://up"], 1, "healthy server connected on the first attempt")
 })
 
@@ -191,6 +191,50 @@ test("buildAiSdkMcpTools recovers a server that fails once then connects (retry)
   })
   assert.equal(attempts, 2, "connected on the retry")
   assert.ok(tools["mcp__flaky__ping"], "transiently-failing server recovered on retry")
+})
+
+test("buildAiSdkMcpTools recovers a server that fails twice then connects (backoff)", async () => {
+  let attempts = 0
+  const createClient = async () => {
+    attempts++
+    if (attempts <= 2) throw new Error("still cold")
+    return { tools: async () => ({ ping: { execute: async () => "pong" } }), close: async () => {} }
+  }
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: { flaky: { type: "http", url: "https://cold" } },
+    createClient,
+    retryDelayMs: 0,
+  })
+  assert.equal(attempts, 3, "third attempt connected")
+  assert.ok(tools["mcp__flaky__ping"], "recovered on the last attempt")
+})
+
+test("buildAiSdkMcpTools caps a hung connect with connectTimeoutMs and closes the late client", async () => {
+  const warnings = []
+  let lateClosed = false
+  // Never-yielding connect that eventually resolves AFTER the timeout.
+  const createClient = () =>
+    new Promise((resolve) =>
+      setTimeout(
+        () => resolve({ tools: async () => ({}), close: async () => (lateClosed = true) }),
+        40
+      )
+    )
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: { hung: { type: "http", url: "https://hang" } },
+    createClient,
+    log: (lvl, msg) => warnings.push(msg),
+    retryDelayMs: 0,
+    maxAttempts: 1,
+    connectTimeoutMs: 10,
+  })
+  assert.deepEqual(Object.keys(tools), [], "hung server contributes no tools")
+  assert.ok(
+    warnings.some((w) => w.includes("timed out")),
+    "timeout surfaced in the log"
+  )
+  await new Promise((r) => setTimeout(r, 60))
+  assert.equal(lateClosed, true, "late-resolving client torn down (no socket leak)")
 })
 
 test("buildAiSdkMcpTools connects servers concurrently (a slow one does not block)", async () => {

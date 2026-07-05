@@ -21,6 +21,11 @@ import { scoreMessage as defaultScoreMessage } from "./importance.mjs"
 /** Floor on the verbatim tail — the drain-line never evicts below this. */
 export const MIN_TAIL = 2
 
+/** Drain-line fraction "hybrid" defaults to when the caller sets none — this is
+ * what makes hybrid ("sliding window for recent + summary for older") a
+ * distinct strategy instead of silently degrading to plain "summary". */
+export const HYBRID_DEFAULT_RETAINED_FRACTION = 0.5
+
 export function planStrategy({
   strategy = "summary",
   conversation,
@@ -29,6 +34,7 @@ export function planStrategy({
   recursiveChunkSize = 20,
   importanceThreshold = 0.4,
   retainedFraction,
+  contextWindow,
   modelId,
   scoreMessage = defaultScoreMessage,
 }) {
@@ -38,13 +44,35 @@ export function planStrategy({
   const middle = [...base.middle]
   const tail = [...base.tail]
 
+  // Hybrid = summary of the old middle PLUS an always-active sliding-window
+  // drain of the tail. Without a caller-set fraction the drain still engages
+  // at a sane default; the other strategies keep drain opt-in.
+  const effectiveRetained =
+    strategy === "hybrid" && typeof retainedFraction !== "number"
+      ? HYBRID_DEFAULT_RETAINED_FRACTION
+      : retainedFraction
+
   // Drain-line: evict the oldest tail messages into the summarize region until
   // the RETAINED content (head + frozen + tail; the new summary is bounded
   // separately) fits under retainedFraction*window. Floors at MIN_TAIL.
-  if (typeof retainedFraction === "number" && retainedFraction > 0 && retainedFraction < 1) {
-    const budget = retainedFraction * getContextWindow(modelId)
-    while (tail.length > MIN_TAIL && estimateTokens([...systemHead, ...frozen, ...tail]) > budget) {
-      middle.push(tail.shift())
+  if (typeof effectiveRetained === "number" && effectiveRetained > 0 && effectiveRetained < 1) {
+    // Prefer the caller's authoritative (catalog-resolved) window — the regex
+    // table in `getContextWindow` drifts and floors unknown models at 128k,
+    // which over-evicts the tail on large-window models.
+    const windowTokens =
+      typeof contextWindow === "number" && contextWindow > 0
+        ? contextWindow
+        : getContextWindow(modelId)
+    const budget = effectiveRetained * windowTokens
+    // Incremental accounting: the head+frozen cost is fixed; each eviction only
+    // removes one message's tokens, so re-scanning the whole retained set per
+    // iteration (O(n²)) is unnecessary.
+    const fixedCost = estimateTokens([...systemHead, ...frozen])
+    let tailCost = estimateTokens(tail)
+    while (tail.length > MIN_TAIL && fixedCost + tailCost > budget) {
+      const evicted = tail.shift()
+      tailCost -= estimateTokens([evicted])
+      middle.push(evicted)
     }
   }
 

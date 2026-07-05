@@ -817,3 +817,74 @@ test("hasImageBlock detects an MCP image block and ignores text-only results", (
   assert.equal(hasImageBlock({ content: [{ type: "text", text: "x" }] }), false)
   assert.equal(hasImageBlock("plain"), false)
 })
+
+test("execute-layer review rewrites the output the MODEL receives", async () => {
+  const def = {
+    name: "echo_x",
+    description: "",
+    inputSchema: {},
+    handler: async () => ({ content: [{ type: "text", text: "original" }] }),
+  }
+  const review = async (toolName, _toolCallId, output, isError) => {
+    assert.equal(toolName, "mcp__cognia-tools__echo_x")
+    assert.equal(output, "original")
+    assert.equal(isError, false)
+    return "REWRITTEN"
+  }
+  const t = __testing__.builtinDefToAiSdkTool(def, null, 0, review)
+  const out = await t.execute({}, { toolCallId: "tc1" })
+  assert.equal(out, "REWRITTEN")
+})
+
+test("execute-layer review can rewrite an error message; undefined passes through", async () => {
+  const failing = {
+    name: "boom",
+    description: "",
+    inputSchema: {},
+    handler: async () => ({ isError: true, content: [{ type: "text", text: "raw failure" }] }),
+  }
+  const t1 = __testing__.builtinDefToAiSdkTool(failing, null, 0, async () => "cleaned failure")
+  await assert.rejects(() => t1.execute({}, {}), /cleaned failure/)
+  const ok = {
+    name: "fine",
+    description: "",
+    inputSchema: {},
+    handler: async () => ({ content: [{ type: "text", text: "kept" }] }),
+  }
+  const t2 = __testing__.builtinDefToAiSdkTool(ok, null, 0, async () => undefined)
+  assert.equal(await t2.execute({}, {}), "kept")
+})
+
+test("a throwing reviewer fails open (original output preserved)", async () => {
+  assert.equal(
+    await __testing__.applyOutputReview(
+      async () => {
+        throw new Error("reviewer broke")
+      },
+      "mcp__cognia-tools__x",
+      "id",
+      "original",
+      false
+    ),
+    "original"
+  )
+})
+
+test("gate settles a pending approval as denied when the step aborts", async () => {
+  const pendingApprovals = new Map()
+  const emitted = []
+  const gate = createToolPermissionGate({
+    emit: (m) => emitted.push(m),
+    sessionId: "s",
+    pendingApprovals,
+    sendOptions: {},
+  })
+  const ac = new AbortController()
+  const p = gate("mcp__cognia-tools__bash", { command: "ls" }, ac.signal)
+  // The request round-tripped; nothing answers — abort must settle it.
+  await new Promise((r) => setImmediate(r))
+  assert.equal(pendingApprovals.size, 1)
+  ac.abort()
+  await assert.rejects(() => p, /aborted/)
+  assert.equal(pendingApprovals.size, 0)
+})

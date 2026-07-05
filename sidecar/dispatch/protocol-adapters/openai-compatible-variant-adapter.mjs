@@ -111,9 +111,14 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         // pick up the class and any Retry-After hint embedded in the payload.
         const retryAfter = res.headers?.get?.("retry-after")
         const text = await res.text().catch(() => "")
-        throw new Error(
+        const err = new Error(
           `HTTP ${res.status}${retryAfter ? ` retry-after: ${retryAfter}` : ""}: ${text.slice(0, 500)}`
         )
+        // Structured fields so extractHttpErrorMeta can read the status and
+        // Retry-After header instead of falling back to message parsing.
+        err.statusCode = res.status
+        if (retryAfter != null) err.responseHeaders = { "retry-after": retryAfter }
+        throw err
       }
       if (!res.body) throw new Error("upstream response has no body")
 
@@ -203,9 +208,13 @@ export function makeOpenAiCompatVariantAdapter(spec) {
           }
           yield { type: "finish", finishReason: finishReason ?? "stop", usage: finalUsage }
           resolveUsage(finalUsage)
-        } catch (err) {
+        } finally {
+          // Settles the usage promise on EVERY exit path — including the
+          // generator being closed early via .return() when the turn is
+          // interrupted. Without this the dispatcher's `await usage` after the
+          // stream loop hangs forever and the session stays `active`. A second
+          // resolve after the success path above is a harmless no-op.
           resolveUsage(null)
-          throw err
         }
       }
 
