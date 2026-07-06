@@ -286,3 +286,51 @@ test("non-2xx throws a structured error extractHttpErrorMeta can read", async ()
     }
   )
 })
+
+/** Run the adapter and return the parsed JSON request body sent upstream. */
+async function capturedBody(spec, reqOverrides = {}) {
+  const fetchFn = fakeFetch(["[DONE]"])
+  const adapter = makeOpenAiCompatVariantAdapter(spec)
+  await adapter.start({ ...REQ(fetchFn), ...reqOverrides })
+  return JSON.parse(fetchFn.calls[0].init.body)
+}
+
+test("injects reasoning effort when the spec declares the field (generic clamp)", async () => {
+  const spec = { ...SPEC, reasoningEffortField: "reasoning_effort" }
+  const body = await capturedBody(spec, { reasoning: { effort: "xhigh" } })
+  assert.equal(body.reasoning_effort, "high") // xhigh folds to high on a generic channel
+})
+
+test("honors a per-channel reasoningEffortMap override", async () => {
+  const spec = {
+    ...SPEC,
+    reasoningEffortField: "reasoning_effort",
+    reasoningEffortMap: { xhigh: "ultra", low: "eco" },
+  }
+  assert.equal(
+    (await capturedBody(spec, { reasoning: { effort: "xhigh" } })).reasoning_effort,
+    "ultra"
+  )
+  assert.equal((await capturedBody(spec, { reasoning: { effort: "low" } })).reasoning_effort, "eco")
+})
+
+test("omits reasoning effort when the spec does not declare the field", async () => {
+  const body = await capturedBody(SPEC, { reasoning: { effort: "high" } })
+  assert.equal("reasoning_effort" in body, false)
+})
+
+test("omits reasoning effort when no effort is set", async () => {
+  const spec = { ...SPEC, reasoningEffortField: "reasoning_effort" }
+  const body = await capturedBody(spec, { reasoning: {} })
+  assert.equal("reasoning_effort" in body, false)
+})
+
+test("requestInject overrides the translated reasoning field", async () => {
+  const spec = {
+    ...SPEC,
+    reasoningEffortField: "reasoning_effort",
+    requestInject: { reasoning_effort: "forced" },
+  }
+  const body = await capturedBody(spec, { reasoning: { effort: "high" } })
+  assert.equal(body.reasoning_effort, "forced")
+})

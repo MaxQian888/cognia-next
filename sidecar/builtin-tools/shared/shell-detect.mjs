@@ -41,6 +41,40 @@ const CMD_SYNTAX_HINT =
   "This host runs cmd.exe (no PowerShell on PATH) — write cmd.exe syntax: `%VAR%`, `&&` to " +
   "chain commands, `NUL` (not /dev/null). PowerShell cmdlets are unavailable."
 
+/**
+ * Non-interactive env hardening for the agent's one-shot shell. Every one of
+ * these blocks on a TTY the agent doesn't have: `git log`/`git diff` page through
+ * `$PAGER`, `git commit` with no `-m` opens `$GIT_EDITOR`, and credential/host
+ * prompts wait on stdin forever. We pin them to non-blocking values so a model
+ * command can never hang the turn. These specific vars are OVERRIDDEN over the
+ * inherited env (that is the point — an ambient `PAGER=less` would otherwise
+ * reintroduce the hang); every other var is inherited unchanged. Mirrors the
+ * Rust native-git path `src-tauri/src/git/exec.rs` + the sandbox denylist
+ * `src-tauri/src/sandbox/env.rs`.
+ */
+export const NON_INTERACTIVE_ENV = Object.freeze({
+  GIT_PAGER: "cat",
+  PAGER: "cat",
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_EDITOR: "true",
+  GCM_INTERACTIVE: "never",
+})
+
+/**
+ * Layer `NON_INTERACTIVE_ENV` over an env map. On POSIX also forces `TERM=dumb`
+ * so curses/color programs render plainly instead of spraying escape codes into
+ * captured output; left untouched on Windows where the shells ignore it. Returns
+ * a new object — the input is not mutated.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @param {{ isWin?: boolean }} [descriptor]
+ */
+export function applyNonInteractiveEnv(env, descriptor = activeShellDescriptor()) {
+  const out = { ...env, ...NON_INTERACTIVE_ENV }
+  if (!descriptor.isWin) out.TERM = "dumb"
+  return out
+}
+
 /** Return only the keys NOT matching any `patterns`. Returns the SAME object ref
  * when nothing was stripped, so callers can cheaply detect "unchanged". */
 function stripEnvKeys(env, patterns) {

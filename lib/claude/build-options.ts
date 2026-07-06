@@ -1383,6 +1383,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           relevanceFloor: memoryConfig.relevanceFloor,
           twinChunkTexts,
           enableQueryExpansion: memoryConfig.enableQueryExpansion,
+          recencyHalfLifeDays: memoryConfig.decayHalfLifeDays,
           // Reuse the turn's query embedding (memory's vector backend shares the
           // twin embedding model via resolveMemoryBackend) — no re-embed.
           precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,

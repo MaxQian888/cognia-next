@@ -18,7 +18,11 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText, DANGEROUS_PATTERNS } from "../safety.mjs"
 import { tailTruncate } from "../shared/truncate.mjs"
 import { pickStreamDecoder } from "../shared/console-decode.mjs"
-import { activeShellDescriptor, bashToolDescription } from "../shared/shell-detect.mjs"
+import {
+  activeShellDescriptor,
+  applyNonInteractiveEnv,
+  bashToolDescription,
+} from "../shared/shell-detect.mjs"
 import { resolveToolPath } from "./read.mjs"
 
 // Re-exported for back-compat: the canonical implementation now lives in
@@ -86,7 +90,9 @@ export function resolveShellInvocation(command, descriptor = activeShellDescript
     isWin: descriptor.isWin,
     shell: descriptor.bin,
     shellArgs: descriptor.buildArgs(command),
-    env: descriptor.sanitizeEnv(process.env),
+    // Drop shell-specific injection vectors, then pin the non-interactive vars
+    // (pager/editor/credential prompts) so a git/pager command can't hang the turn.
+    env: applyNonInteractiveEnv(descriptor.sanitizeEnv(process.env), descriptor),
   }
 }
 

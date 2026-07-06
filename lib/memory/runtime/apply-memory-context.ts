@@ -36,6 +36,8 @@ export interface ApplyMemoryContextInput {
   precomputedQueryEmbedding?: number[]
   /** Heuristic synonym expansion of the memory BM25 keyword leg. Off by default. */
   enableQueryExpansion?: boolean
+  /** Base recency half-life (days), from `MemoryConfig.decayHalfLifeDays`. */
+  recencyHalfLifeDays?: number
   deps: ApplyMemoryContextDeps
 }
 
@@ -96,6 +98,7 @@ export async function applyMemoryContext(
               types: RECALLED_TYPES,
               precomputedQueryEmbedding: input.precomputedQueryEmbedding,
               enableQueryExpansion: input.enableQueryExpansion,
+              recencyHalfLifeDays: input.recencyHalfLifeDays,
             },
             input.deps
           )

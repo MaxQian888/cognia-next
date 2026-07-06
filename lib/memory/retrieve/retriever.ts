@@ -13,11 +13,11 @@
  * the Twin runtime.
  */
 
-import type { Memory, MemoryType } from "@/types/memory/memory"
+import { DEFAULT_MEMORY_CONFIG, type Memory, type MemoryType } from "@/types/memory/memory"
 import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { tokenizeMultilingual } from "@cognia/rag/cjk-tokenizer"
 import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
-import { scoreMemories } from "./scoring"
+import { recencyHalfLifeDaysForType, scoreMemories, veracityFor } from "./scoring"
 
 /**
  * Terms too common to signal topical relevance. The BM25 leg returns *any* doc
@@ -192,6 +192,12 @@ export interface RetrieveMemoriesInput {
    * recall for alternate phrasings without changing the semantic ranking.
    */
   enableQueryExpansion?: boolean
+  /**
+   * Base recency half-life (days) from `MemoryConfig.decayHalfLifeDays`. Scaled
+   * per memory type (episodic fades fast, procedural lingers) into the recency
+   * factor. Defaults to `DEFAULT_MEMORY_CONFIG.decayHalfLifeDays` when omitted.
+   */
+  recencyHalfLifeDays?: number
 }
 
 export interface RetrievedMemory {
@@ -325,10 +331,19 @@ export async function retrieveMemories(
   const floored = normalized.filter((n) => n.score >= input.relevanceFloor)
   if (floored.length === 0) return []
 
+  // Per-type recency decay + source-trust (veracity) weighting: a fresh, user-
+  // stated fact outranks a stale, inbound one of equal relevance. `veracityFor`
+  // is a ranking signal only — the provenance injection gate stays in the reader.
+  const baseHalfLife = input.recencyHalfLifeDays ?? DEFAULT_MEMORY_CONFIG.decayHalfLifeDays
   const scorable = floored
     .map((n) => byId.get(n.id))
     .filter((m): m is Memory => m !== undefined)
-    .map((m) => ({ ...m, relevance: relevanceById.get(m.id) ?? 0 }))
+    .map((m) => ({
+      ...m,
+      relevance: relevanceById.get(m.id) ?? 0,
+      halfLifeDays: recencyHalfLifeDaysForType(m.type, baseHalfLife),
+      veracity: veracityFor(m),
+    }))
 
   const ranked = scoreMemories(scorable, {}).slice(0, input.topK)
 

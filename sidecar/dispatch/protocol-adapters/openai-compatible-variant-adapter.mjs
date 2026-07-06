@@ -31,6 +31,27 @@ function interpolate(template, vars) {
   return template.replace(/\{(apiKey|model|baseURL)\}/g, (_, key) => vars[key] ?? "")
 }
 
+/**
+ * Conservative app-effort → wire value map for generic openai-compatible
+ * channels. Most one-api channels accept only `low|medium|high`, so the two
+ * high tiers fold to `high` and `minimal` folds to `low` — a channel that truly
+ * supports finer levels overrides this via `spec.reasoningEffortMap`.
+ */
+const GENERIC_REASONING_EFFORT = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "high",
+  max: "high",
+}
+
+/** Resolve the wire reasoning-effort value, honoring a per-channel override map. */
+function resolveVariantEffort(effort, map) {
+  if (map && typeof map[effort] === "string") return map[effort]
+  return GENERIC_REASONING_EFFORT[effort] ?? "medium"
+}
+
 /** Apply `requestRenames` to modelParams keys (e.g. maxOutputTokens → max_tokens). */
 function renameParams(params, renames) {
   if (!renames) return { ...params }
@@ -91,11 +112,26 @@ export function makeOpenAiCompatVariantAdapter(spec) {
       for (const [name, value] of Object.entries(spec.headers ?? {})) {
         headers[name.toLowerCase()] = interpolate(value, vars)
       }
+      // Reasoning-effort translation (opt-in): a channel that supports a
+      // thinking level declares the wire field name via `spec.reasoningEffortField`
+      // (e.g. "reasoning_effort"); we then map the app's effort to a safe value.
+      // Omitted by default so channels that reject the field never 400. `requestInject`
+      // still wins (spread last) if a spec sets the same key explicitly.
+      const reasoningInject =
+        spec.reasoningEffortField && req.reasoning?.effort
+          ? {
+              [spec.reasoningEffortField]: resolveVariantEffort(
+                req.reasoning.effort,
+                spec.reasoningEffortMap
+              ),
+            }
+          : {}
       const body = {
         model: req.model,
         messages: req.messages,
         stream: true,
         ...renameParams(req.modelParams ?? {}, spec.requestRenames),
+        ...reasoningInject,
         ...(spec.requestInject ?? {}),
       }
 
