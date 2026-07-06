@@ -98,6 +98,12 @@ function bindStoreWriter(): RunTeamLifecycleDeps["storeWriter"] {
       useAgentTeamStore.getState().updateTeammate(teammateId, updates),
     setFinalResult: (teamId: string, result: string) =>
       useAgentTeamStore.getState().updateTeam(teamId, { finalResult: result }),
+    addTask: (input) => useAgentTeamStore.getState().createTask(input),
+    updateTask: (taskId, updates) => useAgentTeamStore.getState().updateTask(taskId, updates),
+    addEvent: (event) => useAgentTeamStore.getState().addEvent(event),
+    // Adaptive re-plan recruit sink — bring a digital employee onto the team
+    // mid-run (see `replan-checkpoint.ts`).
+    addTeammate: (input) => useAgentTeamStore.getState().addTeammate(input),
   }
 }
 

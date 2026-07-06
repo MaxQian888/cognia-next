@@ -39,7 +39,11 @@ const task = (id: string, deps: string[] = [], order = 0): AgentTeamTask =>
 
 function makeCtx(
   configOverrides: Record<string, unknown> = {},
-  teammateIds: string[] = ["lead", "w1", "w2"]
+  teammateIds: string[] = ["lead", "w1", "w2"],
+  extra: {
+    availableTwins?: Array<{ id: string; name: string; expertise: string }>
+    noAddTeammate?: boolean
+  } = {}
 ) {
   const setTaskStatus = jest.fn()
   const updateTask = jest.fn()
@@ -55,6 +59,24 @@ function makeCtx(
       expectedOutput: input.expectedOutput,
     } as AgentTeamTask
   })
+  let memberCounter = 0
+  const addTeammate = jest.fn((input: Record<string, unknown>) => {
+    memberCounter += 1
+    return {
+      id: `recruit-${memberCounter}`,
+      teamId: "team1",
+      name: input.name,
+      description: input.description ?? "",
+      role: "teammate",
+      status: "idle",
+      config: input.config ?? {},
+      completedTaskIds: [],
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      progress: 0,
+      createdAt: new Date(),
+    }
+  })
+  const register = jest.fn()
   const notify = jest.fn()
   const ctx = {
     runId: "run1",
@@ -66,6 +88,8 @@ function makeCtx(
       teammateIds,
       config: { adaptiveReplan: { enabled: true, ...configOverrides } },
     },
+    ...(extra.availableTwins ? { availableTwins: extra.availableTwins } : {}),
+    pool: { register },
     notifier: { notify, suspend: jest.fn(), resume: jest.fn() },
     storeWriter: {
       setTaskStatus,
@@ -73,15 +97,17 @@ function makeCtx(
       addTask,
       addMessage: jest.fn(),
       updateTeammate: jest.fn(),
+      ...(extra.noAddTeammate ? {} : { addTeammate }),
     },
   } as unknown as TeamRunContext
-  return { ctx, setTaskStatus, updateTask, addTask, notify }
+  return { ctx, setTaskStatus, updateTask, addTask, addTeammate, register, notify }
 }
 
 const decide = (d: Partial<ReplanDecision>): ReplanDecision => ({
   action: "continue",
   reasoning: "r",
   newTasks: [],
+  newMembers: [],
   cancelTaskIds: [],
   reorderTaskIds: [],
   ...d,
@@ -251,6 +277,90 @@ describe("runReplanCheckpoint", () => {
     expect(out.finish).toBe(false)
     expect(out.remaining).toHaveLength(1)
     expect(setTaskStatus).not.toHaveBeenCalled()
+  })
+
+  describe("recruit (mid-run twin re-staffing)", () => {
+    const twins = [{ id: "tw1", name: "Alice", expertise: "security" }]
+
+    it("materializes a digital-employee member and registers it in the pool", async () => {
+      const { ctx, addTeammate, register } = makeCtx({}, ["lead", "w1"], { availableTwins: twins })
+      const out = await runReplanCheckpoint({
+        teamCtx: ctx,
+        runId: "run1",
+        justRanTaskIds: ["t1"],
+        remaining: [task("t2")],
+        dispatch: async () =>
+          decide({
+            action: "recruit",
+            newMembers: [{ name: "Sec", twinId: "tw1", specialization: "security" }],
+          }),
+      })
+      expect(addTeammate).toHaveBeenCalledTimes(1)
+      const input = addTeammate.mock.calls[0]![0] as {
+        name: string
+        config: { twinId?: string; specialization?: string }
+      }
+      expect(input.name).toBe("Sec")
+      expect(input.config.twinId).toBe("tw1")
+      expect(input.config.specialization).toBe("security")
+      expect(register).toHaveBeenCalledTimes(1)
+      expect(register.mock.calls[0]![0]).toMatchObject({ id: "recruit-1" })
+      // No task-graph change for a plain recruit; remaining is untouched.
+      expect(out.finish).toBe(false)
+      expect(out.remaining.map((t) => t.id)).toEqual(["t2"])
+    })
+
+    it("drops a twinId that is not in availableTwins (plain member)", async () => {
+      const { ctx, addTeammate } = makeCtx({}, ["lead"], { availableTwins: twins })
+      await runReplanCheckpoint({
+        teamCtx: ctx,
+        runId: "run1",
+        justRanTaskIds: [],
+        remaining: [],
+        dispatch: async () =>
+          decide({ action: "recruit", newMembers: [{ name: "Ghost", twinId: "nope" }] }),
+      })
+      const input = addTeammate.mock.calls[0]![0] as { config: { twinId?: string } }
+      expect(input.config.twinId).toBeUndefined()
+    })
+
+    it("lets an injected task target a freshly recruited member", async () => {
+      const { ctx, addTeammate, addTask } = makeCtx({}, ["lead"], { availableTwins: twins })
+      await runReplanCheckpoint({
+        teamCtx: ctx,
+        runId: "run1",
+        justRanTaskIds: [],
+        remaining: [],
+        dispatch: async () =>
+          decide({
+            action: "inject",
+            newMembers: [{ name: "Sec", twinId: "tw1" }],
+            newTasks: [
+              { title: "Audit", description: "do audit", assignedTo: "recruit-1", dependsOn: [] },
+            ],
+          }),
+      })
+      expect(addTeammate).toHaveBeenCalledTimes(1)
+      // The recruit id is added to rosterIds, so the injected task keeps it.
+      expect(addTask.mock.calls[0]![0].assignedTo).toBe("recruit-1")
+    })
+
+    it("skips recruiting (no throw) when the store has no addTeammate sink", async () => {
+      const { ctx, register } = makeCtx({}, ["lead"], {
+        availableTwins: twins,
+        noAddTeammate: true,
+      })
+      const out = await runReplanCheckpoint({
+        teamCtx: ctx,
+        runId: "run1",
+        justRanTaskIds: [],
+        remaining: [task("t2")],
+        dispatch: async () =>
+          decide({ action: "recruit", newMembers: [{ name: "Sec", twinId: "tw1" }] }),
+      })
+      expect(register).not.toHaveBeenCalled()
+      expect(out.remaining.map((t) => t.id)).toEqual(["t2"])
+    })
   })
 
   describe("default (non-injected) paths", () => {

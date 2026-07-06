@@ -109,7 +109,8 @@
     "teamNameLabel": "Team name",
     "teamNamePlaceholder": "Name this team",
     "title": "Auto-compose a team",
-    "verifyOption": "Verify (sampling ensemble)"
+    "verifyOption": "Verify (sampling ensemble)",
+    "twinLabel": "Digital employee"
   },
   "builtInBadge": "Built-in",
   "cancel": "Cancel",
@@ -527,6 +528,11 @@
         "label": "Working directory",
         "placeholder": "/absolute/path/to/repo"
       }
+    },
+    "knowledgeTwins": {
+      "title": "Digital employee knowledge",
+      "hint": "Twins selected here can be searched by any teammate via the knowledge tool during a run.",
+      "empty": "No digital employees yet. Create one in the Twin workbench."
     }
   },
   "stats": {
@@ -587,7 +593,10 @@
       "runtime": "Runtime",
       "specialization": "Specialization",
       "temperature": "Temperature ({value})",
-      "title": "Roster fields"
+      "title": "Roster fields",
+      "twin": "Digital twin",
+      "twinNone": "None",
+      "twinHint": "This teammate acts with the selected digital employee's knowledge and style."
     },
     "save": "Save",
     "title": "Configure {name}"

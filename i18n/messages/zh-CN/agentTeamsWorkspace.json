@@ -109,7 +109,8 @@
     "teamNameLabel": "团队名称",
     "teamNamePlaceholder": "为团队命名",
     "title": "自动组建团队",
-    "verifyOption": "验证（采样集成）"
+    "verifyOption": "验证（采样集成）",
+    "twinLabel": "数字员工"
   },
   "builtInBadge": "内置",
   "cancel": "取消",
@@ -527,6 +528,11 @@
         "label": "工作目录",
         "placeholder": "/仓库的绝对路径"
       }
+    },
+    "knowledgeTwins": {
+      "title": "数字员工知识",
+      "hint": "在此选中的孪生可被任意成员在运行中通过知识工具检索。",
+      "empty": "还没有数字员工，请在孪生工作台创建。"
     }
   },
   "stats": {
@@ -587,7 +593,10 @@
       "runtime": "运行时",
       "specialization": "专长",
       "temperature": "温度（{value}）",
-      "title": "队员字段"
+      "title": "队员字段",
+      "twin": "数字孪生",
+      "twinNone": "无",
+      "twinHint": "该成员将带着所选数字员工的知识与风格工作。"
     },
     "save": "保存",
     "title": "配置 {name}"

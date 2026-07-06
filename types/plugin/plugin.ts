@@ -1907,7 +1907,7 @@ export interface PluginTeamDelegationStartPayload {
   delegationId: string
   sourceTeamId: string
   sourceTaskId: string
-  targetType: "sub_agent" | "team" | "background"
+  targetType: "sub_agent" | "team" | "background" | "twin"
   targetId?: string
 }
 

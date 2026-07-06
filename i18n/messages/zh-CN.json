@@ -712,6 +712,7 @@
       "teamNameLabel": "团队名称",
       "teamNamePlaceholder": "为团队命名",
       "title": "自动组建团队",
+      "twinLabel": "数字员工",
       "verifyOption": "验证（采样集成）"
     },
     "builtInBadge": "内置",
@@ -1026,6 +1027,11 @@
         },
         "title": "治理策略"
       },
+      "knowledgeTwins": {
+        "empty": "还没有数字员工，请在孪生工作台创建。",
+        "hint": "在此选中的孪生可被任意成员在运行中通过知识工具检索。",
+        "title": "数字员工知识"
+      },
       "maxConcurrent": "最大并发数",
       "maxRetries": "最大重试次数",
       "memory": {
@@ -1190,7 +1196,10 @@
         "runtime": "运行时",
         "specialization": "专长",
         "temperature": "温度（{value}）",
-        "title": "队员字段"
+        "title": "队员字段",
+        "twin": "数字孪生",
+        "twinHint": "该成员将带着所选数字员工的知识与风格工作。",
+        "twinNone": "无"
       },
       "save": "保存",
       "title": "配置 {name}"
@@ -2245,7 +2254,8 @@
       "effectiveness": "已回收 {pct}%",
       "label": "上下文已压缩",
       "manual": "手动",
-      "phase": "已在第 {turn} 轮重置上下文"
+      "phase": "已在第 {turn} 轮重置上下文",
+      "viewFrames": "查看图像帧"
     },
     "compaction": {
       "notification": "上下文已压缩",
@@ -2875,6 +2885,21 @@
       "provider": "识别引擎：{id}",
       "thumbnailAlt": "源图像",
       "title": "已识别文本"
+    },
+    "opticalArchive": {
+      "coverage": "字符覆盖率",
+      "description": "较早的轮次被渲染为 {count} 张图像帧，由视觉模型回读。",
+      "estimate": "图像 / 文本 token",
+      "frameAlt": "光学帧 {n}",
+      "hideText": "隐藏原文",
+      "noText": "未捕获原文（此边界未开启撤销）。",
+      "notFound": "该归档已不可用。",
+      "readability": "可读性",
+      "revealText": "显示原文",
+      "saved": "已节省 {pct}%",
+      "shape": "形状",
+      "title": "光学归档",
+      "tokens": "Token"
     },
     "permissionMode": {
       "acceptEdits": {
@@ -15402,6 +15427,7 @@
         "label": "压缩方式",
         "options": {
           "hybrid": "混合（保留近期 + 摘要）",
+          "optical": "光学（较早轮次渲染为图片）",
           "recursive": "递归（分块摘要）",
           "selective": "选择性（保留重要，摘要其余）",
           "sliding-window": "滑动窗口（丢弃最旧）",
@@ -19008,6 +19034,12 @@
       "verifyButton": "验证沙盒隔离",
       "version": {
         "label": "版本"
+      },
+      "workspaceConfinement": {
+        "description": "将内置的文件与 Shell 工具约束在当前工作区根目录内。工具试图写到工作区之外时会先请求批准；凭据路径（.ssh、.aws 等）始终被拦截。",
+        "label": "将工具约束在工作区内",
+        "note": "默认开启，且在所有平台生效。关闭后内置工具可无需询问地读写本机任意位置。启用 OS 沙盒时将取代本层。",
+        "title": "工作区约束"
       }
     },
     "searchPlaceholder": "搜索设置…",

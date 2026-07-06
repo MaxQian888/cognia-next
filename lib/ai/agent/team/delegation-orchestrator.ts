@@ -64,11 +64,13 @@ const DEFAULT_DELEGATION_TIMEOUT_MS = 600_000
  * delegationId.
  */
 interface PendingRun {
-  kind: "background" | "external"
+  kind: "background" | "external" | "twin"
   prompt: string
   systemPrompt?: string
-  /** background: the registered agent id; external: the target agent id. */
+  /** background/twin: the registered agent id; external: the target agent id. */
   targetId: string
+  /** twin delegations only: the Employee Digital Twin to inject at run time. */
+  twinId?: string
   sourceTeamId: string
   timeoutMs?: number
 }
@@ -287,6 +289,126 @@ export function delegateToBackground(input: DelegateToBackgroundInput): {
       agentId,
       input.prompt,
       input.systemPrompt
+    )
+    return settled ?? delegation
+  })()
+
+  return { delegation, completionPromise }
+}
+
+export interface DelegateToTwinInput {
+  sourceTeamId: string
+  sourceTaskId: string
+  /** The Employee Digital Twin (ADR-0003) to answer the sub-problem as. */
+  twinId: string
+  /** The task prompt handed to the twin-backed background agent. */
+  prompt: string
+  /** Optional base system prompt to wrap with the twin persona. */
+  systemPrompt?: string
+  reason: string
+  metadata?: Record<string, unknown>
+  /** Defer to `awaiting_approval` for later manual release. */
+  awaitingApproval?: boolean
+  /** Operator override — launch even inside the quiet-hours window. */
+  force?: boolean
+}
+
+/**
+ * Run a twin-backed delegation: build the shared twin deps, pre-inject the
+ * twin's persona + per-task RAG knowledge into the system prompt (best-effort —
+ * degrades to the plain prompt), then run it through the SAME background-agent
+ * path as `runBackgroundDelegation`. Shared by the immediate path and
+ * `approveDelegation` (gated path released later).
+ */
+async function runTwinDelegation(
+  delegationId: string,
+  agentId: string,
+  prompt: string,
+  systemPrompt: string | undefined,
+  twinId: string
+): Promise<TeamDelegationRecord | undefined> {
+  let injectedSystem = systemPrompt
+  try {
+    const { tryBuildTwinDeps } = await import("@/lib/twin/runtime/build-deps")
+    const twinDeps = await tryBuildTwinDeps()
+    if (twinDeps) {
+      const [{ applyTeammateTwinContext }, { getTwin }] = await Promise.all([
+        import("./twin-context"),
+        import("@/lib/db/twins"),
+      ])
+      const twin = await getTwin(twinId).catch(() => undefined)
+      const injected = await applyTeammateTwinContext({
+        actorName: twin?.name ?? twinId,
+        baseSystemPrompt: systemPrompt ?? "",
+        userPrompt: prompt,
+        twinId,
+        twinDeps,
+        source: "team-delegation",
+      })
+      injectedSystem = injected.systemPrompt
+    }
+  } catch {
+    // Twin runtime unavailable — run with the un-injected prompt.
+  }
+  return runBackgroundDelegation(delegationId, agentId, prompt, injectedSystem)
+}
+
+/**
+ * Delegate a sub-problem to an Employee Digital Twin (ADR-0003 × ADR-0022):
+ * a background agent answers it "as" that digital employee (persona + RAG
+ * knowledge pre-injected). Mirrors `delegateToBackground`'s lifecycle; the
+ * `targetId` is the background agent id (so cancel works) and the twin id is
+ * carried in `metadata.twinId` + the stashed pending run.
+ *
+ * Returns the initial record synchronously; callers await `completionPromise`.
+ */
+export function delegateToTwin(input: DelegateToTwinInput): {
+  delegation: TeamDelegationRecord
+  completionPromise: Promise<TeamDelegationRecord>
+} {
+  const store = useAgentTeamStore.getState()
+  const hooks = getPluginLifecycleHooks()
+  const agentId = `bg_${nanoid(10)}`
+  const quietDeferred = !input.force && isDelegationQuietGated(input.sourceTeamId)
+  const deferred = Boolean(input.awaitingApproval) || quietDeferred
+  const delegation = buildDelegation({
+    sourceTeamId: input.sourceTeamId,
+    sourceTaskId: input.sourceTaskId,
+    targetType: "twin",
+    targetId: agentId,
+    reason: input.reason,
+    metadata: {
+      ...input.metadata,
+      twinId: input.twinId,
+      ...(quietDeferred ? { quietHoursDeferred: true } : {}),
+    },
+    status: deferred ? "awaiting_approval" : "active",
+  })
+  store.upsertDelegation(delegation)
+  pendingRuns.set(delegation.id, {
+    kind: "twin",
+    prompt: input.prompt,
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+    targetId: agentId,
+    twinId: input.twinId,
+    sourceTeamId: input.sourceTeamId,
+  })
+  hooks.dispatchOnTeamDelegationStart({
+    delegationId: delegation.id,
+    sourceTeamId: delegation.sourceTeamId,
+    sourceTaskId: delegation.sourceTaskId,
+    targetType: delegation.targetType,
+    targetId: delegation.targetId,
+  })
+
+  const completionPromise = (async (): Promise<TeamDelegationRecord> => {
+    if (deferred) return delegation
+    const settled = await runTwinDelegation(
+      delegation.id,
+      agentId,
+      input.prompt,
+      input.systemPrompt,
+      input.twinId
     )
     return settled ?? delegation
   })()
@@ -535,6 +657,14 @@ export function approveDelegation(delegationId: string): TeamDelegationRecord | 
       pending.prompt,
       pending.systemPrompt
     )
+  } else if (pending?.kind === "twin") {
+    void runTwinDelegation(
+      delegationId,
+      pending.targetId,
+      pending.prompt,
+      pending.systemPrompt,
+      pending.twinId ?? ""
+    )
   } else if (pending?.kind === "external") {
     void runExternalDelegation(
       delegationId,
@@ -562,6 +692,9 @@ export function cancelDelegation(delegationId: string): TeamDelegationRecord | u
   // never be re-dispatched by a later approval.
   pendingRuns.delete(delegationId)
   if (current.targetType === "background" && current.targetId) {
+    getBackgroundAgentManager().cancelAgent(current.targetId)
+  } else if (current.targetType === "twin" && current.targetId) {
+    // twin delegations run on a background agent keyed by `targetId`.
     getBackgroundAgentManager().cancelAgent(current.targetId)
   } else if (current.targetType === "team" && current.targetId) {
     abortTeam(current.targetId, "team delegation cancelled")

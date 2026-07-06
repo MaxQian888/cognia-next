@@ -38,6 +38,12 @@ export interface TeammatePool {
   claim(taskId: string, options?: ClaimOptions): AgentTeammate | null
   recordSuccess(teammateId: string): void
   recordFailure(teammateId: string, error: unknown): void
+  /**
+   * Add a teammate to the pool mid-run (used by adaptive re-planning to RECRUIT
+   * an Employee Digital Twin as a fresh member). No-op if the id already exists.
+   * The new member is immediately claimable on the next wave.
+   */
+  register(teammate: AgentTeammate): void
   availableCount(): number
   isDisqualified(teammateId: string): boolean
   allUnavailable(): boolean
@@ -177,6 +183,17 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
         }
       }
       return null
+    },
+    register: (teammate) => {
+      if (entries.has(teammate.id)) return
+      entries.set(teammate.id, {
+        teammate,
+        breaker: buildBreaker(),
+        disqualified: false,
+      })
+      // A fresh available member may lift an all-unavailable state — re-evaluate
+      // the edge so a parked deadlock gate can recover.
+      checkAllUnavailableEdge()
     },
     recordSuccess: (teammateId) => {
       const e = entries.get(teammateId)

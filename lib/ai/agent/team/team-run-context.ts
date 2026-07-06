@@ -8,6 +8,7 @@
  */
 
 import type {
+  AddTeammateInput,
   AgentTeam,
   AgentTeamEvent,
   AgentTeammate,
@@ -17,6 +18,7 @@ import type {
   SendMessageInput,
   TeamTaskStatus,
 } from "@/types/agent/agent-team"
+import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import type { ConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import type { ModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
 import type { TeammatePool } from "./teammate-pool"
@@ -50,11 +52,31 @@ export interface TeamStoreWriter {
    */
   updateTask?(taskId: string, updates: Partial<AgentTeamTask>): void
   /**
+   * Create a new teammate row mid-run (used by adaptive re-planning to RECRUIT
+   * an Employee Digital Twin as a fresh member). Returns the created teammate so
+   * the checkpoint can register it in the live `TeammatePool`. Optional so
+   * callers that never recruit (eval/plan fixtures, connector/IM headless path)
+   * need not provide it.
+   */
+  addTeammate?(input: AddTeammateInput): AgentTeammate
+  /**
    * Push a live event into the team event stream (drives the workspace activity
    * panel). Used by teammate-progress streaming. Optional so non-UI callers /
    * fixtures may omit it.
    */
   addEvent?(event: AgentTeamEvent): void
+}
+
+/**
+ * Light summary of an Employee Digital Twin the team may recruit (mid-run
+ * re-staffing) or consult. Content-free beyond a short expertise blurb — never
+ * carries raw chunk text. Built once per run by `resolveTeamTwinRuntime`.
+ */
+export interface TeamTwinSummary {
+  id: string
+  name: string
+  /** Short expertise blurb (voice summary + key entities), truncated. */
+  expertise: string
 }
 
 export interface TeamRunContext {
@@ -102,6 +124,22 @@ export interface TeamRunContext {
    * `finally` so no timer outlives the run. Absent when nudges are disabled.
    */
   readonly rateLimitResume?: import("./rate-limit-resume").RateLimitResumeController
+  /**
+   * Per-run Employee Digital Twin runtime deps (ADR-0003), built once by
+   * `resolveTeamTwinRuntime` when any teammate is twin-bound OR the team exposes
+   * `knowledgeTwinIds` OR the run may recruit twins. Threaded into every
+   * twin-bound teammate's dispatch (sidecar → `resolveSendOptions`;
+   * text → `applyTeammateTwinContext`) so all members share one vector-store
+   * client. Undefined when the twin runtime isn't configured — twin injection
+   * then degrades to the plain system prompt.
+   */
+  readonly twinDeps?: TwinRuntimeDepsForBuild
+  /**
+   * Twins the lead may recruit as fresh members during adaptive re-planning
+   * (see `replan-checkpoint.ts`). Empty when the team can't recruit or none
+   * exist. Content-free summaries only.
+   */
+  readonly availableTwins?: TeamTwinSummary[]
 }
 
 const registry = new Map<string, TeamRunContext>()

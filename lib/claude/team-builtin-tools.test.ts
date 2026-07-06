@@ -31,6 +31,15 @@ jest.mock("@/lib/ai/agent/background-agent-manager", () => ({
     cancelAgent: jest.fn(),
   }),
 }))
+// Twin runtime is dynamic-imported by defaultTeamToolDeps.searchTwinKnowledge.
+const tryBuildTwinDepsMock = jest.fn()
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  tryBuildTwinDeps: (...a: unknown[]) => tryBuildTwinDepsMock(...a),
+}))
+const runTwinSearchMock = jest.fn()
+jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+  searchTwinKnowledge: (...a: unknown[]) => runTwinSearchMock(...a),
+}))
 
 const caller: TeamToolCaller = {
   teamId: "team-1",
@@ -89,6 +98,14 @@ function makeDeps(over: Partial<TeamToolDeps> = {}): {
         ],
       }
     }) as TeamToolDeps["getTask"],
+    searchTwinKnowledge: (async (input) => {
+      rec("searchTwinKnowledge")(input)
+      return {
+        ok: true,
+        twinId: "tw1",
+        hits: [{ text: "redacted passage", sourceTitle: "Doc", score: 0.9 }],
+      }
+    }) as TeamToolDeps["searchTwinKnowledge"],
     ...over,
   }
   return { deps, calls }
@@ -102,7 +119,8 @@ describe("team-builtin-tools manifest", () => {
   })
 
   it("every manifest entry is tagged + named, and every name is routable", () => {
-    const entries = buildTeamCollabManifestEntries()
+    // With the twin knowledge tool enabled, the manifest covers every canonical name.
+    const entries = buildTeamCollabManifestEntries({ includeTwinKnowledgeSearch: true })
     const names = entries.map((e) => e.name).sort()
     expect(names).toEqual(Object.values(TEAM_TOOL_NAMES).sort())
     for (const e of entries) {
@@ -110,6 +128,15 @@ describe("team-builtin-tools manifest", () => {
       expect(typeof e.description).toBe("string")
       expect(e.jsonSchema).toBeTruthy()
     }
+  })
+
+  it("gates twin_knowledge_search behind includeTwinKnowledgeSearch", () => {
+    const without = buildTeamCollabManifestEntries().map((e) => e.name)
+    expect(without).not.toContain(TEAM_TOOL_NAMES.twinKnowledgeSearch)
+    const withTool = buildTeamCollabManifestEntries({ includeTwinKnowledgeSearch: true }).map(
+      (e) => e.name
+    )
+    expect(withTool).toContain(TEAM_TOOL_NAMES.twinKnowledgeSearch)
   })
 })
 
@@ -287,6 +314,74 @@ describe("runTeamBuiltinTool", () => {
     expect(await runTeamBuiltinTool(TEAM_TOOL_NAMES.listMembers, {}, caller, deps)).toEqual([
       { id: "tm-a", name: "Ada", role: "lead" },
     ])
+  })
+
+  it("team_delegate routes target=twin and requires a twinId", async () => {
+    const { deps, calls } = makeDeps()
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.delegate,
+        { target: "twin", reason: "ask the expert" },
+        caller,
+        deps
+      )
+    ).toMatch(/target=twin requires a `twinId`/)
+    const ok = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.delegate,
+      { target: "twin", reason: "ask the expert", twinId: "tw1", prompt: "how?" },
+      caller,
+      deps
+    )
+    expect(ok).toMatch(/Delegated to twin/)
+    expect((calls.delegate[0] as [{ target: string; twinId: string }])[0]).toMatchObject({
+      target: "twin",
+      twinId: "tw1",
+    })
+  })
+
+  it("twin_knowledge_search requires a query and returns redacted hits", async () => {
+    const { deps, calls } = makeDeps()
+    expect(
+      await runTeamBuiltinTool(TEAM_TOOL_NAMES.twinKnowledgeSearch, { query: "  " }, caller, deps)
+    ).toMatch(/requires a non-empty `query`/)
+    const out = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.twinKnowledgeSearch,
+      { query: "how to deploy", topK: 3 },
+      caller,
+      deps
+    )
+    expect(out).toMatchObject({ twinId: "tw1" })
+    expect((out as { hits: Array<{ text: string }> }).hits[0]!.text).toBe("redacted passage")
+    expect(
+      (calls.searchTwinKnowledge[0] as [{ teamId: string; query: string; topK: number }])[0]
+    ).toMatchObject({ teamId: "team-1", query: "how to deploy", topK: 3 })
+  })
+
+  it("twin_knowledge_search surfaces the dep error and the empty-hits case", async () => {
+    const errDeps = makeDeps({
+      searchTwinKnowledge: (async () => ({
+        ok: false,
+        error: "no sources",
+      })) as TeamToolDeps["searchTwinKnowledge"],
+    }).deps
+    expect(
+      await runTeamBuiltinTool(TEAM_TOOL_NAMES.twinKnowledgeSearch, { query: "q" }, caller, errDeps)
+    ).toMatch(/Error: no sources/)
+    const emptyDeps = makeDeps({
+      searchTwinKnowledge: (async () => ({
+        ok: true,
+        twinId: "twX",
+        hits: [],
+      })) as TeamToolDeps["searchTwinKnowledge"],
+    }).deps
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.twinKnowledgeSearch,
+        { query: "q" },
+        caller,
+        emptyDeps
+      )
+    ).toMatch(/No knowledge found in twin "twX"/)
   })
 
   it("team_vote rejects a missing consensusId / non-integer option", async () => {
@@ -539,5 +634,67 @@ describe("defaultTeamToolDeps (real store-backed orchestrators)", () => {
     expect(fetched?.comments[0].text).toBe("found the bug")
     expect(deps.addTaskComment({ taskId: "ghost", authorId: "tm-a", text: "x" })).toBeNull()
     expect(deps.getTask("ghost")).toBeNull()
+  })
+})
+
+describe("defaultTeamToolDeps.searchTwinKnowledge (authorization + redaction)", () => {
+  beforeEach(() => {
+    useAgentTeamStore.getState().reset()
+    tryBuildTwinDepsMock.mockReset()
+    runTwinSearchMock.mockReset()
+  })
+
+  it("errors when the team has no digital-employee knowledge sources", async () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "t" })
+    const deps = await defaultTeamToolDeps()
+    const res = await deps.searchTwinKnowledge({ teamId: team.id, query: "q" })
+    expect(res.ok).toBe(false)
+    expect((res as { ok: false; error: string }).error).toMatch(/no digital-employee knowledge/)
+    expect(runTwinSearchMock).not.toHaveBeenCalled()
+  })
+
+  it("rejects a twinId that is not an authorized source", async () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "t" })
+    const cfg = useAgentTeamStore.getState().teams[team.id]!.config
+    useAgentTeamStore.getState().updateTeamConfig(team.id, { ...cfg, knowledgeTwinIds: ["tw1"] })
+    const deps = await defaultTeamToolDeps()
+    const res = await deps.searchTwinKnowledge({ teamId: team.id, query: "q", twinId: "other" })
+    expect(res.ok).toBe(false)
+    expect((res as { ok: false; error: string }).error).toMatch(/not an authorized/)
+  })
+
+  it("errors when the twin runtime is unavailable", async () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "t" })
+    const cfg = useAgentTeamStore.getState().teams[team.id]!.config
+    useAgentTeamStore.getState().updateTeamConfig(team.id, { ...cfg, knowledgeTwinIds: ["tw1"] })
+    tryBuildTwinDepsMock.mockResolvedValue(undefined)
+    const deps = await defaultTeamToolDeps()
+    const res = await deps.searchTwinKnowledge({ teamId: team.id, query: "q" })
+    expect(res.ok).toBe(false)
+    expect((res as { ok: false; error: string }).error).toMatch(/twin runtime is not configured/)
+  })
+
+  it("returns redacted hits for an authorized member-bound twin", async () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "t" })
+    useAgentTeamStore.getState().addTeammate({
+      teamId: team.id,
+      name: "Member",
+      role: "teammate",
+      config: { twinId: "twMember" },
+    })
+    tryBuildTwinDepsMock.mockResolvedValue({ store: {}, embedding: {} })
+    runTwinSearchMock.mockResolvedValue({
+      hits: [{ text: "REDACTED passage", sourceTitle: "Doc", score: 0.9 }],
+      degraded: false,
+    })
+    const deps = await defaultTeamToolDeps()
+    const res = await deps.searchTwinKnowledge({ teamId: team.id, query: "how" })
+    expect(res).toMatchObject({ ok: true, twinId: "twMember" })
+    expect((res as { ok: true; hits: Array<{ text: string }> }).hits[0]!.text).toBe(
+      "REDACTED passage"
+    )
+    expect(runTwinSearchMock).toHaveBeenCalledWith(
+      expect.objectContaining({ twinId: "twMember", query: "how" })
+    )
   })
 })

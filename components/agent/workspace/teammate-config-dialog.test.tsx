@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -10,11 +10,18 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => [],
+  useLiveQuery: (fn: () => unknown) => {
+    try {
+      return fn()
+    } catch {
+      return undefined
+    }
+  },
 }))
 
 jest.mock("@/lib/db/skills", () => ({ listSkills: jest.fn() }))
 jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: jest.fn() }))
+jest.mock("@/lib/db/twins", () => ({ listTwins: jest.fn() }))
 
 jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => ({
   listNativeAnthropicToolEntries: () => [],
@@ -40,8 +47,23 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
 }))
 
 import { TeammateConfigDialog } from "./teammate-config-dialog"
+import { listTwins } from "@/lib/db/twins"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
+
+const listTwinsMock = listTwins as jest.Mock
+
+const TWINS = [
+  { id: "tw1", name: "Alice", createdAt: 0, updatedAt: 0 },
+  { id: "tw2", name: "Bob", createdAt: 0, updatedAt: 0 },
+]
+
+/** Scope down to the twin `<Select>` via its label, since PresetEditor renders other selects too. */
+function getTwinSelectTrigger() {
+  const label = screen.getByText("rosterSection.twin")
+  const block = label.closest("div")!
+  return within(block).getByRole("combobox")
+}
 
 const team: AgentTeam = {
   id: "team-1",
@@ -74,7 +96,11 @@ const teammate: AgentTeammate = {
 }
 
 describe("TeammateConfigDialog", () => {
-  beforeEach(() => updateTeammateMock.mockReset())
+  beforeEach(() => {
+    updateTeammateMock.mockReset()
+    listTwinsMock.mockReset()
+    listTwinsMock.mockReturnValue(TWINS)
+  })
 
   it("renders the dialog header keyed by teammate name", () => {
     render(
@@ -90,5 +116,42 @@ describe("TeammateConfigDialog", () => {
         <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={teammate} team={team} />
       )
     ).not.toThrow()
+  })
+
+  describe("roster twin binding", () => {
+    it("offers a None option plus every live twin", () => {
+      render(
+        <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={teammate} team={team} />
+      )
+      fireEvent.click(getTwinSelectTrigger())
+      const listbox = screen.getByRole("listbox")
+      expect(within(listbox).getByText("rosterSection.twinNone")).toBeInTheDocument()
+      expect(within(listbox).getByText("Alice")).toBeInTheDocument()
+      expect(within(listbox).getByText("Bob")).toBeInTheDocument()
+    })
+
+    it("selecting a twin writes it onto config.twinId", () => {
+      render(
+        <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={teammate} team={team} />
+      )
+      fireEvent.click(getTwinSelectTrigger())
+      fireEvent.click(within(screen.getByRole("listbox")).getByText("Bob"))
+      expect(updateTeammateMock).toHaveBeenCalledWith("t1", { config: { twinId: "tw2" } })
+    })
+
+    it('selecting "None" clears an existing twinId', () => {
+      const boundTeammate: AgentTeammate = { ...teammate, config: { twinId: "tw1" } }
+      render(
+        <TeammateConfigDialog
+          open={true}
+          onOpenChange={() => {}}
+          teammate={boundTeammate}
+          team={team}
+        />
+      )
+      fireEvent.click(getTwinSelectTrigger())
+      fireEvent.click(within(screen.getByRole("listbox")).getByText("rosterSection.twinNone"))
+      expect(updateTeammateMock).toHaveBeenCalledWith("t1", { config: { twinId: undefined } })
+    })
   })
 })

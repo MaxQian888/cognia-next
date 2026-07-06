@@ -66,6 +66,11 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({ execute: (...a: unknown[]) => externalExecuteMock(...a) }),
 }))
 
+const applyTeammateTwinContextMock = jest.fn()
+jest.mock("./twin-context", () => ({
+  applyTeammateTwinContext: (...a: unknown[]) => applyTeammateTwinContextMock(...a),
+}))
+
 // ── Fixtures ────────────────────────────────────────────────────────────────
 function makeTeammate(overrides: Partial<AgentTeammate> = {}): AgentTeammate {
   return {
@@ -136,6 +141,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(false)
   resolveExternalMock.mockResolvedValue(null)
+  applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "unused-default", applied: false })
 })
 
 describe("dispatchTeammate — text-only fallback", () => {
@@ -759,5 +765,115 @@ describe("dispatchTeammate — progress streaming", () => {
     const { ctx, storeWriter } = makeCtx(makeTeammate())
     await dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })
     expect((storeWriter as Record<string, unknown>).addEvent).toBeUndefined()
+  })
+})
+
+describe("dispatchTeammate — twin-backed teammate (ADR-0003)", () => {
+  const twinDepsFixture = { store: {}, embedding: { provider: "openai", model: "m", apiKey: "k" } }
+
+  function withTwinDeps(ctx: TeamRunContext, deps: unknown = twinDepsFixture): void {
+    ;(ctx as unknown as { twinDeps: unknown }).twinDeps = deps
+  }
+
+  it("threads twinDeps + the dispatch prompt into resolveSendOptions on the sidecar path", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok", messageId: "m1" })
+    const { ctx } = makeCtx(makeTeammate({ config: { twinId: "twin-1" } }))
+    withTwinDeps(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        twinDeps: twinDepsFixture,
+        twinUserMessage: "edit code",
+        twinInjectSource: "team",
+      })
+    )
+  })
+
+  it("omits twin fields from resolveSendOptions when the teammate has no twinId", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok", messageId: "m1" })
+    const { ctx } = makeCtx(makeTeammate())
+    withTwinDeps(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    const opts = resolveSendOptionsMock.mock.calls[0][0]
+    expect(opts).not.toHaveProperty("twinDeps")
+    expect(opts).not.toHaveProperty("twinUserMessage")
+    expect(opts).not.toHaveProperty("twinInjectSource")
+  })
+
+  it("omits twin fields from resolveSendOptions when the run built no twinDeps", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok", messageId: "m1" })
+    const { ctx } = makeCtx(makeTeammate({ config: { twinId: "twin-1" } }))
+    // No twinDeps on the run context.
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    const opts = resolveSendOptionsMock.mock.calls[0][0]
+    expect(opts).not.toHaveProperty("twinDeps")
+  })
+
+  it("invokes applyTeammateTwinContext on the text-only channel when twin-bound with twinDeps", async () => {
+    isTauriMock.mockReturnValue(false)
+    applyTeammateTwinContextMock.mockResolvedValue({
+      systemPrompt: "twin-injected system prompt",
+      applied: true,
+    })
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate({ config: { twinId: "twin-1" } }))
+    withTwinDeps(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "reason about this" })
+
+    expect(applyTeammateTwinContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorName: "Worker",
+        userPrompt: "reason about this",
+        twinId: "twin-1",
+        twinDeps: twinDepsFixture,
+        source: "team",
+      })
+    )
+    expect(executeAgentMock).toHaveBeenCalledWith(
+      "reason about this",
+      expect.objectContaining({ systemPrompt: "twin-injected system prompt" })
+    )
+  })
+
+  it("does not invoke applyTeammateTwinContext on the text-only channel when the teammate isn't twin-bound", async () => {
+    isTauriMock.mockReturnValue(false)
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate())
+    withTwinDeps(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "reason about this" })
+
+    expect(applyTeammateTwinContextMock).not.toHaveBeenCalled()
+    expect(executeAgentMock).toHaveBeenCalledWith(
+      "reason about this",
+      expect.objectContaining({ systemPrompt: expect.any(String) })
+    )
+  })
+
+  it("does not invoke applyTeammateTwinContext on the text-only channel when the run built no twinDeps", async () => {
+    isTauriMock.mockReturnValue(false)
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate({ config: { twinId: "twin-1" } }))
+    // No twinDeps on the run context.
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "reason about this" })
+
+    expect(applyTeammateTwinContextMock).not.toHaveBeenCalled()
   })
 })

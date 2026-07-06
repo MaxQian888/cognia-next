@@ -238,6 +238,53 @@ describe("TeammatePool — error classification (PR 6)", () => {
   })
 })
 
+describe("TeammatePool — mid-run register (twin recruit)", () => {
+  it("makes a newly registered teammate claimable", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a] })
+    expect(pool.availableCount()).toBe(1)
+    pool.register(tm("b"))
+    expect(pool.availableCount()).toBe(2)
+    // round-robin now reaches "b"
+    expect(pool.claim("t1")?.id).toBe("a")
+    expect(pool.claim("t2")?.id).toBe("b")
+  })
+
+  it("registers into an empty pool and lifts all-unavailable", () => {
+    const pool = createTeammatePool({ teammates: [] })
+    expect(pool.allUnavailable()).toBe(true)
+    pool.register(tm("recruit"))
+    expect(pool.allUnavailable()).toBe(false)
+    expect(pool.claim("t1")?.id).toBe("recruit")
+  })
+
+  it("re-fires onAllUnavailable recovery edge when a member is registered", () => {
+    const a = tm("a")
+    const fn = jest.fn()
+    const pool = createTeammatePool({
+      teammates: [a],
+      breakerOptions: { minEvents: 2, failureThresholdPct: 50, cooldownMs: 60_000 },
+    })
+    pool.onAllUnavailable(fn)
+    pool.recordFailure("a", new Error("e1"))
+    pool.recordFailure("a", new Error("e2"))
+    expect(fn).toHaveBeenCalledTimes(1)
+    // Registering an available member clears the all-unavailable state so a
+    // later re-entry can fire the edge again.
+    pool.register(tm("b"))
+    expect(pool.allUnavailable()).toBe(false)
+  })
+
+  it("is a no-op when the id already exists", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a] })
+    pool.register(tm("a", "duplicate"))
+    expect(pool.availableCount()).toBe(1)
+    // The original entry is untouched (still claimable by its id).
+    expect(pool.claim("t1")?.name).toBe("a")
+  })
+})
+
 describe("TeammatePool — claim/release plugin hooks (deduped)", () => {
   // Regression guard: the pool MUST NOT dispatch onTeammateClaim/onTeammateRelease.
   // `dispatchTeammate` is the single source of those hooks — firing them here too

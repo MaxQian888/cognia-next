@@ -26,6 +26,7 @@ import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/typ
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
+import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "./team-run-context"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
@@ -188,6 +189,17 @@ async function runToolEnabled(
       character,
       appSettings: appSettings ?? null,
       ...(ceiling ? { permissionCeiling: ceiling } : {}),
+      // Twin-backed teammate (ADR-0003): feed the per-run vector-store deps +
+      // the task prompt so resolveSendOptions' twin branch injects the twin's
+      // persona + per-task RAG. Guard is satisfied only when the teammate is
+      // twin-bound (`character.twinId`) AND the run built twin deps.
+      ...(character.twinId && teamCtx.twinDeps
+        ? {
+            twinDeps: teamCtx.twinDeps,
+            twinUserMessage: prompt,
+            twinInjectSource: "team",
+          }
+        : {}),
     })
     // Apply the resolved step budget as an explicit per-dispatch turn cap. The
     // sidecar dispatcher honors `maxTurns` (an explicit value takes precedence
@@ -512,7 +524,23 @@ export async function dispatchTeammate(
         maxSteps
       )
     } else {
-      turn = await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal, maxSteps)
+      // Twin-backed teammate on the text-only channel (web/mobile): executeAgent
+      // bypasses resolveSendOptions, so pre-inject the twin's persona + per-task
+      // RAG into the system prompt here. Degrades to `systemPrompt` on failure.
+      let textSystemPrompt = systemPrompt
+      if (teammate.config?.twinId && teamCtx.twinDeps) {
+        const injected = await applyTeammateTwinContext({
+          actorName: teammate.name,
+          baseSystemPrompt: systemPrompt,
+          userPrompt: promptText,
+          twinId: teammate.config.twinId,
+          ...(teammate.config.twinSettings ? { twinSettings: teammate.config.twinSettings } : {}),
+          twinDeps: teamCtx.twinDeps,
+          source: "team",
+        })
+        textSystemPrompt = injected.systemPrompt
+      }
+      turn = await runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
     }
   } catch (err) {
     reporter?.finalize("failed")

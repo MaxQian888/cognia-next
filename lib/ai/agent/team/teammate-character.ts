@@ -18,6 +18,7 @@
 
 import type { Character } from "@/lib/claude/types"
 import type { AgentTeam, AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
+import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 
 /** Stable synthetic character id for a teammate. Never looked up in the DB. */
 export function teammateCharacterId(teammate: Pick<AgentTeammate, "id">): string {
@@ -50,6 +51,11 @@ export interface TeammateCharacterInput {
  *                           ← `resolvedCaps.nativeAnthropicToolIds` (when any)
  *  - `allowedTools`         ← `teammate.config.tools`
  *  - `workingDir`           ← `cwd`
+ *  - `twinId` / `twinSettings` ← `teammate.config.{twinId,twinSettings}` (ADR-0003).
+ *    Setting `twinId` is what makes the `resolveSendOptions` twin branch fire for
+ *    a teammate — the dispatch (`dispatch-teammate.ts`) additionally threads the
+ *    per-run `twinDeps` + the task prompt so the twin's persona + per-task RAG
+ *    knowledge inject. Without this the twin branch is unreachable for teams.
  *  - subagents (`resolvedCaps.subagentIds`) are enabled at the session level
  *    (`kind: "team"`), not here, since `Character` has no subagent field.
  */
@@ -76,6 +82,17 @@ export function teammateToCharacter(input: TeammateCharacterInput): Character {
 
   const enableComputerUse = resolvedCaps.nativeAnthropicToolIds.length > 0
 
+  // OS sandbox (ADR-0028): a teammate opt-in beats the team default; the
+  // teammate's own policy is clamped DOWN to the team ceiling (monotonic — a
+  // teammate can only narrow the writable roots / network / caps, never widen).
+  // Setting these on the synthesized Character is what activates the existing
+  // `resolveSendOptions` sandbox gate for a teammate dispatch.
+  const sandboxEnabled = teammate.config?.sandboxEnabled ?? team.config?.sandboxEnabled ?? false
+  const sandboxPolicy = clampSandboxPolicy(
+    team.config?.sandboxPolicy,
+    teammate.config?.sandboxPolicy
+  )
+
   const ts = Date.now()
   const character: Character = {
     id: teammateCharacterId(teammate),
@@ -93,10 +110,16 @@ export function teammateToCharacter(input: TeammateCharacterInput): Character {
     ...(mcpServerIds ? { mcpServerIds } : {}),
     ...(skillIds ? { skillIds, pluginSkillIds: skillIds } : {}),
     ...(cwd ? { workingDir: cwd } : {}),
+    ...(teammate.config?.twinId ? { twinId: teammate.config.twinId } : {}),
+    ...(teammate.config?.twinId && teammate.config.twinSettings
+      ? { twinSettings: teammate.config.twinSettings }
+      : {}),
     enableComputerUse,
     ...(enableComputerUse
       ? { computerUseSettings: { allowedToolIds: [...resolvedCaps.nativeAnthropicToolIds] } }
       : {}),
+    ...(sandboxEnabled ? { sandboxEnabled: true } : {}),
+    ...(sandboxEnabled && sandboxPolicy ? { sandboxPolicy } : {}),
   }
 
   return character

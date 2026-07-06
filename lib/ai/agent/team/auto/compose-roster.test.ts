@@ -1,5 +1,5 @@
 import { composeRoster, heuristicRoster, DEFAULT_MAX_ROSTER } from "./compose-roster"
-import type { CapabilityCatalog } from "./types"
+import type { CapabilityCatalog, TwinRosterEntry } from "./types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { TeamRoutingAssessment } from "@/types/agent/agent-team"
 
@@ -196,6 +196,59 @@ describe("composeRoster (fail-open)", () => {
       ),
     })
     expect(roster.some((m) => m.name === "Real")).toBe(true)
+  })
+})
+
+describe("composeRoster (twin roster)", () => {
+  const twinRoster: TwinRosterEntry[] = [{ twinId: "tw1", name: "Alice", expertise: "security" }]
+
+  it("keeps a twinId that IS present in the input twinRoster", async () => {
+    const roster = await composeRoster({
+      ...base,
+      twinRoster,
+      client: client(
+        JSON.stringify({
+          teammates: [
+            { name: "Sec", description: "s", twinId: "tw1" },
+            { name: "Helper", description: "h" },
+          ],
+        })
+      ),
+    })
+    expect(roster[0].twinId).toBe("tw1")
+  })
+
+  it("drops a hallucinated twinId not present in twinRoster (same whitelist discipline as capabilities)", async () => {
+    const roster = await composeRoster({
+      ...base,
+      twinRoster,
+      client: client(
+        JSON.stringify({
+          teammates: [
+            { name: "Sec", description: "s", twinId: "made-up-twin" },
+            { name: "Helper", description: "h" },
+          ],
+        })
+      ),
+    })
+    expect(roster[0].twinId).toBeUndefined()
+  })
+
+  it("renders the twin roster block into the composed user prompt", async () => {
+    let seenPrompt = ""
+    const roster = await composeRoster({
+      ...base,
+      twinRoster,
+      client: {
+        complete: async (prompt) => {
+          seenPrompt = prompt
+          return JSON.stringify({ teammates: [{ name: "Sec", description: "s" }] })
+        },
+      },
+    })
+    expect(seenPrompt).toContain("tw1")
+    expect(seenPrompt).toContain("Alice")
+    expect(roster.length).toBeGreaterThanOrEqual(2)
   })
 })
 

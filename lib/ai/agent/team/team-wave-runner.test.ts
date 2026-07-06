@@ -58,6 +58,7 @@ describe("runTeamWaves", () => {
         newTasks: [],
         cancelTaskIds: [],
         reorderTaskIds: [],
+        newMembers: [],
       },
     }))
     const res = await runTeamWaves({
@@ -99,6 +100,7 @@ describe("runTeamWaves", () => {
           newTasks: [],
           cancelTaskIds: [],
           reorderTaskIds: [],
+          newMembers: [],
         },
       }
     })
@@ -137,6 +139,7 @@ describe("runTeamWaves", () => {
           newTasks: [],
           cancelTaskIds: [],
           reorderTaskIds: [],
+          newMembers: [],
         },
       }),
     })
@@ -226,6 +229,7 @@ describe("runTeamWaves", () => {
           newTasks: [],
           cancelTaskIds: [],
           reorderTaskIds: [],
+          newMembers: [],
         },
       }),
     })
@@ -286,6 +290,7 @@ describe("runTeamWaves", () => {
           newTasks: [],
           cancelTaskIds: [],
           reorderTaskIds: [],
+          newMembers: [],
         },
       }),
     })

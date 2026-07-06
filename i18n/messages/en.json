@@ -712,6 +712,7 @@
       "teamNameLabel": "Team name",
       "teamNamePlaceholder": "Name this team",
       "title": "Auto-compose a team",
+      "twinLabel": "Digital employee",
       "verifyOption": "Verify (sampling ensemble)"
     },
     "builtInBadge": "Built-in",
@@ -1026,6 +1027,11 @@
         },
         "title": "Governance policy"
       },
+      "knowledgeTwins": {
+        "empty": "No digital employees yet. Create one in the Twin workbench.",
+        "hint": "Twins selected here can be searched by any teammate via the knowledge tool during a run.",
+        "title": "Digital employee knowledge"
+      },
       "maxConcurrent": "Max concurrent",
       "maxRetries": "Max task retries",
       "memory": {
@@ -1190,7 +1196,10 @@
         "runtime": "Runtime",
         "specialization": "Specialization",
         "temperature": "Temperature ({value})",
-        "title": "Roster fields"
+        "title": "Roster fields",
+        "twin": "Digital twin",
+        "twinHint": "This teammate acts with the selected digital employee's knowledge and style.",
+        "twinNone": "None"
       },
       "save": "Save",
       "title": "Configure {name}"
@@ -2245,7 +2254,8 @@
       "effectiveness": "reclaimed {pct}%",
       "label": "Context compacted",
       "manual": "manual",
-      "phase": "context reset at turn {turn}"
+      "phase": "context reset at turn {turn}",
+      "viewFrames": "View frames"
     },
     "compaction": {
       "notification": "Context compacted",
@@ -2875,6 +2885,21 @@
       "provider": "Provider: {id}",
       "thumbnailAlt": "Source image",
       "title": "Text recognized"
+    },
+    "opticalArchive": {
+      "coverage": "Coverage",
+      "description": "Older turns rendered as {count} image frame(s) a vision model reads back.",
+      "estimate": "Image / text tokens",
+      "frameAlt": "Optical frame {n}",
+      "hideText": "Hide original text",
+      "noText": "The original text wasn't captured (undo was off for this boundary).",
+      "notFound": "This archive is no longer available.",
+      "readability": "Readability",
+      "revealText": "Show original text",
+      "saved": "{pct}% saved",
+      "shape": "Shape",
+      "title": "Optical archive",
+      "tokens": "Tokens"
     },
     "permissionMode": {
       "acceptEdits": {
@@ -15402,6 +15427,7 @@
         "label": "Compaction method",
         "options": {
           "hybrid": "Hybrid (recent verbatim + summary)",
+          "optical": "Optical (older turns rendered as images)",
           "recursive": "Recursive (chunked summary)",
           "selective": "Selective (keep important, summarise rest)",
           "sliding-window": "Sliding window (drop oldest)",
@@ -19008,6 +19034,12 @@
       "verifyButton": "Verify confinement",
       "version": {
         "label": "Version"
+      },
+      "workspaceConfinement": {
+        "description": "Confine the built-in file and shell tools to the active workspace roots. Tools that try to write outside the workspace ask for approval first; credential paths (.ssh, .aws, …) are always blocked.",
+        "label": "Confine tools to the workspace",
+        "note": "On by default, and works on every platform. Disabling lets built-in tools read and write anywhere on this machine without asking. The OS sandbox, when enabled, supersedes this layer.",
+        "title": "Workspace confinement"
       }
     },
     "searchPlaceholder": "Search settings…",

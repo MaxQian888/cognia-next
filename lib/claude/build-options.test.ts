@@ -3655,6 +3655,29 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
 })
 
 describe("anthropic-managed (container) skills", () => {
+  it("appends twin_knowledge_search when the dispatching teammate is twin-bound", async () => {
+    // A twin-bound teammate is a sufficient signal — teamHasKnowledgeTwins
+    // short-circuits on character.twinId without needing a dispatch context.
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1", twinId: "twX" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("twin_knowledge_search")
+  })
+
+  it("omits twin_knowledge_search when the team exposes no knowledge twins", async () => {
+    // No character twinId and no resolvable team dispatch context → false leg.
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("team_send_message")
+    expect(toolNames(opts)).not.toContain("twin_knowledge_search")
+  })
   it("warns and does NOT set containerSkillIds — the SDK cannot attach uploaded skill_ids", async () => {
     const char = makeChar({ id: "c1", pluginSkillIds: ["plg-managed"] })
     mResolveSkillsForCharacter.mockResolvedValue([

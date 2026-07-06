@@ -20,6 +20,7 @@ const decision: ReplanDecision = {
   newTasks: [{ title: "Verify", description: "check", dependsOn: [] }],
   cancelTaskIds: [],
   reorderTaskIds: [],
+  newMembers: [],
 }
 
 describe("awaitReplanApproval", () => {

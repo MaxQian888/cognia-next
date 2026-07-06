@@ -855,6 +855,33 @@ export function _resetImPromptMemosForTest(): void {
   builtInSkillsManifestCache.clear()
 }
 
+/**
+ * Whether the team behind this dispatch session exposes any Employee Digital
+ * Twin knowledge source (a member's bound `twinId` or a team-level
+ * `knowledgeTwinIds`). Gates the `twin_knowledge_search` collaboration tool so
+ * it is never offered as a dead capability. Best-effort — a twin-bound current
+ * teammate is a sufficient signal even if the store lookup fails.
+ */
+async function teamHasKnowledgeTwins(
+  sessionId: string,
+  currentTwinId: string | undefined
+): Promise<boolean> {
+  if (currentTwinId) return true
+  try {
+    const { getTeamDispatchContext } = await import("@/lib/claude/agents/dispatch-context-registry")
+    const teamId = getTeamDispatchContext(sessionId)?.teamId
+    if (!teamId) return false
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const state = useAgentTeamStore.getState()
+    if ((state.teams[teamId]?.config.knowledgeTwinIds?.length ?? 0) > 0) return true
+    return Object.values(state.teammates).some(
+      (t) => t.teamId === teamId && Boolean(t.config?.twinId)
+    )
+  } catch {
+    return false
+  }
+}
+
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
   const opts: SendOptions = {}
@@ -2241,7 +2268,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     try {
       const { buildTeamCollabManifestEntries, TEAM_MESSAGING_PROTOCOL } =
         await import("@/lib/claude/team-builtin-tools")
-      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildTeamCollabManifestEntries()]
+      // Only offer `twin_knowledge_search` when the team actually has a knowledge
+      // source (a member's bound twin, or a team-level knowledgeTwinId) — never a
+      // dead capability. Resolved from the per-session team-dispatch context.
+      const includeTwinKnowledgeSearch = await teamHasKnowledgeTwins(session.id, character?.twinId)
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...buildTeamCollabManifestEntries({ includeTwinKnowledgeSearch }),
+      ]
       const existingTeamPrompt = opts.appendSystemPrompt?.trim() ?? ""
       opts.appendSystemPrompt = existingTeamPrompt
         ? `${existingTeamPrompt}\n\n${TEAM_MESSAGING_PROTOCOL}`

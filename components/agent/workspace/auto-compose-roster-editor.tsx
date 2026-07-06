@@ -22,7 +22,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import type { CapabilityCatalog, ProposedTeammate } from "@/lib/ai/agent/team/auto/types"
+import type {
+  CapabilityCatalog,
+  ProposedTeammate,
+  TwinRosterEntry,
+} from "@/lib/ai/agent/team/auto/types"
 
 const CAP_BUCKETS = [
   "skillIds",
@@ -57,6 +61,8 @@ function toggleCapability(
 export interface AutoComposeRosterEditorProps {
   roster: ProposedTeammate[]
   catalog: CapabilityCatalog
+  /** Digital employees (twins) a member may be bound to. Empty = none offered. */
+  twinRoster?: TwinRosterEntry[]
   onChange: (roster: ProposedTeammate[]) => void
   onAdd: () => void
   onRemove: (index: number) => void
@@ -66,6 +72,7 @@ export interface AutoComposeRosterEditorProps {
 export function AutoComposeRosterEditor({
   roster,
   catalog,
+  twinRoster = [],
   onChange,
   onAdd,
   onRemove,
@@ -159,6 +166,35 @@ export function AutoComposeRosterEditor({
                   data-testid={`auto-compose-member-spec-${i}`}
                 />
               </div>
+
+              {twinRoster.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-muted-foreground">{t("twinLabel")}</Label>
+                  <div className="flex flex-wrap gap-1">
+                    {twinRoster.map((tw) => {
+                      const on = member.twinId === tw.twinId
+                      return (
+                        <button
+                          key={tw.twinId}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => patchMember(i, { twinId: on ? undefined : tw.twinId })}
+                          title={tw.expertise || tw.name}
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[10px] transition-colors",
+                            on
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:bg-muted"
+                          )}
+                          data-testid={`auto-compose-twin-${i}-${tw.twinId}`}
+                        >
+                          {tw.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {activeBuckets.length > 0 && (
                 <div className="space-y-1.5">

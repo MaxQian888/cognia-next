@@ -73,6 +73,7 @@ export function materializeProposal(
           ...leadTeammate.config,
           ...(lead.specialization ? { specialization: lead.specialization } : {}),
           ...(lead.capabilities ? { capabilities: lead.capabilities } : {}),
+          ...(lead.twinId ? { twinId: lead.twinId } : {}),
         },
       })
     }
@@ -87,6 +88,7 @@ export function materializeProposal(
       config: {
         ...(m.specialization ? { specialization: m.specialization } : {}),
         ...(m.capabilities ? { capabilities: m.capabilities } : {}),
+        ...(m.twinId ? { twinId: m.twinId } : {}),
       },
     })
     teammateIds.push(teammate.id)

@@ -26,6 +26,7 @@ import type { VisualWorkflow, WorkflowTriggeredFrom } from "@/types/workflow/vis
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
 import { createTeammatePool } from "./team/teammate-pool"
+import { resolveTeamTwinRuntime } from "./team/twin-context"
 import { createBudgetGuard } from "./team/budget-guard"
 import { createTeamNotifier, type TeamNotifierDeps } from "./team/team-notifier"
 import {
@@ -505,6 +506,21 @@ export async function runTeamLifecycle(
       })
     )
 
+    // ── Employee Digital Twin runtime (ADR-0003 × ADR-0022) ──
+    // Build the shared vector-store deps once per run when any teammate is
+    // twin-bound OR the team exposes team-level knowledge twins OR the run may
+    // recruit twins mid-run; enumerate recruitable twins only when adaptive
+    // re-planning / the progress ledger can re-staff. Fully best-effort.
+    const usesTwin =
+      workers.some((w) => Boolean(w.config?.twinId)) ||
+      (team.config.knowledgeTwinIds?.length ?? 0) > 0
+    const mayRecruit =
+      team.config.adaptiveReplan?.enabled === true || team.config.progressLedger?.enabled === true
+    const { twinDeps, availableTwins } = await resolveTeamTwinRuntime({
+      buildDeps: usesTwin || mayRecruit,
+      listAvailable: mayRecruit,
+    })
+
     // ── Register the per-run context FIRST ──
     // Ultracode planning + every pattern/dispatch node reads it via
     // getTeamRunContext(runId); registering before synthesis lets the planner
@@ -522,6 +538,8 @@ export async function runTeamLifecycle(
       gatePolicy,
       storeWriter: deps.storeWriter,
       ...(rateLimitResume ? { rateLimitResume } : {}),
+      ...(twinDeps ? { twinDeps } : {}),
+      ...(availableTwins.length > 0 ? { availableTwins } : {}),
       // Lazily populated by dispatchTeammate on first claim — see
       // `lib/ai/agent/team/dispatch-teammate.ts`.
       resolvedCapabilities: new Map(),

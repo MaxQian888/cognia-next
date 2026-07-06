@@ -45,6 +45,7 @@ const outcome = (over: Partial<ReplanCheckpointOutcome> = {}): ReplanCheckpointO
     newTasks: [],
     cancelTaskIds: [],
     reorderTaskIds: [],
+    newMembers: [],
   },
   ...over,
 })

@@ -535,6 +535,7 @@ export function AutoComposeDialog({
             <AutoComposeRosterEditor
               roster={proposal.roster}
               catalog={catalog}
+              twinRoster={proposal.twinRoster ?? []}
               onChange={(roster) => updateProposal({ roster })}
               onAdd={() => updateProposal({ roster: addMember(proposal.roster) })}
               onRemove={(i) => {

@@ -14,6 +14,7 @@
 
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
+import type { TwinSettings } from "@/types/twin"
 
 // ============================================================================
 // Team Core Types
@@ -455,6 +456,15 @@ export interface AgentTeamConfig {
    */
   sharedMemoryAdapterId?: string
   /**
+   * Employee Digital Twins (ADR-0003) the WHOLE team may consult on demand via
+   * the `twin_knowledge_search` collaboration tool. This is the team-level
+   * knowledge pool — distinct from a member's own `TeammateConfig.twinId`
+   * (which additionally gives that member the twin's persona + per-task RAG).
+   * A member-bound `twinId` is also implicitly queryable. Undefined / empty =
+   * the tool is not offered. See `lib/claude/team-builtin-tools.ts`.
+   */
+  knowledgeTwinIds?: string[]
+  /**
    * Ultracode orchestration settings (ADR-0022 addendum). When `enabled`, the
    * team can run the multi-agent quality-pattern composition instead of a flat
    * task DAG. `autoMode` decides whether a complex task triggers it
@@ -663,6 +673,35 @@ export interface TeammateConfig {
    * to inherit the team default unchanged. See `lib/ai/agent/team/capability-resolver.ts`.
    */
   capabilities?: TeammateCapabilityOverlay
+  /**
+   * Bind this teammate to an Employee Digital Twin (ADR-0003). When set, every
+   * dispatch synthesizes a `Character` carrying this `twinId` so the shared
+   * `resolveSendOptions` twin runtime injects the twin's persona (voice /
+   * playbooks / entities) plus per-task RAG knowledge — the teammate acts as
+   * that digital employee. Undefined = a plain teammate with no twin.
+   * See `lib/ai/agent/team/teammate-character.ts` + `dispatch-teammate.ts`.
+   */
+  twinId?: string
+  /**
+   * Per-teammate override of the twin runtime knobs (RAG topK, style few-shot,
+   * hybrid, citations). Undefined = the twin's own `DEFAULT_TWIN_SETTINGS`.
+   * Only meaningful when `twinId` is set.
+   */
+  twinSettings?: TwinSettings
+  /**
+   * Per-teammate OS-sandbox enablement (ADR-0028). Overrides
+   * `AgentTeamConfig.sandboxEnabled`. When resolved true, the synthesized
+   * `Character` carries `sandboxEnabled` so `resolveSendOptions` routes this
+   * teammate's Bash/Edit/Write through the OS sandbox.
+   */
+  sandboxEnabled?: boolean
+  /**
+   * Per-teammate OS-sandbox resource/network policy (ADR-0028). Clamped DOWN to
+   * the team-level `AgentTeamConfig.sandboxPolicy` ceiling via `clampSandboxPolicy`
+   * — a teammate can only narrow, never widen. Only meaningful when the sandbox
+   * resolves enabled.
+   */
+  sandboxPolicy?: import("@/lib/claude/types").SandboxResourcePolicy
 }
 
 /**
@@ -1042,9 +1081,14 @@ export interface CastVoteInput {
 // ============================================================================
 
 /**
- * Source type for cross-system delegation
+ * Source type for cross-system delegation.
+ *
+ * `twin` (ADR-0003 integration) runs a background agent whose prompt is
+ * pre-injected with an Employee Digital Twin's persona + knowledge — i.e. the
+ * sub-problem is answered "as" that digital employee. See
+ * `lib/ai/agent/team/delegation-orchestrator.ts:delegateToTwin`.
  */
-export type AgentSystemType = "sub_agent" | "team" | "background"
+export type AgentSystemType = "sub_agent" | "team" | "background" | "twin"
 
 /**
  * Lifecycle status for a task handoff / delegation

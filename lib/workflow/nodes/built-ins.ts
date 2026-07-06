@@ -2830,6 +2830,9 @@ registerNodeExecutor({
         addEvent: (
           event: Parameters<ReturnType<typeof useAgentTeamStore.getState>["addEvent"]>[0]
         ) => useAgentTeamStore.getState().addEvent(event),
+        addTeammate: (
+          input: Parameters<ReturnType<typeof useAgentTeamStore.getState>["addTeammate"]>[0]
+        ) => useAgentTeamStore.getState().addTeammate(input),
       },
     }
 

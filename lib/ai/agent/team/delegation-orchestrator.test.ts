@@ -61,6 +61,19 @@ const abortTeamMock = jest.fn()
 jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
   abortTeam: (...a: unknown[]) => abortTeamMock(...a),
 }))
+// Twin runtime — dynamic-imported by runTwinDelegation.
+const tryBuildTwinDepsMock = jest.fn()
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  tryBuildTwinDeps: (...a: unknown[]) => tryBuildTwinDepsMock(...a),
+}))
+const applyTeammateTwinContextMock = jest.fn()
+jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+  applyTeammateTwinContext: (...a: unknown[]) => applyTeammateTwinContextMock(...a),
+}))
+const getTwinMock = jest.fn()
+jest.mock("@/lib/db/twins", () => ({
+  getTwin: (...a: unknown[]) => getTwinMock(...a),
+}))
 
 import * as bgManagerModule from "@/lib/ai/agent/background-agent-manager"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
@@ -83,6 +96,7 @@ import {
   delegateToBackground,
   delegateToExternal,
   delegateToTeam,
+  delegateToTwin,
   wouldCreateTeamCycle,
 } from "./delegation-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
@@ -109,6 +123,12 @@ describe("delegation-orchestrator", () => {
     executeAgentMock.mockResolvedValue({ text: "ok" })
     externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "external result" })
     isInQuietHoursMock.mockReturnValue(false)
+    tryBuildTwinDepsMock.mockReset()
+    applyTeammateTwinContextMock.mockReset()
+    getTwinMock.mockReset()
+    tryBuildTwinDepsMock.mockResolvedValue({ store: {}, embedding: {} })
+    applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "TWIN-INJECTED", applied: true })
+    getTwinMock.mockResolvedValue({ id: "tw1", name: "Alice" })
   })
 
   describe("delegateToBackground", () => {
@@ -181,6 +201,94 @@ describe("delegation-orchestrator", () => {
       const settled = await completionPromise
       expect(settled.status).toBe("awaiting_approval")
       expect(executeAgentMock).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("delegateToTwin", () => {
+    it("creates a twin delegation, injects the persona + knowledge, and settles completed", async () => {
+      executeAgentMock.mockResolvedValue({ text: "twin answer" })
+      const { delegation, completionPromise } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "analyze the incident",
+        reason: "ask the domain expert",
+      })
+      expect(delegation.targetType).toBe("twin")
+      expect(delegation.targetId).toMatch(/^bg_/)
+      expect((delegation.metadata as { twinId?: string } | undefined)?.twinId).toBe("tw1")
+      expect(dispatchOnTeamDelegationStart).toHaveBeenCalledWith(
+        expect.objectContaining({ delegationId: delegation.id, targetType: "twin" })
+      )
+      const settled = await completionPromise
+      expect(applyTeammateTwinContextMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          twinId: "tw1",
+          userPrompt: "analyze the incident",
+          source: "team-delegation",
+        })
+      )
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "analyze the incident",
+        expect.objectContaining({ systemPrompt: "TWIN-INJECTED" })
+      )
+      expect(settled.status).toBe("completed")
+      expect(settled.result).toBe("twin answer")
+    })
+
+    it("degrades to the plain prompt when the twin runtime is unavailable", async () => {
+      tryBuildTwinDepsMock.mockResolvedValue(undefined)
+      executeAgentMock.mockResolvedValue({ text: "ok" })
+      const { completionPromise } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "p",
+        systemPrompt: "BASE",
+        reason: "r",
+      })
+      await completionPromise
+      expect(applyTeammateTwinContextMock).not.toHaveBeenCalled()
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "p",
+        expect.objectContaining({ systemPrompt: "BASE" })
+      )
+    })
+
+    it("defers to awaiting_approval and re-dispatches (with injection) on approval", async () => {
+      executeAgentMock.mockResolvedValue({ text: "late answer" })
+      const { delegation, completionPromise } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "p",
+        reason: "needs review",
+        awaitingApproval: true,
+      })
+      expect(delegation.status).toBe("awaiting_approval")
+      await completionPromise
+      expect(applyTeammateTwinContextMock).not.toHaveBeenCalled()
+      approveDelegation(delegation.id)
+      await flush()
+      expect(applyTeammateTwinContextMock).toHaveBeenCalled()
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "p",
+        expect.objectContaining({ systemPrompt: "TWIN-INJECTED" })
+      )
+    })
+
+    it("cancelDelegation aborts the underlying background agent", () => {
+      const { delegation } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "p",
+        reason: "r",
+        awaitingApproval: true,
+      })
+      cancelDelegation(delegation.id)
+      expect(cancelAgentMock).toHaveBeenCalledWith(delegation.targetId)
+      expect(useAgentTeamStore.getState().delegations[delegation.id]!.status).toBe("cancelled")
     })
   })
 

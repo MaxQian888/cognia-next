@@ -1,5 +1,6 @@
 import { AutoOrchestrationPiiError, planAutoOrchestration } from "./auto-orchestrate"
 import { EMPTY_CAPABILITY_CATALOG, gatherCapabilityCatalog } from "./capability-catalog"
+import { gatherTwinRoster } from "./twin-roster"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
 jest.mock("./capability-catalog", () => {
@@ -9,6 +10,13 @@ jest.mock("./capability-catalog", () => {
 const mockGather = gatherCapabilityCatalog as jest.MockedFunction<typeof gatherCapabilityCatalog>
 // The default impl passes through to the real catalog gatherer; individual
 // tests override one call with mockImplementationOnce / mockRejectedValueOnce.
+
+jest.mock("./twin-roster", () => {
+  const actual = jest.requireActual("./twin-roster")
+  return { ...actual, gatherTwinRoster: jest.fn(actual.gatherTwinRoster) }
+})
+const mockGatherTwins = gatherTwinRoster as jest.MockedFunction<typeof gatherTwinRoster>
+// Same pass-through-by-default pattern as mockGather above.
 
 const NOW = new Date("2026-06-14T00:00:00Z")
 
@@ -172,6 +180,56 @@ describe("planAutoOrchestration", () => {
     })
     expect(proposal.executor?.kind).toBe("single-send")
     expect(proposal.executor?.fromPattern).toBe("single_agent_recommended")
+  })
+
+  it("forwards an explicit twinRoster to composeRoster and includes it on the proposal", async () => {
+    let rosterPrompt = ""
+    const client: LlmClient = {
+      complete: async (prompt, options) => {
+        const sys = options?.system ?? ""
+        if (sys.includes("routing assessor")) return '{"recommendedPattern":"manager_worker"}'
+        if (sys.includes("compose a small specialist team")) {
+          rosterPrompt = prompt
+          return JSON.stringify({
+            teammates: [{ name: "Lead", description: "lead", twinId: "tw1" }],
+          })
+        }
+        return "{}"
+      },
+    }
+    const proposal = await planAutoOrchestration({
+      objective: "ship it",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      now: () => NOW,
+      twinRoster: [{ twinId: "tw1", name: "Alice", expertise: "security" }],
+      client,
+    })
+    expect(rosterPrompt).toContain("tw1")
+    expect(proposal.twinRoster).toEqual([{ twinId: "tw1", name: "Alice", expertise: "security" }])
+    expect(proposal.roster[0].twinId).toBe("tw1")
+  })
+
+  it("omits proposal.twinRoster when an explicit empty twinRoster is passed", async () => {
+    const proposal = await planAutoOrchestration({
+      objective: "ship it",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      now: () => NOW,
+      twinRoster: [],
+      client: stagedClient({ assess: '{"recommendedPattern":"manager_worker"}' }),
+    })
+    expect(proposal.twinRoster).toBeUndefined()
+  })
+
+  it("gathers the twin roster via gatherTwinRoster when omitted", async () => {
+    mockGatherTwins.mockResolvedValueOnce([{ twinId: "tw2", name: "Bob", expertise: "docs" }])
+    const proposal = await planAutoOrchestration({
+      objective: "ship it",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      now: () => NOW,
+      client: stagedClient({ assess: '{"recommendedPattern":"manager_worker"}' }),
+    })
+    expect(mockGatherTwins).toHaveBeenCalled()
+    expect(proposal.twinRoster).toEqual([{ twinId: "tw2", name: "Bob", expertise: "docs" }])
   })
 
   it("routes to council/ensemble when the operator passes a consensus signal", async () => {

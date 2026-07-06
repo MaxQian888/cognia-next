@@ -29,6 +29,7 @@ import type {
   CreateConsensusInput,
   SharedMemoryEntry,
 } from "@/types/agent/agent-team"
+import type { TwinKnowledgeHit } from "@/lib/ai/agent/team/twin-context"
 import {
   canSendMessage,
   describeSuppressedMessage,
@@ -60,6 +61,7 @@ export const TEAM_TOOL_NAMES = {
   listMembers: "team_list_members",
   addTaskComment: "task_add_comment",
   getTask: "task_get",
+  twinKnowledgeSearch: "twin_knowledge_search",
 } as const
 
 /** Synthetic plugin id tagging the promoted team-collaboration manifest entries. */
@@ -112,7 +114,7 @@ export interface TeamToolDeps {
   createConsensus: (input: CreateConsensusInput) => ConsensusRequest
   castVote: (input: CastVoteInput) => ConsensusRequest
   delegate: (input: {
-    target: "background" | "external" | "team"
+    target: "background" | "external" | "team" | "twin"
     sourceTeamId: string
     sourceTaskId: string
     reason: string
@@ -120,6 +122,8 @@ export interface TeamToolDeps {
     systemPrompt?: string
     targetAgentId?: string
     targetTeamId?: string
+    /** Employee Digital Twin id (required for `twin`). */
+    twinId?: string
     ultracode?: boolean
   }) => { id: string; status: string }
   listMembers: (teamId: string) => Array<{ id: string; name: string; role: string }>
@@ -144,6 +148,21 @@ export interface TeamToolDeps {
     description: string
     comments: Array<{ authorName: string; text: string; createdAt: string }>
   } | null
+  /**
+   * On-demand RAG over an Employee Digital Twin's knowledge base (ADR-0003).
+   * Resolves + authorizes the target twin against the team's `knowledgeTwinIds`
+   * plus its members' own `twinId`s, then returns REDACTED hits only. Returns an
+   * `error` string (not throw) on missing config / unauthorized twin / runtime
+   * unavailable.
+   */
+  searchTwinKnowledge: (input: {
+    teamId: string
+    query: string
+    twinId?: string
+    topK?: number
+  }) => Promise<
+    { ok: true; twinId: string; hits: TwinKnowledgeHit[] } | { ok: false; error: string }
+  >
 }
 
 const SEND_MESSAGE_SCHEMA = {
@@ -213,13 +232,15 @@ const DELEGATE_SCHEMA = {
   properties: {
     target: {
       type: "string",
-      enum: ["background", "external", "team"],
-      description: "Where to delegate: a background agent, an external CLI agent, or another team.",
+      enum: ["background", "external", "team", "twin"],
+      description:
+        "Where to delegate: a background agent, an external CLI agent, another team, or a digital employee (twin) that answers with its own knowledge + persona.",
     },
     reason: { type: "string", description: "Why this work is being delegated." },
-    prompt: { type: "string", description: "Task prompt (required for `background`)." },
+    prompt: { type: "string", description: "Task prompt (required for `background` / `twin`)." },
     targetAgentId: { type: "string", description: "External agent id (required for `external`)." },
     targetTeamId: { type: "string", description: "Target team id (required for `team`)." },
+    twinId: { type: "string", description: "Digital employee id (required for `twin`)." },
     ultracode: { type: "boolean", description: "Force ultracode on a `team` delegation." },
   },
   required: ["target", "reason"],
@@ -265,11 +286,39 @@ const GET_TASK_SCHEMA = {
   required: ["taskId"],
 } as const
 
+const TWIN_KNOWLEDGE_SEARCH_SCHEMA = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description: "What to look up in the digital employee's knowledge base.",
+    },
+    twinId: {
+      type: "string",
+      description:
+        "Which digital employee to consult. Omit to use the team's first configured knowledge source.",
+    },
+    topK: { type: "number", description: "How many passages to return (default 5, max 12)." },
+  },
+  required: ["query"],
+} as const
+
+export interface BuildTeamCollabManifestOptions {
+  /**
+   * Append the `twin_knowledge_search` tool. Only true when the team exposes at
+   * least one knowledge twin (team `knowledgeTwinIds` or a member's `twinId`),
+   * so the tool is never offered as a dead capability. See `build-options.ts`.
+   */
+  includeTwinKnowledgeSearch?: boolean
+}
+
 /**
  * Manifest entries for the team-collaboration tools. Returned to `build-options`
  * to append to `pluginTools` for a team dispatch session (opt-in).
  */
-export function buildTeamCollabManifestEntries(): TeamBuiltinManifestEntry[] {
+export function buildTeamCollabManifestEntries(
+  opts: BuildTeamCollabManifestOptions = {}
+): TeamBuiltinManifestEntry[] {
   const entry = (
     name: string,
     description: string,
@@ -326,6 +375,15 @@ export function buildTeamCollabManifestEntries(): TeamBuiltinManifestEntry[] {
       "Fetch a task by id, including its full comment thread.",
       GET_TASK_SCHEMA as unknown as Record<string, unknown>
     ),
+    ...(opts.includeTwinKnowledgeSearch
+      ? [
+          entry(
+            TEAM_TOOL_NAMES.twinKnowledgeSearch,
+            "Search a digital employee's (Employee Digital Twin) knowledge base and get back relevant passages — use when the answer depends on a teammate's or the team's bound domain knowledge.",
+            TWIN_KNOWLEDGE_SEARCH_SCHEMA as unknown as Record<string, unknown>
+          ),
+        ]
+      : []),
   ]
 }
 
@@ -373,6 +431,17 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
           targetTeamId: input.targetTeamId ?? "",
           reason: input.reason,
           ...(input.ultracode !== undefined ? { ultracode: input.ultracode } : {}),
+        })
+        return { id: rec.id, status: rec.status }
+      }
+      if (input.target === "twin") {
+        const { delegation: rec } = delegation.delegateToTwin({
+          sourceTeamId: input.sourceTeamId,
+          sourceTaskId: input.sourceTaskId,
+          twinId: input.twinId ?? "",
+          prompt: input.prompt ?? input.reason,
+          ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+          reason: input.reason,
         })
         return { id: rec.id, status: rec.status }
       }
@@ -428,6 +497,46 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
           createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
         })),
       }
+    },
+    searchTwinKnowledge: async (input) => {
+      const state = useAgentTeamStore.getState()
+      const team = state.teams[input.teamId]
+      // Authorized set = team-level knowledge twins ∪ every member's bound twin.
+      const memberTwinIds = Object.values(state.teammates)
+        .filter((t) => t.teamId === input.teamId)
+        .map((t) => t.config?.twinId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+      const allowed = new Set<string>([...(team?.config.knowledgeTwinIds ?? []), ...memberTwinIds])
+      if (allowed.size === 0) {
+        return {
+          ok: false,
+          error: "no digital-employee knowledge sources are configured for this team",
+        }
+      }
+      let target = input.twinId?.trim()
+      if (target && !allowed.has(target)) {
+        return {
+          ok: false,
+          error: `twin "${target}" is not an authorized knowledge source for this team`,
+        }
+      }
+      if (!target) target = [...allowed][0]
+      const { tryBuildTwinDeps } = await import("@/lib/twin/runtime/build-deps")
+      const twinDeps = await tryBuildTwinDeps()
+      if (!twinDeps) {
+        return {
+          ok: false,
+          error: "the twin runtime is not configured (no embedding key / vector store)",
+        }
+      }
+      const { searchTwinKnowledge: runSearch } = await import("@/lib/ai/agent/team/twin-context")
+      const res = await runSearch({
+        twinId: target,
+        query: input.query,
+        ...(typeof input.topK === "number" ? { topK: input.topK } : {}),
+        twinDeps,
+      })
+      return { ok: true, twinId: target, hits: res.hits }
     },
   }
 }
@@ -539,8 +648,16 @@ export async function runTeamBuiltinTool(
       }
       case TEAM_TOOL_NAMES.delegate: {
         const target = asString(args.target)
-        if (target !== "background" && target !== "external" && target !== "team") {
-          return "Error: team_delegate `target` must be background | external | team."
+        if (
+          target !== "background" &&
+          target !== "external" &&
+          target !== "team" &&
+          target !== "twin"
+        ) {
+          return "Error: team_delegate `target` must be background | external | team | twin."
+        }
+        if (target === "twin" && !asString(args.twinId).trim()) {
+          return "Error: team_delegate target=twin requires a `twinId`."
         }
         const reason = asString(args.reason).trim() || "delegated by teammate"
         const rec = d.delegate({
@@ -552,6 +669,7 @@ export async function runTeamBuiltinTool(
           ...(typeof args.systemPrompt === "string" ? { systemPrompt: args.systemPrompt } : {}),
           ...(typeof args.targetAgentId === "string" ? { targetAgentId: args.targetAgentId } : {}),
           ...(typeof args.targetTeamId === "string" ? { targetTeamId: args.targetTeamId } : {}),
+          ...(typeof args.twinId === "string" ? { twinId: args.twinId } : {}),
           ...(typeof args.ultracode === "boolean" ? { ultracode: args.ultracode } : {}),
         })
         return `Delegated to ${target} (id=${rec.id}, status=${rec.status}).`
@@ -589,6 +707,23 @@ export async function runTeamBuiltinTool(
         if (!taskId) return "Error: task_get requires a `taskId`."
         const task = d.getTask(taskId)
         return task ?? `Error: task ${taskId} not found.`
+      }
+      case TEAM_TOOL_NAMES.twinKnowledgeSearch: {
+        const query = asString(args.query).trim()
+        if (!query) return "Error: twin_knowledge_search requires a non-empty `query`."
+        const twinId = asString(args.twinId).trim()
+        const topKRaw = Number(args.topK)
+        const res = await d.searchTwinKnowledge({
+          teamId: caller.teamId,
+          query,
+          ...(twinId ? { twinId } : {}),
+          ...(Number.isInteger(topKRaw) && topKRaw > 0 ? { topK: topKRaw } : {}),
+        })
+        if (!res.ok) return `Error: ${res.error}`
+        if (res.hits.length === 0) {
+          return `No knowledge found in twin "${res.twinId}" for that query.`
+        }
+        return { twinId: res.twinId, hits: res.hits }
       }
       /* istanbul ignore next -- unreachable: isTeamBuiltinTool() filters non-team names before the switch */
       default:
