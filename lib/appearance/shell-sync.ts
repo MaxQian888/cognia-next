@@ -14,7 +14,7 @@
 import { formatHex, parse as parseCulori } from "culori"
 import { parseHex, toHex } from "@/lib/appearance/vscode-theme/color-utils"
 import { resolveActiveThemeColors } from "@/lib/themes"
-import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
+import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
 
 /** Minimal appearance slice the helper needs. Avoids importing the full
  *  AppSettings shape so the helper stays decoupled from store internals. */

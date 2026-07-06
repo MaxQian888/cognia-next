@@ -44,6 +44,8 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "default_export_dir",
   "fs_search_workspace",
   "fs_read_workspace_file",
+  "fs_list_workspace_dir",
+  "fs_stat_workspace_file",
   // Terminal session listings.
   "terminal_list_all",
   "terminal_list_for_project",
@@ -179,6 +181,24 @@ const WS_CLOSE_GRACE_MS = 30_000
 /** HTTP call timeout (ms). */
 const CALL_TIMEOUT_MS = 30_000
 
+/** Jitter randomness source — overridable so reconnect-timing tests stay
+ * deterministic while production gets real spread. */
+let backoffRandom: () => number = Math.random
+
+/** Test seam: pin the jitter source. Pass `null` to restore `Math.random`. */
+export function __setBackoffRandomForTests(fn: (() => number) | null): void {
+  backoffRandom = fn ?? Math.random
+}
+
+/**
+ * Spread a backoff delay by ±15% so a fleet of devices that all dropped on
+ * the same Wi-Fi flap don't reconnect in lockstep and hammer the desktop in a
+ * synchronized thundering herd.
+ */
+function withJitter(ms: number): number {
+  return Math.round(ms * (0.85 + backoffRandom() * 0.3))
+}
+
 // ---------------------------------------------------------------------------
 // CompanionTransport
 // ---------------------------------------------------------------------------
@@ -242,8 +262,24 @@ export class CompanionTransport implements Transport {
    */
   private rtcCandidateKind: "host" | "srflx" | "prflx" | "relay" | "unknown" = "unknown"
 
-  constructor() {
+  /**
+   * Optional config source override (ADR-0059 T-B2). When set, every config
+   * read in this instance goes through it instead of the module-level
+   * storage cache — the headless brain injects an in-memory
+   * `{ baseUrl, deviceJwt: serviceToken, deviceId: "brain-<id>" }` that is
+   * never persisted (token refreshes just change the provider's return).
+   * The wire shape is unchanged; mobile/web instances pass nothing.
+   */
+  private readonly configProvider: (() => CompanionConfig | null) | null
+
+  constructor(opts: { configProvider?: () => CompanionConfig | null } = {}) {
+    this.configProvider = opts.configProvider ?? null
     this.attachNetworkListeners()
+  }
+
+  /** The active config: injected provider first, storage cache otherwise. */
+  private config(): CompanionConfig | null {
+    return this.configProvider ? this.configProvider() : loadCompanionConfig()
   }
 
   // ── Public: connection state observable ────────────────────────────────────
@@ -262,7 +298,7 @@ export class CompanionTransport implements Transport {
   // ── Transport.call ─────────────────────────────────────────────────────────
 
   async call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
-    const config = loadCompanionConfig()
+    const config = this.config()
     if (!config) {
       return Promise.reject(
         new CompanionError({
@@ -279,10 +315,14 @@ export class CompanionTransport implements Transport {
     // TransportRtc surface returns the same `result` payload the HTTP path
     // would, so callers see no difference.
     const isReadOnly = READ_ONLY_COMMANDS.has(name)
+    // Mint the idempotency key once and reuse it across the RTC attempt and
+    // the HTTPS fallback. If the DataChannel write reached the server and ran
+    // before the channel hard-failed, the fallback request carrying the same
+    // key lets the server dedupe instead of double-executing the command.
+    const idempotencyKey = isReadOnly ? undefined : crypto.randomUUID()
     if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
       try {
         const params = args ?? {}
-        const idempotencyKey = isReadOnly ? undefined : crypto.randomUUID()
         return await this.rtc.call<T>(name, idempotencyKey ? { ...params, idempotencyKey } : params)
       } catch (err) {
         // Hard-fail on the data channel → fall back to HTTPS. The data
@@ -298,8 +338,8 @@ export class CompanionTransport implements Transport {
       Authorization: `Bearer ${config.deviceJwt}`,
       "Content-Type": "application/json",
     }
-    if (!isReadOnly) {
-      headers["Idempotency-Key"] = crypto.randomUUID()
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey
     }
 
     return this.fetchWithRetry<T>(url, headers, JSON.stringify(args ?? {}))
@@ -378,7 +418,7 @@ export class CompanionTransport implements Transport {
   ): Promise<void> {
     if (this.rtc) return // Already open or about to be.
     if (this.rtcConnecting) return this.rtcConnecting
-    const config = options.configOverride ?? loadCompanionConfig()
+    const config = options.configOverride ?? this.config()
     if (!config) {
       console.warn("CompanionTransport.enableWebRtcTier: companion not paired")
       return
@@ -534,7 +574,7 @@ export class CompanionTransport implements Transport {
    */
   public isOnConnectedLan(): boolean {
     if (this.connectionState !== "connected") return false
-    const config = loadCompanionConfig()
+    const config = this.config()
     return !!config && classifyWsHost(config.baseUrl) === "ws-lan"
   }
 
@@ -592,7 +632,7 @@ export class CompanionTransport implements Transport {
       this.rtcCandidateKind = kind
       next = kind === "relay" ? "rtc-relay" : "rtc-direct"
     } else if (this.connectionState === "connected") {
-      const config = loadCompanionConfig()
+      const config = this.config()
       next = config ? classifyWsHost(config.baseUrl) : "offline"
     } else {
       next = "offline"
@@ -642,7 +682,7 @@ export class CompanionTransport implements Transport {
           headers,
           body,
           signal: controller.signal,
-          serverFingerprint: loadCompanionConfig()?.serverFingerprint,
+          serverFingerprint: this.config()?.serverFingerprint,
         })
       } catch (err: unknown) {
         clearTimeout(timeoutId)
@@ -717,7 +757,7 @@ export class CompanionTransport implements Transport {
   // ── Private: WebSocket lifecycle ───────────────────────────────────────────
 
   private openWebSocket(): void {
-    const config = loadCompanionConfig()
+    const config = this.config()
     if (!config || this.wsDestroyed) return
 
     // Build ?since= from the highest cursor across all active channels.
@@ -823,10 +863,17 @@ export class CompanionTransport implements Transport {
 
   private scheduleWsReconnect(): void {
     if (this.wsReconnectTimer !== null) return
+    // Don't schedule reconnect attempts while the OS reports no network: each
+    // would just burn a 30s timeout failing to connect. The online listener
+    // re-opens the socket (and resets the backoff) when connectivity returns.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      this.setConnectionState("offline")
+      return
+    }
     this.setConnectionState("reconnecting")
 
     const idx = Math.min(this.wsReconnectAttempt, WS_BACKOFF_MS.length - 1)
-    const delay = WS_BACKOFF_MS[idx]
+    const delay = withJitter(WS_BACKOFF_MS[idx])
     this.wsReconnectAttempt++
 
     this.wsReconnectTimer = setTimeout(() => {
@@ -886,7 +933,15 @@ export class CompanionTransport implements Transport {
   // ── Private: network awareness ─────────────────────────────────────────────
 
   private attachNetworkListeners(): void {
-    if (typeof window === "undefined" || this.networkListenersAttached) return
+    // The headless brain's window shim is `globalThis` (no EventTarget API),
+    // so require the method — network awareness is a browser concern.
+    if (
+      typeof window === "undefined" ||
+      typeof window.addEventListener !== "function" ||
+      this.networkListenersAttached
+    ) {
+      return
+    }
     this.networkListenersAttached = true
 
     this.onlineListener = () => {

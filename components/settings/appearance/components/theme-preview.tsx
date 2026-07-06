@@ -6,7 +6,7 @@
 // don't read CSS variables here; the colors are passed in directly so
 // previews work without applying the theme to the document.
 
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 export interface ThemePreviewProps {
   colors: Partial<ThemeColors>

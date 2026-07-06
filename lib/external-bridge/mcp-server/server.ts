@@ -23,9 +23,16 @@ import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-article
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
-import { checkRagCall, checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
+import {
+  bridgeScopeForRagScope,
+  checkRagCall,
+  checkRuntimeCall,
+  checkScope,
+  checkToolCall,
+} from "../permission-gate"
+import { wrapUntrusted } from "../untrusted"
 import { computerUse } from "../handlers/computer-use"
-import { agentDispatch, teamRun, pluginToolInvoke } from "../handlers/orchestration"
+import { agentDispatch, teamRun, teamList, pluginToolInvoke } from "../handlers/orchestration"
 import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "../handlers/resources"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
@@ -38,6 +45,7 @@ import {
   connectorsListDrafts,
   connectorsSendMessage,
 } from "../handlers/connectors"
+import { recordLesson, saveSkillDraft, ingestNote } from "../handlers/inbound"
 
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
@@ -68,6 +76,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerComputerUseTool(server, opts.settingsGetter)
   registerOrchestrationTools(server, opts.settingsGetter)
   registerConnectorTools(server, opts.settingsGetter)
+  registerInboundTools(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
   registerPrompts(server, opts.settingsGetter)
 
@@ -84,7 +93,7 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Search Cognia wiki",
       description:
-        "Semantic search over Cognia's generated code wiki articles. " +
+        "Keyword (BM25) search over Cognia's generated code wiki articles. " +
         "Returns top-K article summaries with slugs you can pass to wiki_read.",
       annotations: {
         readOnlyHint: true,
@@ -147,9 +156,10 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Search Cognia code (RAG)",
       description:
-        "Chunk-level retrieval over Cognia's wiki sections OR over a digital " +
-        "twin's chunks (when scope='twin' and rag:twin is enabled). For " +
-        "module-level overviews use wiki_search.",
+        "Chunk-level keyword (BM25) retrieval over Cognia's wiki sections OR over " +
+        "a digital twin's chunks (when scope='twin' and rag:twin is enabled). " +
+        "Optional heuristic rerank, corrective-RAG grading, and citations; no " +
+        "vector/semantic backend. For module-level overviews use wiki_search.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -161,17 +171,33 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
         scope: z.enum(["cognia-self", "user-repo", "runtime", "all", "twin"]).optional(),
         twinId: z.string().optional(),
         k: z.number().int().min(1).max(30).optional(),
-        rerank: z.boolean().optional(),
+        rerank: z
+          .boolean()
+          .optional()
+          .describe("Apply the key-free lexical reranker over the fused pool (default off)."),
+        expand: z
+          .boolean()
+          .optional()
+          .describe("Heuristic synonym query expansion for recall (default on)."),
+        grade: z
+          .boolean()
+          .optional()
+          .describe("Corrective-RAG relevance grading; drops low-relevance hits (default on)."),
+        trim: z
+          .boolean()
+          .optional()
+          .describe("Dynamic context-budget trimming; may shorten chunk content (default off)."),
       },
     },
     async (args) => {
       const ragScope = args.scope ?? "all"
       const settings = await settingsGetter()
-      // Per-call gate: rag:cognia for everything except twin (rag:twin),
-      // which the user must opt into separately.
+      // Per-call gate + audit label share one mapping (bridgeScopeForRagScope):
+      // rag:twin for twin, rag:user-repo for user-repo, rag:cognia for
+      // cognia-self/runtime/all — so a user-repo call is never mislabeled.
       return runWithGate({
         tool: "rag_search",
-        scope: ragScope === "twin" ? "rag:twin" : "rag:cognia",
+        scope: bridgeScopeForRagScope(ragScope) ?? "rag:cognia",
         check: checkRagCall(settings, ragScope),
         body: () =>
           ragSearch({
@@ -180,6 +206,9 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
             twinId: args.twinId,
             k: args.k,
             rerank: args.rerank,
+            expand: args.expand,
+            grade: args.grade,
+            trim: args.trim,
           }),
       })
     }
@@ -362,6 +391,37 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         scope: "agent:team",
         check: checkToolCall(await settingsGetter(), "team_run"),
         body: () => teamRun(args as Parameters<typeof teamRun>[0]),
+      })
+  )
+
+  server.registerTool(
+    "team_list",
+    {
+      title: "List Cognia agent teams",
+      description:
+        "List configured Agent Teams (id, status, redacted objective), including " +
+        "teams marked 'awaiting external pickup' by an external-handoff dispatch — " +
+        "claim one by starting it with `team_run`. Read-only. Denied by default " +
+        "until the `agent:team` scope is enabled in Settings → External Bridge.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        awaitingExternalOnly: z
+          .boolean()
+          .optional()
+          .describe("Only unclaimed external-pickup teams."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "team_list",
+        scope: "agent:team",
+        check: checkToolCall(await settingsGetter(), "team_list"),
+        body: () => teamList(args as Parameters<typeof teamList>[0]),
       })
   )
 
@@ -575,6 +635,111 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// record_lesson / save_skill_draft / ingest_note (inbound write, ADR-0008 P4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter) {
+  const inboundAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  }
+
+  // record_lesson
+  server.registerTool(
+    "record_lesson",
+    {
+      title: "Record a lesson for Cognia to review",
+      description:
+        "Submit a lesson learned / correction worth remembering. Lands in Cognia's inbound review queue as a pending draft (nothing is applied to live memory); the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        title: z.string(),
+        lesson: z.string(),
+        tags: z.array(z.string()).optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "record_lesson",
+        scope: "inbound:write",
+        check: checkToolCall(await settingsGetter(), "record_lesson"),
+        body: () =>
+          recordLesson({
+            title: args.title,
+            lesson: args.lesson,
+            tags: args.tags,
+            source: args.source,
+          }),
+      })
+  )
+
+  // save_skill_draft
+  server.registerTool(
+    "save_skill_draft",
+    {
+      title: "Propose a skill draft for Cognia to review",
+      description:
+        "Submit a proposed skill (name + instructions). Lands in Cognia's inbound review queue as a pending draft (no skill is installed); the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        name: z.string(),
+        instructions: z.string(),
+        description: z.string().optional(),
+        trigger: z.string().optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "save_skill_draft",
+        scope: "inbound:write",
+        check: checkToolCall(await settingsGetter(), "save_skill_draft"),
+        body: () =>
+          saveSkillDraft({
+            name: args.name,
+            instructions: args.instructions,
+            description: args.description,
+            trigger: args.trigger,
+            source: args.source,
+          }),
+      })
+  )
+
+  // ingest_note
+  server.registerTool(
+    "ingest_note",
+    {
+      title: "File a note with Cognia for later review",
+      description:
+        "Submit a free-form note / snippet to file for later. Lands in Cognia's inbound review queue as a pending draft; the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        title: z.string(),
+        note: z.string(),
+        url: z.string().optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "ingest_note",
+        scope: "inbound:write",
+        check: checkToolCall(await settingsGetter(), "ingest_note"),
+        body: () =>
+          ingestNote({
+            title: args.title,
+            note: args.note,
+            url: args.url,
+            source: args.source,
+          }),
+      })
+  )
+}
+
 function mapEntityToScope(entityType: string) {
   switch (entityType) {
     case "skill":
@@ -688,7 +853,13 @@ function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter)
         check: { allowed: true },
         latencyMs: Date.now() - start,
       })
-      return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: article.contentMd }] }
+      // ADR-0008 R7: fence generated wiki prose as untrusted so a coding agent
+      // that feeds the body back into a model never treats it as instructions.
+      return {
+        contents: [
+          { uri: uri.href, mimeType: "text/markdown", text: wrapUntrusted(article.contentMd) },
+        ],
+      }
     }
   )
 }

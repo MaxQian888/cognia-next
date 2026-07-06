@@ -61,21 +61,17 @@ describe("plugin runtime proof audit", () => {
     expect(chatHeaderPoint?.requiredTests.length).toBeGreaterThan(0)
   })
 
-  it("flags known optimistic runtime paths that still lack executable proof", () => {
+  it("no longer tracks the resolved status-projection / fallback-mock risks", () => {
     const report = auditPluginRuntimeClaims()
 
-    expect(report.runtimeRisks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "plugin-store.status-projection-fallback",
-          proofStatus: "missing_proof",
-        }),
-        expect.objectContaining({
-          id: "plugin-marketplace.fallback-mock",
-          proofStatus: "missing_proof",
-        }),
-      ])
-    )
+    // Both prior "missing_proof" risks were closed against current code: the
+    // lifecycle store hard-throws via `resolveVerifiedPluginManager`, and the
+    // marketplace `mock` mode was replaced by disclosed remote/degraded/demo
+    // modes. Neither stale entry (nor its nonexistent path) may resurface.
+    const ids = report.runtimeRisks.map((risk) => risk.id)
+    expect(ids).not.toContain("plugin-store.status-projection-fallback")
+    expect(ids).not.toContain("plugin-marketplace.fallback-mock")
+    expect(report.runtimeRisks).toEqual([])
   })
 
   // ADR 0016 P1-9 — strengthen the proof audit: every canonical hook must

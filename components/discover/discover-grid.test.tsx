@@ -50,6 +50,52 @@ describe("<DiscoverGrid />", () => {
     expect(screen.queryByTestId("discover-grid-empty")).not.toBeInTheDocument()
   })
 
+  it("renders 6 skeleton placeholders in grid/list mode and 8 in compact mode", () => {
+    const skeletons = () =>
+      screen.getByTestId("discover-grid-loading").querySelectorAll('[data-slot="skeleton"]')
+    const { rerender } = render(
+      <DiscoverGrid
+        category="characters"
+        items={[]}
+        loading
+        query=""
+        view="grid"
+        selectedItemId={null}
+        onSelectItem={jest.fn()}
+      />
+    )
+    expect(skeletons()).toHaveLength(6)
+
+    rerender(
+      <DiscoverGrid
+        category="characters"
+        items={[]}
+        loading
+        query=""
+        view="compact"
+        selectedItemId={null}
+        onSelectItem={jest.fn()}
+      />
+    )
+    expect(skeletons()).toHaveLength(8)
+  })
+
+  it("renders grid-mode cards with a full-height list item", () => {
+    render(
+      <DiscoverGrid
+        category="characters"
+        items={[mkCharacter("c1", "Alpha")]}
+        loading={false}
+        query=""
+        view="grid"
+        selectedItemId={null}
+        onSelectItem={jest.fn()}
+      />
+    )
+    const li = screen.getByTestId("discover-item-character-c1").closest("li")
+    expect(li).toHaveClass("h-full")
+  })
+
   it("renders an empty state with the category-specific key when no items", () => {
     render(
       <DiscoverGrid

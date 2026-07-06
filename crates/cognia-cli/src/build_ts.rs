@@ -58,7 +58,6 @@ pub fn build_and_pack(
         std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     pack_frontend_bundle(&bundle_path, crate_root, manifest, main_rel)?;
-    println!("Built {id} v{version} → {}", bundle_path.display());
     Ok(bundle_path)
 }
 

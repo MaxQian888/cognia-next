@@ -17,6 +17,13 @@ pub mod credential_window;
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 pub mod keymap;
 pub mod screenshot;
+// ADR-0020 cross-platform bounded subset — depth/node-capped tree walk, the
+// Locator matcher, and rect-center math shared by the macOS (AX) and Linux
+// (AT-SPI) backends. Compiled on those targets (and under `test` everywhere) so
+// the platform-agnostic logic stays covered on the Windows dev host where the
+// native backends don't compile.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+pub mod tree_shape;
 // KEY=value line parser for shell-tool output (`xdotool --shell`). Only
 // the Linux backend consumes it in production; compiled with tests
 // everywhere so the parser stays covered on the Windows dev host.

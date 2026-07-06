@@ -211,7 +211,7 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
   }
 
   const importerOpts = { twinId: raw.id, source: raw.filename }
-  let produced: { title: string; markdown: string } | null = null
+  let produced: { title: string; markdown: string; speakers?: string[] } | null = null
 
   try {
     if (raw.format === "chatgpt-export") {
@@ -264,6 +264,13 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
     produced = { title: raw.filename, markdown: text }
   }
 
+  // Union importer-discovered speakers with any the raw source already
+  // carried — the redaction pass (`deriveNameHints`) reads them off the
+  // parsed result, so dropping them here would leak participant names to
+  // the cloud embedder on the paste-mode importer path.
+  const speakers = [
+    ...new Set([...(raw.baseMetadata?.speakers ?? []), ...(produced.speakers ?? [])]),
+  ]
   return {
     id: raw.id,
     kind: dispatch.kind,
@@ -271,7 +278,10 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
     title: produced.title,
     originalText: produced.markdown,
     embeddableText: produced.markdown,
-    baseMetadata: raw.baseMetadata ?? {},
+    baseMetadata: {
+      ...(raw.baseMetadata ?? {}),
+      ...(speakers.length > 0 ? { speakers } : {}),
+    },
     bytes: produced.markdown.length,
   }
 }
@@ -280,17 +290,24 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
  * Reduce an importer's `RawSource[]` fan-out down to a single combined
  * markdown blob. Uses the first source's filename as the document title
  * and concatenates the remaining bodies with a horizontal-rule separator
- * so the heading-aware chunker can still slice on `###` headers.
+ * so the heading-aware chunker can still slice on `###` headers. The
+ * fan-out's per-source speakers are unioned so the caller can merge them
+ * into the parsed `baseMetadata`.
  */
 function collectImporterText(
   produced: RawSource[] | undefined,
   fallbackTitle: string
-): { title: string; markdown: string } {
+): { title: string; markdown: string; speakers?: string[] } {
   if (!produced || produced.length === 0) {
     return { title: fallbackTitle, markdown: "" }
   }
   const first = produced[0]
   const title = first.filename.replace(/\.md$/i, "") || fallbackTitle
   const parts = produced.map((src) => src.text ?? "").filter((s) => s.trim().length > 0)
-  return { title, markdown: parts.join("\n\n---\n\n") }
+  const speakers = [...new Set(produced.flatMap((src) => src.baseMetadata?.speakers ?? []))]
+  return {
+    title,
+    markdown: parts.join("\n\n---\n\n"),
+    ...(speakers.length > 0 ? { speakers } : {}),
+  }
 }

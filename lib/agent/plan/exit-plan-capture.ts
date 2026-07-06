@@ -17,7 +17,12 @@
  */
 
 import type { SDKAssistantMessage, SDKMessage, BetaToolUseBlock } from "@/lib/claude/types"
-import type { AgentPlan, CreatePlanInput, CreatePlanStepInput } from "@/types/agent/plan"
+import type {
+  AgentPlan,
+  CreatePlanInput,
+  CreatePlanStepInput,
+  PlanConfig,
+} from "@/types/agent/plan"
 
 /**
  * Split a markdown plan body into ordered step titles. Recognises `-`/`*`
@@ -64,6 +69,8 @@ export interface ExitPlanCaptureContext {
   characterId?: string
   /** Override the derived plan title. */
   title?: string
+  /** Plan-config overrides (e.g. `AppSettings.planSettings`). Pure passthrough. */
+  config?: Partial<PlanConfig>
 }
 
 /**
@@ -78,8 +85,10 @@ export function planInputFromExitPlanMode(
   const o = input as Record<string, unknown>
 
   let titles: string[] = []
+  let planText: string | undefined
   if (typeof o.plan === "string") {
     titles = parsePlanText(o.plan)
+    planText = o.plan
   } else if (Array.isArray(o.steps)) {
     titles = titlesFromArray(o.steps)
   } else if (Array.isArray(o.plan)) {
@@ -101,6 +110,10 @@ export function planInputFromExitPlanMode(
     source: "exit_plan_mode",
     executionMode: "auto",
     steps,
+    ...(ctx.config ? { config: ctx.config } : {}),
+    // Keep the full markdown body for audit / display — the step list is a
+    // lossy projection of it.
+    ...(planText ? { metadata: { planText } } : {}),
   }
 }
 
@@ -132,9 +145,25 @@ export async function captureExitPlanMode(
 ): Promise<AgentPlan | null> {
   const input = findExitPlanModeInput(evt)
   if (input == null) return null
+  // User-level plan defaults (Settings → Agent runtime → Plan mode). Best
+  // effort: capture must not fail because settings are unreadable.
+  let config: Partial<PlanConfig> | undefined
+  try {
+    const { getSettings } = await import("@/lib/db/settings")
+    const s = (await getSettings())?.planSettings
+    if (s && (s.requireApproval !== undefined || s.maxAutoRefinements !== undefined)) {
+      config = {
+        ...(s.requireApproval !== undefined ? { requireApproval: s.requireApproval } : {}),
+        ...(s.maxAutoRefinements !== undefined ? { maxAutoRefinements: s.maxAutoRefinements } : {}),
+      }
+    }
+  } catch {
+    // fall through — defaults apply
+  }
   const planInput = planInputFromExitPlanMode(input, {
     sessionId,
     ...(characterId ? { characterId } : {}),
+    ...(config ? { config } : {}),
   })
   if (!planInput) return null
   const { getPlanRuntime } = await import("./runtime")

@@ -18,6 +18,11 @@ jest.mock("@/lib/automation/plugin-tauri", () => ({
   pluginComputerUseTextEditor: jest.fn(),
 }))
 
+jest.mock("@/lib/automation/ocr-click", () => ({
+  findScreenText: jest.fn(),
+  clickScreenText: jest.fn(),
+}))
+
 jest.mock("@/lib/slash-commands/registry", () => ({
   registerSlashCommand: jest.fn(),
   unregisterCommandsByPlugin: jest.fn(),
@@ -44,6 +49,7 @@ import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-co
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { dispatchAnthropicAction } from "@/lib/automation/anthropic-action-mapper"
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
+import { findScreenText, clickScreenText } from "@/lib/automation/ocr-click"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
 import type { PluginTool } from "@/types/plugin/plugin"
@@ -51,6 +57,8 @@ import type { PluginTool } from "@/types/plugin/plugin"
 const mockedDispatchAction = dispatchAnthropicAction as jest.Mock
 const mockedBash = pluginComputerUseBash as jest.Mock
 const mockedTextEditor = pluginComputerUseTextEditor as jest.Mock
+const mockedFindText = findScreenText as jest.Mock
+const mockedClickText = clickScreenText as jest.Mock
 const mockedGetState = (useChatStore as unknown as { getState: jest.Mock }).getState
 const mockedGetSettings = getActiveComputerUseSettings as jest.Mock
 
@@ -62,6 +70,7 @@ interface MockAgentCtx {
   agent?: {
     registerTool: jest.Mock<void, [ToolArg]>
     unregisterTool: jest.Mock<void, [string]>
+    context: { registerProvider: jest.Mock }
   }
 }
 
@@ -74,6 +83,7 @@ function buildCtx(opts: { withAgent?: boolean } = {}): MockAgentCtx {
     ctx.agent = {
       registerTool: jest.fn(),
       unregisterTool: jest.fn(),
+      context: { registerProvider: jest.fn() },
     }
   }
   return ctx
@@ -110,20 +120,32 @@ describe("computer-use plugin activate()", () => {
     expect(manifest.i18n?.locales?.["zh-CN"]?.["slash.cu.body"]).toBeDefined()
   })
 
-  it("registers computer_use, bash, and text_editor plugin tools", async () => {
+  it("registers computer_use, bash, text_editor, find_text, click_text plugin tools", async () => {
     const ctx = buildCtx()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await definition.activate(ctx as any)
     const calls = ctx.agent!.registerTool.mock.calls.map((c) => c[0])
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(5)
     const names = calls.map((c) => c.name).sort()
-    expect(names).toEqual(["bash", "computer_use", "text_editor"])
+    expect(names).toEqual(["bash", "click_text", "computer_use", "find_text", "text_editor"])
     for (const c of calls) {
       expect(c.pluginId).toBe("cognia-computer-use")
       expect(c.definition.requiresApproval).toBe(true)
       expect(c.definition.parametersSchema).toBeDefined()
       expect(typeof c.execute).toBe("function")
     }
+  })
+
+  it("registers the comparative surface-guidance context provider", async () => {
+    const ctx = buildCtx()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await definition.activate(ctx as any)
+    const providers = ctx.agent!.context.registerProvider.mock.calls.map((c) => c[0])
+    expect(providers).toHaveLength(1)
+    const text = providers[0].provide()
+    expect(text).toMatch(/computer_use/)
+    expect(text).toMatch(/browser_\*/)
+    expect(text).toMatch(/mcp__playwright__/)
   })
 
   it("warns and skips tool registration if ctx.agent is absent", async () => {
@@ -210,6 +232,45 @@ describe("computer-use plugin activate()", () => {
         { surface: "computerUse", pluginId: "cognia-computer-use", sessionKey: "sess-2" }
       )
     })
+
+    it("find_text → findScreenText with the query + gated ctx", async () => {
+      const tool = await getTool("find_text")
+      mockedFindText.mockResolvedValueOnce({ ok: true, matches: [], providerId: "p", capture: {} })
+      await tool!.execute({ text: "Submit", languages: ["en"] }, { config: {} })
+      expect(mockedFindText).toHaveBeenCalledWith({
+        query: "Submit",
+        languages: ["en"],
+        ctx: { surface: "computerUse", pluginId: "cognia-computer-use" },
+      })
+    })
+
+    it("click_text → clickScreenText forwarding occurrence/button/double", async () => {
+      const tool = await getTool("click_text")
+      mockedClickText.mockResolvedValueOnce({ ok: true, clicked: {} })
+      await tool!.execute(
+        { text: "OK", occurrence: 2, button: "right", double: true },
+        { config: {} }
+      )
+      expect(mockedClickText).toHaveBeenCalledWith({
+        query: "OK",
+        occurrence: 2,
+        button: "right",
+        doubleClick: true,
+        languages: undefined,
+        ctx: { surface: "computerUse", pluginId: "cognia-computer-use" },
+      })
+    })
+
+    it("find_text returns ok:false instead of throwing when OCR fails", async () => {
+      const tool = await getTool("find_text")
+      mockedFindText.mockRejectedValueOnce(new Error("no geometry"))
+      const res = (await tool!.execute({ text: "x" }, { config: {} })) as {
+        ok: boolean
+        error: string
+      }
+      expect(res.ok).toBe(false)
+      expect(res.error).toMatch(/no geometry/)
+    })
   })
 })
 
@@ -224,7 +285,13 @@ describe("computer-use plugin deactivate()", () => {
     // plugin disables.
     expect(unregisterPluginI18n).not.toHaveBeenCalled()
     const unregistered = ctx.agent!.unregisterTool.mock.calls.map((c) => c[0])
-    expect(unregistered.sort()).toEqual(["bash", "computer_use", "text_editor"])
+    expect(unregistered.sort()).toEqual([
+      "bash",
+      "click_text",
+      "computer_use",
+      "find_text",
+      "text_editor",
+    ])
   })
 
   it("survives without ctx", async () => {

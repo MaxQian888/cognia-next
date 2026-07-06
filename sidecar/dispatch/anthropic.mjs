@@ -25,16 +25,21 @@ import { makeInputStream } from "./input-stream.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
+import { classifyToolCallConfinement, combineVerdict } from "../builtin-tools/confinement.mjs"
 import {
   makeServerAlwaysLoad,
   alwaysLoadToolSet,
   stampUserServersAlwaysLoad,
 } from "./tool-search-policy.mjs"
 import { buildLspHooks } from "./lsp-hooks.mjs"
+import { buildAgentHooks, mergeHookMaps } from "./agent-hooks.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
+import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
+import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
 
 /** Bare name of the `ask_user` elicitation tool (namespaced by the sidecar as
  * `mcp__cognia-plugin-tools__ask_user`). */
@@ -114,6 +119,12 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // without stderr access.
   const CANUSETOOL_DEBUG =
     process.env.COGNIA_SIDECAR_VERBOSE === "1" || process.env.COGNIA_SIDECAR_VERBOSE === "true"
+  // MCP server output capture. The Agent SDK forwards the spawned claude-code
+  // subprocess's stderr — which carries every stdio MCP server's diagnostic
+  // output — through the `stderr` option wired into `options` below. Each line
+  // becomes an `mcp_log` event the renderer's MCP log panel renders. Before
+  // this the output had no sink ("without stderr access") and was silently lost.
+  const mcpStderrSink = createStderrLogSink({ sessionId, emit, source: "stderr" })
   /** @type {Map<string, { resolve: (r: any) => void }>} */
   const pendingApprovals = new Map()
   /**
@@ -162,6 +173,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // (Construction shared with the ai-sdk path — see lsp-resolver-factory.mjs.)
   const lsp = makeLazyLspResolver({ sendOptions, log })
   const { lspEnabled, lspResolver } = lsp
+  // Per-session code-graph index (resolver-bound like LSP — see
+  // codegraph-resolver-factory.mjs). Lazily built on first tool call.
+  const codeGraph = makeLazyCodeGraphResolver({ sendOptions, log })
 
   // Read-before-write tracking for the coreFiles suite. On this path the
   // suite is registered only via the `coreFilesOnAnthropic` escape hatch
@@ -176,6 +190,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     enabled: builtinEnabled,
     alwaysLoad: serverAlwaysLoad(BUILTIN_SERVER_NAME),
     lspResolver,
+    codeGraphResolver: codeGraph.codeGraphResolver,
     readTracker,
     cwd: sendOptions.cwd,
     dispatchPath: "anthropic",
@@ -186,6 +201,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     // the ai-sdk bridge). `undefined` ⇒ buildCogniaToolsServer's 120s default;
     // `0` disables.
     toolExecutionTimeoutMs: sendOptions.toolExecutionTimeoutMs,
+    // Cap oversized built-in tool-result bodies (parity with the ai-sdk
+    // compaction cap). Undefined ⇒ no cap. See builtin-tools/result-cap.mjs.
+    maxToolResultTokens: sendOptions.compaction?.maxToolResultTokens,
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).
@@ -342,9 +360,22 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     forkSession: isFork ? true : undefined,
     env: baseEnv,
 
+    // Capture the claude-code subprocess stderr (incl. spawned stdio MCP
+    // servers' diagnostics) into `mcp_log` events. Wrapped by the sink so a
+    // downstream emit failure never faults the SDK's stderr pump.
+    stderr: (data) => mcpStderrSink.write(data),
+
     // Diagnostics-after-edit feedback loop (Phase 2). Omitted when LSP is
     // disabled — the strip-undefined pass below removes the field.
-    hooks: lspEnabled ? buildLspHooks(lspResolver) : undefined,
+    // SDK-native hooks: the LSP diagnostics-after-edit hook (Phase 2) merged
+    // with the user's settings.json lifecycle hooks (`sendOptions.hooks`, injected
+    // HOST-side after the trust gate). Both are `Partial<Record<HookEvent,
+    // HookCallbackMatcher[]>>`; `mergeHookMaps` concatenates per event. Returns
+    // undefined when neither contributes, so the strip pass omits the key.
+    hooks: mergeHookMaps(
+      lspEnabled ? buildLspHooks(lspResolver) : undefined,
+      buildAgentHooks(sendOptions.hooks, { emit, log, sessionId, cwd: sendOptions.cwd })
+    ),
 
     canUseTool: (toolName, input, ctx) => {
       // The `ask_user` elicitation tool is the user interaction itself: the
@@ -370,26 +401,60 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       if (!doomed && suppressList && suppressList.includes(toolName)) {
         return Promise.resolve({ behavior: "allow", updatedInput: input })
       }
-      // OpenCode-style static ruleset short-circuit (Layer A). Only EXPLICIT
-      // allow/deny rules act here; anything else ("ask") falls through to the
-      // normal round-trip so the renderer's richer Auto-mode (Layer B) and the
-      // manual approval modal still run. Fail-open on any resolver error.
+      // OpenCode-style static ruleset short-circuit (Layer A), composed with the
+      // workspace-confinement verdict (ADR-0028 lite). Only EXPLICIT allow/deny
+      // rules act here; a confinement "ask" (mutator escaping the workspace roots)
+      // overrides a ruleset "allow" and falls through to the round-trip, while a
+      // confinement "deny" (write into / symlink-escape toward a credential path)
+      // hard-rejects. Anything unresolved ("ask") falls through so the renderer's
+      // richer Auto-mode (Layer B) and the manual approval modal still run.
+      // Fail-open on any resolver error.
       const ruleset = sendOptions.permissionRuleset
-      if (ruleset && !doomed) {
+      let rulesetVerdict = null
+      if (ruleset) {
         try {
-          const verdict = resolveForToolCall(ruleset, toolName, input)
-          if (verdict === "allow") {
-            return Promise.resolve({ behavior: "allow", updatedInput: input })
-          }
-          if (verdict === "deny") {
-            return Promise.resolve({
-              behavior: "deny",
-              message: "denied by permission ruleset",
-            })
-          }
+          rulesetVerdict = resolveForToolCall(ruleset, toolName, input)
         } catch {
-          // fall through to the approval round-trip
+          rulesetVerdict = null
         }
+      }
+      let confinementVerdict = null
+      try {
+        confinementVerdict = classifyToolCallConfinement(
+          sendOptions.confinement,
+          toolName,
+          input,
+          sendOptions.cwd
+        )
+      } catch {
+        confinementVerdict = null
+      }
+      const combinedVerdict = combineVerdict(rulesetVerdict, confinementVerdict)
+      // An explicit DENY outranks the doom-loop escalation: a doom-looped call
+      // to a denied tool (or a credential-escaping write) must stay denied, not
+      // downgrade to an approval prompt the user could accept.
+      if (combinedVerdict === "deny") {
+        return Promise.resolve({
+          behavior: "deny",
+          message:
+            confinementVerdict === "deny" && rulesetVerdict !== "deny"
+              ? "denied: path escapes the workspace into a protected credential location"
+              : "denied by permission ruleset",
+        })
+      }
+      // Session-global "Allow always" grant (parity with the ai-sdk gate). An
+      // explicit name-level grant beats a confinement "ask" but not the "deny"
+      // handled above; the doom guard still suspends the silent short-circuit.
+      const alwaysAllow = Array.isArray(sendOptions.alwaysAllowTools)
+        ? sendOptions.alwaysAllowTools
+        : null
+      if (!doomed && alwaysAllow && alwaysAllow.includes(toolName)) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
+      // The silent ALLOW short-circuit is what the doom guard exists to
+      // suspend — a doomed call falls through to the approval round-trip.
+      if (combinedVerdict === "allow" && !doomed) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
       }
       const requestId = randomUUID()
       // Boundary instrumentation (COGNIA_SIDECAR_VERBOSE=1): the Agent SDK path
@@ -422,7 +487,13 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         )
       }
       return new Promise((resolve) => {
+        let onAbort = null
         const settle = (result) => {
+          // Symmetric cleanup: drop the abort listener when the approval
+          // settles normally so listeners don't accumulate on a shared signal.
+          if (onAbort && ctx.signal && typeof ctx.signal.removeEventListener === "function") {
+            ctx.signal.removeEventListener("abort", onAbort)
+          }
           if (CANUSETOOL_DEBUG) {
             log(
               "info",
@@ -436,7 +507,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         // requires `updatedInput` to be a record on an allow.
         pendingApprovals.set(requestId, { resolve: settle, input })
         if (ctx.signal) {
-          const onAbort = () => {
+          onAbort = () => {
             if (pendingApprovals.delete(requestId)) {
               settle({ behavior: "deny", message: "aborted" })
             }
@@ -456,15 +527,34 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
 
   const q = query({ prompt: inputStream.iterable, options })
 
+  // First-connection self-healing: the SDK's `system/init` event reports each
+  // MCP server's connect status; a server that failed its FIRST connect (cold
+  // npx install, waking remote endpoint) is auto-reconnected once instead of
+  // staying failed until the user finds the reconnect button. `needs-auth`
+  // servers are left alone (reconnecting can't mint a token).
+  const mcpAutoReconnect = createMcpAutoReconnector({
+    reconnect: (name) => q.reconnectMcpServer(name),
+    log,
+    emitMcpLog: ({ level, message, server, source }) =>
+      emit(buildMcpLogEvent({ sessionId, ts: Date.now(), level, message, server, source })),
+  })
+
   const session = {
     q,
-    pushUserMessage: (content) =>
+    pushUserMessage: (content) => {
+      // Per-turn doom-guard reset (parity with the ai-sdk path, which builds a
+      // fresh guard each turn). Without this, a legitimate identical call made
+      // once per turn — e.g. reading the same config at each turn's start —
+      // crosses the threshold on the 3rd TURN of a multi-turn session and
+      // forces approval prompts forever after.
+      doomGuard.reset()
       inputStream.push({
         type: "user",
         message: { role: "user", content },
         parent_tool_use_id: null,
         session_id: sessionId,
-      }),
+      })
+    },
     // Manual compaction: the Agent SDK owns compaction and intercepts a
     // `/compact [focus]` user turn (emitting its own `compact_boundary`). We
     // unify the manual entry point by pushing that turn — no bespoke summary.
@@ -501,6 +591,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
             sdkSessionId: evt.session_id,
           })
         }
+        mcpAutoReconnect.onEvent(evt)
         emit({ type: "event", sessionId, event: evt })
       }
       emit({ type: "session_ended", sessionId })
@@ -516,8 +607,13 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       })
     } finally {
       session._ended = true
+      // Flush any trailing partial stderr line so the last unterminated MCP log
+      // isn't dropped at session end.
+      mcpStderrSink.end()
       // Tear down any per-session LSP servers the resolver started.
       lsp.dispose()
+      // Close the code-graph store + file watcher.
+      codeGraph.dispose()
       // Kill any background shells the agent left running this session.
       bgShells.killAll()
     }

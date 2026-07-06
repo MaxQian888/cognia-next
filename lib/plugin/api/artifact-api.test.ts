@@ -3,7 +3,7 @@
  */
 
 import { createArtifactAPI, getArtifactRenderers, clearArtifactRenderers } from "./artifact-api"
-import type { ArtifactRenderer } from "@/types/plugin/plugin-extended"
+import type { ArtifactRenderer } from "@/types/plugin/plugin"
 
 // Mock artifact renderers to prevent heavy dependency chain (react-vega etc.)
 jest.mock("@/components/artifacts/artifact-renderers", () => ({

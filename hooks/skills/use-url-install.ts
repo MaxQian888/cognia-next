@@ -6,6 +6,7 @@
 import { useCallback, useState } from "react"
 import { installMarketplaceItem } from "@/lib/skills/marketplace-install"
 import { parseSkillsShInput, resolveSkillsShRef } from "@/lib/skills/skillssh-github"
+import { resolveSkillPanelPrefs, useSettingsStore } from "@/stores/settings"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
 
 export interface UseUrlInstall {
@@ -33,7 +34,10 @@ export function useUrlInstall(): UseUrlInstall {
     setBusy(true)
     try {
       const { item } = await resolveSkillsShRef(ref)
-      await installMarketplaceItem(item)
+      const autoEnableNew = resolveSkillPanelPrefs(
+        useSettingsStore.getState().settings?.skillPanelPrefs
+      ).autoEnableNew
+      await installMarketplaceItem(item, { disabledByDefault: !autoEnableNew })
       return item
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

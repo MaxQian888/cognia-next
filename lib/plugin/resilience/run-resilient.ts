@@ -14,7 +14,7 @@
 import { combineAbortSignals } from "@/lib/connectivity/capacitor-http"
 import type { CircuitBreaker } from "@/lib/connectors/circuit-breaker"
 import { backoffDelayMs } from "@/lib/queue/retry-policy"
-import { withTimeout } from "@/lib/utils/with-timeout"
+import { withTimeout } from "@cognia/primitives"
 
 import { classifyResilienceError, isRetryableKind } from "./error-classify"
 

@@ -23,6 +23,7 @@ import type {
   Team,
 } from "@/lib/claude/types"
 import type { Project } from "@/types"
+import type { ProjectChunk } from "@/types/project-knowledge"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type { BackupHistoryRow } from "./backup-history"
 import type { NotificationRecord } from "@/types/notifications"
@@ -84,7 +85,7 @@ import type { ChatInputHistoryRow } from "./chat-input-history"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { Loop, LoopEvent } from "@/types/loop"
 import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
-import type { RemoteControlAuditEntry } from "@/types/remote-control"
+import type { RemoteControlAuditEntry, RemoteControlRunStatusRow } from "@/types/remote-control"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
@@ -100,6 +101,7 @@ import type { UnattendedExecAuditRow } from "./terminal-audit"
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
 // import-site stability. See `lib/db/CONVENTIONS.md`.
 import type { ModelsDevCatalogRow } from "./models-dev-catalog"
+import type { OpenRouterCatalogRow } from "./openrouter-catalog"
 import type { SessionStateRow } from "./session-state"
 import type { TrustedPublisherRow } from "./trusted-publishers"
 import type { TtsProviderKeyRow } from "@/types/media/tts"
@@ -126,10 +128,12 @@ import type {
   PetCharacterBinding,
   PetAchievementRecord,
   PetConversationRow,
+  PetInventoryRow,
 } from "@/types/pet"
 import { accountDatabaseName } from "@/lib/accounts/account-db"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
+import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
 
 /**
  * Idempotently backfill `roots` on a project row from the legacy
@@ -2123,6 +2127,116 @@ export class CogniaDB extends Dexie {
     this.version(90).stores({
       sessionFolders: "id, projectId, [projectId+order], name, createdAt, updatedAt",
     })
+
+    // v91 — Denormalised `triggeredBySource` index on `workflowRuns`. Promotes
+    // `triggeredBy.source` to a top-level indexed column (Dexie can't index
+    // nested props) so the IM progress-runner watches only IM-triggered runs
+    // via `.where("triggeredBySource").equals("im")` instead of scanning the
+    // whole table. Restates the full workflowRuns index list (Dexie replaces,
+    // not merges, a table's index list). Backfill stamps legacy rows.
+    this.version(91)
+      .stores({
+        workflowRuns:
+          "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt]",
+      })
+      .upgrade(backfillTriggeredBySourceV91)
+
+    // v92 — Remote-control run-status projection. Closes the result loop for the
+    // inbound `/api/v1/commands/:target` surface: the renderer stamps each
+    // server-issued `runId` with its dispatch outcome (and, where a subsystem
+    // emits a terminal signal, the final status) so `GET /api/v1/runs/:runId`
+    // can report it. Pure additive — no upgrade hook. See
+    // `lib/db/remote-control-run-status.ts`.
+    this.version(92).stores({
+      remoteControlRunStatus: "&runId, target, status, startedAt, updatedAt",
+    })
+
+    // v93 — OpenRouter live-models catalog cache (singleton). The OpenRouter
+    // analogue of `modelsDevCatalog` (v60): a single "singleton" row holding the
+    // full real-time `/models` list + fetch timestamp. Both the GUI and the CLI
+    // (which shares this Dexie via its snapshot) read it so the OpenRouter model
+    // picker syncs in real time across shells. Pure additive — no upgrade hook.
+    // See `lib/db/openrouter-catalog.ts` + `lib/ai/providers/openrouter-catalog-sync.ts`.
+    this.version(93).stores({
+      openrouterCatalog: "&id, fetchedAt",
+    })
+
+    // v94 — Pet item inventory (economy wave, ADR-0058). Catalog item id is
+    // the PK; qty/timestamps are non-indexed payload. The catalog itself is
+    // static code (`lib/pet/economy/item-catalog.ts`), never persisted. Pure
+    // additive — no upgrade hook. See `lib/db/pet.ts`.
+    this.version(94).stores({
+      petInventory: "&id",
+    })
+
+    // v95 — Wiki Lint results (one singleton row per scope, mirrors
+    // `wikiManifest`). Detects orphan pages + dangling `[[slug]]` links from a
+    // no-AI local pass. Pure additive — no upgrade hook. See
+    // `lib/db/wiki-lint-results.ts` and `lib/wiki/lint/`.
+    this.version(95).stores({
+      wikiLintResults: "&scope, lastRunAt",
+    })
+
+    // v96 — Attention Radar reports (info-diet analysis). Newest-first by
+    // `generatedAt`; `[scope+generatedAt]` powers the "latest for scope" read.
+    // Pure additive — no upgrade hook. See `lib/db/radar-reports.ts` +
+    // `lib/radar/`.
+    this.version(96).stores({
+      radarReports: "&id, generatedAt, [scope+generatedAt]",
+    })
+
+    // v97 — Content capture store (confirm-bubble flow). `fingerprint` is the
+    // SHA-256 dedup key; `capturedAt` drives the radar's "last N days" query.
+    // Pure additive — no upgrade hook. See `lib/db/captured-items.ts` +
+    // `lib/capture/`.
+    this.version(97).stores({
+      capturedItems: "&id, capturedAt, kind, sourceApp, fingerprint",
+    })
+
+    // v98 — External Bridge inbound-write review queue (ADR-0008 Phase 4).
+    // MCP inbound-write tools land contributions here as `pending` drafts for
+    // operator review; nothing mutates live state. `status` powers the pending
+    // queue read; `createdAt` drives newest-first + cap trimming. Pure
+    // additive — no upgrade hook. See `lib/db/inbound-drafts.ts` +
+    // `lib/external-bridge/handlers/inbound.ts`.
+    this.version(98).stores({
+      inboundDrafts: "&id, kind, status, createdAt",
+    })
+
+    // v99 — Inbound gateway durable request log (ADR-0043). One row per
+    // inbound request (success, upstream failure, or middleware rejection),
+    // pushed from the `gateway://request-log` Tauri event. `at` drives the
+    // newest-first view + cap trimming; `status`/`model`/`keyId` power the
+    // filters. Pure additive — no upgrade hook. See
+    // `lib/db/gateway-request-log.ts` + `src-tauri/src/gateway/server.rs`.
+    this.version(99).stores({
+      gatewayRequestLog: "&id, at, status, model, keyId",
+    })
+
+    // v100 — Project-scoped RAG (workspace knowledge base). One row per sliced
+    // chunk of a `Project.knowledgeBase` file, with a pointer into the remote
+    // vector store (collection `cognia_project_{projectId}`). Project-scoped —
+    // listed in `PROJECT_SCOPED_TABLES` so `deleteProjectCascade` drops the
+    // local rows (and a best-effort remote collection drop). Indexes mirror
+    // `twinChunks`: `[projectId+fileId]` for per-file cascade on remove,
+    // `[projectId+createdAt]` for the cheap corpus-version signal. Pure additive
+    // — chunks are derived and repopulate on next ingest. See
+    // `lib/db/project-chunks.ts` + `lib/project-knowledge/`.
+    this.version(100).stores({
+      projectChunks:
+        "&id, projectId, fileId, vectorDocId, [projectId+fileId], [projectId+createdAt]",
+    })
+
+    // v101 — Optical-compaction archives (ADR-0063). One row per "optical"
+    // compaction boundary: the rendered image frames + token stats + the
+    // original pre-compaction transcript, so a boundary can be re-opened after a
+    // reload (the in-memory undo registry is empty then). `sessionId` powers the
+    // per-session viewer; `createdAt` (and the `[sessionId+createdAt]` compound)
+    // drive newest-first reads + cap trimming. Pure additive — no upgrade hook.
+    // See `lib/db/optical-archives.ts`.
+    this.version(101).stores({
+      opticalArchives: "&id, sessionId, createdAt, [sessionId+createdAt]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2133,6 +2247,9 @@ export class CogniaDB extends Dexie {
   syncCursors!: Table<SyncCursorRow, string>
   // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
   projects!: Table<Project, string>
+  // v100 — Project-scoped RAG chunks (workspace knowledge base). See
+  // `lib/db/project-chunks.ts` and `@/types/project-knowledge`.
+  projectChunks!: Table<ProjectChunk, string>
   // v65 — Autonomous long-term memory. See `lib/db/memories.ts`.
   memories!: Table<Memory, string>
   // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.
@@ -2145,13 +2262,19 @@ export class CogniaDB extends Dexie {
   pluginMarketplaceSources!: Table<PluginMarketplaceSourceRow, string>
   // v60 — models.dev catalog cache (singleton). See `lib/db/models-dev-catalog.ts`.
   modelsDevCatalog!: Table<ModelsDevCatalogRow, string>
+  // v93 — OpenRouter live-models catalog cache (singleton). See `lib/db/openrouter-catalog.ts`.
+  openrouterCatalog!: Table<OpenRouterCatalogRow, string>
   // v67 — Pet subsystem. See `lib/db/pet.ts` and `@/types/pet`.
   petProfile!: Table<PetProfile, "global">
   petCharacterBindings!: Table<PetCharacterBinding, string>
   petActivityLog!: Table<PetActivityRow, number>
   petAchievements!: Table<PetAchievementRecord, string>
+  // v94 — Pet item inventory (economy wave). See `lib/db/pet.ts`.
+  petInventory!: Table<PetInventoryRow, string>
   // v72 — Remote-control durable audit. See `lib/db/remote-control-audit.ts`.
   remoteControlAudit!: Table<RemoteControlAuditEntry, string>
+  // v92 — Remote-control run-status projection. See `lib/db/remote-control-run-status.ts`.
+  remoteControlRunStatus!: Table<RemoteControlRunStatusRow, string>
   // v73 — Pet Live2D models + asset blobs. See `lib/db/pet-models.ts`.
   petModels!: Table<PetModelRow, string>
   petModelFiles!: Table<PetModelFileRow, string>
@@ -2164,12 +2287,25 @@ export class CogniaDB extends Dexie {
   toolRoutes!: Table<import("@/types/routing/tool-route").ToolRouteRecord, string>
   // v77 — Pet conversation history. See `lib/db/pet-conversation.ts`.
   petConversation!: Table<PetConversationRow, number>
+  // v95 — Wiki Lint results (singleton per scope). See `lib/db/wiki-lint-results.ts`.
+  wikiLintResults!: Table<import("@/types/wiki").WikiLintResult, import("@/types/wiki").WikiScope>
+  // v96 — Attention Radar reports. See `lib/db/radar-reports.ts`.
+  radarReports!: Table<import("@/types/radar").RadarReport, string>
+  // v97 — Content capture store. See `lib/db/captured-items.ts`.
+  capturedItems!: Table<import("@/types/capture").CapturedItem, string>
+  // v98 — External Bridge inbound-write review queue. See `lib/db/inbound-drafts.ts`.
+  inboundDrafts!: Table<import("./inbound-drafts").InboundDraftRow, string>
+  // v99 — Inbound gateway durable request log. See `lib/db/gateway-request-log.ts`.
+  gatewayRequestLog!: Table<import("@/types/gateway").GatewayRequestLogRow, string>
+  // v101 — Optical-compaction archives (ADR-0063). See `lib/db/optical-archives.ts`.
+  opticalArchives!: Table<import("./optical-archives").OpticalArchiveRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
 // `*-types.ts` file) per `lib/db/CONVENTIONS.md`. They are re-exported here so
 // `@/lib/db/schema` remains the stable import surface for existing call sites.
 export type { ModelsDevCatalogRow } from "./models-dev-catalog"
+export type { OpenRouterCatalogRow } from "./openrouter-catalog"
 export type { SessionStateRow } from "./session-state"
 export type { TrustedPublisherRow } from "./trusted-publishers"
 export type { TtsProviderKeyRow } from "@/types/media/tts"
@@ -2181,6 +2317,7 @@ export type { AutomationAuditLogRow } from "@/lib/automation/audit"
 export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
 export type { PluginDexieMeta } from "./plugin-types"
 export type { EvalRunRow } from "./eval-runs"
+export type { OpticalArchiveRow, OpticalArchiveFrame } from "./optical-archives"
 export type { TraceAnnotationRow } from "./trace-annotations"
 export type { CalibrationItemRow } from "./calibration-items"
 export type { CalibrationRunRow, CalibrationVerdict } from "./calibration-runs"
@@ -2223,6 +2360,24 @@ export function getDb(): CogniaDB {
   }
   if (!_db) {
     _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME)
+    // Yield to another connection that needs to upgrade the schema. Plugin
+    // Dexie tables and second tabs open the same DB name at a higher version;
+    // without this handler our connection keeps holding the old version and
+    // the other one logs "Upgrade '…' blocked by other connection holding
+    // version N" and stalls. Closing + dropping the cache lets the upgrade
+    // proceed; the next getDb() re-opens at the new version.
+    _db.on("versionchange", () => {
+      closeCachedDb()
+    })
+    // The mirror case: WE are the connection trying to upgrade and something
+    // else is holding the old version open. Downgrade Dexie's default noisy
+    // console warning to an informative log; the open retries once the other
+    // connection closes (its own versionchange handler above will yield).
+    _db.on("blocked", () => {
+      console.info(
+        "[db] schema upgrade is waiting for another connection (tab or plugin) to close; it will proceed automatically."
+      )
+    })
     const seedTarget = _db
     // Kick off seeding once per process. We import lazily to avoid a circular
     // dependency: seed.ts imports the per-table CRUD modules which import this

@@ -115,15 +115,14 @@ test("shell_execute_advanced caps stdout when output is huge", async () => {
     cwd: TMP,
     timeoutMs: 10000,
   })
-  // execFile's maxBuffer makes Node throw ERR_CHILD_PROCESS_STDOUT_MAXBUFFER;
-  // we capture that as a non-zero exit with stderr content rather than a
-  // tool error. Either shape is acceptable so long as we don't crash.
-  if (r.isError) {
-    assert.match(r.content[0].text, /shell_execute_advanced/)
-  } else {
-    const data = decode(r)
-    assert.ok(data.stdoutTruncated || data.stderr || data.error)
-  }
+  // The capture ceiling (4 MB) is above the 64 KB display cap, so a successful
+  // verbose command FINISHES (exit 0) and headTruncate flags the displayed
+  // slice — no maxBuffer rejection mislabelling it as a failure.
+  assert.equal(r.isError, undefined)
+  const data = decode(r)
+  assert.equal(data.exitCode, 0)
+  assert.equal(data.stdoutTruncated, true)
+  assert.ok(data.stdout.length <= MAX_OUTPUT_BYTES + 64) // capped + marker
 })
 
 test("shell_execute_advanced clamps over-large timeoutMs", async () => {

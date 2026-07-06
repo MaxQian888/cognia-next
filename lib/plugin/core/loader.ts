@@ -5,7 +5,7 @@
 import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
 import type { Plugin, PluginDefinition, PluginManifest, PluginPermission } from "@/types/plugin"
-import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
+import { TimeoutError, withTimeout } from "@cognia/primitives"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import { loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
@@ -231,7 +231,10 @@ export class PluginLoader {
         const definition = await builtinRegistryEntry.load()
         this.loadedModules.set(manifest.id, {
           definition,
-          exports: { default: definition },
+          // Prefer the entry's full export namespace when provided (built-ins
+          // whose manifest declares connectors[] and expose a named factory);
+          // otherwise the default-only shape is enough for the common case.
+          exports: builtinRegistryEntry.moduleExports ?? { default: definition },
         })
         return definition
       }

@@ -24,6 +24,7 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 import { requestLoginQr, pollLoginStatus } from "@/lib/connectors/adapters/wechat-personal/auth"
+import { isTauri } from "@/lib/tauri"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
@@ -49,6 +50,7 @@ export function WeChatPersonalConfigDialog({
 }: WeChatPersonalConfigDialogProps) {
   const t = useTranslations("settings.connections.wechatPersonal")
   const isNew = row === null
+  const desktop = isTauri()
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
@@ -110,6 +112,10 @@ export function WeChatPersonalConfigDialog({
   }
 
   const handleGetQr = async () => {
+    if (!desktop) {
+      toast.error(t("desktopOnly"))
+      return
+    }
     setLoginStatus("idle")
     setQrImg(null)
     try {
@@ -226,9 +232,19 @@ export function WeChatPersonalConfigDialog({
         ) : null}
 
         <div className="flex flex-col items-start gap-3">
-          <Button type="button" variant="outline" size="sm" onClick={() => void handleGetQr()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handleGetQr()}
+            disabled={!desktop || saving}
+          >
             {loggedIn ? t("reLogin") : t("getQrButton")}
           </Button>
+
+          {!desktop ? (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{t("desktopOnly")}</p>
+          ) : null}
 
           {qrImg ? (
             <div className="space-y-2">

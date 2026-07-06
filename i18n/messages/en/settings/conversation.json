@@ -16,6 +16,40 @@
   },
   "model": "Model",
   "provider": "Provider",
+  "sidebar": {
+    "contentSearch": {
+      "description": "Also match text inside messages, not just conversation titles (slower).",
+      "heading": "Search message content",
+      "label": "Search inside messages"
+    },
+    "density": {
+      "description": "Tighten row spacing to fit more conversations.",
+      "heading": "Compact rows",
+      "label": "Use compact conversation rows"
+    },
+    "description": "Tune how the chat sidebar lists and searches conversations.",
+    "groupByDate": {
+      "description": "Group conversations into Today / Yesterday / Previous buckets.",
+      "heading": "Group by date",
+      "label": "Group conversations by date"
+    },
+    "preview": {
+      "description": "Show a second line with the latest message under each conversation.",
+      "heading": "Message preview",
+      "label": "Show message preview"
+    },
+    "resetWidth": {
+      "button": "Reset width",
+      "description": "Reset the draggable sidebar back to its default width.",
+      "heading": "Sidebar width"
+    },
+    "title": "Conversation sidebar",
+    "unread": {
+      "description": "Show a count badge on conversations with unread messages.",
+      "heading": "Unread badges",
+      "label": "Show unread badges"
+    }
+  },
   "streaming": {
     "description": "Stream assistant replies token-by-token as they are generated. Off shows each reply only when complete.",
     "heading": "Token-level streaming",

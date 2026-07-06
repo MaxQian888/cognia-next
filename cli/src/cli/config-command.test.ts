@@ -85,6 +85,40 @@ describe("configCommand", () => {
     expect(setConfigValue).toHaveBeenCalledWith("/h", "model", "claude-x")
   })
 
+  it("set providers.<id>.baseURL routes to setProviderBaseURL, not the flat writer", async () => {
+    const s = sink()
+    const setConfigValue = jest.fn()
+    const setProviderBaseURL = jest.fn().mockReturnValue("/h/config.json")
+    const code = await configCommand(
+      parseArgv(["config", "set", "providers.deepseek.baseURL", "https://relay.example.com/v1"]),
+      { out: s.out, home: "/h", setConfigValue, setProviderBaseURL }
+    )
+    expect(code).toBe(0)
+    expect(setProviderBaseURL).toHaveBeenCalledWith(
+      "/h",
+      "deepseek",
+      "https://relay.example.com/v1"
+    )
+    expect(setConfigValue).not.toHaveBeenCalled()
+    expect(s.stdout()).toMatch(/Set providers\.deepseek\.baseURL in \/h\/config\.json/)
+  })
+
+  it("set providers.<id>.baseURL surfaces writer validation errors", async () => {
+    const s = sink()
+    const code = await configCommand(
+      parseArgv(["config", "set", "providers.deepseek.baseURL", "not-a-url"]),
+      {
+        out: s.out,
+        home: "/h",
+        setProviderBaseURL: () => {
+          throw new Error("Invalid url")
+        },
+      }
+    )
+    expect(code).toBe(2)
+    expect(s.stderr()).toMatch(/Invalid url/)
+  })
+
   it("set without a value errors with exit 2", async () => {
     const s = sink()
     const code = await configCommand(parseArgv(["config", "set", "model"]), {

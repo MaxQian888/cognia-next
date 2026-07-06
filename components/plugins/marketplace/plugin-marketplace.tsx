@@ -35,7 +35,7 @@ import { PluginMarketplaceSkeleton } from "./plugin-marketplace-skeleton"
 import { PluginEmptyState } from "../_shared/plugin-empty-state"
 import { PluginErrorCard } from "../_shared/plugin-error-card"
 
-type Section = "all" | "featured" | "popular" | "recent" | "builtin"
+type Section = "all" | "featured" | "popular" | "recent" | "builtin" | "workspace" | "shared"
 
 const PAGE_SIZE = 12
 
@@ -121,6 +121,12 @@ export function PluginMarketplace() {
         return market.recent
       case "builtin":
         return builtinEntries
+      case "workspace":
+        // Plugins from GitHub marketplace catalogs the user/org added.
+        return sources.entries
+      case "shared":
+        // Plugins from the remote (shared) Cognia plugin registry.
+        return allResults
       default:
         // Merge GitHub marketplace-repo entries into the default browse view.
         return [...allResults, ...sources.entries]
@@ -163,6 +169,8 @@ export function PluginMarketplace() {
               <ToggleGroupItem value="popular">{t("sections.popular")}</ToggleGroupItem>
               <ToggleGroupItem value="recent">{t("sections.recent")}</ToggleGroupItem>
               <ToggleGroupItem value="builtin">{t("sections.builtin")}</ToggleGroupItem>
+              <ToggleGroupItem value="workspace">{t("sections.workspace")}</ToggleGroupItem>
+              <ToggleGroupItem value="shared">{t("sections.shared")}</ToggleGroupItem>
             </ToggleGroup>
           </ScrollShadowRow>
           <Button

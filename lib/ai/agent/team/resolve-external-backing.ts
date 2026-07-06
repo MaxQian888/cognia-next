@@ -40,14 +40,23 @@ export async function resolveTeammateExternalAgent(
   resolvedCaps: ResolvedCapabilities,
   teamCtx: TeamRunContext
 ): Promise<string | null> {
-  const presetId = resolveTeammatePresetId(teammate, resolvedCaps)
+  let presetId = resolveTeammatePresetId(teammate, resolvedCaps)
   if (!presetId) return null
+
+  const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+  const { createAgentFromPreset, isFromPreset, resolvePreferredCodexExecutablePresetId } =
+    await import("@/lib/ai/agent/external/presets")
+
+  // Codex ships two executable surfaces: the native `codex app-server` and the
+  // ACP shim (`@zed-industries/codex-acp`). Prefer the first-party app-server
+  // when the `codex` CLI is installed, exactly like the gallery's quick-add.
+  if (presetId === "codex") {
+    presetId = await resolvePreferredCodexExecutablePresetId()
+  }
 
   const cached = teamCtx.externalAgentInstances.get(presetId)
   if (cached) return cached
 
-  const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-  const { createAgentFromPreset, isFromPreset } = await import("@/lib/ai/agent/external/presets")
   const manager = getExternalAgentManager()
 
   // Reuse a live agent already created from this preset, else spawn one.

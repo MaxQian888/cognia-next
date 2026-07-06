@@ -11,6 +11,7 @@ import type {
   SearchResult,
 } from "@/lib/search/types"
 import { getEnabledProviders, isProviderConfigured } from "@/lib/search/types"
+import { getProviderHealth } from "./provider-health"
 import { log } from "./log"
 
 import { routeSearch } from "./search-type-router"
@@ -67,6 +68,12 @@ export async function search(
     providersToTry = enabledProviders
   }
 
+  // Circuit breaker: try healthy providers first, pushing still-open (recently
+  // failing) providers to the back so a hard-down provider doesn't cost a
+  // round-trip on every query. Identity when the breaker is disabled.
+  const health = getProviderHealth()
+  providersToTry = health.orderByHealth(providersToTry)
+
   let lastError: Error | null = null
 
   for (const providerConfig of providersToTry) {
@@ -78,11 +85,13 @@ export async function search(
         providerConfig,
         searchOptions
       )
+      health.recordResult(providerConfig.providerId, true)
       void recordUsage(providerConfig.providerId, Date.now() - startTime, true)
       return result
     } catch (error) {
       log.warn(`Search with ${providerConfig.providerId} failed`, { error })
       lastError = error instanceof Error ? error : new Error(String(error))
+      health.recordResult(providerConfig.providerId, false)
       void recordUsage(providerConfig.providerId, Date.now() - startTime, false)
 
       if (!fallbackEnabled) {
@@ -221,7 +230,12 @@ export async function aggregateSearch(
     throw new Error("All search providers failed")
   }
 
-  const aggregatedResults = mergeAndRankResults(successfulResults.flatMap((r) => r.results))
+  // Normalize each provider's scores to [0,1] before merging so one provider's
+  // scoring scale (e.g. Exa's cosine similarity vs. Tavily's relevance) doesn't
+  // dominate the ranking. Single-result / all-equal sets keep their raw scores.
+  const aggregatedResults = mergeAndRankResults(
+    successfulResults.flatMap((r) => normalizeScores(r.results))
+  )
 
   const answer = successfulResults.find((r) => r.answer)?.answer
 
@@ -236,6 +250,25 @@ export async function aggregateSearch(
     responseTime: Date.now() - startTime,
     totalResults: aggregatedResults.length,
   }
+}
+
+/**
+ * Min-max normalize a single provider's result scores into [0,1]. When every
+ * score is equal (including a single result) there's no meaningful spread, so
+ * the raw scores are kept — normalizing one value to 1 would discard the
+ * provider's own confidence signal.
+ */
+function normalizeScores(results: SearchResult[]): SearchResult[] {
+  if (results.length < 2) return results
+  let min = Infinity
+  let max = -Infinity
+  for (const r of results) {
+    if (r.score < min) min = r.score
+    if (r.score > max) max = r.score
+  }
+  const range = max - min
+  if (range <= 0) return results
+  return results.map((r) => ({ ...r, score: (r.score - min) / range }))
 }
 
 function mergeAndRankResults(results: SearchResult[]): SearchResult[] {

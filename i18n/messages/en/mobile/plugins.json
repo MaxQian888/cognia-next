@@ -1,8 +1,11 @@
 {
+  "backAria": "Back to Me",
   "disabled": "Disabled",
   "empty": "No plugins installed.",
   "enabled": "Enabled",
+  "intro": "Enable or disable installed plugins. Changes sync to your paired desktop when it next comes online.",
   "queueLabel": "Queued — desktop will apply when online.",
+  "title": "Plugins",
   "toggleAria": "Toggle plugin",
   "toggleFailed": "Toggle failed: {message}"
 }

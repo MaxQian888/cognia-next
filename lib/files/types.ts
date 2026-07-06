@@ -9,6 +9,8 @@ export interface WorkspaceEntry {
   absolutePath: string
   isDir: boolean
   size: number
+  /** Last-modified time in ms since epoch, or `null` when unavailable. */
+  mtimeMs: number | null
 }
 
 /** Raw shape coming back from the Rust side (snake_case fields). */
@@ -17,6 +19,7 @@ export interface RawWorkspaceEntry {
   absolute_path: string
   is_dir: boolean
   size: number
+  mtime_ms?: number | null
 }
 
 export function fromRawWorkspaceEntry(raw: RawWorkspaceEntry): WorkspaceEntry {
@@ -25,5 +28,31 @@ export function fromRawWorkspaceEntry(raw: RawWorkspaceEntry): WorkspaceEntry {
     absolutePath: raw.absolute_path,
     isDir: raw.is_dir,
     size: raw.size,
+    mtimeMs: raw.mtime_ms ?? null,
+  }
+}
+
+/** Metadata for a single workspace path (mirrors the Rust `WorkspaceStat`). */
+export interface WorkspaceStat {
+  exists: boolean
+  isDir: boolean
+  size: number
+  mtimeMs: number | null
+}
+
+/** Raw shape from the Rust `fs_stat_workspace_file` command (snake_case). */
+export interface RawWorkspaceStat {
+  exists: boolean
+  is_dir: boolean
+  size: number
+  mtime_ms?: number | null
+}
+
+export function fromRawWorkspaceStat(raw: RawWorkspaceStat): WorkspaceStat {
+  return {
+    exists: raw.exists,
+    isDir: raw.is_dir,
+    size: raw.size,
+    mtimeMs: raw.mtime_ms ?? null,
   }
 }

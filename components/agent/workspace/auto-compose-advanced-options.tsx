@@ -50,6 +50,10 @@ export interface AutoComposeOptions {
   requirePlanApproval: boolean
   ultracode: boolean
   clarifyEnabled: boolean
+  /** Opt into a council executor (cross-model consensus on one answer). */
+  consensusNeeded: boolean
+  /** Opt into a verification ensemble (N samples + synthesis). */
+  verificationNeeded: boolean
 }
 
 export const DEFAULT_AUTO_COMPOSE_OPTIONS: AutoComposeOptions = {
@@ -58,6 +62,8 @@ export const DEFAULT_AUTO_COMPOSE_OPTIONS: AutoComposeOptions = {
   requirePlanApproval: false,
   ultracode: false,
   clarifyEnabled: true,
+  consensusNeeded: false,
+  verificationNeeded: false,
 }
 
 export interface AutoComposeAdvancedOptionsProps {
@@ -150,6 +156,24 @@ export function AutoComposeAdvancedOptions({
           disabled={disabled}
           testId="auto-compose-clarify-toggle"
           onCheckedChange={(v) => patch({ clarifyEnabled: v })}
+        />
+        <OptionSwitch
+          label={t("consensusOption")}
+          checked={options.consensusNeeded}
+          disabled={disabled}
+          testId="auto-compose-consensus"
+          onCheckedChange={(v) =>
+            patch({ consensusNeeded: v, ...(v ? { verificationNeeded: false } : {}) })
+          }
+        />
+        <OptionSwitch
+          label={t("verifyOption")}
+          checked={options.verificationNeeded}
+          disabled={disabled}
+          testId="auto-compose-verify"
+          onCheckedChange={(v) =>
+            patch({ verificationNeeded: v, ...(v ? { consensusNeeded: false } : {}) })
+          }
         />
       </CollapsibleContent>
     </Collapsible>

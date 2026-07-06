@@ -9,7 +9,7 @@
 import { ChevronRightIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { THEME_COLOR_KEYS } from "@/lib/appearance"
 import { type ContrastAudit, isFlaggedPair } from "@/lib/appearance/contrast-audit"
 import { cn } from "@/lib/utils"

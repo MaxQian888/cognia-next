@@ -75,6 +75,76 @@ describe("runMemoryMaintenance", () => {
     expect(invalidated).toEqual(["a"]) // lowest-scored evicted to reach cap 1
   })
 
+  it("evicts global-scope overflow even when the session carries a characterId", async () => {
+    // Regression: global memories are stored with characterId: undefined, so a
+    // realistic listActive (mirroring listMemories) honors the characterId
+    // filter. Before the fix, maintenance passed the session's characterId into
+    // decay while the scope was global → the filter matched nothing → eviction
+    // silently no-oped and the per-scope cap was never enforced.
+    const invalidated: string[] = []
+    const globalRows = [
+      mem({ id: "a", scope: "global", importance: 1, lastAccessedAt: 1 }),
+      mem({ id: "b", scope: "global", importance: 9 }),
+    ]
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+      decayDeps: {
+        listActive: async (scope, characterId) =>
+          globalRows.filter((m) => m.scope === scope && m.characterId === characterId),
+        invalidate: async (id) => {
+          invalidated.push(id)
+        },
+      },
+    }
+    await runMemoryMaintenance(
+      {
+        transcript,
+        scope: "global",
+        characterId: "char-1", // a session bound to a character
+        provenance: "user",
+        config: cfg({ maxActivePerScope: 1 }),
+      },
+      deps
+    )
+    expect(invalidated).toEqual(["a"]) // lowest-scored evicted to reach cap 1
+  })
+
+  it("scopes decay to the character id for character-scope maintenance", async () => {
+    const invalidated: string[] = []
+    const rows = [
+      mem({ id: "g", scope: "global", importance: 1, lastAccessedAt: 1 }),
+      mem({
+        id: "c1",
+        scope: "character",
+        characterId: "char-1",
+        importance: 1,
+        lastAccessedAt: 1,
+      }),
+      mem({ id: "c2", scope: "character", characterId: "char-1", importance: 9 }),
+    ]
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+      decayDeps: {
+        listActive: async (scope, characterId) =>
+          rows.filter((m) => m.scope === scope && m.characterId === characterId),
+        invalidate: async (id) => {
+          invalidated.push(id)
+        },
+      },
+    }
+    await runMemoryMaintenance(
+      {
+        transcript,
+        scope: "character",
+        characterId: "char-1",
+        provenance: "user",
+        config: cfg({ maxActivePerScope: 1 }),
+      },
+      deps
+    )
+    expect(invalidated).toEqual(["c1"]) // only the character's overflow is touched
+  })
+
   it("expires stale non-pinned memories when maxIdleDays is set (access-time forgetting)", async () => {
     const NOW = 1_700_000_000_000
     const DAY = 24 * 60 * 60 * 1000

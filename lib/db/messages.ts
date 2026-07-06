@@ -7,6 +7,70 @@ function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+/** Max characters kept in the denormalized {@link ChatSession.lastMessagePreview}. */
+const PREVIEW_MAX = 120
+
+/** Concatenate the text of a message's `text` parts (ignores tool/file parts). */
+function messageText(parts: StoredMessage["parts"]): string {
+  let out = ""
+  for (const p of parts ?? []) {
+    if (p && typeof p === "object" && (p as { type?: unknown }).type === "text") {
+      const t = (p as { text?: unknown }).text
+      if (typeof t === "string") out += (out ? " " : "") + t
+    }
+  }
+  return out
+}
+
+/** One-line, length-capped preview derived from a message's text parts. */
+function previewOf(parts: StoredMessage["parts"]): string {
+  return messageText(parts).replace(/\s+/g, " ").trim().slice(0, PREVIEW_MAX)
+}
+
+export interface ContentSearchResult {
+  /** Session ids with at least one message whose text matched the needle. */
+  ids: Set<string>
+  /** True when the scan hit `limit` before exhausting the workspace's messages. */
+  truncated: boolean
+}
+
+/**
+ * Opt-in message-content search for the conversation sidebar. Scans up to
+ * `limit` messages (optionally scoped to a workspace via `projectId`) and
+ * returns the distinct session ids whose text parts contain `needle`
+ * (case-insensitive). Bounded by design — an unbounded scan of the whole
+ * `messages` store would be expensive — and reports `truncated` so the caller
+ * can surface "results may be incomplete" instead of silently dropping matches.
+ * `projectId` is matched with `.filter` (not `.where`) so it works without a
+ * dedicated index.
+ */
+export async function searchSessionsByContent(
+  needle: string,
+  opts: { projectId?: string; limit?: number } = {}
+): Promise<ContentSearchResult> {
+  const trimmed = needle.trim().toLowerCase()
+  const ids = new Set<string>()
+  if (!trimmed) return { ids, truncated: false }
+
+  const limit = opts.limit ?? 5000
+  const db = getDb()
+  const inScope = opts.projectId
+    ? (row: StoredMessage) => row.projectId === opts.projectId
+    : () => true
+  // Read one extra row to detect truncation without a second query.
+  const rows = (await db.messages
+    .filter(inScope)
+    .limit(limit + 1)
+    .toArray()) as StoredMessage[]
+  const truncated = rows.length > limit
+  const scanned = truncated ? rows.slice(0, limit) : rows
+  for (const row of scanned) {
+    if (ids.has(row.sessionId)) continue
+    if (messageText(row.parts).toLowerCase().includes(trimmed)) ids.add(row.sessionId)
+  }
+  return { ids, truncated }
+}
+
 /**
  * Per-session snapshot of the last *committed* persist: message id →
  * `{ ref, createdAt }`. `ref` is the in-memory `UIMessage` object reference at
@@ -77,6 +141,10 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
   // events for newly-arrived user messages once the rows are persisted.
   const newUserMessageIds: string[] = []
 
+  // The last message's resolved timestamp + parts, captured in the write loop
+  // so we can denormalize a preview onto the session row after commit.
+  let lastPreviewSource: { createdAt: number; parts: StoredMessage["parts"] } | null = null
+
   const snapshot = persistSnapshots.get(sessionId)
   // Built inside the transaction, applied to `persistSnapshots` only after the
   // write commits — so a thrown/aborted transaction never leaves the cache
@@ -131,6 +199,12 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
       // Record every message in the next snapshot regardless of whether we
       // rewrite its row, so the next persist can skip it.
       nextSnapshot.set(id, { ref: m, createdAt })
+
+      // Remember the trailing message (resolved createdAt = boundary key) for
+      // the post-commit preview denormalization below.
+      if (i === messages.length - 1) {
+        lastPreviewSource = { createdAt, parts: m.parts }
+      }
 
       // Skip rewriting a row whose in-memory reference is unchanged since the
       // last committed persist *and* that still exists on disk. The adapter
@@ -195,6 +269,29 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
     persistSnapshots.delete(sessionId)
   } else if (nextSnapshot) {
     persistSnapshots.set(sessionId, nextSnapshot)
+  }
+
+  // Denormalize a preview of the last message onto the session row so the
+  // sidebar can render a preview line without a per-row message query. Written
+  // only on a message *boundary* (a different `lastMessageAt`) — never on
+  // in-place streaming text growth, which would rewrite the row on every token
+  // batch and churn the sidebar's `useLiveQuery`. A long streamed reply's
+  // preview may therefore show an early chunk; it refreshes on the next message.
+  // Re-widen: `lastPreviewSource` is only ever assigned inside the transaction
+  // closure, so the compiler's outer-flow type stays at its `null` initializer.
+  const previewSource = lastPreviewSource as {
+    createdAt: number
+    parts: StoredMessage["parts"]
+  } | null
+  if (previewSource && session) {
+    const boundaryChanged =
+      session.lastMessageAt !== previewSource.createdAt || session.lastMessagePreview === undefined
+    if (boundaryChanged) {
+      await db.sessions.update(sessionId, {
+        lastMessagePreview: previewOf(previewSource.parts),
+        lastMessageAt: previewSource.createdAt,
+      })
+    }
   }
 
   if (newUserMessageIds.length > 0) {

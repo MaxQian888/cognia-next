@@ -391,22 +391,51 @@ export async function htmlToMarkdown(content: string): Promise<string> {
   // Remove unwanted elements
   $("script, style, noscript, nav, footer, header").remove()
 
-  let markdown = ""
+  // Inline elements FIRST — otherwise flattening a block via `.text()` strips
+  // the inner anchors/emphasis before their own pass runs (the historical bug:
+  // links inside <p> were lost). Innermost → outermost: code, strong, em, a.
+  $("code").each((_, el) => {
+    const text = $(el).text().trim()
+    $(el).replaceWith(`\`${text}\``)
+  })
+  $("strong, b").each((_, el) => {
+    const text = $(el).text().trim()
+    if (text) $(el).replaceWith(`**${text}**`)
+  })
+  $("em, i").each((_, el) => {
+    const text = $(el).text().trim()
+    if (text) $(el).replaceWith(`*${text}*`)
+  })
+  $("a").each((_, el) => {
+    const text = $(el).text().trim()
+    const href = $(el).attr("href") || ""
+    $(el).replaceWith(href && text ? `[${text}](${href})` : text)
+  })
+  // Images — WeChat/article bodies lazy-load via data-src.
+  $("img").each((_, el) => {
+    const alt = $(el).attr("alt")?.trim() || ""
+    const src = $(el).attr("src") || $(el).attr("data-src") || ""
+    $(el).replaceWith(src ? `![${alt}](${src})` : "")
+  })
+  // Line breaks.
+  $("br").each((_, el) => {
+    $(el).replaceWith("\n")
+  })
 
-  // Process headings
+  // Block elements.
   $("h1, h2, h3, h4, h5, h6").each((_, el) => {
     const level = parseInt((el as CheerioElement).tagName.charAt(1), 10)
     const text = $(el).text().trim()
     $(el).replaceWith(`\n${"#".repeat(level)} ${text}\n`)
   })
-
-  // Process paragraphs
-  $("p").each((_, el) => {
+  $("blockquote").each((_, el) => {
     const text = $(el).text().trim()
-    $(el).replaceWith(`\n${text}\n`)
+    if (text) $(el).replaceWith(`\n> ${text.split("\n").join("\n> ")}\n`)
   })
-
-  // Process lists
+  $("pre").each((_, el) => {
+    const text = $(el).text().replace(/\s+$/, "")
+    $(el).replaceWith(`\n\`\`\`\n${text}\n\`\`\`\n`)
+  })
   $("ul, ol").each((_, el) => {
     const isOrdered = (el as CheerioElement).tagName === "ol"
     $(el)
@@ -417,39 +446,19 @@ export async function htmlToMarkdown(content: string): Promise<string> {
         $(li).replaceWith(`${prefix} ${text}\n`)
       })
   })
-
-  // Process links
-  $("a").each((_, el) => {
+  $("p").each((_, el) => {
     const text = $(el).text().trim()
-    const href = $(el).attr("href") || ""
-    $(el).replaceWith(`[${text}](${href})`)
-  })
-
-  // Process bold/strong
-  $("strong, b").each((_, el) => {
-    const text = $(el).text().trim()
-    $(el).replaceWith(`**${text}**`)
-  })
-
-  // Process italic/em
-  $("em, i").each((_, el) => {
-    const text = $(el).text().trim()
-    $(el).replaceWith(`*${text}*`)
-  })
-
-  // Process code
-  $("code").each((_, el) => {
-    const text = $(el).text().trim()
-    $(el).replaceWith(`\`${text}\``)
+    $(el).replaceWith(`\n${text}\n`)
   })
 
   // Get final text
-  markdown = $("body").text() || $.root().text()
+  let markdown = $("body").text() || $.root().text()
 
   // Clean up whitespace
   markdown = markdown
-    .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim()
 
   return markdown

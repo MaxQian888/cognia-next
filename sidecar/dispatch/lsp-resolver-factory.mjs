@@ -29,7 +29,14 @@ export function makeLazyLspResolver({ sendOptions, log }) {
         installDir: lspConfig?.installDir,
         allowInstall: lspConfig?.autoInstall !== false,
         logger: { warn: (m) => log("warn", String(m)) },
-      }).catch(() => null)
+      }).catch((e) => {
+        // Surface the reason and clear the cached promise so a TRANSIENT
+        // failure (installer race, first-run download hiccup) doesn't disable
+        // LSP for the whole session — the next tool call retries.
+        log("warn", `LSP resolver init failed (will retry on next use): ${e?.message ?? e}`)
+        lspResolverPromise = null
+        return null
+      })
     }
     return lspResolverPromise
   }

@@ -13,9 +13,60 @@ import {
   extractJson,
   createLlmClient,
   createAnthropicLlmClient,
+  createTwinLanguageModel,
   readUsageDelta,
   type LlmConfig,
 } from "./llm"
+import { generateText } from "ai"
+import { createAzure } from "@ai-sdk/azure"
+import { createOpenAI } from "@ai-sdk/openai"
+
+jest.mock("ai", () => ({
+  generateText: jest.fn(async ({ model }) => ({
+    text: `ok:${model.__provider}`,
+    usage: { inputTokens: 1, outputTokens: 2 },
+    providerMetadata: {},
+  })),
+  streamText: jest.fn(({ model }) => ({
+    textStream: (async function* () {
+      yield `stream:${model.__provider}`
+    })(),
+    usage: Promise.resolve({ inputTokens: 3, outputTokens: 4 }),
+    providerMetadata: Promise.resolve({}),
+  })),
+}))
+
+function makeEndpointFamilyFactory(provider: string) {
+  return jest.fn((settings: unknown) => {
+    const make = (entrypoint: string, id: string) => ({
+      __provider: `${provider}.${entrypoint}`,
+      id,
+      settings,
+    })
+    const fn = Object.assign(
+      jest.fn((id: string) => make("bare", id)),
+      {
+        chat: jest.fn((id: string) => make("chat", id)),
+        responses: jest.fn((id: string) => make("responses", id)),
+      }
+    )
+    return fn
+  })
+}
+
+jest.mock("@ai-sdk/openai", () => ({
+  createOpenAI: makeEndpointFamilyFactory("openai"),
+}))
+
+jest.mock("@ai-sdk/azure", () => ({
+  createAzure: makeEndpointFamilyFactory("azure"),
+}))
+
+function lastGenerateTextCall() {
+  return (generateText as jest.Mock).mock.calls.at(-1)?.[0] as
+    | { model?: { __provider?: string; id?: string; settings?: unknown }; maxOutputTokens?: number }
+    | undefined
+}
 
 describe("extractJson", () => {
   it("parses a bare JSON object", () => {
@@ -119,6 +170,146 @@ describe("createLlmClient", () => {
 
   it("createAnthropicLlmClient is the same factory for back-compat", () => {
     expect(createAnthropicLlmClient).toBe(createLlmClient)
+  })
+
+  it("createTwinLanguageModel returns an ai-sdk model handle", async () => {
+    const model = await createTwinLanguageModel(baseConfig("openai"))
+    expect(model).toBeDefined()
+  })
+
+  describe("OpenAI endpoint-family dispatch", () => {
+    beforeEach(() => {
+      ;(generateText as jest.Mock).mockClear()
+      ;(createOpenAI as jest.Mock).mockClear()
+      ;(createAzure as jest.Mock).mockClear()
+    })
+
+    it("routes OpenAI-compatible provider ids to Chat Completions by default", async () => {
+      const client = createLlmClient({
+        provider: "openrouter" as LlmConfig["provider"],
+        model: "openrouter/auto",
+        apiKey: "sk-or-v1-test",
+        baseURL: "https://openrouter.ai/api/v1",
+      })
+
+      await expect(client.complete("hi")).resolves.toBe("ok:openai.chat")
+
+      expect(createOpenAI).toHaveBeenCalledWith({
+        apiKey: "sk-or-v1-test",
+        baseURL: "https://openrouter.ai/api/v1",
+      })
+      expect(lastGenerateTextCall()?.model).toMatchObject({
+        __provider: "openai.chat",
+        id: "openrouter/auto",
+      })
+    })
+
+    it("fills the catalog base URL for built-in OpenAI-compatible providers", async () => {
+      const client = createLlmClient({
+        provider: "openrouter" as LlmConfig["provider"],
+        model: "openrouter/auto",
+        apiKey: "sk-or-v1-test",
+      })
+
+      await expect(client.complete("hi")).resolves.toBe("ok:openai.chat")
+
+      expect(createOpenAI).toHaveBeenCalledWith({
+        apiKey: "sk-or-v1-test",
+        baseURL: "https://openrouter.ai/api/v1",
+      })
+      expect(lastGenerateTextCall()?.model?.__provider).toBe("openai.chat")
+    })
+
+    it("routes genuine OpenAI through Responses by default", async () => {
+      const client = createLlmClient({
+        provider: "openai",
+        model: "gpt-5.2",
+        apiKey: "sk-openai",
+      })
+
+      await expect(client.complete("hi")).resolves.toBe("ok:openai.responses")
+
+      expect(lastGenerateTextCall()?.model).toMatchObject({
+        __provider: "openai.responses",
+        id: "gpt-5.2",
+      })
+    })
+
+    it("honors apiFlavor when a compatible endpoint explicitly supports Responses", async () => {
+      const client = createLlmClient({
+        provider: "openrouter" as LlmConfig["provider"],
+        model: "gpt-5-proxy",
+        apiKey: "sk-proxy",
+        baseURL: "https://gateway.example/v1",
+        apiFlavor: "responses",
+      } as LlmConfig)
+
+      await expect(client.complete("hi")).resolves.toBe("ok:openai.responses")
+
+      expect(lastGenerateTextCall()?.model).toMatchObject({
+        __provider: "openai.responses",
+        id: "gpt-5-proxy",
+      })
+    })
+
+    it("routes Codex ChatGPT-login backends through Responses and forwards headers", async () => {
+      const headers = {
+        "ChatGPT-Account-Id": "acct_123",
+        "OpenAI-Beta": "responses=experimental",
+      }
+      const client = createLlmClient({
+        provider: "codex" as LlmConfig["provider"],
+        model: "gpt-5.2-codex",
+        apiKey: "chatgpt-bearer",
+        baseURL: "https://chatgpt.com/backend-api/codex",
+        headers,
+      } as LlmConfig)
+
+      await expect(client.complete("hi")).resolves.toBe("ok:openai.responses")
+
+      expect(createOpenAI).toHaveBeenCalledWith({
+        apiKey: "chatgpt-bearer",
+        baseURL: "https://chatgpt.com/backend-api/codex",
+        headers,
+      })
+      expect(lastGenerateTextCall()?.model?.__provider).toBe("openai.responses")
+    })
+
+    it("routes Azure through Chat by default and Responses when explicitly requested", async () => {
+      const auto = createLlmClient({
+        provider: "azure" as LlmConfig["provider"],
+        model: "gpt-5",
+        apiKey: "sk-azure",
+        baseURL: "https://example.openai.azure.com",
+      })
+      await expect(auto.complete("hi")).resolves.toBe("ok:azure.chat")
+
+      const responses = createLlmClient({
+        provider: "azure" as LlmConfig["provider"],
+        model: "gpt-5",
+        apiKey: "sk-azure",
+        baseURL: "https://example.openai.azure.com",
+        apiFlavor: "responses",
+      } as LlmConfig)
+      await expect(responses.complete("hi")).resolves.toBe("ok:azure.responses")
+
+      expect(createAzure).toHaveBeenCalledTimes(2)
+    })
+
+    it("maps maxTokens to the AI SDK v6 maxOutputTokens option", async () => {
+      const client = createLlmClient({
+        provider: "openai",
+        model: "gpt-5.2",
+        apiKey: "sk-openai",
+        defaultMaxTokens: 123,
+      })
+
+      await client.complete("hi")
+      expect(lastGenerateTextCall()?.maxOutputTokens).toBe(123)
+
+      await client.complete("hi", { maxTokens: 45 })
+      expect(lastGenerateTextCall()?.maxOutputTokens).toBe(45)
+    })
   })
 })
 

@@ -6,14 +6,17 @@
 
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion } from "motion/react"
+import {
+  Attachments,
+  type AttachmentData,
+  getMediaCategory,
+} from "@/components/ai-elements/attachments"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { FileIcon, XIcon } from "lucide-react"
 import { OcrMenu, isOcrEligible } from "./ocr-menu"
-
-const IMAGE_PREFIX = "image/"
 
 export interface AttachmentPreviewProps {
   /**
@@ -40,7 +43,9 @@ export function AttachmentPreview(props: AttachmentPreviewProps = {}) {
   const chips = (
     <AnimatePresence initial={false}>
       {attachments.files.map((f) => {
-        const isImage = (f.mediaType ?? "").startsWith(IMAGE_PREFIX)
+        // Drive image-vs-file off the shared ai-elements media classifier so the
+        // composer and the vendored primitive agree on what counts as an image.
+        const isImage = getMediaCategory(f as AttachmentData) === "image"
         const displayName = f.filename ?? t("fallbackName")
         const showOcr = !!props.onOcrSelect && isOcrEligible(f.mediaType ?? null)
         return (
@@ -91,6 +96,13 @@ export function AttachmentPreview(props: AttachmentPreviewProps = {}) {
       })}
     </AnimatePresence>
   )
+  // Bare: raw chips with no container so a parent bar (e.g. context-chip-bar)
+  // can lay attachments and references out in one flex flow. Standalone: wrap in
+  // the vendored `Attachments` container (inline variant) plus our padded row.
   if (props.bare) return chips
-  return <div className="flex flex-wrap gap-2 px-2 pt-2">{chips}</div>
+  return (
+    <Attachments variant="inline" className="px-2 pt-2">
+      {chips}
+    </Attachments>
+  )
 }

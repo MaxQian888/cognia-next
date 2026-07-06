@@ -3,10 +3,13 @@
  *
  * When the binary is launched with `COGNIA_ROLE=sidecar` (the CLI self-execs it
  * this way — see {@link resolveSpawnTarget}), it must run the Node sidecar host
- * instead of the CLI. The sidecar bundle (`sidecar/claude-host.mjs`) starts its
- * readline host loop as a top-level side effect on evaluation, so importing it
- * is enough to launch it — the open stdin interface then keeps the process
- * alive. Collaborators are injected so this unit-tests without a real import.
+ * instead of the CLI. We launch it by importing the sidecar bundle
+ * (`sidecar/claude-host.mjs`): that module starts its readline host loop as a
+ * top-level side effect, but ONLY when it recognises itself as the process
+ * entry point. Since we import it (rather than run it as `argv[1]`), its argv
+ * check would miss — so it also treats `COGNIA_ROLE === "sidecar"` as an entry
+ * signal. The open stdin interface then keeps the process alive. Collaborators
+ * are injected so this unit-tests without a real import.
  */
 
 import { pathToFileURL } from "node:url"

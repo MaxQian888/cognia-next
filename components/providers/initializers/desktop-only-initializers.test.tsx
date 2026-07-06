@@ -16,9 +16,15 @@ jest.mock("@/lib/native/utils", () => ({
   isTauri: () => isTauriMock(),
 }))
 
+let mockPetRole: "main" | "web" | "overlay" | "popup" = "main"
+jest.mock("@/lib/pet/window-role", () => ({
+  getPetWindowRole: () => mockPetRole,
+}))
+
 describe("DesktopOnlyInitializers", () => {
   beforeEach(() => {
     isTauriMock.mockReset()
+    mockPetRole = "main"
   })
 
   it("renders nothing on web (isTauri() === false)", async () => {
@@ -38,6 +44,21 @@ describe("DesktopOnlyInitializers", () => {
     })
     // Mirrors the count of gated children in the component — a guard against
     // silently dropping one when the list changes.
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(13)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(14)
   })
+
+  it.each(["overlay", "popup"] as const)(
+    "renders nothing in the %s pet window even on Tauri",
+    async (role) => {
+      isTauriMock.mockReturnValue(true)
+      mockPetRole = role
+      let container!: HTMLElement
+      await act(async () => {
+        container = render(<DesktopOnlyInitializers />).container
+      })
+      // The bundled initializers are all main-window concerns; the pet windows
+      // must not run them (e.g. the character-pack fs scan the caps deny).
+      expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(0)
+    }
+  )
 })

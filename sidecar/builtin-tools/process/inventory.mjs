@@ -174,7 +174,17 @@ export function parseCsvRow(line) {
   return out
 }
 
+// Per-row cap on the (often very long) command line. At a list `limit` of 100
+// rows an uncapped cmdLine — full argv of every process — can dominate the
+// result; clipping each keeps the listing token-frugal while still showing the
+// program and leading args.
+export const MAX_CMDLINE_CHARS = 200
+
 export function formatProcess(proc) {
+  const cmdLine =
+    typeof proc.cmdLine === "string" && proc.cmdLine.length > MAX_CMDLINE_CHARS
+      ? `${proc.cmdLine.slice(0, MAX_CMDLINE_CHARS)}…`
+      : proc.cmdLine
   return {
     pid: proc.pid,
     name: proc.name,
@@ -182,7 +192,7 @@ export function formatProcess(proc) {
     memoryMB:
       typeof proc.memoryBytes === "number" ? Math.round(proc.memoryBytes / 1024 / 1024) : undefined,
     cpuPercent: proc.cpuPercent,
-    cmdLine: proc.cmdLine,
+    cmdLine,
   }
 }
 

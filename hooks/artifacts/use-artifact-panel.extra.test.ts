@@ -162,6 +162,52 @@ describe("useArtifactPanelState — extra coverage", () => {
     void a
   })
 
+  it("marks html/svg as openable in a new tab and exposes the overflow action", () => {
+    makeArtifact() // html
+    const { result } = renderHook(() => useArtifactPanelState())
+    expect(result.current.isOpenableInNewTab).toBe(true)
+    expect(result.current.overflowActions).toContain("openInNewTab")
+  })
+
+  it("handleOpenInNewTab opens a blob URL and revokes it after a grace period", () => {
+    jest.useFakeTimers()
+    makeArtifact()
+    const createObjectURL = jest.fn(() => "blob:mock")
+    const revokeObjectURL = jest.fn()
+    Object.assign(URL, { createObjectURL, revokeObjectURL })
+    const open = jest.fn()
+    window.open = open as unknown as typeof window.open
+
+    const { result } = renderHook(() => useArtifactPanelState())
+    act(() => result.current.handleOpenInNewTab())
+    expect(createObjectURL).toHaveBeenCalled()
+    expect(open).toHaveBeenCalledWith("blob:mock", "_blank", "noopener,noreferrer")
+    act(() => jest.advanceTimersByTime(10001))
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock")
+    jest.useRealTimers()
+  })
+
+  it("code artifacts are not openable in a new tab", () => {
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "code",
+      title: "Snippet",
+      content: "x=1",
+      language: "python",
+    })
+    const { result } = renderHook(() => useArtifactPanelState())
+    expect(result.current.isOpenableInNewTab).toBe(false)
+    expect(result.current.overflowActions).not.toContain("openInNewTab")
+  })
+
+  it("setViewMode accepts the split mode", () => {
+    makeArtifact()
+    const { result } = renderHook(() => useArtifactPanelState())
+    act(() => result.current.setViewMode("split"))
+    expect(result.current.viewMode).toBe("split")
+  })
+
   it("buildReturnContext is exposed via handleOpenInCanvas with no active artifact", () => {
     // Without an active artifact, handleOpenInCanvas is a no-op.
     const { result } = renderHook(() => useArtifactPanelState())

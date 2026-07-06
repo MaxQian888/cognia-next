@@ -4,7 +4,9 @@ import {
   COMPACT_HANDOFF_SNIPPET,
   DEFAULT_KEEP_RECENT,
   DEFAULT_MAX_SUMMARY_TOKENS,
+  POST_COMPACTION_RECOVERY_SNIPPET,
   buildCompactionSummaryPrompt,
+  buildPostCompactionRecovery,
   resolveCompactInstructions,
   resolveCompaction,
 } from "./compact-instructions"
@@ -46,6 +48,26 @@ describe("compact-instructions", () => {
   it("snippet mentions interruption awareness", () => {
     expect(COMPACT_HANDOFF_SNIPPET.toLowerCase()).toContain("assume")
     expect(COMPACT_HANDOFF_SNIPPET.toLowerCase()).toContain("compaction")
+  })
+
+  describe("buildPostCompactionRecovery", () => {
+    it("returns the recovery snippet with no durable instructions", () => {
+      expect(buildPostCompactionRecovery()).toBe(POST_COMPACTION_RECOVERY_SNIPPET)
+      expect(buildPostCompactionRecovery({ durableInstructions: "  " })).toBe(
+        POST_COMPACTION_RECOVERY_SNIPPET
+      )
+    })
+
+    it("appends durable instructions when provided", () => {
+      const out = buildPostCompactionRecovery({ durableInstructions: "Keep the kanban in sync" })
+      expect(out.startsWith(POST_COMPACTION_RECOVERY_SNIPPET)).toBe(true)
+      expect(out).toContain("Instructions still in effect:\nKeep the kanban in sync")
+    })
+
+    it("re-asserts summary authority", () => {
+      expect(POST_COMPACTION_RECOVERY_SNIPPET.toLowerCase()).toContain("authoritative")
+      expect(POST_COMPACTION_RECOVERY_SNIPPET.toLowerCase()).toContain("compaction")
+    })
   })
 
   describe("resolveCompaction", () => {
@@ -150,6 +172,16 @@ describe("compact-instructions", () => {
         resolveCompaction({ appComp: { compressionModel: { maxSummaryTokens: 0 } } })
           .maxSummaryTokens
       ).toBe(DEFAULT_MAX_SUMMARY_TOKENS)
+    })
+
+    it("threads the optical shape/budget knobs to the wire (app override then default)", () => {
+      // App-level optical config wins.
+      const r = resolveCompaction({
+        appComp: { optical: { size: 512, variant: "bw", maxFrames: 2 } },
+      })
+      expect(r.optical).toEqual({ size: 512, variant: "bw", maxFrames: 2 })
+      // Absent → the documented default block.
+      expect(resolveCompaction({}).optical).toBe(DEFAULT_COMPRESSION_SETTINGS.optical)
     })
   })
 })

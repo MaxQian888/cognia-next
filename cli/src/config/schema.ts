@@ -19,8 +19,17 @@
 import { z } from "zod"
 import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@/lib/claude/types"
 
-/** AI SDK protocol families the sidecar's dispatch table understands. */
-export const RESOLVER_PROTOCOLS = ["openai", "anthropic", "google", "mistral", "cohere"] as const
+/** AI SDK protocol families the sidecar's dispatch table understands. Mirrors
+ *  BUILTIN_PROTOCOL_NAMES in sidecar/dispatch/protocol-adapters/provider-protocol.mjs. */
+export const RESOLVER_PROTOCOLS = [
+  "openai",
+  "anthropic",
+  "google",
+  "mistral",
+  "cohere",
+  "azure",
+  "bedrock",
+] as const
 
 /** SDK permission modes, mirrored from `SendOptions["permissionMode"]`. */
 export const PERMISSION_MODES = [
@@ -168,6 +177,30 @@ export const clipboardSchema = z
   .strict()
 export type ClipboardConfig = z.infer<typeof clipboardSchema>
 
+/** How the `command` jumps to a line/col when opening a file. Drives the arg
+ * shape in `tui/runtime/editor.describeEditor` for an editor not in its table. */
+export const EDITOR_GOTO_FORMATS = ["vscode", "sublime", "vim", "jetbrains", "none"] as const
+export type EditorGotoFormat = (typeof EDITOR_GOTO_FORMATS)[number]
+
+/**
+ * Preferred external editor for `/open` and the clickable file paths in tool
+ * cards. Absent ⇒ auto-detected at use time (`$VISUAL` / `$EDITOR` /
+ * `TERM_PROGRAM` / a PATH probe). A bare string in `config.json` is sugar for
+ * `{ command: <string> }`; the object form additionally allows extra flags and
+ * an explicit goto format for an editor the detector doesn't know.
+ */
+export const editorConfigSchema = z
+  .object({
+    /** The editor launcher command (e.g. `code`, `cursor`, `subl`, `nvim`). */
+    command: z.string().min(1).optional(),
+    /** Extra flags inserted before the file argument. */
+    args: z.array(z.string()).optional(),
+    /** Override how a line/col is passed for an unknown `command`. */
+    gotoFormat: z.enum(EDITOR_GOTO_FORMATS).optional(),
+  })
+  .strict()
+export type EditorConfig = z.infer<typeof editorConfigSchema>
+
 /**
  * Overridable user-facing notice strings for the clipboard / copy commands.
  * The CLI's Ink TUI has no next-intl wiring, so these live in config: every key
@@ -249,6 +282,21 @@ export const mascotSchema = z
 export type MascotConfig = z.infer<typeof mascotSchema>
 
 /**
+ * Digital-twin retrieval config. The CLI has no local twin data — retrieval
+ * round-trips through the running desktop app's CLI bridge and returns
+ * REDACTED prompt segments. `characterId` names the twin-bound GUI
+ * character whose twin should ground the CLI's turns.
+ */
+export const twinCliSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    characterId: z.string().optional(),
+  })
+  .strict()
+
+export type TwinCliConfig = z.infer<typeof twinCliSchema>
+
+/**
  * Transcript rendering preferences — how tool/file output is shown in the
  * transcript and the full-output pager. Every field is optional; absent values
  * fall back to {@link RENDER_DEFAULTS}, which reproduces the historic look.
@@ -273,6 +321,11 @@ export const renderConfigSchema = z
      * (smooths bursty model output). Only active on an interactive TTY; ignored
      * in CI / non-interactive output. */
     streamReveal: z.boolean().optional(),
+    /** Fullscreen only: let a mouse click on a collapsed tool/thinking cell
+     * toggle just that cell (instead of the global Ctrl+T). Enabling it keeps
+     * every cell individually measured, which turns off context-burst folding —
+     * hence opt-in (default off). */
+    clickToExpand: z.boolean().optional(),
   })
   .strict()
 
@@ -290,6 +343,7 @@ export const RENDER_DEFAULTS: ResolvedRenderConfig = {
   fileLineNumbers: true,
   verboseByDefault: false,
   streamReveal: true,
+  clickToExpand: false,
 }
 
 /** Fill missing render-pref fields with {@link RENDER_DEFAULTS}. */
@@ -414,6 +468,26 @@ const customLimitsSourceSchema = z
   .strict()
 
 /**
+ * Per-subagent provider/model override. Keyed by subagent id in
+ * {@link cliConfigFileSchema.subagentModels}. Either field may be set on its
+ * own: `model` alone swaps the model within the inherited provider; `provider`
+ * alone re-routes to another configured provider (taking its default model).
+ * Both empty would be meaningless, so the entry is required to carry ≥1 field —
+ * the `/agents models` panel deletes the entry entirely on "inherit".
+ */
+export const subagentModelOverrideSchema = z
+  .object({
+    provider: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((v) => Boolean(v.provider || v.model), {
+    message: "subagent model override needs a provider or model",
+  })
+
+export type SubagentModelOverride = z.infer<typeof subagentModelOverrideSchema>
+
+/**
  * The `config.json` shape. Every field is optional — an empty file is valid and
  * resolves entirely from defaults + env + flags.
  */
@@ -448,14 +522,31 @@ export const cliConfigFileSchema = z
      * provider configured (otherwise it returns a clean "no provider" error).
      */
     webTools: z.boolean().optional(),
+    /**
+     * Opt-in automatic tier routing (default off). When on, a one-shot/headless
+     * `run` scores the prompt's difficulty and routes it to the cheapest capable
+     * tier alias (fast/balanced/powerful), seeded from the enabled providers.
+     * See `lib/routing/auto-tier.ts`; toggle via `/route auto on|off`.
+     */
+    autoRoute: z.boolean().optional(),
     /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
     skillTool: z.boolean().optional(),
     /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
     slashCommandTool: z.boolean().optional(),
+    /**
+     * Per-subagent provider/model overrides (subagent id → {@link
+     * SubagentModelOverride}), edited from the `/agents models` panel. Overlaid
+     * onto a discovered subagent's definition before dispatch, so it wins over
+     * the agent's markdown frontmatter `model`/`provider`. Absent ids inherit
+     * (frontmatter, else the active provider's default model).
+     */
+    subagentModels: z.record(z.string(), subagentModelOverrideSchema).optional(),
     /** Customizable footer: which segments to show, in order, and the palette. */
     statusBar: statusBarSchema.optional(),
     /** Terminal mascot (enabled + style). Absent ⇒ shown in the `clawd` style. */
     mascot: mascotSchema.optional(),
+    /** Digital-twin retrieval over the desktop CLI bridge. Absent ⇒ off. */
+    twin: twinCliSchema.optional(),
     /** Output style ("response mode"). Appends a style instruction to the system
      * prompt. Absent / `default` ⇒ no change. */
     outputStyle: z.enum(OUTPUT_STYLES).optional(),
@@ -529,9 +620,25 @@ export const cliConfigFileSchema = z
      * the transcript; `"select"` keeps native click-drag text selection (losing
      * wheel-scroll). Only meaningful in the fullscreen layout on a TTY. */
     mouse: z.enum(MOUSE_MODES).optional(),
+    /** Whether the TUI updates the terminal window/tab title to reflect live
+     * session state (working / needs input / background activity / idle). Absent
+     * ⇒ enabled; set `false` to leave the terminal title untouched. */
+    terminalTitle: z.boolean().optional(),
+    /** Whether to ring the terminal bell when a turn finishes (so you can tab
+     * away during a long run and be alerted). Absent ⇒ off; only fires for turns
+     * that ran long enough to be worth a notification. */
+    notify: z.boolean().optional(),
+    /** Whether turn/background-run completion (and errors) also fire an OSC
+     * desktop notification, not just the terminal bell — so an unfocused terminal
+     * still pops a native alert. Only takes effect when `notify` is on; set
+     * `false` to keep the bell but suppress desktop popups. Absent ⇒ enabled. */
+    desktopNotifications: z.boolean().optional(),
     /** Clipboard OSC 52 strategy for `/copy` & the copy keybinding. Absent ⇒
      * `"auto"` (native helper locally, OSC 52 over SSH). */
     clipboard: clipboardSchema.optional(),
+    /** Preferred external editor for `/open` and clickable tool-card paths. A
+     * bare string is sugar for `{ command }`. Absent ⇒ auto-detected. */
+    editor: z.union([z.string().min(1), editorConfigSchema]).optional(),
     /** Overridable copy/clipboard notice strings. Absent keys ⇒
      * {@link NOTICE_DEFAULTS}. */
     notices: noticesSchema.optional(),
@@ -568,6 +675,17 @@ export const cliConfigFileSchema = z
      * excluded (they self-bound). Absent ⇒ 120000. Set `0` to disable.
      */
     toolExecutionTimeoutMs: z.number().int().min(0).optional(),
+    /**
+     * Idle (read) timeout for a DISPATCHED subagent turn, in milliseconds. A
+     * subagent runs autonomously and several can fan out concurrently over the
+     * single sidecar, so the provider gap between tool legs routinely exceeds the
+     * interactive {@link streamIdleTimeoutMs} (60s) under load — which spuriously
+     * killed heavy subagents. This bound is therefore far more generous and only
+     * catches a genuinely dead stream; the subagent is really bounded by
+     * `toolExecutionTimeoutMs` + the step/turn budget. Absent ⇒ 300000. Set `0`
+     * to disable.
+     */
+    subagentStreamIdleTimeoutMs: z.number().int().min(0).optional(),
   })
   .strict()
 
@@ -622,10 +740,16 @@ export interface ResolvedConfig {
   devPluginsDir?: string
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
+  /** Opt-in automatic tier routing for one-shot/headless runs. Default off. */
+  autoRoute?: boolean
   /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
   skillTool?: boolean
   /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
   slashCommandTool?: boolean
+  /** Per-subagent provider/model overrides (subagent id → override), edited from
+   * the `/agents models` panel. Overlaid onto a discovered subagent's definition
+   * before dispatch. Absent ids inherit (frontmatter, else active default). */
+  subagentModels?: Record<string, SubagentModelOverride>
   /** Customizable footer config (segments + theme). Absent = default layout. */
   statusBar?: StatusBarConfig
   /** Terminal mascot config (enabled + style). Absent = shown in `clawd` style. */
@@ -672,12 +796,29 @@ export interface ResolvedConfig {
   /** Fullscreen mouse model (`select` / `scroll`). Absent ⇒ `scroll` (wheel
    * scrolls the transcript). Only meaningful in the fullscreen layout on a TTY. */
   mouse?: MouseMode
+  /** Whether the TUI updates the terminal window/tab title with live session
+   * state. Absent ⇒ enabled; `false` leaves the terminal title untouched. */
+  terminalTitle?: boolean
+  /** Ring the terminal bell when a turn finishes. Absent ⇒ off. */
+  notify?: boolean
+  /** Also fire an OSC desktop notification on completion/error (needs `notify`
+   * on). Absent ⇒ enabled; `false` keeps the bell but suppresses desktop popups. */
+  desktopNotifications?: boolean
   /** Clipboard OSC 52 strategy (`auto` / `always` / `never`). Absent ⇒ `auto`
    * (native helper locally, OSC 52 escape over SSH). */
   clipboard?: ClipboardConfig
+  /** Preferred external editor (normalized to the object form). Absent ⇒
+   * auto-detected at use time by `tui/runtime/editor.detectEditor`. */
+  editor?: EditorConfig
   /** Overridable copy/clipboard notice strings. Absent ⇒ {@link NOTICE_DEFAULTS};
    * resolved per-use via {@link resolveNotices}. */
   notices?: NoticesConfig
+  /** Digital-twin retrieval over the desktop CLI bridge. When `enabled` and
+   * the desktop app is running, each turn fetches the REDACTED twin context
+   * for `characterId` and injects it into the prompt; when the desktop is
+   * unreachable the turn proceeds without twin context (one notice per
+   * session). Absent ⇒ off. */
+  twin?: TwinCliConfig
   /** Idle (read) timeout for a streaming turn, in ms. Absent ⇒ 60000; `0`
    * disables. Guards against a provider stream that stalls mid-turn. */
   streamIdleTimeoutMs?: number
@@ -693,6 +834,15 @@ export interface ResolvedConfig {
    * otherwise hang the whole turn until the wall-clock. Exec tools self-bound
    * and are excluded. Absent ⇒ 120000; `0` disables. */
   toolExecutionTimeoutMs?: number
+  /** Idle (read) timeout (ms) for a DISPATCHED subagent turn. A subagent is
+   * autonomous (no user watching) and several can fan out concurrently over the
+   * one sidecar — so the gap between a tool result and the model's next token
+   * routinely exceeds the interactive 60s idle under provider load, which
+   * spuriously killed heavy subagents ("stream idle for 60000ms"). This idle is
+   * therefore far more generous than {@link streamIdleTimeoutMs}; the subagent is
+   * really bounded by `toolExecutionTimeoutMs` + the step/turn budget, with this
+   * only catching a genuinely dead stream. Absent ⇒ 300000; `0` disables. */
+  subagentStreamIdleTimeoutMs?: number
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */
@@ -711,4 +861,5 @@ export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
   streamIdleTimeoutMs: 60_000,
   aiSdkMaxSteps: 256,
   toolExecutionTimeoutMs: 120_000,
+  subagentStreamIdleTimeoutMs: 300_000,
 }

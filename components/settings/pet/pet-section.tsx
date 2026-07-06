@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/stores/settings"
 import { resetPet } from "@/lib/db/pet"
-import { isTauri } from "@/lib/platform/detect"
+import { CapabilityGate } from "@/components/platform/capability-gate"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 import { SettingsCard } from "../common/settings-section"
 import { PetAppearanceControls } from "@/components/pet/settings/pet-appearance-controls"
@@ -21,6 +21,7 @@ import { PetInteractionControls } from "@/components/pet/settings/pet-interactio
 import { PetSoundControls } from "@/components/pet/settings/pet-sound-controls"
 import { PetCareControls } from "@/components/pet/settings/pet-care-controls"
 import { PetDesktopControls } from "@/components/pet/settings/pet-desktop-controls"
+import { PetTwinAwarenessControls } from "@/components/pet/settings/pet-twin-awareness-controls"
 
 export function PetSection() {
   const t = useTranslations("settings.pet")
@@ -52,7 +53,12 @@ export function PetSection() {
       <PetInteractionControls pet={pet} patch={patch} />
       <PetSoundControls pet={pet} patch={patch} />
       <PetCareControls pet={pet} patch={patch} />
-      {isTauri() && <PetDesktopControls pet={pet} patch={patch} />}
+      {/* The overlay window is bound to the local desktop shell — a
+          server-backed profile can't host it (ADR-0059 F5). */}
+      <CapabilityGate profiles={["desktop"]}>
+        <PetDesktopControls pet={pet} patch={patch} />
+      </CapabilityGate>
+      <PetTwinAwarenessControls pet={pet} patch={patch} />
 
       <div className="flex items-center justify-between gap-4 border-t pt-4">
         <div className="space-y-0.5">

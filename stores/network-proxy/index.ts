@@ -24,7 +24,11 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { isTauri } from "@/lib/tauri"
 import { buildProxyUrl, isProxyActive } from "@/lib/network/proxy-config"
 import { loggers } from "@/lib/logging"
-import { DEFAULT_NETWORK_PROXY_SETTINGS, type NetworkProxySettings } from "@/types/network/proxy"
+import {
+  DEFAULT_NETWORK_PROXY_SETTINGS,
+  type NetworkProxySettings,
+  type ProxyCandidate,
+} from "@/types/network/proxy"
 
 const log = loggers.network
 
@@ -167,4 +171,41 @@ export async function applyProxyToRust(cfg?: NetworkProxySettings | null): Promi
 /** Test-only — clears the dedupe cache so subsequent applyProxyToRust pushes. */
 export function resetApplyProxyDedupeForTesting(): void {
   lastPushedSerialized = null
+}
+
+// ---------------------------------------------------------------------------
+// Startup auto-detect — makes `mode: "auto"` a live setting, not a label.
+// ---------------------------------------------------------------------------
+
+/**
+ * When the persisted proxy mode is `auto`, re-run local detection at boot and
+ * adopt the top candidate if its host/port differs from what's stored. Proxy
+ * clients (Clash, V2Ray, …) can pick a different port between launches, so an
+ * `auto` config that was pinned once would otherwise silently break.
+ *
+ * No-op outside Tauri, when mode isn't `auto`, or when detection finds nothing
+ * (the previously-stored host is left untouched rather than wiped). Never
+ * throws — a failed probe just leaves the config as-is.
+ */
+export async function maybeAutoDetectProxy(): Promise<void> {
+  if (!isTauri()) return
+  const cfg = getNetworkProxy()
+  if (cfg.mode !== "auto") return
+  try {
+    const candidates = await invoke<ProxyCandidate[]>("proxy_detect")
+    const best = candidates?.[0]
+    if (!best) return
+    if (best.host === cfg.host && best.port === cfg.port) return
+    const next: NetworkProxySettings = {
+      ...cfg,
+      protocol: best.kind === "socks5" ? "socks5" : "http",
+      host: best.host,
+      port: best.port,
+      lastDetectedAt: Date.now(),
+    }
+    await useSettingsStore.getState().save({ networkProxy: next })
+    log.debug(`Auto-detect adopted proxy ${best.host}:${best.port}`)
+  } catch (err) {
+    log.warn(`Auto-detect failed: ${String(err)}`)
+  }
 }

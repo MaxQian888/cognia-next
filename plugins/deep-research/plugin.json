@@ -14,7 +14,8 @@
   },
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
   },
   "permissions": ["network:fetch", "secrets:read", "secrets:write"],
   "activationEvents": ["startup"],

@@ -9,21 +9,24 @@
 // Rust side emits nothing for them). The message list swaps these markers in for
 // the normal MessageRenderer so they carry no avatar / actions / usage chrome.
 
+import type { ComponentType } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, WebhookIcon } from "lucide-react"
+import {
+  ChevronRightIcon,
+  FileInputIcon,
+  ShieldXIcon,
+  TriangleAlertIcon,
+  type LucideProps,
+} from "lucide-react"
 import type { UIMessage } from "ai"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { isKnownHookEvent } from "@/lib/claude/hooks/event-catalog"
+import type { HookNoticePartData } from "@/lib/claude/hooks"
 import { cn } from "@/lib/utils"
 
-export interface HookNoticePartData {
-  type: "hook-notice"
-  event: string
-  toolName?: string
-  outcome: "blocked" | "context" | "warning"
-  block?: string
-  additionalContext?: string
-  warnings: string[]
-}
+// Canonical home is `lib/claude/hooks.ts`; re-exported here so existing
+// consumers (message-renderer, tests) keep importing it from the renderer.
+export type { HookNoticePartData } from "@/lib/claude/hooks"
 
 /** True when a message is a synthetic hook-notice marker. */
 export function isHookNoticeMessage(message: UIMessage): boolean {
@@ -34,30 +37,34 @@ export function isHookNoticeMessage(message: UIMessage): boolean {
   )
 }
 
-// Status-keyed colours for the left bar + the outcome chip.
-const OUTCOME_STYLES: Record<HookNoticePartData["outcome"], { bar: string; chip: string }> = {
-  blocked: { bar: "bg-destructive", chip: "text-destructive" },
-  context: { bar: "bg-primary", chip: "text-primary" },
-  warning: { bar: "bg-amber-500", chip: "text-amber-600 dark:text-amber-400" },
+// Status-keyed visuals: a leading icon (coloured), the left status bar, and the
+// outcome pill. The icon makes the outcome legible at a glance before reading.
+interface OutcomeStyle {
+  bar: string
+  icon: string
+  pill: string
+  Icon: ComponentType<LucideProps>
 }
-
-// Lifecycle events we ship a localized display name for; anything else falls
-// back to the raw event identifier (a stable proper noun, e.g. "PreToolUse").
-const KNOWN_EVENTS = new Set([
-  "PreToolUse",
-  "PostToolUse",
-  "PostToolUseFailure",
-  "UserPromptSubmit",
-  "PermissionRequest",
-  "PermissionDenied",
-  "SessionStart",
-  "SessionEnd",
-  "Stop",
-  "StopFailure",
-  "SubagentStop",
-  "Notification",
-  "PostCompact",
-])
+const OUTCOME_STYLES: Record<HookNoticePartData["outcome"], OutcomeStyle> = {
+  blocked: {
+    bar: "bg-destructive",
+    icon: "text-destructive",
+    pill: "bg-destructive/10 text-destructive",
+    Icon: ShieldXIcon,
+  },
+  context: {
+    bar: "bg-primary",
+    icon: "text-primary",
+    pill: "bg-primary/10 text-primary",
+    Icon: FileInputIcon,
+  },
+  warning: {
+    bar: "bg-amber-500",
+    icon: "text-amber-600 dark:text-amber-400",
+    pill: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    Icon: TriangleAlertIcon,
+  },
+}
 
 /**
  * Message-level marker — the built-in agent projects a hook fire as a whole
@@ -75,22 +82,28 @@ export function HookNoticeMarker({ message }: { message: UIMessage }) {
  */
 export function HookNoticeRow({ data: part }: { data: HookNoticePartData }) {
   const t = useTranslations("chat.hookNotice")
+  const tHooks = useTranslations("hooks")
   const styles = OUTCOME_STYLES[part.outcome] ?? OUTCOME_STYLES.warning
+  const OutcomeIcon = styles.Icon
 
-  const eventLabel = KNOWN_EVENTS.has(part.event) ? t(`event.${part.event}`) : part.event
+  // Every recognised event now has a localized label (single catalog source);
+  // a genuinely unknown future id still falls back to its raw value.
+  const eventLabel = isKnownHookEvent(part.event)
+    ? tHooks(`events.${part.event}.label`)
+    : part.event
   const outcomeLabel = t(`outcome.${part.outcome}`)
   const hasBody = Boolean(part.block) || Boolean(part.additionalContext) || part.warnings.length > 0
 
   return (
     <Collapsible className="my-2" data-testid={`hook-notice-${part.outcome}`}>
       <div className="flex items-stretch overflow-hidden rounded-md bg-muted/50 text-xs">
-        <div className={cn("w-0.5 shrink-0", styles.bar)} aria-hidden />
+        <div className={cn("w-1 shrink-0", styles.bar)} aria-hidden />
         <CollapsibleTrigger
-          className="group flex flex-1 items-center gap-2 px-2 py-1.5 text-left disabled:cursor-default"
+          className="group flex flex-1 items-center gap-2 px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 enabled:hover:bg-muted/40 disabled:cursor-default"
           aria-label={t("toggle")}
           disabled={!hasBody}
         >
-          <WebhookIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <OutcomeIcon className={cn("size-3.5 shrink-0", styles.icon)} aria-hidden />
           <span className="font-medium">{eventLabel}</span>
           {part.toolName ? (
             <span
@@ -100,7 +113,12 @@ export function HookNoticeRow({ data: part }: { data: HookNoticePartData }) {
               {part.toolName}
             </span>
           ) : null}
-          <span className={cn("shrink-0", styles.chip)}>· {outcomeLabel}</span>
+          <span
+            className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", styles.pill)}
+            data-testid="hook-notice-outcome"
+          >
+            {outcomeLabel}
+          </span>
           {hasBody ? (
             <ChevronRightIcon
               className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"

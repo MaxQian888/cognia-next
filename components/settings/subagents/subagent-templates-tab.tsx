@@ -62,9 +62,18 @@ import type { SubAgentTemplate, SubAgentPriority } from "@/types/agent/sub-agent
 import { SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
 import { createLogger } from "@/lib/logging"
 import { SubagentImportDialog } from "./subagent-import-dialog"
+import { ProviderModelCombobox } from "@/components/settings/provider/routing/provider-model-combobox"
+import type { ProviderName } from "@cognia/provider-types/provider"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
+import {
+  BUILTIN_EXECUTABLE_PRESET_IDS,
+  getPresetDisplayInfo,
+} from "@/lib/ai/agent/external/presets"
 
 const log = createLogger("settings.subagents.templates")
+
+/** Sentinel for the "built-in engine" option (Radix reserves the empty string). */
+const EXTERNAL_NONE_VALUE = "__builtin__"
 
 const CATEGORIES: SubAgentTemplate["category"][] = [
   "research",
@@ -750,24 +759,38 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
           </div>
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">{t("editorModel")}</Label>
-          <Input
-            value={draft.config?.model ?? ""}
-            onChange={(e) => updateConfig("model", e.target.value || undefined)}
-            placeholder={t("editorModelPlaceholder")}
-            className="h-8 text-xs"
-            data-testid="editor-model"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">{t("editorProvider")}</Label>
-          <Input
-            value={draft.config?.provider ?? ""}
-            onChange={(e) => updateConfig("provider", e.target.value || undefined)}
-            placeholder={t("editorProviderPlaceholder")}
-            className="h-8 text-xs"
-            data-testid="editor-provider"
-          />
+          <Label className="text-xs">{t("editorProviderModel")}</Label>
+          <div className="flex items-center gap-2">
+            <ProviderModelCombobox
+              providerId={draft.config?.provider}
+              modelId={draft.config?.model}
+              onSelect={(providerId, modelId) =>
+                setDraft((d) => ({
+                  ...d,
+                  config: { ...d.config, provider: providerId as ProviderName, model: modelId },
+                }))
+              }
+              className="flex-1"
+            />
+            {draft.config?.provider || draft.config?.model ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs"
+                onClick={() =>
+                  setDraft((d) => ({
+                    ...d,
+                    config: { ...d.config, provider: undefined, model: undefined },
+                  }))
+                }
+                data-testid="editor-model-clear"
+              >
+                {t("editorModelClear")}
+              </Button>
+            ) : null}
+          </div>
+          <p className="text-muted-foreground text-xs">{t("editorProviderModelHint")}</p>
         </div>
         <div className="space-y-1">
           <Label className="text-xs">{t("editorSystemPrompt")}</Label>
@@ -779,6 +802,29 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
             placeholder={t("editorSystemPromptPlaceholder")}
             data-testid="editor-system-prompt"
           />
+        </div>
+        {/* External CLI backing (A2): run this subagent on Claude Code / Codex / … */}
+        <div className="space-y-1">
+          <Label className="text-xs">{t("editorExternalRuntime")}</Label>
+          <Select
+            value={draft.config?.externalPresetId ?? EXTERNAL_NONE_VALUE}
+            onValueChange={(v) =>
+              updateConfig("externalPresetId", v === EXTERNAL_NONE_VALUE ? undefined : v)
+            }
+          >
+            <SelectTrigger className="h-8 text-xs" data-testid="editor-external-runtime">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={EXTERNAL_NONE_VALUE}>{t("externalRuntimeNone")}</SelectItem>
+              {BUILTIN_EXECUTABLE_PRESET_IDS.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {getPresetDisplayInfo(id)?.name ?? id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">{t("editorExternalRuntimeHint")}</p>
         </div>
         <div className="flex items-start gap-2">
           <Checkbox

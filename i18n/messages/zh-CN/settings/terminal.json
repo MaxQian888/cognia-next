@@ -140,5 +140,56 @@
     },
     "helper": "允许工作流的终端步骤在后台无界面执行 shell 命令 — 不占用终端标签页、无需逐条确认。每条命令都会先经过安全分类器筛查；明确危险的命令始终被拦截。",
     "label": "允许无人值守执行"
+  },
+  "quickFixes": {
+    "label": "快速修复",
+    "helper": "命令失败时在该命令处显示灯泡，提供修复建议：git push --set-upstream、“是否想输入”、创建 PR 链接、释放被占端口、pwsh 未找到命令等。"
+  },
+  "commandActions": {
+    "label": "命令操作",
+    "helper": "让每条命令左侧的状态点可交互：点击即可重跑命令或复制命令与输出，并显示退出码与耗时。"
+  },
+  "stickyScroll": {
+    "label": "粘性滚动",
+    "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。"
+  },
+  "groups": {
+    "agents": "代理与自动化",
+    "ai": "AI 自动补全",
+    "appearance": "外观",
+    "behavior": "行为",
+    "productivity": "效率工具",
+    "shell": "Shell 与会话"
+  },
+  "fontWeight": {
+    "bold": "粗体",
+    "label": "字重",
+    "normal": "常规"
+  },
+  "fontWeightBold": {
+    "label": "粗体文本字重"
+  },
+  "lineHeight": {
+    "helper": "行高按字号倍数缩放；字间距按像素在字形之间增加横向间隔。二者都会重新适配终端。",
+    "label": "行高"
+  },
+  "letterSpacing": {
+    "label": "字间距（px）"
+  },
+  "scrollSensitivity": {
+    "helper": "每滚动一格滚轮移动的行数。按住 Alt 滚动速度为 5 倍。",
+    "label": "滚动速度（行）"
+  },
+  "minContrast": {
+    "aa": "WCAG AA（4.5）",
+    "aaa": "WCAG AAA（7）",
+    "helper": "在文字与背景之间强制最低对比度以提升可读性。关闭则保留原始 ANSI 配色；AA / AAA 满足 WCAG；最大则强制黑白。",
+    "label": "最低对比度",
+    "max": "最大（21）",
+    "off": "关闭"
+  },
+  "confirmOnClose": {
+    "helper": "关闭仍在运行命令的标签页前先询问，避免误关中断正在执行的命令。空闲标签页始终立即关闭。",
+    "label": "关闭运行中终端前确认"
   }
 }

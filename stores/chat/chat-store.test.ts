@@ -21,9 +21,20 @@ import {
 } from "./chat-store"
 // Touch the barrel so its `export * from "./chat-store"` line is covered.
 import * as barrel from "./"
+import {
+  ExecutionBroker,
+  DEFAULT_AI_TURN_LIMIT,
+  __resetExecutionBrokerForTesting,
+  getExecutionBroker,
+} from "@/lib/execution/broker"
+import type { ExecutionLease } from "@/lib/execution/types"
 
 it("barrel re-exports useChatStore", () => {
   expect(barrel.useChatStore).toBe(useChatStore)
+})
+
+it("MAX_CONCURRENT_STREAMS reflects the unified broker ceiling", () => {
+  expect(MAX_CONCURRENT_STREAMS).toBe(DEFAULT_AI_TURN_LIMIT)
 })
 
 const msg = (id: string, text = ""): UIMessage =>
@@ -291,6 +302,92 @@ describe("useChatStore", () => {
       })
       act(() => result.current.clearReferencedPaths())
       expect(result.current.referencedPaths).toEqual([])
+    })
+  })
+
+  describe("referencedWorkflowElements", () => {
+    beforeEach(() => {
+      act(() => useChatStore.getState().clearReferencedWorkflowElements())
+    })
+
+    it("adds a node reference", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() =>
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "Draft",
+          kind: "ai.prompt",
+        })
+      )
+      expect(result.current.referencedWorkflowElements).toEqual([
+        { type: "node", id: "n_a", label: "Draft", kind: "ai.prompt" },
+      ])
+    })
+
+    it("dedupes by type + id", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A",
+          kind: "k",
+        })
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A2",
+          kind: "k",
+        })
+      })
+      expect(result.current.referencedWorkflowElements).toHaveLength(1)
+      // Same id + different type is a distinct reference.
+      act(() =>
+        result.current.addReferencedWorkflowElement({
+          type: "edge",
+          id: "n_a",
+          label: "E",
+          kind: "default",
+        })
+      )
+      expect(result.current.referencedWorkflowElements).toHaveLength(2)
+    })
+
+    it("removes by type + id (no-op when missing)", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A",
+          kind: "k",
+        })
+        result.current.addReferencedWorkflowElement({
+          type: "edge",
+          id: "e_1",
+          label: "E",
+          kind: "default",
+        })
+      })
+      act(() => result.current.removeReferencedWorkflowElement("node", "n_a"))
+      expect(result.current.referencedWorkflowElements.map((r) => r.id)).toEqual(["e_1"])
+      act(() => result.current.removeReferencedWorkflowElement("node", "missing"))
+      expect(result.current.referencedWorkflowElements).toHaveLength(1)
+    })
+
+    it("clears the list", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.addReferencedWorkflowElement({
+          type: "node",
+          id: "n_a",
+          label: "A",
+          kind: "k",
+        })
+      })
+      act(() => result.current.clearReferencedWorkflowElements())
+      expect(result.current.referencedWorkflowElements).toEqual([])
     })
   })
 
@@ -700,18 +797,38 @@ describe("useChatStore", () => {
       expect(selectStreamingCount(state)).toBe(1)
     })
 
-    it("selectIsAtStreamCap is true once MAX_CONCURRENT_STREAMS are streaming", () => {
-      streamN(MAX_CONCURRENT_STREAMS)
-      const state = useChatStore.getState()
-      // A new (idle) session is blocked.
-      expect(selectIsAtStreamCap(state, "fresh")).toBe(true)
-      // An already-streaming session is never blocked from continuing.
-      expect(selectIsAtStreamCap(state, "s0")).toBe(false)
-    })
+    // The cap is now owned by the unified ExecutionBroker, so drive it through
+    // broker leases rather than streaming slices. A small limit keeps the test
+    // legible.
+    describe("broker-backed cap", () => {
+      const leases: ExecutionLease[] = []
+      beforeEach(() => {
+        __resetExecutionBrokerForTesting(new ExecutionBroker({ limits: { "ai-turn": 3 } }))
+      })
+      afterEach(() => {
+        for (const l of leases.splice(0)) l.release("ok")
+        __resetExecutionBrokerForTesting()
+      })
+      const fill = async (n: number) => {
+        const b = getExecutionBroker()
+        for (let i = 0; i < n; i++) {
+          leases.push(await b.acquire({ kind: "chat", label: `l${i}`, sessionId: `s${i}` }))
+        }
+      }
 
-    it("selectIsAtStreamCap is false below the cap", () => {
-      streamN(MAX_CONCURRENT_STREAMS - 1)
-      expect(selectIsAtStreamCap(useChatStore.getState(), "fresh")).toBe(false)
+      it("selectIsAtStreamCap is true once the broker pool is full", async () => {
+        await fill(3)
+        const state = useChatStore.getState()
+        // A new (unknown) session is blocked.
+        expect(selectIsAtStreamCap(state, "fresh")).toBe(true)
+        // A session that already holds a leg is a continuation — never blocked.
+        expect(selectIsAtStreamCap(state, "s0")).toBe(false)
+      })
+
+      it("selectIsAtStreamCap is false below the cap", async () => {
+        await fill(2)
+        expect(selectIsAtStreamCap(useChatStore.getState(), "fresh")).toBe(false)
+      })
     })
   })
 
@@ -755,16 +872,31 @@ describe("useChatStore", () => {
       expect(renderHook(() => useSessionMessagesLoadError("B")).result.current).toBe("x")
     })
 
-    it("useIsAtStreamCap reacts to the cap", () => {
-      act(() => {
-        for (let i = 0; i < MAX_CONCURRENT_STREAMS; i++) {
-          useChatStore.getState().openSession(`c${i}`)
-          useChatStore.getState().setSessionStatus(`c${i}`, "streaming")
+    it("useIsAtStreamCap reacts to the broker cap", async () => {
+      __resetExecutionBrokerForTesting(new ExecutionBroker({ limits: { "ai-turn": 3 } }))
+      const broker = getExecutionBroker()
+      const fresh = renderHook(() => useIsAtStreamCap("fresh"))
+      const c0 = renderHook(() => useIsAtStreamCap("c0"))
+      const nullHook = renderHook(() => useIsAtStreamCap(null))
+      expect(fresh.result.current).toBe(false)
+
+      const leases: ExecutionLease[] = []
+      await act(async () => {
+        for (let i = 0; i < 3; i++) {
+          leases.push(await broker.acquire({ kind: "chat", label: `c${i}`, sessionId: `c${i}` }))
         }
       })
-      expect(renderHook(() => useIsAtStreamCap("fresh")).result.current).toBe(true)
-      expect(renderHook(() => useIsAtStreamCap("c0")).result.current).toBe(false)
-      expect(renderHook(() => useIsAtStreamCap(null)).result.current).toBe(false)
+      fresh.rerender()
+      c0.rerender()
+      expect(fresh.result.current).toBe(true)
+      // c0 already holds a leg → continuation, never blocked.
+      expect(c0.result.current).toBe(false)
+      expect(nullHook.result.current).toBe(false)
+
+      act(() => {
+        for (const l of leases) l.release("ok")
+      })
+      __resetExecutionBrokerForTesting()
     })
   })
 })

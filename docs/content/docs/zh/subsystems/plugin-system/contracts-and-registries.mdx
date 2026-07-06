@@ -122,8 +122,21 @@ export function reportRegistryConflict(info: RegistryConflictInfo): void {
 | `workflow-template-registry.ts` | `PluginWorkflowTemplateDef`（validating） | `defineWorkflowTemplate` | `registerWorkflowTemplate :111`、`validateWorkflowTemplateRequires :77`、`getWorkflowTemplateWarnings :124` |
 | `shared-memory-adapter-registry.ts` | `PluginSharedMemoryAdapterDef`（plain） | `defineSharedMemoryAdapter` | `registerSharedMemoryAdapter :24`、`unregisterSharedMemoryAdaptersByPlugin :28` |
 | `command-safety-registry.ts` | 按 pluginId 的 `ToolRules`（plain，合并） | （无 —— `ctx.terminal` 命令式） | `registerPluginCommandRules :30`、`getPluginCommandRulesets :48` |
+| `pet-achievement-registry.ts` | `PluginPetAchievementDef`（plain，纯数据条件 DSL） | （manifest `petAchievements`） | `registerPetAchievement`、`compilePluginAchievement`、`listCompiledPluginAchievements` |
+| `pet-item-registry.ts` | `PluginPetItemDef`（plain，纯数据） | （manifest `petItems`） | `registerPetItem`、`projectPluginItem`、`listProjectedPluginItems` |
 | `createOverlayRegistry.ts` | 工厂 —— 基底 | — | `createOverlayRegistry :144` |
 | `createValidatingOverlayRegistry.ts` | 工厂 —— requires 警告包装 | — | `createValidatingOverlayRegistry :63` |
+
+## 桌宠集成面
+
+宠物子系统（ADR-0058）向插件暴露四个协同表面：
+
+- **`ctx.pet`**（capability `pet`；权限 `pet:read` / `pet:interact`，`lib/plugin/api/pet-api.ts`）—— 读取去 PII 的宠物摘要、订阅净化后的事件、发起养育互动、发放 XP/金币奖励。奖励受令牌桶限流（`pet:interact` / `pet:emit`）并被每插件每日预算钳制（50 XP / 100 金币，`lib/plugin/api/pet-budget.ts`）；生命周期事件不可由插件发出。
+- **Hooks** —— `onPetInteract`、`onPetLevelUp`、`onPetEvolved`、`onPetAchievementUnlocked`、`onPetUnwell`，由 `lib/pet/runtime/pet-controller.ts` fire-and-forget 分发。载荷不携带任何事件 meta（PII 红线）；雷达/被动事件从不分发。
+- **UI slot** —— `pet.console.tab`（/pet 控制台由宿主持有的「插件」tab，仅在有贡献时出现）与 `pet.panel.actions`（互动面板动作行，上限 4）。context 包：`level` / `stage` / `mood` / `condition`。
+- **工作流节点** —— 内置 `trigger.pet.event`（levelUp / evolved / achievementUnlocked / unwell，runner 在 `lib/workflow/runtime/pet-event-trigger.ts`）与 `action.pet.interact`。
+
+`plugins/pet-daily-quests` 是端到端参考实现（控制台 tab 任务板、经预算 API 发奖、goal hook 联动）。
 
 ## SDK define*() 目录
 

@@ -231,6 +231,76 @@ describe("WorkflowProposalCard — Apply flow", () => {
   })
 })
 
+describe("WorkflowProposalCard — cross-device seed (mobile copilot)", () => {
+  // The tool executed on the DESKTOP renderer, so THIS renderer's proposal
+  // store is empty; the card must seed from the tool-result `messageParts`
+  // echo and apply against the local editor store.
+  it("seeds the local store from messageParts and applies", () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    // No openProposal() here — simulates the phone, which never ran the tool.
+    render(
+      <WorkflowProposalCard
+        part={makePart({
+          ok: true,
+          proposalId: "p_seed",
+          workflowId: "wf_a",
+          summary: "x",
+          opCount: { add: 2, remove: 0, connect: 1, disconnect: 0, configure: 0 },
+          messageParts: [
+            {
+              type: "workflow-proposal",
+              proposalId: "p_seed",
+              workflowId: "wf_a",
+              summary: "x",
+              ops: sampleOps,
+            },
+          ],
+        })}
+      />
+    )
+    // The op list renders from the echo even before apply.
+    fireEvent.click(screen.getByTestId("workflow-proposal-toggle"))
+    expect(screen.getByTestId("workflow-proposal-op-list").textContent).toContain("n_a")
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("workflow-proposal-apply"))
+    })
+    expect(store.getState().nodes).toHaveLength(2)
+    expect(store.getState().edges).toHaveLength(1)
+    expect(useProposalStore.getState().statusOf("p_seed")).toBe("applied")
+    expect(screen.getByTestId("workflow-proposal-status")).toHaveTextContent("Applied")
+  })
+
+  it("seeds from messageParts on discard so the badge transitions", () => {
+    render(
+      <WorkflowProposalCard
+        part={makePart({
+          ok: true,
+          proposalId: "p_seed2",
+          workflowId: "wf_a",
+          summary: "x",
+          opCount: { add: 2, remove: 0, connect: 1, disconnect: 0, configure: 0 },
+          messageParts: [
+            {
+              type: "workflow-proposal",
+              proposalId: "p_seed2",
+              workflowId: "wf_a",
+              summary: "x",
+              ops: sampleOps,
+            },
+          ],
+        })}
+      />
+    )
+    act(() => {
+      fireEvent.click(screen.getByTestId("workflow-proposal-discard"))
+    })
+    expect(useProposalStore.getState().statusOf("p_seed2")).toBe("discarded")
+    expect(screen.getByTestId("workflow-proposal-status")).toHaveTextContent("Discarded")
+  })
+})
+
 describe("WorkflowProposalCard — Discard flow", () => {
   it("transitions to 'discarded' and hides Apply/Discard buttons", () => {
     useProposalStore.getState().openProposal("wf_a", {
@@ -256,5 +326,35 @@ describe("WorkflowProposalCard — Discard flow", () => {
     expect(useProposalStore.getState().statusOf("p_1")).toBe("discarded")
     expect(screen.getByTestId("workflow-proposal-status")).toHaveTextContent("Discarded")
     expect(screen.queryByTestId("workflow-proposal-apply")).not.toBeInTheDocument()
+  })
+})
+
+describe("WorkflowProposalCard — canvas highlight on hover", () => {
+  it("rings the affected nodes on hover and clears them on leave", () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    useProposalStore.getState().openProposal("wf_a", {
+      proposalId: "p_1",
+      workflowId: "wf_a",
+      summary: "s",
+      ops: sampleOps,
+    })
+    render(
+      <WorkflowProposalCard
+        part={makePart({
+          ok: true,
+          proposalId: "p_1",
+          workflowId: "wf_a",
+          summary: "s",
+          opCount: { add: 2, remove: 0, connect: 1, disconnect: 0, configure: 0 },
+        })}
+      />
+    )
+    const card = screen.getByTestId("workflow-proposal-card")
+    // add_node n_a, add_node n_b, connect_edge n_a→n_b → { n_a, n_b }.
+    fireEvent.mouseEnter(card)
+    expect(store.getState().highlightedNodeIds).toEqual({ n_a: true, n_b: true })
+    fireEvent.mouseLeave(card)
+    expect(store.getState().highlightedNodeIds).toEqual({})
   })
 })

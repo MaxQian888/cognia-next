@@ -14,7 +14,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
-import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import {
   Save,
@@ -51,12 +50,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useSettingsStore } from "@/stores/settings"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { useCanvasMonacoSetup } from "@/hooks/canvas/use-canvas-monaco-setup"
 import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
+import { useAutoSuggestions } from "@/hooks/canvas/use-auto-suggestions"
 import { useCanvasKeyboardShortcuts } from "@/hooks/canvas/use-canvas-keyboard-shortcuts"
+import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import { RenameDialog } from "./rename-dialog"
@@ -66,8 +66,10 @@ import {
 } from "@/components/document/document-format-toolbar"
 import { FORMAT_ACTION_MAP, TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { CanvasInlineCommand } from "./canvas-inline-command"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { LspServerHint } from "@/components/editor/lsp-server-hint"
+import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar"
 import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 
@@ -123,23 +125,16 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // workbench, no worker assets); every editorRef consumer below falls back
   // to whole-document semantics when the Monaco ref is absent.
   const isMobile = useIsMobile()
-  const { resolvedTheme } = useTheme()
-  const monacoLink = useSettingsStore((s) => s.monacoLink)
-  // Monaco accepts only specific theme ids ("vs", "vs-dark", etc).
-  // Resolve "auto" to vs / vs-dark via the next-themes resolved theme
-  // so we never pass an unknown id at first render. The hook's effect
-  // re-applies on changes; this prevents an initial flash.
-  const resolvedMonacoTheme = useMemo(() => {
-    // App-level Monaco linking (Settings → Appearance → Advanced). A lock pins
-    // Monaco to a base theme regardless of the app theme; otherwise the
-    // per-canvas setting wins, and an "auto" canvas theme follows the app theme
-    // only while linking is enabled (else it stays standalone on vs-dark).
-    if (monacoLink.lockedThemeId) return monacoLink.lockedThemeId
-    const theme = monacoSetup.settings.theme
-    if (theme && theme !== "auto") return theme
-    if (!monacoLink.enabled) return "vs-dark"
-    return resolvedTheme === "dark" ? "vs-dark" : "vs"
-  }, [monacoLink, monacoSetup.settings.theme, resolvedTheme])
+  // Feature-flag gate: `canvas.aiWorkbench.v1` (env / localStorage override).
+  // When off, the AI action toolbar items and the Ctrl+K palette are hidden.
+  const aiWorkbenchEnabled = useCanvasFeatureFlag("canvas.aiWorkbench.v1")
+  const accessibility = useCanvasSettingsStore((s) => s.settings.accessibility)
+  const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
+  // Single-writer Monaco theme id, resolved inside the setup hook (the hook is
+  // the only caller of `monaco.editor.setTheme`). Passing it to the `theme` prop
+  // too just avoids a first-paint flash — both agree, so the editor now tracks
+  // the app palette / light-dark / high-contrast state instead of fighting it.
+  const resolvedMonacoTheme = monacoSetup.resolvedThemeId
 
   // Drop the stale Monaco handle when the viewport flips to mobile (the
   // light editor renders instead) so consumers take their fallback paths.
@@ -169,6 +164,21 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     window.addEventListener("canvas-action", handler as EventListener)
     return () => window.removeEventListener("canvas-action", handler as EventListener)
   }, [])
+
+  // Ctrl+S / Ctrl+Shift+S arrive as `canvas-save` from the keybinding handler
+  // (the panel owns the editor buffer, so the save lives here). "manual" flushes
+  // the live buffer into the store; "version" additionally snapshots a version.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      if (!activeId) return
+      const mode = (ev as CustomEvent<{ mode?: string }>).detail?.mode
+      const content = editorRef.current?.getValue()
+      if (typeof content === "string") updateDoc(activeId, { content, updatedAt: new Date() })
+      if (mode === "version") saveVersion(activeId, "manual")
+    }
+    window.addEventListener("canvas-save", handler as EventListener)
+    return () => window.removeEventListener("canvas-save", handler as EventListener)
+  }, [activeId, updateDoc, saveVersion])
 
   // Lightweight auto-save: every `autoSaveInterval` seconds, push the
   // editor's current value into the artifact store and write a snapshot
@@ -325,6 +335,20 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     })
   }, [activeDoc, suggestions])
 
+  // Auto-trigger suggestions after a typing pause when the AI settings ask for it.
+  // Gated on the AI-workbench flag and idle state so it never fights an in-flight run.
+  useAutoSuggestions({
+    enabled:
+      aiWorkbenchEnabled &&
+      !isMobile &&
+      Boolean(activeDoc) &&
+      !actions.running &&
+      !suggestions.running,
+    documentId: activeId ?? "",
+    content: activeDoc?.content ?? "",
+    trigger: triggerSuggestions,
+  })
+
   const onCreate = useCallback(() => {
     const id = create({
       title: t("untitledDefault"),
@@ -371,6 +395,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         onTriggerSuggestions={triggerSuggestions}
         onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
         onFormat={handleFormat}
+        aiEnabled={aiWorkbenchEnabled}
       />
 
       <PluginExtensionSlot
@@ -378,7 +403,17 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         className="flex items-center gap-1 border-b bg-muted/20 px-2 py-1 empty:hidden"
       />
 
-      <div ref={editorContainerRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div
+        ref={editorContainerRef}
+        className={cn(
+          "relative min-h-0 min-w-0 flex-1 overflow-hidden",
+          // Accessibility → focus indicator: draw an inset ring around the
+          // editor whenever focus lands inside it, so keyboard users can see
+          // where they are without hunting for the caret.
+          accessibility.focusIndicator &&
+            "focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/60"
+        )}
+      >
         {activeDoc ? (
           isMobile ? (
             // Mobile: CodeMirror light editor — Monaco's worker bundle and
@@ -390,6 +425,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
               onChange={(v) => handleEditorChange(v)}
               aria-label={activeDoc.title}
               className="px-2"
+              fontSize={editorSettings.fontSize}
+              fontFamily={editorSettings.fontFamily}
+              lineHeight={editorSettings.lineHeight}
+              tabSize={editorSettings.tabSize}
+              wordWrap={editorSettings.wordWrap}
+              lineNumbers={editorSettings.lineNumbers !== "off"}
             />
           ) : (
             <div className="flex h-full flex-col">
@@ -412,6 +453,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
                   />
                 </Suspense>
               </div>
+              {monacoSetup.diagnostics ? (
+                <MonacoDiagnosticsBar
+                  monaco={monacoSetup.diagnostics.monaco}
+                  editor={monacoSetup.diagnostics.editor}
+                />
+              ) : null}
             </div>
           )
         ) : (
@@ -436,9 +483,25 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         )}
       </div>
       {actions.error && (
-        <div className="border-t bg-destructive/5 p-2 text-xs text-destructive">
+        <div
+          className="border-t bg-destructive/5 p-2 text-xs text-destructive"
+          // Accessibility → announce errors: expose the AI-action failure to
+          // assistive tech as an alert region so screen readers speak it.
+          role={accessibility.announceErrors ? "alert" : undefined}
+          aria-live={accessibility.announceErrors ? "assertive" : "off"}
+        >
           {actions.error}
         </div>
+      )}
+
+      {aiWorkbenchEnabled && (
+        <CanvasInlineCommand
+          running={actions.running}
+          onAction={runAction}
+          onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
+          onTriggerSuggestions={triggerSuggestions}
+          onCreateDocument={onCreate}
+        />
       )}
     </div>
   )
@@ -463,6 +526,7 @@ interface CanvasToolbarProps {
   onTriggerSuggestions: () => void
   onSaveVersion: () => void
   onFormat: (action: FormatAction) => void
+  aiEnabled: boolean
 }
 
 function CanvasToolbar({
@@ -480,6 +544,7 @@ function CanvasToolbar({
   onTriggerSuggestions,
   onSaveVersion,
   onFormat,
+  aiEnabled,
 }: CanvasToolbarProps) {
   const t = useTranslations("canvas")
   const tActions = useTranslations("canvas.actions")
@@ -604,19 +669,7 @@ function CanvasToolbar({
                 size="icon"
                 className="size-7"
                 aria-label={t("commandPalette", { default: "Command palette" })}
-                onClick={() => {
-                  const isMac =
-                    typeof navigator !== "undefined" &&
-                    navigator.platform.toLowerCase().includes("mac")
-                  window.dispatchEvent(
-                    new KeyboardEvent("keydown", {
-                      key: "k",
-                      metaKey: isMac,
-                      ctrlKey: !isMac,
-                      bubbles: true,
-                    })
-                  )
-                }}
+                onClick={() => window.dispatchEvent(new CustomEvent("canvas-inline-command"))}
               >
                 <Search className="size-3.5" />
               </Button>
@@ -639,55 +692,59 @@ function CanvasToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => void onAction("review")} disabled={running}>
-                <Wand2 className="mr-2 size-3.5" />
-                {tActions("review")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("fix")} disabled={running}>
-                <Bug className="mr-2 size-3.5" />
-                {tActions("fix")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("improve")} disabled={running}>
-                <Sparkles className="mr-2 size-3.5" />
-                {tActions("improve")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <DropdownMenuItem disabled={running} onSelect={(e) => e.preventDefault()}>
-                    <Languages className="mr-2 size-3.5" />
-                    {tActions("translate")}
+              {aiEnabled && (
+                <>
+                  <DropdownMenuItem onClick={() => void onAction("review")} disabled={running}>
+                    <Wand2 className="mr-2 size-3.5" />
+                    {tActions("review")}
                   </DropdownMenuItem>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="left">
-                  {TRANSLATE_LANGUAGES.map((l) => (
-                    <DropdownMenuItem
-                      key={l.value}
-                      onClick={() => void onAction("translate", { targetLanguage: l.value })}
-                    >
-                      {l.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
-                <HelpCircle className="mr-2 size-3.5" />
-                {tActions("explain")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
-                <Minimize2 className="mr-2 size-3.5" />
-                {tActions("simplify")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
-                <Maximize2 className="mr-2 size-3.5" />
-                {tActions("expand")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
-                <Lightbulb className="mr-2 size-3.5" />
-                {tActions("suggest", { default: "Suggest" })}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => void onAction("fix")} disabled={running}>
+                    <Bug className="mr-2 size-3.5" />
+                    {tActions("fix")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void onAction("improve")} disabled={running}>
+                    <Sparkles className="mr-2 size-3.5" />
+                    {tActions("improve")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <DropdownMenuItem disabled={running} onSelect={(e) => e.preventDefault()}>
+                        <Languages className="mr-2 size-3.5" />
+                        {tActions("translate")}
+                      </DropdownMenuItem>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" side="left">
+                      {TRANSLATE_LANGUAGES.map((l) => (
+                        <DropdownMenuItem
+                          key={l.value}
+                          onClick={() => void onAction("translate", { targetLanguage: l.value })}
+                        >
+                          {l.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
+                    <HelpCircle className="mr-2 size-3.5" />
+                    {tActions("explain")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
+                    <Minimize2 className="mr-2 size-3.5" />
+                    {tActions("simplify")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
+                    <Maximize2 className="mr-2 size-3.5" />
+                    {tActions("expand")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
+                    <Lightbulb className="mr-2 size-3.5" />
+                    {tActions("suggest", { default: "Suggest" })}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onClick={onSaveVersion} disabled={running}>
                 <Save className="mr-2 size-3.5" />
                 {tActions("saveVersion", { default: "Save version" })}

@@ -36,6 +36,8 @@ import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
 import { executeTwinTask } from "./twin-executor"
 import { executeWikiRebuildTask } from "./wiki-rebuild-executor"
+import { executeWikiLintTask } from "./wiki-lint-executor"
+import { executeRadarReportTask } from "./radar-report-executor"
 import { executeAgentTeamTask } from "./team-executor"
 import { executeGoalTask } from "./goal-executor"
 import { executePlanTask } from "./plan-executor"
@@ -693,12 +695,14 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("external-agent", executeExternalAgentTask)
   registerTaskExecutor("twin", executeTwinTask)
   registerTaskExecutor("wiki-rebuild", executeWikiRebuildTask)
+  registerTaskExecutor("wiki-lint", executeWikiLintTask)
+  registerTaskExecutor("radar-report", executeRadarReportTask)
   registerTaskExecutor("agent-team", executeAgentTeamTask)
   registerTaskExecutor("goal", executeGoalTask)
   registerTaskExecutor("plan", executePlanTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin, wiki-rebuild, agent-team, goal, plan"
+    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan"
   )
 }
 
@@ -711,6 +715,8 @@ export {
   executePluginTask,
   executeBackupTask,
   executeWikiRebuildTask,
+  executeWikiLintTask,
+  executeRadarReportTask,
   executeCustomTask,
   executeAgentTeamTask,
   executeGoalTask,

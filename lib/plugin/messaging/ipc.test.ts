@@ -10,7 +10,7 @@ import {
   CircuitOpenError,
   IPCAbortError,
 } from "./ipc"
-import { TimeoutError } from "@/lib/utils/with-timeout"
+import { TimeoutError } from "@cognia/primitives"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
 

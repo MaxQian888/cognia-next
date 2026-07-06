@@ -25,6 +25,7 @@
   "scopeDescriptions": {
     "agent:dispatch": "⚠ Lets external agents run your built-in/plugin subagents or characters headlessly (tool loop + model calls). Returned text is PII-redacted. Default OFF.",
     "agent:team": "⚠ Lets external agents start an Agent Team headlessly — a multi-agent orchestration they couldn't otherwise reach. Default OFF.",
+    "inbound:write": "⚠ Lets external agents contribute lessons, skill drafts, and notes. Nothing is applied automatically — submissions land in a review queue as pending, untrusted drafts for you to accept or discard. Default OFF.",
     "inbox:connectors:read": "⚠ Read-only inbox introspection — adapters, conversations, drafts, audit. Metadata may include conversation handles and recent message snippets. Default OFF.",
     "inbox:connectors:send": "⚠ Lets external agents enqueue AI replies to your IM inbox. Goes through the same pipeline as in-app chat (PII gate, policy, outbound queue). Default OFF.",
     "mcp:computer-use": "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay.",
@@ -144,5 +145,39 @@
     "toastRebuildFailed": "Rebuild failed: {message}",
     "toastRebuilt": "Wiki rebuilt: {summary} ({duration})",
     "webModeWarning": "Wiki rebuild requires the Tauri desktop app."
+  },
+  "wikiLint": {
+    "title": "Wiki Lint",
+    "description": "Check the compiled wiki for orphan pages and broken [[links]]. Runs locally, no LLM.",
+    "run": "Run lint",
+    "runAria": "Run the wiki lint check",
+    "never": "Never",
+    "lastRun": "Last run",
+    "articleCount": "Articles",
+    "orphanCount": "Orphans",
+    "brokenCount": "Broken links",
+    "brokenListSummary": "{count, plural, one {# article with broken links} other {# articles with broken links}}",
+    "orphanListSummary": "{count, plural, one {# orphan page} other {# orphan pages}}",
+    "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
+    "toastLinted": "Lint done: {orphans} orphans, {broken} broken.",
+    "toastLintFailed": "Lint failed: {message}",
+    "scheduleTitle": "Schedule",
+    "scheduleHelp": "Automatic lint runs via the scheduler. Daily runs at 03:00 local; Weekly runs Sunday 03:00. Custom takes a 5-field cron expression.",
+    "scheduleModeLabel": "Frequency",
+    "scheduleMode": {
+      "off": "Off",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "custom": "Custom"
+    },
+    "scheduleCustomCronLabel": "Cron expression",
+    "scheduleSave": "Save",
+    "scheduleSaveAria": "Save wiki lint schedule",
+    "scheduleAction": {
+      "created": "Wiki lint schedule created.",
+      "updated": "Wiki lint schedule updated."
+    },
+    "scheduleCleared": "Wiki lint schedule cleared.",
+    "scheduleInvalidCron": "Invalid cron expression: {expression}"
   }
 }

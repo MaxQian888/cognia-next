@@ -15,6 +15,7 @@ import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_GIT_SETTINGS } from "@/types/git"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
 import { getDb } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
@@ -36,6 +37,12 @@ export const DEFAULTS: AppSettings = {
   canvasCodeSandboxEnabled: true,
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   routingFallbackEnabled: true,
+  // Cache-friendly prompt assembly is on by default: volatile per-turn sections
+  // (twin RAG, style few-shot, memory recall) are routed to the appended tail so
+  // the stable system prefix stays byte-identical across turns and provider
+  // prompt caches (Anthropic cache_control, DeepSeek/OpenAI auto-cache) keep
+  // hitting. Explicit `false` opts out (mirrors routingFallbackEnabled).
+  cacheOptimizationEnabled: true,
   apiKey: undefined,
   apiBaseUrl: undefined,
   activeProviderId: undefined,
@@ -54,6 +61,7 @@ export const DEFAULTS: AppSettings = {
   language: "en",
   reduceMotion: false,
   workflowEditorPerformanceTier: undefined,
+  evalSettings: { ...DEFAULT_EVAL_SETTINGS },
   telemetryEnabled: false,
   storageRetention: { traceRetentionDays: 30 },
   sttLanguage: "en-US",
@@ -136,6 +144,10 @@ export const DEFAULTS: AppSettings = {
   // are off until the user opts in via Settings → 应用安全.
   biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
 
+  // Auto-lock disabled by default — the local account stays unlocked until a
+  // manual lock or app exit. Opt-in from Settings → Security.
+  accountAutoLockMinutes: 0,
+
   // OCR subsystem preferences. Driven by the settings page at
   // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.
   ocrSettings: { ...DEFAULT_OCR_SETTINGS },
@@ -153,6 +165,15 @@ export const DEFAULTS: AppSettings = {
   // Right-edge timeline minimap — feature on, collapsed by default, label
   // summaries off (they cost one model call per turn).
   conversationTimeline: { enabled: true, expanded: false, labelSummary: { enabled: false } },
+  // Conversation sidebar (ChannelList) — comfortable density, no preview line,
+  // date grouping + unread badges on, title-only search (content search is opt-in).
+  conversationSidebar: {
+    density: "comfortable",
+    showPreview: false,
+    groupByDate: true,
+    showUnreadBadges: true,
+    searchScope: "title",
+  },
   // Token-level streaming for interactive chat — on by default.
   streamPartialMessages: true,
 }
@@ -195,6 +216,16 @@ export async function getSettings(): Promise<AppSettings> {
         ...DEFAULT_GIT_SETTINGS.commitMessageAI,
         ...(row.gitSettings?.commitMessageAI ?? {}),
       },
+      reviewAI: {
+        enabled: false,
+        ...DEFAULT_GIT_SETTINGS.reviewAI,
+        ...(row.gitSettings?.reviewAI ?? {}),
+      },
+      explainAI: {
+        enabled: false,
+        ...DEFAULT_GIT_SETTINGS.explainAI,
+        ...(row.gitSettings?.explainAI ?? {}),
+      },
     },
     // Forward-compat: a row saved before sidebar customization existed has no
     // `sidebarLayout` — fall back to the default so the rail renders pinned
@@ -210,6 +241,10 @@ export async function getSettings(): Promise<AppSettings> {
         ...DEFAULTS.conversationTimeline?.labelSummary,
         ...(row.conversationTimeline?.labelSummary ?? {}),
       },
+    },
+    conversationSidebar: {
+      ...DEFAULTS.conversationSidebar,
+      ...(row.conversationSidebar ?? {}),
     },
     id: SINGLETON_ID,
   }

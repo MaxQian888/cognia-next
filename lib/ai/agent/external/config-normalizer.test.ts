@@ -349,6 +349,33 @@ describe("normalizeExternalAgentConfigInput", () => {
     expect(cfg.enabled).toBe(true)
   })
 
+  it("clamps the default permission mode to one the protocol can enforce", () => {
+    // Codex has no `dontAsk` — persisting it would store a backend-incompatible
+    // mode, so it is clamped down to the nearest supported mode (`plan`).
+    const codex = normalizeExternalAgentConfigInput(
+      {
+        name: "Codex",
+        protocol: "codex-app-server",
+        transport: "stdio",
+        defaultPermissionMode: "dontAsk",
+      } as never,
+      { runtimeIsTauri: true }
+    )
+    expect(codex.defaultPermissionMode).toBe("plan")
+
+    // ACP supports every mode, so it round-trips unchanged.
+    const acp = normalizeExternalAgentConfigInput(
+      {
+        name: "Claude",
+        protocol: "acp",
+        transport: "stdio",
+        defaultPermissionMode: "dontAsk",
+      } as never,
+      { runtimeIsTauri: true }
+    )
+    expect(acp.defaultPermissionMode).toBe("dontAsk")
+  })
+
   it("flags an unsupported protocol in metadata", () => {
     const cfg = normalizeExternalAgentConfigInput(
       {

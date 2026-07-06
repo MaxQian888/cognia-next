@@ -10,9 +10,12 @@ import path from "node:path"
 import {
   cliConfigFileSchema,
   type CliConfigFile,
+  type ClipboardConfig,
+  type EditorConfig,
   type MascotConfig,
   type RenderConfig,
   type StatusBarConfig,
+  type SubagentModelOverride,
 } from "./schema"
 import { userConfigPath, type FileReader } from "./load"
 import type { BuiltinToolsConfig } from "@/lib/claude/types"
@@ -108,6 +111,38 @@ export function setProviderModel(
 }
 
 /**
+ * Set (or clear) a provider's base URL in `config.json`'s
+ * `providers[providerId].baseURL` — the per-provider proxy/self-hosted/
+ * regional endpoint override. Only `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`
+ * get an env-var shortcut; every other provider previously required hand-
+ * editing `config.json` even though the schema field already validated fine.
+ * Passing `null` clears the override (falls back to the catalog default).
+ * Validates the merged file before writing; returns the absolute path.
+ */
+export function setProviderBaseURL(
+  home: string,
+  providerId: string,
+  baseURL: string | null,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!providerId.trim()) throw new Error("provider id is required")
+  const current = readUserConfig(home, fsx)
+  const providers = { ...current.providers }
+  const existing = providers[providerId] ?? {}
+  if (baseURL === null) {
+    const { baseURL: _dropped, ...rest } = existing
+    providers[providerId] = rest
+  } else {
+    providers[providerId] = { ...existing, baseURL }
+  }
+  const merged = cliConfigFileSchema.parse({ ...current, providers })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * Merge a status-bar patch into `config.json`'s `statusBar` object (the footer
  * isn't a scalar so it can't go through {@link setConfigValue}). Validates the
  * merged file before writing. Returns the absolute path written.
@@ -139,6 +174,28 @@ export function setMascotConfig(
   const current = readUserConfig(home, fsx)
   const mascot = { ...current.mascot, ...patch }
   const merged = cliConfigFileSchema.parse({ ...current, mascot })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
+ * Merge an editor patch into `config.json`'s `editor` object. The stored value
+ * may be the string sugar (`"code"`) — normalize it to the object form before
+ * merging so a partial patch (e.g. just `{ command }` from `/editor code`) never
+ * clobbers existing `args`/`gotoFormat`. Validates before writing.
+ */
+export function setEditorConfig(
+  home: string,
+  patch: EditorConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const prior: EditorConfig =
+    typeof current.editor === "string" ? { command: current.editor } : (current.editor ?? {})
+  const editor = { ...prior, ...patch }
+  const merged = cliConfigFileSchema.parse({ ...current, editor })
   const target = userConfigPath(home)
   fsx.mkdirp(path.dirname(target))
   fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
@@ -256,10 +313,16 @@ export function setBuiltinTools(
 /** Top-level boolean flags editable from the settings panel. */
 export const BOOLEAN_FLAG_KEYS = [
   "webTools",
+  "autoRoute",
   "skillTool",
   "slashCommandTool",
   "externalSkills",
   "pluginTools",
+  "notify",
+  "desktopNotifications",
+  "autoCompact",
+  "showActiveSkills",
+  "terminalTitle",
 ] as const
 export type BooleanFlagKey = (typeof BOOLEAN_FLAG_KEYS)[number]
 
@@ -279,6 +342,55 @@ export function setBooleanFlag(
   }
   const current = readUserConfig(home, fsx)
   return writeMergedConfig(home, { ...current, [key]: value }, fsx)
+}
+
+/**
+ * Top-level NUMERIC config keys editable from the settings panel — the reliability
+ * / context-management knobs that {@link setConfigValue} (strings only) and
+ * {@link setBooleanFlag} (booleans only) can't reach. `autoCompactThreshold` is a
+ * 0–1 fraction; the rest are millisecond / step counts. Values are validated
+ * against the schema (min/int constraints) before anything lands on disk.
+ */
+export const NUMBER_CONFIG_KEYS = [
+  "autoCompactThreshold",
+  "streamIdleTimeoutMs",
+  "aiSdkMaxSteps",
+  "toolExecutionTimeoutMs",
+  "subagentStreamIdleTimeoutMs",
+] as const
+export type NumberConfigKey = (typeof NUMBER_CONFIG_KEYS)[number]
+
+/**
+ * Set one top-level numeric config key in `config.json`. A dedicated writer (not
+ * {@link setConfigValue}, which coerces everything to a string) so the schema's
+ * numeric constraints validate the merged file before writing. Returns the path.
+ */
+export function setNumberConfig(
+  home: string,
+  key: NumberConfigKey,
+  value: number,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!(NUMBER_CONFIG_KEYS as readonly string[]).includes(key)) {
+    throw new Error(`unknown numeric key "${key}" — settable: ${NUMBER_CONFIG_KEYS.join(", ")}`)
+  }
+  const current = readUserConfig(home, fsx)
+  return writeMergedConfig(home, { ...current, [key]: value }, fsx)
+}
+
+/**
+ * Merge a clipboard patch into `config.json`'s `clipboard` object (OSC 52 mode +
+ * byte cap). An object, not a scalar, so it can't go through {@link
+ * setConfigValue}; validated by the schema before writing. Returns the path.
+ */
+export function setClipboardConfig(
+  home: string,
+  patch: ClipboardConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const clipboard = { ...current.clipboard, ...patch }
+  return writeMergedConfig(home, { ...current, clipboard }, fsx)
 }
 
 /** Top-level string-array keys editable from the settings panel. */
@@ -318,6 +430,29 @@ export function setBuiltinHookOverride(
   const current = readUserConfig(home, fsx)
   const builtinHookOverrides = { ...current.builtinHookOverrides, [id]: enabled }
   return writeMergedConfig(home, { ...current, builtinHookOverrides }, fsx)
+}
+
+/**
+ * Set (or clear) one subagent's provider/model override in `config.json`'s
+ * `subagentModels` map (subagent id → override). Passing `null` DELETES that
+ * subagent's entry (reset to inherit). An object, not a scalar, so it can't go
+ * through {@link setConfigValue}; the schema's `.strict()` + the override's
+ * `.refine()` reject a malformed/empty override before anything is written.
+ * Returns the absolute path written.
+ */
+export function setSubagentModel(
+  home: string,
+  agentId: string,
+  override: SubagentModelOverride | null,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!agentId.trim()) throw new Error("subagent id is required")
+  const current = readUserConfig(home, fsx)
+  const subagentModels: Record<string, SubagentModelOverride> = { ...current.subagentModels }
+  if (override === null) delete subagentModels[agentId]
+  else subagentModels[agentId] = override
+  const next = Object.keys(subagentModels).length > 0 ? subagentModels : undefined
+  return writeMergedConfig(home, { ...current, subagentModels: next }, fsx)
 }
 
 /** A user-authored custom theme file: a base (built-in name or BaseColors

@@ -16,6 +16,7 @@ import React from "react"
 import { Box, measureElement, type DOMElement, type Key } from "ink"
 
 import {
+  effectiveTop,
   hiddenRows,
   scrollByLines,
   scrollPage,
@@ -69,9 +70,17 @@ export interface PanelScroll {
  * Scroll controller for a bounded overlay viewport `viewportRows` tall.
  * `viewportRows` is supplied by the caller (terminal height minus chrome) so the
  * hook stays free of `stdout` and is trivially testable.
+ *
+ * `initial` overrides the starting intent: a live-transcript panel passes
+ * `{ top: 0, stick: true }` to follow the tail as content grows (scrolling up
+ * disengages the pin; scrolling back to the bottom re-engages it — the same
+ * rules `scroll-view-state` gives the fullscreen transcript).
  */
-export function usePanelScroll(viewportRows: number): PanelScroll {
-  const [intent, setIntent] = React.useState<ScrollIntent>(PANEL_INITIAL)
+export function usePanelScroll(
+  viewportRows: number,
+  initial: ScrollIntent = PANEL_INITIAL
+): PanelScroll {
+  const [intent, setIntent] = React.useState<ScrollIntent>(initial)
   const [content, setContent] = React.useState(0)
 
   const measure = React.useCallback((contentHeight: number) => {
@@ -99,8 +108,9 @@ export function usePanelScroll(viewportRows: number): PanelScroll {
     [content, viewportRows]
   )
 
-  // Panels never stick, so the effective offset is just the clamped intent.
-  const offset = Math.min(intent.top, Math.max(0, content - viewportRows))
+  // The effective offset respects `stick` (pin to bottom) when engaged; for the
+  // default non-sticking intent it is just the clamped raw offset, as before.
+  const offset = effectiveTop(intent, content, viewportRows)
   return {
     offset,
     hidden: hiddenRows(intent, content, viewportRows),

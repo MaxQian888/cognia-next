@@ -138,6 +138,18 @@ describe("desktop client", () => {
     expect(mockCall).toHaveBeenCalledWith("automation_settings_set", { settings: s })
   })
 
+  it("desktop.setEnabled invokes the dedicated enable command", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.setEnabled(true)
+    expect(mockCall).toHaveBeenCalledWith("automation_set_enabled", { enabled: true })
+  })
+
+  it("desktop.killSwitchEngaged reads the engaged flag", async () => {
+    mockCall.mockResolvedValueOnce(true)
+    await expect(desktop.killSwitchEngaged()).resolves.toBe(true)
+    expect(mockCall).toHaveBeenCalledWith("automation_kill_switch_engaged", {})
+  })
+
   it("desktop.killSwitch invokes the kill switch command", async () => {
     mockCall.mockResolvedValueOnce(undefined)
     await desktop.killSwitch()

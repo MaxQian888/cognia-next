@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { createDataset } from "@/lib/db/eval-datasets"
+import { resolveEvalSettings } from "@/lib/ai/eval/settings"
 import { useEvalDatasets } from "@/hooks/eval/use-eval-data"
 import { useRunConfigOptions } from "@/hooks/eval/use-run-config-options"
 import { DatasetDetail } from "./dataset-detail"
@@ -47,13 +48,18 @@ export function EvalDashboard() {
 
   const handleCreate = useCallback(async () => {
     if (!name.trim() || !capability.trim()) return
-    const ds = await createDataset({ name: name.trim(), capability: capability.trim() })
+    const defaultGate = resolveEvalSettings(settings).defaultGate
+    const ds = await createDataset({
+      name: name.trim(),
+      capability: capability.trim(),
+      ...(defaultGate ? { gate: defaultGate } : {}),
+    })
     setSelectedId(ds.id)
     setMobileDetailOpen(true)
     setName("")
     setCapability("")
     setCreating(false)
-  }, [name, capability])
+  }, [name, capability, settings])
 
   const select = (id: string) => {
     setSelectedId(id)

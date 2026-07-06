@@ -17,6 +17,8 @@ export function useObservabilityControls() {
   const refreshMs = useObservabilityStore((s) => s.refreshMs)
   const filters = useObservabilityStore((s) => s.filters)
   const editMode = useObservabilityStore((s) => s.editMode)
+  const thresholds = useObservabilityStore((s) => s.thresholds)
+  const hiddenPanels = useObservabilityStore((s) => s.hiddenPanels)
 
   const setRangePreset = useObservabilityStore((s) => s.setRangePreset)
   const setCustomRange = useObservabilityStore((s) => s.setCustomRange)
@@ -25,6 +27,11 @@ export function useObservabilityControls() {
   const setEditMode = useObservabilityStore((s) => s.setEditMode)
   const setLayouts = useObservabilityStore((s) => s.setLayouts)
   const resetLayouts = useObservabilityStore((s) => s.resetLayouts)
+  const setThreshold = useObservabilityStore((s) => s.setThreshold)
+  const resetThresholds = useObservabilityStore((s) => s.resetThresholds)
+  const setHiddenPanels = useObservabilityStore((s) => s.setHiddenPanels)
+  const togglePanelVisibility = useObservabilityStore((s) => s.togglePanelVisibility)
+  const importConfig = useObservabilityStore((s) => s.importConfig)
 
   return {
     rangePreset,
@@ -33,6 +40,8 @@ export function useObservabilityControls() {
     refreshMs,
     filters,
     editMode,
+    thresholds,
+    hiddenPanels,
     setRangePreset,
     setCustomRange,
     setRefreshMs,
@@ -40,6 +49,11 @@ export function useObservabilityControls() {
     setEditMode,
     setLayouts,
     resetLayouts,
+    setThreshold,
+    resetThresholds,
+    setHiddenPanels,
+    togglePanelVisibility,
+    importConfig,
   }
 }
 

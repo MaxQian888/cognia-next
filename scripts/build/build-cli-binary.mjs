@@ -45,7 +45,18 @@ const sidecarOutDir = path.join(binDir, "sidecar")
 // Deps the sidecar bundle keeps external (resolved from the copied node_modules
 // at runtime): claude-agent-sdk does dynamic requires / spawns the `claude`
 // binary, node-pty is a native addon, pdfjs-dist ships legacy/worker builds.
-const SIDECAR_EXTERNALS = ["@anthropic-ai/claude-agent-sdk", "node-pty", "pdfjs-dist"]
+const SIDECAR_EXTERNALS = [
+  "@anthropic-ai/claude-agent-sdk",
+  "node-pty",
+  "pdfjs-dist",
+  // better-sqlite3 is a native addon; web-tree-sitter + tree-sitter-wasms load
+  // `.wasm` data files via dynamic require that esbuild can't inline. Keep them
+  // external so they're copied next to the binary; the code-graph subsystem
+  // degrades gracefully if any are absent.
+  "better-sqlite3",
+  "web-tree-sitter",
+  "tree-sitter-wasms",
+]
 
 // The TUI rendering stack MUST stay external. Inlining Ink + react-reconciler +
 // scheduler into one bundle breaks React's renderer (the TUI mounts but paints
@@ -66,6 +77,12 @@ const TARGETS = [
   { pkg: "node24-macos-arm64", dist: "cognia-agent-macos-arm64", bin: "cognia-agent", archive: "tar.gz" },
 ]
 
+// `--layout-only` (ADR-0059 W6): stop after assembling the plain-Node layout
+// (cli.mjs + TUI node_modules + sidecar/) into cli/dist/bin/cognia-agent-layout,
+// skipping the pkg binary + archives. This is what Dockerfile.cognia-server
+// ships — the container already has Node, so embedding one via pkg is waste.
+const LAYOUT_ONLY = process.argv.includes("--layout-only")
+
 let esbuild
 try {
   esbuild = await import("esbuild")
@@ -75,19 +92,23 @@ try {
 }
 
 let pkg
-try {
-  pkg = await import("@yao-pkg/pkg")
-} catch {
-  console.error("build-cli-binary: @yao-pkg/pkg is not installed. Run: pnpm add -D @yao-pkg/pkg")
-  process.exit(1)
+if (!LAYOUT_ONLY) {
+  try {
+    pkg = await import("@yao-pkg/pkg")
+  } catch {
+    console.error("build-cli-binary: @yao-pkg/pkg is not installed. Run: pnpm add -D @yao-pkg/pkg")
+    process.exit(1)
+  }
 }
 
 let archiver
-try {
-  archiver = (await import("archiver")).default
-} catch {
-  console.error("build-cli-binary: archiver is not installed. Run: pnpm add -D archiver")
-  process.exit(1)
+if (!LAYOUT_ONLY) {
+  try {
+    archiver = (await import("archiver")).default
+  } catch {
+    console.error("build-cli-binary: archiver is not installed. Run: pnpm add -D archiver")
+    process.exit(1)
+  }
 }
 
 // Stream a dist folder into a per-platform archive (zip for Windows, tar.gz for
@@ -126,14 +147,31 @@ const stubNextPlugin = {
   setup(build) {
     build.onResolve({ filter: STUB_PATTERN }, (args) => ({ path: args.path, namespace: "cli-stub" }))
     build.onLoad({ filter: /.*/, namespace: "cli-stub" }, () => ({
+      // `apply: () => noop` so a module-top-level `const C = dynamic(...)`
+      // yields a no-op component, not `null` — otherwise `C.displayName`
+      // (e.g. markdown-renderer's withRendererErrorBoundary) throws at import.
       contents:
-        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop) });",
+        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop), apply: () => noop });",
       loader: "js",
     }))
   },
 }
 
 const ASSET_LOADERS = { ".ttf": "empty", ".css": "empty", ".svg": "empty", ".woff": "empty", ".woff2": "empty" }
+
+// Load the i18n aggregate messages as DEFAULT-ONLY JSON modules — same fix as
+// build-cli.mjs: the messages contain an `eval` top-level namespace, and
+// esbuild's json loader otherwise emits `var eval = …` named exports, a
+// strict-mode SyntaxError in ESM output (crashed `cognia-agent serve`).
+const jsonDefaultOnlyPlugin = {
+  name: "json-default-only-messages",
+  setup(build) {
+    build.onLoad({ filter: /i18n[\\/]messages[\\/][^\\/]+\.json$/ }, async (args) => {
+      const raw = await fs.promises.readFile(args.path, "utf8")
+      return { contents: `export default ${raw}`, loader: "js" }
+    })
+  },
+}
 
 // Best-effort recursive remove. On Windows a dist subdir can be locked because a
 // terminal is parked in it (cwd lock) — that blocks deleting the DIR but not
@@ -170,7 +208,7 @@ await esbuild.build({
   // TUI_EXTERNALS); those resolve from the adjacent node_modules at runtime.
   external: TUI_EXTERNALS,
   loader: ASSET_LOADERS,
-  plugins: [stubNextPlugin],
+  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "info",
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, cliBundle)}`)
@@ -208,6 +246,22 @@ await esbuild.build({
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, path.join(sidecarOutDir, "claude-host.mjs"))}`)
 
+// 2b. Copy the sidecar's runtime-read data files next to the bundle. esbuild
+// inlines the JS but NOT files loaded via `fs.readFileSync(import.meta.url-
+// relative path)`; in the bundle `import.meta.url` resolves to claude-host.mjs,
+// so each such file must sit beside it. store-sqlite.mjs reads `schema.sql` at
+// module load (a top-level read — it runs even before the sqlite store is
+// constructed), so a missing file crashes the sidecar before it emits `ready`.
+const SIDECAR_DATA_FILES = [path.join(root, "sidecar/builtin-tools/code/schema.sql")]
+for (const src of SIDECAR_DATA_FILES) {
+  if (!fs.existsSync(src)) {
+    console.error(`build-cli-binary: missing sidecar data file ${path.relative(root, src)}`)
+    process.exit(1)
+  }
+  fs.cpSync(src, path.join(sidecarOutDir, path.basename(src)))
+}
+console.log(`build-cli-binary: copied ${SIDECAR_DATA_FILES.length} sidecar data file(s) → ${path.relative(root, sidecarOutDir)}`)
+
 // 3. Copy a pruned node_modules — just the externals (+ their nested deps).
 // Under pnpm's isolated layout each package nests its own deps, so a
 // dereferenced recursive copy of each external yields a correct closure.
@@ -231,6 +285,24 @@ for (const dep of SIDECAR_EXTERNALS) {
   fs.cpSync(src, path.join(destNodeModules, dep), { recursive: true, dereference: true })
 }
 console.log(`build-cli-binary: copied sidecar externals → ${path.relative(root, destNodeModules)}`)
+
+// 3c. Layout-only exit: assemble the plain-Node dist (no pkg binary). The
+// consumer runs `node <layout>/cli.mjs …`; cli.mjs resolves react/ink from the
+// adjacent node_modules, and the sidecar rides alongside exactly as in the
+// binary dists.
+if (LAYOUT_ONLY) {
+  const layoutDir = path.join(binDir, "cognia-agent-layout")
+  safeRm(layoutDir)
+  fs.mkdirSync(layoutDir, { recursive: true })
+  fs.cpSync(cliBundle, path.join(layoutDir, "cli.mjs"))
+  fs.cpSync(tuiNodeModules, path.join(layoutDir, "node_modules"), {
+    recursive: true,
+    dereference: true,
+  })
+  fs.cpSync(sidecarOutDir, path.join(layoutDir, "sidecar"), { recursive: true, dereference: true })
+  console.log(`build-cli-binary: assembled layout ${path.relative(root, layoutDir)}`)
+  process.exit(0)
+}
 
 // 3b. pkg snapshot entry: a tiny CJS bootstrap. pkg is rock-solid with CJS but
 // its ESM-from-snapshot resolution is broken on Windows (it hands Node a raw

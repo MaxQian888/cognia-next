@@ -4,6 +4,7 @@
 
 import { generateText, streamText } from "ai"
 import { getProviderModel, type ProviderName } from "@cognia/provider-core/core/client"
+import type { ApiFlavor } from "@cognia/provider-types/provider"
 import type { CanvasActionAttachment, CanvasWorkbenchActionType } from "@/types/artifact/artifact"
 
 // The pure diff → hunk → apply engine was extracted to `canvas-review` (no
@@ -18,6 +19,8 @@ export interface CanvasActionConfig {
   model: string
   apiKey: string
   baseURL?: string
+  apiFlavor?: ApiFlavor
+  headers?: Record<string, string>
 }
 
 export interface CanvasActionResult {
@@ -186,10 +189,10 @@ export async function executeCanvasAction(
   config: CanvasActionConfig,
   options?: CanvasActionExecutionOptions
 ): Promise<CanvasActionResult> {
-  const { provider, model, apiKey, baseURL } = config
+  const { provider, model, apiKey, baseURL, apiFlavor, headers } = config
 
   try {
-    const modelInstance = getProviderModel({ provider, model, apiKey, baseURL })
+    const modelInstance = getProviderModel({ provider, model, apiKey, baseURL, apiFlavor, headers })
     const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
 
     const result = await generateText({
@@ -303,10 +306,10 @@ export async function executeCanvasActionStreaming(
   callbacks: StreamingCallbacks,
   options?: CanvasActionExecutionOptions
 ): Promise<void> {
-  const { provider, model, apiKey, baseURL } = config
+  const { provider, model, apiKey, baseURL, apiFlavor, headers } = config
 
   try {
-    const modelInstance = getProviderModel({ provider, model, apiKey, baseURL })
+    const modelInstance = getProviderModel({ provider, model, apiKey, baseURL, apiFlavor, headers })
     const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
 
     const result = streamText({

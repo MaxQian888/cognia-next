@@ -98,14 +98,20 @@ const initialState: RemoteControlState = {
 
 function cloneConfig(c: RemoteControlConfig): RemoteControlConfig {
   return {
-    inbound: { ...c.inbound, allowlist: [...c.inbound.allowlist] },
+    inbound: {
+      ...c.inbound,
+      allowlist: [...c.inbound.allowlist],
+      disabledTargets: [...(c.inbound.disabledTargets ?? [])],
+    },
     outbound: {
       hasSigningSecret: c.outbound.hasSigningSecret,
       defaultHeaders: c.outbound.defaultHeaders.map((h) => ({ ...h })),
       endpoints: (c.outbound.endpoints ?? []).map((e) => ({
         ...e,
         headers: e.headers.map((h) => ({ ...h })),
+        eventTypes: e.eventTypes ? [...e.eventTypes] : undefined,
       })),
+      delivery: c.outbound.delivery ? { ...c.outbound.delivery } : undefined,
     },
   }
 }
@@ -145,6 +151,9 @@ export const useRemoteControlStore = create<RemoteControlStore>()(
         if (Array.isArray(patch.allowlist)) {
           next.inbound.allowlist = [...patch.allowlist]
         }
+        if (Array.isArray(patch.disabledTargets)) {
+          next.inbound.disabledTargets = [...patch.disabledTargets]
+        }
         set({ config: next })
         if (!isTauri()) return { ok: true }
         try {
@@ -163,6 +172,16 @@ export const useRemoteControlStore = create<RemoteControlStore>()(
         next.outbound = { ...next.outbound, ...patch }
         if (Array.isArray(patch.defaultHeaders)) {
           next.outbound.defaultHeaders = patch.defaultHeaders.map((h) => ({ ...h }))
+        }
+        if (Array.isArray(patch.endpoints)) {
+          next.outbound.endpoints = patch.endpoints.map((e) => ({
+            ...e,
+            headers: e.headers.map((h) => ({ ...h })),
+            eventTypes: e.eventTypes ? [...e.eventTypes] : undefined,
+          }))
+        }
+        if (patch.delivery) {
+          next.outbound.delivery = { ...patch.delivery }
         }
         set({ config: next })
         if (!isTauri()) return { ok: true }

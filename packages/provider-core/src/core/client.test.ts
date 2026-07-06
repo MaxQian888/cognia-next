@@ -42,6 +42,10 @@ jest.mock("@ai-sdk/cohere", () => ({
   __esModule: true,
   createCohere: makeFactoryMock("cohere"),
 }))
+jest.mock("@ai-sdk/azure", () => ({
+  __esModule: true,
+  createAzure: makeFactoryMock("azure"),
+}))
 
 import { getProviderModel, isGenuineOpenAiEndpoint } from "./client"
 import { createAnthropic } from "@ai-sdk/anthropic"
@@ -49,6 +53,7 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
+import { createAzure } from "@ai-sdk/azure"
 
 type ResolvedModel = { provider: string; modelId?: string; factoryOpts?: Record<string, unknown> }
 
@@ -57,6 +62,7 @@ const mockOpenAI = createOpenAI as unknown as jest.Mock
 const mockGoogle = createGoogleGenerativeAI as unknown as jest.Mock
 const mockMistral = createMistral as unknown as jest.Mock
 const mockCohere = createCohere as unknown as jest.Mock
+const mockAzure = createAzure as unknown as jest.Mock
 
 describe("getProviderModel", () => {
   beforeEach(() => {
@@ -65,6 +71,7 @@ describe("getProviderModel", () => {
     mockGoogle.mockClear()
     mockMistral.mockClear()
     mockCohere.mockClear()
+    mockAzure.mockClear()
     delete process.env.ANTHROPIC_API_KEY
   })
 
@@ -132,6 +139,22 @@ describe("getProviderModel", () => {
     }
   )
 
+  it("fills the catalog base URL for built-in OpenAI-compatible providers", () => {
+    const m = getProviderModel({
+      provider: "openrouter" as never,
+      model: "anthropic/claude-sonnet-4",
+      apiKey: "sk-or-v1-test",
+    }) as ResolvedModel
+
+    expect(m.provider).toBe("openai.chat")
+    expect(m.modelId).toBe("anthropic/claude-sonnet-4")
+    expect(mockOpenAI).toHaveBeenCalledWith({
+      apiKey: "sk-or-v1-test",
+      baseURL: "https://openrouter.ai/api/v1",
+      headers: undefined,
+    })
+  })
+
   it("routes codex through the Responses API even on the ChatGPT backend (not *.openai.com)", () => {
     const m = getProviderModel({
       provider: "codex" as never,
@@ -175,6 +198,46 @@ describe("getProviderModel", () => {
     delete process.env.ANTHROPIC_API_KEY
     getProviderModel({ provider: "anthropic", model: "x", apiKey: "from-call" })
     expect(process.env.ANTHROPIC_API_KEY).toBeUndefined()
+  })
+
+  it("honors an explicit apiFlavor over the openai host heuristic", () => {
+    // Force Responses on a gateway URL that the heuristic would route to Chat.
+    const r = getProviderModel({
+      provider: "openai",
+      model: "gpt-4o",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "responses",
+    }) as ResolvedModel
+    expect(r.provider).toBe("openai.responses")
+    // Force Chat on genuine OpenAI that the heuristic would route to Responses.
+    const c = getProviderModel({
+      provider: "openai",
+      model: "gpt-4o",
+      baseURL: "https://api.openai.com/v1",
+      apiFlavor: "chat",
+    }) as ResolvedModel
+    expect(c.provider).toBe("openai.chat")
+  })
+
+  it("routes azure to its native factory: auto → chat, apiFlavor:responses → responses", () => {
+    const auto = getProviderModel({
+      provider: "azure" as never,
+      model: "gpt-5",
+      baseURL: "https://x.openai.azure.com",
+    }) as ResolvedModel
+    expect(mockAzure).toHaveBeenCalledTimes(1)
+    expect(auto.provider).toBe("azure.chat")
+    const resp = getProviderModel({
+      provider: "azure" as never,
+      model: "gpt-5",
+      baseURL: "https://x.openai.azure.com",
+      apiFlavor: "responses",
+    }) as ResolvedModel
+    expect(resp.provider).toBe("azure.responses")
+  })
+
+  it("rejects bedrock in the in-renderer model factory (chat/sidecar path only)", () => {
+    expect(() => getProviderModel({ provider: "bedrock" as never, model: "x" })).toThrow(/bedrock/i)
   })
 
   it("throws for an unsupported provider instead of silently using Anthropic", () => {

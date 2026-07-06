@@ -34,7 +34,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use super::{healthz, rpc, tls::TlsMaterial, ws, ws_terminal};
+use super::{a2a, acp, healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
 use axum::{
     middleware::{from_fn, from_fn_with_state},
     routing::{any, get, post},
@@ -232,7 +232,17 @@ pub fn build_router(state: SharedState) -> Router {
         // stable installation identifier so mobile clients can detect
         // cert rotation and confirm they're talking to the right
         // desktop. See `healthz` module docs.
-        .route("/api/v1/healthz", get(healthz::healthz_handler));
+        .route("/api/v1/healthz", get(healthz::healthz_handler))
+        // Prometheus exposition (ADR-0059 D9) — aggregate counters only,
+        // same public trust model as the services' /metrics.
+        .route("/metrics", get(super::metrics::metrics_handler))
+        // A2A Agent Card (a2a-protocol.org) — public discovery document. Read
+        // only, discovery-safe fields only; the A2A endpoint itself (`/a2a`)
+        // is device-JWT gated below.
+        .route(
+            "/.well-known/agent-card.json",
+            get(a2a::a2a_agent_card_handler),
+        );
 
     // Authenticated routes — JWT verifier middleware applied.
     //
@@ -244,20 +254,57 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/v1/whoami", get(auth::whoami_handler))
         .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
         .route("/ws/v1/events", any(ws::ws_handler))
+        // Headless-brain data plane (ADR-0059 W3). The JWT middleware already
+        // enforces loopback for service-scope tokens; the handler additionally
+        // rejects non-service scopes before the upgrade.
+        .route("/ws/v1/bridge", any(ws_bridge::ws_bridge_handler))
         .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
+        // ACP server (Agent Client Protocol) — external editors drive cognia
+        // Claude sessions over JSON-RPC. Baseline-chat surface only (the
+        // handler reaches `claude_*` arms through `rpc::dispatch`, whose
+        // control/service gates still apply), so a device JWT suffices.
+        .route("/ws/v1/acp", any(acp::acp_handler))
+        // A2A server (Agent2Agent, a2a-protocol.org) — external agents drive
+        // cognia over JSON-RPC. Same baseline-chat trust model as ACP: reaches
+        // `claude_*` arms through `rpc::dispatch`, so a device JWT suffices.
+        .route("/a2a", post(a2a::a2a_rpc_handler))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,
         ));
 
-    Router::new()
+    let mut router = Router::new()
         .merge(metered_pre_auth_routes)
         .merge(unmetered_public_routes)
         .merge(protected_routes)
-        // Body-size limit applied to all routes.  JWT payloads are tiny; the
-        // generous limit leaves room for future multipart (M4.6 push-token).
-        .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
-        .with_state(state)
+        .with_state(state);
+
+    // Public connector webhook ingress (ADR-0059 F4 / R12) — headless only.
+    // Deliberately OUTSIDE the JWT middleware: webhook auth is the platform
+    // HMAC/signature + replay guard inside `connectors::axum_app`. It still
+    // sits inside the pre-auth per-source-IP rate limit and (below) the body
+    // cap. Events publish onto the EventBus → `/ws/v1/events` → the brain's
+    // connector runtime, retiring the cloudflared-tunnel requirement for
+    // cloud installs. Nested after `with_state` because the connectors
+    // router carries its own (already-resolved) `ConnectorsState`.
+    if let Some(services) = crate::headless::headless_services() {
+        let emitter: std::sync::Arc<dyn crate::connectors::axum_app::EventEmitter> =
+            std::sync::Arc::new(crate::connectors::axum_app::BusEventEmitter(
+                std::sync::Arc::clone(&services.event_bus),
+            ));
+        let connectors_router = crate::connectors::axum_app::build_router(
+            services.connectors.clone(),
+            emitter,
+            None, // no OneBot reverse-WS AppHandle headless
+        )
+        .layer(from_fn(middleware::pre_auth_rate_limit));
+        router = router.nest("/connectors", connectors_router);
+    }
+
+    // Body-size limit applied to all routes (incl. the ingress — Lark/Slack
+    // webhook bodies fit comfortably under 64 KiB). JWT payloads are tiny;
+    // the generous limit leaves room for future multipart (M4.6 push-token).
+    router.layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +444,130 @@ mod tests {
         );
 
         let _ = handle.shutdown.send(());
+    }
+
+    /// ADR-0059 F4/R12: the public `/connectors` ingress mounts only on
+    /// headless installs; on desktop the route does not exist.
+    #[tokio::test]
+    async fn connectors_ingress_mounts_only_when_headless() {
+        use tower::ServiceExt as _;
+        // The headless-services slot is process-global; serialize with the
+        // other global-slot tests.
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+
+        crate::headless::install_headless_services(None);
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/connectors/health")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // No ingress on desktop: the path falls through to the router
+        // fallback, which the JWT layer wraps (pre-existing behavior) → 401.
+        // The load-bearing half of the assertion is "not 200".
+        assert_eq!(resp.status().as_u16(), 401, "desktop has no ingress");
+
+        // The pre-auth rate limiter requires a peer address; oneshot has no
+        // TCP connection, so inject ConnectInfo the way the make-service
+        // would.
+        let peer = axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            34567,
+        )));
+
+        crate::headless::install_headless_services(Some(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        ));
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/connectors/health")
+                    .extension(peer.clone())
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200, "headless mounts the ingress");
+
+        // Deterministic rejection shape for an unregistered adapter — what
+        // the tier-2 smoke asserts against.
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/connectors/webhook/telegram/ghost")
+                    .extension(peer)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 404, "unregistered adapter → 404");
+
+        crate::headless::install_headless_services(None);
+    }
+
+    /// `/ws/v1/acp` sits in the protected block: without a device JWT the
+    /// middleware rejects the upgrade before the handler runs.
+    #[tokio::test]
+    async fn acp_route_requires_device_jwt() {
+        use tower::ServiceExt as _;
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/ws/v1/acp")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 401, "no token → 401 before upgrade");
+    }
+
+    /// `/a2a` sits in the protected block: without a device JWT the middleware
+    /// rejects the request before the handler runs.
+    #[tokio::test]
+    async fn a2a_route_requires_device_jwt() {
+        use tower::ServiceExt as _;
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 401, "no token → 401");
+    }
+
+    /// The A2A Agent Card is a public discovery document — no JWT required.
+    #[tokio::test]
+    async fn a2a_agent_card_is_public() {
+        use tower::ServiceExt as _;
+        let router = build_router(test_state());
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/.well-known/agent-card.json")
+                    .header("host", "example.com:7890")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200, "agent card is public");
     }
 
     #[test]

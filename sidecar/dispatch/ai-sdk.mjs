@@ -16,14 +16,21 @@ import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
+import {
+  resolveProviderProtocol,
+  normalizeProtocol,
+  isMisroutedToOpenAi,
+} from "./protocol-adapters/provider-protocol.mjs"
 import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
 import { planStrategy } from "./compaction-strategies.mjs"
 import { capToolResults } from "./tool-result-cap.mjs"
 import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
+import { buildMcpLogEvent } from "./mcp-log.mjs"
 
 // Recent user/assistant messages kept verbatim when compacting; everything
 // older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
@@ -51,45 +58,12 @@ const TOOL_RESULT_REVIEW_TIMEOUT_MS = 30_000
 // Map a provider id (or explicit `protocol` field) to the AI SDK family the
 // renderer uses to construct a model instance. Custom provider ids must
 // supply `providerCredentials.protocol` because the id alone tells us nothing.
+// The id→protocol table is the single source of truth in `provider-protocol.mjs`;
+// the renderer's resolver forwards `providerCredentials.protocol` for every turn,
+// so this id-based path is the fallback for callers that don't (CLI, older code).
 function resolveProtocol(provider, credentials) {
-  if (credentials?.protocol) return credentials.protocol
-  switch (provider) {
-    case "openai":
-    case "openrouter": // openrouter speaks the openai protocol with a custom baseURL
-    case "opencode": // OpenCode Zen — OpenAI-compatible gateway (verified live)
-    case "opencode-go": // OpenCode Go — same gateway, /go segment
-    case "codex": // Codex (OpenAI) — Responses API; ChatGPT-login carries headers
-
-    case "deepseek":
-    case "groq":
-    case "mistral-openai-compat":
-    // Local inference engines all expose an OpenAI-compatible /v1 surface, so
-    // they dispatch through the openai client with a custom baseURL. Built-in
-    // ids must be recognised here because they reach the sidecar without an
-    // explicit `providerCredentials.protocol` (only custom ids carry one).
-    case "ollama":
-    case "lmstudio":
-    case "llamacpp":
-    case "llamafile":
-    case "vllm":
-    case "localai":
-    case "jan":
-    case "textgenwebui":
-    case "koboldcpp":
-    case "tabbyapi":
-      return "openai"
-    case "google":
-    case "gemini":
-      return "google"
-    case "mistral":
-      return "mistral"
-    case "cohere":
-      return "cohere"
-    case "anthropic":
-      return "anthropic"
-    default:
-      return null
-  }
+  if (credentials?.protocol) return normalizeProtocol(credentials.protocol)
+  return resolveProviderProtocol(provider)
 }
 
 // `buildModel` moved to `protocol-adapters/ai-sdk-adapter.mjs` (the built-in
@@ -104,6 +78,22 @@ function resolveProtocol(provider, credentials) {
  * cache prefix. Assistant messages whose content becomes empty after the
  * filter are dropped entirely; non-assistant messages pass through untouched.
  */
+/**
+ * Best-effort human-readable message from an arbitrary thrown/streamed error
+ * value. Guards `JSON.stringify` — a circular provider error object must not
+ * throw inside an error-reporting path.
+ */
+function errorToMessage(err) {
+  if (err instanceof Error) return err.message
+  if (typeof err === "string") return err
+  if (err && typeof err.message === "string") return err.message
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return String(err)
+  }
+}
+
 function stripReasoningParts(messages) {
   const out = []
   for (const msg of messages) {
@@ -298,6 +288,19 @@ function chargeLegSteps({ legStepsRead, legStepsRun, perLegCap }) {
 }
 
 /**
+ * Resolve the per-leg agentic step cap (STEP_CHUNK). A caller-supplied
+ * `aiSdkStepChunk` (≥ 1, floored) raises/lowers how many sequential tool-use
+ * steps run per `streamText` leg; anything invalid falls back to the default 16.
+ * Exported via `__testing__`.
+ *
+ * @param {unknown} aiSdkStepChunk
+ * @returns {number}
+ */
+function resolveStepChunk(aiSdkStepChunk) {
+  return typeof aiSdkStepChunk === "number" && aiSdkStepChunk >= 1 ? Math.floor(aiSdkStepChunk) : 16
+}
+
+/**
  * @param {{
  *   provider: string,
  *   sessionId: string,
@@ -385,6 +388,9 @@ export function dispatchAiSdk({
     emit,
     sessionId,
     pendingProtocolExecs,
+    onCancel: (execId, reason) => {
+      emit({ type: "protocol_adapter_cancel", sessionId, execId, reason })
+    },
   })
   if (!protocolAdapter) {
     emit({
@@ -428,6 +434,25 @@ export function dispatchAiSdk({
       type: "session_ended",
       sessionId,
       error: `provider "${provider}" is not configured: no API key or base URL was found. Add credentials for "${provider}" (CLI: ~/.cognia/credentials.json or the matching *_API_KEY env var; desktop: Settings → Providers) and try again.`,
+    })
+    return null
+  }
+
+  // Credential-leak guard. A built-in openai-PROTOCOL provider that is NOT a
+  // genuine OpenAI host (every aggregator — openrouter / deepseek / groq / xai /
+  // … — and the local engines) MUST carry its own base URL. If it got dropped
+  // upstream the openai client silently defaults to api.openai.com, which would
+  // send THIS provider's key (e.g. an `sk-or-…` OpenRouter key) to OpenAI — a
+  // credential leak that OpenAI rejects with a misleading "Incorrect API key"
+  // error. The renderer resolver fills the base URL from the provider catalog;
+  // this is the sidecar's last line of defence. Refuse with a clear, actionable
+  // message instead of leaking the key. (The base-URL-less case above already
+  // returned, so reaching here means a key IS present but the URL is wrong.)
+  if (protocol === "openai" && isMisroutedToOpenAi(provider, resolvedCreds.baseURL)) {
+    emit({
+      type: "session_ended",
+      sessionId,
+      error: `provider "${provider}" has no base URL, so the request would go to api.openai.com with the "${provider}" API key — refused to avoid leaking the key to OpenAI. This usually means the app is running an older build: restart it (desktop: quit and relaunch; web: hard-reload) to pick up the provider fix, or set the "${provider}" base URL in Settings → Providers.`,
     })
     return null
   }
@@ -484,8 +509,6 @@ export function dispatchAiSdk({
   // against this Map. Engaged only when `sendOptions.toolResultReviewEnabled`.
   const pendingToolResultReviews = new Map()
   const toolResultReviewEnabled = sendOptions.toolResultReviewEnabled === true
-  // Correlate tool-call ids → names so a tool-result review names its tool.
-  const toolNamesById = new Map()
   // Tools are stable for the session — build once, reuse across turns.
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache
@@ -509,6 +532,9 @@ export function dispatchAiSdk({
   // teardown so no background process outlives the session.
   const bgShells = createBgShellRegistry()
   const lsp = makeLazyLspResolver({ sendOptions, log })
+  // Per-session code-graph index (resolver-bound like LSP). Lazily built on
+  // first tool call; disposed at session teardown.
+  const codeGraph = makeLazyCodeGraphResolver({ sendOptions, log })
   // Agentic step budget for the WHOLE user turn. The turn runs a manual agent
   // loop (see `runTurn`) of `STEP_CHUNK`-step legs until the model naturally
   // stops or this budget is exhausted — a runaway backstop, NOT a task-length
@@ -517,7 +543,15 @@ export function dispatchAiSdk({
   // otherwise 256. This replaces a hard 16-step single leg that silently stopped
   // any multi-tool task on every non-Anthropic provider — the Anthropic Agent
   // SDK loops unbounded, so the two channels were badly asymmetric.
-  const STEP_CHUNK = 16
+  // Per-leg agentic step cap. Each `streamText` leg re-sends the whole growing
+  // conversation, so a LARGER chunk means fewer legs → fewer full re-sends for a
+  // long tool-using turn (less prompt-token overhead). The trade-off: a larger
+  // chunk runs more steps between the per-leg `maybeCompact` check, so the window
+  // is inspected less often within a turn — keep the default modest (16) and let
+  // callers opt into a larger chunk via `aiSdkStepChunk`. Parallel tool calls
+  // within a single step are handled natively by AI SDK (multiple tool-calls per
+  // step execute concurrently), so this only bounds sequential tool-use depth.
+  const STEP_CHUNK = resolveStepChunk(sendOptions.aiSdkStepChunk)
   const baseStepsBudget =
     typeof sendOptions.maxTurns === "number" && sendOptions.maxTurns > 0
       ? sendOptions.maxTurns
@@ -534,41 +568,40 @@ export function dispatchAiSdk({
     }
   }
 
-  // Pause before a tool result reaches the model: emit a `tool_result_review`
-  // and await the renderer's `tool_result_decision`. A returned
-  // `updatedToolOutput` rewrites the output; `undefined`/`null` (no responder,
-  // no change, or timeout) passes the original through. Returns a possibly-new
-  // stream event with the output replaced.
-  async function reviewToolResult(evt) {
-    const isError = evt?.type === "tool-error"
-    const current = isError
-      ? evt.error instanceof Error
-        ? evt.error.message
-        : typeof evt.error === "string"
-          ? evt.error
-          : JSON.stringify(evt.error)
-      : (evt.output ?? evt.result)
+  // PostToolUse review round-trip, applied at the tool EXECUTE layer (threaded
+  // into `buildAiSdkTools` / `buildAiSdkMcpTools` below): emit a
+  // `tool_result_review` and await the renderer's `tool_result_decision`.
+  // Returns the updated output, or `undefined` (no responder, no change, or
+  // timeout) to pass the original through. Rewriting at the execute layer is
+  // what makes the review reach the MODEL — streamText persists the execute
+  // return into the conversation, so a rewrite applied to the fullStream
+  // tool-result event afterwards would be display-only.
+  async function reviewToolOutput(toolName, toolUseId, current, isError) {
+    if (closing || cancelled) return undefined
     const reviewId = randomUUID()
-    const updated = await new Promise((resolve) => {
-      pendingToolResultReviews.set(reviewId, { resolve })
-      emit({
-        type: "tool_result_review",
-        sessionId,
-        reviewId,
-        toolUseId: evt.toolCallId ?? "",
-        toolName: toolNamesById.get(evt.toolCallId) ?? "",
-        result: current,
-        isError,
-      })
-      setTimeout(() => {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
         if (pendingToolResultReviews.has(reviewId)) {
           pendingToolResultReviews.delete(reviewId)
           resolve(undefined)
         }
       }, TOOL_RESULT_REVIEW_TIMEOUT_MS)
+      pendingToolResultReviews.set(reviewId, {
+        resolve: (v) => {
+          clearTimeout(timer)
+          resolve(v)
+        },
+      })
+      emit({
+        type: "tool_result_review",
+        sessionId,
+        reviewId,
+        toolUseId: toolUseId ?? "",
+        toolName: toolName ?? "",
+        result: current,
+        isError: isError === true,
+      })
     })
-    if (updated === undefined || updated === null) return evt
-    return isError ? { ...evt, error: updated } : { ...evt, output: updated, result: updated }
   }
 
   // Build a flat conversation from accumulated user/assistant turns.
@@ -682,6 +715,11 @@ export function dispatchAiSdk({
           : {
               lastInputTokens,
               modelId: model,
+              // Authoritative window resolved by the renderer (catalog-backed);
+              // falls back to the regex table inside `shouldCompact` when absent.
+              ...(typeof comp.contextWindow === "number"
+                ? { contextWindow: comp.contextWindow }
+                : {}),
               ...(typeof comp.fraction === "number" ? { fraction: comp.fraction } : {}),
             }
       if (!shouldCompact(args)) return
@@ -699,6 +737,9 @@ export function dispatchAiSdk({
       importanceThreshold: comp.importanceThreshold,
       retainedFraction: comp.retainedFraction,
       modelId: model,
+      // Authoritative catalog-resolved window (same source `shouldCompact`
+      // uses) so the drain-line budget doesn't fall back to the regex table.
+      ...(typeof comp.contextWindow === "number" ? { contextWindow: comp.contextWindow } : {}),
     })
     if (plan.kind === "none") return
 
@@ -750,6 +791,10 @@ export function dispatchAiSdk({
           tools: undefined,
           maxSteps: 1,
           credentials: summaryCreds,
+          // Interruptible: a hung summary provider must not stall the turn
+          // head forever. Absent for a between-turns manual compaction (no
+          // active controller) — that call has no turn to stall.
+          ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
           streamTextFn: streamTextOverride,
         })
         let out = ""
@@ -775,18 +820,78 @@ export function dispatchAiSdk({
     let next
     let decision = "reused"
     let summaryProduced = false
+    let opticalMeta
 
-    if (plan.kind === "rebuild") {
+    // Optical strategy (ADR-0063): render the `middle` to image frame(s) the
+    // vision model reads back. `buildOpticalCompaction` gates on coverage,
+    // budget, and a round-trip readability check; on any failure it returns null
+    // and we drop through to summarize the same `middle` as text below.
+    if (plan.kind === "optical") {
+      const { buildOpticalCompaction } = await import("./optical/compact.mjs")
+      const opticalTranscribe = async (dataUrl) => {
+        const sum = comp.summary ?? {}
+        let visionAdapter = protocolAdapter
+        if (sum.protocol) {
+          const alt = resolveAdapter(sum.protocol, sum.protocolAdapterSpec, {
+            emit,
+            sessionId,
+            pendingProtocolExecs,
+          })
+          if (alt) visionAdapter = alt
+        }
+        const run = await visionAdapter.start({
+          model: sum.model || model,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "image", image: dataUrl, mediaType: "image/png" },
+                {
+                  type: "text",
+                  text: "Transcribe ALL text visible in this image verbatim, preserving reading order. Output only the transcription, no commentary.",
+                },
+              ],
+            },
+          ],
+          modelParams: { ...modelParams, maxOutputTokens: 1024 },
+          tools: undefined,
+          maxSteps: 1,
+          credentials: sum.credentials || creds,
+          ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
+          streamTextFn: streamTextOverride,
+        })
+        let out = ""
+        for await (const evt of run.fullStream) {
+          if (evt?.type === "text-delta") out += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+        }
+        return out.trim()
+      }
+      const optical = await buildOpticalCompaction({
+        middle: plan.middle,
+        modelId: model,
+        version: nextVersion,
+        options: comp.optical ?? {},
+        transcribe: comp.optical?.verify === false ? undefined : opticalTranscribe,
+        log,
+      })
+      if (optical) {
+        next = [...plan.systemHead, ...frozen, ...(plan.keep ?? []), optical.message, ...plan.tail]
+        opticalMeta = optical.meta
+        summaryProduced = true
+      }
+    }
+
+    if (next === undefined && plan.kind === "rebuild") {
       // Sliding-window (or a no-op fallback) — no LLM call.
       next = plan.rebuilt
-    } else {
+    } else if (next === undefined) {
       let summaryText
       if (plan.kind === "chunked") {
-        const parts = []
-        for (const chunk of plan.chunks) {
-          const s = await summarize(chunk)
-          if (s) parts.push(s)
-        }
+        // Chunks are independent — summarize them concurrently (order is
+        // preserved by Promise.all's positional results).
+        const parts = (await Promise.all(plan.chunks.map((chunk) => summarize(chunk)))).filter(
+          Boolean
+        )
         if (regenerate && frozen.length) parts.unshift(renderForSummary(frozen))
         if (parts.length === 0) return
         summaryText =
@@ -839,6 +944,8 @@ export function dispatchAiSdk({
           post_tokens: estimateTokens(next),
           strategy: comp.strategy ?? "summary",
           ...(summaryProduced ? { frozenSummaryDecision: decision } : {}),
+          ...(opticalMeta ? { optical: { ...opticalMeta, sessionId } } : {}),
+          ...(plan.kind === "optical" && !opticalMeta ? { opticalFallback: true } : {}),
           ...(preMessages ? { pre_messages: preMessages } : {}),
         },
       },
@@ -869,6 +976,12 @@ export function dispatchAiSdk({
       lastCreds = creds
       lastModelParams = modelParams
 
+      // Created BEFORE any compaction so `interrupt()` can abort the one-shot
+      // summary call too (previously the controller was created after
+      // `maybeCompact`, leaving the summary request un-abortable).
+      const abortController = new AbortController()
+      activeAbortController = abortController
+
       // Honour a manual `/compact` that arrived mid-turn (deferred so we never
       // run two summary calls concurrently), then the automatic threshold.
       if (manualCompactPending) {
@@ -896,9 +1009,13 @@ export function dispatchAiSdk({
           pendingApprovals,
           pendingPluginToolCalls,
           lspResolver: lsp.lspResolver,
+          codeGraphResolver: codeGraph.codeGraphResolver,
           readTracker,
           bgShells,
           doomGuard: toolDoomGuard,
+          // PostToolUse rewrite at the execute layer (opt-in) — see
+          // `reviewToolOutput` above.
+          ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
         })
 
         // External MCP servers (parity with the Anthropic path, which passes
@@ -925,11 +1042,17 @@ export function dispatchAiSdk({
             const mcp = await buildAiSdkMcpTools({
               mcpServers: sendOptions.mcpServers,
               gate: mcpGate,
+              ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
               // A routed `@agent` narrows the allowlist to its own tools and
               // unions its deny-list (parity with the built-in tool path above).
               allowedTools: agentScopedSendOptions.allowedTools,
               disallowedTools: agentScopedSendOptions.disallowedTools,
               log,
+              // Surface each server's stderr + connect/tool diagnostics as
+              // `mcp_log` events for the renderer's MCP log panel (the ai-sdk
+              // path previously logged these only to the sidecar's own stderr).
+              emitMcpLog: (entry) =>
+                emit(buildMcpLogEvent({ sessionId, ts: Date.now(), ...entry })),
             })
             mcpClose = mcp.close
             if (Object.keys(mcp.tools).length > 0) {
@@ -947,9 +1070,6 @@ export function dispatchAiSdk({
           }
         }
       }
-
-      const abortController = new AbortController()
-      activeAbortController = abortController
 
       // ── Manual agent loop ────────────────────────────────────────────────
       // The AI SDK-blessed pattern (docs: "manual agent loop"): each `streamText`
@@ -1069,21 +1189,20 @@ export function dispatchAiSdk({
           if (cancelled) break
           if (evt?.type === "error") streamError = evt.error
           if (evt?.type === "finish") finishReason = evt.finishReason ?? finishReason
-          if (evt?.type === "tool-call" && evt.toolCallId) {
-            toolNamesById.set(evt.toolCallId, evt.toolName ?? "")
-          }
-          // PostToolUse rewrite: let the renderer review/rewrite tool output
-          // before the model sees it (opt-in; ai-sdk channel only).
-          const handled =
-            toolResultReviewEnabled && (evt?.type === "tool-result" || evt?.type === "tool-error")
-              ? await reviewToolResult(evt)
-              : evt
-          const out = adapter.handle(handled)
+          // NB: the PostToolUse review no longer intercepts here — it runs at
+          // the tool EXECUTE layer (see `reviewToolOutput`), so tool-result
+          // events already carry the reviewed output the model will see.
+          const out = adapter.handle(evt)
           flushAdapter(out)
           if (evt?.type === "text-delta") {
             legText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
           }
         }
+        // Seal this leg's streamed text/reasoning deltas into the canonical full
+        // `assistant` snapshot (the deltas above are `stream_event` previews). The
+        // renderer replaces the in-progress preview by id. No-op for a leg that
+        // produced only tool results (its boundary snapshots already sealed it).
+        flushAdapter(adapter.sealAssistant())
         assistantText += legText
 
         // A streamed error before ANY text in the whole turn is a failed turn —
@@ -1092,12 +1211,7 @@ export function dispatchAiSdk({
         // here also skips the `result.response`/`result.usage` reads below, whose
         // getters reject on a hard error.
         if (streamError && !assistantText && !cancelled) {
-          const msg =
-            streamError instanceof Error
-              ? streamError.message
-              : typeof streamError === "string"
-                ? streamError
-                : (streamError?.message ?? JSON.stringify(streamError))
+          const msg = errorToMessage(streamError)
           emit({
             type: "session_ended",
             sessionId,
@@ -1207,6 +1321,9 @@ export function dispatchAiSdk({
         // safety cap and that another message resumes the same accumulated context.
         const note = `\n\n_(Reached the ${maxStepsBudget}-step agentic safety cap for this turn — send another message to continue.)_`
         flushAdapter(adapter.handle({ type: "text-delta", text: note }))
+        // Seal the appended note as the canonical assistant snapshot (the line
+        // above only streamed it as a `stream_event` delta).
+        flushAdapter(adapter.sealAssistant())
         assistantText += note
       }
 
@@ -1236,12 +1353,7 @@ export function dispatchAiSdk({
         // reply as a successful turn. Symmetric with the pre-text error branch
         // above — forward the real HTTP status + Retry-After so the renderer
         // classifies off authoritative data.
-        const msg =
-          turnError instanceof Error
-            ? turnError.message
-            : typeof turnError === "string"
-              ? turnError
-              : (turnError?.message ?? JSON.stringify(turnError))
+        const msg = errorToMessage(turnError)
         emit({
           type: "session_ended",
           sessionId,
@@ -1261,6 +1373,11 @@ export function dispatchAiSdk({
           type: "session_ended",
           sessionId,
           error: err?.message ?? String(err),
+          // Thrown (non-streamed) failures — buildModel errors, the variant
+          // adapter's HTTP throw, getter rejections — carry status/Retry-After
+          // too; forward it so the renderer's breaker doesn't fall back to
+          // string matching. `{}` when the error has no HTTP metadata.
+          ...extractHttpErrorMeta(err),
         })
       }
     } finally {
@@ -1331,7 +1448,8 @@ export function dispatchAiSdk({
           for (const [id, ch] of pendingProtocolExecs) {
             pendingProtocolExecs.delete(id)
             try {
-              ch.fail("interrupted")
+              if (typeof ch.cancel === "function") ch.cancel("interrupted")
+              else ch.fail("interrupted")
             } catch {
               /* defensive — the channel shape is adapter-defined */
             }
@@ -1398,8 +1516,20 @@ export function dispatchAiSdk({
       closing = true
       cancelled = true
       activeAbortController?.abort()
+      if (pendingProtocolExecs) {
+        for (const [id, ch] of pendingProtocolExecs) {
+          pendingProtocolExecs.delete(id)
+          try {
+            if (typeof ch.cancel === "function") ch.cancel("session closed")
+            else ch.fail("session closed")
+          } catch {
+            /* defensive — the channel shape is adapter-defined */
+          }
+        }
+      }
       inputStream.close()
       lsp.dispose()
+      codeGraph.dispose()
       // Disconnect any external MCP servers opened for this session.
       if (mcpClose) {
         const done = mcpClose
@@ -1411,6 +1541,10 @@ export function dispatchAiSdk({
     pendingPluginToolCalls,
     pendingProtocolExecs,
     pendingToolResultReviews,
+    // Exposed for tests: the execute-layer PostToolUse review round-trip that
+    // `buildAiSdkTools` / `buildAiSdkMcpTools` invoke before a tool's output
+    // reaches the model.
+    reviewToolOutput,
     sendOptions,
   }
 }
@@ -1425,4 +1559,5 @@ export const __testing__ = {
   projectToolResultImages,
   sanitizeToolMessagePairs,
   chargeLegSteps,
+  resolveStepChunk,
 }

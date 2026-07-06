@@ -69,3 +69,22 @@ export function getPetWindowRole(
   if (label === PET_POPUP_WINDOW_LABEL) return "popup"
   return "main"
 }
+
+/**
+ * True when the current webview runs the full app runtime — the main desktop
+ * window or the browser/Capacitor shell ("main" / "web").
+ *
+ * The transparent pet overlay/popup windows load this same root layout but are
+ * least-privilege (see `src-tauri/capabilities/pet.json`): they are granted
+ * neither the notification, autostart, store, CLI, deep-link, nor
+ * window-set-title permissions. Any boot-time hook that touches those APIs must
+ * gate on this so it no-ops in a pet window instead of logging a
+ * denied-capability warning. Mirrors the `role === "main" || "web"` gate
+ * already used by `SettingsSyncProvider`.
+ *
+ * @param getLabel Optional DI seam for tests; forwarded to {@link getPetWindowRole}.
+ */
+export function isMainAppWindow(getLabel: () => string | undefined = readWebviewLabel): boolean {
+  const role = getPetWindowRole(getLabel)
+  return role === "main" || role === "web"
+}

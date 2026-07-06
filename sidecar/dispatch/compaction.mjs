@@ -50,6 +50,28 @@ export function getContextWindow(modelId) {
   return DEFAULT_CONTEXT_WINDOW
 }
 
+/** Character size of a structured tool-result body (string | text-part array |
+ * arbitrary object). Bounded, non-throwing. */
+function toolBodyLength(body) {
+  if (body == null) return 0
+  if (typeof body === "string") return body.length
+  if (Array.isArray(body)) {
+    let n = 0
+    for (const b of body) n += toolBodyLength(b)
+    return n
+  }
+  if (typeof body === "object") {
+    if (typeof body.text === "string") return body.text.length
+    if ("value" in body) return toolBodyLength(body.value)
+    try {
+      return JSON.stringify(body).length
+    } catch {
+      return 0
+    }
+  }
+  return String(body).length
+}
+
 function textLength(content) {
   if (typeof content === "string") return content.length
   if (Array.isArray(content)) {
@@ -57,6 +79,12 @@ function textLength(content) {
     for (const part of content) {
       if (typeof part === "string") n += part.length
       else if (part && typeof part.text === "string") n += part.text.length
+      else if (part && typeof part === "object") {
+        // Tool-result parts keep their body in `output` / `result` / `content`
+        // rather than `text`; counting them 0 systematically undercounted
+        // tool-heavy conversations (the drain-line then evicted too little).
+        n += toolBodyLength(part.output ?? part.result ?? part.content)
+      }
     }
     return n
   }
@@ -82,10 +110,19 @@ export function estimateTokens(messages) {
  *   configured `messageCountThreshold` (token-independent).
  * - otherwise (token-threshold / default) → fires when the last turn's real
  *   input token count crossed the auto-compact fraction of the model's window.
+ *
+ * `contextWindow` is the AUTHORITATIVE window the renderer resolved from the
+ * provider catalog (`resolveSendOptions` → `SendOptions.compaction.contextWindow`).
+ * Prefer it over {@link getContextWindow}'s regex table: that table is a
+ * conservative mirror that drifts (e.g. it floors every `deepseek*` id at 128k,
+ * so a real 1M deepseek-v4 would auto-compact at ~107k instead of ~835k). The
+ * regex window is only the fallback for callers that don't thread the resolved
+ * value (older sessions, the parity test).
  */
 export function shouldCompact({
   lastInputTokens,
   modelId,
+  contextWindow,
   fraction = AUTO_COMPACT_FRACTION,
   trigger,
   messageCount,
@@ -97,7 +134,10 @@ export function shouldCompact({
     return messageCountThreshold > 0 && messageCount >= messageCountThreshold
   }
   if (typeof lastInputTokens !== "number" || lastInputTokens <= 0) return false
-  const window = getContextWindow(modelId)
+  const window =
+    typeof contextWindow === "number" && contextWindow > 0
+      ? contextWindow
+      : getContextWindow(modelId)
   return lastInputTokens >= window * fraction
 }
 
@@ -111,20 +151,41 @@ export function shouldCompact({
 /** Sentinel prefix every spliced summary message opens with. */
 export const SUMMARY_OPEN_TAG = "<conversation-summary"
 
-/** True when `m` is a previously-spliced compaction summary. */
+/** Leading text of a summary/optical message (the sentinel-bearing header),
+ * whether content is a plain string or a `[text, …image]` array (the optical
+ * strategy renders the archive as image parts after the header). */
+function leadingText(m) {
+  if (!m || m.role !== "user") return null
+  if (typeof m.content === "string") return m.content
+  if (Array.isArray(m.content)) {
+    const first = m.content.find((p) => p && p.type === "text" && typeof p.text === "string")
+    return first ? first.text : null
+  }
+  return null
+}
+
+/** True when `m` is a previously-spliced compaction summary OR optical archive.
+ * Both are protected as frozen so prior archives are carried forward verbatim
+ * instead of being fed back into `middle` (and, for optical, silently lost — an
+ * image part yields no text to re-summarize). */
 export function isSummaryMessage(m) {
+  const head = leadingText(m)
+  return head != null && head.startsWith(SUMMARY_OPEN_TAG)
+}
+
+/** True when the frozen artifact is an optical (image-bearing) archive. */
+export function isOpticalMessage(m) {
   return (
-    !!m &&
-    m.role === "user" &&
-    typeof m.content === "string" &&
-    m.content.startsWith(SUMMARY_OPEN_TAG)
+    isSummaryMessage(m) &&
+    Array.isArray(m.content) &&
+    m.content.some((p) => p && p.type === "image")
   )
 }
 
-/** Version parsed from a summary message's `v="N"` header (0 when absent). */
+/** Version parsed from a summary/optical message's `v="N"` header (0 absent). */
 export function summaryVersion(m) {
   if (!isSummaryMessage(m)) return 0
-  const match = m.content.match(/^<conversation-summary\s+v="(\d+)"/)
+  const match = leadingText(m).match(/^<conversation-summary\s+v="(\d+)"/)
   return match ? Number(match[1]) : 0
 }
 
@@ -135,6 +196,27 @@ export function makeSummaryMessage(summary, version) {
     role: "user",
     content: `${SUMMARY_OPEN_TAG} v="${v}">\nSummary of earlier conversation (compacted to save context):\n${summary}\n</conversation-summary>`,
   }
+}
+
+/**
+ * Render one versioned optical-archive message: a sentinel-bearing text header
+ * followed by the rendered image parts. Recognized as frozen by
+ * {@link isSummaryMessage}, so it is carried forward verbatim across turns.
+ * @param {Array<{type:"image", image:string, mediaType?:string}>} imageParts
+ * @param {{ messageCount?:number, frameCount?:number }} info
+ * @param {number} version
+ */
+export function makeOpticalMessage(imageParts, info, version) {
+  const v = Number.isFinite(version) && version > 0 ? version : 1
+  const frames = imageParts.length
+  const msgs = info?.messageCount
+  const header =
+    `${SUMMARY_OPEN_TAG} v="${v}" optical="1">\n` +
+    `Earlier conversation${typeof msgs === "number" ? ` (${msgs} messages)` : ""} was compacted to ` +
+    `save context: it is rendered as ${frames} optical frame image${frames === 1 ? "" : "s"} below. ` +
+    `Read the image${frames === 1 ? "" : "s"} as verbatim conversation history and treat it as authoritative.\n` +
+    `</conversation-summary>`
+  return { role: "user", content: [{ type: "text", text: header }, ...imageParts] }
 }
 
 /**

@@ -36,6 +36,18 @@ jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
 }))
 
+// Standalone (BYOK) chat — off by default so the sidecar-path suite is
+// unaffected; individual tests flip the flag.
+const standaloneFlag = { value: false }
+const runStandaloneTurnMock = jest.fn(async (_args?: unknown): Promise<void> => undefined)
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: () => standaloneFlag.value,
+}))
+jest.mock("@/lib/ai/chat/standalone-engine", () => ({
+  runStandaloneTurn: (args: { emit: (e: unknown) => void; signal: AbortSignal }) =>
+    runStandaloneTurnMock(args),
+}))
+
 jest.mock("@/lib/claude/adapter", () => ({
   applySdkEvent: jest.fn(() => ({ messages: [], turnComplete: false })),
   contentPreview: (c: unknown) => (typeof c === "string" ? c : "preview"),
@@ -328,9 +340,29 @@ jest.mock("@/stores/chat", () => ({
   selectIsAtStreamCap: (s: unknown, id: string) => selectIsAtStreamCapMock(s, id),
 }))
 
+// The unified execution broker governs the concurrency cap; stub it so a test
+// can flip the session at/over capacity without standing up the real broker.
+const isAtCapacityMock = jest.fn((_resource: string, _id?: string) => false)
+jest.mock("@/lib/execution/broker", () => ({
+  getExecutionBroker: () => ({
+    isAtCapacity: (resource: string, id?: string) => isAtCapacityMock(resource, id),
+  }),
+}))
+// Chat admission is exercised in lib/execution/chat-lease.test.ts; here it is a
+// no-op so the hook's send path stays isolated from the real broker.
+const acquireChatLeaseMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/execution/chat-lease", () => ({
+  acquireChatLease: (...args: unknown[]) => acquireChatLeaseMock(...args),
+}))
+
 const settingsState = {
-  settings: { alwaysAllowTools: [] as string[], artifacts: { autoCreate: false } },
+  settings: {
+    alwaysAllowTools: [] as string[],
+    artifacts: { autoCreate: false },
+    agentPermissions: undefined as { toolRules?: Record<string, unknown> } | undefined,
+  },
   toggleAlwaysAllow: jest.fn().mockResolvedValue(undefined),
+  save: jest.fn().mockResolvedValue(undefined),
 }
 const settingsSubscribers: Array<(s: typeof settingsState) => void> = []
 
@@ -387,6 +419,8 @@ beforeEach(() => {
   onClaudeUnsub.mockClear()
   sendPromptMock.mockReset().mockResolvedValue(undefined)
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
+  standaloneFlag.value = false
+  runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   approveToolMock.mockReset().mockResolvedValue(undefined)
   persistMessagesMock.mockReset().mockResolvedValue(undefined)
@@ -429,6 +463,8 @@ beforeEach(() => {
   chatState.setPendingCommandOverrides.mockClear()
   chatState.clearEphemeralSkillIds.mockClear()
   selectIsAtStreamCapMock.mockReset().mockReturnValue(false)
+  isAtCapacityMock.mockReset().mockReturnValue(false)
+  acquireChatLeaseMock.mockReset().mockResolvedValue(undefined)
   subscribers.length = 0
   settingsSubscribers.length = 0
   mockGetTwinRuntimeSettings.mockReset()
@@ -496,6 +532,39 @@ describe("useClaudeChat — actions", () => {
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
+  })
+
+  it("send() routes through the standalone engine (not the sidecar) in BYOK mode", async () => {
+    standaloneFlag.value = true
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(runStandaloneTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess-1", emit: expect.any(Function) })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("stop() aborts the standalone turn instead of interrupting the sidecar", async () => {
+    standaloneFlag.value = true
+    let captured: { signal: AbortSignal } | null = null
+    runStandaloneTurnMock.mockImplementation(async (args?: unknown) => {
+      captured = args as { signal: AbortSignal }
+      await new Promise(() => {}) // never resolves — stays "in flight"
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      void result.current.send("hello")
+    })
+    await act(async () => {
+      await result.current.stop("sess-1")
+    })
+    expect(captured).not.toBeNull()
+    expect(captured!.signal.aborted).toBe(true)
+    expect(interruptSessionMock).not.toHaveBeenCalled()
   })
 
   it("external-agent writes stream into the sender's own slice across a mid-run focus switch (D1)", async () => {
@@ -775,6 +844,30 @@ describe("useClaudeChat — actions", () => {
       )
     })
     expect(settingsState.toggleAlwaysAllow).toHaveBeenCalledWith("read", true)
+    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
+  })
+
+  it("respondToApproval (allow_always) persists a TARGET-SCOPED rule when a target exists", async () => {
+    settingsState.save.mockClear()
+    settingsState.toggleAlwaysAllow.mockClear()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId: "r-1",
+          toolName: "Bash",
+          input: { command: "git status" },
+        } as never,
+        "allow_always"
+      )
+    })
+    // Scoped rule persisted; the coarse name-grant path is NOT taken.
+    expect(settingsState.save).toHaveBeenCalledWith({
+      agentPermissions: { toolRules: { Bash: { "git *": "allow" } } },
+    })
+    expect(settingsState.toggleAlwaysAllow).not.toHaveBeenCalled()
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
   })
 
@@ -1529,7 +1622,7 @@ describe("useClaudeChat — concurrent sessions", () => {
   })
 
   it("send() is blocked (no sidecar call) when the concurrency cap is reached", async () => {
-    selectIsAtStreamCapMock.mockReturnValue(true)
+    isAtCapacityMock.mockReturnValue(true)
     const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {

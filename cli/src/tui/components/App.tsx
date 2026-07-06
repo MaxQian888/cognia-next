@@ -8,130 +8,80 @@
  */
 import fs from "node:fs"
 import os from "node:os"
-import { spawn } from "node:child_process"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
-import { Box, Text, useApp, useInput, useStdout } from "ink"
+import { Box, useApp, useStdout, type DOMElement } from "ink"
 
 import { Banner } from "./Banner"
-import { ScrollView } from "./ScrollView"
-import { FindBar } from "./FindBar"
 import { useScroll } from "../hooks/useScroll"
 import { useTranscriptCursor } from "../hooks/useTranscriptCursor"
-import { cellToText } from "../format/scrollback-search"
 import { resolveLayoutMode, readLayoutCapability, type LayoutCapability } from "../layout-mode"
-import {
-  enterAltScreen,
-  exitAltScreen,
-  applyMouseMode,
-  resetMouse,
-  type ScreenStream,
-} from "../screen"
-import { parseMouseEvent } from "../input/mouse"
+import { type ScreenStream } from "../screen"
+import { type TitleStream, type TitleEnv } from "../terminal-title"
 import { ThemeProvider } from "../theme/context"
 import { RenderPrefsProvider } from "../render/context"
 import { resolveTheme } from "../theme/resolve"
-import { Footer } from "./Footer"
-import { BottomStatus } from "./BottomStatus"
-import { Inflight } from "./Inflight"
-import { WorkflowRunPanel } from "./WorkflowRunPanel"
-import { Mascot } from "./Mascot"
-import { selectMascotMood } from "../mascot/mascot"
-import { Input } from "./Input"
-import { SelectList } from "./SelectList"
-import { MarketplaceBrowser } from "./MarketplaceBrowser"
-import { McpPanel } from "./McpPanel"
-import { McpToolsPanel } from "./McpToolsPanel"
-import { SkillPanel } from "./SkillPanel"
-import { EffortSlider } from "./EffortSlider"
 import { StartupGate } from "./StartupGate"
-import { Transcript } from "./Transcript"
 import type { ListDirs } from "./FolderPicker"
 import { trustFolder as defaultTrustFolder } from "../../config/trusted-folders"
 import { listSessions, type ReadDir } from "./sessions-list"
-import { PermissionOverlay } from "./overlays/PermissionOverlay"
-import { Help } from "./overlays/Help"
-import { HistorySearch } from "./overlays/HistorySearch"
-import { UsagePanel } from "./overlays/UsagePanel"
-import { LimitsPanel } from "./overlays/LimitsPanel"
-import { StatusPanel } from "./overlays/StatusPanel"
-import { DoctorPanel } from "./overlays/DoctorPanel"
-import { DocumentViewer } from "./overlays/DocumentViewer"
-import { InspectOverlay } from "./overlays/InspectOverlay"
-import { ConfirmOverlay } from "./overlays/ConfirmOverlay"
-import { PlanApprovalOverlay } from "./overlays/PlanApprovalOverlay"
-import { AskUserDialog } from "./overlays/AskUserDialog"
+import { recomputeSubagentModelRows } from "../runtime/subagent-models-model"
 import { useAskUserOverlay } from "../hooks/use-ask-user-overlay"
-import {
-  readCrashReportText,
-  resolveCrashLogDirs,
-  type CrashLogFs,
-} from "../runtime/crash-log-discovery"
 import { savePlan } from "../runtime/plan-store"
 import {
   planFileName,
   planTitle,
   planDecisionMode,
   PLAN_APPROVED_PROMPT,
-  PLAN_REFINE_PROMPT,
+  PLAN_EXECUTE_PROMPT,
   type PlanDecision,
 } from "../runtime/plan"
-import { catalogModelIds } from "@/lib/ai/model-options"
-
-import { collectModelOptions, formatModelOptionLabel, modelInfoHint } from "./model-options"
-import { collectProviderOptions } from "../commands/provider-options"
-import { FormOverlay } from "./overlays/FormOverlay"
+import { collectModelOptions } from "./model-options"
 import { dispatchCommand } from "../commands/dispatch"
 import { createMentionProviders, type MentionProviders } from "../mention/providers"
 import { preprocessMentions } from "../mention/preprocess"
 import { skillSetEnabled } from "../runtime/skill-controller"
-import {
-  mcpPanel as runMcpPanel,
-  mcpReconnect,
-  mcpToggleServerInPanel,
-  mcpToggleTool,
-  openMcpToolsPanel,
-} from "../runtime/mcp-controller"
+import { mcpAuthStartupNotices } from "../runtime/mcp-controller"
+import { createMcpProbeCache } from "../runtime/mcp-cache"
 import {
   readEnabled as readEnabledSkills,
   setEnabled as setSkillEnabled,
-  setManyEnabled as setManySkillsEnabled,
 } from "../../skill/skill-state"
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { buildAgents, discoverAgentFiles } from "../../agent/discover-agents"
-import { cyclePermissionMode } from "../input/mode-cycle"
-import { parseBang, formatBashResult } from "../commands/bash-shellout"
+import { parseBang } from "../commands/bash-shellout"
+import { parseHashMemory } from "../input/hash-memory"
 import {
   runShell as defaultRunShell,
   type ShellResult,
   type RunShellOpts,
 } from "../../agent/run-shell"
 import { registerFeatureCommands } from "../commands"
-import { runRuntimeRequest } from "../runtime"
 import { runGoalStreaming } from "../runtime/goal-run"
-import { createCliLifecycleFirer } from "../runtime/lifecycle-firer"
 import { runLoopStreaming } from "../runtime/loop-run"
+import { runFixStreaming } from "../runtime/fix-run"
 import { frameSteer } from "../runtime/driven-turns"
-import { buildStepInspectorDoc } from "../runtime/workflow-step-doc"
 import { copilotCheckProposal } from "../runtime/workflow-copilot-controller"
 import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
+import { initOpenRouterCatalog as defaultInitOpenRouterCatalog } from "../runtime/openrouter-catalog-controller"
+import { registerCustomCommands as defaultRegisterCustomCommands } from "../commands/custom-commands"
 import { resolveActiveModel } from "../../config/active-model"
 import { shouldAutoCompact } from "../../agent/auto-compact"
 import { ensureCliDb } from "../../db/bootstrap"
-import { createForm, formSubmit } from "../state/form"
+import { formSubmit } from "../state/form"
 import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
-import { isBusy, lastAssistantText } from "../state/selectors"
+import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
 import { runningSubagents } from "../format/subagent"
+import type { StatusSegmentView } from "../format/status-bar"
 import {
   countInterruptedCliBackgroundRuns,
   countRunningCliBackgroundRuns,
 } from "../../agent/subagent-background-tasks"
-import { contextPercent } from "../format/usage"
-import { copyToClipboard, clipboardFailureMessage, type CopyResult } from "../clipboard"
+import { copyToClipboard, type CopyResult } from "../clipboard"
 import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
 import { searchHistory } from "../input/history-search"
-import { bufferFromText, bufferText, insertText } from "../input/buffer"
+import { bufferText, insertText } from "../input/buffer"
 import { appendHistory } from "../input/history-store"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { useTerminalSize } from "../hooks/useTerminalSize"
@@ -146,98 +96,53 @@ import {
   setStatusBarConfig,
   setMascotConfig,
   setPluginToolsConfig,
-  setAdditionalRoots,
   setBuiltinTools,
   setBooleanFlag,
   setBuiltinHookOverride,
-  setStringArrayConfig,
-  setCustomTheme,
   setRenderConfig,
-  setKeybindings,
+  setNumberConfig,
+  setClipboardConfig,
+  setSubagentModel,
+  setEditorConfig,
 } from "../../config/mutate"
-import { resolveKeybindings, matchAction } from "../input/keybindings"
-import { collectInspectables } from "../runtime/inspect"
-import { formatToolResultBody } from "../commands/expand-command"
-import { computeAddDir } from "../runtime/add-dir"
+import { openInEditor, detectEditor } from "../runtime/editor"
+import { resolveKeybindings } from "../input/keybindings"
 import {
-  EFFORT_SLIDER_LEVELS,
-  PERMISSION_MODES,
   DEFAULT_MOUSE_MODE,
   resolveRenderConfig,
   resolveNotices,
-  type ThinkingLevel,
+  type SubagentModelOverride,
 } from "../../config/schema"
-import { deriveEffortSliderState, modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
-import { SettingsOverlay } from "./overlays/SettingsOverlay"
 import {
   settingsSections,
-  cycleEnum,
   NUMERIC_RENDER_KEYS,
   type SettingsRow,
   type SettingsApplyTarget,
 } from "../runtime/settings-sections"
 import type { BuiltinToolsConfig } from "@/lib/claude/types"
 import type { ListDir } from "../commands/file-completer"
-import type { CommandEffect } from "../commands/types"
-import type { ConfigMenuRow } from "../commands/config-menu"
-import type { InspectItem, SelectItem } from "../state/types"
 import type {
   ResolvedConfig,
   StatusBarConfig,
   MascotConfig,
+  ClipboardConfig,
+  EditorConfig,
   OutputStyle,
   StatusTheme,
   MascotStyle,
 } from "../../config/schema"
-
-const DOUBLE_CTRL_C_MS = 1000
-
-// Rows the transcript scrolls per mouse-wheel notch in the fullscreen layout.
-const WHEEL_SCROLL_LINES = 3
-
-// A terminal resize fires a burst of events during a drag. Repainting `<Static>`
-// (clear screen + reprint every cell) on each one smears and flickers, so the
-// heavy repaint is debounced until the drag settles. The live frame still
-// reflows instantly because its width is driven by the (immediate) size hook.
-const RESIZE_DEBOUNCE_MS = 120
-
-// Clear the screen + scrollback + home the cursor. `<Static>` writes the
-// transcript straight into the terminal scrollback (it is never re-rendered), so
-// emptying the cell array on `/clear` does NOT erase what is already on screen —
-// only wiping the terminal does. Ink repaints its (now empty) frame on top.
-const CLEAR_SCREEN = "\x1B[2J\x1B[3J\x1B[H"
-
-function clearTerminal(): void {
-  if (process.stdout.isTTY) process.stdout.write(CLEAR_SCREEN)
-}
-
-/** Position of the user message at `index` among all user messages: its 1-based
- * `pos`, the `total` user-message count, and how many `later` ones follow it.
- * Drives the backtrack/edit status line. */
-function userMessageStats(
-  cells: { kind: string }[],
-  index: number
-): { pos: number; total: number; later: number } {
-  let total = 0
-  let pos = 0
-  cells.forEach((c, i) => {
-    if (c.kind === "user") {
-      total++
-      if (i === index) pos = total
-    }
-  })
-  return { pos, total, later: total - pos }
-}
-
-/** Read a theme config file, or null when it doesn't exist / can't be read. */
-function readThemeFile(p: string): string | null {
-  try {
-    return fs.readFileSync(p, "utf8")
-  } catch {
-    return null
-  }
-}
+import { clearTerminal, readThemeFile } from "./app/app-helpers"
+import { useBashShellout } from "./app/use-bash-shellout"
+import { useBacktrack } from "./app/use-backtrack"
+import { useSteerQueue } from "./app/use-steer-queue"
+import { useTerminalChrome } from "./app/use-terminal-chrome"
+import { TranscriptRegion } from "./app/TranscriptRegion"
+import { AppOverlays } from "./app/AppOverlays"
+import { BottomRegion } from "./app/BottomRegion"
+import type { AgentTreeHit } from "./BottomStatus"
+import { useGlobalKeys } from "./app/use-global-keys"
+import { useApplyEffect } from "./app/use-apply-effect"
 
 // Register the feature-command clusters (Cognia runtime, MCP, plugins, skills)
 // on top of the core catalog. Idempotent — safe at module load.
@@ -306,6 +211,14 @@ export interface AppProps {
   persistStatusBar?: (home: string, patch: StatusBarConfig) => void
   /** Persist a `/mascot` change to config.json; defaults to the real writer. */
   persistMascot?: (home: string, patch: MascotConfig) => void
+  /** Persist a `/editor <command>` change to config.json; defaults to the real writer. */
+  persistEditor?: (home: string, patch: EditorConfig) => void
+  /** Spawn the editor for `/open`; defaults to the real `openInEditor` (injected
+   * in tests so they never launch a real editor). */
+  openInEditorFn?: typeof openInEditor
+  /** Read a persisted plan file back (for fresh-session execution after an
+   * "Edit plan first"); defaults to a best-effort fs read. Injected in tests. */
+  loadPlanFile?: (file: string) => string | null
   /** Persist the `pluginTools` gate (toggled by the effort slider's `ultracode`
    * tier) to config.json; defaults to the real writer. Injected as a no-op by
    * tests so they never touch the real `~/.cognia/config.json`. */
@@ -320,6 +233,14 @@ export interface AppProps {
    * defaults to the real models.dev reader. Injected by tests so they don't
    * touch the catalog and the async dispatch stays deterministic. */
   resolveMeta?: (provider: string, model: string | undefined) => Promise<ModelMeta>
+  /** Prime + (if stale) refresh the OpenRouter live-models catalog at boot, so
+   * the `/model` picker reflects the synced real-time list. Defaults to the real
+   * controller; injected as a no-op by tests so they don't open the db / network. */
+  initOpenRouterCatalog?: (opts?: { apiKey?: string }) => Promise<void>
+  /** Discover + register `.claude/commands` / `.cognia/commands` prompt templates
+   * as slash commands. Defaults to the real disk scanner; injected as a no-op by
+   * tests so they never touch disk. */
+  registerCustomCommands?: (opts: { cwd: string; osHome: string }) => Promise<unknown>
   /** Persist a captured plan to `~/.cognia/plans`; defaults to the real writer.
    * Returns the path written (or null on failure). Injected as a no-op by tests. */
   persistPlan?: (home: string, fileName: string, raw: string) => string | null
@@ -329,6 +250,9 @@ export interface AppProps {
   /** Start a streaming `/loop` run; defaults to {@link runLoopStreaming}. Injected
    * by tests so they don't touch the CLI-local db / loop engine. */
   startLoopRun?: typeof runLoopStreaming
+  /** Start a streaming `/fix` test-fix loop; defaults to {@link runFixStreaming}.
+   * Injected by tests so they don't spawn a real test process. */
+  startFixRun?: typeof runFixStreaming
   /** `@` mention candidate sources for the composer popup + submit-time
    * preprocessing. Defaults to the real disk/db providers; injected by tests so
    * the composer never touches a live db / disk. */
@@ -355,6 +279,13 @@ export interface AppProps {
    * first frame and leave a blank screen until a resize. Defaults to false so
    * tests (which render App directly) still drive the full enter on mount. */
   altScreenPreEntered?: boolean
+  /** Sink for the dynamic terminal-title escapes; defaults to the Ink stdout.
+   * Kept distinct from {@link screenOut} so the title writes never pollute the
+   * alt-screen lifecycle assertions. Injected by tests to assert the title. */
+  titleOut?: TitleStream
+  /** Env slice steering terminal-title adaptation (tmux / screen / dumb);
+   * defaults to `process.env`. Injected by tests. */
+  titleEnv?: TitleEnv
 }
 
 export function App({
@@ -391,6 +322,15 @@ export function App({
   listDirs,
   persistStatusBar = setStatusBarConfig,
   persistMascot = setMascotConfig,
+  persistEditor = setEditorConfig,
+  openInEditorFn = openInEditor,
+  loadPlanFile = (file: string) => {
+    try {
+      return fs.readFileSync(file, "utf8")
+    } catch {
+      return null
+    }
+  },
   persistPluginTools = setPluginToolsConfig,
   initialHistory = [],
   persistHistory = (entry) => {
@@ -401,15 +341,20 @@ export function App({
     }
   },
   resolveMeta = resolveModelMeta,
+  initOpenRouterCatalog = defaultInitOpenRouterCatalog,
+  registerCustomCommands = defaultRegisterCustomCommands,
   persistPlan = savePlan,
   startGoalRun = runGoalStreaming,
   startLoopRun = runLoopStreaming,
+  startFixRun = runFixStreaming,
   mentionProviders: mentionProvidersProp,
   persistSkillEnabled,
   readClipboardImage = defaultReadClipboardImage,
   layoutCapability,
   screenOut,
   altScreenPreEntered,
+  titleOut,
+  titleEnv,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -418,6 +363,9 @@ export function App({
   const agent = useAgentSession({
     config: state.config,
     dispatch,
+    // Bind the chat session to the live app id so its transcript lands under the
+    // id `/export`/`/handoff`/`/resume` read (it tracks `/clear` + `/resume`).
+    sessionId: state.sessionId,
     createSession,
     getCellCount: () => state.cells.length,
     // Seed the live auto-approve set from THIS app's home (not the OS home) so
@@ -466,6 +414,34 @@ export function App({
   // Whether the composer popup currently owns input — read by the wheel handler
   // so the transcript doesn't scroll while the popup is being wheel-scrolled.
   const composerPopupOpen = useRef(false)
+  // The run-state chip row in the BottomStatus, so a click on the subagent chip
+  // opens the `/agents` panel (parity with Ctrl+B).
+  const subagentChipRef = useRef<DOMElement | null>(null)
+  // The running-agents tree in the BottomStatus: BottomStatus publishes the
+  // rendered box + agent rows here so a click on a row opens that agent's live
+  // run page directly (Claude Code parity).
+  const agentTreeRef = useRef<AgentTreeHit | null>(null)
+  // The persistent status footer row + its rendered segments, so a click on the
+  // model/mode/thinking segment opens the matching picker (Claude Code parity).
+  const footerRowRef = useRef<DOMElement | null>(null)
+  const footerSegmentsRef = useRef<StatusSegmentView[] | null>(null)
+  // The fullscreen scroll viewport's content box (its `marginTop={-offset}`
+  // encodes the scroll position), so a transcript click can be mapped to the
+  // cell under it when the click-to-expand pref is on.
+  const scrollContentRef = useRef<DOMElement | null>(null)
+  // Stable callbacks for the memoized <Input>: an inline arrow / default-param
+  // arrow would be a fresh reference each render and defeat React.memo, making
+  // the composer re-render (and re-run slash/mention matching) on every delta.
+  const handlePopupOpenChange = useCallback((open: boolean) => {
+    composerPopupOpen.current = open
+  }, [])
+  const persistHistoryRef = useRef(persistHistory)
+  useEffect(() => {
+    persistHistoryRef.current = persistHistory
+  }, [persistHistory])
+  const handleHistoryPush = useCallback((entry: string) => {
+    persistHistoryRef.current(entry)
+  }, [])
 
   // Bridge the `ask_user` elicitation store into the overlay system: when the
   // agent calls `ask_user`, mirror the active prompt into an `askUser` overlay
@@ -518,69 +494,73 @@ export function App({
     [state.config.keybindings]
   )
   // Abort controller for the active background runtime run (goal/workflow/…).
+  // Exposed to `useApplyEffect` through stable accessors (not the raw ref) so the
+  // hook never mutates a prop.
   const runtimeAbort = useRef<AbortController | null>(null)
-  // Timer that clears the Ctrl+C double-press window after the hint expires, so a
-  // single press doesn't linger waiting for a second press forever.
-  const ctrlCTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const setRuntimeAbort = useCallback((c: AbortController | null) => {
+    runtimeAbort.current = c
+  }, [])
+  const getRuntimeAbort = useCallback(() => runtimeAbort.current, [])
 
-  // Double-Esc backtrack (Codex's "Esc twice to edit the last message"): the first
-  // idle Esc arms a short window, the second pulls the last user message back into
-  // the composer for editing — without touching the transcript (rewinding history
-  // stays with /rewind, /retry). `armed` is mirrored to state so BottomStatus can
-  // show the confirm hint; the ref is the source of truth for the key handler.
-  const [backtrackArmed, setBacktrackArmed] = useState(false)
-  const backtrackArmedRef = useRef(false)
-  const backtrackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const disarmBacktrack = useCallback(() => {
-    backtrackArmedRef.current = false
-    setBacktrackArmed(false)
-    if (backtrackTimer.current) {
-      clearTimeout(backtrackTimer.current)
-      backtrackTimer.current = null
-    }
-  }, [])
-  const armBacktrack = useCallback(() => {
-    backtrackArmedRef.current = true
-    setBacktrackArmed(true)
-    if (backtrackTimer.current) clearTimeout(backtrackTimer.current)
-    backtrackTimer.current = setTimeout(() => {
-      backtrackArmedRef.current = false
-      setBacktrackArmed(false)
-      backtrackTimer.current = null
-    }, 1500)
-  }, [])
+  // The `!command` shell-out cluster (live cells + foreground/background lifecycle
+  // + last-failure capture for `/analyze`). `runBash` is consumed by `applyEffect`
+  // and `handleSubmit`; the kill/background entry points by the key handler.
+  const {
+    runBash,
+    backgroundForegroundBash,
+    killForegroundBash,
+    hasForegroundRun,
+    takeLastFailedBash,
+  } = useBashShellout(runShell, state.config.cwd, dispatch)
 
-  // `btw` steer mirror. The async goal/loop driver and the plain-turn drain read
-  // the latest queued steer through a ref (component `state` is only the snapshot
-  // at dispatch time). Kept in sync with `state.steerQueue`.
-  const steerRef = useRef<string[]>(state.steerQueue)
-  useEffect(() => {
-    steerRef.current = state.steerQueue
-  }, [state.steerQueue])
-  // Drain the queued steer messages into a single framed prompt (or null when
-  // empty). Clearing the reducer queue keeps the footer indicator honest.
-  const takeSteer = useCallback((): string | null => {
-    if (steerRef.current.length === 0) return null
-    const joined = steerRef.current.join("\n")
-    steerRef.current = []
-    dispatch({ type: "STEER_CLEAR" })
-    return joined
-  }, [])
+  // Double-Esc backtrack-to-edit selection (armed/disarmed state + timer).
+  const { backtrackArmed, backtrackArmedRef, armBacktrack, disarmBacktrack } = useBacktrack()
+
+  // `btw` steer mirror — the ref the async goal/loop driver + plain-turn drain
+  // read, plus `takeSteer` to drain the queue into one framed prompt.
+  const { takeSteer } = useSteerQueue(state.steerQueue, dispatch)
 
   // Reactive terminal size. `columns` drives the full-width composer/overlays
   // (so the UI fills the terminal like Claude Code) and `rows` budgets how many
   // list rows fit before scrolling. The live frame reflows the instant this
   // updates; only the heavy `<Static>` repaint below is debounced.
   const { columns, rows } = useTerminalSize()
-  // Row budgets: overlays replace the composer (reserve ~8 rows for the banner
-  // is in scrollback, plus footer/mascot/title/borders); inline popups sit above
-  // the composer so they stay compact.
-  const overlayRows = Math.max(3, rows - 8)
+  // Row budget for inline popups, which sit above the composer so they stay
+  // compact. (`overlayRows`, which depends on the resolved `fullscreen` flag, is
+  // computed once that's known — see below.)
   const popupRows = Math.max(3, Math.min(10, rows - 6))
 
+  // One shared MCP probe cache for the whole App session: the startup warm seeds
+  // it, and every `/mcp` panel / tool-list / reconnect reuses it, so re-opening
+  // `/mcp` renders instantly instead of re-connecting to every server.
+  const mcpProbeCache = useMemo(() => createMcpProbeCache(), [])
+
   // Minimal MCP deps for the interactive panel's in-place actions (toggle /
-  // reconnect / tools / remove). Built per render so it tracks the live config.
-  const mcpPanelDeps = () => ({ dispatch, roots: [state.config.cwd, home], home })
+  // reconnect / tools / remove). Built per render so it tracks the live config;
+  // carries the shared probe cache so the panel reads cached status.
+  const mcpPanelDeps = () => ({
+    dispatch,
+    roots: [state.config.cwd, home],
+    home,
+    probeCache: mcpProbeCache,
+  })
+
+  // One-time boot warm: probe every enabled MCP server once and seed the shared
+  // cache (so `/mcp` opens instantly), and warn (via a NOTICE cell) about any
+  // enabled remote server that needs authorization. Fires once per session as
+  // soon as we enter the chat phase; the probe is async and never blocks the
+  // first frame.
+  const mcpAuthChecked = useRef(false)
+  useEffect(() => {
+    if (state.phase !== "chat" || mcpAuthChecked.current) return
+    mcpAuthChecked.current = true
+    void mcpAuthStartupNotices({
+      dispatch,
+      roots: [state.config.cwd, home],
+      home,
+      probeCache: mcpProbeCache,
+    })
+  }, [state.phase, state.config.cwd, home, dispatch, mcpProbeCache])
 
   // Effective layout: the configured preference (default `fullscreen`) gated by
   // terminal capability — a non-TTY / dumb terminal always falls back to the
@@ -588,49 +568,54 @@ export function App({
   // under jsdom with no TTY, keeps the historic layout untouched).
   const capability = layoutCapability ?? readLayoutCapability()
   const fullscreen = resolveLayoutMode(state.config.layout, capability) === "fullscreen"
+  // Row budget for the modal overlay list (e.g. `/model`). The list's own chrome
+  // (border/title/footer/scroll hints) plus the bottom status/mascot/footer cost
+  // ~8 rows. In fullscreen the FIXED top banner (~7 rows) is also on-screen above
+  // the overlay, so reserve for it too — otherwise a long list builds a box taller
+  // than the terminal and the highlighted row scrolls off the bottom (the cursor
+  // "disappears"). In scrollback mode the banner scrolls away, so ~8 is enough.
+  const overlayRows = Math.max(3, rows - (fullscreen ? 15 : 8))
   // Fullscreen mouse model (default = native click-drag selection). Drives the
   // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
   const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
 
   const { stdout } = useStdout()
-  // Alternate-screen lifecycle. Entering pins the banner/composer and gives the
-  // transcript its own scroll viewport; the cleanup restores the user's terminal
-  // (and prior scrollback) on unmount or whenever `/layout scrollback` flips the
-  // mode off. The escapes are idempotent, so `mount.tsx`'s hard-exit safety net
-  // can also exit without coordinating with this effect.
+  // Sink for the alt-screen enter/exit + mouse escapes (also re-applied live by
+  // `applyEffect`'s `mouse` case, so it stays in App scope).
   const screen: ScreenStream = screenOut ?? (stdout as unknown as ScreenStream)
-  // Tracks whether the alternate screen is already active. Seeded from
-  // `altScreenPreEntered` so the effect below knows when `mount.tsx` already
-  // entered + cleared the alt buffer BEFORE Ink's first paint: re-entering here
-  // would re-issue CLEAR_HOME and wipe the frame Ink just drew, and because the
-  // post-measure re-render is usually identical (content fits → offset stays 0)
-  // Ink's diff writes nothing — leaving a blank screen until the next full
-  // repaint (a terminal resize). Skipping the redundant enter keeps the first
-  // frame on screen while still owning enter/exit for live `/layout` toggles
-  // (and for tests, which render App directly with no pre-enter).
-  const altScreenActive = useRef(Boolean(altScreenPreEntered) && fullscreen)
-  useEffect(() => {
-    if (!fullscreen) return
-    if (!altScreenActive.current) {
-      enterAltScreen(screen)
-      // Mouse handling lives with the alt-screen lifecycle: it is only meaningful
-      // (and only safe) while fullscreen owns the screen. `select` (default)
-      // leaves the mouse uncaptured so native selection works; `scroll` captures
-      // the wheel so it pages the transcript. A live `/mouse` toggle re-applies
-      // imperatively in `applyEffect` — this only seeds the initial mode.
-      applyMouseMode(mouseMode, screen)
-      altScreenActive.current = true
-    }
-    return () => {
-      resetMouse(screen)
-      exitAltScreen(screen)
-      altScreenActive.current = false
-    }
-    // `mouseMode` is intentionally NOT a dep: the initial application is gated by
-    // `altScreenActive`, and live changes go through `applyEffect` so a re-enter
-    // never re-issues CLEAR_HOME. eslint-disable to keep the effect enter-once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullscreen, screen])
+  // Title/bell inputs, derived once and fed to the terminal-chrome hook below.
+  const titleEnabled = state.config.terminalTitle !== false
+  const titleSink: TitleStream = titleOut ?? (stdout as unknown as TitleStream)
+  const awaitingInput = state.overlay.kind === "permission" || state.overlay.kind === "askUser"
+  const activityKind =
+    state.activity && state.activity.status === "running" ? state.activity.kind : undefined
+  const notifyEnabled = state.config.notify === true
+  // Desktop notifications ride on top of the bell: enabled only when notify is on
+  // AND the user hasn't explicitly opted out (`desktopNotifications: false`).
+  const desktopNotifyEnabled = notifyEnabled && state.config.desktopNotifications !== false
+
+  // Terminal-integration effects: alt-screen + mouse lifecycle, dynamic
+  // window/tab title, opt-in completion bell, and the scrollback resize repaint.
+  useTerminalChrome({
+    fullscreen,
+    screen,
+    mouseMode,
+    altScreenPreEntered,
+    stdout,
+    clearScreen,
+    dispatch,
+    titleEnabled,
+    titleSink,
+    titleEnv,
+    busy,
+    awaitingInput,
+    activityKind,
+    cwd: state.config.cwd,
+    notifyEnabled,
+    desktopNotifyEnabled,
+    lastCompletion: state.lastCompletion,
+    now,
+  })
 
   // Scroll controller for the fullscreen viewport (no-op in scrollback mode,
   // where the terminal's native scrollback handles it).
@@ -640,7 +625,7 @@ export function App({
   const scrollReset = scroll.reset
   // Find-in-viewport cursor (fullscreen only). Drives the FindBar, the focused
   // cell's highlight, per-cell copy, and the jump-to-match scroll below.
-  const cursor = useTranscriptCursor(state.cells)
+  const cursor = useTranscriptCursor(state.cells, fullscreen && renderPrefs.clickToExpand)
   // Jump the viewport so the focused match lands ~1/3 down, re-running as the
   // gated per-cell measurements settle (cursor.targetRow folds in their version).
   const cursorTargetRow = cursor.targetRow
@@ -650,35 +635,6 @@ export function App({
     // fires when the focus/measurement changes, not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursorTargetRow])
-
-  // Terminal resize recovery (scrollback mode only). `<Static>` wrote the
-  // transcript into the scrollback at the OLD width; on resize Ink reflows its
-  // live frame over that stale content, smearing the layout (duplicated lines,
-  // stray full-width rules). Clear the screen and bump the render epoch so
-  // `<Static>` remounts and re-prints every cell at the new width — debounced so
-  // a drag doesn't thrash the whole scrollback on every intermediate size. In
-  // fullscreen there is no `<Static>`; Ink reflows the bounded frame on its own,
-  // so we skip the clear-and-repaint entirely.
-  const repaintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    if (!stdout?.on || fullscreen) return
-    const onResize = () => {
-      if (repaintTimer.current) clearTimeout(repaintTimer.current)
-      repaintTimer.current = setTimeout(() => {
-        repaintTimer.current = null
-        clearScreen()
-        dispatch({ type: "REPAINT" })
-      }, RESIZE_DEBOUNCE_MS)
-    }
-    stdout.on("resize", onResize)
-    return () => {
-      stdout.off?.("resize", onResize)
-      if (repaintTimer.current) {
-        clearTimeout(repaintTimer.current)
-        repaintTimer.current = null
-      }
-    }
-  }, [stdout, clearScreen, fullscreen])
 
   // Resolve the active model's context window + pricing from the models.dev
   // catalog whenever the provider or model changes, so the context gauge sizes
@@ -712,6 +668,53 @@ export function App({
       cancelled = true
     }
   }, [resolveMeta, activeProvider, activeModel])
+
+  // Prime + background-refresh the OpenRouter live-models catalog whenever
+  // OpenRouter is the active provider, so the `/model` picker reflects the synced
+  // real-time list (the same shared row the desktop GUI uses). Gated on the
+  // provider so a user who never touches OpenRouter pays no db/network cost.
+  // Best-effort — the controller swallows its own failures.
+  const openRouterApiKey = state.config.providers.openrouter?.apiKey
+  useEffect(() => {
+    if (activeProvider !== "openrouter") return
+    void initOpenRouterCatalog({ apiKey: openRouterApiKey })
+  }, [activeProvider, initOpenRouterCatalog, openRouterApiKey])
+
+  // Discover user-authored `.claude/commands` / `.cognia/commands` prompt
+  // templates and register them as slash commands. Registration is guarded +
+  // idempotent, so the effect is safe to re-run; `matchSlash` reads the registry
+  // live, so the new commands surface the moment the async scan resolves — same
+  // contract as the OpenRouter catalog init above. Best-effort (swallows errors).
+  useEffect(() => {
+    void registerCustomCommands({ cwd: state.config.cwd, osHome })
+  }, [registerCustomCommands, state.config.cwd, osHome])
+
+  // For a dynamic-catalog provider (OpenRouter) the synced live list may not be
+  // primed when the `/model` picker opens. Kick off a sync and swap the full
+  // real-time catalog into the still-open picker the moment it lands — without
+  // this the picker shows the static fallback subset and looks like it "never
+  // updates". No-op for every other provider (their lists are static/synchronous).
+  const syncAndRefreshModelOverlay = useCallback(() => {
+    if (state.config.provider !== "openrouter") return
+    void initOpenRouterCatalog({ apiKey: openRouterApiKey }).then(() => {
+      dispatch({
+        type: "OVERLAY_REFRESH_MODEL_OPTIONS",
+        options: collectModelOptions(state.config),
+      })
+    })
+  }, [state.config, dispatch, initOpenRouterCatalog, openRouterApiKey])
+
+  // Open the `/model` switcher instantly with whatever models are cached, then
+  // live-refresh once the dynamic catalog sync resolves.
+  const openModelPicker = useCallback(() => {
+    const options = collectModelOptions(state.config)
+    if (options.length === 0) {
+      dispatch({ type: "NOTICE", message: "No models configured." })
+      return
+    }
+    dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "model", options, index: 0, query: "" } })
+    syncAndRefreshModelOverlay()
+  }, [state.config, dispatch, syncAndRefreshModelOverlay])
 
   // When a plan-mode turn proposes a plan (the reducer captured it as
   // `lastPlan`), persist it to `~/.cognia/plans` and open the approval prompt —
@@ -806,8 +809,11 @@ export function App({
     dispatch({ type: "STARTUP_TRUST" })
   }, [home, trustFolderFn, state.config.cwd])
 
-  // Folder picker confirmed a directory: switch cwd, trust it, and enter chat.
-  // The agent's SendOptions are re-resolved so the new cwd reaches the first turn.
+  // Folder picker confirmed a directory (or `/cd <dir>`): switch cwd, trust it,
+  // and enter chat. `agent.changeCwd` dispatches SET_CWD and recreates the
+  // session so the new cwd reaches the next turn (and respawns the sidecar under
+  // it). A live mid-session `/cd` therefore actually relocates the agent, not
+  // just the `/cwd` display.
   const changeCwd = useCallback(
     (dir: string) => {
       try {
@@ -815,9 +821,8 @@ export function App({
       } catch {
         // best-effort persistence
       }
-      dispatch({ type: "SET_CWD", cwd: dir })
+      void agent.changeCwd(dir)
       dispatch({ type: "STARTUP_TRUST" })
-      agent.invalidate()
     },
     [agent, home, trustFolderFn]
   )
@@ -854,13 +859,57 @@ export function App({
     [home, persistProviderModel]
   )
 
-  // Resolve a plan-approval choice. Either approve gear switches to a build mode
-  // (auto-edits → acceptEdits, confirm-each → default) so edits are allowed,
-  // persists that choice, and injects the synthetic "proceed" turn; "Keep
-  // planning" (mode null) just closes the prompt and stays in plan mode.
+  // Resolve a plan-approval choice (Claude Code parity — the execution mode is
+  // chosen at approval time):
+  //   - approve-auto / approve-confirm: switch to a build mode (acceptEdits /
+  //     default) and implement IN CONTEXT (the plan above is still visible).
+  //   - approve-new-session: mint a FRESH session (clean context), switch to
+  //     acceptEdits, and inject the plan text (reloaded from disk so any
+  //     "Edit plan first" revisions are honoured). The leading plan title
+  //     auto-names the run in the sessions list.
+  //   - edit-then-approve: open the saved plan in $EDITOR and KEEP the overlay
+  //     open so the user can revise, then approve.
+  //   - keep: close and stay in plan mode.
   const onPlanDecision = useCallback(
     (decision: PlanDecision) => {
+      const planOverlay = state.overlay.kind === "plan" ? state.overlay : null
+
+      // Edit-first: launch the editor on the saved plan, leave the overlay up.
+      if (decision === "edit-then-approve") {
+        const file = planOverlay?.savedTo
+        if (!file) {
+          dispatch({ type: "NOTICE", message: "No saved plan file to edit yet." })
+          return
+        }
+        const { editor } = detectEditor(process.env, { config: state.config.editor })
+        void openInEditorFn(file, { editor }).then((ok) =>
+          dispatch({
+            type: "NOTICE",
+            message: ok
+              ? `Editing ${file} in ${editor.displayName} — save it, then pick an approve option to run the edited plan.`
+              : `Couldn't launch an editor — edit ${file} manually, then approve.`,
+          })
+        )
+        return
+      }
+
       dispatch({ type: "OVERLAY_CLOSE" })
+      if (decision === "keep") return
+
+      // Fresh-session execution: clean context, auto-edits, embed the (reloaded)
+      // plan so the new session has the full brief.
+      if (decision === "approve-new-session") {
+        const reloaded = planOverlay?.savedTo ? loadPlanFile(planOverlay.savedTo) : null
+        const raw = reloaded ?? planOverlay?.raw ?? ""
+        persist("permissionMode", "acceptEdits")
+        void (async () => {
+          await agent.clear(mintId())
+          await agent.switchMode("acceptEdits")
+          await agent.send(raw ? PLAN_EXECUTE_PROMPT(raw) : PLAN_APPROVED_PROMPT)
+        })()
+        return
+      }
+
       const mode = planDecisionMode(decision)
       if (mode) {
         persist("permissionMode", mode)
@@ -874,7 +923,7 @@ export function App({
         })()
       }
     },
-    [agent, persist]
+    [agent, persist, state.overlay, state.config.editor, openInEditorFn, loadPlanFile, mintId]
   )
 
   const openSessions = useCallback(() => {
@@ -907,469 +956,44 @@ export function App({
     doResume(items[0].sessionId)
   }, [doResume, home, readdir, transcriptFs])
 
-  // Run a `!command` shell-out: append a live bash cell, then fill it with the
-  // result. Defined above `applyEffect` so the `runBash` CommandEffect can reuse
-  // it. The primary entry is `handleSubmit` (a bare `!…` line bypasses commands).
-  const runBash = useCallback(
-    (command: string) => {
-      dispatch({ type: "BASH_START", command })
-      void Promise.resolve(
-        runShell(command, {
-          cwd: state.config.cwd,
-          // Stream output live into the cell; the final BASH_RESULT reflows it to
-          // the clean formatted form (trim + exit note) once the process exits.
-          onChunk: (chunk) => dispatch({ type: "BASH_APPEND", chunk }),
-        })
-      )
-        .then((r) =>
-          dispatch({
-            type: "BASH_RESULT",
-            output: formatBashResult(r),
-            status: r.code === 0 ? "done" : "error",
-            exitCode: r.code,
-          })
-        )
-        .catch((err: unknown) =>
-          dispatch({
-            type: "BASH_RESULT",
-            output: err instanceof Error ? err.message : String(err),
-            status: "error",
-          })
-        )
-    },
-    [runShell, state.config.cwd]
-  )
-
-  // Interpret a pure CommandEffect produced by the dispatcher. The only place
-  // the slash commands' side effects happen — keeps every handler unit-testable.
-  const applyEffect = useCallback(
-    (effect: CommandEffect) => {
-      switch (effect.kind) {
-        case "none":
-          break
-        case "notice":
-          dispatch({ type: "NOTICE", message: effect.message })
-          break
-        case "openOverlay":
-          dispatch({ type: "OVERLAY_OPEN", overlay: effect.overlay })
-          break
-        case "openForm":
-          dispatch({
-            type: "OVERLAY_OPEN",
-            overlay: {
-              kind: "form",
-              form: createForm(
-                effect.form.specs,
-                effect.form.title,
-                effect.form.commandName,
-                effect.form.subcommand
-              ),
-            },
-          })
-          break
-        case "send":
-          void agent.send(effect.prompt)
-          break
-        case "compact":
-          // Light up the PreCompact lifecycle hook (ADR-0040 follow-up) just
-          // before the context window is trimmed. Fire-and-forget observational.
-          void createCliLifecycleFirer({ home, osHome })(
-            "PreCompact",
-            {
-              agentId: "cli",
-              sessionId: state.sessionId,
-            },
-            { payload: { focus: effect.focus ?? null } }
-          )
-          void agent.compact(effect.focus)
-          break
-        case "clear":
-          // Wipe the terminal first (Static scrollback won't clear itself), then
-          // reset state so Ink repaints the empty transcript onto a blank screen.
-          clearScreen()
-          scrollReset()
-          // Drop any find cursor — its focused cell id is about to be wiped.
-          cursor.clear()
-          void agent.clear(mintId())
-          break
-        case "copy":
-          void Promise.resolve(copyClipboard(effect.text)).then((res) =>
-            dispatch({
-              type: "NOTICE",
-              message: res.ok ? notices.copiedReply : clipboardFailureMessage(res.reason, notices),
-            })
-          )
-          break
-        case "handoff":
-          void Promise.resolve(pushHandoff?.(state.sessionId)).then(() =>
-            dispatch({ type: "NOTICE", message: "Pushed this session to the desktop app." })
-          )
-          break
-        case "openSessions":
-          openSessions()
-          break
-        case "resumeLast":
-          resumeMostRecent()
-          break
-        case "rewindList": {
-          const checkpoints = agent.listCheckpoints()
-          if (checkpoints.length === 0) {
-            dispatch({
-              type: "NOTICE",
-              message: "No checkpoints yet — they're captured as the agent works.",
-            })
-            break
-          }
-          dispatch({
-            type: "OVERLAY_OPEN",
-            overlay: {
-              kind: "select",
-              title: "Rewind to checkpoint",
-              items: checkpoints.map((c) => {
-                const label = c.label.length > 48 ? `${c.label.slice(0, 47)}…` : c.label
-                const files = c.fileCount
-                  ? ` · ${c.fileCount} file${c.fileCount === 1 ? "" : "s"}`
-                  : ""
-                return { id: String(c.seq), label: `#${c.seq} · ${label}${files}` }
-              }),
-              index: 0,
-              onSelectCommand: "rewind apply",
-            },
-          })
-          break
-        }
-        case "rewind":
-          void agent.rewind(effect.seq, effect.scope, state.cells)
-          break
-        case "addDir": {
-          const r = computeAddDir(effect.op, effect.arg, {
-            config: state.config,
-            cwd: state.config.cwd,
-            exists: (p) => fs.existsSync(p),
-            isDir: (p) => {
-              try {
-                return fs.statSync(p).isDirectory()
-              } catch {
-                return false
-              }
-            },
-          })
-          if (r.roots) {
-            // Persist (best-effort — a read-only home keeps it in-memory only),
-            // patch the live config, and re-resolve options so the next turn
-            // exposes the new dirs to the Read tool.
-            try {
-              setAdditionalRoots(home, r.roots)
-            } catch {
-              // read-only home: in-memory only
-            }
-            dispatch({ type: "SET_ADDITIONAL_ROOTS", roots: r.roots })
-            agent.invalidate()
-            // Light up the CwdChanged lifecycle hook (ADR-0040 follow-up): the
-            // agent's readable working roots just changed. Fire-and-forget.
-            void createCliLifecycleFirer({ home, osHome })(
-              "CwdChanged",
-              {
-                agentId: "cli",
-                sessionId: state.sessionId,
-              },
-              { payload: { roots: r.roots } }
-            )
-          }
-          dispatch({ type: "NOTICE", message: r.message })
-          break
-        }
-        case "runBash":
-          runBash(effect.command)
-          break
-        case "statusBar":
-          // Live-apply the footer change, then persist it to config.json so it
-          // survives the next launch. A read-only home only loses persistence.
-          dispatch({ type: "SET_STATUS_BAR", statusBar: effect.patch })
-          try {
-            persistStatusBar(home, effect.patch)
-          } catch {
-            dispatch({ type: "NOTICE", message: "Status bar updated (couldn't save to config)." })
-          }
-          break
-        case "mascot":
-          // Live-apply the mascot change, then persist it. A read-only home only
-          // loses persistence (the live change still takes effect this session).
-          dispatch({ type: "SET_MASCOT", mascot: effect.patch })
-          try {
-            persistMascot(home, effect.patch)
-          } catch {
-            dispatch({ type: "NOTICE", message: "Mascot updated (couldn't save to config)." })
-          }
-          break
-        case "theme":
-          // Live-apply the colour theme (the reducer re-resolves the palette so
-          // the whole UI recolours in place), then persist the scalar key. The
-          // theme is display-only, so no SendOptions invalidation is needed.
-          dispatch({ type: "SET_THEME", theme: effect.theme })
-          if (!persist("theme", effect.theme)) {
-            dispatch({ type: "NOTICE", message: "Theme updated (couldn't save to config)." })
-          } else {
-            dispatch({ type: "NOTICE", message: `Theme: ${effect.theme}` })
-          }
-          break
-        case "outputStyle":
-          // Live-apply the response mode, persist it (scalar config key), and
-          // re-resolve SendOptions so the next turn uses the new system prompt.
-          dispatch({ type: "SET_OUTPUT_STYLE", style: effect.style })
-          if (!persist("outputStyle", effect.style)) {
-            dispatch({ type: "NOTICE", message: "Output style updated (couldn't save to config)." })
-          }
-          agent.invalidate()
-          dispatch({ type: "NOTICE", message: `Output style: ${effect.style}` })
-          break
-        case "agentMode":
-          // Persist the active mode (scalar config key) and recreate the session
-          // (switchAgentMode dispatches SET_AGENT_MODE + drops the session) so the
-          // mode's prompt / tools / model / permission take effect next turn.
-          if (!persist("agentMode", effect.modeId)) {
-            dispatch({ type: "NOTICE", message: "Agent mode updated (couldn't save to config)." })
-          }
-          void agent.switchAgentMode(effect.modeId)
-          dispatch({
-            type: "NOTICE",
-            message:
-              effect.modeId === "general"
-                ? "Agent mode: none (plain chat)"
-                : `Agent mode: ${effect.modeId}`,
-          })
-          break
-        case "layout":
-          // Live-apply the layout (the alt-screen useEffect below enters/exits
-          // the alternate buffer as `fullscreen` flips) and persist the scalar
-          // key. Display-only, so no SendOptions invalidation. The effective mode
-          // still degrades to scrollback on a non-TTY terminal.
-          dispatch({ type: "SET_LAYOUT", layout: effect.mode })
-          if (!persist("layout", effect.mode)) {
-            dispatch({ type: "NOTICE", message: "Layout updated (couldn't save to config)." })
-          } else {
-            dispatch({ type: "NOTICE", message: `Layout: ${effect.mode}` })
-          }
-          break
-        case "mouse":
-          // Live-apply the mouse model by rewriting the terminal tracking /
-          // alternate-scroll escapes in place (only meaningful while fullscreen
-          // owns the screen; a no-op on a non-TTY). Then persist the scalar key.
-          dispatch({ type: "SET_MOUSE", mode: effect.mode })
-          if (fullscreen) applyMouseMode(effect.mode, screen)
-          if (!persist("mouse", effect.mode)) {
-            dispatch({ type: "NOTICE", message: "Mouse mode updated (couldn't save to config)." })
-          } else {
-            dispatch({
-              type: "NOTICE",
-              message:
-                effect.mode === "select"
-                  ? "Mouse: select — drag to select text; PgUp/PgDn to scroll."
-                  : "Mouse: scroll — wheel scrolls; Shift+drag to select text.",
-            })
-          }
-          break
-        case "customTheme": {
-          // Write the user's edited base colours to ~/.cognia/themes/cli.json and
-          // activate `custom:cli` (the reducer re-resolves the palette → expandPalette
-          // cascades each base edit to every derived token). A read-only home only
-          // loses persistence; the live recolour still applies this session.
-          const slug = "cli"
-          try {
-            setCustomTheme(home, slug, {
-              base: effect.base,
-              ...(effect.overrides ? { overrides: effect.overrides } : {}),
-            })
-            setConfigValue(home, "theme", `custom:${slug}`)
-          } catch {
-            dispatch({ type: "NOTICE", message: "Custom theme applied (couldn't save to config)." })
-          }
-          dispatch({ type: "SET_THEME", theme: `custom:${slug}` })
-          dispatch({ type: "NOTICE", message: "Applied your custom theme." })
-          break
-        }
-        case "settingsSet": {
-          // Apply a previously file-only field edited from the settings panel's
-          // single-field form (system prompt / skill dirs / allowed-tools list).
-          const field = effect.field
-          let patch: Partial<ResolvedConfig> = {}
-          try {
-            if (field === "systemPrompt") {
-              patch = { systemPrompt: effect.value || undefined }
-              setConfigValue(home, "systemPrompt", effect.value)
-            } else if (field === "skillDirs" || field === "allowedTools") {
-              const arr = effect.value.split(/\s+/).filter(Boolean)
-              patch = { [field]: arr.length ? arr : undefined } as Partial<ResolvedConfig>
-              setStringArrayConfig(home, field, arr)
-            }
-          } catch {
-            dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
-          }
-          dispatch({ type: "SET_CONFIG_PATCH", patch })
-          agent.invalidate()
-          dispatch({ type: "NOTICE", message: `Updated ${field}.` })
-          break
-        }
-        case "keybind": {
-          // Rebind (spec) or reset (empty spec) a keyboard chord. Persisted to
-          // config.keybindings and live-merged so the next keypress honours it.
-          const action = effect.action
-          try {
-            if (effect.spec === "") {
-              setKeybindings(home, { [action]: null })
-              const next = { ...state.config.keybindings }
-              delete next[action]
-              dispatch({ type: "SET_CONFIG_PATCH", patch: { keybindings: next } })
-              dispatch({ type: "NOTICE", message: `Reset ${action} to its default key.` })
-            } else {
-              setKeybindings(home, { [action]: effect.spec })
-              dispatch({
-                type: "SET_CONFIG_PATCH",
-                patch: { keybindings: { ...state.config.keybindings, [action]: effect.spec } },
-              })
-              dispatch({ type: "NOTICE", message: `Bound ${action} to ${effect.spec}.` })
-            }
-          } catch {
-            dispatch({ type: "NOTICE", message: "Keybinding changed (couldn't save to config)." })
-          }
-          break
-        }
-        case "goalRun": {
-          // Start a self-driving goal that streams every turn into the transcript
-          // (reuses lib/goal: createGoal + judge + handleTurnComplete). Esc aborts
-          // the controller, ending the run. `btw` steers it via `takeSteer`.
-          const controller = new AbortController()
-          runtimeAbort.current = controller
-          void startGoalRun(effect.objective, {
-            send: agent.send,
-            dispatch,
-            sessionId: state.sessionId,
-            config: state.config,
-            signal: controller.signal,
-            takeSteer,
-            firer: createCliLifecycleFirer({ home, osHome }),
-          }).finally(() => {
-            if (runtimeAbort.current === controller) runtimeAbort.current = null
-            persistDb()
-          })
-          break
-        }
-        case "loop": {
-          // Run a self-paced or interval loop, streaming each turn (reuses
-          // lib/loop). Esc aborts the controller; `btw` steers via `takeSteer`.
-          const controller = new AbortController()
-          runtimeAbort.current = controller
-          void startLoopRun({
-            send: agent.send,
-            dispatch,
-            sessionId: state.sessionId,
-            config: state.config,
-            signal: controller.signal,
-            mode: effect.mode,
-            prompt: effect.prompt,
-            ...(effect.intervalMs !== undefined ? { intervalMs: effect.intervalMs } : {}),
-            ...(effect.maxIterations !== undefined ? { maxIterations: effect.maxIterations } : {}),
-            takeSteer,
-          }).finally(() => {
-            if (runtimeAbort.current === controller) runtimeAbort.current = null
-            persistDb()
-          })
-          break
-        }
-        case "runtime": {
-          const controller = new AbortController()
-          runtimeAbort.current = controller
-          const roots = [state.config.cwd, home]
-          void runRuntimeRequest(effect.runtime, {
-            dispatch,
-            config: state.config,
-            sessionId: state.sessionId,
-            signal: controller.signal,
-            home,
-            osHome,
-            roots,
-            version: VERSION,
-            usage: state.usage,
-            contextWindow: state.modelMeta?.contextWindow,
-            usageHistory: state.usageHistory,
-            toolStats: state.toolStats,
-            ...(state.rateLimits ? { rateLimits: state.rateLimits } : {}),
-            ...(state.initDraft ? { initDraft: state.initDraft } : {}),
-          })
-            .catch((err: unknown) =>
-              dispatch({
-                type: "NOTICE",
-                message: `Runtime error: ${err instanceof Error ? err.message : String(err)}`,
-              })
-            )
-            .finally(() => {
-              if (runtimeAbort.current === controller) runtimeAbort.current = null
-              // Config-mutating features (MCP / skill / plugin toggles) must
-              // re-resolve SendOptions so the change reaches the next turn.
-              if (
-                effect.runtime.feature === "mcp" ||
-                effect.runtime.feature === "skill" ||
-                effect.runtime.feature === "plugin" ||
-                effect.runtime.feature === "permissions"
-              ) {
-                agent.invalidate()
-              }
-              // Persist any db writes the runtime performed.
-              persistDb()
-            })
-          break
-        }
-        case "planRefine":
-          // Drop back into plan mode (persist + live) and seed a revise turn —
-          // the OpenCode "keep iterating" loop. Mirrors the plan-approval switch:
-          // switchMode mutates the live session in place, so the plan above is
-          // still in context for the refine turn.
-          persist("permissionMode", "plan")
-          void (async () => {
-            await agent.switchMode("plan")
-            await agent.send(PLAN_REFINE_PROMPT)
-          })()
-          break
-        case "exit":
-          doExit()
-          break
-      }
-    },
-    [
-      agent,
-      clearScreen,
-      copyClipboard,
-      doExit,
-      home,
-      osHome,
-      mintId,
-      openSessions,
-      persist,
-      persistDb,
-      persistStatusBar,
-      persistMascot,
-      pushHandoff,
-      resumeMostRecent,
-      runBash,
-      startGoalRun,
-      startLoopRun,
-      takeSteer,
-      scrollReset,
-      cursor,
-      fullscreen,
-      screen,
-      notices,
-      state.config,
-      state.sessionId,
-      state.usage,
-      state.modelMeta,
-      state.usageHistory,
-      state.toolStats,
-      state.rateLimits,
-      state.initDraft,
-      state.cells,
-    ]
-  )
+  // Interpret a pure CommandEffect produced by the dispatcher — see useApplyEffect.
+  const applyEffect = useApplyEffect({
+    agent,
+    dispatch,
+    state,
+    home,
+    osHome,
+    mintId,
+    clearScreen,
+    scrollReset,
+    cursor,
+    copyClipboard,
+    notices,
+    pushHandoff,
+    openSessions,
+    resumeMostRecent,
+    runBash,
+    takeLastFailedBash,
+    persistStatusBar,
+    persistMascot,
+    persistEditor,
+    openInEditorFn,
+    runShell,
+    persist,
+    persistDb,
+    fullscreen,
+    screen,
+    startGoalRun,
+    startLoopRun,
+    startFixRun,
+    syncAndRefreshModelOverlay,
+    takeSteer,
+    doExit,
+    changeCwd,
+    setRuntimeAbort,
+    getRuntimeAbort,
+    mcpProbeCache,
+  })
 
   const runCommandLine = useCallback(
     (line: string) => {
@@ -1503,6 +1127,13 @@ export function App({
         }
         dispatch({ type: "EDIT_CLEAR" })
       }
+      // `# fact` quick-captures a memory (Claude Code parity) instead of sending
+      // to the model — reuses /remember (→ memory add). Checked before bang/slash.
+      const memo = parseHashMemory(text)
+      if (memo !== null) {
+        runCommandLine(`/remember ${memo}`)
+        return
+      }
       const bang = parseBang(text)
       if (bang !== null) {
         runBash(bang)
@@ -1602,6 +1233,24 @@ export function App({
             setConfigValue(home, target.key, String(value))
             invalidate = true
             break
+          case "numberValue": {
+            // Arrives as a string from an enum row; the schema stores a number.
+            const num = Number(value)
+            patch = { [target.key]: num } as Partial<ResolvedConfig>
+            setNumberConfig(home, target.key, num)
+            invalidate = true
+            break
+          }
+          case "clipboard": {
+            // osc52 is a string mode; osc52MaxBytes a number. Read live at copy
+            // time from state.config, so no SendOptions invalidation needed.
+            const clipPatch = (
+              target.key === "osc52" ? { osc52: String(value) } : { osc52MaxBytes: Number(value) }
+            ) as ClipboardConfig
+            patch = { clipboard: { ...cfg.clipboard, ...clipPatch } }
+            setClipboardConfig(home, clipPatch)
+            break
+          }
           case "builtinTool":
             patch = { builtinTools: { ...cfg.builtinTools, [target.key]: Boolean(value) } }
             setBuiltinTools(home, { [target.key]: Boolean(value) } as Partial<BuiltinToolsConfig>)
@@ -1684,6 +1333,38 @@ export function App({
     [state.config, runCommandLine, applyEffect]
   )
 
+  // `/agents models` panel edit: persist one subagent's provider/model override
+  // (or clear it on `null`), patch the live config, invalidate the session so the
+  // next dispatch picks up the change, and reopen the panel with rows recomputed
+  // against the new config (cursor index preserved). Mirrors `applySettings`.
+  const applySubagentModelEdit = useCallback(
+    (agentId: string, override: SubagentModelOverride | null) => {
+      const ov = state.overlay
+      if (ov.kind !== "subagentModels") return
+      const nextMap = { ...(state.config.subagentModels ?? {}) }
+      if (override === null) delete nextMap[agentId]
+      else nextMap[agentId] = override
+      const subagentModels = Object.keys(nextMap).length > 0 ? nextMap : undefined
+      const patch: Partial<ResolvedConfig> = { subagentModels }
+      try {
+        setSubagentModel(home, agentId, override)
+      } catch {
+        dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
+      }
+      dispatch({ type: "SET_CONFIG_PATCH", patch })
+      agent.invalidate()
+      dispatch({
+        type: "OVERLAY_OPEN",
+        overlay: {
+          kind: "subagentModels",
+          rows: recomputeSubagentModelRows(ov.rows, { ...state.config, ...patch }),
+          index: ov.index,
+        },
+      })
+    },
+    [state.overlay, state.config, home, agent]
+  )
+
   // Reverse-history-search handlers. The pure `searchHistory` matcher scans the
   // composer history (oldest-first); `fromIndex = entries.length` finds the most
   // recent match, and passing the last hit's index cycles to the next-older one.
@@ -1753,332 +1434,44 @@ export function App({
     [agent, home, persistToolApproval, state.overlay]
   )
 
-  useInput((input, key) => {
-    if (key.ctrl && input === "c") {
-      // A Ctrl+C with draft text in the composer clears the draft first (Claude
-      // Code behaviour) — it never interrupts the turn or counts toward exit.
-      // Only an empty composer falls through to the interrupt / double-press-to-
-      // exit ladder below. Guarded to the normal chat view: overlays own their
-      // own keys and the startup gate handles its own input.
-      if (state.phase === "chat" && !overlayOpen && bufferText(state.input.buffer).length > 0) {
-        dispatch({ type: "INPUT_CLEAR" })
-        // Cancel any half-armed "press again to exit" window so the cleared
-        // draft doesn't leave a primed exit behind.
-        if (ctrlCTimer.current) {
-          clearTimeout(ctrlCTimer.current)
-          ctrlCTimer.current = null
-        }
-        if (state.lastCtrlCAt) dispatch({ type: "CLEAR_CTRL_C" })
-        return
-      }
-      const at = now()
-      if (state.lastCtrlCAt && at - state.lastCtrlCAt < DOUBLE_CTRL_C_MS) {
-        // Clear the pending hint timer before we exit.
-        if (ctrlCTimer.current) {
-          clearTimeout(ctrlCTimer.current)
-          ctrlCTimer.current = null
-        }
-        doExit()
-      } else {
-        dispatch({ type: "CTRL_C", at })
-        if (busy) {
-          agent.abort()
-          abortRuntime()
-          dispatch({ type: "NOTICE", message: "Interrupted · Press Ctrl+C again to exit" })
-        } else {
-          dispatch({ type: "NOTICE", message: "Press Ctrl+C again to exit" })
-        }
-        // Clear the double-press window after 3 s so a single press doesn't
-        // linger indefinitely — the next Ctrl+C restarts the cycle.
-        if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current)
-        ctrlCTimer.current = setTimeout(() => {
-          ctrlCTimer.current = null
-          dispatch({ type: "CLEAR_CTRL_C" })
-        }, 3000)
-      }
-      return
-    }
-    // During the startup gate, only Ctrl+C (above) is honored — the gate owns
-    // its own keys.
-    if (state.phase === "startup") return
-    // Find-in-viewport (Ctrl+F): while the find bar is open it owns all input —
-    // printable keys extend the query (live incremental search), arrows / Enter
-    // step matches, Ctrl+Y copies the focused match, Esc closes. The composer is
-    // unmounted during find (see the render below), so this is the only consumer.
-    if (cursor.state.find) {
-      const find = cursor.state.find
-      if (key.escape) {
-        cursor.clear()
-        clearScreen()
-        return
-      }
-      if (key.return || key.downArrow) {
-        cursor.next()
-        return
-      }
-      if (key.upArrow) {
-        cursor.prev()
-        return
-      }
-      if (key.ctrl && input === "y") {
-        const cell = cursor.focused
-        if (cell) {
-          void Promise.resolve(copyClipboard(cellToText(cell))).then((res) =>
-            dispatch({
-              type: "NOTICE",
-              message: res.ok ? notices.copiedCell : clipboardFailureMessage(res.reason, notices),
-            })
-          )
-        }
-        return
-      }
-      if (key.backspace || key.delete) {
-        cursor.setQuery(find.query.slice(0, -1))
-        return
-      }
-      // A printable character extends the query; control/meta chords are ignored.
-      if (input && !key.ctrl && !key.meta && !key.tab) {
-        cursor.setQuery(find.query + input)
-        return
-      }
-      return
-    }
-    // Backtrack-to-edit selection: the composer is inert (`disabled` below) while
-    // a prior user message is highlighted. ↑/↓ walk between user messages, Esc
-    // cancels, Enter (or typing) loads the message into the composer as the edit
-    // target — submitting then forks the conversation there.
-    if (state.backtrack) {
-      const idx = state.backtrack.index
-      const targetText = () => {
-        const cell = state.cells[idx]
-        return cell && cell.kind === "user" ? cell.text : ""
-      }
-      // Scrollback highlights via `<Static>`, which only repaints after a clear +
-      // epoch bump. Wipe the screen here so the reducer's epoch bump re-prints the
-      // transcript with the highlight at its new position. Fullscreen re-renders
-      // live, so it needs no clear.
-      const repaintHighlight = () => {
-        if (!fullscreen) clearScreen()
-      }
-      if (key.upArrow) {
-        repaintHighlight()
-        dispatch({ type: "BACKTRACK_MOVE", dir: -1 })
-        return
-      }
-      if (key.downArrow) {
-        repaintHighlight()
-        dispatch({ type: "BACKTRACK_MOVE", dir: 1 })
-        return
-      }
-      if (key.escape) {
-        repaintHighlight()
-        dispatch({ type: "BACKTRACK_CANCEL" })
-        return
-      }
-      if (key.return) {
-        repaintHighlight()
-        dispatch({ type: "INPUT_SET", buffer: bufferFromText(targetText()) })
-        dispatch({ type: "BACKTRACK_COMMIT", index: idx })
-        return
-      }
-      // Start typing to edit: load the message and append the typed character.
-      if (input && !key.ctrl && !key.meta && !key.tab) {
-        repaintHighlight()
-        dispatch({ type: "INPUT_SET", buffer: bufferFromText(targetText() + input) })
-        dispatch({ type: "BACKTRACK_COMMIT", index: idx })
-        return
-      }
-      return
-    }
-    // Fullscreen scroll: PgUp/PgDn page the transcript viewport (conflict-free —
-    // the composer ignores PageUp/PageDown, and overlays own input while open).
-    // Reaching the bottom re-engages follow mode, so PgDn doubles as "jump to
-    // latest". In scrollback mode the terminal's native scrollback handles this,
-    // so these keys fall through untouched.
-    if (fullscreen && !overlayOpen) {
-      if (key.pageUp) {
-        scroll.pageUp()
-        return
-      }
-      if (key.pageDown) {
-        scroll.pageDown()
-        return
-      }
-      // Mouse reports only arrive in `scroll` mode (SGR tracking is on). Scroll
-      // the transcript by a few lines per wheel notch; swallow every other mouse
-      // event (clicks/releases) so it never reaches a text field as literal
-      // characters. In `select` mode tracking is off, so any stray report is
-      // still swallowed here rather than inserted.
-      const mouse = parseMouseEvent(input)
-      if (mouse) {
-        // While the composer popup owns input, let it consume the wheel (it
-        // scrolls the popup) instead of paging the transcript underneath.
-        if (mouse.kind === "wheel" && mouseMode === "scroll" && !composerPopupOpen.current) {
-          for (let i = 0; i < WHEEL_SCROLL_LINES; i++) {
-            if (mouse.dir === "up") scroll.lineUp()
-            else scroll.lineDown()
-          }
-        }
-        return
-      }
-    }
-    // Ctrl+T toggles tool/thinking output for the whole transcript (moved off
-    // Ctrl+R, which now opens history search). The composer ignores unhandled
-    // ctrl chords, and overlays own input while open, so this only fires in the
-    // normal chat view. The transcript lives in `<Static>` (write-once), so clear
-    // the screen and let the bumped epoch re-print every cell with the new
-    // collapsed state.
-    // Global chord actions are resolved through the (customizable) keybindings
-    // table — see `input/keybindings.ts`. Each keeps its own guard; all are gated
-    // on no-overlay so a modal owns input while open. Defaults reproduce the
-    // historic chords (Ctrl+T/R/O/V/I) plus the new Ctrl+G inspector.
-    const chord = overlayOpen ? undefined : matchAction(keybindings, input, key)
-    // Toggle tool/thinking output for the whole transcript. The transcript lives
-    // in `<Static>` (write-once), so clear the screen and let the bumped epoch
-    // re-print every cell with the new collapsed state.
-    if (chord === "collapseAll") {
-      clearScreen()
-      dispatch({ type: "TOGGLE_COLLAPSE_ALL" })
-      return
-    }
-    // Open incremental find-in-viewport. Fullscreen only: the jump-to-match needs
-    // the app-managed scroll viewport (scrollback mode has `/search` instead).
-    if (chord === "find") {
-      if (fullscreen) cursor.open()
-      else dispatch({ type: "NOTICE", message: "Find is available in the fullscreen layout." })
-      return
-    }
-    // Reverse-history-search over the composer history (readline parity). The
-    // overlay owns input once open; here we seed it empty with no match yet.
-    if (chord === "historySearch") {
-      dispatch({
-        type: "OVERLAY_OPEN",
-        overlay: {
-          kind: "historySearch",
-          query: "",
-          match: null,
-          matchIndex: state.input.history.entries.length,
-        },
-      })
-      return
-    }
-    // Persistent detailed-output mode (Claude Code parity): all tool/thinking
-    // cells render expanded until toggled off. Same write-once repaint dance.
-    if (chord === "verboseToggle") {
-      clearScreen()
-      dispatch({ type: "TOGGLE_VERBOSE" })
-      dispatch({ type: "NOTICE", message: state.verbose ? "Detail mode off" : "Detail mode on" })
-      return
-    }
-    // Open the tool-output inspector: a picker of every tool/bash/subagent cell
-    // that produced output; Enter opens its full, highlighted output in the pager.
-    if (chord === "inspect") {
-      const items = collectInspectables(state.cells)
-      if (items.length === 0) {
-        dispatch({ type: "NOTICE", message: "No tool output to inspect yet." })
-      } else {
-        dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "inspect", items, index: 0 } })
-      }
-      return
-    }
-    // Copy the latest assistant reply to the clipboard without entering find
-    // mode (Codex Ctrl+O parity). The injected writer handles OSC 52 over SSH.
-    if (chord === "copyLast") {
-      const reply = lastAssistantText(state)
-      if (reply) {
-        void Promise.resolve(copyClipboard(reply)).then((res) =>
-          dispatch({
-            type: "NOTICE",
-            message: res.ok ? notices.copiedReply : clipboardFailureMessage(res.reason, notices),
-          })
-        )
-      } else {
-        dispatch({ type: "NOTICE", message: notices.noReplyToCopy })
-      }
-      return
-    }
-    // Clear the visible scrollback + repaint WITHOUT resetting the conversation
-    // (distinct from `/clear`, which wipes the session). Cells are untouched.
-    if (chord === "clearScreen") {
-      clearScreen()
-      scrollReset()
-      cursor.clear()
-      dispatch({ type: "REPAINT" })
-      return
-    }
-    // Paste an image from the OS clipboard as an `@<path>` mention so it flows
-    // through the attachment pipeline.
-    if (chord === "pasteImage") {
-      void pasteClipboardImage()
-      return
-    }
-    // Inspect the current step of a live `/workflow run` — input/output/logs/usage
-    // in a scrollable document overlay (reuses the `document` kind). Only fires
-    // when a run is actually in flight.
-    if (chord === "workflowInspect" && state.workflowRun?.steps.length) {
-      const wr = state.workflowRun
-      const sel = wr.currentId
-        ? wr.steps.find((s) => s.id === wr.currentId)
-        : wr.steps[Math.min(wr.completed, wr.steps.length - 1)]
-      if (sel) {
-        dispatch({
-          type: "OVERLAY_OPEN",
-          overlay: {
-            kind: "document",
-            title: `Step · ${sel.label}`,
-            body: buildStepInspectorDoc(sel, wr.events ?? []),
-            format: "markdown",
-          },
-        })
-      }
-      return
-    }
-    // Shift+Tab cycles the permission mode (Claude Code parity). Persists the
-    // choice and re-resolves SendOptions via switchMode so the next turn honours
-    // it. Gated on no-overlay so a completion popup's Tab keeps priority.
-    if (key.tab && key.shift && !overlayOpen) {
-      const next = cyclePermissionMode(state.config.permissionMode)
-      persist("permissionMode", next)
-      void agent.switchMode(next)
-      dispatch({ type: "NOTICE", message: `Permission mode: ${next}` })
-      return
-    }
-    // Esc only acts here when no overlay is open (overlays own their Esc).
-    if (key.escape && !overlayOpen) {
-      // A live turn / background run: Esc interrupts (existing behaviour) and
-      // cancels any half-armed backtrack.
-      if (busy || state.activity) {
-        if (busy) agent.abort()
-        abortRuntime()
-        disarmBacktrack()
-        return
-      }
-      // Idle: double-Esc enters backtrack-to-edit selection. Skip while the
-      // completion popup is open (its Esc closes the popup) or while the composer
-      // holds a draft (don't clobber unsent text). The selection highlights the
-      // last user message; ↑/↓ walk earlier/later, Enter loads it for editing.
-      if (composerPopupOpen.current) return
-      // Esc while editing a backtracked message cancels: drop the edit target and
-      // clear the composer (the loaded text is discarded).
-      if (state.editTarget) {
-        dispatch({ type: "EDIT_CLEAR" })
-        dispatch({ type: "INPUT_SET", buffer: bufferFromText("") })
-        disarmBacktrack()
-        return
-      }
-      if (bufferText(state.input.buffer).length > 0) {
-        disarmBacktrack()
-        return
-      }
-      if (backtrackArmedRef.current) {
-        disarmBacktrack()
-        // Scrollback: clear so the epoch bump re-prints with the new highlight.
-        if (!fullscreen) clearScreen()
-        dispatch({ type: "BACKTRACK_ENTER" })
-      } else {
-        armBacktrack()
-      }
-    }
+  // Global key handler: Ctrl+C ladder, find-in-viewport, backtrack-to-edit,
+  // fullscreen scroll/mouse routing, chord actions, Shift+Tab, double-Esc.
+  useGlobalKeys({
+    state,
+    dispatch,
+    overlayOpen,
+    busy,
+    fullscreen,
+    mouseMode,
+    notices,
+    keybindings,
+    renderPrefs,
+    now,
+    doExit,
+    agent,
+    abortRuntime,
+    askUser,
+    hasForegroundRun,
+    killForegroundBash,
+    backgroundForegroundBash,
+    copyClipboard,
+    runCommandLine,
+    openModelPicker,
+    persist,
+    pasteClipboardImage,
+    scrollReset,
+    disarmBacktrack,
+    armBacktrack,
+    cursor,
+    scroll,
+    clearScreen,
+    composerPopupOpen,
+    subagentChipRef,
+    agentTreeRef,
+    footerRowRef,
+    footerSegmentsRef,
+    scrollContentRef,
+    backtrackArmedRef,
   })
 
   const banner = useMemo(
@@ -2101,8 +1494,10 @@ export function App({
   const footerSubagentRunning = useMemo(() => runningSubagents(inflightTools), [inflightTools])
   const footerBackgroundSubagents = useMemo(() => {
     void inflightTools
-    return countRunningCliBackgroundRuns()
-  }, [inflightTools])
+    // Scope to this chat session so the footer counts only the background
+    // subagents the current session started (the registry is process-global).
+    return countRunningCliBackgroundRuns(state.sessionId)
+  }, [inflightTools, state.sessionId])
   const copilotName = state.copilot?.name
   const hasCopilot = state.copilot !== undefined
   const footerCopilot = useMemo(
@@ -2120,6 +1515,16 @@ export function App({
     const t = setTimeout(() => setStreamStartedAt(isStreaming ? Date.now() : null), 0)
     return () => clearTimeout(t)
   }, [isStreaming])
+
+  // Timestamp the last live stream delta, for the BottomStatus stall hint. The
+  // reducer bumps `streamSeq` on every text/thinking/tool/usage delta; this
+  // effect re-stamps "now" whenever it changes while streaming (mirrors the
+  // `since` capture above — deferred set, no impure work during render).
+  const [lastActivityAt, setLastActivityAt] = useState<number | null>(null)
+  useEffect(() => {
+    const t = setTimeout(() => setLastActivityAt(isStreaming ? Date.now() : null), 0)
+    return () => clearTimeout(t)
+  }, [isStreaming, state.streamSeq])
 
   // Startup phase: welcome banner + the "do you trust this folder?" gate only —
   // no transcript/composer/footer until the user proceeds.
@@ -2147,698 +1552,68 @@ export function App({
     <ThemeProvider palette={themePalette}>
       <RenderPrefsProvider prefs={renderPrefs}>
         <Box flexDirection="column" width={columns} {...(fullscreen ? { height: rows } : {})}>
-          {fullscreen ? (
-            <>
-              {/* Fixed top banner — rendered outside the scroll viewport so it
-                  never scrolls away (the whole point of fullscreen). It carries a
-                  live status line (mode / context / tokens) since, unlike the
-                  scrollback banner, it stays on screen for the whole session. */}
-              <Banner
-                version={VERSION}
-                provider={state.config.provider}
-                model={activeModel}
-                cwd={state.config.cwd}
-                status={{
-                  mode: state.config.permissionMode,
-                  contextPct: contextPercent(
-                    state.usage,
-                    activeModel,
-                    state.modelMeta?.contextWindow
-                  ),
-                  sessionTokens: state.sessionTotals.inputTokens + state.sessionTotals.outputTokens,
-                }}
-              />
-              {/* Scrollable middle: history + the live turn, clipped to the
-                  space between the banner and the composer. */}
-              <ScrollView offset={scroll.offset} onMeasure={scroll.measure}>
-                <Transcript
-                  cells={state.cells}
-                  verbose={state.verbose}
-                  mode="live"
-                  measuring={cursor.measuring}
-                  focusedCellId={
-                    (state.backtrack ? state.cells[state.backtrack.index]?.id : undefined) ??
-                    cursor.state.focusedCellId
-                  }
-                  onCellHeight={cursor.reportCellHeight}
-                />
-                <Inflight inflight={state.inflight} verbose={state.verbose} />
-                <WorkflowRunPanel run={state.workflowRun} />
-              </ScrollView>
-              {/* "Scrolled up" hint — only while the view isn't pinned to the
-                  bottom, so a following transcript shows nothing. */}
-              {!scroll.atBottom && (
-                <Box flexShrink={0}>
-                  <Text color={themePalette.muted} dimColor>
-                    {`↑ ${scroll.hidden.below} more line${scroll.hidden.below === 1 ? "" : "s"} below · End to jump to latest`}
-                  </Text>
-                </Box>
-              )}
-            </>
-          ) : (
-            <>
-              <Transcript
-                cells={state.cells}
-                header={banner}
-                verbose={state.verbose}
-                epoch={state.renderEpoch}
-                focusedCellId={
-                  state.backtrack ? (state.cells[state.backtrack.index]?.id ?? null) : null
-                }
-              />
-              <Inflight inflight={state.inflight} verbose={state.verbose} />
-              <WorkflowRunPanel run={state.workflowRun} />
-            </>
-          )}
-          {state.overlay.kind === "permission" && (
-            <PermissionOverlay
-              req={state.overlay.req}
-              choices={state.overlay.choices}
-              index={state.overlay.index}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onResolve={resolvePermission}
-            />
-          )}
-          {state.overlay.kind === "model" && (
-            <SelectList
-              title="Switch model"
-              items={state.overlay.options.map((m) => ({
-                label: formatModelOptionLabel(m, state.config.provider),
-                hint: modelInfoHint(m, state.config.provider),
-              }))}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={(i) => {
-                const m = (state.overlay as { options: string[] }).options[i]
-                // Remember the pick under the ACTIVE provider, not as a global pin —
-                // so it survives a provider switch and never bleeds onto others.
-                persistProviderModelFn(state.config.provider, m)
-                void agent.switchModel(m)
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "mode" && (
-            <SelectList
-              title="Permission mode"
-              items={state.overlay.options.map((m) => ({ label: m }))}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={(i) => {
-                const m = (state.overlay as { options: (typeof PERMISSION_MODES)[number][] })
-                  .options[i]
-                persist("permissionMode", m)
-                void agent.switchMode(m)
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "effortSlider" && (
-            <EffortSlider
-              off={state.overlay.off}
-              index={state.overlay.index}
-              width={columns}
-              supported={modelSupportsEffort(state.config.provider, activeModel)}
-              modelLabel={activeModel}
-              onConfirm={({ off, index }) => {
-                // Resolve the picked level: off → "off", else the slider tier.
-                const lvl: ThinkingLevel = off ? "off" : EFFORT_SLIDER_LEVELS[index]
-                // `ultracode` couples to the dynamic-workflow plugin tools; every
-                // other tier turns the gate back off (per the slider's contract).
-                const pluginTools = lvl === "ultracode"
-                persist("thinkingLevel", lvl)
-                persistPluginTools(home, pluginTools)
-                // switchThinking dispatches SET_THINKING (with pluginTools) AND
-                // drops the session so the new effort + gate apply next turn.
-                void agent.switchThinking(lvl, pluginTools)
-                // Warn (but still save) when the active model won't honour effort —
-                // the preference re-applies once a reasoning-capable model is active.
-                if (lvl !== "off" && !modelSupportsEffort(state.config.provider, activeModel)) {
-                  dispatch({
-                    type: "NOTICE",
-                    message: `Saved. Note: ${activeModel ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
-                  })
-                }
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "provider" && (
-            <SelectList
-              title="Switch provider"
-              items={state.overlay.options.map((p) => ({
-                label: p.name,
-                hint: `${p.id} · ${p.configured ? p.auth : "not configured"}`,
-              }))}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={(i) => {
-                const picked = (state.overlay as { options: { id: string; configured: boolean }[] })
-                  .options[i]
-                // Reset to the new provider's default model so the active model is
-                // always valid for the provider: the provider's own configured model
-                // wins, else its curated catalog default (shared model catalog).
-                const defaultModel =
-                  state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
-                persist("provider", picked.id)
-                // Do NOT pin a top-level model on switch — the provider's own
-                // remembered model (or its catalog default) drives the display via
-                // resolveActiveModel, so switching never strands another provider's id.
-                void agent.switchProvider(picked.id, defaultModel)
-                if (!picked.configured) {
-                  dispatch({
-                    type: "NOTICE",
-                    message: `No credential for "${picked.id}" — run: cognia-agent auth login --provider ${picked.id} --api-key <key>`,
-                  })
-                }
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "config" && (
-            <SelectList
-              title="Settings"
-              items={state.overlay.rows.map((r) => ({ label: r.label, hint: r.value }))}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={(i) => {
-                const row = (state.overlay as { rows: ConfigMenuRow[] }).rows[i]
-                switch (row.action) {
-                  case "provider":
-                    dispatch({
-                      type: "OVERLAY_OPEN",
-                      overlay: {
-                        kind: "provider",
-                        options: collectProviderOptions(state.config),
-                        index: 0,
-                      },
-                    })
-                    break
-                  case "model": {
-                    const options = collectModelOptions(state.config)
-                    if (options.length === 0) {
-                      dispatch({ type: "NOTICE", message: "No models configured." })
-                    } else {
-                      dispatch({
-                        type: "OVERLAY_OPEN",
-                        overlay: { kind: "model", options, index: 0 },
-                      })
-                    }
-                    break
-                  }
-                  case "mode":
-                    dispatch({
-                      type: "OVERLAY_OPEN",
-                      overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
-                    })
-                    break
-                  case "thinking":
-                    dispatch({
-                      type: "OVERLAY_OPEN",
-                      overlay: {
-                        kind: "effortSlider",
-                        ...deriveEffortSliderState(state.config.thinkingLevel),
-                      },
-                    })
-                    break
-                  case "auth":
-                    dispatch({
-                      type: "NOTICE",
-                      message: `Auth: ${row.value}. Set with: cognia-agent auth login --provider ${state.config.provider} --api-key <key> | --subscription <token>`,
-                    })
-                    break
-                  case "cwd":
-                    dispatch({ type: "NOTICE", message: state.config.cwd })
-                    break
-                }
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "settings" && (
-            <SettingsOverlay
-              sections={state.overlay.sections}
-              section={state.overlay.section}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMoveRow={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSwitchSection={(delta) => {
-                if (state.overlay.kind !== "settings") return
-                const len = state.overlay.sections.length
-                const next = (((state.overlay.section + delta) % len) + len) % len
-                dispatch({
-                  type: "OVERLAY_OPEN",
-                  overlay: {
-                    kind: "settings",
-                    sections: state.overlay.sections,
-                    section: next,
-                    index: 0,
-                  },
-                })
-              }}
-              onAdjust={(row, delta) => {
-                if (row.control.type !== "enum") return
-                applySettings(
-                  row.control.apply,
-                  cycleEnum(row.control.options, row.control.current, delta)
-                )
-              }}
-              onToggle={(row) => {
-                if (row.control.type !== "boolean") return
-                applySettings(row.control.apply, !row.control.current)
-              }}
-              onActivate={(row) => activateSettings(row)}
-              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "sessions" && (
-            <SelectList
-              title="Resume session"
-              items={state.overlay.items.map((s) => ({ label: s.title, hint: `${s.turns} turns` }))}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={(i) => {
-                const picked = (state.overlay as { items: { sessionId: string }[] }).items[i]
-                dispatch({ type: "OVERLAY_CLOSE" })
-                doResume(picked.sessionId)
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "select" && (
-            <SelectList
-              title={state.overlay.title}
-              items={state.overlay.items.map((it) => ({ label: it.label, hint: it.hint }))}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={(i) => {
-                const o = state.overlay as { items: SelectItem[]; onSelectCommand?: string }
-                const item = o.items[i]
-                dispatch({ type: "OVERLAY_CLOSE" })
-                // View-only lists (no command) just close on Enter.
-                if (o.onSelectCommand) runCommandLine(`/${o.onSelectCommand} ${item.id}`.trim())
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "inspect" && (
-            <InspectOverlay
-              items={state.overlay.items}
-              index={state.overlay.index}
-              width={columns}
-              maxRows={overlayRows}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={(i) => {
-                const o = state.overlay as { items: InspectItem[] }
-                const item = o.items[i]
-                const cell = item ? state.cells.find((c) => c.id === item.cellId) : undefined
-                if (cell?.kind === "tool") {
-                  dispatch({
-                    type: "OVERLAY_OPEN",
-                    overlay: {
-                      kind: "document",
-                      title: `${cell.toolName} output`,
-                      body: formatToolResultBody(cell),
-                      format: "markdown",
-                    },
-                  })
-                } else if (cell?.kind === "bash") {
-                  dispatch({
-                    type: "OVERLAY_OPEN",
-                    overlay: {
-                      kind: "document",
-                      title: "bash output",
-                      body: "# bash\n\n```bash\n" + cell.output + "\n```",
-                      format: "markdown",
-                    },
-                  })
-                } else {
-                  dispatch({ type: "OVERLAY_CLOSE" })
-                }
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "marketplace" && (
-            <MarketplaceBrowser
-              entries={state.overlay.entries}
-              width={columns}
-              maxRows={overlayRows}
-              onSelect={(ref) => {
-                dispatch({ type: "OVERLAY_CLOSE" })
-                runCommandLine(`/plugin preview ${ref}`.trim())
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "mcp" && (
-            <McpPanel
-              servers={state.overlay.servers}
-              probing={state.overlay.probing}
-              width={columns}
-              maxRows={overlayRows}
-              onTools={(name) => void openMcpToolsPanel(name, mcpPanelDeps())}
-              onAuth={(name) => {
-                dispatch({ type: "OVERLAY_CLOSE" })
-                runCommandLine(`/mcp auth ${name}`)
-              }}
-              onReconnect={(name) => void mcpReconnect(name, mcpPanelDeps())}
-              onToggle={(name) =>
-                void mcpToggleServerInPanel(name, mcpPanelDeps()).then(() => agent.invalidate())
-              }
-              onAdd={() => {
-                dispatch({ type: "OVERLAY_CLOSE" })
-                runCommandLine("/mcp add")
-              }}
-              onRemove={(name) =>
-                dispatch({
-                  type: "OVERLAY_OPEN",
-                  overlay: {
-                    kind: "confirm",
-                    title: "Remove MCP server",
-                    body: `Remove **${name}** from \`~/.cognia/mcp.json\`?\n\nRe-add it any time with \`/mcp add\`.`,
-                    format: "markdown",
-                    onConfirmCommand: `mcp remove ${name}`,
-                    onCancelCommand: "mcp",
-                  },
-                })
-              }
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "mcpTools" && (
-            <McpToolsPanel
-              server={state.overlay.server}
-              tools={state.overlay.tools}
-              width={columns}
-              maxRows={overlayRows}
-              onToggle={(tool, enabled) => {
-                if (state.overlay.kind !== "mcpTools") return
-                mcpToggleTool(state.overlay.server, tool, enabled, mcpPanelDeps())
-                agent.invalidate()
-              }}
-              onBack={() => void runMcpPanel(mcpPanelDeps())}
-            />
-          )}
-          {state.overlay.kind === "skills" && (
-            <SkillPanel
-              rows={state.overlay.rows}
-              width={columns}
-              maxRows={overlayRows}
-              loadMode={state.config.skillLoadMode ?? "name"}
-              onToggleLoadMode={() => {
-                const next = (state.config.skillLoadMode ?? "name") === "name" ? "full" : "name"
-                applySettings({ kind: "configValue", key: "skillLoadMode" }, next)
-              }}
-              onToggle={(id) => {
-                if (state.overlay.kind !== "skills") return
-                const row = state.overlay.rows.find((r) => r.id === id)
-                try {
-                  setSkillEnabled(home, id, !(row?.enabled ?? false))
-                } catch {
-                  // read-only home: the badge still flips for this session.
-                }
-                dispatch({ type: "SKILL_ROW_TOGGLE", id })
-                agent.invalidate()
-              }}
-              onSetAll={(ids, enabled) => {
-                if (state.overlay.kind !== "skills") return
-                try {
-                  setManySkillsEnabled(home, ids, enabled)
-                } catch {
-                  // read-only home: the badges still flip for this session.
-                }
-                dispatch({ type: "SKILL_ROWS_SET_MANY", ids, enabled })
-                agent.invalidate()
-              }}
-              onShow={(id) => {
-                dispatch({ type: "OVERLAY_CLOSE" })
-                runCommandLine(`/skill show ${id}`)
-              }}
-              onCreate={() => {
-                dispatch({ type: "OVERLAY_CLOSE" })
-                runCommandLine("/skill create")
-              }}
-              onDelete={(id) =>
-                dispatch({
-                  type: "OVERLAY_OPEN",
-                  overlay: {
-                    kind: "confirm",
-                    title: "Delete skill",
-                    body: `Delete skill \`${id}\`?\n\nBuilt-in and on-disk skills are kept (delete their folder instead).`,
-                    format: "markdown",
-                    onConfirmCommand: `skill delete ${id}`,
-                    onCancelCommand: "skill",
-                  },
-                })
-              }
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "askUser" && (
-            <AskUserDialog request={state.overlay.request} onResolve={askUser.resolve} />
-          )}
-          {state.overlay.kind === "form" && (
-            <FormOverlay
-              form={state.overlay.form}
-              onUpdate={(f) => dispatch({ type: "FORM_UPDATE", form: f })}
-              onSubmit={submitForm}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "usage" && (
-            <UsagePanel
-              usage={state.usage}
-              model={activeModel}
-              totals={state.sessionTotals}
-              contextWindow={state.modelMeta?.contextWindow}
-              pricing={state.modelMeta?.pricing}
-              usageHistory={state.usageHistory}
-              costHistory={state.costHistory}
-              toolStats={state.toolStats}
-              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "limits" && (
-            <LimitsPanel
-              snapshots={state.overlay.snapshots}
-              analysis={state.overlay.analysis}
-              now={state.overlay.now}
-              rateLimits={state.overlay.rateLimits}
-              activeProvider={state.overlay.activeProvider}
-              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "help" && (
-            <Help onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
-          )}
-          {state.overlay.kind === "historySearch" && (
-            <HistorySearch
-              query={state.overlay.query}
-              match={state.overlay.match}
-              onChar={(ch) => {
-                const o = state.overlay as { query: string }
-                // A fresh refinement restarts from the most-recent end of history.
-                applyHistorySearch(o.query + ch, state.input.history.entries.length)
-              }}
-              onBackspace={() => {
-                const o = state.overlay as { query: string }
-                applyHistorySearch(o.query.slice(0, -1), state.input.history.entries.length)
-              }}
-              onNext={() => {
-                const o = state.overlay as { query: string; matchIndex: number }
-                // Cycle to the next-older match: pass the current hit's index.
-                applyHistorySearch(o.query, o.matchIndex)
-              }}
-              onAccept={() => {
-                const o = state.overlay as { match: string | null }
-                dispatch({ type: "OVERLAY_CLOSE" })
-                if (o.match) dispatch({ type: "INPUT_SET", buffer: bufferFromText(o.match) })
-              }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "status" && (
-            <StatusPanel
-              report={state.overlay.report}
-              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "doctor" && (
-            <DoctorPanel
-              report={state.overlay.report}
-              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-              onViewReport={(stem) => {
-                const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
-                if (!dirs.crashReportsDir) return
-                const nodeFs: CrashLogFs = {
-                  readdirSync: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
-                  readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
-                  statSync: (p) => fs.statSync(p),
-                }
-                const body = readCrashReportText(dirs.crashReportsDir, stem, nodeFs)
-                if (body == null) return
-                dispatch({
-                  type: "OVERLAY_OPEN",
-                  overlay: {
-                    kind: "document",
-                    title: `Crash report · ${stem}`,
-                    body,
-                    format: "text",
-                  },
-                })
-              }}
-              onOpenDir={() => {
-                const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
-                const dir = dirs.crashReportsDir
-                if (!dir) return
-                const platform = process.platform
-                const cmd =
-                  platform === "win32" ? "explorer" : platform === "darwin" ? "open" : "xdg-open"
-                const args = platform === "win32" ? [dir] : [dir]
-                spawn(cmd, args, { stdio: "ignore", detached: true }).unref()
-              }}
-            />
-          )}
-          {state.overlay.kind === "document" && (
-            <DocumentViewer
-              title={state.overlay.title}
-              body={state.overlay.body}
-              format={state.overlay.format}
-              lang={state.overlay.lang}
-              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "plan" && (
-            <PlanApprovalOverlay
-              index={state.overlay.index}
-              savedTo={state.overlay.savedTo}
-              raw={state.overlay.raw}
-              prevPlan={state.overlay.prevPlan}
-              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-              onSelect={onPlanDecision}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            />
-          )}
-          {state.overlay.kind === "confirm" && (
-            <ConfirmOverlay
-              title={state.overlay.title}
-              body={state.overlay.body}
-              format={state.overlay.format}
-              onConfirm={() => {
-                const cmd = (state.overlay as { onConfirmCommand: string }).onConfirmCommand
-                dispatch({ type: "OVERLAY_CLOSE" })
-                runCommandLine(`/${cmd}`.trim())
-              }}
-              onCancel={() => {
-                const cancel = (state.overlay as { onCancelCommand?: string }).onCancelCommand
-                dispatch({ type: "OVERLAY_CLOSE" })
-                if (cancel) runCommandLine(`/${cancel}`.trim())
-              }}
-            />
-          )}
-          <BottomStatus
-            turnStatus={state.turnStatus}
-            activity={state.activity}
-            tools={inflightTools}
-            steerQueue={state.steerQueue}
-            since={streamStartedAt}
-            subagentRunning={footerSubagentRunning}
-            backgroundSubagents={footerBackgroundSubagents}
+          <TranscriptRegion
+            state={state}
+            fullscreen={fullscreen}
+            banner={banner}
+            activeModel={activeModel}
+            scroll={scroll}
+            scrollContentRef={scrollContentRef}
+            cursor={cursor}
+            mutedColor={themePalette.muted}
+          />
+          <AppOverlays
+            state={state}
+            dispatch={dispatch}
+            agent={agent}
+            columns={columns}
+            overlayRows={overlayRows}
+            activeModel={activeModel}
+            home={home}
+            resolvePermission={resolvePermission}
+            persist={persist}
+            persistProviderModelFn={persistProviderModelFn}
+            persistPluginTools={persistPluginTools}
+            openModelPicker={openModelPicker}
+            applySettings={applySettings}
+            activateSettings={activateSettings}
+            applySubagentModelEdit={applySubagentModelEdit}
+            applyHistorySearch={applyHistorySearch}
+            doResume={doResume}
+            runCommandLine={runCommandLine}
+            submitForm={submitForm}
+            onPlanDecision={onPlanDecision}
+            askUser={askUser}
+            mcpPanelDeps={mcpPanelDeps}
+          />
+          <BottomRegion
+            state={state}
+            dispatch={dispatch}
+            cursor={cursor}
+            overlayOpen={overlayOpen}
+            columns={columns}
+            popupRows={popupRows}
+            warningColor={themePalette.warning}
+            streamStartedAt={streamStartedAt}
+            lastActivityAt={lastActivityAt}
+            footerSubagentRunning={footerSubagentRunning}
+            footerBackgroundSubagents={footerBackgroundSubagents}
             interruptedBackgroundSubagents={interruptedBackgroundSubagents}
-            copilot={footerCopilot}
-            verbose={state.verbose}
+            footerCopilot={footerCopilot}
             backtrackArmed={backtrackArmed}
-            columns={columns}
-          />
-          {cursor.state.find && (
-            <FindBar
-              query={cursor.state.find.query}
-              matchCount={cursor.matchCount}
-              matchIndex={cursor.matchIndex}
-            />
-          )}
-          {/* Backtrack-to-edit status: while selecting, the composer is inert and
-              ↑/↓ choose a message (shown as #position/total so it reads even in
-              scrollback mode, where the transcript can't highlight the cell); once
-              a target is committed, warn how many later turns the edit discards. */}
-          {state.backtrack &&
-            (() => {
-              const { pos, total } = userMessageStats(state.cells, state.backtrack.index)
-              return (
-                <Box flexShrink={0}>
-                  <Text color={themePalette.warning}>
-                    {`✎ Editing message #${pos}/${total} — ↑/↓ choose · Enter to edit · Esc to cancel`}
-                  </Text>
-                </Box>
-              )
-            })()}
-          {state.editTarget &&
-            (() => {
-              const { pos, total, later } = userMessageStats(state.cells, state.editTarget.index)
-              return (
-                <Box flexShrink={0}>
-                  <Text color={themePalette.warning}>
-                    {`✎ Editing message #${pos}/${total} · ${later} later turn(s) will be discarded on send · Esc to cancel`}
-                  </Text>
-                </Box>
-              )
-            })()}
-          {!overlayOpen && !cursor.state.find && (
-            <Input
-              input={state.input}
-              dispatch={dispatch}
-              onSubmit={handleSubmit}
-              onHistoryPush={persistHistory}
-              // Inert while a backtrack-to-edit selection is active (App owns ↑/↓/
-              // Enter then); otherwise stays active even during a turn so a `btw`
-              // steer can be typed mid-stream (`handleSubmit` queues it).
-              disabled={!!state.backtrack}
-              cwd={state.config.cwd}
-              listDir={listDir}
-              mentionProviders={mentionProviders}
-              width={columns}
-              popupRows={popupRows}
-              keybindings={keybindings}
-              mode={state.config.permissionMode}
-              enabledSkillIds={enabledSkillIds}
-              onToggleSkill={toggleSkillEnabled}
-              onPopupOpenChange={(open) => {
-                composerPopupOpen.current = open
-              }}
-            />
-          )}
-          <Mascot
-            mood={selectMascotMood({
-              turnStatus: state.turnStatus,
-              hasThinking: state.inflight.thinking.length > 0,
-              activityRunning: state.activity?.status === "running",
-            })}
-            style={state.config.mascot?.style ?? "clawd"}
-            enabled={state.config.mascot?.enabled !== false}
-          />
-          <Footer
-            config={state.config}
-            usage={state.usage}
-            totals={state.sessionTotals}
-            contextWindow={state.modelMeta?.contextWindow}
-            rateLimits={state.rateLimits}
-            turnStatus={state.turnStatus}
-            planTitle={footerPlanTitle}
-            columns={columns}
+            subagentChipRef={subagentChipRef}
+            agentTreeRef={agentTreeRef}
+            handleSubmit={handleSubmit}
+            handleHistoryPush={handleHistoryPush}
+            listDir={listDir}
+            mentionProviders={mentionProviders}
+            keybindings={keybindings}
+            enabledSkillIds={enabledSkillIds}
+            toggleSkillEnabled={toggleSkillEnabled}
+            handlePopupOpenChange={handlePopupOpenChange}
+            footerPlanTitle={footerPlanTitle}
+            footerRowRef={footerRowRef}
+            footerSegmentsRef={footerSegmentsRef}
           />
         </Box>
       </RenderPrefsProvider>

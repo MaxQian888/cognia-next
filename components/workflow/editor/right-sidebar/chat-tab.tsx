@@ -39,8 +39,10 @@ import { getDb } from "@/lib/db/schema"
 import { listMessages } from "@/lib/db/messages"
 import { Loader2Icon, MessageSquareIcon } from "lucide-react"
 import { WorkflowSessionBar } from "@/components/workflow/editor/chat/session-bar"
-import type { ChatSession, SendContent } from "@/lib/claude/types"
+import type { ChatSession, SendContent, SendContentBlock } from "@/lib/claude/types"
 import type { EditorStore } from "@/lib/workflow/editor/store"
+import { useMentionableWorkflowElements } from "@/lib/workflow/editor/use-mentionable-workflow-elements"
+import type { WorkflowElementRef } from "@/stores/chat/chat-store"
 import {
   WorkflowEditorProvider,
   type WorkflowEditorContextValue,
@@ -76,6 +78,37 @@ export function WorkflowEditorChatTab({
   const t = useTranslations("workflowEditor.chat")
   const { session, loading } = useWorkflowEditorSession(workflowId, workflowName)
   const claude = useClaudeChat()
+
+  // Copilot ⇄ canvas selector: the composer's `@` / `@node:` / `@edge:` picker
+  // reads these elements; picking one stages a reference chip. `onHighlight`
+  // pulses the picker's active node on the canvas via the store's transient
+  // highlight channel.
+  const wfElements = useMentionableWorkflowElements(useStore)
+  const workflowMention = useMemo(
+    () => ({
+      elements: wfElements,
+      onHighlight: (ids: string[]) => useStore.getState().setHighlightedNodes(ids),
+    }),
+    [wfElements, useStore]
+  )
+
+  // Keep the canvas reference ring in sync with the staged chips so the user
+  // sees which nodes are attached to the next AI turn (a violet ring).
+  const referencedWfElements = useChatStore((s) => s.referencedWorkflowElements)
+  useEffect(() => {
+    const nodeIds = referencedWfElements.filter((r) => r.type === "node").map((r) => r.id)
+    useStore.getState().setReferencedNodes(nodeIds)
+  }, [referencedWfElements, useStore])
+
+  // Drop staged refs + highlights when the editor unmounts so they never leak
+  // into the next session's composer or leave a stale ring on re-open.
+  useEffect(() => {
+    return () => {
+      useStore.getState().setReferencedNodes([])
+      useStore.getState().setHighlightedNodes([])
+      useChatStore.getState().clearReferencedWorkflowElements()
+    }
+  }, [useStore])
 
   // The session bar lets the user spin off / switch additional sessions for
   // this workflow; those mutate the chat store's `activeSessionId`. Track it
@@ -143,11 +176,19 @@ export function WorkflowEditorChatTab({
   const handleSend = useCallback(
     async (content: SendContent) => {
       try {
-        // Expand `@node:<id>` / `@edge:<id>` references against the current
-        // graph snapshot BEFORE the agent sees them. Falls through any
-        // unknown ids verbatim so the agent can flag dangling references.
-        const expanded = applyWorkflowMentionExpansion(content, useStore)
+        // Fold the staged reference chips into the message as `@node:`/`@edge:`
+        // tokens, then expand every `@node:<id>` / `@edge:<id>` (typed or
+        // staged) against the current graph snapshot BEFORE the agent sees
+        // them. Unknown ids fall through verbatim so the agent can flag
+        // dangling references. Chips + ring clear once the turn is sent.
+        const refs = useChatStore.getState().referencedWorkflowElements
+        const withRefs = refs.length > 0 ? prependWorkflowRefs(content, refs) : content
+        const expanded = applyWorkflowMentionExpansion(withRefs, useStore)
         await claude.send(expanded)
+        if (refs.length > 0) {
+          useChatStore.getState().clearReferencedWorkflowElements()
+          useStore.getState().setReferencedNodes([])
+        }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
       }
@@ -283,6 +324,7 @@ export function WorkflowEditorChatTab({
             onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
             showHeader={false}
             emptyState={emptyState}
+            workflowMention={workflowMention}
           />
         </div>
       </PerfBoundary>
@@ -302,6 +344,29 @@ export type { EditorStore }
  *
  * SendContent is `string | SendContentBlock[]` — handles both shapes.
  */
+/**
+ * Prepend the staged workflow-reference chips to the outgoing message as
+ * `@node:<id>` / `@edge:<id>` tokens so {@link applyWorkflowMentionExpansion}
+ * turns them into self-contained citations the agent can ground on. Merges into
+ * the first text block (or the string) so no empty leading block is created.
+ * Exported for unit testing without rendering the component.
+ */
+function prependWorkflowRefs(content: SendContent, refs: WorkflowElementRef[]): SendContent {
+  const tokens = refs.map((r) => `@${r.type}:${r.id}`).join(" ")
+  const prefix = `Referring to these workflow elements: ${tokens}\n\n`
+  if (typeof content === "string") return prefix + content
+  const idx = content.findIndex((b) => b.type === "text")
+  if (idx >= 0) {
+    const next = content.slice()
+    const block = next[idx] as Extract<SendContentBlock, { type: "text" }>
+    next[idx] = { ...block, text: prefix + block.text }
+    return next
+  }
+  return [{ type: "text", text: prefix } as SendContentBlock, ...content]
+}
+
+export { prependWorkflowRefs }
+
 function applyWorkflowMentionExpansion(content: SendContent, useStore: EditorStore): SendContent {
   const snapshot = snapshotFromEditorState(useStore.getState())
   if (typeof content === "string") {

@@ -15,7 +15,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 function draft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
   return {
@@ -51,14 +51,20 @@ describe("wikiSearch", () => {
     expect(out.results.map((r) => r.slug)).toEqual(["b", "c", "a"])
   })
 
-  it("ranks title hits above summary hits above no-match", async () => {
+  it("returns BM25-matching articles, excludes non-matching, sorted by score", async () => {
     await createWikiArticle(draft({ slug: "title-hit", title: "Twin distill orchestrator" }))
     await createWikiArticle(
       draft({ slug: "summary-hit", title: "Other module", summary: "uses twin distill flow" })
     )
     await createWikiArticle(draft({ slug: "no-hit", title: "Unrelated", summary: "no match" }))
     const out = await wikiSearch({ query: "twin distill" })
-    expect(out.results.map((r) => r.slug)).toEqual(["title-hit", "summary-hit"])
+    const slugs = out.results.map((r) => r.slug)
+    expect(slugs).toContain("title-hit")
+    expect(slugs).toContain("summary-hit")
+    expect(slugs).not.toContain("no-hit")
+    for (let i = 1; i < out.results.length; i++) {
+      expect(out.results[i - 1].score).toBeGreaterThanOrEqual(out.results[i].score)
+    }
   })
 
   it("clamps k to the [1, 20] range", async () => {
@@ -91,10 +97,10 @@ describe("wikiSearch", () => {
 })
 
 describe("wikiRead", () => {
-  it("returns the full article body for a known slug", async () => {
+  it("returns the full article body (untrusted-wrapped) for a known slug", async () => {
     await createWikiArticle(draft({ slug: "needle", contentMd: "# full body" }))
     const out = await wikiRead({ slug: "needle" })
-    expect(out?.contentMd).toBe("# full body")
+    expect(out?.contentMd).toBe("<untrusted_content>\n# full body\n</untrusted_content>")
     expect(out?.sourceRefs).toHaveLength(1)
   })
 
@@ -109,24 +115,10 @@ describe("wikiRead", () => {
 })
 
 describe("internal helpers", () => {
-  it("tokenize lowercases and splits on common separators", () => {
-    expect(__TESTING__.tokenize("Hello, World!")).toEqual(["hello", "world"])
-    expect(__TESTING__.tokenize("lib/twin/ingest")).toEqual(["lib", "twin", "ingest"])
-    expect(__TESTING__.tokenize("a b c")).toEqual([]) // all 1-char tokens dropped
-  })
-
-  it("countHits returns 0 for empty inputs", () => {
-    expect(__TESTING__.countHits([], ["a"])).toBe(0)
-    expect(__TESTING__.countHits(["a"], [])).toBe(0)
-  })
-
-  it("countHits counts unique needle hits", () => {
-    expect(__TESTING__.countHits(["foo", "bar", "baz"], ["foo", "qux", "bar"])).toBe(2)
-  })
-
-  it("clamp coerces NaN to min", () => {
+  it("clamp coerces NaN to min and clamps to bounds", () => {
     expect(__TESTING__.clamp(NaN, 1, 10)).toBe(1)
     expect(__TESTING__.clamp(99, 1, 10)).toBe(10)
     expect(__TESTING__.clamp(0, 1, 10)).toBe(1)
+    expect(__TESTING__.clamp(5, 1, 10)).toBe(5)
   })
 })

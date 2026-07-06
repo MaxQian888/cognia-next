@@ -27,6 +27,15 @@ use uuid::Uuid;
 const PAIR_TTL_SECS: i64 = 5 * 60;
 /// 90 days in seconds.
 const DEVICE_TTL_SECS: i64 = 90 * 24 * 3600;
+/// 24 hours in seconds — the headless brain's service token (ADR-0059 W4).
+/// Short-lived and re-minted on every brain spawn + on a 12h refresh timer,
+/// so a leaked token expires fast; the loopback-peer check in the middleware
+/// is the primary defense.
+const SERVICE_TTL_SECS: i64 = 24 * 3600;
+
+/// `device_id` stamped on the headless brain's service token. The brain is a
+/// singleton localhost client, not a paired device.
+pub const SERVICE_DEVICE_ID: &str = "brain-local";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -119,6 +128,32 @@ pub fn issue_device_jwt(
         &EncodingKey::from_secret(secret),
     )?;
     Ok(token)
+}
+
+/// Issue the headless brain's service JWT signed with `secret` (ADR-0059 W4).
+///
+/// Carries `scope = "service"` and a fixed `device_id` ([`SERVICE_DEVICE_ID`]).
+/// The middleware additionally requires the request to originate from loopback
+/// before honoring a service token — a service token minted for the localhost
+/// brain must never authenticate a remote caller.
+pub fn issue_service_jwt(secret: &[u8], account_id: &str) -> Result<(String, i64), JwtError> {
+    validate_account_id(account_id)?;
+    let now = now_secs();
+    let exp = now + SERVICE_TTL_SECS;
+    let claims = Claims {
+        scope: "service".to_string(),
+        iat: now,
+        exp,
+        jti: None,
+        device_id: Some(SERVICE_DEVICE_ID.to_string()),
+        account_id: Some(account_id.to_string()),
+    };
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret),
+    )?;
+    Ok((token, exp))
 }
 
 /// Verify a JWT and return its claims.
@@ -227,6 +262,29 @@ mod tests {
         assert_eq!(claims.device_id.as_deref(), Some(device_id.as_str()));
         assert_eq!(claims.account_id.as_deref(), Some(ACCOUNT_ID));
         assert!(claims.jti.is_none());
+    }
+
+    #[test]
+    fn issue_and_verify_service_jwt() {
+        let (token, exp) = issue_service_jwt(SECRET, ACCOUNT_ID).expect("issue service");
+        assert!(exp > now_secs());
+        let claims =
+            verify_for_account(SECRET, &token, "service", ACCOUNT_ID).expect("verify service");
+        assert_eq!(claims.scope, "service");
+        assert_eq!(claims.device_id.as_deref(), Some(SERVICE_DEVICE_ID));
+        assert_eq!(claims.account_id.as_deref(), Some(ACCOUNT_ID));
+        assert!(claims.jti.is_none());
+        // A service token is not a device token.
+        assert!(verify(SECRET, &token, "device").is_err());
+    }
+
+    #[test]
+    fn service_jwt_exp_is_within_24_hours() {
+        let before = now_secs();
+        let (_, exp) = issue_service_jwt(SECRET, ACCOUNT_ID).expect("issue");
+        let after = now_secs();
+        assert!(exp >= before + SERVICE_TTL_SECS);
+        assert!(exp <= after + SERVICE_TTL_SECS);
     }
 
     #[test]

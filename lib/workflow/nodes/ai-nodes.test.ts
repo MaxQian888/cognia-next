@@ -13,15 +13,16 @@ jest.mock("@cognia/vector/embedding", () => ({
 }))
 
 // Mock createLlmClient (real-LLM path) while keeping the real extractJson.
-const completeMock = jest.fn(async () => "stub")
+const completeMock = jest.fn(async (..._args: unknown[]) => "stub")
+const createLlmClientMock = jest.fn(() => ({
+  complete: (...args: unknown[]) => completeMock(...args),
+  getUsageSnapshot: () => ({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+}))
 jest.mock("@/lib/twin/distill/llm", () => {
   const actual = jest.requireActual("@/lib/twin/distill/llm")
   return {
     ...actual,
-    createLlmClient: jest.fn(() => ({
-      complete: (...args: unknown[]) => completeMock(...(args as [])),
-      getUsageSnapshot: () => ({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
-    })),
+    createLlmClient: (...args: unknown[]) => createLlmClientMock(...(args as [])),
   }
 })
 
@@ -56,6 +57,11 @@ async function run(
 beforeEach(() => {
   generateEmbeddingMock.mockClear()
   completeMock.mockClear()
+  createLlmClientMock.mockClear()
+  createLlmClientMock.mockImplementation(() => ({
+    complete: (...args: unknown[]) => completeMock(...args),
+    getUsageSnapshot: () => ({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+  }))
 })
 
 describe("B1 — ai.prompt structured output", () => {
@@ -84,6 +90,30 @@ describe("B1 — ai.prompt structured output", () => {
     expect(out.structured).toEqual({ title: "hi", score: 5 })
   })
 
+  it("real client path forwards provider protocol metadata", async () => {
+    const headers = { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" }
+    await run("ai.prompt", {
+      provider: "openrouter",
+      model: "openai/gpt-4.1-mini",
+      apiKey: "k",
+      baseURL: "https://openrouter.ai/api/v1",
+      apiFlavor: "chat",
+      headers,
+      userPrompt: "x",
+    })
+
+    expect(createLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers,
+      })
+    )
+  })
+
   it("json mode surfaces parseError when the model returns no JSON", async () => {
     completeMock.mockResolvedValueOnce("sorry, no json here")
     const out = await run("ai.prompt", {
@@ -95,6 +125,87 @@ describe("B1 — ai.prompt structured output", () => {
     })
     expect(out.structured).toBeNull()
     expect(typeof out.parseError).toBe("string")
+  })
+
+  const outputSchema = {
+    type: "object",
+    properties: { title: { type: "string" }, score: { type: "number" } },
+    required: ["title", "score"],
+  }
+
+  it("typed output: real call validates the structured result", async () => {
+    completeMock.mockResolvedValueOnce('{"title":"hi","score":5}')
+    const out = await run("ai.prompt", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      userPrompt: "x",
+      responseFormat: "json",
+      outputSchema,
+    })
+    expect(out.structured).toEqual({ title: "hi", score: 5 })
+    expect(out.schemaValid).toBe(true)
+  })
+
+  it("typed output: auto-fixes once then succeeds", async () => {
+    completeMock
+      .mockResolvedValueOnce('{"title":"hi"}') // missing score
+      .mockResolvedValueOnce('{"title":"hi","score":7}')
+    const out = await run("ai.prompt", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      userPrompt: "x",
+      responseFormat: "json",
+      outputSchema,
+    })
+    expect(out.schemaValid).toBe(true)
+    expect(completeMock).toHaveBeenCalledTimes(2)
+    expect(completeMock.mock.calls[1][0]).toMatch(/score/)
+  })
+
+  it("typed output: throws after the retry when unmet (fail default)", async () => {
+    completeMock.mockResolvedValue('{"title":"hi"}')
+    const reg = getExecutor("ai.prompt" as never, 1)!
+    await expect(
+      reg.execute(
+        makeCtx({
+          provider: "openai",
+          model: "gpt",
+          apiKey: "k",
+          userPrompt: "x",
+          responseFormat: "json",
+          outputSchema,
+        })
+      )
+    ).rejects.toThrow(/did not satisfy/)
+    expect(completeMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("typed output: soft mode keeps the unvalidated value", async () => {
+    completeMock.mockResolvedValue('{"title":"hi"}')
+    const out = await run("ai.prompt", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      userPrompt: "x",
+      responseFormat: "json",
+      outputSchema,
+      onSchemaViolation: "soft",
+    })
+    expect(out.schemaValid).toBe(false)
+    expect(out.structured).toEqual({ title: "hi" })
+  })
+
+  it("typed output: stub path stays soft so pre-credential runs survive", async () => {
+    const out = await run("ai.prompt", {
+      userPrompt: "hi",
+      responseFormat: "json",
+      outputSchema,
+    })
+    // Stub returns {} which violates the schema, but must NOT throw.
+    expect(out.structured).toEqual({})
+    expect(out.schemaValid).toBe(false)
   })
 })
 
@@ -111,6 +222,31 @@ describe("B2 — ai.classify routing", () => {
       makeCtx({ input: "this is urgent", labels: ["urgent", "normal"] })
     )
     expect(full.decision).toBe("urgent")
+  })
+
+  it("forwards explicit provider protocol metadata to ai.prompt v2", async () => {
+    const headers = { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" }
+    await run("ai.classify", {
+      provider: "openrouter",
+      model: "openai/gpt-4.1-mini",
+      apiKey: "k",
+      baseURL: "https://openrouter.ai/api/v1",
+      apiFlavor: "chat",
+      headers,
+      input: "this ticket is urgent",
+      labels: ["urgent", "normal"],
+    })
+
+    expect(createLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers,
+      })
+    )
   })
 })
 
@@ -162,6 +298,32 @@ describe("B4 — ai.extract typed parameter extraction", () => {
     expect(out.extracted).toEqual({ name: "Bob", amount: 42 })
     expect(out.missing).toEqual([])
     expect(out.valid).toBe(true)
+  })
+
+  it("forwards explicit provider protocol metadata to ai.prompt v2", async () => {
+    completeMock.mockResolvedValueOnce('{"name":"Bob"}')
+    const headers = { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" }
+    await run("ai.extract", {
+      provider: "openrouter",
+      model: "openai/gpt-4.1-mini",
+      apiKey: "k",
+      baseURL: "https://openrouter.ai/api/v1",
+      apiFlavor: "chat",
+      headers,
+      input: "Bob",
+      schema: { name: "string" },
+    })
+
+    expect(createLlmClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers,
+      })
+    )
   })
 
   it("coerces boolean / string / number fields per the schema hints", async () => {

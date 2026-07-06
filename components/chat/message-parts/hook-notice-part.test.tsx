@@ -53,7 +53,7 @@ describe("HookNoticeMarker", () => {
     render(<HookNoticeMarker message={hookMessage()} />)
     expect(screen.getByTestId("hook-notice-blocked")).toBeTruthy()
     expect(screen.getByText("Before tool")).toBeTruthy()
-    expect(screen.getByText("· blocked")).toBeTruthy()
+    expect(screen.getByTestId("hook-notice-outcome").textContent).toBe("blocked")
     expect(screen.getByTestId("hook-notice-tool").textContent).toBe("Bash")
     // Collapsed: the reason is not mounted until expanded.
     expect(screen.queryByTestId("hook-notice-reason")).toBeNull()
@@ -84,7 +84,7 @@ describe("HookNoticeMarker", () => {
     )
     expect(screen.getByTestId("hook-notice-context")).toBeTruthy()
     expect(screen.getByText("Prompt submitted")).toBeTruthy()
-    expect(screen.getByText("· context injected")).toBeTruthy()
+    expect(screen.getByTestId("hook-notice-outcome").textContent).toBe("context injected")
     // No tool chip for a non-tool event.
     expect(screen.queryByTestId("hook-notice-tool")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Toggle hook details" }))
@@ -103,7 +103,7 @@ describe("HookNoticeMarker", () => {
       />
     )
     expect(screen.getByTestId("hook-notice-warning")).toBeTruthy()
-    expect(screen.getByText("· warning")).toBeTruthy()
+    expect(screen.getByTestId("hook-notice-outcome").textContent).toBe("warning")
     fireEvent.click(screen.getByRole("button", { name: "Toggle hook details" }))
     const list = screen.getByTestId("hook-notice-warnings")
     expect(list.textContent).toContain("hook timed out after 5000ms")
@@ -113,6 +113,14 @@ describe("HookNoticeMarker", () => {
   it("falls back to the raw event identifier for unknown events", () => {
     render(<HookNoticeMarker message={hookMessage({ event: "SomeFutureEvent" })} />)
     expect(screen.getByText("SomeFutureEvent")).toBeTruthy()
+  })
+
+  it("localizes a cataloged event that previously fell back to its raw id", () => {
+    // WorktreeCreate had no localized label before the shared event catalog;
+    // it now resolves through the `hooks` namespace instead of showing raw.
+    render(<HookNoticeMarker message={hookMessage({ event: "WorktreeCreate" })} />)
+    expect(screen.getByText("Worktree created")).toBeTruthy()
+    expect(screen.queryByText("WorktreeCreate")).toBeNull()
   })
 
   it("renders directly from part data via HookNoticeRow (inline external-agent use)", () => {

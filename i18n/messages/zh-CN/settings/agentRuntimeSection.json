@@ -34,12 +34,20 @@
       "teacher": "讲解式"
     },
     "permAcceptEdits": "接受编辑 — 自动允许写文件",
+    "permAuto": "自动 — 多数操作在后台安全检查下运行",
     "permBypass": "绕过 — 允许全部（危险）",
     "permDefault": "默认 — 编辑前询问",
+    "permDontAsk": "不询问 — 仅预先批准和只读的工具",
     "permPlan": "计划 — 仅读取并提出建议",
     "permissionDesc": "新会话的默认权限模式，角色和会话仍可覆盖。",
     "permissionMode": "模式",
     "permissionTitle": "权限模式",
+    "planDesc": "计划模式回合提出计划（ExitPlanMode）时应用的默认设置。",
+    "planMaxAutoRefinements": "最大自动优化次数",
+    "planMaxAutoRefinementsHint": "步骤失败后自动修复重规划的上限（0–10）。",
+    "planRequireApproval": "计划需要审批",
+    "planRequireApprovalHint": "实施前显示审批卡片。关闭后，捕获的计划将以自动接受编辑模式直接继续。",
+    "planTitle": "计划模式",
     "routingDesc": "某次发送失败时，自动尝试别名回退链中的下一项。关闭后会保留原始错误，便于排查。",
     "routingTitle": "路由回退",
     "thinkingActiveHint": "已开启：每轮最多预留 {budget} token 用于回复前的推理。",
@@ -234,6 +242,7 @@
     "title": "延迟加载工具",
     "toolsHelp": "这些裸工具名将常驻、永不延迟加载。",
     "toolsLabel": "始终加载的工具",
-    "toolsPlaceholder": "工具名称，例如 read_file"
+    "toolsPlaceholder": "工具名称，例如 read_file",
+    "unknownHint": "未在当前工具目录中找到——在匹配的服务器或工具存在之前，此固定项不会生效。"
   }
 }

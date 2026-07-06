@@ -75,10 +75,22 @@ async function performCapture(): Promise<{
  * capture as `take_screenshot`, then runs the PNG through the OCR pipeline so
  * the agent gets the screen's text instead of (or alongside) raw image bytes.
  */
-async function performCaptureOcr(
-  languages?: string[]
-): Promise<
-  { ok: true; text: string; markdown: string; providerId: string } | { ok: false; error: string }
+/** Text block + image-relative bounding box (origin top-left, px). */
+interface OcrTextBlock {
+  text: string
+  bbox?: { x: number; y: number; width: number; height: number }
+  confidence?: number
+}
+
+async function performCaptureOcr(languages?: string[]): Promise<
+  | {
+      ok: true
+      text: string
+      markdown: string
+      providerId: string
+      blocks: OcrTextBlock[]
+    }
+  | { ok: false; error: string }
 > {
   try {
     const file = await captureScreenshot()
@@ -92,11 +104,20 @@ async function performCaptureOcr(
       },
       buildOcrDeps()
     )
+    // Surface per-block geometry (when the provider emits it) so callers can map
+    // text to a location. Coordinates are relative to the captured image — for
+    // an actionable screen click prefer the gated click_text / find_text tools.
+    const blocks: OcrTextBlock[] = (result.pages[0]?.blocks ?? []).map((b) => ({
+      text: b.text,
+      bbox: b.bbox,
+      confidence: b.confidence,
+    }))
     return {
       ok: true,
       text: result.combinedText,
       markdown: result.combinedMarkdown,
       providerId: result.providerId,
+      blocks,
     }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -137,7 +158,7 @@ const definition: PluginDefinition = {
       definition: {
         name: "extract_screenshot_ocr",
         description:
-          "Capture a screen image and extract its text via OCR. Returns the recognized text + markdown.",
+          "Capture a screen image and extract its text via OCR. Returns the recognized text + markdown, plus per-block geometry (`blocks` with image-relative bboxes) when the provider supports it. To click on-screen text, use the gated click_text/find_text tools instead.",
         parametersSchema: {
           type: "object",
           properties: {

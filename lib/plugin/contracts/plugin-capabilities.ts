@@ -132,7 +132,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/api/skill.ts",
       "packages/plugin-sdk/src/context/extended.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: ["plugins/anthropic-skills/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: ["lib/plugin/registries/skill-registry.test.ts"],
@@ -148,8 +148,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.media + AI-backed media helpers",
     hostBindings: ["lib/plugin/api/media-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/media.ts",
       "packages/plugin-sdk/src/context/extended.ts",
-      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -163,8 +163,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.canvas + active editor selection bridge",
     hostBindings: ["lib/plugin/api/canvas-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/canvas.ts",
       "packages/plugin-sdk/src/context/extended.ts",
-      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -178,10 +178,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.ai + built-in provider fallback",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/ai-provider.ts",
       "packages/plugin-sdk/src/context/extended.ts",
-      "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/providers.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: ["lib/plugin/api/ai-provider-api.test.ts"],
   },
@@ -200,7 +200,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-theme.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/appearance.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "packages/plugin-sdk/src/define/define-theme.test.ts",
@@ -217,7 +217,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/manifest/index.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/plugin.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: [
       "plugins/clipboard-tools/src/index.ts",
       "plugins/web-tools/src/index.ts",
@@ -266,6 +266,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "Provider extension integration is not production-ready",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/api/ai-provider.ts",
       "packages/plugin-sdk/src/index.ts",
       "packages/plugin-sdk/src/context/extended.ts",
     ],
@@ -335,10 +336,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-configuration.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: [
-      "plugin-sdk/python/src/cognia/context.py",
-      "plugin-sdk/python/src/cognia/runtime.py",
-    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/workflow.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/api/config-api.test.ts",
@@ -366,7 +364,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: ["pythonMain", "pythonDependencies"],
     runtimeBinding: "PyO3/Tauri python runtime",
     hostBindings: ["src-tauri/src/plugin_api/python/commands.rs", "lib/plugin/core/manager.ts"],
-    typescriptSdk: ["packages/plugin-sdk/src/context/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/api/python.ts",
+      "packages/plugin-sdk/src/context/index.ts",
+    ],
     pythonSdk: [
       "plugin-sdk/python/src/cognia/runtime.py",
       "plugin-sdk/python/src/cognia/plugin.py",
@@ -655,7 +656,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       // Python plugins can declare external-agent presets through the same
       // manifest schema; the SDK helper is a thin pass-through to the Tauri
       // command that mirrors the contribution into the runtime overlay.
-      "plugin-sdk/python/src/cognia_next/external_agent_presets.py",
+      "plugin-sdk/python/src/cognia/external_agent.py",
     ],
     builtinContributionPaths: ["plugins/external-agent-preset-example/src/index.ts"],
     docs: "docs/content/docs/en/chat/external-agents/index.mdx",
@@ -684,7 +685,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-external-agent-adapter.ts",
       "packages/plugin-sdk/src/manifest/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia_next/external_agent_adapters.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/external_agent.py"],
     builtinContributionPaths: ["plugins/external-agent-adapter-example/src/index.ts"],
     docs: "docs/content/docs/en/chat/external-agents/integration.mdx",
     requiredTests: [
@@ -714,7 +715,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/api/mcp-server-preset.ts",
       "packages/plugin-sdk/src/context/extended.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: [
       "plugins/playwright-mcp/src/index.ts",
       "plugins/stagehand-mcp/src/index.ts",
@@ -752,7 +753,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/api/native-anthropic-tool.ts",
       "packages/plugin-sdk/src/context/extended.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: ["plugins/computer-use/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -770,12 +771,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // Diagnostics + provider responses route through the existing
     // `monaco-bridge` + `lsp-protocol-adapter` pipeline.
     id: "lsp-server",
-    // Host runtime is fully wired (lsp-registry + monaco bridge + sidecar
-    // client are all live), but the SDK packages don't yet ship a
-    // `defineLspServer()` helper — plugin authors declare LSP servers
-    // through `manifest.lspServers[]` only. Downgrade to `experimental`
-    // until the SDK gains a typed helper; the host contract is unaffected.
-    support: "experimental",
+    // Promoted experimental→supported: the host runtime was already fully
+    // wired (lsp-registry + monaco bridge + sidecar client), and the prior
+    // "no typed SDK helper" justification is now stale — `defineLspServer()`
+    // ships at `packages/plugin-sdk/src/define/define-lsp-server.ts` and is
+    // re-exported from the root barrel + `api/lsp-server.ts`. Plugin authors
+    // can declare LSP servers via the typed helper or `manifest.lspServers[]`.
+    support: "supported",
     manifestFields: ["lspServers"],
     runtimeBinding: "lib/plugin/lsp/lsp-registry registerPluginLspServers / unregisterByOwner",
     hostBindings: [
@@ -786,13 +788,17 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/vscode-shim/monaco-bridge.ts",
       "sidecar/vscode-ext-host/src/lsp-client.ts",
     ],
-    typescriptSdk: [],
-    pythonSdk: [],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-lsp-server.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/providers.py"],
     builtinContributionPaths: ["plugins/test-lsp-contribution/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/lsp/lsp-registry.test.ts",
       "sidecar/vscode-ext-host/tests/lsp-client.test.mjs",
+      "packages/plugin-sdk/src/define/define-lsp-server.test.ts",
     ],
   },
   {
@@ -824,13 +830,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/api/character-pack.ts",
       "packages/plugin-sdk/src/define/define-character-pack.ts",
     ],
-    pythonSdk: [
-      // Python plugins declare character packs through the same manifest
-      // schema; the existing context bridge serialises the shape into the
-      // host without a dedicated helper, matching how `skills` are wired.
-      "plugin-sdk/python/src/cognia/context.py",
-      "plugin-sdk/python/src/cognia/types.py",
-    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: ["plugins/cognia-character-seeds/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -855,7 +855,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/claude/agents/subagents/index.ts",
     ],
     typescriptSdk: ["packages/plugin-sdk/src/define/define-subagent.ts"],
-    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: [
       "plugins/agent-team-examples/src/index.ts",
       "plugins/computer-use/src/index.ts",
@@ -880,7 +880,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/settings/agent/agent-team-templates-section.tsx",
     ],
     typescriptSdk: ["packages/plugin-sdk/src/define/define-agent-team-template.ts"],
-    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: [
       "plugins/agent-team-examples/src/index.ts",
       "plugins/computer-use/src/index.ts",
@@ -1043,7 +1043,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/workflow/editor/right-sidebar/settings/plugin-capabilities-section.tsx",
     ],
     typescriptSdk: ["packages/plugin-sdk/src/define/define-workflow-template.ts"],
-    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/workflow.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/workflow-template-registry.test.ts",
@@ -1067,7 +1067,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-connector.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/providers.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "packages/plugin-sdk/src/define/define-connector.test.ts",
@@ -1138,7 +1138,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-theme-pack.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/appearance.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "packages/plugin-sdk/src/define/define-theme-pack.test.ts",
@@ -1161,7 +1161,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-font-contribution.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/appearance.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "packages/plugin-sdk/src/define/define-font-contribution.test.ts",
@@ -1183,7 +1183,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-wallpaper.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/appearance.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "packages/plugin-sdk/src/define/define-wallpaper.test.ts",
@@ -1216,7 +1216,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/context/extended.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/quick-action-registry.test.ts",
@@ -1234,12 +1234,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // standard registry so both the in-process and sidecar dispatch paths
     // pick them up unchanged.
     id: "cli-tools",
-    // Host runtime is fully wired (validation + exec pipeline + registry
-    // dispatch), but the capability is manifest-declarative only — the SDK
-    // packages ship no `defineCliTool()` helper yet. Same posture as
-    // `lsp-server`: experimental until a typed SDK helper exists; the host
-    // contract is unaffected.
-    support: "experimental",
+    // Promoted experimental→supported: the host runtime was already fully
+    // wired (validation + exec pipeline + registry dispatch), and the prior
+    // "no `defineCliTool()` helper yet" justification is now stale — the
+    // typed helper ships at `packages/plugin-sdk/src/define/define-cli-tool.ts`
+    // and is re-exported from the root barrel + `api/cli-tool.ts`. Plugin
+    // authors can declare CLI tools via the typed helper or `manifest.cliTools[]`.
+    support: "supported",
     manifestFields: ["cliTools"],
     runtimeBinding:
       "manager.registerPluginContributions cliTools → registry.registerTool(executeCliTool)",
@@ -1249,12 +1250,16 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/cli-tools/binary-status.ts",
       "src-tauri/src/plugin_api/cli_exec.rs",
     ],
-    typescriptSdk: [],
-    pythonSdk: [],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-cli-tool.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/providers.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/cli-tools/execute-cli-tool.test.ts",
       "lib/plugin/cli-tools/cli-binary-policy.test.ts",
+      "packages/plugin-sdk/src/define/define-cli-tool.test.ts",
     ],
   },
   {
@@ -1296,7 +1301,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/automation",
       "src-tauri/src/automation",
     ],
-    typescriptSdk: [],
+    typescriptSdk: ["packages/plugin-sdk/src/api/automation.ts"],
     pythonSdk: [],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -1319,7 +1324,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/companion",
       "src-tauri/src/companion_api",
     ],
-    typescriptSdk: [],
+    typescriptSdk: ["packages/plugin-sdk/src/api/companion.ts"],
     pythonSdk: [],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -1470,6 +1475,55 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/uri/uri-handler-registry.test.ts",
       "lib/plugin/api/uri-api.test.ts",
     ],
+  },
+  {
+    id: "pet",
+    support: "supported",
+    manifestFields: [],
+    runtimeBinding: "context.pet (createPetAPI — rate-limited, daily reward budget)",
+    hostBindings: [
+      "lib/plugin/api/pet-api.ts",
+      "lib/plugin/api/pet-budget.ts",
+      "lib/plugin/core/context.ts",
+      "lib/pet/events/pet-event-bus.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/manifest/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
+    builtinContributionPaths: ["plugins/pet-daily-quests/src/index.ts"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: ["lib/plugin/api/pet-api.test.ts", "lib/plugin/api/pet-budget.test.ts"],
+  },
+  {
+    id: "pet-achievement",
+    support: "supported",
+    manifestFields: ["petAchievements"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES dispatch → pet-achievement-registry (condition DSL compiled into checkAchievements)",
+    hostBindings: [
+      "lib/plugin/registries/pet-achievement-registry.ts",
+      "lib/plugin/contracts/capability-bridge-map.ts",
+      "lib/pet/achievements/check.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/manifest/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/pet.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: ["lib/plugin/registries/pet-achievement-registry.test.ts"],
+  },
+  {
+    id: "pet-item",
+    support: "supported",
+    manifestFields: ["petItems"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES dispatch → pet-item-registry (unioned static-first into the shop catalog)",
+    hostBindings: [
+      "lib/plugin/registries/pet-item-registry.ts",
+      "lib/plugin/contracts/capability-bridge-map.ts",
+      "lib/pet/economy/item-catalog.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/manifest/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/pet.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: ["lib/plugin/registries/pet-item-registry.test.ts"],
   },
 ] as const
 

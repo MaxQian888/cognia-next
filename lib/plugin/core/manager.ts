@@ -39,6 +39,7 @@ import { PluginLoader } from "@/lib/plugin/core/loader"
 import { PluginRegistry } from "@/lib/plugin/core/registry"
 import {
   createFullPluginContext,
+  createWorkflowAPI,
   teardownPluginWorkflowRegistrations,
 } from "@/lib/plugin/core/context"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
@@ -122,7 +123,7 @@ import {
   type LoadOrderBlockReason,
 } from "@/lib/plugin/core/load-order"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
-import { buildWasmToolDefinitions } from "./wasm-loader"
+import { buildWasmNodeDefs, buildWasmToolDefinitions } from "./wasm-loader"
 // PR-D — overlay-registry capabilities (skills / mcp-server-preset /
 // native-anthropic-tool / external-agent-preset) now flow through the
 // codified `CAPABILITY_BRIDGE_MAP`. Bespoke capabilities (modes,
@@ -437,6 +438,25 @@ export function __resetPluginManagerForTesting(): void {
   pluginManagerInstance = null
 }
 
+/**
+ * Produce a structured-clone-safe copy of a plugin manifest for persistence
+ * into the Dexie `plugins` table. Some manifests carry live runtime objects
+ * whose members are functions (e.g. a `sharedMemoryAdapters[]` adapter's
+ * `write`/`read`/`delete`). IndexedDB's structured-clone algorithm throws
+ * `DataCloneError` on functions, which would abort the whole discovery-row
+ * write. A JSON round-trip drops every function-valued (and otherwise
+ * non-serializable) property while preserving the serializable metadata the
+ * discovery UI actually reads. Falls back to the original object only if the
+ * manifest is somehow not JSON-encodable, letting the caller's try/catch log it.
+ */
+export function toClonableManifest(manifest: PluginManifest): PluginManifest {
+  try {
+    return JSON.parse(JSON.stringify(manifest)) as PluginManifest
+  } catch {
+    return manifest
+  }
+}
+
 // =============================================================================
 // Plugin Manager Class
 // =============================================================================
@@ -560,18 +580,31 @@ export class PluginManager {
   private collectRuntimeProfileDiagnostics(
     manifest: PluginManifest
   ): ExtensionCompatibilityDiagnostic[] {
-    if (this.runtimeProfile !== "browser") {
+    // The Tauri (desktop) profile trusts every built-in; runtime-surface gating
+    // applies only to the browser-class profiles — web `browser` and the
+    // Capacitor `mobile` WebView. `surface` is whichever of those is active.
+    if (this.runtimeProfile === "tauri") {
       return []
     }
+    const surface = this.runtimeProfile
 
-    const compatibility = manifest.runtimeCompatibility?.browser
+    // Mobile is a browser-class runtime: when a plugin omits an explicit
+    // `mobile` target we fall back to its `browser` availability. Every built-in
+    // declares `mobile` (enforced by builtin-manifest-shape.test.ts), so this
+    // fallback only catches third-party plugins authored before the mobile
+    // surface existed.
+    const compat = manifest.runtimeCompatibility
+    const fellBackToBrowser = surface === "mobile" && !compat?.mobile
+    const compatibility = fellBackToBrowser ? compat?.browser : compat?.[surface]
+    const fallbackNote = fellBackToBrowser ? " (inherited from browser compatibility)" : ""
+
     if (!compatibility) {
       return [
         {
-          code: "runtime.browser.unsupported",
+          code: `runtime.${surface}.unsupported`,
           severity: "error",
-          message: `Plugin ${manifest.id} does not declare browser runtime compatibility.`,
-          hint: "Add browser runtime compatibility metadata before enabling this plugin in browser mode.",
+          message: `Plugin ${manifest.id} does not declare ${surface} runtime compatibility.`,
+          hint: `Add ${surface} runtime compatibility metadata before enabling this plugin in ${surface} mode.`,
         },
       ]
     }
@@ -583,13 +616,13 @@ export class PluginManager {
     if (compatibility.availability === "degraded") {
       return [
         {
-          code: "runtime.browser.degraded",
+          code: `runtime.${surface}.degraded`,
           severity: "warning",
           message:
             compatibility.reason ||
-            `Plugin ${manifest.id} is only partially supported in browser runtime.`,
+            `Plugin ${manifest.id} is only partially supported in ${surface} runtime${fallbackNote}.`,
           hint: compatibility.entrypoint
-            ? `Browser bundle entrypoint: ${compatibility.entrypoint}`
+            ? `${surface} bundle entrypoint: ${compatibility.entrypoint}`
             : undefined,
         },
       ]
@@ -597,14 +630,37 @@ export class PluginManager {
 
     return [
       {
-        code: "runtime.browser.unsupported",
+        code: `runtime.${surface}.unsupported`,
         severity: "error",
-        message: compatibility.reason || `Plugin ${manifest.id} is blocked in browser runtime.`,
+        message:
+          compatibility.reason ||
+          `Plugin ${manifest.id} is blocked in ${surface} runtime${fallbackNote}.`,
         hint: compatibility.entrypoint
-          ? `Declared browser entrypoint: ${compatibility.entrypoint}`
+          ? `Declared ${surface} entrypoint: ${compatibility.entrypoint}`
           : undefined,
       },
     ]
+  }
+
+  /**
+   * True when the active runtime profile *blocks* this plugin (an
+   * error-severity runtime diagnostic), e.g. a desktop-native built-in
+   * (`computer-use`, `playwright-mcp`, …) under the `browser` profile — which
+   * is also what the Capacitor mobile shell boots as (it is non-Tauri).
+   *
+   * Such a plugin stays discovered and visible in `/plugins` (flagged
+   * incompatible), but MUST be excluded from automatic startup enable /
+   * activation: auto-enabling it would throw in `loadPlugin` and fire one
+   * failure toast per plugin, which on mobile/web manifested as a flood of
+   * toasts at boot. A manual, user-initiated `enablePlugin` is unaffected and
+   * still surfaces the diagnostic on demand. Returns `false` on the `tauri`
+   * profile (`collectRuntimeProfileDiagnostics` is browser-only), so desktop
+   * auto-enable behaviour is untouched.
+   */
+  private isBlockedByRuntimeProfile(manifest: PluginManifest): boolean {
+    return this.collectRuntimeProfileDiagnostics(manifest).some(
+      (diagnostic) => diagnostic.severity === "error"
+    )
   }
 
   private recordPluginVerification(
@@ -992,7 +1048,11 @@ export class PluginManager {
         .filter(
           (plugin) =>
             plugin.status === "installed" &&
-            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest))
+            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest)) &&
+            // Don't auto-enable plugins the active runtime profile blocks
+            // (e.g. desktop-native built-ins on the browser/mobile shell) —
+            // each would throw in loadPlugin and fire a failure toast at boot.
+            !this.isBlockedByRuntimeProfile(plugin.manifest)
         )
         .map((plugin) => plugin.manifest.id)
     )
@@ -1052,7 +1112,9 @@ export class PluginManager {
   // ===========================================================================
 
   async scanPlugins(): Promise<DiscoveredPlugin[]> {
-    if (this.runtimeProfile === "browser") {
+    // Browser AND mobile discover built-ins from the static registry; only the
+    // Tauri shell additionally scans the on-disk plugin directory below.
+    if (this.runtimeProfile !== "tauri") {
       return this.scanBrowserBuiltins()
     }
 
@@ -1164,16 +1226,26 @@ export class PluginManager {
     source: PluginSource,
     path: string
   ): Promise<void> {
+    // Some manifests carry LIVE runtime objects with function members — e.g.
+    // agent-team-examples' `sharedMemoryAdapters[].write/read/…`. IndexedDB's
+    // structured-clone algorithm rejects functions with DataCloneError, so the
+    // whole row fails to persist and the plugin never reaches the Dexie-backed
+    // UI. Strip to a clone-safe projection first. The live manifest (functions
+    // intact) is rebuilt fresh from the module on every discovery and is what
+    // enable-time registration reads; the persisted row is metadata-only.
+    const serializableManifest = toClonableManifest(manifest)
     try {
       await upsertPlugin({
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        type: (manifest.type as string) || "frontend",
+        id: serializableManifest.id,
+        name: serializableManifest.name,
+        version: serializableManifest.version,
+        type: (serializableManifest.type as string) || "frontend",
         source,
         path,
-        manifest: manifest as unknown as Record<string, unknown>,
-        capabilities: Array.isArray(manifest.capabilities) ? [...manifest.capabilities] : [],
+        manifest: serializableManifest as unknown as Record<string, unknown>,
+        capabilities: Array.isArray(serializableManifest.capabilities)
+          ? [...serializableManifest.capabilities]
+          : [],
       })
     } catch (error) {
       loggers.manager.warn(`[plugin:${manifest.id}] failed to persist discovery row to Dexie`, {
@@ -1978,7 +2050,25 @@ export class PluginManager {
         store.setPluginStatus?.(pluginId, "installed")
       }
 
-      // Load first when not currently active in runtime. Re-read the live
+      // Apply any declared Dexie tables BEFORE loadPlugin. loadPlugin runs the
+      // plugin's activate() (see loadPlugin → definition.activate), and
+      // activate() typically touches ctx.dexie right away (e.g. github-delivery
+      // counts its tables to surface mis-declared schemas). If the namespaced
+      // stores aren't in the live schema yet, that first db.table() throws
+      // "Table <id>:<name> does not exist" and enable fails. Worse, it fails
+      // permanently: the pluginDexieMeta row that restorePluginDexieTables
+      // relies on at boot is only written by applyPluginTables, which never runs
+      // if loadPlugin already threw — so the tables are never restored on any
+      // later boot either. Applying tables first breaks that deadlock.
+      if (plugin.manifest.dexie) {
+        await applyPluginTables(
+          getDb() as unknown as import("dexie").default,
+          pluginId,
+          plugin.manifest.dexie
+        )
+      }
+
+      // Load next when not currently active in runtime. Re-read the live
       // status so the just-applied error recovery (or any concurrent enable) is
       // reflected here rather than the stale captured snapshot.
       const currentStatus = store.plugins[pluginId]?.status ?? plugin.status
@@ -1988,16 +2078,6 @@ export class PluginManager {
         !this.loader.isLoaded(pluginId)
       ) {
         await this.loadPlugin(pluginId)
-      }
-
-      // Apply any declared Dexie tables before enabling the plugin so that
-      // ctx.dexie is ready when the plugin's activate() runs.
-      if (plugin.manifest.dexie) {
-        await applyPluginTables(
-          getDb() as unknown as import("dexie").default,
-          pluginId,
-          plugin.manifest.dexie
-        )
       }
 
       // Register plugin-provided i18n strings so the next render of any
@@ -2836,6 +2916,14 @@ export class PluginManager {
         continue
       }
 
+      // Skip plugins the active runtime profile blocks (e.g. desktop-native
+      // built-ins under the browser/mobile shell). Lazy-activating them would
+      // throw in loadPlugin and spam an activation-failure toast on every
+      // matching event. They remain enable-able manually from `/plugins`.
+      if (this.isBlockedByRuntimeProfile(plugin.manifest)) {
+        continue
+      }
+
       if (this.activationInFlight.has(plugin.manifest.id)) {
         continue
       }
@@ -2904,7 +2992,9 @@ export class PluginManager {
   async syncRuntimeState(): Promise<void> {
     const store = usePluginStore.getState()
 
-    if (this.runtimeProfile === "browser" || !canUseTauriInvoke()) {
+    // Only the Tauri shell has a backend status ledger to sync from; browser
+    // and mobile have no native invoke bridge.
+    if (this.runtimeProfile !== "tauri" || !canUseTauriInvoke()) {
       return
     }
 
@@ -3878,6 +3968,27 @@ export class PluginManager {
     for (const tool of buildWasmToolDefinitions(plugin.manifest)) {
       this.registry.registerTool(pluginId, tool)
       store.registerPluginTool(pluginId, tool)
+    }
+    // Project the manifest's declared workflow nodes into executors that route
+    // through the WASM `workflow-node-execute` export. Registered through the
+    // SAME machinery as frontend plugins (kind-prefix + catalog + per-plugin
+    // teardown via `teardownPluginWorkflowRegistrations`), so a disabled WASM
+    // plugin's nodes disappear cleanly. Without this the Rust dispatch + guest
+    // impl were unreachable (`No executor registered for <kind>`).
+    const nodeDefs = buildWasmNodeDefs(plugin.manifest)
+    if (nodeDefs.length > 0) {
+      const workflowApi = createWorkflowAPI(pluginId)
+      for (const def of nodeDefs) {
+        try {
+          workflowApi.registerNode(def)
+        } catch (error) {
+          loggers.manager.warn("WASM workflow node registration failed", {
+            pluginId,
+            kind: def.kind,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
     }
   }
 

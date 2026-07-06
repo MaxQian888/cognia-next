@@ -242,6 +242,11 @@ export interface PluginSubagentDispatchResult {
 export interface PluginRunTeamOptions {
   /** Force ("force") or disable ("off") ultracode orchestration for this run. */
   ultracode?: boolean
+  /**
+   * Trigger origin for HITL gate policy (see lib/ai/agent/team/gate-policy).
+   * Defaults to "plugin"; the external bridge passes "external".
+   */
+  origin?: import("@/types/agent/agent-team").TeamRunOrigin
 }
 
 /** Terminal outcome of a programmatic team run. */

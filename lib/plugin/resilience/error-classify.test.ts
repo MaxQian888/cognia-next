@@ -1,5 +1,5 @@
 import { classifyResilienceError, isRetryableKind } from "@/lib/plugin/resilience/error-classify"
-import { TimeoutError } from "@/lib/utils/with-timeout"
+import { TimeoutError } from "@cognia/primitives"
 
 describe("classifyResilienceError", () => {
   it("classifies a TimeoutError as timeout", () => {

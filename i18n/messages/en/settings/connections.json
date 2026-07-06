@@ -73,6 +73,12 @@
       "rateBucketAvailable": "{available}/{capacity} tokens",
       "rateBucketLabel": "Rate limit",
       "rateBucketNextRefill": "Next token in {seconds}s",
+      "reason": {
+        "credentials_missing": "Credentials missing — set App ID / App Secret",
+        "credentials_unavailable": "Credentials unavailable — keyring access denied",
+        "no_data": "No inbound data — connection idle or closed",
+        "transport_error": "Transport error — reconnecting"
+      },
       "reconnectNow": "Reconnect now",
       "reconnectQueued": "Reconnect queued.",
       "runtimeTitle": "Outbound runtime",
@@ -146,6 +152,9 @@
     "status": {
       "connected": "Connected",
       "disabled": "Not enabled"
+    },
+    "transportLabels": {
+      "dingtalkStream": "Stream Mode WSS"
     }
   },
   "audit": {
@@ -404,7 +413,14 @@
     "sectionIdentity": "Identity",
     "sectionIdentityDesc": "DingTalk open-platform app credentials.",
     "titleEdit": "Edit DingTalk connector",
-    "titleNew": "Add DingTalk connector"
+    "titleNew": "Add DingTalk connector",
+    "testButtonLabel": "Test credentials",
+    "testCredentialsAria": "Test credentials",
+    "testSucceededLabel": "Credentials valid",
+    "testFailedLabel": "Credential test failed",
+    "testSucceededToast": "Access token minted successfully.",
+    "testFailedToast": "DingTalk credential test failed: {error}",
+    "testSucceededStatus": "Access token minted."
   },
   "discord": {
     "adapterCreated": "Adapter created.",
@@ -600,7 +616,13 @@
       "requiresDesktop": "Bot identity probe requires the desktop runtime.",
       "tenant": "Tenant",
       "title": "Bot identity",
-      "unknown": "Identity has not been probed yet. Click \"Probe identity\" after saving credentials."
+      "unknown": "Identity has not been probed yet. Click \"Probe identity\" after saving credentials.",
+      "dingtalkNoProbe": "DingTalk adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
+      "qqOfficialNoProbe": "QQ Official adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
+      "wechatOaNoProbe": "WeChat Official Account adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
+      "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
+      "wechatPersonalNoProbe": "Personal WeChat adapters don't expose an active identity probe.",
+      "unsupportedNoProbe": "This adapter doesn't expose an active identity probe."
     }
   },
   "matrix": {
@@ -638,7 +660,14 @@
     "sectionIdentity": "Identity",
     "sectionIdentityDesc": "Homeserver and access token for the bot account.",
     "titleEdit": "Edit Matrix connector",
-    "titleNew": "Add Matrix connector"
+    "titleNew": "Add Matrix connector",
+    "testAccessTokenAria": "Test Matrix access token",
+    "testButtonLabel": "Test access token",
+    "testSucceededLabel": "Access token valid",
+    "testFailedLabel": "Access token test failed",
+    "testSucceededToast": "Signed in as {userId}",
+    "testFailedToast": "Matrix token test failed: {error}",
+    "testSucceededStatus": "Signed in as {userId}"
   },
   "onebot": {
     "adapterCreatedWithEndpoint": "Adapter created. Paste the endpoint URL into NapCat config.",
@@ -778,7 +807,14 @@
     "sectionIdentity": "Identity",
     "sectionIdentityDesc": "App credentials for the QQ open platform.",
     "titleEdit": "Edit QQ Official Bot",
-    "titleNew": "Add QQ Official Bot"
+    "titleNew": "Add QQ Official Bot",
+    "testButtonLabel": "Test credentials",
+    "testCredentialsAria": "Test credentials",
+    "testSucceededLabel": "Credentials valid",
+    "testFailedLabel": "Credential test failed",
+    "testSucceededToast": "Connected to gateway {gatewayUrl}.",
+    "testFailedToast": "QQ credential test failed: {error}",
+    "testGatewayUrl": "Gateway: {gatewayUrl}"
   },
   "quickCommands": {
     "actionTypeLabel": "Action type",
@@ -815,17 +851,17 @@
   "sendTest": {
     "bodyLabel": "Body",
     "chatIdHelp": {
-      "dingtalk": "1:1: the sender's staff id. Group: the conversationId from an inbound callback.",
+      "dingtalk": "1:1: the sender's staff id (or single:<staffId>). Group: group:<conversationId> from an inbound callback.",
       "discord": "Right-click the channel in Discord (Developer Mode on) → Copy Channel ID.",
       "lark": "Open Lark chat → Settings → Group Info → Copy chat_id (oc_…).",
       "matrix": "The room id (e.g. !abcd:matrix.org). Invite the bot to the room first.",
-      "onebot": "QQ user uin (private chat) or group uin.",
-      "qq-official": "The channel id or group openid.",
+      "onebot": "QQ user uin (private chat) or group:<uin> for a group chat.",
+      "qq-official": "The channel id; prefix with group: / c2c: / direct: to target a group openid or user.",
       "slack": "Channel id from the URL or the channel kebab menu → Open channel details → Copy Channel ID.",
       "telegram": "Forward any message from the chat to @userinfobot to read its numeric id.",
       "wechat-oa": "The follower's OpenID (from an inbound message).",
       "wechat-personal": "Reply-only — personal WeChat cannot be messaged proactively, so the test send will be rejected.",
-      "wecom": "Single chat: the recipient's userid. Group: the chatid from a prior inbound callback."
+      "wecom": "Single chat: the recipient's userid. Group: group:<chatid> from a prior inbound callback."
     },
     "chatIdLabel": "Target chat / channel id",
     "defaultBody": "[cognia] Test message from the Adapters → Config tab.",
@@ -834,7 +870,21 @@
     "sendButton": "Send test",
     "sentError": "Send failed ({code}): {message}",
     "sentSuccess": "Sent. platform_message_id = {messageId}",
-    "title": "Send a test message"
+    "targetPlaceholder": {
+      "dingtalk": "staff-id or group:conversationId",
+      "discord": "e.g. 1234567890123456789",
+      "lark": "oc_…",
+      "matrix": "!abcd:matrix.org",
+      "onebot": "uin or group:uin",
+      "qq-official": "channel id, group:openid or c2c:openid",
+      "slack": "C0123456789",
+      "telegram": "e.g. 123456789",
+      "wechat-oa": "OpenID",
+      "wechat-personal": "reply-only",
+      "wecom": "userid or group:chatid"
+    },
+    "title": "Send a test message",
+    "unsupportedReplyOnly": "This adapter can only reply to inbound messages; it can't send a standalone test message."
   },
   "slack": {
     "adapterCreated": "Adapter created.",
@@ -1034,7 +1084,17 @@
     "webhookUrlAfterSave": "(generated after save)",
     "webhookUrlHelp": "Prefix this path with your public base URL and paste it into Server Config → URL.",
     "webhookUrlLabel": "Webhook URL",
-    "windowNote": "Replies use the 客服 message API and are only allowed within 48h of the user's last message."
+    "windowNote": "Replies use the 客服 message API and are only allowed within 48h of the user's last message.",
+    "testButtonLabel": "Test credentials",
+    "testCredentialsAria": "Test credentials",
+    "testCredentialScopeHelp": "Testing mints a short-lived access token from WeChat to verify the AppID and AppSecret.",
+    "testSucceededLabel": "Credentials valid",
+    "testFailedLabel": "Credential test failed",
+    "testSucceededToast": "Access token minted successfully.",
+    "testFailedToast": "WeChat OA credential test failed: {error}",
+    "testSucceededStatus": "Access token minted.",
+    "openCompanion": "Open companion",
+    "openCompanionAria": "Open the companion tunnel settings"
   },
   "wechatPersonal": {
     "adapterCreated": "WeChat connected. Replies start once a contact messages the bot.",
@@ -1064,7 +1124,8 @@
     "statusScaned": "Scanned — confirm on your phone…",
     "statusWaiting": "Waiting for scan…",
     "titleEdit": "Configure Personal WeChat (iLink)",
-    "titleNew": "Add Personal WeChat (iLink)"
+    "titleNew": "Add Personal WeChat (iLink)",
+    "desktopOnly": "Personal WeChat QR login is only available in the desktop runtime."
   },
   "wecom": {
     "adapterCreated": "WeCom bot created. The long connection starts once enabled.",
@@ -1097,6 +1158,14 @@
     "titleNew": "Add WeCom (企业微信) Bot",
     "welcomeHelp": "Sent when a user opens the bot chat (enter_chat). Leave blank to send no welcome.",
     "welcomeLabel": "Welcome message (optional)",
-    "welcomePlaceholder": "Hi! How can I help you today?"
+    "welcomePlaceholder": "Hi! How can I help you today?",
+    "testButtonLabel": "Test credentials",
+    "testCredentialsAria": "Test WeCom credentials",
+    "testCredentialScopeHelp": "Testing mints a short-lived access token from WeCom to verify the corp credentials.",
+    "testSucceededLabel": "Credentials valid",
+    "testFailedLabel": "Credential test failed",
+    "testSucceededToast": "Subscribe endpoint reachable; credentials valid.",
+    "testFailedToast": "WeCom credential test failed: {error}",
+    "testSucceededStatus": "Subscribe endpoint reachable."
   }
 }

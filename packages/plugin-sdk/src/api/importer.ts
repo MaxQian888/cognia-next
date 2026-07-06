@@ -14,4 +14,4 @@ export type {
   ImportResult,
   ImportSource,
   PluginImportAPI,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"

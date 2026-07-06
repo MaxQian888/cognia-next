@@ -79,4 +79,16 @@ describe("ApprovalGateDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /Approve/i }))
     expect(onApprove).toHaveBeenCalledWith()
   })
+
+  it("capability_audit gate renders its variant copy and approves with no payload", () => {
+    const onApprove = jest.fn()
+    const onReject = jest.fn()
+    renderDialog({ gateType: "capability_audit", onApprove, onReject })
+    expect(screen.getByText(/Stale capabilities detected/i)).toBeInTheDocument()
+    // Variant button labels replace the generic Approve/Reject pair.
+    fireEvent.click(screen.getByRole("button", { name: /Run anyway/i }))
+    expect(onApprove).toHaveBeenCalledWith()
+    fireEvent.click(screen.getByRole("button", { name: /Cancel run/i }))
+    expect(onReject).toHaveBeenCalledTimes(1)
+  })
 })

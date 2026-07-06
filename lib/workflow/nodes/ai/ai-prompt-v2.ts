@@ -15,6 +15,7 @@
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
+import type { ApiFlavor } from "@cognia/provider-types/provider"
 import { applyPiiGate, type PiiGateMode } from "./pii-gate"
 import { buildJsonInstruction, parseStructured } from "./structured"
 
@@ -27,7 +28,15 @@ export interface AiPromptV2Params {
   model?: string
   apiKey?: string
   baseURL?: string
+  apiFlavor?: ApiFlavor
+  headers?: Record<string, string>
   systemPrompt?: string
+  /**
+   * Optional twin-bound character. When set and the character has a `twinId`,
+   * the twin's retrieved context is injected into the system prompt (shared
+   * `injectTwinContext` helper). Absent → no twin grounding, unchanged behavior.
+   */
+  characterId?: string
   userPrompt?: string
   temperature?: number
   responseFormat?: "text" | "json"
@@ -65,6 +74,29 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     system: baseSystem,
     user: params.userPrompt ?? "",
   })
+
+  // Twin grounding: when the node targets a twin-bound character, wrap the
+  // (already PII-gated) system prompt with the twin's retrieved context via the
+  // shared injector. No characterId → byte-identical to before. Injected twin
+  // material is redacted at ingest, so it rides safely after the PII gate. The
+  // injector never throws and degrades to the original prompt on any failure.
+  if (typeof params.characterId === "string" && params.characterId.trim()) {
+    const { injectTwinContext } = await import("../shared/twin-injector")
+    const injected = await injectTwinContext({
+      characterId: params.characterId,
+      userPrompt: gated.user,
+      baseSystemPrompt: gated.system,
+      source: "workflow:ai.prompt",
+    })
+    // MERGE, don't replace: the injector's returned prompt is the twin's own
+    // assembly (built from `character.systemPrompt`) and does NOT carry the
+    // node's `systemPrompt` or the JSON-mode instruction baked into `baseSystem`.
+    // Keep the twin context first and the node base last so the JSON instruction
+    // retains its emphasis-last position.
+    if (injected.applied) {
+      gated.system = [injected.systemPrompt, gated.system].filter(Boolean).join("\n\n")
+    }
+  }
 
   const finalize = (out: PromptOutcome): StepExecutionResult => {
     const withPii = gated.redacted ? { ...out, piiRedacted: true } : out
@@ -177,6 +209,8 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     model: params.model,
     apiKey,
     baseURL: params.baseURL,
+    apiFlavor: params.apiFlavor,
+    headers: params.headers,
     defaultTemperature: params.temperature,
   })
 

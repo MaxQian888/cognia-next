@@ -27,9 +27,12 @@ import { seedBuiltinSlashCommands } from "./registry"
 import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-blocks"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
+import { dispatchPetSubcommand } from "./actions/pet"
 import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
+import { handleRunWorkflow } from "./actions/run-saved-workflow"
+import { handleCouncil } from "./actions/council"
 
 /**
  * Names of the sections in the Settings page (URL `?section=` values).
@@ -66,7 +69,7 @@ export interface SlashContext {
   pushSystemMessage: (payload: string | SystemMessageBlock | SlashCommandResultBlock) => void
 }
 
-export type SlashScope = "builtin" | "project" | "user"
+export type SlashScope = "builtin" | "project" | "user" | "plugin"
 
 /** A single parameter the command's guided form collects. */
 export interface SlashParamSpec {
@@ -147,6 +150,7 @@ function buildHelpText(commands: SlashCommand[]): string {
     builtin: [],
     project: [],
     user: [],
+    plugin: [],
   }
   for (const c of commands) groups[c.scope].push(c)
   const sections: string[] = [HELP_BODY_HEADER]
@@ -432,6 +436,17 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "pet",
+    description: "Check on or care for your desktop pet (feed, play, clean, …).",
+    scope: "builtin",
+    category: "system",
+    argumentHint: "<status | feed | play | pet | sleep | clean | treat>",
+    handler: async (ctx) => {
+      const result = await dispatchPetSubcommand(ctx.args)
+      ctx.pushSystemMessage(result.system)
+    },
+  },
+  {
     name: "loop",
     description:
       "Repeat a prompt — fixed interval (/loop 5m …) via the scheduler, or self-paced (/loop …) with model-chosen delays.",
@@ -458,6 +473,23 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       if (result?.system) ctx.pushSystemMessage(result.system)
     },
   },
+  {
+    name: "workflow",
+    description: "Run a saved workflow from chat by name or id. Progress shows as a toast.",
+    scope: "builtin",
+    category: "system",
+    argumentHint: "<name | id>",
+    handler: handleRunWorkflow,
+  },
+  {
+    name: "council",
+    description:
+      "Ask several models the same question and synthesize a consensus answer with a confidence rating.",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "<question> [--models a,b,c] [--synth alias]",
+    handler: handleCouncil,
+  },
   // Workflow Copilot commands — only active inside workflow-editor sessions.
   // Each handler self-gates on activeSessionId so the picker never lists
   // them in the main chat.
@@ -471,14 +503,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
 // already does.
 seedBuiltinSlashCommands(BUILTIN_SLASH_COMMANDS)
 
-/**
- * Replace `$ARGUMENTS` and `$1..$9` placeholders in a template body. The
- * `args` string is split on whitespace for positional substitution; whole
- * `args` is used for `$ARGUMENTS`. Unfilled positionals collapse to empty.
- */
-export function applyTemplate(template: string, args: string): string {
-  const positional = args.trim().split(/\s+/).filter(Boolean)
-  let out = template.replace(/\$ARGUMENTS/g, args.trim())
-  out = out.replace(/\$([1-9])/g, (_, n) => positional[Number(n) - 1] ?? "")
-  return out
-}
+// `applyTemplate` moved to the pure sibling `./apply-template` so the CLI can
+// import it without `builtin.ts`'s store/React side effects. Re-exported here to
+// keep the existing `@/lib/slash-commands/builtin` import sites working.
+export { applyTemplate } from "./apply-template"

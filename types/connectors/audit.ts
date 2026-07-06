@@ -109,6 +109,14 @@ export type AuditKind =
   // `runAndCapture` path. Mirrors `team.dispatched`; `teamId` wins when both are
   // set. Carries `fields.workflowId` + `fields.sourceMessageId`.
   | "workflow.dispatched"
+  // Draft mode prepared a real AI-generated reply for human review (manual
+  // connector mode / unmatched-in-draft policy). Fired when the `draft-prepare`
+  // route decision ran the character/twin/memory-grounded turn through the PII
+  // gate and persisted a `connectorDrafts` row. Carries `fields.draftId`,
+  // `fields.sourceMessageId`, `fields.assistantMessageId`. A PII block or
+  // capture failure audits `adapter.error` (reason `draft_prepare_capture_failed`)
+  // instead, mirroring the `ai-run` convention.
+  | "draft.prepared"
   // Tool-permission approval over chat (control-plane HITL). `requested` when
   // an ask-tier tool projected an Allow/Deny card; `granted` / `denied` on the
   // user's button press; `expired` when the approval TTL elapsed (auto-deny).

@@ -3,7 +3,7 @@
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { AppSettings } from "@/lib/claude/types"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => {

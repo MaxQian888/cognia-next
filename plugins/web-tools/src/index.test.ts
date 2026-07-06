@@ -152,7 +152,9 @@ describe("web-tools (built-in)", () => {
     // model isn't billed for the same content twice ("drop double-content").
     expect(result.body).toBeUndefined()
     expect(mockParseHTML).toHaveBeenCalled()
-    expect(result.text).toBe("Readable body text.")
+    // Non-distilled page text is framed as untrusted for injection safety.
+    expect(result.text).toContain("Readable body text.")
+    expect(result.text).toContain("Untrusted web content")
     expect(result.title).toBe("My Page")
   })
 

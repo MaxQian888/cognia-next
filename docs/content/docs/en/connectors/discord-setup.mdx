@@ -32,7 +32,7 @@ This guide walks you through creating a Discord application, obtaining a bot tok
 1. In your application, go to **General Information**.
 2. Copy the **Public Key** (64-character hex string).
 
-This is used for Ed25519 signature verification when Discord sends interaction payloads to a webhook endpoint. Phase 1 uses Gateway (WebSocket) mode, so this is **optional** for now — but it is good practice to save it for a future webhook migration.
+This is reserved for Ed25519 signature verification when Discord sends interaction payloads to a webhook endpoint. Phase 1 uses Gateway (WebSocket) mode only, so cognia-next does **not** persist the public key yet and does not expose an Interactions endpoint URL. Keep the value in the Discord Developer Portal for a future webhook migration.
 
 ---
 
@@ -79,7 +79,7 @@ cognia-next uses intent bitmask **33281** by default:
 3. In the **Discord Configuration** dialog:
    - Enter a **Display Name** for this bot (e.g. "My Server Bot").
    - Paste the **Bot Token** you copied in step 2.
-   - Optionally paste the **Public Key** from step 3.
+   - Leave the **Public Key** field blank unless you are preparing for a future Interactions webhook migration; current Gateway mode does not save or use it.
    - Click **Test** to verify the token connects to Discord successfully.
 4. Click **Create**.
 
@@ -104,4 +104,4 @@ If the adapter shows **Down** or **Degraded**:
 - **Rate limits**: Discord rate-limits bots at 50 messages per second per channel. cognia-next's outbound runner respects retryable errors (HTTP 429).
 - **Large servers**: For bots in 100+ servers, you must apply for **Gateway Privileged Intents** through the Developer Portal.
 - **Sharding**: Not supported in Phase 1. Single-shard operation only.
-- **Voice messages**: Not supported in Phase 1. Planned for Phase 2.
+- **Voice messages**: Supported when the voice segment already has a public audio URL; cognia-next sends a voice-flagged Discord message that references that URL. Native multipart upload is still pending the Tauri upload bridge.

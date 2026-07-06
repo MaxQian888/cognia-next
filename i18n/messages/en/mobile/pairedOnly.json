@@ -1,0 +1,5 @@
+{
+  "description": "Connect a desktop to edit these settings",
+  "hint": "Agent settings run on your paired desktop. Pair a desktop from the Account section to edit them here.",
+  "title": "Desktop required"
+}

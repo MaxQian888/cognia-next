@@ -462,3 +462,38 @@ remaining UI surface (the session field + resolution already work end-to-end).
 Dexie bump to `v57` (additive, no upgrade hook) — new `sandboxConnections`
 table. `Character.computerUseTarget` + `ChatSession.computerUseTarget` are
 optional; existing rows round-trip unchanged.
+
+## Addendum (2026-06-27) — OCR-assisted click + macOS bounded element tree
+
+### `find_text` / `click_text` (pixel ⇄ OCR bridge)
+
+Two new **gated** plugin MCP tools (`lib/automation/ocr-click.ts`, surfaced by
+the computer-use plugin) let the model act on on-screen text by name instead of
+guessing pixel coordinates:
+
+- `find_text` — capture the screen (gated `desktop.screenshot`) → OCR → return
+  text blocks with **screen-space** coordinates, ranked best-first for a query.
+- `click_text` — the same, then `desktop.click` the matched block's center
+  (occurrence/button/double selectable). Coordinates map OCR `bbox` → physical
+  px via the provider rasterization dims and the Rust screenshot-downscale
+  factor (the `coordinate-scaler` signal). Both ride the existing
+  gate/consent/audit pipeline. Requires an OCR provider that emits bounding
+  boxes (tesseract / windows-ocr); a no-geometry provider returns a clear error.
+  `extract_screenshot_ocr` also now returns image-relative `blocks`.
+
+### macOS bounded AX element tree
+
+`read_tree` / `find` on macOS now walk the **frontmost window's** AX subtree via
+the high-level `accessibility` crate, depth/node-capped through the new
+platform-agnostic `automation::platform::shared::tree_shape` helper (matcher +
+budget + rect-center; unit-tested on every host including the Windows dev box).
+`capabilities.has_a11y_tree` is now `true` on macOS, and `find` satisfies
+name / name_contains / control_type (not just process/title). The native AX FFI
+is verified on macOS CI — it does not compile on the Windows dev host.
+
+**Deferred (Phase-next):** macOS `pick_at_point` coordinate hit-test
+(`AXUIElementCopyElementAtPosition` needs a raw `-sys` ref wrap across the
+`accessibility` crate's older core-foundation pin), element-targeted
+actions (re-resolvable element refs), element geometry (`AXPosition`/`AXSize`),
+and the **Linux AT-SPI** equivalent (async/zbus — not attempted blind from the
+Windows host). `tree_shape` is the shared backbone those will reuse.

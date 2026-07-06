@@ -35,6 +35,10 @@
       "availability": "degraded",
       "entrypoint": "src/index.ts",
       "reason": "Plugin manager registers the echo LSP through lib/plugin/lsp/lsp-registry on enable; the sidecar's CogniaLspClient spawns the fixture as a child process."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "LSP servers spawn through the Node sidecar — unavailable on mobile."
     }
   }
 }

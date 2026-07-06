@@ -22,7 +22,9 @@ import { createCheckpointCapture, type CheckpointCapture } from "../runtime/chec
 import { realCheckpointFs } from "../runtime/checkpoint-store"
 import { createGateController, runTurn } from "./turn-engine"
 import { captureEventToActions } from "../state/event-mapper"
-import { parseRateLimitHeaders } from "../format/rate-limits"
+import { sidecarEventToMcpLog } from "../runtime/mcp-log-model"
+import { defaultMcpLogFileWriter, type McpLogFileWriter } from "../runtime/mcp-log-file"
+import { parseRateLimitHeaders, rateLimitWarning } from "../format/rate-limits"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { ResolvedConfig } from "../../config/schema"
@@ -61,6 +63,10 @@ export interface AgentSessionApi {
    * tools / model / permission fold deep into resolved SendOptions, so the
    * session is recreated to take effect on the next turn. */
   switchAgentMode(modeId: string): Promise<void>
+  /** Switch the session working directory (`/cd`). Like the model, the cwd folds
+   * deep into resolved SendOptions and drives the sidecar respawn, so the live
+   * session is dropped and recreated under the new cwd on the next turn. */
+  changeCwd(dir: string): Promise<void>
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
   invalidate(): void
@@ -114,6 +120,7 @@ function cellsToEntries(cells: Cell[]): TranscriptEntry[] {
 export function useAgentSession({
   config,
   dispatch,
+  sessionId,
   createSession = createAgentSession,
   subscribeSidecar = (handler) => transport.subscribe(SIDECAR_EVENT, handler),
   requestCompact = compactSession,
@@ -126,9 +133,16 @@ export function useAgentSession({
   getCellCount = () => 0,
   createCheckpoints = defaultCreateCheckpoints,
   resolveApprovedTools,
+  appendMcpLog,
 }: {
   config: ResolvedConfig
   dispatch: (action: TuiAction) => void
+  /** The app's current session id (from mount / `/clear` / `/resume`). The
+   * lazily-created chat session is bound to it so its on-disk transcript lands
+   * under the SAME id `/export`, `/handoff`, `/resume`, and the checkpoint store
+   * read from. Without this the runner would mint its own divergent id and
+   * `/export` would always report "no turns". */
+  sessionId?: string
   createSession?: CreateSession
   /** Subscribe to the sidecar event channel (injected for tests). */
   subscribeSidecar?: (handler: (payload: unknown) => void) => () => void
@@ -144,6 +158,9 @@ export function useAgentSession({
    * auto-approve set. Defaults to the `tool-approvals.json` store (cwd-scoped);
    * injected in tests to stay off-disk. */
   resolveApprovedTools?: () => Set<string>
+  /** Durable sink for captured MCP logs (`~/.cognia/logs/mcp.log`). Defaults to
+   * a home-scoped rotating file writer; injected in tests to stay off-disk. */
+  appendMcpLog?: McpLogFileWriter
 }): AgentSessionApi {
   const configRef = useRef(config)
   // Keep the latest config available to the async callbacks below without
@@ -151,6 +168,13 @@ export function useAgentSession({
   useEffect(() => {
     configRef.current = config
   }, [config])
+  // The live app session id, mirrored into a ref so `ensureSession` binds the
+  // lazily-created session to it (and tracks `/clear`/`/resume` id changes)
+  // without recreating the callback on every id change.
+  const sessionIdRef = useRef(sessionId)
+  useEffect(() => {
+    sessionIdRef.current = sessionId
+  }, [sessionId])
   const sessionRef = useRef<AgentSession | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   // The live "Allow always" set consulted by the gate's silent auto-approver.
@@ -178,22 +202,91 @@ export function useAgentSession({
   // can show real remaining-quota + reset countdowns (not just plan windows).
   // This subscription is independent of the turn loop, so it survives /clear and
   // /resume and updates whenever a response lands.
+  // De-dupes rate-limit toasts: remembers the last warning bucket ("crit" /
+  // "exceeded" / null) so a stream of headers near the limit warns once per
+  // escalation, and re-warns only after quota recovers.
+  const rateWarnLevelRef = useRef<"crit" | "exceeded" | null>(null)
+  // Durable MCP-log file sink (rotating `~/.cognia/logs/mcp.log`). Home-scoped;
+  // built once (useMemo, not a render-time ref write) so the effect below keeps a
+  // stable identity. Injected in tests to stay off-disk.
+  const writeMcpLogFile = useMemo<McpLogFileWriter>(
+    () => appendMcpLog ?? defaultMcpLogFileWriter(resolveHome(process.env, os.homedir())),
+    [appendMcpLog]
+  )
+  // Throttle the "MCP server error" toast so a burst of stderr error lines warns
+  // once, not once per line. Holds the epoch ms of the last error toast.
+  const mcpErrToastAtRef = useRef(0)
   useEffect(() => {
     const off = subscribeSidecar((payload) => {
-      if (
-        !payload ||
-        typeof payload !== "object" ||
-        (payload as { type?: unknown }).type !== "usage_headers"
-      ) {
+      if (!payload || typeof payload !== "object") return
+      const type = (payload as { type?: unknown }).type
+      // Captured MCP output log (`mcp_log`) + the generic sidecar `log` stream →
+      // the `/mcp logs` panel buffer + the durable file, plus a throttled toast
+      // on an error so a broken server isn't silent. These events were dropped
+      // entirely before (only usage/exit were handled), so MCP diagnostics were
+      // invisible.
+      if (type === "mcp_log" || type === "log") {
+        const entry = sidecarEventToMcpLog(payload, Date.now)
+        if (entry) {
+          dispatch({ type: "MCP_LOG_APPEND", entry })
+          writeMcpLogFile(entry)
+          if (
+            entry.level === "error" &&
+            (entry.source === "stderr" || entry.source === "diagnostic")
+          ) {
+            const t = Date.now()
+            if (t - mcpErrToastAtRef.current > 8000) {
+              mcpErrToastAtRef.current = t
+              dispatch({
+                type: "TOAST_PUSH",
+                severity: "error",
+                message: entry.server ? `MCP server "${entry.server}" error` : "MCP server error",
+                hint: "Open /mcp logs to see details.",
+              })
+            }
+          }
+        }
+        // Fall through: a `log` isn't otherwise handled here; `mcp_log` is ours.
         return
       }
-      const headers = (payload as { headers?: unknown }).headers
-      if (!headers || typeof headers !== "object") return
-      const snapshot = parseRateLimitHeaders(headers as Record<string, string>, Date.now())
-      if (snapshot) dispatch({ type: "SET_RATE_LIMITS", snapshot })
+      if (type === "usage_headers") {
+        const headers = (payload as { headers?: unknown }).headers
+        if (!headers || typeof headers !== "object") return
+        const snapshot = parseRateLimitHeaders(headers as Record<string, string>, Date.now())
+        if (snapshot) {
+          dispatch({ type: "SET_RATE_LIMITS", snapshot })
+          // Warn when the worst meter crosses into crit/exceeded — the /limits
+          // panel had this data but nothing pushed it, so throttling was silent.
+          const warn = rateLimitWarning(snapshot)
+          const nextLevel = warn?.level ?? null
+          if (warn && nextLevel !== rateWarnLevelRef.current) {
+            dispatch({
+              type: "TOAST_PUSH",
+              severity: warn.severity,
+              message: warn.message,
+              hint: warn.hint,
+            })
+          }
+          rateWarnLevelRef.current = nextLevel
+        }
+        return
+      }
+      if (type === "sidecar_exited") {
+        // The backend process died. Previously this was received but only mined
+        // for rate-limit headers, so an idle-time crash was invisible until the
+        // next send failed. Flag it and raise a transient toast so the user knows
+        // the backend is down (it respawns automatically on the next message).
+        dispatch({ type: "SIDECAR_STATUS", down: true })
+        dispatch({
+          type: "TOAST_PUSH",
+          severity: "error",
+          message: "Agent backend stopped",
+          hint: "It restarts automatically on your next message.",
+        })
+      }
     })
     return off
-  }, [subscribeSidecar, dispatch])
+  }, [subscribeSidecar, dispatch, writeMcpLogFile])
 
   // The settings.json lifecycle-hook runner (loads the merged cognia + .claude
   // hook config once). Fired for each capture event + at turn end + on submit.
@@ -228,11 +321,15 @@ export function useAgentSession({
   const gate = useMemo(
     () =>
       createGateController(
-        (req) =>
+        (req) => {
+          // Fire PermissionRequest + Notification so user hook scripts (and any
+          // OS-level notifier they wire) know Claude is waiting on approval.
+          hookRunner.onPermissionRequest(req.toolName, req.input)
           dispatch({
             type: "OVERLAY_OPEN",
             overlay: { kind: "permission", req, choices: DEFAULT_PERMISSION_CHOICES, index: 0 },
-          }),
+          })
+        },
         // PreToolUse hooks: a deny blocks the tool before the overlay shows.
         (req) => hookRunner.preToolUse(req.toolName, req.input),
         // Silent auto-approve for tools the user already chose "Allow always".
@@ -246,16 +343,41 @@ export function useAgentSession({
 
   const ensureSession = useCallback((): AgentSession => {
     if (!sessionRef.current) {
-      sessionRef.current = createSession({ config: configRef.current })
+      // Bind the session to the app's id (when known) so its transcript file is
+      // the one `/export`, `/handoff`, and `/resume` read back. Omitting it let
+      // the runner mint a divergent id — `/export` then found no file ("no
+      // turns"). The ref is read lazily on creation (never during render), so it
+      // reflects the latest `/clear`/`/resume` id.
+
+      const boundId = sessionIdRef.current
+      sessionRef.current = createSession({
+        config: configRef.current,
+        ...(boundId ? { sessionId: boundId } : {}),
+      })
+      // A chat session just began — fire SessionStart so hook scripts can seed
+      // context / log the session (Claude Code parity).
+      hookRunner.onSessionStart(sessionRef.current.sessionId)
     }
     return sessionRef.current
-  }, [createSession])
+  }, [createSession, hookRunner])
 
   const dropSession = useCallback(async () => {
+    // Abort any in-flight turn FIRST. /clear, /resume, fork, and model/provider/
+    // thinking/agent-mode switches all funnel through here and can fire mid-turn
+    // (slash commands bypass the busy gate). Killing the sidecar from under a live
+    // capture would reject it as a non-abort error → a stray "error" cell landing
+    // in the freshly-RESET session. Aborting first routes it through the clean
+    // (recoverable) interrupt path before the reset wipes the old cells.
+    abortRef.current?.abort()
     const current = sessionRef.current
     sessionRef.current = null
-    if (current) await current.close()
-  }, [])
+    if (current) {
+      // The session is being torn down (/clear, /resume, exit) — fire SessionEnd
+      // before closing so hook scripts can flush / summarize.
+      hookRunner.onSessionEnd(current.sessionId)
+      await current.close()
+    }
+  }, [hookRunner])
 
   // ── Workflow Copilot mode ──────────────────────────────────────────────────
   // A dedicated `workflow-editor`-kind session, isolated from the chat session
@@ -282,6 +404,9 @@ export function useAgentSession({
   )
 
   const dropCopilotSession = useCallback(async () => {
+    // Same rationale as dropSession: abort a live copilot turn before tearing the
+    // session down (both turn kinds share `abortRef`).
+    abortRef.current?.abort()
     const current = copilotRef.current
     copilotRef.current = null
     if (current) await current.close()
@@ -367,10 +492,20 @@ export function useAgentSession({
 
   const resolvePermission = useCallback(
     (decision: CapturePermissionDecision) => {
+      // Capture the head request BEFORE resolving (which pops it) so a denial can
+      // be attributed to its tool for the PermissionDenied hook.
+      const head = gate.peek()
       gate.resolve(decision)
-      dispatch({ type: "OVERLAY_CLOSE" })
+      if (decision.decision === "deny" && head) {
+        hookRunner.onPermissionDenied(head.toolName, decision.message)
+      }
+      // `gate.resolve` re-opens the overlay (via the `onRequest` dispatch) for the
+      // next queued request when a batch of parallel tool calls is awaiting
+      // approval. Only close the overlay once the queue has fully drained —
+      // closing unconditionally would hide the next ask and hang those tools.
+      if (!gate.isPending()) dispatch({ type: "OVERLAY_CLOSE" })
     },
-    [dispatch, gate]
+    [dispatch, gate, hookRunner]
   )
 
   const rememberApproval = useCallback((toolName: string) => {
@@ -403,6 +538,18 @@ export function useAgentSession({
       dispatch({ type: "SET_MODEL", model })
       // Options resolve lazily and are cached per session; recreate so the new
       // model takes effect on the next turn.
+      await dropSession()
+    },
+    [dispatch, dropSession]
+  )
+
+  const changeCwd = useCallback(
+    async (dir: string) => {
+      dispatch({ type: "SET_CWD", cwd: dir })
+      // The cwd is baked into the captured SendOptions of a live session (and the
+      // sidecar spawned under it); only a fresh session picks up the new dir. Drop
+      // it so the next turn recreates from the updated config — same contract as
+      // switchModel. configRef is refreshed by the SET_CWD re-render before then.
       await dropSession()
     },
     [dispatch, dropSession]
@@ -569,6 +716,7 @@ export function useAgentSession({
     switchThinking,
     switchProvider,
     switchAgentMode,
+    changeCwd,
     invalidate,
     compact,
     listCheckpoints,

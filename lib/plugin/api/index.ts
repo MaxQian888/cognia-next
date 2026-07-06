@@ -100,7 +100,7 @@ export type {
   PluginExtensionAPI,
   PluginPermissionAPI,
   PluginContextAPI,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 
 // Re-export mounted context API types.
 export type { PluginOcrAPI } from "./ocr-api"

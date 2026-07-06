@@ -27,6 +27,11 @@ jest.mock("@/lib/claude/ipc", () => ({
   restoreSession: (...args: unknown[]) => restoreSessionMock(...args),
 }))
 
+// The optical-archive dialog (rendered when opticalArchiveId is set) reads the
+// row via useLiveQuery; stub it + the Dexie helper so this test needs no DB.
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => undefined }))
+jest.mock("@/lib/db/optical-archives", () => ({ getOpticalArchive: jest.fn() }))
+
 let mockStoreState: {
   activeSessionId: string | null
   replaceMessages: jest.Mock
@@ -98,6 +103,30 @@ describe("CompactBoundaryMarker", () => {
     expect(screen.getByText(/auto/)).toBeInTheDocument()
   })
 
+  it("shows the phase + reclaimed-percent labels when derivable from the transcript", () => {
+    const msg = boundary({ preTokens: 1000, postTokens: 250 }, "b1")
+    const assistant = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+      metadata: { usage: { inputTokens: 1000, outputTokens: 0 } },
+    } as unknown as UIMessage
+    mockStoreState.messages = [assistant, msg]
+    render(<CompactBoundaryMarker message={msg} />)
+    // turnLabel = 1 assistant turn before the boundary; reclaimed 75%.
+    expect(screen.getByTestId("compact-phase")).toHaveTextContent('phase:{"turn":1}')
+    expect(screen.getByTestId("compact-effectiveness")).toHaveTextContent(
+      'effectiveness:{"pct":75}'
+    )
+  })
+
+  it("omits the effectiveness label when nothing was reclaimed", () => {
+    const msg = boundary({ preTokens: 100, postTokens: 100 }, "b1")
+    mockStoreState.messages = [msg]
+    render(<CompactBoundaryMarker message={msg} />)
+    expect(screen.queryByTestId("compact-effectiveness")).not.toBeInTheDocument()
+  })
+
   it("does not show an undo button without a live snapshot", () => {
     render(<CompactBoundaryMarker message={boundary({ undoToken: "compact-1" })} />)
     expect(screen.queryByTestId("compact-undo")).not.toBeInTheDocument()
@@ -131,5 +160,23 @@ describe("CompactBoundaryMarker", () => {
     render(<CompactBoundaryMarker message={boundary({ undoToken: "compact-1" })} />)
     await userEvent.click(screen.getByTestId("compact-undo"))
     await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+
+  it("offers a View-frames button that opens the optical archive dialog", async () => {
+    render(
+      <CompactBoundaryMarker
+        message={boundary({ opticalArchiveId: "compact-1", opticalFrameCount: 2 })}
+      />
+    )
+    // No optical archive → no view button on ordinary boundaries.
+    expect(screen.queryByTestId("optical-archive-dialog")).not.toBeInTheDocument()
+    const btn = screen.getByTestId("compact-view-frames")
+    await userEvent.click(btn)
+    expect(await screen.findByTestId("optical-archive-dialog")).toBeInTheDocument()
+  })
+
+  it("shows no View-frames button on a non-optical boundary", () => {
+    render(<CompactBoundaryMarker message={boundary({ trigger: "auto" })} />)
+    expect(screen.queryByTestId("compact-view-frames")).not.toBeInTheDocument()
   })
 })

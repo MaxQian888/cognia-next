@@ -69,6 +69,33 @@ describe("pickPhoto", () => {
     expect((out as { base64?: string }).base64).toBe(btoa("hello"))
   })
 
+  it("uses the synchronous web fallback when no native Camera plugin is registered", async () => {
+    // No `loader` override → the real defaultLoader is used. With no
+    // window.Capacitor.Plugins.Camera, the activation-preserving fast path
+    // must skip the rejecting dynamic import and call the picker directly.
+    const file = new File(["hello"], "shot.png", { type: "image/png" })
+    const picker = jest.fn().mockResolvedValue([file])
+    const out = await pickPhoto({ source: "camera", picker })
+    expect(picker).toHaveBeenCalledWith(
+      expect.objectContaining({ accept: "image/*", capture: "environment", multiple: false })
+    )
+    expect(out).toMatchObject({ kind: "captured", format: "png" })
+  })
+
+  it("uses the native plugin when window.Capacitor.Plugins.Camera is present", async () => {
+    const cam = makeCam()
+    ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = { Plugins: { Camera: cam } }
+    const picker = jest.fn()
+    try {
+      const out = await pickPhoto({ source: "camera", picker })
+      expect(cam.getPhoto).toHaveBeenCalled()
+      expect(picker).not.toHaveBeenCalled()
+      expect(out).toMatchObject({ kind: "captured" })
+    } finally {
+      delete (globalThis as unknown as { Capacitor?: unknown }).Capacitor
+    }
+  })
+
   it("does not pass capture for the photos source in the web fallback", async () => {
     const file = new File(["x"], "p.jpg", { type: "image/jpeg" })
     const picker = jest.fn().mockResolvedValue([file])
@@ -282,6 +309,34 @@ describe("pickMultiplePhotos", () => {
       })
     } finally {
       urlRef.createObjectURL = original
+    }
+  })
+
+  it("uses the synchronous multi web fallback when no native Camera plugin is registered", async () => {
+    const urlRef = URL as unknown as { createObjectURL?: (b: Blob) => string }
+    const original = urlRef.createObjectURL
+    urlRef.createObjectURL = jest.fn(() => "blob:stub")
+    try {
+      const picker = jest.fn().mockResolvedValue([new File(["a"], "a.png", { type: "image/png" })])
+      const out = await pickMultiplePhotos({ picker })
+      expect(picker).toHaveBeenCalledWith(expect.objectContaining({ multiple: true }))
+      expect(out).toEqual({ kind: "picked", photos: [{ uri: "blob:stub", format: "png" }] })
+    } finally {
+      urlRef.createObjectURL = original
+    }
+  })
+
+  it("uses the native plugin for multi when window.Capacitor.Plugins.Camera is present", async () => {
+    const cam = makeCam()
+    ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = { Plugins: { Camera: cam } }
+    const picker = jest.fn()
+    try {
+      const out = await pickMultiplePhotos({ picker })
+      expect(cam.pickImages).toHaveBeenCalled()
+      expect(picker).not.toHaveBeenCalled()
+      expect(out).toMatchObject({ kind: "picked" })
+    } finally {
+      delete (globalThis as unknown as { Capacitor?: unknown }).Capacitor
     }
   })
 

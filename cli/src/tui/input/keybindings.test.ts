@@ -78,6 +78,7 @@ describe("matchAction", () => {
   it("maps default chords back to their actions", () => {
     const b = resolveKeybindings(undefined)
     expect(matchAction(b, ...ctrl("g"))).toBe("inspect")
+    expect(matchAction(b, ...ctrl("b"))).toBe("agentsPanel")
     expect(matchAction(b, ...ctrl("o"))).toBe("verboseToggle")
     expect(matchAction(b, ...ctrl("t"))).toBe("collapseAll")
     expect(matchAction(b, ...ctrl("a"))).toBe("lineHome")

@@ -8,7 +8,12 @@ import React from "react"
 import { Box, Text, useStdout } from "ink"
 
 import { paletteCodeTheme } from "../markdown/highlight"
-import { highlightCached, themeCodeKey, tokenizeCached } from "../markdown/render-cache"
+import {
+  highlightCached,
+  themeCodeKey,
+  tokenizeCached,
+  tokenizeTransient,
+} from "../markdown/render-cache"
 import { stringWidth, truncateToWidth } from "../markdown/width"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import { useTheme } from "../theme/context"
@@ -400,8 +405,14 @@ export function MarkdownLine({
   }
 }
 
-export function Markdown({ raw }: { raw: string }) {
-  const lines = React.useMemo(() => tokenizeCached(raw), [raw])
+export function Markdown({ raw, streaming = false }: { raw: string; streaming?: boolean }) {
+  // The in-flight streaming body grows every paced-reveal tick; route it through
+  // a dedicated single-entry cache so its throwaway prefixes never evict the
+  // committed transcript cells from the shared LRU.
+  const lines = React.useMemo(
+    () => (streaming ? tokenizeTransient(raw) : tokenizeCached(raw)),
+    [raw, streaming]
+  )
   // Fit the fenced-code frame to the live terminal width (minus the 2-col
   // gutter) so its rules don't wrap on a narrow terminal. `useStdout` does not
   // subscribe to resize, so this is a snapshot read with no extra re-renders;

@@ -72,6 +72,7 @@ function LogHarness(props: {
   onToggleBookmark?: (id: string) => void
   searchQuery?: string
   useRegex?: boolean
+  isSelected?: boolean
 }) {
   const t = useTranslations("logging")
   return (
@@ -86,6 +87,7 @@ function LogHarness(props: {
       useRegex={props.useRegex ?? false}
       isBookmarked={props.isBookmarked ?? false}
       onToggleBookmark={props.onToggleBookmark}
+      isSelected={props.isSelected}
       t={t}
     />
   )
@@ -400,3 +402,17 @@ describe("TraceGroup", () => {
 // Keep type-import alive so unused-imports linter doesn't strip it.
 const _logLevelGuard: LogLevel | undefined = undefined
 void _logLevelGuard
+
+describe("LogEntry — selected state", () => {
+  it("marks the row with data-selected and highlight classes when isSelected", () => {
+    renderWithTooltip(<LogHarness log={makeLog()} isSelected />)
+    const row = screen.getByTestId("log-entry-row")
+    expect(row).toHaveAttribute("data-selected", "true")
+    expect(row.className).toContain("border-l-primary")
+  })
+
+  it("omits data-selected when not selected", () => {
+    renderWithTooltip(<LogHarness log={makeLog()} />)
+    expect(screen.getByTestId("log-entry-row")).not.toHaveAttribute("data-selected")
+  })
+})

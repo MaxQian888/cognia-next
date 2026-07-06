@@ -3,6 +3,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 import { ObservabilityToolbar, type ObservabilityToolbarProps } from "./observability-toolbar"
+import { DASHBOARD_CONFIG_VERSION } from "@/lib/observability/dashboard-config"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -17,12 +18,28 @@ function setup(over: Partial<ObservabilityToolbarProps> = {}) {
     filters: {},
     editMode: false,
     windowSpans: [],
+    lastUpdated: null,
+    traces: [],
     onPreset: jest.fn(),
     onCustom: jest.fn(),
     onRefreshMs: jest.fn(),
+    onRefresh: jest.fn(),
     onFilters: jest.fn(),
     onToggleEdit: jest.fn(),
     onResetLayout: jest.fn(),
+    onOpenSettings: jest.fn(),
+    buildConfig: () => ({
+      version: DASHBOARD_CONFIG_VERSION,
+      layouts: null,
+      hiddenPanels: [],
+      thresholds: {},
+      rangePreset: "1h",
+      customSince: null,
+      customUntil: null,
+      refreshMs: 10_000,
+      filters: {},
+    }),
+    onImportConfig: jest.fn(),
     ...over,
   }
   render(<ObservabilityToolbar {...props} />)
@@ -35,6 +52,17 @@ describe("ObservabilityToolbar", () => {
     expect(screen.getByTestId("variable-filter-bar")).toBeInTheDocument()
     expect(screen.getByTestId("time-range-trigger")).toBeInTheDocument()
     expect(screen.getByTestId("toggle-edit")).toBeInTheDocument()
+    expect(screen.getByTestId("manual-refresh")).toBeInTheDocument()
+    expect(screen.getByTestId("export-menu")).toBeInTheDocument()
+    expect(screen.getByTestId("open-settings")).toBeInTheDocument()
+  })
+
+  it("opens settings and fires a manual refresh", () => {
+    const props = setup()
+    fireEvent.click(screen.getByTestId("open-settings"))
+    expect(props.onOpenSettings).toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("manual-refresh"))
+    expect(props.onRefresh).toHaveBeenCalled()
   })
 
   it("hides reset-layout unless editing", () => {

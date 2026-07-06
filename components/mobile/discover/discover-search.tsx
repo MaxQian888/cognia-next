@@ -16,6 +16,11 @@ export interface DiscoverSearchProps {
   /** Override the input's aria-label. Defaults to `discover.searchAria`. */
   ariaLabel?: string
   /**
+   * Forwarded to the underlying `<input>` so callers can focus it — e.g. the
+   * `/` hotkey (`useSearchHotkey`) on the desktop discover body.
+   */
+  inputRef?: React.Ref<HTMLInputElement>
+  /**
    * Base test id. The wrapper uses `{testid}`, the input `{testid}-input`,
    * the clear button `{testid}-clear`. Defaults to `discover-search` so
    * existing Discover callers and tests keep their ids.
@@ -29,6 +34,7 @@ export function DiscoverSearch({
   className,
   placeholder,
   ariaLabel,
+  inputRef,
   testid = "discover-search",
 }: DiscoverSearchProps) {
   const t = useTranslations("discover")
@@ -40,6 +46,7 @@ export function DiscoverSearch({
         className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
       />
       <Input
+        ref={inputRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder ?? t("search")}

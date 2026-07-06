@@ -74,15 +74,17 @@ function buildWorkflow(): VisualWorkflow {
 function renderTopbar(mode: "read" | "edit" = "read") {
   const store: EditorStore = createEditorStore(buildWorkflow())
   const onToggleMode = jest.fn()
+  const onOpenCopilot = jest.fn()
   render(
     <MobileEditorTopbar
       store={store}
       reactFlowInstance={null}
       mode={mode}
       onToggleMode={onToggleMode}
+      onOpenCopilot={onOpenCopilot}
     />
   )
-  return { store, onToggleMode }
+  return { store, onToggleMode, onOpenCopilot }
 }
 
 beforeEach(async () => {
@@ -106,6 +108,13 @@ describe("<MobileEditorTopbar />", () => {
     const { onToggleMode } = renderTopbar("read")
     await user.click(screen.getByTestId("mobile-editor-mode-toggle"))
     expect(onToggleMode).toHaveBeenCalledTimes(1)
+  })
+
+  it("fires onOpenCopilot when the copilot button is tapped (available in read mode)", async () => {
+    const user = userEvent.setup()
+    const { onOpenCopilot } = renderTopbar("read")
+    await user.click(screen.getByTestId("mobile-editor-copilot"))
+    expect(onOpenCopilot).toHaveBeenCalledTimes(1)
   })
 
   it("disables Save when clean and persists once dirty", async () => {

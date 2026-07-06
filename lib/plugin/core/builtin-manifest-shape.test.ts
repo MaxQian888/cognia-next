@@ -14,7 +14,12 @@ import type { PluginRuntimeProfile } from "@/types/plugin"
  */
 
 const PLUGINS_DIR = join(process.cwd(), "plugins")
-const CANONICAL_RUNTIME_SURFACES: ReadonlyArray<PluginRuntimeProfile> = ["browser", "tauri"]
+const CANONICAL_RUNTIME_SURFACES: ReadonlyArray<PluginRuntimeProfile> = [
+  "browser",
+  "tauri",
+  "mobile",
+]
+const RUNTIME_AVAILABILITIES = ["supported", "degraded", "blocked"] as const
 
 function listManifests(): { plugin: string; path: string; json: Record<string, unknown> }[] {
   const out: { plugin: string; path: string; json: Record<string, unknown> }[] = []
@@ -52,6 +57,23 @@ describe("built-in plugin manifests", () => {
       for (const key of Object.keys(compat)) {
         expect(CANONICAL_RUNTIME_SURFACES).toContain(key as PluginRuntimeProfile)
       }
+    }
+  )
+
+  // Mobile (Capacitor) is a first-class runtime surface: every built-in that
+  // declares runtimeCompatibility MUST declare an explicit `mobile` availability
+  // so the Capacitor shell loads only the supported subset instead of inheriting
+  // browser availability by accident (which re-opens the boot toast flood). See
+  // the manager's collectRuntimeProfileDiagnostics + isBlockedByRuntimeProfile.
+  it.each(manifests.map((m) => [m.plugin, m] as const))(
+    "%s declares an explicit mobile runtime availability",
+    (_plugin, manifest) => {
+      const compat = manifest.json.runtimeCompatibility as
+        | Record<string, { availability?: string } | undefined>
+        | undefined
+      if (!compat) return
+      expect(compat.mobile).toBeDefined()
+      expect(RUNTIME_AVAILABILITIES).toContain(compat.mobile?.availability as never)
     }
   )
 })

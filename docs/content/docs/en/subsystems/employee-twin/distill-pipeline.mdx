@@ -158,7 +158,7 @@ the surface the [unredact dialog](./workbench-ui#drafts-tab--accept-flow) drives
 
 ## Helpers
 
-- **`with-timeout.ts`** is a re-export shim over `@/lib/utils/with-timeout`. `withTimeout` is a hard deadline
+- **`with-timeout.ts`** is a re-export shim over `@cognia/primitives`. `withTimeout` is a hard deadline
   that rejects; `withTimeoutOrFallback` returns `{ value, error }`, logging via `onError` and yielding a
   supplied fallback. The default agent timeout is 90 s.
 - **`heuristics/style-prefilter.ts`** (`selectStyleCandidates`, L50) shrinks the StyleAgent's candidate pool

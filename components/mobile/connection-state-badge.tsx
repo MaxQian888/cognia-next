@@ -60,6 +60,7 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
   const t = useTranslations("mobile.connectionState")
   const state = useConnectionState()
   const router = useRouter()
+  const [menuOpen, setMenuOpen] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [pairedOpen, setPairedOpen] = useState(false)
   const [diagOpen, setDiagOpen] = useState(false)
@@ -70,10 +71,16 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
   // useState init so we don't pay a setState-in-effect cascade.
   const [mobile] = useState(() => isMobile())
 
+  // The relative "last synced" stamps only render inside the dropdown, so
+  // only run the refresh clock while it's open — this badge lives in the
+  // app-wide shell, so an always-on 30s interval ticked on every screen.
   useEffect(() => {
+    if (!menuOpen) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate one-shot clock seed so the relative "last synced" stamps are fresh the moment the dropdown opens, not stale from a prior open.
+    setNow(Date.now())
     const id = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(id)
-  }, [])
+  }, [menuOpen])
 
   useEffect(() => {
     if (!mobile) return
@@ -148,7 +155,7 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"

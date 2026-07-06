@@ -26,6 +26,9 @@ var mockTauri = true
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
   isTauri: () => mockTauri,
+  // The desktop block is now behind <CapabilityGate profiles={["desktop"]}>,
+  // which resolves the host profile from detectPlatform().
+  detectPlatform: () => (mockTauri ? "tauri" : "web"),
 }))
 
 const openPetWindow = jest.fn().mockResolvedValue(true)

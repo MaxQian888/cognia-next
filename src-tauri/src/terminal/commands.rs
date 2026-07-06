@@ -187,9 +187,133 @@ pub fn terminal_list_all(
     Ok(state.list_all())
 }
 
+/// Free a TCP port by killing whatever process is listening on it. Backs the
+/// terminal "free port" quick fix (VS Code parity — `freePort` in
+/// `terminalQuickFixBuiltinActions.ts`). Best-effort and bounded: resolves the
+/// listening PID(s) via the platform's standard tool (`netstat` on Windows,
+/// `lsof` elsewhere) and signals them. Returns the PIDs that were signalled,
+/// possibly empty (nothing was listening / the tool was unavailable).
+#[tauri::command]
+pub fn terminal_kill_port(port: u16) -> Result<Vec<u32>, String> {
+    if port == 0 {
+        return Err("invalid port".into());
+    }
+    let pids = listening_pids(port)?;
+    let mut killed = Vec::new();
+    for pid in pids {
+        if kill_pid(pid) {
+            killed.push(pid);
+        }
+    }
+    Ok(killed)
+}
+
+/// Parse `netstat -ano -p tcp` output for PIDs listening on `port`. Pure (no
+/// IO) so the column-matching is testable on any platform.
+#[allow(dead_code)]
+fn parse_netstat_pids(output: &str, port: u16) -> Vec<u32> {
+    let needle = format!(":{port}");
+    let mut pids = Vec::new();
+    for line in output.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        // `  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   12345`
+        if cols.len() < 5 || !cols[0].eq_ignore_ascii_case("TCP") {
+            continue;
+        }
+        if !cols[1].ends_with(&needle) || !cols[3].eq_ignore_ascii_case("LISTENING") {
+            continue;
+        }
+        if let Ok(pid) = cols[4].parse::<u32>() {
+            if pid != 0 && !pids.contains(&pid) {
+                pids.push(pid);
+            }
+        }
+    }
+    pids
+}
+
+/// Parse `lsof -t` output (one PID per line). Pure so it's testable anywhere.
+#[allow(dead_code)]
+fn parse_lsof_pids(output: &str) -> Vec<u32> {
+    let mut pids = Vec::new();
+    for line in output.lines() {
+        if let Ok(pid) = line.trim().parse::<u32>() {
+            if pid != 0 && !pids.contains(&pid) {
+                pids.push(pid);
+            }
+        }
+    }
+    pids
+}
+
+#[cfg(windows)]
+fn listening_pids(port: u16) -> Result<Vec<u32>, String> {
+    let output = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .output()
+        .map_err(|e| format!("netstat failed: {e}"))?;
+    Ok(parse_netstat_pids(
+        &String::from_utf8_lossy(&output.stdout),
+        port,
+    ))
+}
+
+#[cfg(not(windows))]
+fn listening_pids(port: u16) -> Result<Vec<u32>, String> {
+    let output = std::process::Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+        .output()
+        .map_err(|e| format!("lsof failed: {e}"))?;
+    Ok(parse_lsof_pids(&String::from_utf8_lossy(&output.stdout)))
+}
+
+#[cfg(windows)]
+fn kill_pid(pid: u32) -> bool {
+    std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn kill_pid(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{parse_lsof_pids, parse_netstat_pids};
     use std::path::Path;
+
+    #[test]
+    fn parse_netstat_extracts_listening_pid_for_port() {
+        let out = "\
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       12345
+  TCP    127.0.0.1:5500         0.0.0.0:0              LISTENING       6789
+  TCP    [::]:3000              [::]:0                 LISTENING       12345
+  TCP    0.0.0.0:3000           10.0.0.2:55123         ESTABLISHED     999";
+        assert_eq!(parse_netstat_pids(out, 3000), vec![12345]);
+        assert_eq!(parse_netstat_pids(out, 5500), vec![6789]);
+    }
+
+    #[test]
+    fn parse_netstat_does_not_confuse_port_suffixes() {
+        let out = "  TCP    0.0.0.0:13000          0.0.0.0:0              LISTENING       42";
+        assert!(parse_netstat_pids(out, 3000).is_empty());
+        assert_eq!(parse_netstat_pids(out, 13000), vec![42]);
+    }
+
+    #[test]
+    fn parse_lsof_reads_one_pid_per_line_deduped() {
+        assert_eq!(parse_lsof_pids("4242\n4242\n51\n"), vec![4242, 51]);
+        assert!(parse_lsof_pids("\n  \n").is_empty());
+    }
 
     #[test]
     fn resolve_script_dir_falls_back_to_manifest_relative() {

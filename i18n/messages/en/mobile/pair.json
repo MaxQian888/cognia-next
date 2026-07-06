@@ -84,10 +84,16 @@
     "generic": "Pairing failed (HTTP {status})."
   },
   "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+  "loadingManualCta": "Set up manually",
+  "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
   "loadingTitle": "Checking for an existing pairing…",
   "manualDivider": "or paste manually",
   "offlineSubtitle": "Couldn't reach the desktop — verify the desktop is awake and on the same network.",
   "offlineTitle": "Connection lost",
+  "payloadError": {
+    "invalid": "That pairing payload couldn't be decoded — copy the full cgnp2|… string from the server and paste it again.",
+    "versionMismatch": "This pairing payload is version {got}, which this app doesn't understand. Update the app or the server so both speak the same payload version."
+  },
   "permissions": {
     "localNetwork": {
       "description": "Grant local-network access so the phone can find the desktop on your Wi-Fi.",
@@ -125,5 +131,16 @@
   },
   "title": "Connect to desktop",
   "tokenLabel": "Pair token",
-  "transportLabel": "Transport"
+  "transportLabel": "Transport",
+  "web": {
+    "baseUrlLocked": "Server URL is set by this deployment",
+    "codeHint": "Generate a code on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",
+    "formCardDescription": "Paste the pairing payload or the 6-digit code issued by your cognia server — both use the same 5-minute pair token.",
+    "formCardTitle": "Pair this browser",
+    "intro": "Connect this browser to your cognia server. Paste the pairing payload or enter the 6-digit code to sign in.",
+    "pasteHint": "Paste the full cgnp2|… payload — the server URL fills in automatically — or just the raw pair JWT.",
+    "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
+    "storageNoticeTitle": "Credential stays in this browser",
+    "title": "Connect to your server"
+  }
 }

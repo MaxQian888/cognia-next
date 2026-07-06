@@ -5,6 +5,7 @@
     "label": "压缩方式",
     "options": {
       "hybrid": "混合（保留近期 + 摘要）",
+      "optical": "光学（较早轮次渲染为图片）",
       "recursive": "递归（分块摘要）",
       "selective": "选择性（保留重要，摘要其余）",
       "sliding-window": "滑动窗口（丢弃最旧）",

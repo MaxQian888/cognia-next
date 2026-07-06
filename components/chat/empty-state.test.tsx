@@ -101,6 +101,18 @@ describe("<EmptyChatState />", () => {
     expect(screen.getByRole("button", { name: /newChat/ })).toBeInTheDocument()
   })
 
+  // ── AI starter suggestion chips ───────────────────────────────────────
+  it("renders model-suggested prompts as suggestion chips and fires onUseSample", async () => {
+    const props = baseProps()
+    const user = userEvent.setup()
+    render(<EmptyChatState {...props} aiSamples={["Plan my week", "  ", "Draft an email"]} />)
+    // Blank entries are filtered out; only the two real prompts become chips.
+    expect(screen.getByTestId("ai-starters")).toBeInTheDocument()
+    expect(screen.getByText("sections.aiPrompts")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Plan my week" }))
+    expect(props.onUseSample).toHaveBeenCalledWith("Plan my week")
+  })
+
   // ── Dev-tool starter prompts ──────────────────────────────────────────
   it("always shows the starter prompts and fires onUseSample on click", async () => {
     const props = baseProps()

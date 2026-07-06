@@ -24,7 +24,10 @@ async function execGitDiff(args) {
     if (args.pathspec?.length) argv.push("--", ...args.pathspec)
     const { stdout } = await runGit(argv, args.cwd)
     const { text, truncated } = trimTail(stdout || "(no changes)")
-    return toolText(truncated ? text : stdout || "(no changes)")
+    const guidance = truncated
+      ? "\n(diff truncated — narrow it with the `pathspec` argument or a smaller `context`.)"
+      : ""
+    return toolText(`${text}${guidance}`)
   } catch (err) {
     return toolError(err, "git_diff")
   }

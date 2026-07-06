@@ -28,6 +28,7 @@ import { CanvasCodeSandboxCard } from "./canvas-code-sandbox-card"
 import { SandboxEnableCard } from "./sandbox-enable-card"
 import { SandboxPolicyCard } from "./sandbox-policy-card"
 import { SandboxTierCard } from "./sandbox-tier-card"
+import { WorkspaceConfinementCard } from "./workspace-confinement-card"
 
 export function SandboxSection() {
   const t = useTranslations("settings.sandbox")
@@ -135,6 +136,7 @@ export function SandboxSection() {
         </CardContent>
       </Card>
       <SandboxEnableCard />
+      <WorkspaceConfinementCard />
       <CanvasCodeSandboxCard />
       <SandboxTierCard />
       <SandboxPolicyCard />

@@ -29,6 +29,7 @@ import { runIndexPageAgent, type ArticleSummary } from "./agents/index-page-agen
 import { assembleArticle } from "./agents/module-article-agent"
 import { applyCrossRefs, buildSlugIndex } from "./agents/cross-ref-agent"
 import { buildModuleStats, chunksWithinBudget } from "./agents/repo-map-agent"
+import { buildImportGraph } from "./agents/import-graph"
 import { bucketByModule, filterIncludedPaths } from "./file-walker"
 import { buildMerkleMap, hashContent } from "./merkle"
 import { moduleArticlePrompt, WIKI_SYSTEM_VOICE } from "./prompts"
@@ -166,8 +167,17 @@ export async function rebuildWiki(
   const allChunks: CodeChunk[] = []
   for (const list of chunksByModule.values()) allChunks.push(...list)
 
-  // 5. RepoMapAgent — compute module pageRank scores.
-  const stats = buildModuleStats(allChunks)
+  // 5. RepoMapAgent — compute module pageRank scores. Build the module import
+  //    graph from the chunk contents (already in memory) so ranking reflects
+  //    real dependency centrality (Aider-style PageRank), falling back to the
+  //    size heuristic if graph construction fails for any reason.
+  let importGraph: Map<string, Set<string>> | undefined
+  try {
+    importGraph = buildImportGraph(allChunks)
+  } catch {
+    importGraph = undefined
+  }
+  const stats = buildModuleStats(allChunks, { importGraph })
   const statByModule = new Map(stats.map((s) => [s.module, s]))
 
   // 6. ModuleArticleAgent — one LLM call per module that needs work.

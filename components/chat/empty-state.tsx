@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 import Image from "next/image"
 import { useTranslations, useFormatter, useNow } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
@@ -309,33 +310,26 @@ export function EmptyChatState({
           </motion.div>
         ) : null}
 
-        {/* AI starters — model-suggested opening prompts (composer assistance) */}
+        {/* AI starters — model-suggested opening prompts, surfaced as a
+            horizontal row of ai-elements suggestion chips. Clicking a chip
+            loads its prompt into the composer via onUseSample. */}
         {aiPrompts.length > 0 ? (
           <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="ai-starters">
             <h3 className={GROUP_HEADING_CLASS}>{t("sections.aiPrompts")}</h3>
-            <motion.div
-              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
-              variants={STAGGER_CONTAINER}
-            >
+            <Suggestions className="py-1">
               {aiPrompts.map((prompt, i) => (
-                <motion.div key={`ai-${i}-${prompt.slice(0, 24)}`} variants={STAGGER_CHILD}>
-                  <Card
-                    role="button"
-                    tabIndex={0}
-                    aria-label={prompt}
-                    onClick={() => onUseSample(prompt)}
-                    onKeyDown={onActivate(() => onUseSample(prompt))}
-                    className={cn(
-                      "flex h-full cursor-pointer flex-row items-center gap-2 p-3",
-                      INTERACTIVE_CARD_CLASS
-                    )}
-                  >
-                    <SparklesIcon className="size-4 shrink-0 text-primary" aria-hidden />
-                    <span className="line-clamp-2 text-sm">{prompt}</span>
-                  </Card>
-                </motion.div>
+                <Suggestion
+                  key={`ai-${i}-${prompt.slice(0, 24)}`}
+                  suggestion={prompt}
+                  onClick={onUseSample}
+                  aria-label={prompt}
+                  className="max-w-[20rem]"
+                >
+                  <SparklesIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
+                  <span className="truncate">{prompt}</span>
+                </Suggestion>
               ))}
-            </motion.div>
+            </Suggestions>
           </motion.div>
         ) : null}
 

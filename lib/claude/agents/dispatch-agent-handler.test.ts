@@ -6,6 +6,7 @@ import {
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
 import { getSettings } from "@/lib/db/settings"
+import { getSession } from "@/lib/db/sessions"
 import {
   registerDispatchContext,
   recordResolvedPermissionCeiling,
@@ -22,7 +23,18 @@ import {
   cancelRendererBackgroundRun,
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import { requestCancelSubagentRun, liveSubagentRunCount } from "./subagent-cancel-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+
+/** Spin the event loop until `pred()` is truthy or attempts run out. */
+async function waitFor<T>(pred: () => T | undefined, attempts = 100): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    const v = pred()
+    if (v) return v
+    await new Promise((r) => setTimeout(r, 0))
+  }
+  throw new Error("waitFor: condition never met")
+}
 
 jest.mock("@/lib/plugin/agent-sdk/dispatch", () => ({
   __esModule: true,
@@ -36,12 +48,17 @@ jest.mock("@/lib/db/settings", () => ({
   __esModule: true,
   getSettings: jest.fn(),
 }))
+jest.mock("@/lib/db/sessions", () => ({
+  __esModule: true,
+  getSession: jest.fn(),
+}))
 
 const mockDispatch = dispatchSubagent as jest.MockedFunction<typeof dispatchSubagent>
 const mockGetDef = getDispatchableSubagentDef as jest.MockedFunction<
   typeof getDispatchableSubagentDef
 >
 const mockGetSettings = getSettings as jest.MockedFunction<typeof getSettings>
+const mockGetSession = getSession as jest.MockedFunction<typeof getSession>
 
 const ok = (text: string, runId = "child-1"): PluginSubagentDispatchResult => ({
   text,
@@ -60,6 +77,7 @@ beforeEach(() => {
   mockGetSettings.mockResolvedValue({
     subagentNesting: { enabled: true, maxDepth: 2, tokenBudget: 0, timeoutMs: 0 },
   } as never)
+  mockGetSession.mockResolvedValue(undefined)
   mockDispatch.mockResolvedValue(ok("done"))
 })
 
@@ -145,6 +163,43 @@ describe("runDispatchAgentTool — call modes", () => {
     expect(mockDispatch.mock.calls[0][2]).not.toHaveProperty("_permissionCeiling")
   })
 
+  it("falls back to the session row's permissionMode when no ceiling was recorded", async () => {
+    // Belt-and-braces: the parent send never ran resolveSendOptions' ceiling
+    // recorder (early return / missing session.id), but the session row itself
+    // says plan — the child must still inherit the plan clamp.
+    mockGetSession.mockResolvedValue({ id: "chat-1", permissionMode: "plan" } as never)
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "build" },
+    })
+    expect(mockDispatch.mock.calls[0][2]).toMatchObject({
+      _permissionCeiling: { permissionMode: "plan" },
+    })
+  })
+
+  it("a recorded ceiling wins over a divergent session-row mode", async () => {
+    recordResolvedPermissionCeiling("chat-1", { permissionMode: "acceptEdits" })
+    mockGetSession.mockResolvedValue({ id: "chat-1", permissionMode: "plan" } as never)
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "build" },
+    })
+    // The recorded ceiling is post-clamp and authoritative — never overridden.
+    expect(mockDispatch.mock.calls[0][2]).toMatchObject({
+      _permissionCeiling: { permissionMode: "acceptEdits" },
+    })
+    expect(mockGetSession).not.toHaveBeenCalled()
+  })
+
+  it("does not synthesize a ceiling from an `auto` session mode (no ACP equivalent)", async () => {
+    mockGetSession.mockResolvedValue({ id: "chat-1", permissionMode: "auto" } as never)
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "build" },
+    })
+    expect(mockDispatch.mock.calls[0][2]).not.toHaveProperty("_permissionCeiling")
+  })
+
   it("uses the resolved inline def when available (projected ids)", async () => {
     mockGetDef.mockReturnValue({
       id: "template:x",
@@ -215,6 +270,42 @@ describe("runDispatchAgentTool — call modes", () => {
 
     expect(cancelRendererBackgroundRun(runId!)).toBe(true)
     expect(signal?.aborted).toBe(true)
+  })
+
+  it("registers every foreground run in the cancel registry and aborting marks it cancelled", async () => {
+    // Dispatch hangs until its abort signal fires, then rejects — mirroring a
+    // user-cancelled run.
+    mockDispatch.mockImplementation(
+      (_id, _prompt, opts) =>
+        new Promise<PluginSubagentDispatchResult>((_res, rej) => {
+          const signal = (opts as { abortSignal?: AbortSignal }).abortSignal
+          signal?.addEventListener("abort", () => rej(new Error("aborted by user")))
+        })
+    )
+    const pending = runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "long" },
+    })
+
+    // The foreground run is registered (Abort button can reach it) and running.
+    // (liveSubagentRunCount is process-global; assert the delta, not an absolute.)
+    const running = await waitFor(() =>
+      Object.values(useSubagentRuntimeStore.getState().subAgents).find(
+        (r) => r.status === "running"
+      )
+    )
+    const liveBefore = liveSubagentRunCount()
+    expect(liveBefore).toBeGreaterThanOrEqual(1)
+
+    expect(requestCancelSubagentRun(running.id)).toBe(true)
+    const out = await pending
+    expect(out).toMatch(/aborted by user/i)
+
+    // Aborted → cancelled, NOT failed; and the registry entry is cleaned up.
+    const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)
+    expect(runs.some((r) => r.status === "cancelled")).toBe(true)
+    expect(runs.some((r) => r.status === "failed")).toBe(false)
+    expect(liveSubagentRunCount()).toBe(liveBefore - 1)
   })
 
   it("returns a clear message when collecting an unknown run", async () => {

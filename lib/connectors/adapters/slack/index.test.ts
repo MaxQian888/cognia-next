@@ -386,13 +386,54 @@ describe("createSlackAdapter", () => {
     })
   })
 
-  it("fetchHistory() returns an empty async iterable", async () => {
+  it("fetchHistory() calls conversations.history and yields parsed messages", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "connectors_http_request") return undefined
+      const req = (args as { req: { url: string } }).req
+      if (req.url.includes("conversations.history")) {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            ok: true,
+            messages: [
+              {
+                type: "message",
+                user: "U123",
+                text: "from history",
+                ts: "1700000000.000001",
+                channel_type: "channel",
+              },
+            ],
+            response_metadata: { next_cursor: "" },
+          }),
+        }
+      }
+      return makeSendOkResp()
+    })
+
     const adapter = makeAdapter()
-    const events: unknown[] = []
-    for await (const evt of adapter.fetchHistory!("slack:sl-1:C01", {})) {
+    const events: NormalizedInboundEvent[] = []
+    for await (const evt of adapter.fetchHistory!("slack:sl-1:C01", {
+      before: "1700000001.000000",
+      after: "1699999999.000000",
+    })) {
       events.push(evt)
     }
-    expect(events).toHaveLength(0)
+    expect(events).toHaveLength(1)
+    expect(events[0].messageId).toBe("1700000000.000001")
+    expect(events[0].plainText).toBe("from history")
+
+    const historyCall = mockInvoke.mock.calls.find(
+      ([cmd, args]: [string, { req?: { url?: string } }]) =>
+        cmd === "connectors_http_request" && args.req?.url?.includes("conversations.history")
+    )
+    expect(historyCall).toBeDefined()
+    const url = new URL((historyCall![1] as { req: { url: string } }).req.url)
+    expect(url.searchParams.get("channel")).toBe("C01")
+    expect(url.searchParams.get("limit")).toBe("200")
+    expect(url.searchParams.get("latest")).toBe("1700000001.000000")
+    expect(url.searchParams.get("oldest")).toBe("1699999999.000000")
   })
 
   it("refreshCredentials() resolves without error", async () => {

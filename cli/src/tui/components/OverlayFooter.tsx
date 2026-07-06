@@ -8,7 +8,7 @@ import { Text } from "ink"
 
 import { useTheme } from "../theme/context"
 
-export const DEFAULT_OVERLAY_HINT = "↑/↓ navigate · Enter select · Esc cancel"
+export const DEFAULT_OVERLAY_HINT = "↑/↓ or click · Enter select · Esc cancel"
 
 export function OverlayFooter({ hint = DEFAULT_OVERLAY_HINT }: { hint?: string }) {
   const theme = useTheme()

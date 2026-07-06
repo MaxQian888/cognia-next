@@ -162,6 +162,13 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
 
     let window =
         tauri::WebviewWindowBuilder::new(app, "pet", tauri::WebviewUrl::App("pet-overlay".into()))
+            // Transparency comes ONLY from `transparent(true)` (Windows: DWM +
+            // WebView2 composition; macOS: needs the `macos-private-api` feature,
+            // enabled via `macOSPrivateApi`). Never call `.background_color(...)`
+            // here: on Windows the window layer IGNORES the alpha channel (Tauri
+            // v2 `WindowConfig.backgroundColor` docs), so any color — even one
+            // with alpha 0 — forces an OPAQUE window and defeats transparency.
+            // The page paints itself transparent via `data-pet-overlay` CSS.
             .transparent(true)
             .decorations(false)
             .always_on_top(true)
@@ -172,16 +179,53 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
             .inner_size(opts.width, opts.height)
             .build()
             .map_err(|e| e.to_string())?;
+
+    // The app-wide menu bar (`menu.rs` `app.set_menu`) attaches to every newly
+    // created window on Windows/Linux — including this frameless transparent
+    // overlay, where it painted a File/Edit menubar strip while the pet was
+    // focused or dragged. Detach it from this window only, before the first
+    // reveal. No-op on macOS (the menu there is app-global, never per-window).
+    let _ = window.remove_menu();
+
     window
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
 
-    // Apply click-through before the first paint, then reveal — reduces the
-    // transparent-webview first-paint flicker on Windows.
+    // Apply click-through before the first paint.
     window
         .set_ignore_cursor_events(opts.click_through)
         .map_err(|e| e.to_string())?;
-    window.show().map_err(|e| e.to_string())?;
+
+    // Intentionally do NOT `show()` here. On Windows a `transparent(true)` window
+    // shown before its WebView has committed a first paint renders an opaque
+    // (black) rectangle until something forces a recomposite — the "invisible
+    // until I click it" bug. The window is created `visible(false)`; the pet
+    // overlay renderer reveals it after its first painted frame (see
+    // `PetOverlayView`), exactly like the main window's `WindowShowInitializer`.
+    // The re-show branch above still calls `show()` directly because an existing
+    // window has already painted, so it can never flash.
+
+    // Safety net (mirrors the main window's net in `lib.rs`). The frontend
+    // reveal (`lib/pet/reveal.ts`) is best-effort and error-swallowing — if it
+    // throws (JS crash, hung hydrate), the pet would stay invisible forever with
+    // no way back except a manual re-toggle. Force it visible after a grace
+    // period so a reveal failure can never strand an alive-but-invisible pet.
+    // Only fires when still hidden, so the normal first-paint reveal is
+    // unaffected and the transparent black-frame bug is not reintroduced.
+    {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            if let Some(window) = handle.get_webview_window("pet") {
+                if !window.is_visible().unwrap_or(true) {
+                    log::warn!(
+                        "pet window still hidden 8s after open; force-showing (renderer never signaled first paint)"
+                    );
+                    crate::window_utils::bring_window_to_front(&window);
+                }
+            }
+        });
+    }
 
     Ok(())
 }

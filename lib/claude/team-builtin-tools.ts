@@ -29,6 +29,26 @@ import type {
   CreateConsensusInput,
   SharedMemoryEntry,
 } from "@/types/agent/agent-team"
+import type { TwinKnowledgeHit } from "@/lib/ai/agent/team/twin-context"
+import {
+  canSendMessage,
+  describeSuppressedMessage,
+  type RecentMessage,
+} from "@/lib/ai/agent/team/message-guard"
+
+/**
+ * System-prompt fragment appended for a team dispatch session (alongside the
+ * collaboration tool manifest). Teaches the two conventions the message guard and the
+ * `<info_for_agent>` UI strip rely on. Kept here so the prompt + the tools agree.
+ */
+export const TEAM_MESSAGING_PROTOCOL = `TEAM MESSAGING PROTOCOL:
+- Do NOT send idle/acknowledgement-only messages ("ok", "understood", "waiting for tasks", "收到", "明白"). Stay silent unless you have findings, a decision, a blocker, or a question. Such messages are dropped.
+- Do not repeat a message a teammate already has, and do not rapid-fire the same teammate — batch your updates.
+- Record durable findings, decisions, and results as a task comment (task_add_comment) — that is what the operator reads on the board; direct messages are ephemeral.
+- If you must pass operational instructions to a teammate that the human operator should NOT see, wrap ONLY that hidden part in <info_for_agent> ... </info_for_agent>. Keep normal human-readable coordination outside the block. NEVER use this block in a message addressed to the user.`
+
+/** How far back the message guard windows recent team messages (ms). */
+const MESSAGE_GUARD_WINDOW_MS = 60_000
 
 /** Canonical tool names. Kept in one place so the manifest + router agree. */
 export const TEAM_TOOL_NAMES = {
@@ -39,6 +59,9 @@ export const TEAM_TOOL_NAMES = {
   vote: "team_vote",
   delegate: "team_delegate",
   listMembers: "team_list_members",
+  addTaskComment: "task_add_comment",
+  getTask: "task_get",
+  twinKnowledgeSearch: "twin_knowledge_search",
 } as const
 
 /** Synthetic plugin id tagging the promoted team-collaboration manifest entries. */
@@ -91,7 +114,7 @@ export interface TeamToolDeps {
   createConsensus: (input: CreateConsensusInput) => ConsensusRequest
   castVote: (input: CastVoteInput) => ConsensusRequest
   delegate: (input: {
-    target: "background" | "external" | "team"
+    target: "background" | "external" | "team" | "twin"
     sourceTeamId: string
     sourceTaskId: string
     reason: string
@@ -99,9 +122,47 @@ export interface TeamToolDeps {
     systemPrompt?: string
     targetAgentId?: string
     targetTeamId?: string
+    /** Employee Digital Twin id (required for `twin`). */
+    twinId?: string
     ultracode?: boolean
   }) => { id: string; status: string }
   listMembers: (teamId: string) => Array<{ id: string; name: string; role: string }>
+  /** Recent team messages (epoch-ms `createdAt`), windowed by the default impl. */
+  recentMessages: (teamId: string) => RecentMessage[]
+  addTaskComment: (input: {
+    taskId: string
+    authorId: string
+    text: string
+    attachments?: Array<{
+      name: string
+      kind: "artifact" | "file" | "link"
+      ref: string
+      mimeType?: string
+      sizeBytes?: number
+    }>
+  }) => { id: string } | null
+  getTask: (taskId: string) => {
+    id: string
+    title: string
+    status: string
+    description: string
+    comments: Array<{ authorName: string; text: string; createdAt: string }>
+  } | null
+  /**
+   * On-demand RAG over an Employee Digital Twin's knowledge base (ADR-0003).
+   * Resolves + authorizes the target twin against the team's `knowledgeTwinIds`
+   * plus its members' own `twinId`s, then returns REDACTED hits only. Returns an
+   * `error` string (not throw) on missing config / unauthorized twin / runtime
+   * unavailable.
+   */
+  searchTwinKnowledge: (input: {
+    teamId: string
+    query: string
+    twinId?: string
+    topK?: number
+  }) => Promise<
+    { ok: true; twinId: string; hits: TwinKnowledgeHit[] } | { ok: false; error: string }
+  >
 }
 
 const SEND_MESSAGE_SCHEMA = {
@@ -171,13 +232,15 @@ const DELEGATE_SCHEMA = {
   properties: {
     target: {
       type: "string",
-      enum: ["background", "external", "team"],
-      description: "Where to delegate: a background agent, an external CLI agent, or another team.",
+      enum: ["background", "external", "team", "twin"],
+      description:
+        "Where to delegate: a background agent, an external CLI agent, another team, or a digital employee (twin) that answers with its own knowledge + persona.",
     },
     reason: { type: "string", description: "Why this work is being delegated." },
-    prompt: { type: "string", description: "Task prompt (required for `background`)." },
+    prompt: { type: "string", description: "Task prompt (required for `background` / `twin`)." },
     targetAgentId: { type: "string", description: "External agent id (required for `external`)." },
     targetTeamId: { type: "string", description: "Target team id (required for `team`)." },
+    twinId: { type: "string", description: "Digital employee id (required for `twin`)." },
     ultracode: { type: "boolean", description: "Force ultracode on a `team` delegation." },
   },
   required: ["target", "reason"],
@@ -185,11 +248,77 @@ const DELEGATE_SCHEMA = {
 
 const LIST_MEMBERS_SCHEMA = { type: "object", properties: {} } as const
 
+const ADD_TASK_COMMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    taskId: { type: "string", description: "The task to comment on." },
+    content: {
+      type: "string",
+      description:
+        "Your finding, decision, blocker, or result (markdown). This is the durable, board-visible record.",
+    },
+    attachments: {
+      type: "array",
+      description: "Optional references the operator can open.",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Display name." },
+          kind: {
+            type: "string",
+            enum: ["artifact", "file", "link"],
+            description: "What `ref` points at.",
+          },
+          ref: { type: "string", description: "Artifact id, workspace-relative path, or URL." },
+        },
+        required: ["name", "kind", "ref"],
+      },
+    },
+  },
+  required: ["taskId", "content"],
+} as const
+
+const GET_TASK_SCHEMA = {
+  type: "object",
+  properties: {
+    taskId: { type: "string", description: "The task id to fetch (includes its comment thread)." },
+  },
+  required: ["taskId"],
+} as const
+
+const TWIN_KNOWLEDGE_SEARCH_SCHEMA = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description: "What to look up in the digital employee's knowledge base.",
+    },
+    twinId: {
+      type: "string",
+      description:
+        "Which digital employee to consult. Omit to use the team's first configured knowledge source.",
+    },
+    topK: { type: "number", description: "How many passages to return (default 5, max 12)." },
+  },
+  required: ["query"],
+} as const
+
+export interface BuildTeamCollabManifestOptions {
+  /**
+   * Append the `twin_knowledge_search` tool. Only true when the team exposes at
+   * least one knowledge twin (team `knowledgeTwinIds` or a member's `twinId`),
+   * so the tool is never offered as a dead capability. See `build-options.ts`.
+   */
+  includeTwinKnowledgeSearch?: boolean
+}
+
 /**
  * Manifest entries for the team-collaboration tools. Returned to `build-options`
  * to append to `pluginTools` for a team dispatch session (opt-in).
  */
-export function buildTeamCollabManifestEntries(): TeamBuiltinManifestEntry[] {
+export function buildTeamCollabManifestEntries(
+  opts: BuildTeamCollabManifestOptions = {}
+): TeamBuiltinManifestEntry[] {
   const entry = (
     name: string,
     description: string,
@@ -236,6 +365,25 @@ export function buildTeamCollabManifestEntries(): TeamBuiltinManifestEntry[] {
       "List the teammates on your team (id, name, role) — use before messaging or delegating.",
       LIST_MEMBERS_SCHEMA as unknown as Record<string, unknown>
     ),
+    entry(
+      TEAM_TOOL_NAMES.addTaskComment,
+      "Record a finding, decision, blocker, or result on a task. This is the durable, board-visible delivery channel — prefer it over ephemeral direct messages for anything the operator should see.",
+      ADD_TASK_COMMENT_SCHEMA as unknown as Record<string, unknown>
+    ),
+    entry(
+      TEAM_TOOL_NAMES.getTask,
+      "Fetch a task by id, including its full comment thread.",
+      GET_TASK_SCHEMA as unknown as Record<string, unknown>
+    ),
+    ...(opts.includeTwinKnowledgeSearch
+      ? [
+          entry(
+            TEAM_TOOL_NAMES.twinKnowledgeSearch,
+            "Search a digital employee's (Employee Digital Twin) knowledge base and get back relevant passages — use when the answer depends on a teammate's or the team's bound domain knowledge.",
+            TWIN_KNOWLEDGE_SEARCH_SCHEMA as unknown as Record<string, unknown>
+          ),
+        ]
+      : []),
   ]
 }
 
@@ -286,6 +434,17 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
         })
         return { id: rec.id, status: rec.status }
       }
+      if (input.target === "twin") {
+        const { delegation: rec } = delegation.delegateToTwin({
+          sourceTeamId: input.sourceTeamId,
+          sourceTaskId: input.sourceTaskId,
+          twinId: input.twinId ?? "",
+          prompt: input.prompt ?? input.reason,
+          ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+          reason: input.reason,
+        })
+        return { id: rec.id, status: rec.status }
+      }
       const { delegation: rec } = delegation.delegateToBackground({
         sourceTeamId: input.sourceTeamId,
         sourceTaskId: input.sourceTaskId,
@@ -299,6 +458,86 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
       Object.values(useAgentTeamStore.getState().teammates)
         .filter((t) => t.teamId === teamId)
         .map((t) => ({ id: t.id, name: t.name, role: t.role })),
+    recentMessages: (teamId) => {
+      const cutoff = Date.now() - MESSAGE_GUARD_WINDOW_MS
+      return useAgentTeamStore
+        .getState()
+        .getTeamMessages(teamId)
+        .filter((m) => m.type === "direct" || m.type === "broadcast")
+        .map((m) => ({
+          senderId: m.senderId,
+          ...(m.recipientId ? { recipientId: m.recipientId } : {}),
+          content: m.content,
+          createdAt: m.timestamp instanceof Date ? m.timestamp.getTime() : Number(m.timestamp) || 0,
+        }))
+        .filter((m) => m.createdAt >= cutoff)
+    },
+    addTaskComment: (input) => {
+      const comment = useAgentTeamStore.getState().addTaskComment({
+        taskId: input.taskId,
+        authorId: input.authorId,
+        text: input.text,
+        ...(input.attachments && input.attachments.length > 0
+          ? { attachments: input.attachments }
+          : {}),
+      })
+      return comment ? { id: comment.id } : null
+    },
+    getTask: (taskId) => {
+      const task = useAgentTeamStore.getState().tasks[taskId]
+      if (!task) return null
+      return {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        description: task.description,
+        comments: (task.comments ?? []).map((c) => ({
+          authorName: c.authorName,
+          text: c.text,
+          createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
+        })),
+      }
+    },
+    searchTwinKnowledge: async (input) => {
+      const state = useAgentTeamStore.getState()
+      const team = state.teams[input.teamId]
+      // Authorized set = team-level knowledge twins ∪ every member's bound twin.
+      const memberTwinIds = Object.values(state.teammates)
+        .filter((t) => t.teamId === input.teamId)
+        .map((t) => t.config?.twinId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+      const allowed = new Set<string>([...(team?.config.knowledgeTwinIds ?? []), ...memberTwinIds])
+      if (allowed.size === 0) {
+        return {
+          ok: false,
+          error: "no digital-employee knowledge sources are configured for this team",
+        }
+      }
+      let target = input.twinId?.trim()
+      if (target && !allowed.has(target)) {
+        return {
+          ok: false,
+          error: `twin "${target}" is not an authorized knowledge source for this team`,
+        }
+      }
+      if (!target) target = [...allowed][0]
+      const { tryBuildTwinDeps } = await import("@/lib/twin/runtime/build-deps")
+      const twinDeps = await tryBuildTwinDeps()
+      if (!twinDeps) {
+        return {
+          ok: false,
+          error: "the twin runtime is not configured (no embedding key / vector store)",
+        }
+      }
+      const { searchTwinKnowledge: runSearch } = await import("@/lib/ai/agent/team/twin-context")
+      const res = await runSearch({
+        twinId: target,
+        query: input.query,
+        ...(typeof input.topK === "number" ? { topK: input.topK } : {}),
+        twinDeps,
+      })
+      return { ok: true, twinId: target, hits: res.hits }
+    },
   }
 }
 
@@ -328,6 +567,19 @@ export async function runTeamBuiltinTool(
         const content = asString(args.content).trim()
         if (!content) return "Error: team_send_message requires non-empty `content`."
         const to = asString(args.to).trim()
+        // Anti-storm guard: drop idle/ack-only chatter, duplicates, ping-pong, and
+        // rate-floods before they reach the mailbox. The store is the source of truth
+        // for the recent-message window. result_share deliverables never come here.
+        const decision = canSendMessage({
+          senderId: caller.teammateId,
+          ...(to ? { recipientId: to } : {}),
+          content,
+          now: Date.now(),
+          recentMessages: d.recentMessages(caller.teamId),
+        })
+        if (!decision.allow) {
+          return describeSuppressedMessage(decision.reason as Exclude<typeof decision.reason, "ok">)
+        }
         d.addMessage({
           teamId: caller.teamId,
           senderId: caller.teammateId,
@@ -396,8 +648,16 @@ export async function runTeamBuiltinTool(
       }
       case TEAM_TOOL_NAMES.delegate: {
         const target = asString(args.target)
-        if (target !== "background" && target !== "external" && target !== "team") {
-          return "Error: team_delegate `target` must be background | external | team."
+        if (
+          target !== "background" &&
+          target !== "external" &&
+          target !== "team" &&
+          target !== "twin"
+        ) {
+          return "Error: team_delegate `target` must be background | external | team | twin."
+        }
+        if (target === "twin" && !asString(args.twinId).trim()) {
+          return "Error: team_delegate target=twin requires a `twinId`."
         }
         const reason = asString(args.reason).trim() || "delegated by teammate"
         const rec = d.delegate({
@@ -409,12 +669,61 @@ export async function runTeamBuiltinTool(
           ...(typeof args.systemPrompt === "string" ? { systemPrompt: args.systemPrompt } : {}),
           ...(typeof args.targetAgentId === "string" ? { targetAgentId: args.targetAgentId } : {}),
           ...(typeof args.targetTeamId === "string" ? { targetTeamId: args.targetTeamId } : {}),
+          ...(typeof args.twinId === "string" ? { twinId: args.twinId } : {}),
           ...(typeof args.ultracode === "boolean" ? { ultracode: args.ultracode } : {}),
         })
         return `Delegated to ${target} (id=${rec.id}, status=${rec.status}).`
       }
       case TEAM_TOOL_NAMES.listMembers: {
         return d.listMembers(caller.teamId)
+      }
+      case TEAM_TOOL_NAMES.addTaskComment: {
+        const taskId = asString(args.taskId).trim()
+        const content = asString(args.content).trim()
+        if (!taskId) return "Error: task_add_comment requires a `taskId`."
+        if (!content) return "Error: task_add_comment requires non-empty `content`."
+        const attachments = Array.isArray(args.attachments)
+          ? args.attachments
+              .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
+              .map((a): { name: string; kind: "artifact" | "file" | "link"; ref: string } => ({
+                name: asString(a.name).trim() || "attachment",
+                kind: a.kind === "artifact" || a.kind === "link" ? a.kind : "file",
+                ref: asString(a.ref).trim(),
+              }))
+              .filter((a) => a.ref)
+          : undefined
+        const res = d.addTaskComment({
+          taskId,
+          authorId: caller.teammateId,
+          text: content,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        })
+        return res
+          ? `Comment added to ${taskId} (id=${res.id}).`
+          : `Error: could not add comment — task ${taskId} not found.`
+      }
+      case TEAM_TOOL_NAMES.getTask: {
+        const taskId = asString(args.taskId).trim()
+        if (!taskId) return "Error: task_get requires a `taskId`."
+        const task = d.getTask(taskId)
+        return task ?? `Error: task ${taskId} not found.`
+      }
+      case TEAM_TOOL_NAMES.twinKnowledgeSearch: {
+        const query = asString(args.query).trim()
+        if (!query) return "Error: twin_knowledge_search requires a non-empty `query`."
+        const twinId = asString(args.twinId).trim()
+        const topKRaw = Number(args.topK)
+        const res = await d.searchTwinKnowledge({
+          teamId: caller.teamId,
+          query,
+          ...(twinId ? { twinId } : {}),
+          ...(Number.isInteger(topKRaw) && topKRaw > 0 ? { topK: topKRaw } : {}),
+        })
+        if (!res.ok) return `Error: ${res.error}`
+        if (res.hits.length === 0) {
+          return `No knowledge found in twin "${res.twinId}" for that query.`
+        }
+        return { twinId: res.twinId, hits: res.hits }
       }
       /* istanbul ignore next -- unreachable: isTeamBuiltinTool() filters non-team names before the switch */
       default:

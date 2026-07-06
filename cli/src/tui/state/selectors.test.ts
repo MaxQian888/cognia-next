@@ -12,6 +12,7 @@ import {
   isBusy,
   lastAssistantText,
   lastCodeBlock,
+  lastToolFilePath,
   lastToolResultText,
   lastUserText,
   nthAssistantText,
@@ -95,6 +96,32 @@ describe("selectors", () => {
     const cells: Cell[] = [{ id: "1", kind: "assistant", raw: "plain prose only" }]
     expect(lastCodeBlock({ ...base(), cells })).toBeNull()
     expect(lastCodeBlock(base())).toBeNull()
+  })
+
+  it("lastToolFilePath finds the newest file tool, skipping command tools", () => {
+    const readTool: ToolCell = {
+      id: "t1",
+      kind: "tool",
+      callKey: "k1",
+      toolName: "read",
+      input: { file_path: "/x/a.ts", offset: 7 },
+      status: "done",
+      collapsed: true,
+    }
+    const bashTool: ToolCell = {
+      id: "t2",
+      kind: "tool",
+      callKey: "k2",
+      toolName: "bash",
+      input: { command: "ls" },
+      status: "done",
+      collapsed: true,
+    }
+    expect(lastToolFilePath({ ...base(), cells: [readTool, bashTool] })).toEqual({
+      path: "/x/a.ts",
+      line: 7,
+    })
+    expect(lastToolFilePath(base())).toBeNull()
   })
 
   it("lastToolResultText returns strings verbatim and other shapes as JSON", () => {

@@ -34,6 +34,8 @@ import {
   type McpServerStatus,
 } from "../../mcp/probe-mcp-server"
 import { probeMcpTools, type McpToolInfo } from "../../mcp/probe-mcp-tools"
+import { type McpProbeCache, toCacheEntry } from "./mcp-cache"
+import { formatServerStatusSummary } from "./mcp-log-model"
 import { openDocument } from "./shared"
 import { buildPromptsDocument, buildResourcesDocument, buildToolsDocument } from "./tool-doc"
 import type { TuiAction } from "../state/types"
@@ -64,6 +66,13 @@ export interface McpDeps {
   /** Remove a server from `~/.cognia/mcp.json`. Returns false when the server
    * isn't user-owned (project `.mcp.json` / plugin). Injected in tests. */
   removeServer?: (name: string) => boolean
+  /** Shared probe cache (created once at App startup). When present, the panel
+   * and tool list render from the last probe instead of re-connecting on every
+   * open; only reconnect/enable/add re-probe. Absent in unit tests that assert
+   * the raw probe behaviour, and in the command-path deps. */
+  probeCache?: McpProbeCache
+  /** Injected clock (for the cache's `probedAt` stamp). Defaults to Date.now. */
+  now?: () => number
 }
 
 /** Flag keys consumed by `/mcp add` itself; everything else is a preset field. */
@@ -154,42 +163,159 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
     })
     return
   }
+  const cache = deps.probeCache
   const enabledServers = servers.filter((s) => s.enabled)
+  // Probe servers we have no cached result for, PLUS any cached as `failed` — a
+  // warmed cache (from the startup warm or a prior open) makes re-opening `/mcp`
+  // instant for healthy servers, but a boot-time transient failure must NOT
+  // stick: re-probe it on open so a recovered server can flip to `connected`
+  // instead of requiring a manual reconnect.
+  const toProbe = enabledServers.filter((s) => {
+    const cached = cache?.get(s.name)
+    return !cached || cached.status === "failed"
+  })
+  const toProbeNames = new Set(toProbe.map((s) => s.name))
   deps.dispatch({
     type: "OVERLAY_OPEN",
     overlay: {
       kind: "mcp",
-      probing: enabledServers.length > 0,
-      servers: servers.map((s) => ({
-        name: s.name,
-        transport: s.transport,
-        enabled: s.enabled,
-        status: s.enabled ? ("pending" as const) : ("disabled" as const),
-      })),
+      probing: toProbe.length > 0,
+      servers: servers.map((s) => {
+        const cached = s.enabled ? cache?.get(s.name) : undefined
+        // A server being re-probed shows `pending` (not its stale `failed`).
+        const status: McpServerStatus | "pending" = !s.enabled
+          ? "disabled"
+          : toProbeNames.has(s.name)
+            ? "pending"
+            : (cached?.status ?? "pending")
+        return {
+          name: s.name,
+          transport: s.transport,
+          enabled: s.enabled,
+          status,
+          ...(cached ? { toolCount: cached.toolCount } : {}),
+        }
+      }),
     },
   })
-  if (enabledServers.length === 0) return
+  if (toProbe.length === 0) return
   const probe = deps.probeServer ?? defaultProbeServer(deps.home)
-  let remaining = enabledServers.length
+  const now = deps.now ?? Date.now
+  let remaining = toProbe.length
   await Promise.all(
-    enabledServers.map((s) =>
+    toProbe.map((s) =>
       probe(s, { statusOnly: true })
         .then(
-          (r) => ({ status: r.status, error: r.error, toolCount: r.tools.length }),
+          (r) => ({
+            status: r.status,
+            error: r.error,
+            tools: r.tools,
+            resources: r.resources,
+            prompts: r.prompts,
+          }),
           (e: unknown) => ({
             status: "failed" as McpServerStatus,
             error: e instanceof Error ? e.message : String(e),
-            toolCount: undefined as number | undefined,
+            tools: [] as McpToolInfo[],
+            resources: [],
+            prompts: [],
           })
         )
-        .then((patch) => {
+        .then((result) => {
+          cache?.set(s.name, toCacheEntry(result, now()))
           remaining -= 1
           deps.dispatch({
             type: "MCP_STATUS_PATCH",
             name: s.name,
-            patch,
+            patch: { status: result.status, error: result.error, toolCount: result.tools.length },
             doneProbing: remaining === 0,
           })
+        })
+    )
+  )
+}
+
+/**
+ * `/mcp logs` — open the captured MCP log panel. Rows render from the live
+ * `state.mcpLogs` buffer (fed by the sidecar's `mcp_log` + generic `log`
+ * stream); this just opens the overlay with a snapshot of each server's status
+ * (from the warmed probe cache) for the header. Never probes — the panel is a
+ * pure view over already-captured output.
+ */
+export function mcpLogsPanel(deps: McpDeps): void {
+  const cache = deps.probeCache
+  const servers = loadServers(deps).map((s) => ({
+    name: s.name,
+    status: !s.enabled ? "disabled" : (cache?.get(s.name)?.status ?? "pending"),
+  }))
+  const statusSummary = formatServerStatusSummary(servers)
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: { kind: "mcpLogs", ...(statusSummary ? { statusSummary } : {}) },
+  })
+}
+
+/**
+ * Boot-time MCP warm + auth check. Probes enabled servers once at startup and,
+ * when a shared {@link McpProbeCache} is supplied (the App path), seeds it with
+ * every server's status + advertised tools — so the first `/mcp` open and the
+ * per-tool panel render instantly instead of re-connecting ("load MCP by default
+ * on startup"). It still emits the proactive NOTICE for each remote server that
+ * needs authorization (the hint Claude Code shows), guiding the user to
+ * `/mcp auth <name>`. Stdio servers never need auth, so they never trigger a
+ * notice; connected / failed probes stay silent to avoid startup noise.
+ *
+ * Without a cache (the legacy signature used by the startup-notice unit tests)
+ * only remote servers are probed — stdio servers are skipped entirely, so no
+ * child process is spawned just for an auth check that can never apply.
+ */
+export async function mcpAuthStartupNotices(deps: McpDeps): Promise<void> {
+  const cache = deps.probeCache
+  const enabled = loadServers(deps).filter((s) => s.enabled)
+  // With a cache, warm EVERY enabled server (stdio included). Without one, keep
+  // the old behaviour: only remote servers matter for the auth notice.
+  const targets = cache ? enabled : enabled.filter((s) => s.transport !== "stdio")
+  if (targets.length === 0) return
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  const now = deps.now ?? Date.now
+  await Promise.all(
+    targets.map((s) =>
+      probe(s, { statusOnly: true })
+        .then(
+          (r) => ({
+            status: r.status,
+            error: r.error,
+            tools: r.tools,
+            resources: r.resources,
+            prompts: r.prompts,
+          }),
+          (e: unknown) => ({
+            status: "failed" as McpServerStatus,
+            error: e instanceof Error ? e.message : String(e),
+            tools: [] as McpToolInfo[],
+            resources: [],
+            prompts: [],
+          })
+        )
+        .then((result) => {
+          cache?.set(s.name, toCacheEntry(result, now()))
+          if (result.status === "needs_auth" && s.transport !== "stdio") {
+            deps.dispatch({
+              type: "NOTICE",
+              message: `⚠ MCP server "${s.name}" needs authorization — run /mcp auth ${s.name}`,
+            })
+          } else if (result.status === "failed") {
+            // A server that fails to load used to be visible only if the user
+            // opened /mcp. Surface it as a transient warn toast so a broken MCP
+            // config isn't silently swallowed at startup (probed once per server,
+            // so no de-dup needed).
+            deps.dispatch({
+              type: "TOAST_PUSH",
+              severity: "warn",
+              message: `MCP server "${s.name}" failed to load`,
+              hint: "Open /mcp to see the error.",
+            })
+          }
         })
     )
   )
@@ -205,14 +331,31 @@ export async function mcpReconnect(name: string, deps: McpDeps): Promise<void> {
   }
   deps.dispatch({ type: "MCP_STATUS_PATCH", name, patch: { status: "pending" } })
   const probe = deps.probeServer ?? defaultProbeServer(deps.home)
-  const patch = await probe(server, { statusOnly: true }).then(
-    (r) => ({ status: r.status, error: r.error, toolCount: r.tools.length }),
+  const now = deps.now ?? Date.now
+  const result = await probe(server, { statusOnly: true }).then(
+    (r) => ({
+      status: r.status,
+      error: r.error,
+      tools: r.tools,
+      resources: r.resources,
+      prompts: r.prompts,
+    }),
     (e: unknown) => ({
       status: "failed" as McpServerStatus,
       error: e instanceof Error ? e.message : String(e),
+      tools: [] as McpToolInfo[],
+      resources: [],
+      prompts: [],
     })
   )
-  deps.dispatch({ type: "MCP_STATUS_PATCH", name, patch })
+  // A reconnect is the one action that always re-probes — refresh the cache so
+  // the panel reflects the fresh status and a later re-open stays instant.
+  deps.probeCache?.set(name, toCacheEntry(result, now()))
+  deps.dispatch({
+    type: "MCP_STATUS_PATCH",
+    name,
+    patch: { status: result.status, error: result.error, toolCount: result.tools.length },
+  })
 }
 
 /**
@@ -229,6 +372,9 @@ export async function mcpToggleServerInPanel(
   if (!server) return null
   const disable = server.enabled
   ;(deps.setServerDisabled ?? ((n, d) => setDisabled(deps.home, n, d)))(name, disable)
+  // Drop the stale cache entry on disable so a later re-enable re-probes; the
+  // enable path re-probes immediately (below), refreshing the cache itself.
+  if (disable) deps.probeCache?.clear(name)
   deps.dispatch({
     type: "MCP_STATUS_PATCH",
     name,
@@ -249,13 +395,37 @@ export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<vo
     deps.dispatch({ type: "NOTICE", message: `MCP server "${name}" not found.` })
     return
   }
+  const cache = deps.probeCache
+  // The panel/startup probe already captured this server's tools (a status-only
+  // probe still lists tools) — reuse them so drilling in doesn't re-connect.
+  const cached = cache?.get(name)
   let tools: McpToolInfo[]
-  try {
-    tools = await (deps.probe ?? probeMcpTools)(server)
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
-    deps.dispatch({ type: "NOTICE", message: `Could not list tools for "${name}": ${reason}` })
-    return
+  if (cached && cached.status === "connected" && cached.tools.length > 0) {
+    tools = cached.tools
+  } else {
+    try {
+      tools = await (deps.probe ?? probeMcpTools)(server)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      deps.dispatch({ type: "NOTICE", message: `Could not list tools for "${name}": ${reason}` })
+      return
+    }
+    // Fold the freshly-listed tools into the cache so a later open is instant.
+    // A successful tool probe means the server is reachable, so record it as
+    // `connected` and drop any stale error — otherwise a recovered server that
+    // was previously cached as `failed` would keep its failed badge and re-probe
+    // on every open (the connected fast-path above only hits on `connected`).
+    if (cache) {
+      const now = deps.now ?? Date.now
+      cache.set(name, {
+        status: "connected",
+        tools,
+        resources: cached?.resources ?? [],
+        prompts: cached?.prompts ?? [],
+        toolCount: tools.length,
+        probedAt: now(),
+      })
+    }
   }
   if (tools.length === 0) {
     deps.dispatch({ type: "NOTICE", message: `"${name}" advertises no tools.` })
@@ -532,6 +702,9 @@ export function mcpToggle(name: string, deps: McpDeps): void {
   }
   const disable = server.enabled // currently on → disable
   ;(deps.setServerDisabled ?? ((n, d) => setDisabled(deps.home, n, d)))(name, disable)
+  // The server's status changed — drop its cached probe so the next `/mcp` open
+  // re-probes it rather than showing a stale badge.
+  deps.probeCache?.clear(name)
   deps.dispatch({
     type: "NOTICE",
     message: `MCP server "${name}" ${disable ? "disabled" : "enabled"}.`,
@@ -540,6 +713,7 @@ export function mcpToggle(name: string, deps: McpDeps): void {
 
 export function mcpSetEnabled(name: string, enabled: boolean, deps: McpDeps): void {
   ;(deps.setServerDisabled ?? ((n, d) => setDisabled(deps.home, n, d)))(name, !enabled)
+  deps.probeCache?.clear(name)
   deps.dispatch({
     type: "NOTICE",
     message: `MCP server "${name}" ${enabled ? "enabled" : "disabled"}.`,
@@ -593,6 +767,7 @@ export async function mcpRemove(name: string, deps: McpDeps): Promise<void> {
     return
   }
   const removed = (deps.removeServer ?? defaultRemoveServer(deps.home))(key)
+  if (removed) deps.probeCache?.clear(key)
   deps.dispatch({
     type: "NOTICE",
     message: removed
@@ -668,6 +843,7 @@ async function mcpAddFromPreset(flags: Record<string, string>, deps: McpDeps): P
   const config = applyPresetFields(preset, values)
   const name = flags.name?.trim() || preset.id
   ;(deps.addServer ?? defaultAddServer(deps.home))(name, preset.transport, config)
+  deps.probeCache?.clear(name)
   deps.dispatch({
     type: "NOTICE",
     message: `Added MCP server "${name}" from preset "${preset.id}" (${preset.transport}). Applies on the next turn.`,
@@ -700,6 +876,7 @@ export async function mcpAdd(args: string, deps: McpDeps): Promise<void> {
       ? { command: flags.command, ...(flags.args ? { args: flags.args.split(/\s+/) } : {}) }
       : { url: flags.url }
   ;(deps.addServer ?? defaultAddServer(deps.home))(name, transport, config)
+  deps.probeCache?.clear(name)
   deps.dispatch({
     type: "NOTICE",
     message: `Added MCP server "${name}" (${transport}). Applies on the next turn.`,

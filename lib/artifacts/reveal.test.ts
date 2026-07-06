@@ -1,5 +1,6 @@
 import { revealArtifactInWorkspace } from "./reveal"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 
 afterEach(() => {
   // Reset the store between tests; persist hydration is namespace-scoped
@@ -10,6 +11,7 @@ afterEach(() => {
     panelOpen: false,
     panelView: "artifact",
   })
+  useArtifactDockLayoutStore.getState().resetLayout()
 })
 
 describe("revealArtifactInWorkspace", () => {
@@ -33,5 +35,21 @@ describe("revealArtifactInWorkspace", () => {
     expect(useArtifactStore.getState().activeArtifactId).toBe(artifact.id)
     expect(useArtifactStore.getState().panelOpen).toBe(true)
     expect(useArtifactStore.getState().panelView).toBe("artifact")
+  })
+
+  it("expands the docked panel and opens the mobile Sheet fallback", () => {
+    const artifact = useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "console.log(1)",
+    })
+    useArtifactDockLayoutStore.getState().setDockCollapsed(true)
+    useArtifactDockLayoutStore.getState().setMobileSheetOpen(false)
+
+    revealArtifactInWorkspace(artifact.id)
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
   })
 })

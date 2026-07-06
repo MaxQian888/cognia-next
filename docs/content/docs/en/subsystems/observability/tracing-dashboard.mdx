@@ -193,6 +193,27 @@ The dashboard uses the `observability` namespace (`observability.panels.*`, `obs
 `observability.toolbar.*`, `observability.range.*`, `observability.filters.*`,
 `observability.waterfall.*`). The guild-rail nav label is `observability`.
 
+## Interactions & Settings
+
+Beyond the read-only panels, the dashboard is interactive:
+
+- **Click-to-filter** — clicking a donut slice/legend row or a bar toggles that value in the
+  variable filters (`toggleFilterValue` in `lib/observability/filters.ts`), so breakdowns cross-filter
+  the whole dashboard. Selected values are highlighted; a per-panel measure toggle
+  (`BreakdownMetricToggle`) switches spans/cost/errors (`breakdownValue` + `topByMetric`).
+- **Legend toggle** — multi-series time-series panels (latency percentiles, token throughput) get a
+  clickable legend that hides/shows individual series.
+- **Settings drawer** (`ObservabilitySettingsSheet`, gear button) — per-metric warn/crit threshold
+  overrides (`mergeThresholds`, persisted in the store), default range + refresh, panel show/hide
+  (`hiddenPanels`), and data management (span count + `pruneOlderThan` retention + `clearAllSpans`).
+- **Export / import** (`ExportMenu`) — recent traces → CSV (`tracesToCsv`), the whole dashboard config
+  → JSON (`serializeDashboardConfig`/`parseDashboardConfig`), via the cross-platform `saveExport`.
+- **Manual refresh + last-updated** (`RefreshStatus` over `useRefreshTick`'s `{ tick, lastUpdated, refresh }`).
+- **Deep links** — the active range + filters mirror to the URL (`useObservabilityUrlSync` over
+  `lib/observability/url-state.ts`), so a `/observability?range=6h&f=…` link reproduces the view.
+- **Keyboard shortcuts** (`useObservabilityHotkeys`) — `e` edit · `r` refresh · `f` focus filters · `s` settings.
+- **Empty state** (`ObservabilityEmptyState`) when the window holds no spans.
+
 ## Where to Start
 
 | Goal | File |
@@ -200,4 +221,7 @@ The dashboard uses the `observability` namespace (`observability.panels.*`, `obs
 | Add a panel | add a `PanelDef` to `PANELS` in `components/observability/panel-registry.ts` + a `defaultLayouts` slot |
 | Add a metric/series | `lib/observability/aggregate-series.ts` + `TimeSeriesPanel` config |
 | Add a breakdown dimension | `Dimension` union + `dimValue` in `lib/observability/breakdown.ts` + the filter bar |
-| Tune thresholds | `DEFAULT_THRESHOLDS` in `lib/observability/thresholds.ts` |
+| Tune default thresholds | `DEFAULT_THRESHOLDS` in `lib/observability/thresholds.ts` (users override them in the settings drawer) |
+| Change the settings drawer | `components/observability/observability-settings-sheet.tsx` + the store slices in `stores/observability/observability-store.ts` |
+| Change what deep-links carry | `lib/observability/url-state.ts` |
+| Change the export format | `lib/observability/export-csv.ts` / `lib/observability/dashboard-config.ts` |

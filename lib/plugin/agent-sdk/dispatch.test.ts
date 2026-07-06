@@ -39,6 +39,11 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
   createAgentFromPreset: (...a: unknown[]) => externalCreatePreset(...a),
   isFromPreset: (...a: unknown[]) => externalIsFromPreset(...a),
 }))
+const externalSupported = jest.fn<boolean, unknown[]>(() => true)
+jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
+  __esModule: true,
+  supportsExternalAgents: (...a: unknown[]) => externalSupported(...a),
+}))
 
 const mockExecute = executeAgent as jest.MockedFunction<typeof executeAgent>
 const mockGetSubagent = getSubagent as jest.MockedFunction<typeof getSubagent>
@@ -69,6 +74,7 @@ beforeEach(() => {
   mockTeam.start.mockResolvedValue(undefined)
   externalGetAllAgents.mockReturnValue([])
   externalIsFromPreset.mockReturnValue(null)
+  externalSupported.mockReturnValue(true)
 })
 
 describe("dispatchSubagent", () => {
@@ -76,6 +82,7 @@ describe("dispatchSubagent", () => {
     const res = await dispatchSubagent(subagent, "review this PR")
     expect(mockExecute).toHaveBeenCalledWith("review this PR", {
       toolsEnabled: true,
+      isDispatchedSubagent: true,
       systemPrompt: "You review code.",
       model: "sonnet",
       allowedTools: ["Read", "Grep"],
@@ -88,6 +95,16 @@ describe("dispatchSubagent", () => {
       finishReason: "stop",
     })
     expect(res.runId).toEqual(expect.any(String))
+  })
+
+  it("forwards a cross-provider def.provider to executeAgent", async () => {
+    await dispatchSubagent({ ...subagent, provider: "anthropic" }, "go")
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({ provider: "anthropic" })
+  })
+
+  it("omits provider when the def names none", async () => {
+    await dispatchSubagent(subagent, "go")
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("provider")
   })
 
   it("resolves a registered subagent by id", async () => {
@@ -123,6 +140,20 @@ describe("dispatchSubagent", () => {
   it("omits permissionCeiling when the parent set none", async () => {
     await dispatchSubagent(subagent, "go")
     expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("permissionCeiling")
+  })
+
+  it("always marks the run as a dispatched subagent (leaf-gate signal)", async () => {
+    // Leaf def (no allowNesting): flagged, and no dispatchContext — build-options
+    // withholds dispatch_agent from it instead of treating it as top-level.
+    await dispatchSubagent(subagent, "go")
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({ isDispatchedSubagent: true })
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("dispatchContext")
+    // Nesting def: flagged AND carries a dispatchContext for its own children.
+    await dispatchSubagent({ ...subagent, allowNesting: true }, "go", { _maxDepth: 2 })
+    expect(mockExecute.mock.calls[1][1]).toMatchObject({
+      isDispatchedSubagent: true,
+      dispatchContext: expect.objectContaining({ depth: 1, maxDepth: 2 }),
+    })
   })
 
   it("forwards the live-progress _onEvent sink to executeAgent as onEvent", async () => {
@@ -256,6 +287,40 @@ describe("dispatchSubagent — external backing (A2)", () => {
     externalExecute.mockResolvedValue({ success: false, error: "connect refused" })
     await expect(dispatchSubagent(externalDef, "go")).rejects.toThrow("connect refused")
   })
+
+  it("fails loudly (never silently) when external agents are unsupported", async () => {
+    externalSupported.mockReturnValue(false)
+    await expect(dispatchSubagent(externalDef, "go")).rejects.toThrow(/desktop app/)
+    expect(externalExecute).not.toHaveBeenCalled()
+    expect(mockExecute).not.toHaveBeenCalled() // did NOT fall back to the built-in engine
+  })
+
+  it("derives the external permission mode from the parent ceiling", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-4", metadata: { preset: "claude-code" } })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    await dispatchSubagent(externalDef, "go", {
+      _permissionCeiling: { permissionMode: "plan" },
+    })
+    expect(externalExecute.mock.calls[0][2]).toMatchObject({ permissionMode: "plan" })
+  })
+
+  it("streams external protocol events into _onEvent as CaptureStreamEvents", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-5", metadata: { preset: "claude-code" } })
+    externalExecute.mockImplementation(async (_id: unknown, _prompt: unknown, opts: unknown) => {
+      const onEvent = (opts as { onEvent?: (e: unknown) => void }).onEvent
+      onEvent?.({
+        type: "message_delta",
+        timestamp: new Date(),
+        delta: { type: "text", text: "hi" },
+      })
+      onEvent?.({ type: "done", timestamp: new Date(), success: true })
+      return { success: true, finalResponse: "hi" }
+    })
+    const sink = jest.fn()
+    await dispatchSubagent(externalDef, "go", { _onEvent: sink })
+    expect(sink).toHaveBeenCalledWith({ type: "text-delta", delta: "hi" })
+    expect(sink).toHaveBeenCalledTimes(1) // `done` produces no capture event
+  })
 })
 
 describe("runTeam", () => {
@@ -265,7 +330,7 @@ describe("runTeam", () => {
       status: "completed",
     })
     const res = await runTeam("t1", { ultracode: true })
-    expect(mockTeam.start).toHaveBeenCalledWith("t1", { ultracode: true })
+    expect(mockTeam.start).toHaveBeenCalledWith("t1", { origin: "plugin", ultracode: true })
     expect(res).toEqual({ teamId: "t1", status: "completed" })
   })
 
@@ -280,7 +345,7 @@ describe("runTeam", () => {
     const config = { id: "adhoc", name: "Ad-hoc" } as never
     const res = await runTeam(config)
     expect(mockTeam.create).toHaveBeenCalledWith(config)
-    expect(mockTeam.start).toHaveBeenCalledWith("adhoc", {})
+    expect(mockTeam.start).toHaveBeenCalledWith("adhoc", { origin: "plugin" })
     expect(res.teamId).toBe("adhoc")
   })
 

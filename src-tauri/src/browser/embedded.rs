@@ -208,12 +208,88 @@ async fn eval_embed_with_result(app: &AppHandle, js: &str) -> Result<String, Str
 }
 
 /// Snapshot the embedded page's accessibility tree (JSON envelope from
-/// `__cogniaSnapshot`).
+/// `__cogniaSnapshot`). `args` is an optional JSON options string
+/// (`{"includeText":true}`) forwarded verbatim to the page helper; absent → the
+/// lean default (interactive nodes only).
 #[tauri::command]
-pub async fn browser_embed_snapshot(app: AppHandle) -> Result<String, String> {
+pub async fn browser_embed_snapshot(
+    app: AppHandle,
+    args: Option<String>,
+) -> Result<String, String> {
     #[cfg(desktop)]
     {
-        eval_embed_with_result(&app, "window.__cogniaSnapshot()").await
+        let opts = args.unwrap_or_else(|| "{}".to_string());
+        let call = format!("window.__cogniaSnapshot({})", js_string(&opts)?);
+        eval_embed_with_result(&app, &call).await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, args);
+        Err("desktop only".to_string())
+    }
+}
+
+/// Cap on the serialized result of `browser_embed_evaluate` so a runaway
+/// expression (e.g. `document.documentElement.outerHTML` on a huge page) can't
+/// flood the model context.
+#[cfg(desktop)]
+const MAX_EVAL_RESULT: usize = 200_000;
+
+#[cfg(desktop)]
+fn truncate_eval(mut raw: String) -> String {
+    if raw.len() > MAX_EVAL_RESULT {
+        raw.truncate(MAX_EVAL_RESULT);
+        raw.push_str("…(truncated)");
+    }
+    raw
+}
+
+/// Evaluate a JS *expression* in the embedded page and return a JSON envelope
+/// `{"ok":true,"value":…}` / `{"ok":false,"error":…}`. The expression is wrapped
+/// so its value is JSON-serialized and exceptions become values (never crashing
+/// the eval bridge). Trust-tier gating lives in the calling plugin tool — the
+/// embedded engine only ever evaluates against the page it was told to.
+#[tauri::command]
+pub async fn browser_embed_evaluate(app: AppHandle, expr: String) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        let wrapped = format!(
+            "(function(){{try{{return JSON.stringify({{ok:true,value:({})}});}}catch(e){{return JSON.stringify({{ok:false,error:String(e)}});}}}})()",
+            expr
+        );
+        let raw = eval_embed_with_result(&app, &wrapped).await?;
+        Ok(truncate_eval(raw))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, expr);
+        Err("desktop only".to_string())
+    }
+}
+
+/// Whether the embedded page currently has an element matching `selector`.
+#[tauri::command]
+pub async fn browser_embed_has_selector(app: AppHandle, selector: String) -> Result<bool, String> {
+    #[cfg(desktop)]
+    {
+        let call = format!("window.__cogniaHasSelector({})", js_string(&selector)?);
+        let raw = eval_embed_with_result(&app, &call).await?;
+        Ok(raw.trim() == "true")
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, selector);
+        Err("desktop only".to_string())
+    }
+}
+
+/// In-flight + completed request counters (JSON `{"pending":n,"completed":m}`)
+/// used to detect network idle.
+#[tauri::command]
+pub async fn browser_embed_network_state(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        eval_embed_with_result(&app, "window.__cogniaNetworkState()").await
     }
     #[cfg(not(desktop))]
     {

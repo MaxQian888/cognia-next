@@ -54,10 +54,18 @@ import {
 import { EvalRunConfig, EvalGateConfig } from "./forms/eval-forms"
 import {
   AgentTurnConfig,
+  ApprovalRequestConfig,
+  MobileCameraConfig,
+  MobileScanBarcodeConfig,
+  MobileLocationConfig,
+  MobileShareConfig,
+  MobileNotifyConfig,
   AiClassifyConfig,
+  AiCouncilConfig,
   AiEmbedConfig,
   AiExtractConfig,
   AiPromptConfig,
+  EnsembleConfig,
   BranchConfig,
   CatchConfig,
   CharacterCreateConfig,
@@ -70,6 +78,8 @@ import {
   ConnectorSendConfig,
   CronConfig,
   DesktopEventTriggerConfig,
+  PetEventTriggerConfig,
+  PetInteractConfig,
   GenericJsonConfig,
   GoalAnalyticsConfig,
   GoalCompletedTriggerConfig,
@@ -140,11 +150,13 @@ import {
   TeamUpdateConfig,
   TemplateConfig,
   TransformConfig,
+  AggregateConfig,
   TwinIngestConfig,
   TwinRagConfig,
   WaitConfig,
   WebhookRespondConfig,
   WebhookTriggerConfig,
+  OutputConfig,
 } from "./forms"
 
 export type NodeConfigComponent = ComponentType<{
@@ -164,12 +176,22 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "trigger.webhook": WebhookTriggerConfig,
   "trigger.team": TeamTriggerConfig,
   "trigger.desktop.event": DesktopEventTriggerConfig,
+  "trigger.pet.event": PetEventTriggerConfig,
   // Actions: characters
   "action.character.send": CharacterSendConfig,
   "action.character.create": CharacterCreateConfig,
   "action.character.update": CharacterUpdateConfig,
   // Actions: agent
   "action.agent.turn": AgentTurnConfig,
+  "action.pet.interact": PetInteractConfig,
+  // Actions: human-in-the-loop (ADR 0061 P2)
+  "action.approval.request": ApprovalRequestConfig,
+  // Actions: remote device steps (ADR 0061 P3)
+  "action.mobile.camera": MobileCameraConfig,
+  "action.mobile.scanBarcode": MobileScanBarcodeConfig,
+  "action.mobile.location": MobileLocationConfig,
+  "action.mobile.share": MobileShareConfig,
+  "action.mobile.notify": MobileNotifyConfig,
   // Actions: goals
   "action.goal.create": GoalCreateConfig,
   "action.goal.get": GoalTransitionConfig,
@@ -281,6 +303,8 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "ai.classify": AiClassifyConfig,
   "ai.extract": AiExtractConfig,
   "ai.embed": AiEmbedConfig,
+  "ai.council": AiCouncilConfig,
+  "ai.ensemble": EnsembleConfig,
   // Flow
   "flow.branch": BranchConfig,
   "flow.switch": SwitchConfig,
@@ -295,11 +319,13 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "flow.catch": CatchConfig,
   // Data
   "data.transform": TransformConfig,
+  "data.aggregate": AggregateConfig,
   "data.code": CodeConfig,
   "data.template": TemplateConfig,
   // I/O
   "io.http": HttpRequestConfig,
   "io.webhook.respond": WebhookRespondConfig,
+  "io.output": OutputConfig,
   // Annotations
   "annotation.note": NoteConfig,
   "annotation.group": GroupAnnotationConfig,

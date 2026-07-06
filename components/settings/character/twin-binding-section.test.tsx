@@ -34,6 +34,12 @@ jest.mock("dexie-react-hooks", () => ({
 jest.mock("@/lib/db/characters", () => ({
   listCharacters: async () => [{ id: "char_x", name: "Other character", twinId: "twin_existing" }],
 }))
+// The "pick existing" list now unions the twins registry. The synchronous
+// useLiveQuery stub above returns the default ([]) for any async query, so the
+// picker stays hidden here — we just keep the registry import resolvable.
+jest.mock("@/lib/db/twins", () => ({
+  observeTwins: async () => [{ id: "twin_existing", name: "Registry Twin" }],
+}))
 jest.mock("@/lib/db/twin-chunks", () => ({ countTwinChunksByTwin: async () => 42 }))
 jest.mock("@/lib/db/twin-profile", () => ({
   getTwinProfile: async () => ({
@@ -134,6 +140,42 @@ describe("<TwinBindingSection />", () => {
     const last = onChange.mock.calls[onChange.mock.calls.length - 1][0]
     expect(last.twinSettings.enableRag).toBe(false)
     expect(last.twinId).toBe("twin_x")
+  })
+
+  it("toggling enableCitations updates settings and reveals the style select", () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <TwinBindingSection
+        value={{ twinId: "twin_x", twinSettings: DEFAULT_TWIN_SETTINGS }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.click(screen.getByLabelText("enableCitations"))
+    expect(onChange.mock.calls.at(-1)![0].twinSettings.enableCitations).toBe(true)
+    rerender(
+      <TwinBindingSection
+        value={{
+          twinId: "twin_x",
+          twinSettings: { ...DEFAULT_TWIN_SETTINGS, enableCitations: true },
+        }}
+        onChange={onChange}
+      />
+    )
+    expect(screen.getByText("citationStyleLabel")).toBeInTheDocument()
+  })
+
+  it("toggles query expansion and corrective filter", () => {
+    const onChange = jest.fn()
+    render(
+      <TwinBindingSection
+        value={{ twinId: "twin_x", twinSettings: DEFAULT_TWIN_SETTINGS }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.click(screen.getByLabelText("enableQueryExpansion"))
+    expect(onChange.mock.calls.at(-1)![0].twinSettings.enableQueryExpansion).toBe(true)
+    fireEvent.click(screen.getByLabelText("enableCorrectiveFilter"))
+    expect(onChange.mock.calls.at(-1)![0].twinSettings.enableCorrectiveFilter).toBe(true)
   })
 
   it("unbind confirms then clears both fields", () => {

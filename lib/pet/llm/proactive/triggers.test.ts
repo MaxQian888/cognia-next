@@ -31,6 +31,43 @@ describe("evaluateEventComment", () => {
     expect(evaluateEventComment(ev("fed"))).toBeNull()
     expect(evaluateEventComment(ev("talked"))).toBeNull()
   })
+
+  describe("wisdom gate on workflowRun", () => {
+    const at = (seed: number): PetEvent => ({ source: "workflow", kind: "workflowRun", at: seed })
+
+    it("fires ~25% of runs at wisdom 0 (deterministic per seed)", () => {
+      let fired = 0
+      for (let seed = 0; seed < 100; seed++) {
+        if (evaluateEventComment(at(seed), { wisdom: 0 })) fired++
+      }
+      expect(fired).toBe(25) // rolls 0..24 pass the 25% gate
+    })
+
+    it("always fires at wisdom 100", () => {
+      for (let seed = 0; seed < 100; seed++) {
+        expect(evaluateEventComment(at(seed), { wisdom: 100 })).not.toBeNull()
+      }
+    })
+
+    it("scales the pass rate between the bounds", () => {
+      let fired = 0
+      for (let seed = 0; seed < 100; seed++) {
+        if (evaluateEventComment(at(seed), { wisdom: 50 })) fired++
+      }
+      expect(fired).toBe(63) // 25 + 75 × 0.5 = 62.5 → rolls 0..62 pass
+    })
+
+    it("keeps milestones unaffected by wisdom 0", () => {
+      expect(evaluateEventComment(ev("levelUp"), { wisdom: 0 })).not.toBeNull()
+      expect(evaluateEventComment(ev("goalComplete"), { wisdom: 0 })).not.toBeNull()
+    })
+
+    it("omitted opts = today's always-fire behavior", () => {
+      for (let seed = 0; seed < 10; seed++) {
+        expect(evaluateEventComment(at(seed))).not.toBeNull()
+      }
+    })
+  })
 })
 
 describe("evaluateIdle", () => {

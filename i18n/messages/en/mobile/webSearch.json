@@ -1,0 +1,15 @@
+{
+  "backAria": "Back to Me",
+  "enabled": "Enable web search",
+  "enabledHelp": "Lets the assistant fetch fresh results from the web.",
+  "fallback": "Fall back to free search",
+  "fallbackHelp": "If the preferred provider fails, retry with the built-in free provider.",
+  "maxResults": "Results per search",
+  "provider": "Preferred provider",
+  "providerHelp": "Which search engine to use first.",
+  "maxResultsHelp": "How many results to pull into each search call.",
+  "resultsCount": "{count, plural, one {# result} other {# results}}",
+  "sectionDescription": "Provider API keys are configured on the desktop.",
+  "sectionTitle": "Web search",
+  "title": "Web search"
+}

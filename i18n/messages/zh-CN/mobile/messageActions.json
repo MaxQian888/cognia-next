@@ -5,6 +5,7 @@
   "copySuccess": "已复制到剪贴板。",
   "description": "选择一项操作。",
   "longPressHint": "长按消息查看操作",
+  "quote": "引用",
   "share": "分享…",
   "shareDialogTitle": "分享至",
   "shareFailed": "分享失败：{message}",

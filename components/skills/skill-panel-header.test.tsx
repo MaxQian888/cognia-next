@@ -21,6 +21,12 @@ jest.mock("./skill-panel-toolbar", () => ({
   SkillPanelToolbar: () => <div data-testid="toolbar-stub" />,
 }))
 
+// Stub the preferences popover (its own test covers behavior; this keeps the
+// header test from pulling the full hooks/settings graph).
+jest.mock("./skill-preferences", () => ({
+  SkillPreferencesPopover: () => <div data-testid="prefs-stub" />,
+}))
+
 import { fireEvent, render, screen } from "@testing-library/react"
 import { useSkillsStore } from "@/stores/skills"
 import { SkillPanelHeader } from "./skill-panel-header"
@@ -89,6 +95,17 @@ describe("SkillPanelHeader", () => {
     render(<SkillPanelHeader totalCount={1} filteredCount={1} />)
     expect(document.querySelector("[data-skill-search]")).toBeNull()
     expect(screen.queryByPlaceholderText("filter.search")).not.toBeInTheDocument()
+  })
+
+  it("mounts the preferences (gear) popover", () => {
+    render(<SkillPanelHeader totalCount={1} filteredCount={1} />)
+    expect(screen.getByTestId("prefs-stub")).toBeInTheDocument()
+  })
+
+  it("keeps the preferences popover on tabs other than My Skills", () => {
+    useSkillsStore.setState({ activeTab: "analytics" } as never)
+    render(<SkillPanelHeader totalCount={1} filteredCount={1} />)
+    expect(screen.getByTestId("prefs-stub")).toBeInTheDocument()
   })
 
   it("renders the tabsSlot content when provided", () => {

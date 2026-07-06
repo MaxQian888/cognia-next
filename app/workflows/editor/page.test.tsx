@@ -10,7 +10,7 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: mockGet }),
   notFound: () => mockNotFound(),
 }))
-jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => "desktop" }))
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => false }))
 jest.mock("@/lib/db/workflows", () => ({ getWorkflow: jest.fn() }))
 jest.mock("@/components/workflow/editor/canvas", () => ({
   WorkflowEditorCanvas: ({ workflow }: { workflow: { id: string } }) => (

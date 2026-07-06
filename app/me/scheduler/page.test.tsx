@@ -359,6 +359,13 @@ describe("MobileSchedulerPage interactions", () => {
     expect(screen.getByTestId("stub-task-form")).toBeInTheDocument()
   })
 
+  it("lifts the FAB above the mobile tab bar so it doesn't occlude the bottom nav", () => {
+    render(<MobileSchedulerPage />)
+    // The h-14 (spacing.14) offset must be present so the FAB clears the fixed
+    // MobileTabBar mounted on /me/* routes.
+    expect(screen.getByTestId("stub-fab").className).toContain("spacing.14")
+  })
+
   it("calls createTask and closes the sheet on submit", async () => {
     render(<MobileSchedulerPage />)
     fireEvent.click(screen.getByTestId("stub-fab"))

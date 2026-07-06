@@ -31,7 +31,18 @@
   },
   "renameFailed": "Failed to rename workflow",
   "renamed": "Workflow renamed",
+  "run": "Run",
   "runCountBadge": "{count} runs",
+  "runDialog": {
+    "cancel": "Cancel",
+    "description": "Start this workflow now. Optionally pass a JSON payload as the trigger input.",
+    "invalidJson": "Payload must be valid JSON.",
+    "payloadLabel": "Trigger payload (optional)",
+    "payloadPlaceholder": "{ \"key\": \"value\" }",
+    "runButton": "Run workflow",
+    "title": "Run “{name}”"
+  },
+  "runStarted": "Workflow run started",
   "saveAsTemplate": "Save as template",
   "saveAsTemplateFailed": "Couldn’t save as template",
   "savedAsTemplate": "Saved as template",

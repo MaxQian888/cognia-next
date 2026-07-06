@@ -28,6 +28,7 @@ jest.mock("@/lib/db/settings", () => ({
 jest.mock("@/lib/claude/ipc", () => ({
   setApiKey: jest.fn(),
   restartSidecar: jest.fn(),
+  setProviderEnv: jest.fn(),
 }))
 
 jest.mock("@/lib/tauri", () => ({
@@ -56,6 +57,7 @@ const dbSettings = require("@/lib/db/settings") as {
 const ipc = require("@/lib/claude/ipc") as {
   setApiKey: jest.Mock
   restartSidecar: jest.Mock
+  setProviderEnv: jest.Mock
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauri = require("@/lib/tauri") as { isTauri: jest.Mock }
@@ -152,6 +154,9 @@ describe("load", () => {
         shellAdvanced: false,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
       },
       updates: { autoCheck: true },
       canvasCodeSandboxEnabled: true,
@@ -391,6 +396,9 @@ describe("setBuiltinToolEnabled", () => {
         shellAdvanced: false,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
       },
     })
     expect(useSettingsStore.getState().settings?.builtinTools.process).toBe(true)
@@ -428,6 +436,9 @@ describe("setBuiltinToolEnabled", () => {
         shellAdvanced: true,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
       },
     })
   })
@@ -501,6 +512,38 @@ describe("setWebToolsNativeOnAnthropic", () => {
       webTools: { enabled: true, nativeOnAnthropic: true },
     })
     expect(useSettingsStore.getState().settings?.webTools?.nativeOnAnthropic).toBe(true)
+  })
+})
+
+// ---- setWebToolsAllowPrivateHosts / setWebToolsAlwaysDistill ----
+
+describe("setWebToolsAllowPrivateHosts / setWebToolsAlwaysDistill", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      settings: baseSettings({ webTools: { enabled: true, nativeOnAnthropic: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+  })
+
+  it("persists allowPrivateHosts while preserving other web-tools flags", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsAllowPrivateHosts(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true, allowPrivateHosts: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.allowPrivateHosts).toBe(true)
+  })
+
+  it("persists alwaysDistill while preserving other web-tools flags", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsAlwaysDistill(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true, alwaysDistill: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.alwaysDistill).toBe(true)
   })
 })
 
@@ -621,6 +664,326 @@ describe("setApiKey", () => {
   })
 })
 
+// ---- setProviderConfig / setDefaultProvider — Anthropic sidecar restart ----
+//
+// Regression coverage for the bug where editing a built-in provider's
+// baseURL/apiKey persisted to Dexie and pushed to the Rust ApiKeyState but
+// never restarted the sidecar — so the Anthropic native dispatcher (which
+// only reads env at process spawn) kept using the stale value indefinitely.
+
+describe("setProviderConfig — anthropic env push + debounced restart", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.clearAllTimers()
+    jest.useRealTimers()
+  })
+
+  it("pushes env and schedules a debounced restart when editing anthropic's baseURL as the default provider", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://restart-1.example.com" })
+    })
+
+    expect(ipc.setProviderEnv).toHaveBeenCalledWith(null, "https://restart-1.example.com")
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("coalesces rapid successive edits into a single restart", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://coalesce-1.example.com" })
+    })
+    jest.advanceTimersByTime(400)
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://coalesce-2.example.com" })
+    })
+    jest.advanceTimersByTime(400)
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+
+    jest.advanceTimersByTime(400)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not schedule an extra restart when the resolved (apiKey, baseURL) pair is unchanged", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://dedup.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://dedup.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not schedule a redundant debounced restart after switching to anthropic when a following edit is identical", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    const anthropicCfg = {
+      providerId: "anthropic",
+      enabled: true,
+      defaultModel: "",
+      apiKey: "sk-switch",
+      baseURL: "https://switch.example.com",
+    }
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({
+        defaultProvider: "anthropic",
+        providerSettings: { anthropic: anthropicCfg },
+        ...patch,
+      })
+    )
+
+    // Switching the default to anthropic restarts immediately AND records the
+    // applied env via markAnthropicEnvApplied.
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+
+    // A following config edit with the same (apiKey, baseURL) must NOT schedule
+    // a second (debounced) restart — the immediate one already applied it.
+    await act(async () => {
+      await useSettingsStore.getState().setProviderConfig("anthropic", {
+        apiKey: "sk-switch",
+        baseURL: "https://switch.example.com",
+      })
+    })
+    jest.advanceTimersByTime(800)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT push env or restart for a non-anthropic provider, even as the default", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "openrouter" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "openrouter", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("openrouter", { baseURL: "https://openrouter-proxy.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env when anthropic is edited but is not the active default provider", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "openrouter" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "openrouter", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://not-default.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env or restart when not in Tauri", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://web-mode.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env when the patch touches neither apiKey nor baseURL", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore.getState().setProviderConfig("anthropic", { defaultModel: "opus" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+})
+
+describe("setDefaultProvider — anthropic env push + immediate restart", () => {
+  it("pushes env and restarts immediately when switching the default provider to anthropic", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({
+        providerSettings: {
+          anthropic: {
+            providerId: "anthropic",
+            enabled: true,
+            defaultModel: "",
+            apiKey: "sk-anthropic",
+            baseURL: "https://proxy.example.com",
+          },
+        },
+        ...patch,
+      })
+    )
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+
+    expect(ipc.setProviderEnv).toHaveBeenCalledWith("sk-anthropic", "https://proxy.example.com")
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT push env or restart when switching the default provider to a non-anthropic provider", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("openrouter")
+    })
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env or restart when not in Tauri", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("warns when setProviderEnv rejects", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockRejectedValue(new Error("ipc gone"))
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+
+    expect(console.warn).toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+})
+
+// ---- setDefaultProvider — defaultModel pairing ----
+//
+// Switching the default provider must keep the (defaultModel, defaultProvider)
+// pair coherent: a stale model from the previous provider would otherwise be
+// sent to the new provider's base URL on the next turn.
+
+describe("setDefaultProvider — defaultModel sync", () => {
+  it("rewrites a foreign defaultModel to the new provider's configured default", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        defaultProvider: "openai",
+        defaultModel: "gpt-4o",
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, defaultModel: "deepseek-reasoner" },
+        },
+      } as never),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("deepseek")
+    })
+
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultProvider: "deepseek", defaultModel: "deepseek-reasoner" })
+    )
+  })
+
+  it("keeps the current defaultModel when the new provider can serve it", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        defaultProvider: "openai",
+        defaultModel: "deepseek-chat",
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, enabledModels: ["deepseek-chat"] },
+        },
+      } as never),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("deepseek")
+    })
+
+    const patch = dbSettings.saveSettings.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(patch.defaultProvider).toBe("deepseek")
+    expect("defaultModel" in patch).toBe(false)
+  })
+})
+
 // ---- Web search setters (top-level) ----
 
 describe("simple search setters delegating to saveSettings", () => {
@@ -707,6 +1070,70 @@ describe("resolveSkillBundleMirrors", () => {
         baseSettings({ skillBundleMirrors: { claude: false, codex: false } })
       )
     ).toEqual({ claude: false, codex: false })
+  })
+})
+
+// ---- Skill panel prefs ----
+
+describe("setSkillPanelPrefs", () => {
+  it("persists a partial patch when no prior value exists", async () => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSkillPanelPrefs({ density: "compact", viewMode: "grid" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillPanelPrefs: { density: "compact", viewMode: "grid" },
+    })
+  })
+
+  it("merges over an existing partial rather than replacing it", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ skillPanelPrefs: { density: "compact", showTags: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setSkillPanelPrefs({ showTags: false, autoEnableNew: false })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillPanelPrefs: { density: "compact", showTags: false, autoEnableNew: false },
+    })
+  })
+})
+
+describe("setLastSkillView", () => {
+  it("merges over the existing last-view snapshot", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ lastSkillView: { tab: "browse", sort: "name" } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setLastSkillView({ sort: "usage", tag: "yaml" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      lastSkillView: { tab: "browse", sort: "usage", tag: "yaml" },
+    })
+  })
+})
+
+describe("resolveSkillPanelPrefs (re-export)", () => {
+  it("applies defaults when settings has no prefs", async () => {
+    const { resolveSkillPanelPrefs } = await import("./settings-store")
+    const resolved = resolveSkillPanelPrefs(baseSettings().skillPanelPrefs)
+    expect(resolved.density).toBe("comfortable")
+    expect(resolved.autoEnableNew).toBe(true)
+    expect(resolved.showDescription).toBe(true)
+  })
+
+  it("honors stored overrides", async () => {
+    const { resolveSkillPanelPrefs } = await import("./settings-store")
+    const resolved = resolveSkillPanelPrefs({ density: "compact", enabledWarnThreshold: 5 })
+    expect(resolved.density).toBe("compact")
+    expect(resolved.enabledWarnThreshold).toBe(5)
   })
 })
 

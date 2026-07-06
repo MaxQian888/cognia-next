@@ -10,7 +10,7 @@ import {
   revokePermission,
   pluginHasApiPermission,
 } from "./permission-api"
-import type { PluginAPIPermission } from "@/types/plugin/plugin-extended"
+import type { PluginAPIPermission } from "@/types/plugin/plugin"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
 
 jest.mock("@/lib/plugin/security/permission-requests", () => ({

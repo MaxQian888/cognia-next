@@ -1,4 +1,10 @@
-import { agentDispatch, teamRun, pluginToolInvoke, runOrchestrationExec } from "./orchestration"
+import {
+  agentDispatch,
+  teamRun,
+  teamList,
+  pluginToolInvoke,
+  runOrchestrationExec,
+} from "./orchestration"
 
 const isTauriMock = jest.fn<boolean, []>(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
@@ -25,6 +31,14 @@ jest.mock("@/lib/twin/ingest/redact", () => ({
   redactText: (...a: unknown[]) => redactTextMock(...(a as [string])),
 }))
 
+const updateTeamMock = jest.fn()
+let storeTeams: Record<string, unknown> = {}
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: {
+    getState: () => ({ teams: storeTeams, updateTeam: updateTeamMock }),
+  },
+}))
+
 beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   dispatchSubagentMock.mockReset()
@@ -32,6 +46,8 @@ beforeEach(() => {
   executeAgentMock.mockReset()
   invokePluginToolMock.mockReset()
   redactTextMock.mockReset().mockImplementation((text: string) => ({ redacted: text, map: {} }))
+  updateTeamMock.mockReset()
+  storeTeams = {}
 })
 
 describe("agentDispatch", () => {
@@ -110,13 +126,193 @@ describe("teamRun", () => {
   it("starts the team and returns its status", async () => {
     runTeamMock.mockResolvedValue({ teamId: "t1", status: "completed" })
     const out = await teamRun({ teamId: "t1", ultracode: true })
-    expect(runTeamMock).toHaveBeenCalledWith("t1", { ultracode: true })
+    expect(runTeamMock).toHaveBeenCalledWith("t1", { origin: "external", ultracode: true })
     expect(out).toEqual({ ok: true, teamId: "t1", status: "completed" })
   })
 
   it("collapses a thrown error", async () => {
     runTeamMock.mockRejectedValue(new Error("not found"))
     expect(await teamRun({ teamId: "t1" })).toEqual({ ok: false, error: "not found" })
+  })
+
+  it("stamps the external-pickup claim before dispatch (idempotently)", async () => {
+    runTeamMock.mockResolvedValue({ teamId: "t1", status: "running" })
+    storeTeams = {
+      t1: { id: "t1", externalPickup: { requestedAt: new Date(0) } },
+    }
+    await teamRun({ teamId: "t1" })
+    expect(updateTeamMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        externalPickup: expect.objectContaining({
+          claimedBy: "external-bridge",
+          claimedAt: expect.any(Date),
+        }),
+      })
+    )
+
+    // Already claimed → never overwritten.
+    updateTeamMock.mockClear()
+    storeTeams = {
+      t1: {
+        id: "t1",
+        externalPickup: { requestedAt: new Date(0), claimedBy: "other", claimedAt: new Date(1) },
+      },
+    }
+    await teamRun({ teamId: "t1" })
+    expect(updateTeamMock).not.toHaveBeenCalled()
+  })
+
+  it("stamps a structured claimant + claim lease (ADR 0061 P4)", async () => {
+    runTeamMock.mockResolvedValue({ teamId: "t1", status: "running" })
+    storeTeams = { t1: { id: "t1", status: "idle", externalPickup: { requestedAt: new Date(0) } } }
+    await teamRun({
+      teamId: "t1",
+      claimant: { kind: "device", id: "dev-9", label: "Max's phone" },
+    })
+    expect(updateTeamMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        externalPickup: expect.objectContaining({
+          claimedBy: "dev-9",
+          claimant: { kind: "device", id: "dev-9", label: "Max's phone" },
+          claimLeaseExpiresAt: expect.any(Date),
+        }),
+      })
+    )
+  })
+
+  it("re-claims an expired claim lease on a still-idle team", async () => {
+    runTeamMock.mockResolvedValue({ teamId: "t1", status: "running" })
+    storeTeams = {
+      t1: {
+        id: "t1",
+        status: "idle",
+        externalPickup: {
+          requestedAt: new Date(0),
+          claimedBy: "dead-claimant",
+          claimedAt: new Date(1),
+          claimLeaseExpiresAt: new Date(Date.now() - 60_000),
+        },
+      },
+    }
+    await teamRun({ teamId: "t1" })
+    expect(updateTeamMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        externalPickup: expect.objectContaining({ claimedBy: "external-bridge" }),
+      })
+    )
+  })
+
+  it("rejects a claimant when the pickup is addressed to someone else", async () => {
+    storeTeams = {
+      t1: {
+        id: "t1",
+        status: "idle",
+        externalPickup: { requestedAt: new Date(0), targetId: "dev-only" },
+      },
+    }
+    const out = await teamRun({ teamId: "t1" })
+    expect(out.ok).toBe(false)
+    expect(out.error).toContain("dev-only")
+    expect(runTeamMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("teamList", () => {
+  it("returns the structured fallback off the renderer", async () => {
+    isTauriMock.mockReturnValue(false)
+    expect((await teamList()).ok).toBe(false)
+  })
+
+  it("projects agent-team store rows with redacted name/objective", async () => {
+    redactTextMock.mockImplementation((text: string) => ({
+      redacted: text.replace("secret", "<NAME_001>"),
+      map: {},
+    }))
+    storeTeams = {
+      t1: { id: "t1", name: "Team secret", status: "idle", task: "help secret org" },
+    }
+    const out = await teamList()
+    expect(out.ok).toBe(true)
+    expect(out.teams).toEqual([
+      {
+        id: "t1",
+        name: "Team <NAME_001>",
+        status: "idle",
+        objective: "help <NAME_001> org",
+        awaitingExternalPickup: false,
+      },
+    ])
+  })
+
+  it("filters to unclaimed external-pickup teams and serializes requestedAt", async () => {
+    storeTeams = {
+      plain: { id: "plain", name: "P", status: "idle", task: "x" },
+      waiting: {
+        id: "waiting",
+        name: "W",
+        status: "idle",
+        task: "y",
+        externalPickup: { requestedAt: new Date("2026-07-02T00:00:00Z") },
+      },
+      claimed: {
+        id: "claimed",
+        name: "C",
+        status: "idle",
+        task: "z",
+        externalPickup: {
+          requestedAt: new Date("2026-07-01T00:00:00Z"),
+          claimedBy: "external-bridge",
+          claimedAt: new Date("2026-07-01T01:00:00Z"),
+        },
+      },
+    }
+    const out = await teamList({ awaitingExternalOnly: true })
+    expect(out.teams).toHaveLength(1)
+    expect(out.teams?.[0]).toMatchObject({
+      id: "waiting",
+      awaitingExternalPickup: true,
+      requestedAt: "2026-07-02T00:00:00.000Z",
+    })
+  })
+
+  it("re-advertises an expired claim on a still-idle team and exposes claimant (ADR 0061 P4)", async () => {
+    storeTeams = {
+      stale: {
+        id: "stale",
+        name: "S",
+        status: "idle",
+        task: "x",
+        externalPickup: {
+          requestedAt: new Date("2026-07-02T00:00:00Z"),
+          claimedBy: "dead-claimant",
+          claimant: { kind: "external-agent", id: "dead-claimant" },
+          claimedAt: new Date("2026-07-02T01:00:00Z"),
+          claimLeaseExpiresAt: new Date(Date.now() - 1_000),
+        },
+      },
+      dispatched: {
+        id: "dispatched",
+        name: "D",
+        status: "executing",
+        task: "y",
+        externalPickup: {
+          requestedAt: new Date("2026-07-02T00:00:00Z"),
+          claimedBy: "live-claimant",
+          claimedAt: new Date("2026-07-02T01:00:00Z"),
+          claimLeaseExpiresAt: new Date(Date.now() - 1_000),
+        },
+      },
+    }
+    const out = await teamList({ awaitingExternalOnly: true })
+    // Expired + idle → free again; expired + executing → the claim did its
+    // job (the team is running), never re-advertised.
+    expect(out.teams?.map((t) => t.id)).toEqual(["stale"])
+    expect(out.teams?.[0]).toMatchObject({
+      claimant: { kind: "external-agent", id: "dead-claimant" },
+    })
   })
 })
 
@@ -174,6 +370,16 @@ describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", 
     expect(
       await runOrchestrationExec("plugin_tool_invoke", { pluginId: "p", toolName: "q" })
     ).toMatchObject({ ok: true, result: { rows: 1 } })
+  })
+
+  it("routes team_list through its core", async () => {
+    storeTeams = { t9: { id: "t9", name: "N", status: "idle", task: "obj" } }
+    const out = (await runOrchestrationExec("team_list", {})) as {
+      ok: boolean
+      teams?: Array<{ id: string }>
+    }
+    expect(out.ok).toBe(true)
+    expect(out.teams?.[0]?.id).toBe("t9")
   })
 
   it("returns a structured error for an unknown command", async () => {

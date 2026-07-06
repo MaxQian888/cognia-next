@@ -13,6 +13,8 @@ import {
   summarizeToolCall,
   toolDetailLine,
   toolDisplayName,
+  toolFileLine,
+  toolFilePath,
   toolKind,
 } from "./tools"
 import type { ToolCell } from "../state/types"
@@ -72,6 +74,42 @@ describe("parseTodos", () => {
     expect(parseTodos(null)).toEqual([])
     expect(parseTodos({})).toEqual([])
     expect(parseTodos({ todos: "nope" })).toEqual([])
+  })
+})
+
+describe("toolFilePath", () => {
+  it("extracts the path for file tools by key precedence", () => {
+    expect(toolFilePath("read", { file_path: "/a.ts" })).toBe("/a.ts")
+    expect(toolFilePath("edit", { filePath: "/b.ts" })).toBe("/b.ts")
+    expect(toolFilePath("grep", { path: "src" })).toBe("src")
+    expect(toolFilePath("read", { file_path: "/win.ts", path: "/other" })).toBe("/win.ts")
+  })
+
+  it("returns the verbatim (untruncated) path", () => {
+    const long = "/" + "a".repeat(200) + ".ts"
+    expect(toolFilePath("read", { file_path: long })).toBe(long)
+  })
+
+  it("recognises namespaced builtin edit tools", () => {
+    expect(toolFilePath("mcp__cognia-tools__edit", { file_path: "/c.ts" })).toBe("/c.ts")
+  })
+
+  it("returns undefined for command tools and when no path is present", () => {
+    expect(toolFilePath("bash", { command: "ls" })).toBeUndefined()
+    expect(toolFilePath("shell", { command: "ls", path: "x" })).toBeUndefined()
+    expect(toolFilePath("read", {})).toBeUndefined()
+  })
+})
+
+describe("toolFileLine", () => {
+  it("returns a read tool's offset as the line", () => {
+    expect(toolFileLine("read", { file_path: "/a.ts", offset: 12 })).toBe(12)
+  })
+
+  it("returns undefined without an offset, for non-read tools, or offset 0", () => {
+    expect(toolFileLine("read", { file_path: "/a.ts" })).toBeUndefined()
+    expect(toolFileLine("read", { file_path: "/a.ts", offset: 0 })).toBeUndefined()
+    expect(toolFileLine("edit", { file_path: "/a.ts", offset: 12 })).toBeUndefined()
   })
 })
 

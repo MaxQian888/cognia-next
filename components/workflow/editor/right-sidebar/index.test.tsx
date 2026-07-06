@@ -63,6 +63,8 @@ interface FakeState {
   diagnostics?: { errorCount: number; warningCount: number; infoCount: number }
   requestedProblemsPanel?: boolean
   clearRequestedProblemsPanel?: () => void
+  requestedInspectorPanel?: boolean
+  clearRequestedInspectorPanel?: () => void
 }
 
 function makeFakeStore(initial: FakeState): EditorStore {
@@ -291,6 +293,40 @@ describe("RightSidebar", () => {
         "active"
       )
       expect(clearRequestedProblemsPanel).toHaveBeenCalled()
+    })
+  })
+
+  describe("inspector-panel signal", () => {
+    it("switches to the Inspector tab over a pinned tab and clears the signal", async () => {
+      const user = userEvent.setup()
+      const clearRequestedInspectorPanel = jest.fn()
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+        clearRequestedInspectorPanel,
+      })
+      harness(store)
+
+      // Pin the Runs tab manually — a plain selection would now be swallowed.
+      await user.click(screen.getByTestId("workflow-right-sidebar-tab-runs"))
+      expect(screen.getByTestId("workflow-right-sidebar-tab-runs")).toHaveAttribute(
+        "data-state",
+        "active"
+      )
+
+      // Explicit configure gesture fires the store signal.
+      act(() => {
+        ;(store as unknown as { setState: (s: Partial<FakeState>) => void }).setState({
+          selectedNodeIds: ["n1"],
+          requestedInspectorPanel: true,
+        })
+      })
+      expect(screen.getByTestId("workflow-right-sidebar-tab-inspector")).toHaveAttribute(
+        "data-state",
+        "active"
+      )
+      expect(clearRequestedInspectorPanel).toHaveBeenCalled()
     })
   })
 

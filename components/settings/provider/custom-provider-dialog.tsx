@@ -6,17 +6,7 @@
  */
 
 import { useState, useEffect, useMemo } from "react"
-import {
-  Plus,
-  X,
-  AlertCircle,
-  Check,
-  Eye,
-  EyeOff,
-  Settings2,
-  RefreshCw,
-  Loader2,
-} from "lucide-react"
+import { Plus, X, AlertCircle, Eye, EyeOff, Settings2, RefreshCw, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { ApiProtocol, ProviderModelDiscoveryEntry } from "@cognia/provider-types"
+import type { ApiFlavor, ApiProtocol, ProviderModelDiscoveryEntry } from "@cognia/provider-types"
 import type { CustomModelMetadata, CustomProviderSettings } from "@/stores/settings/settings-store"
 import {
   Dialog,
@@ -39,13 +29,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { useSettingsStore } from "@/stores"
-import { testCustomProviderConnectionByProtocol } from "@/lib/ai/infrastructure/api-test"
-import { listProtocolAdapters } from "@cognia/provider-core/providers/protocol-adapter-registry"
+import { useSettingsStore } from "@/stores/settings"
+import { useConnectionTest } from "@/hooks/settings/use-connection-test"
+import { ProtocolSelectContent } from "./protocol-select-content"
 import {
   buildCustomProviderModelDiscoverySnapshot,
   discoverOpenAICompatibleModels,
 } from "@cognia/provider-core/providers/model-discovery"
+import { ConnectionStatusCard, toConnectionCardResult } from "./provider-config-tab"
 
 const PROTOCOL_DEFAULT_BASE_URLS: Record<string, string> = {
   openai: "",
@@ -86,11 +77,6 @@ export function CustomProviderDialog({
   const updateCustomProvider = useSettingsStore((state) => state.updateCustomProvider)
   const removeCustomProvider = useSettingsStore((state) => state.removeCustomProvider)
 
-  // Plugin-contributed protocol adapters extend the picker beyond the three
-  // built-ins. Read once per dialog mount — registrations change only on
-  // plugin enable/disable, never mid-dialog.
-  const pluginProtocols = useMemo(() => listProtocolAdapters(), [])
-
   const [name, setName] = useState("")
   const [baseURL, setBaseURL] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -99,8 +85,15 @@ export function CustomProviderDialog({
   const [newModel, setNewModel] = useState("")
   const [defaultModel, setDefaultModel] = useState("")
   const [apiProtocol, setApiProtocol] = useState<ApiProtocol>("openai")
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<"success" | "error" | null>(null)
+  // OpenAI endpoint family override. "auto" keeps the host heuristic; "responses"
+  // forces the Responses API (unlocks it on Azure / gateways / custom URLs).
+  const [apiFlavor, setApiFlavor] = useState<ApiFlavor>("auto")
+  const {
+    testing,
+    result: testResult,
+    test: runConnectionTest,
+    reset: resetTestResult,
+  } = useConnectionTest()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [modelMetadata, setModelMetadata] = useState<Record<string, CustomModelMetadata>>({})
   const [expandedModelSettings, setExpandedModelSettings] = useState<string | null>(null)
@@ -135,6 +128,7 @@ export function CustomProviderDialog({
         setBaseURL(provider.baseURL || "")
         setApiKey(provider.apiKey || "")
         setApiProtocol(provider.apiProtocol || "openai")
+        setApiFlavor(provider.apiFlavor || "auto")
         setModels(provider.customModels || [])
         setDefaultModel(provider.defaultModel || "")
         setModelMetadata(provider.customModelMetadata || {})
@@ -146,6 +140,7 @@ export function CustomProviderDialog({
         setBaseURL("")
         setApiKey("")
         setApiProtocol("openai")
+        setApiFlavor("auto")
         setModels([])
         setNewModel("")
         setDefaultModel("")
@@ -154,13 +149,13 @@ export function CustomProviderDialog({
         setDiscoveredModels([])
         setDiscoveredModelsLastFetched(undefined)
       }
-      setTestResult(null)
+      resetTestResult()
       setShowDeleteConfirm(false)
       setShowKey(false)
       setDiscoveryError(null)
     }, 0)
     return () => clearTimeout(timer)
-  }, [open, editingProviderId, customProviders])
+  }, [open, editingProviderId, customProviders, resetTestResult])
 
   const handleAddModel = () => {
     const trimmedModel = newModel.trim()
@@ -213,18 +208,7 @@ export function CustomProviderDialog({
 
   const handleTestConnection = async () => {
     if (!baseURL || !apiKey) return
-
-    setTesting(true)
-    setTestResult(null)
-
-    try {
-      const result = await testCustomProviderConnectionByProtocol(baseURL, apiKey, apiProtocol)
-      setTestResult(result.success ? "success" : "error")
-    } catch {
-      setTestResult("error")
-    } finally {
-      setTesting(false)
-    }
+    await runConnectionTest(baseURL, apiKey, apiProtocol)
   }
 
   const handleDiscoverModels = async () => {
@@ -270,6 +254,9 @@ export function CustomProviderDialog({
       baseURL: baseURL.trim(),
       apiKey: apiKey.trim(),
       apiProtocol,
+      // Only the OpenAI family has a Responses/Chat split; force "auto" for the
+      // others so a stale override can't ride along after a protocol switch.
+      apiFlavor: apiProtocol === "openai" ? apiFlavor : "auto",
       customModels: models,
       customModelMetadata: modelMetadata,
       discoveredModels,
@@ -326,7 +313,7 @@ export function CustomProviderDialog({
                 const nextProtocol = v as ApiProtocol
                 const prevDefault = defaultBaseUrlFor(apiProtocol)
                 setApiProtocol(nextProtocol)
-                setTestResult(null)
+                resetTestResult()
                 setDiscoveryError(null)
                 setDiscoveredModels([])
                 setDiscoveredModelsLastFetched(undefined)
@@ -339,41 +326,49 @@ export function CustomProviderDialog({
               <SelectTrigger id="api-protocol">
                 <SelectValue placeholder={t("selectProtocol")} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="openai">
-                  <div className="flex flex-col">
-                    <span>OpenAI</span>
-                    <span className="text-xs text-muted-foreground">{t("protocolOpenAIDesc")}</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="anthropic">
-                  <div className="flex flex-col">
-                    <span>Anthropic</span>
-                    <span className="text-xs text-muted-foreground">
-                      {t("protocolAnthropicDesc")}
-                    </span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="gemini">
-                  <div className="flex flex-col">
-                    <span>Gemini</span>
-                    <span className="text-xs text-muted-foreground">{t("protocolGeminiDesc")}</span>
-                  </div>
-                </SelectItem>
-                {pluginProtocols.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    <div className="flex flex-col">
-                      <span>{p.label}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {t("protocolPluginDesc", { plugin: p.pluginId ?? "plugin" })}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
+              <ProtocolSelectContent />
             </Select>
             <p className="text-xs text-muted-foreground">{t("apiProtocolHint")}</p>
           </div>
+
+          {/* API Flavor (OpenAI family only): Responses vs Chat Completions */}
+          {apiProtocol === "openai" && (
+            <div className="space-y-2">
+              <Label htmlFor="api-flavor">{t("apiFlavor")}</Label>
+              <Select value={apiFlavor} onValueChange={(v) => setApiFlavor(v as ApiFlavor)}>
+                <SelectTrigger id="api-flavor">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorAuto")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorAutoDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="responses">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorResponses")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorResponsesDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="chat">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorChat")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorChatDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{t("apiFlavorHint")}</p>
+            </div>
+          )}
 
           {/* Base URL */}
           <div className="space-y-2">
@@ -384,7 +379,7 @@ export function CustomProviderDialog({
               onChange={(e) => {
                 const nextBaseURL = e.target.value
                 setBaseURL(nextBaseURL)
-                setTestResult(null)
+                resetTestResult()
                 setDiscoveryError(null)
                 setDiscoveredModels([])
                 setDiscoveredModelsLastFetched(undefined)
@@ -411,7 +406,7 @@ export function CustomProviderDialog({
                   value={apiKey}
                   onChange={(e) => {
                     setApiKey(e.target.value)
-                    setTestResult(null)
+                    resetTestResult()
                   }}
                   placeholder={t("apiKeyPlaceholder")}
                   className="pr-10"
@@ -437,16 +432,7 @@ export function CustomProviderDialog({
                 {testing ? tc("loading") : t("test")}
               </Button>
             </div>
-            {testResult === "success" && (
-              <p className="flex items-center gap-1 text-sm text-green-600">
-                <Check className="h-4 w-4" /> {t("connectionSuccess")}
-              </p>
-            )}
-            {testResult === "error" && (
-              <p className="flex items-center gap-1 text-sm text-destructive">
-                <AlertCircle className="h-4 w-4" /> {t("connectionFailed")}
-              </p>
-            )}
+            {testResult && <ConnectionStatusCard result={toConnectionCardResult(testResult)} />}
           </div>
 
           {/* Models */}

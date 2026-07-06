@@ -84,10 +84,16 @@
     "generic": "配对失败（HTTP {status}）。"
   },
   "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+  "loadingManualCta": "手动配对",
+  "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
   "loadingTitle": "正在检查既有配对…",
   "manualDivider": "或手动粘贴",
   "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
   "offlineTitle": "连接已断开",
+  "payloadError": {
+    "invalid": "无法解析该配对载荷——请从服务器完整复制 cgnp2|… 字符串后重新粘贴。",
+    "versionMismatch": "该配对载荷版本为 {got}，当前应用无法识别。请升级应用或服务器，使两端载荷版本一致。"
+  },
   "permissions": {
     "localNetwork": {
       "description": "请授予本地网络访问权限，本机才能在 Wi-Fi 上发现桌面端。",
@@ -125,5 +131,16 @@
   },
   "title": "连接桌面",
   "tokenLabel": "配对令牌",
-  "transportLabel": "传输层"
+  "transportLabel": "传输层",
+  "web": {
+    "baseUrlLocked": "服务器地址由部署方预设",
+    "codeHint": "在服务器上运行 “cognia-server pair” 生成配对码，或从桌面端 设置 → 伴侣 中复制。",
+    "formCardDescription": "粘贴配对载荷，或输入服务器签发的 6 位配对码——两者共用同一枚 5 分钟有效的配对令牌。",
+    "formCardTitle": "配对此浏览器",
+    "intro": "将此浏览器连接到你的 cognia 服务器。粘贴配对载荷或输入 6 位配对码即可登录。",
+    "pasteHint": "粘贴完整的 cgnp2|… 载荷（服务器地址会自动填入），或直接粘贴配对 JWT。",
+    "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
+    "storageNoticeTitle": "凭据保存在此浏览器中",
+    "title": "连接到服务器"
+  }
 }

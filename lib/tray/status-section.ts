@@ -9,22 +9,43 @@
 // PII-redacted `safeObjective` only — never the raw objective — because the
 // OS tray is a screenshot-able surface.
 
+import { NEUTRAL_MOOD_CEILING, UNWELL_NEED_THRESHOLD } from "@/lib/pet/care/condition"
 import type { TrayMenuItem, TrayStateSnapshot } from "./types"
 
 /** Max characters of the goal objective shown in the detail row. */
 export const GOAL_TITLE_MAX = 48
 
 /**
+ * Coarse 3-band mood indicator for the tray (a screenshot-able OS surface —
+ * exact percentages are more precision than useful at a glance, mirroring
+ * the widget's own needs→mood banding in `lib/pet/state/reducer.ts`).
+ */
+export function petMoodEmoji(pet: NonNullable<TrayStateSnapshot["pet"]>): string {
+  const worst = Math.min(pet.energy, pet.mood)
+  if (worst < UNWELL_NEED_THRESHOLD) return "😟"
+  if (worst < NEUTRAL_MOOD_CEILING) return "😐"
+  return "😊"
+}
+
+/**
  * Derive the single i18n key that names the app's current primary state.
  * Priority is alert-first: a running automation outranks an active goal,
- * which outranks raw streaming. Shared with `lib/tray/tooltip.ts` so the
- * tooltip and the status row never disagree.
+ * which outranks raw streaming, which outranks the pet needing attention —
+ * ambient pet-care is the lowest-priority signal, shown only when nothing
+ * else is going on. Shared with `lib/tray/tooltip.ts` so the tooltip and the
+ * status row never disagree.
  */
 export function deriveStatusKey(snapshot: TrayStateSnapshot): string {
   if (snapshot.automation.running) return "tray.status.automationRunning"
   if (snapshot.goal.active) return "tray.status.goalRunning"
   if (snapshot.goal.paused) return "tray.status.goalPaused"
   if (snapshot.chat.streaming) return "tray.status.streaming"
+  if (
+    snapshot.pet?.enabled &&
+    Math.min(snapshot.pet.energy, snapshot.pet.mood) < UNWELL_NEED_THRESHOLD
+  ) {
+    return "tray.status.petNeedsAttention"
+  }
   return "tray.status.idle"
 }
 
@@ -58,6 +79,18 @@ export function buildStatusSection(snapshot: TrayStateSnapshot): TrayMenuItem[] 
       kind: "action",
       id: "tray.status.goal",
       label: truncateTitle(title),
+      disabled: true,
+      payload: { kind: "native", action: "noop" },
+    })
+  }
+
+  if (snapshot.pet?.enabled) {
+    rows.push({
+      kind: "action",
+      id: "tray.status.pet",
+      // Literal (not an i18n key) — the resilient builder translator passes
+      // unknown keys through unchanged, same as the goal-title row above.
+      label: petMoodEmoji(snapshot.pet),
       disabled: true,
       payload: { kind: "native", action: "noop" },
     })

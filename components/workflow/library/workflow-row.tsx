@@ -31,6 +31,7 @@ import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { WorkflowActionItems } from "./workflow-action-items"
 import { WorkflowRenameDialog } from "./workflow-rename-dialog"
 import { WorkflowEditTagsDialog } from "./workflow-edit-tags-dialog"
+import { WorkflowRunDialog } from "./workflow-run-dialog"
 import { usePinnedWorkflows } from "./use-pinned-workflows"
 import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 
@@ -51,6 +52,7 @@ function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
   const pinned = isPinned(workflow.id)
   const [renameOpen, setRenameOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
+  const [runOpen, setRunOpen] = useState(false)
 
   const activate = () => {
     if (selectionMode) toggleSelection(workflow.id)
@@ -148,6 +150,7 @@ function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
                   workflow={workflow}
                   Item={DropdownMenuItem}
                   Separator={DropdownMenuSeparator}
+                  onRun={() => setRunOpen(true)}
                   onRename={() => setRenameOpen(true)}
                   onEditTags={() => setTagsOpen(true)}
                   onDelete={() => openDeleteDialog([workflow.id])}
@@ -161,6 +164,7 @@ function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
             workflow={workflow}
             Item={ContextMenuItem}
             Separator={ContextMenuSeparator}
+            onRun={() => setRunOpen(true)}
             onRename={() => setRenameOpen(true)}
             onEditTags={() => setTagsOpen(true)}
             onDelete={() => openDeleteDialog([workflow.id])}
@@ -169,6 +173,7 @@ function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
       </ContextMenu>
       <WorkflowRenameDialog workflow={workflow} open={renameOpen} onOpenChange={setRenameOpen} />
       <WorkflowEditTagsDialog workflow={workflow} open={tagsOpen} onOpenChange={setTagsOpen} />
+      <WorkflowRunDialog workflow={workflow} open={runOpen} onOpenChange={setRunOpen} />
     </>
   )
 }

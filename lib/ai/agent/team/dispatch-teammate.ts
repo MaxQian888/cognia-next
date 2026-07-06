@@ -26,9 +26,11 @@ import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/typ
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
+import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "./team-run-context"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
+import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
   "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
@@ -108,6 +110,7 @@ function teamPermissionCeiling(
       ? { disallowedTools: config.disallowedTools }
       : {}),
     ...(config.defaultPermissionMode ? { permissionMode: config.defaultPermissionMode } : {}),
+    ...(config.sandboxPolicy ? { sandboxPolicy: config.sandboxPolicy } : {}),
   }
   return Object.keys(spec).length > 0 ? spec : undefined
 }
@@ -186,6 +189,17 @@ async function runToolEnabled(
       character,
       appSettings: appSettings ?? null,
       ...(ceiling ? { permissionCeiling: ceiling } : {}),
+      // Twin-backed teammate (ADR-0003): feed the per-run vector-store deps +
+      // the task prompt so resolveSendOptions' twin branch injects the twin's
+      // persona + per-task RAG. Guard is satisfied only when the teammate is
+      // twin-bound (`character.twinId`) AND the run built twin deps.
+      ...(character.twinId && teamCtx.twinDeps
+        ? {
+            twinDeps: teamCtx.twinDeps,
+            twinUserMessage: prompt,
+            twinInjectSource: "team",
+          }
+        : {}),
     })
     // Apply the resolved step budget as an explicit per-dispatch turn cap. The
     // sidecar dispatcher honors `maxTurns` (an explicit value takes precedence
@@ -194,6 +208,11 @@ async function runToolEnabled(
     const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
       signal,
       ...(onCaptureEvent ? { onEvent: onCaptureEvent } : {}),
+      execution: {
+        kind: "team",
+        label: `Team ${session.id.slice(0, 8)}`,
+        ...(session.projectId ? { projectId: session.projectId } : {}),
+      },
     })
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {
@@ -212,14 +231,23 @@ async function runToolEnabled(
 async function runExternalBacked(
   teamCtx: TeamRunContext,
   teammate: AgentTeammate,
+  resolvedCaps: ResolvedCapabilities,
   agentId: string,
   prompt: string,
   systemPrompt: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onCaptureEvent?: (event: CaptureStreamEvent) => void
 ): Promise<{ text: string; usage?: TokenUsage }> {
-  const [{ getExternalAgentManager }, { deriveExternalSessionPermission }] = await Promise.all([
+  const [
+    { getExternalAgentManager },
+    { deriveExternalSessionPermission },
+    { resolveAcpMcpServers },
+    { pipeExternalEventsToCapture },
+  ] = await Promise.all([
     import("@/lib/ai/agent/external/manager"),
     import("@/lib/ai/agent/external/permission-cascade"),
+    import("@/lib/ai/agent/external/resolve-acp-mcp-servers"),
+    import("@/lib/ai/agent/external/external-event-progress"),
   ])
   const manager = getExternalAgentManager()
 
@@ -231,12 +259,22 @@ async function runExternalBacked(
     teammate.config?.tools ? { allowedTools: teammate.config.tools } : {}
   )
 
+  // Forward the teammate's explicitly-resolved MCP servers into the external
+  // agent's ACP session so it can call the same tools a built-in teammate would
+  // (the external CLI keeps its own MCP config in addition to these).
+  const mcpServers = await resolveAcpMcpServers(resolvedCaps.mcpServerIds)
+
   const result = await manager.execute(agentId, prompt, {
     systemPrompt,
     ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
     ...(teamCtx.team.config?.workingDir
       ? { workingDirectory: teamCtx.team.config.workingDir }
       : {}),
+    ...(mcpServers.length > 0 ? { context: { custom: { mcpServers } } } : {}),
+    // Live progress: translate the external protocol stream into the same
+    // CaptureStreamEvent frames the sidecar channel emits, so an external
+    // teammate streams tool-calls/text into the activity panel too.
+    ...(onCaptureEvent ? { onEvent: pipeExternalEventsToCapture(onCaptureEvent) } : {}),
     signal,
   })
 
@@ -385,6 +423,43 @@ export async function dispatchTeammate(
     const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) channel = "sidecar"
   }
+  if (channel === "text" && runtime === "claude" && args.preferToolEnabled !== false) {
+    // Reached only when a tool-capable `claude` teammate could not get the
+    // desktop sidecar (isTauri() was false). On a desktop target this "should
+    // never happen"; when it does the teammate silently loses tools + sub-agent
+    // nesting, so surface it instead of degrading quietly. Excludes external,
+    // intentional text (preferToolEnabled === false), and non-claude runtimes.
+    teamCtx.notifier.notify({
+      level: "warn",
+      title: "Teammate degraded to text channel",
+      body: `${teammate.name} is running without tools or sub-agent nesting — the desktop sidecar was unavailable.`,
+      runId: teamCtx.runId,
+      teamId: teamCtx.teamId,
+      taskId: args.taskId,
+      dedupeKey: `text-fallback:${teamCtx.runId}:${teammate.id}`,
+    })
+  }
+  if (
+    (runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0) &&
+    channel !== "external"
+  ) {
+    // An external-CLI-backed teammate (e.g. runtime "codex"/"claude-code", or a
+    // teammate carrying an external-agent preset) could not reach its external
+    // agent — the browser/mobile shell has no external-agent host, or the CLI is
+    // not installed. Rather than SILENTLY running the task on the built-in engine
+    // (wrong model + wrong tools than the user asked for), surface the fallback.
+    const wantedAgent =
+      runtime !== "claude" ? runtime : (resolvedCaps.externalAgentPresetIds[0] ?? "external agent")
+    teamCtx.notifier.notify({
+      level: "warn",
+      title: "External runtime unavailable",
+      body: `${teammate.name} is configured to run on "${wantedAgent}", but that external agent is unavailable here — falling back to the built-in engine.`,
+      runId: teamCtx.runId,
+      teamId: teamCtx.teamId,
+      taskId: args.taskId,
+      dedupeKey: `external-fallback:${teamCtx.runId}:${teammate.id}`,
+    })
+  }
 
   // Live progress streaming → workspace activity panel. Built only when the
   // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
@@ -427,10 +502,12 @@ export async function dispatchTeammate(
       turn = await runExternalBacked(
         teamCtx,
         teammate,
+        resolvedCaps,
         externalAgentId,
         promptText,
         systemPrompt,
-        combinedSignal
+        combinedSignal,
+        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined
       )
     } else if (channel === "sidecar") {
       turn = await runToolEnabled(
@@ -447,7 +524,23 @@ export async function dispatchTeammate(
         maxSteps
       )
     } else {
-      turn = await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal, maxSteps)
+      // Twin-backed teammate on the text-only channel (web/mobile): executeAgent
+      // bypasses resolveSendOptions, so pre-inject the twin's persona + per-task
+      // RAG into the system prompt here. Degrades to `systemPrompt` on failure.
+      let textSystemPrompt = systemPrompt
+      if (teammate.config?.twinId && teamCtx.twinDeps) {
+        const injected = await applyTeammateTwinContext({
+          actorName: teammate.name,
+          baseSystemPrompt: systemPrompt,
+          userPrompt: promptText,
+          twinId: teammate.config.twinId,
+          ...(teammate.config.twinSettings ? { twinSettings: teammate.config.twinSettings } : {}),
+          twinDeps: teamCtx.twinDeps,
+          source: "team",
+        })
+        textSystemPrompt = injected.systemPrompt
+      }
+      turn = await runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
     }
   } catch (err) {
     reporter?.finalize("failed")
@@ -465,6 +558,18 @@ export async function dispatchTeammate(
       )
     }
     const error = err instanceof Error ? err : new Error(String(err))
+    // Rate-limit auto-resume: when the failure is a provider rate limit with a
+    // known cooldown, schedule a single guarded "continue" nudge (additive — the
+    // wave's existing error handling still runs). No-op when nudges are disabled
+    // (controller absent) or the error isn't a rate limit.
+    const cooldown = parseRateLimitCooldown(error.message)
+    if (cooldown && teamCtx.rateLimitResume) {
+      teamCtx.rateLimitResume.onRateLimit({
+        memberId: teammate.id,
+        fingerprint: agendaFingerprint([{ id: args.taskId, status: "failed" }]),
+        retryAfterMs: cooldown.retryAfterMs,
+      })
+    }
     release("failure", error)
     throw error
   }

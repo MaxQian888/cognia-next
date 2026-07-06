@@ -42,6 +42,102 @@ export interface AttachmentRef {
   remoteRef: string
 }
 
+export interface ConnectorMediaUploadRequest {
+  uploadUrl: string
+  headers?: Record<string, string>
+  sourceUrl?: string
+  localPath?: string
+  contentType?: string
+}
+
+export interface MatrixCryptoInitRequest {
+  adapterId: string
+  userId: string
+  deviceId: string
+  storeDir?: string
+  storePassphrase?: string
+}
+
+export interface MatrixCryptoOutgoingRequest {
+  requestId: string
+  kind: string
+  method: string
+  path: string
+  body: unknown
+}
+
+export interface MatrixCryptoMarkSentRequest {
+  adapterId: string
+  requestId: string
+  kind: string
+  response: unknown
+}
+
+export interface MatrixCryptoReceiveSyncRequest {
+  adapterId: string
+  toDeviceEvents?: unknown[]
+  changedDevices?: string[]
+  leftDevices?: string[]
+  oneTimeKeyCounts?: Record<string, number>
+  unusedFallbackKeys?: string[]
+  nextBatchToken?: string | null
+}
+
+export interface MatrixCryptoDecryptRequest {
+  adapterId: string
+  roomId: string
+  event: unknown
+}
+
+export interface MatrixCryptoDecryptResponse {
+  event: unknown
+}
+
+export interface MatrixCryptoEncryptRequest {
+  adapterId: string
+  roomId: string
+  eventType: string
+  content: unknown
+}
+
+export interface MatrixCryptoEncryptResponse {
+  content: unknown
+}
+
+export interface MatrixCryptoShareRoomKeyRequest {
+  adapterId: string
+  roomId: string
+  userIds: string[]
+}
+
+export interface MatrixCryptoTrackUsersRequest {
+  adapterId: string
+  userIds: string[]
+}
+
+export interface MatrixCryptoMissingSessionsRequest {
+  adapterId: string
+  userIds: string[]
+}
+
+export interface MatrixCryptoAttachmentEncryptRequest {
+  bytesBase64: string
+}
+
+export interface MatrixCryptoAttachmentEncryptResponse {
+  bytesBase64: string
+  info: unknown
+}
+
+export interface MatrixCryptoAttachmentDecryptRequest {
+  bytesBase64: string
+  info: unknown
+}
+
+export interface MatrixCryptoAttachmentDecryptResponse {
+  bytesBase64: string
+}
+
 // ---------------------------------------------------------------------------
 // Task 19 — adapter registry commands
 // ---------------------------------------------------------------------------
@@ -148,6 +244,20 @@ export async function connectorsWsClose(handleId: string): Promise<void> {
   await invoke("connectors_ws_close", { handleId })
 }
 
+/**
+ * Close every leaked connector WS / Lark long-connection socket and return the
+ * count reaped.
+ *
+ * A webview hard reload keeps the Rust core process (and its sockets) alive
+ * while discarding the renderer that owned their handle ids, so the per-handle
+ * close never runs and the sockets — plus Lark's self-reconnect loop — pile up,
+ * delivering duplicate inbound events. The connector bootstrap calls this once,
+ * before opening any adapter, to reap the previous load's leaked sockets.
+ */
+export async function connectorsResetAllWs(): Promise<number> {
+  return invoke<number>("connectors_reset_all_ws")
+}
+
 // ---------------------------------------------------------------------------
 // Lark long-connection (protobuf-framed WS)
 //
@@ -197,9 +307,111 @@ export async function connectorsOnebotProbe(): Promise<OnebotLiveClient[]> {
 export async function connectorsAttachmentFetch(
   adapterId: string,
   remoteRef: string,
-  sourceUrl: string
+  sourceUrl: string,
+  headers?: Record<string, string>
 ): Promise<AttachmentRef> {
-  return invoke<AttachmentRef>("connectors_attachment_fetch", { adapterId, remoteRef, sourceUrl })
+  return invoke<AttachmentRef>("connectors_attachment_fetch", {
+    adapterId,
+    remoteRef,
+    sourceUrl,
+    headers,
+  })
+}
+
+/**
+ * Read a cached attachment's plaintext bytes as base64. Returns `null` when
+ * the attachment is not cached or its size exceeds `maxBytes`. This is the
+ * only renderer path into the encrypted connector cache — the webview's fs
+ * scope does not cover the cache directory.
+ */
+export async function connectorsAttachmentRead(
+  adapterId: string,
+  remoteRef: string,
+  maxBytes: number
+): Promise<string | null> {
+  return invoke<string | null>("connectors_attachment_read", {
+    adapterId,
+    remoteRef,
+    maxBytes,
+  })
+}
+
+export async function connectorsMediaUpload(req: ConnectorMediaUploadRequest): Promise<string> {
+  return invoke<string>("connectors_media_upload", { req })
+}
+
+export async function connectorsMatrixCryptoInit(req: MatrixCryptoInitRequest): Promise<void> {
+  await invoke("connectors_matrix_crypto_init", { req })
+}
+
+export async function connectorsMatrixCryptoOutgoingRequests(
+  adapterId: string
+): Promise<MatrixCryptoOutgoingRequest[]> {
+  return invoke<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_outgoing_requests", {
+    adapterId,
+  })
+}
+
+export async function connectorsMatrixCryptoMarkRequestSent(
+  req: MatrixCryptoMarkSentRequest
+): Promise<void> {
+  await invoke("connectors_matrix_crypto_mark_request_sent", { req })
+}
+
+export async function connectorsMatrixCryptoReceiveSyncChanges(
+  req: MatrixCryptoReceiveSyncRequest
+): Promise<void> {
+  await invoke("connectors_matrix_crypto_receive_sync_changes", { req })
+}
+
+export async function connectorsMatrixCryptoDecryptEvent(
+  req: MatrixCryptoDecryptRequest
+): Promise<MatrixCryptoDecryptResponse> {
+  return invoke<MatrixCryptoDecryptResponse>("connectors_matrix_crypto_decrypt_event", { req })
+}
+
+export async function connectorsMatrixCryptoEncryptEvent(
+  req: MatrixCryptoEncryptRequest
+): Promise<MatrixCryptoEncryptResponse> {
+  return invoke<MatrixCryptoEncryptResponse>("connectors_matrix_crypto_encrypt_event", { req })
+}
+
+export async function connectorsMatrixCryptoShareRoomKey(
+  req: MatrixCryptoShareRoomKeyRequest
+): Promise<MatrixCryptoOutgoingRequest[]> {
+  return invoke<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_share_room_key", { req })
+}
+
+export async function connectorsMatrixCryptoUpdateTrackedUsers(
+  req: MatrixCryptoTrackUsersRequest
+): Promise<void> {
+  await invoke("connectors_matrix_crypto_update_tracked_users", { req })
+}
+
+export async function connectorsMatrixCryptoGetMissingSessions(
+  req: MatrixCryptoMissingSessionsRequest
+): Promise<MatrixCryptoOutgoingRequest[]> {
+  return invoke<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_get_missing_sessions", {
+    req,
+  })
+}
+
+export async function connectorsMatrixCryptoEncryptAttachment(
+  req: MatrixCryptoAttachmentEncryptRequest
+): Promise<MatrixCryptoAttachmentEncryptResponse> {
+  return invoke<MatrixCryptoAttachmentEncryptResponse>(
+    "connectors_matrix_crypto_encrypt_attachment",
+    { req }
+  )
+}
+
+export async function connectorsMatrixCryptoDecryptAttachment(
+  req: MatrixCryptoAttachmentDecryptRequest
+): Promise<MatrixCryptoAttachmentDecryptResponse> {
+  return invoke<MatrixCryptoAttachmentDecryptResponse>(
+    "connectors_matrix_crypto_decrypt_attachment",
+    { req }
+  )
 }
 
 // ---------------------------------------------------------------------------

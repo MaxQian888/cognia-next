@@ -1,6 +1,7 @@
 //! `cognia plugin sign <bundle> --key <path>` — produce `<bundle>.sig`.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
+use serde::Serialize;
 use std::path::PathBuf;
 
 use crate::signing::{sign_bundle, Keypair};
@@ -14,10 +15,6 @@ use crate::ui::{style, RuntimeUi};
 ///     development, so the prompt nudges authors to be intentional.
 ///   * Output paints the success line, fingerprint dim, and labels bold.
 pub fn run(bundle: PathBuf, key: PathBuf, out: Option<PathBuf>, ui: &mut RuntimeUi) -> Result<()> {
-    let bytes = std::fs::read(&bundle).with_context(|| format!("read {}", bundle.display()))?;
-    let private_b64 =
-        std::fs::read_to_string(&key).with_context(|| format!("read {}", key.display()))?;
-    let kp = Keypair::from_private_base64(private_b64.trim())?;
     let dest = out.unwrap_or_else(|| {
         let mut p = bundle.clone();
         let new_name = format!(
@@ -29,11 +26,37 @@ pub fn run(bundle: PathBuf, key: PathBuf, out: Option<PathBuf>, ui: &mut Runtime
         p.set_file_name(new_name);
         p
     });
-    let proceed = ui
+
+    let bytes = match std::fs::read(&bundle).with_context(|| format!("read {}", bundle.display())) {
+        Ok(bytes) => bytes,
+        Err(err) if ui.flags.json => return emit_json_failure(&bundle, &dest, "read", err),
+        Err(err) => return Err(err),
+    };
+    let private_b64 =
+        match std::fs::read_to_string(&key).with_context(|| format!("read {}", key.display())) {
+            Ok(private_b64) => private_b64,
+            Err(err) if ui.flags.json => return emit_json_failure(&bundle, &dest, "read", err),
+            Err(err) => return Err(err),
+        };
+    let kp = match Keypair::from_private_base64(private_b64.trim()) {
+        Ok(kp) => kp,
+        Err(err) if ui.flags.json => return emit_json_failure(&bundle, &dest, "read", err),
+        Err(err) => return Err(err),
+    };
+    let proceed = match ui
         .confirm_overwrite(&dest, "--yes to overwrite the existing signature")
-        .map_err(|e| anyhow!("{e}"))?;
+        .map_err(|e| anyhow!("{e}"))
+    {
+        Ok(proceed) => proceed,
+        Err(err) if ui.flags.json => return emit_json_failure(&bundle, &dest, "overwrite", err),
+        Err(err) => return Err(err),
+    };
     if !proceed {
-        bail!("sign aborted: {} would be overwritten", dest.display());
+        let err = anyhow!("sign aborted: {} would be overwritten", dest.display());
+        if ui.flags.json {
+            return emit_json_failure(&bundle, &dest, "overwrite", err);
+        }
+        return Err(err);
     }
     let signature = sign_bundle(&kp.signing_key, &bytes);
     // Create the destination's parent dir if `--out` points somewhere that
@@ -41,25 +64,97 @@ pub fn run(bundle: PathBuf, key: PathBuf, out: Option<PathBuf>, ui: &mut Runtime
     // `create_dir_all` rather than erroring with a raw OS path error.
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("mkdir {}", parent.display()))?;
+            if let Err(err) = std::fs::create_dir_all(parent)
+                .with_context(|| format!("mkdir {}", parent.display()))
+            {
+                if ui.flags.json {
+                    return emit_json_failure(&bundle, &dest, "write", err);
+                }
+                return Err(err);
+            }
         }
     }
-    std::fs::write(&dest, &signature).with_context(|| format!("write {}", dest.display()))?;
-    println!(
-        "{}{} {} → {}",
-        style::success_prefix(),
-        style::ok("Signed"),
-        style::bold(bundle.display().to_string()),
-        style::bold(dest.display().to_string()),
-    );
-    println!("  {}  {}", style::dim("public key:"), kp.public_base64());
-    println!(
-        "  {}  {}",
-        style::dim("fingerprint:"),
-        style::dim(kp.fingerprint_hex())
-    );
+    if let Err(err) =
+        std::fs::write(&dest, &signature).with_context(|| format!("write {}", dest.display()))
+    {
+        if ui.flags.json {
+            return emit_json_failure(&bundle, &dest, "write", err);
+        }
+        return Err(err);
+    }
+    let public_key = kp.public_base64();
+    let fingerprint = kp.fingerprint_hex();
+    if ui.flags.json {
+        let payload = SignJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "sign",
+            bundle: bundle.display().to_string(),
+            signature: dest.display().to_string(),
+            public_key,
+            fingerprint,
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else if !ui.flags.quiet {
+        println!(
+            "{}{} {} → {}",
+            style::success_prefix(),
+            style::ok("Signed"),
+            style::bold(bundle.display().to_string()),
+            style::bold(dest.display().to_string()),
+        );
+        println!("  {}  {}", style::dim("public key:"), public_key);
+        println!(
+            "  {}  {}",
+            style::dim("fingerprint:"),
+            style::dim(fingerprint)
+        );
+    }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct SignFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    bundle: String,
+    signature: String,
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SignJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    bundle: String,
+    signature: String,
+    #[serde(rename = "publicKey")]
+    public_key: String,
+    fingerprint: String,
+}
+
+fn emit_json_failure(
+    bundle: &std::path::Path,
+    signature: &std::path::Path,
+    stage: &'static str,
+    err: anyhow::Error,
+) -> Result<()> {
+    let payload = SignFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "sign",
+        stage,
+        bundle: bundle.display().to_string(),
+        signature: signature.display().to_string(),
+        error: err.to_string(),
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
 }
 
 #[cfg(test)]
@@ -156,5 +251,26 @@ mod tests {
         let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
         run(bundle, key_path, Some(out_path.clone()), &mut ui).unwrap();
         assert!(out_path.exists());
+    }
+
+    #[test]
+    fn sign_json_payload_is_schema_versioned() {
+        let payload = SignJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "sign",
+            bundle: "target/plugin.zip".into(),
+            signature: "target/plugin.zip.sig".into(),
+            public_key: "pub".into(),
+            fingerprint: "abc".into(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["action"], "sign");
+        assert_eq!(json["bundle"], "target/plugin.zip");
+        assert_eq!(json["signature"], "target/plugin.zip.sig");
+        assert_eq!(json["publicKey"], "pub");
+        assert_eq!(json["fingerprint"], "abc");
     }
 }

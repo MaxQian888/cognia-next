@@ -200,9 +200,11 @@ function OverviewTab() {
     if (!settings) return
     setSavingEnabled(true)
     try {
-      const updated: AutomationSettings = { ...settings, enabled: next }
-      await desktop.settingsSet(updated)
-      setSettings(updated)
+      // Route the explicit enable/disable toggle through the dedicated command:
+      // enabling is the operator's deliberate resume, which releases an engaged
+      // kill switch. A bulk `settingsSet` never resumes automation.
+      await desktop.setEnabled(next)
+      setSettings({ ...settings, enabled: next })
       toast.success(next ? "Automation engine enabled" : "Automation engine disabled")
     } catch (err) {
       toast.error("Update failed", {

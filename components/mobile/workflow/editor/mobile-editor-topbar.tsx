@@ -25,6 +25,7 @@ import {
   Save as SaveIcon,
   Pencil as EditIcon,
   Eye as ReadIcon,
+  Sparkles as CopilotIcon,
   Undo2 as UndoIcon,
   Redo2 as RedoIcon,
   LayoutGrid as AutoLayoutIcon,
@@ -61,6 +62,8 @@ export interface MobileEditorTopbarProps {
   reactFlowInstance: WorkflowFlowInstance | null
   mode: "read" | "edit"
   onToggleMode: () => void
+  /** Open the AI copilot sheet. */
+  onOpenCopilot: () => void
 }
 
 export function MobileEditorTopbar({
@@ -68,6 +71,7 @@ export function MobileEditorTopbar({
   reactFlowInstance,
   mode,
   onToggleMode,
+  onOpenCopilot,
 }: MobileEditorTopbarProps) {
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
@@ -226,6 +230,18 @@ export function MobileEditorTopbar({
           <ReadIcon className="mr-1 size-4" aria-hidden="true" />
         )}
         {mode === "edit" ? t("modeEdit") : t("modeRead")}
+      </Button>
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-11 shrink-0"
+        onClick={onOpenCopilot}
+        aria-label={t("copilot")}
+        data-testid="mobile-editor-copilot"
+      >
+        <CopilotIcon className="size-5" aria-hidden="true" />
       </Button>
 
       <Button

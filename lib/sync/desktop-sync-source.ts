@@ -15,7 +15,9 @@
  * primitives carries the answer all the way back.
  */
 
-import type { Skill, StoredMessage, ChatSession, Character } from "@/lib/claude/types"
+import type { Skill, StoredMessage, ChatSession, Character, McpServer } from "@/lib/claude/types"
+import type { WorkflowRunRow } from "@/types/workflow/visual"
+import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { getDb } from "@/lib/db/schema"
 import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
@@ -125,16 +127,26 @@ export async function readDexieDelta(
       return readMessagesDelta(since)
     case "workflows":
       return readWorkflowsDelta(since)
+    case "workflowRuns":
+      return readWorkflowRunsDelta(since)
     case "twinProfile":
       return readTwinProfileDelta(since)
     case "plugins":
       return readPluginsDelta(since)
     case "adapterInstances":
       return readAdapterInstancesDelta(since)
+    case "mcpServers":
+      return readMcpServersDelta(since)
+    case "terminalHistory":
+      return readTerminalHistoryDelta(since)
     case "settings":
       return readSettingsDelta(since)
     case "conversationOverrides":
       return readConversationOverridesDelta(since)
+    case "goals":
+      return readGoalsDelta(since)
+    case "memories":
+      return readMemoriesDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -148,8 +160,11 @@ async function readCharactersDelta(since: number): Promise<SyncDelta<Character>>
 }
 
 async function readSkillsDelta(since: number): Promise<SyncDelta<Skill>> {
-  const all = await getDb().skills.toArray()
-  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+  // skills carries an `updatedAt` index (schema `id, name, updatedAt, ...`),
+  // so pull only the rows past the cursor instead of scanning the whole
+  // table into memory and filtering — a large skill library otherwise
+  // hydrated every row on every pull. Mirrors readSessionsDelta.
+  const rows = await getDb().skills.where("updatedAt").above(since).toArray()
   return finalizeDelta("skills", rows, since)
 }
 
@@ -177,6 +192,47 @@ async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
   return finalizeDelta("workflows", rows as UpdatedAtRow[], since)
 }
 
+/**
+ * Workflow RUN history. Unlike the other tables, run rows carry no
+ * `updatedAt` — a run is written at creation (`startedAt`) and again at
+ * completion (`completedAt`), and the mobile run surfaces only care about the
+ * status flip across those two moments. So the cursor rides
+ * `max(startedAt, completedAt)`: a run crosses the wire once when it starts
+ * (status "running") and once when it finishes (final status), which is
+ * exactly what the library badges / runs feed need.
+ *
+ * Both `startedAt` and `completedAt` are indexed (schema v22), so we union the
+ * two range queries instead of scanning the whole table. The first sync
+ * (`since === 0`) is bounded to the last 30 days, and the result is paged
+ * (oldest-activity first) so a heavy run history streams across several pulls
+ * rather than one multi-MB payload — each run embeds its `workflowSnapshot`.
+ */
+const RUN_FIRST_SYNC_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const RUN_PAGE_SIZE = 200
+
+function runActivityAt(run: WorkflowRunRow): number {
+  return Math.max(run.startedAt ?? 0, run.completedAt ?? 0)
+}
+
+async function readWorkflowRunsDelta(since: number): Promise<SyncDelta<WorkflowRunRow>> {
+  const db = getDb()
+  // Floor the first full sync to a recent window so a years-deep run history
+  // doesn't hydrate in one shot; incremental pulls use the real cursor.
+  const floor = since === 0 ? Math.max(0, Date.now() - RUN_FIRST_SYNC_WINDOW_MS) : since
+  const [started, completed] = await Promise.all([
+    db.workflowRuns.where("startedAt").above(floor).toArray(),
+    db.workflowRuns.where("completedAt").above(floor).toArray(),
+  ])
+  const byId = new Map<string, WorkflowRunRow>()
+  for (const run of [...started, ...completed]) {
+    if (runActivityAt(run) > since) byId.set(run.id, run)
+  }
+  const ordered = [...byId.values()].sort((a, b) => runActivityAt(a) - runActivityAt(b))
+  const page = ordered.slice(0, RUN_PAGE_SIZE)
+  const hasMore = ordered.length > RUN_PAGE_SIZE
+  return finalizeDelta("workflowRuns", page, since, hasMore, runActivityAt)
+}
+
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {
   // twinProfile rows track changes via updatedAt; older rows without an
   // updatedAt always sync once and then settle.
@@ -196,12 +252,56 @@ async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unkno
   return finalizeDelta("adapterInstances", rows as UpdatedAtRow[], since)
 }
 
+async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServer>> {
+  // mcpServers carries `updatedAt` (set on every create/update) but the index
+  // is `id, name, enabled` — no `updatedAt` index — so we read all and filter,
+  // mirroring readPluginsDelta. The configured-server set is small. The mobile
+  // `/me/mcp` page is a read-only viewer, so deltas only ever flow desktop→phone.
+  const all = await getDb().mcpServers.toArray()
+  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+  return finalizeDelta("mcpServers", rows, since)
+}
+
+/**
+ * Durable terminal command history (ADR-0039 phase 2). Unlike every other
+ * synced table, `terminalHistory` rows carry no `updatedAt`/`createdAt` — the
+ * only monotonic field is `ts` (last-execution epoch ms), which schema v74
+ * indexes. So we range-query on `ts` and ride the cursor on `ts` via the
+ * `finalizeDelta` override, exactly the way `readWorkflowRunsDelta` cursors on
+ * `max(startedAt, completedAt)`.
+ *
+ * Re-run semantics are correct as-is: re-executing a command bumps `ts` on the
+ * same `id`, so the row re-crosses the wire and the phone's `bulkPut`
+ * overwrites in place. Prune-deletions are not tombstoned (same as
+ * mcpServers/settings) — the phone ages stale rows out passively.
+ */
+async function readTerminalHistoryDelta(since: number): Promise<SyncDelta<TerminalHistoryRow>> {
+  const rows = await getDb().terminalHistory.where("ts").above(since).toArray()
+  return finalizeDelta("terminalHistory", rows, since, false, (r) => r.ts)
+}
+
 async function readConversationOverridesDelta(since: number): Promise<SyncDelta<unknown>> {
   // v49 table; carries an `updatedAt` index (schema `&id, &conversationKey,
   // sessionId, pinned, archived, updatedAt`). Mobile mirrors pinned /
   // archived / lastReadAt so the Inbox renders correct buckets offline.
   const rows = await getDb().conversationOverrides.where("updatedAt").above(since).toArray()
   return finalizeDelta("conversationOverrides", rows as unknown as UpdatedAtRow[], since)
+}
+
+async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {
+  // chatGoals carries an `updatedAt` index (schema `…, createdAt, updatedAt`),
+  // so pull only the rows past the cursor instead of scanning the whole table.
+  const rows = await getDb().chatGoals.where("updatedAt").above(since).toArray()
+  return finalizeDelta("goals", rows as UpdatedAtRow[], since)
+}
+
+async function readMemoriesDelta(since: number): Promise<SyncDelta<unknown>> {
+  // memories has an `updatedAt` field but NOT an index on it (schema indexes
+  // scope/type/status/…), so we can't `.where("updatedAt").above`. Read all
+  // and filter — mirrors readPluginsDelta. The personal memory store is small.
+  const all = await getDb().memories.toArray()
+  const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
+  return finalizeDelta("memories", rows as UpdatedAtRow[], since)
 }
 
 /**
@@ -235,7 +335,13 @@ async function finalizeDelta<T extends UpdatedAtRow>(
   table: SyncableTable,
   rows: T[],
   since: number,
-  hasMore = false
+  hasMore = false,
+  /**
+   * How to read a row's cursor watermark. Defaults to `updatedAt ?? createdAt`
+   * — the shape every other table carries. `workflowRuns` has neither, so it
+   * passes `max(startedAt, completedAt)` instead (see readWorkflowRunsDelta).
+   */
+  cursorOf: (row: T) => number = (row) => Number(row.updatedAt ?? row.createdAt ?? 0)
 ): Promise<SyncDelta<T>> {
   // Fold in tombstones recorded since the cursor (v61). The phone applies
   // `deleted_ids` via `bulkDelete`, so a desktop deletion finally reaches
@@ -245,7 +351,7 @@ async function finalizeDelta<T extends UpdatedAtRow>(
 
   let highestCursor = since
   for (const row of rows) {
-    const candidate = Number(row.updatedAt ?? row.createdAt ?? 0)
+    const candidate = cursorOf(row)
     if (candidate > highestCursor) highestCursor = candidate
   }
   if (maxDeletedAt > highestCursor) highestCursor = maxDeletedAt

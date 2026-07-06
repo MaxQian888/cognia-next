@@ -23,6 +23,10 @@ export interface UseConversationListModelParams {
   query: string
   view?: "active" | "archived"
   collapsedFolderIds?: ReadonlySet<string>
+  /** Group loose sessions into date buckets. Defaults to `true`. */
+  groupByDate?: boolean
+  /** Session ids whose message content matched the query (title OR content). */
+  contentMatchIds?: ReadonlySet<string>
   /** Override the injected clock (tests only); defaults to `Date.now()`. */
   now?: number
 }
@@ -39,6 +43,8 @@ export function useConversationListModel({
   query,
   view = "active",
   collapsedFolderIds = EMPTY_COLLAPSED,
+  groupByDate = true,
+  contentMatchIds,
   now,
 }: UseConversationListModelParams): ConversationListModel {
   return useMemo(
@@ -48,7 +54,9 @@ export function useConversationListModel({
         view,
         now: resolveNow(now),
         collapsedFolderIds,
+        groupByDate,
+        contentMatchIds,
       }),
-    [sessions, folders, query, view, collapsedFolderIds, now]
+    [sessions, folders, query, view, collapsedFolderIds, groupByDate, contentMatchIds, now]
   )
 }

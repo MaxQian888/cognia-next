@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   INITIAL_CURSOR,
+  cellAtRow,
   cellTopRow,
   clearFocus,
   closeFind,
@@ -44,6 +45,10 @@ export interface TranscriptCursor {
   targetRow: number | null
   /** The focused cell (for per-cell copy / expand), or null. */
   focused: Cell | null
+  /** Map a scroll-content row (absolute click row minus the content box's top)
+   * to the cell under it, or null when it lands on a gap / unmeasured cell.
+   * Only meaningful while measuring (find/focus open, or `alwaysMeasure`). */
+  cellIdAtContentRow: (row: number) => string | null
   open: () => void
   close: () => void
   setQuery: (query: string) => void
@@ -55,7 +60,14 @@ export interface TranscriptCursor {
   reportCellHeight: (id: string, height: number) => void
 }
 
-export function useTranscriptCursor(cells: Cell[]): TranscriptCursor {
+export function useTranscriptCursor(
+  cells: Cell[],
+  /** Keep per-cell measurement on even when find is closed and no cell is
+   * focused — so a transcript click can be mapped to a cell (`/menu`-style
+   * click-to-expand). Costs the measuring wrappers + disables context folding,
+   * so the App only sets it when the click-to-expand pref is on. */
+  alwaysMeasure = false
+): TranscriptCursor {
   const [state, setState] = useState<CursorState>(INITIAL_CURSOR)
   // Latest cells, so the action closures (which fire on keypress, after commit)
   // never compute over a stale transcript. Synced in an effect rather than during
@@ -93,7 +105,17 @@ export function useTranscriptCursor(cells: Cell[]): TranscriptCursor {
     setState(clearFocus)
   }, [])
 
-  const measuring = isFindActive(state) || state.focusedCellId !== null
+  const measuring = isFindActive(state) || state.focusedCellId !== null || alwaysMeasure
+
+  const cellIdAtContentRow = useCallback(
+    (row: number) =>
+      cellAtRow(
+        cells.map((c) => c.id),
+        heights,
+        row
+      ),
+    [cells, heights]
+  )
 
   const targetRow = useMemo(() => {
     if (state.focusedCellId === null) return null
@@ -112,6 +134,7 @@ export function useTranscriptCursor(cells: Cell[]): TranscriptCursor {
     match: currentMatch(state),
     targetRow,
     focused: focusedCell(cells, state),
+    cellIdAtContentRow,
     open,
     close,
     setQuery,

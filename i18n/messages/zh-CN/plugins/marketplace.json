@@ -24,6 +24,8 @@
     "builtin": "内置",
     "featured": "精选",
     "popular": "热门",
-    "recent": "最近上架"
+    "recent": "最近上架",
+    "shared": "共享",
+    "workspace": "工作区"
   }
 }

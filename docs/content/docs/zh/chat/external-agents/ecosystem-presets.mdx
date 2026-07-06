@@ -1,6 +1,6 @@
 ---
 title: 生态与预设
-description: 产品目录与开箱即用配置—— ecosystem-adapters.ts（413 行）枚举 4 个产品适配器与 10 个按支持层级打标的面，presets.ts（332 行）派生 4 个可执行预设并支持插件贡献的预设，env-builder.ts（85 行）在拉起时注入 codex 订阅环境变量叠加。
+description: 产品目录与开箱即用配置—— ecosystem-adapters.ts 枚举 9 个产品适配器与 16 个按支持层级打标的面，presets.ts 派生 10 个可执行预设并支持插件贡献的预设，env-builder.ts 在拉起时注入 codex 订阅环境变量叠加。
 ---
 
 # 生态与预设
@@ -8,19 +8,21 @@ description: 产品目录与开箱即用配置—— ecosystem-adapters.ts（413
 <Status variant="stable" />
 
 <TLDR>
-  这一簇回答"用户能挑**哪些**外部 Agent，每个又如何拉起？" `ecosystem-adapters.ts` 是静态产品目录：4 个
-  适配器（**Codex**、**Claude Code**、**Gemini CLI**、**Cursor**）暴露 10 个面（`:48`），每个打标
-  `executable`、`guided` 或 `documented-only`。只有 4 个面是 `executable`——它们成为 `presets.ts`（`:105`）
-  里的 4 个内置**预设**：`codex`、`claude-code`、`gemini-cli`、`cursor-cli`，全为 ACP-走-stdio。
-  `createAgentFromPreset`（`:242`）从一个预设 id 物化出完整 `ExternalAgentConfig`，一个运行时叠加层让插件
+  这一簇回答"用户能挑**哪些**外部 Agent，每个又如何拉起？" `ecosystem-adapters.ts` 是静态产品目录：9 个
+  适配器（**Codex**、**Claude Code**、**Gemini CLI**、**Copilot CLI**、**Kiro**、**Qwen Code**、**Pi**、
+  **Factory Droid**、**Cursor**）暴露 16 个面（`:48`），每个打标
+  `executable`、`guided` 或 `documented-only`。10 个 `executable` 面成为 `presets.ts`
+  里的内置**预设**：`codex`、`codex-app-server`、`claude-code`、`gemini-cli`、`cursor-cli`、
+  `copilot-cli`、`kiro`、`qwen-code`、`pi`、`droid`——除原生 codex app-server 外全为 ACP-走-stdio。
+  `createAgentFromPreset` 从一个预设 id 物化出完整 `ExternalAgentConfig`，一个运行时叠加层让插件
   无需触碰封闭类型联合即可注册自己的预设。拉起时，`env-builder.ts`（`:36`）注入活跃 Codex 订阅账户的环境
   变量——那是唯一一个需要超出普通 API key 的凭据的预设。
 </TLDR>
 
 <StatGrid>
-  <Stat label="产品适配器" value="4" hint="codex · claude-code · gemini-cli · cursor —— ecosystem-adapters.ts:48" />
-  <Stat label="面" value="10" hint="4 可执行 · 6 仅文档" />
-  <Stat label="可执行预设" value="4" hint="presets.ts:105（+ custom:null）" />
+  <Stat label="产品适配器" value="9" hint="codex · claude-code · gemini-cli · copilot-cli · kiro · qwen-code · pi · droid · cursor —— ecosystem-adapters.ts:48" />
+  <Stat label="面" value="16" hint="10 可执行 · 6 仅文档" />
+  <Stat label="可执行预设" value="10" hint="EXTERNAL_AGENT_PRESETS（+ custom:null）" />
   <Stat label="全为 ACP / stdio" value="是" hint="每个可执行预设都是 acp + stdio" />
   <Stat label="默认超时" value="30s" hint="createAgentFromPreset :278（对比 config-normalizer 300s）" />
   <Stat label="环境叠加" value="仅 codex" hint="env-builder.ts:62 —— 订阅支撑" />
@@ -43,12 +45,18 @@ description: 产品目录与开箱即用配置—— ecosystem-adapters.ts（413
 | codex | slack | documented-only | http/http | — | 配置 Slack 应用 | 116 |
 | codex | cloud | documented-only | http/http | — | ChatGPT/OpenAI 云 | 134 |
 | **claude-code** | acp-stdio（Claude Code） | executable | acp/stdio | `npx -y @anthropics/claude-code --stdio` | `ANTHROPIC_API_KEY` | 160 |
-| **gemini-cli** | acp-stdio（Gemini CLI） | executable | acp/stdio | `npx -y @google/gemini-cli --stdio` | `GOOGLE_API_KEY` | 188 |
-| **cursor** | acp-stdio（Cursor CLI） | executable | acp/stdio | `cursor-agent`（在 PATH） | 安装 Cursor CLI | 216 |
-| cursor | mcp-config | documented-only | acp/http | — | Cursor 侧 MCP 配置 | 236 |
-| cursor | background-agent | documented-only | acp/http | — | 托管后台 Agent | 253 |
+| **gemini-cli** | acp-stdio（Gemini CLI） | executable | acp/stdio | `npx -y @google/gemini-cli --stdio` | `GOOGLE_API_KEY` | 210 |
+| **copilot-cli** | acp-stdio（GitHub Copilot CLI） | executable | acp/stdio | `copilot --acp` | `COPILOT_GITHUB_TOKEN` / `/login` | 238 |
+| **kiro** | acp-stdio（Kiro CLI） | executable | acp/stdio | `kiro-cli acp` | AWS Builder ID 登录 | 269 |
+| **qwen-code** | acp-stdio（Qwen Code） | executable | acp/stdio | `npx -y @qwen-code/qwen-code --acp` | Qwen OAuth / `OPENAI_API_KEY` | 298 |
+| **pi** | acp-stdio（Pi，社区适配器） | executable | acp/stdio | `npx -y pi-acp` | Pi 自身配置密钥；第三方桥 | 327 |
+| **droid** | acp-stdio（Factory Droid） | executable | acp/stdio | `droid exec --output-format acp` | `FACTORY_API_KEY` / 设备码登录 | 359 |
+| **cursor** | acp-stdio（Cursor CLI） | executable | acp/stdio | `cursor-agent`（在 PATH） | 安装 Cursor CLI | 390 |
+| cursor | mcp-config | documented-only | acp/http | — | Cursor 侧 MCP 配置 | 410 |
+| cursor | background-agent | documented-only | acp/http | — | 托管后台 Agent | 427 |
 
-适配器块起始于：codex `:52`、claude-code `:153`、gemini-cli `:181`、cursor `:209`。查找/解析辅助：
+适配器块起始于：codex `:52`、claude-code `:175`、gemini-cli `:203`、copilot-cli `:231`、kiro `:262`、
+qwen-code `:291`、pi `:320`、droid `:352`、cursor `:383`。查找/解析辅助：
 `getExternalAgentEcosystemAdapter`（`:274`）、`findExternalAgentSurfaceByPresetId`（`:284`）、
 `findExternalAgentSurface`（`:297`）、`checkSurfaceExecutability`（`:324`，对 `documented-only` 返回阻断）、
 `listAllSurfacesWithTier`（`:348`），以及 `resolveExternalAgentSurfaceFromMetadata`（`:387`，被 Manager 的
@@ -57,20 +65,27 @@ description: 产品目录与开箱即用配置—— ecosystem-adapters.ts（413
 > **OpenCode 不在这份目录里。** 它是一个*协议*（`config-normalizer.ts:16`），而非打包的产品面——用户把它
 > 指向一个运行中的 OpenCode 服务端，而非挑一个预设。
 
-## 四个预设
+## 内置预设
 
-`presets.ts` *从*可执行面派生内置预设——每个预设由 `buildPresetConfig(presetId)`（`:76`）构建，它按
-`presetId` 查面。目录是 `EXTERNAL_AGENT_PRESETS`（`:105`）：
+`presets.ts` *从*可执行面派生内置预设——每个预设由 `buildPresetConfig(presetId)` 构建，它按
+`presetId` 查面。目录是 `EXTERNAL_AGENT_PRESETS`：
 
-| 预设 id | 名称 | 协议 | 传输 | 拉起 | 构建于 |
-| --- | --- | --- | --- | --- | --- |
-| `codex` | Codex CLI | acp | stdio | `npx -y @zed-industries/codex-acp` | 109 |
-| `claude-code` | Claude Code | acp | stdio | `npx -y @anthropics/claude-code --stdio` | 110 |
-| `gemini-cli` | Gemini CLI | acp | stdio | `npx -y @google/gemini-cli --stdio` | 111 |
-| `cursor-cli` | Cursor CLI | acp | stdio | `cursor-agent` | 112 |
-| `custom` | — | — | — | `null`（用户自定义） | 113 |
+| 预设 id | 名称 | 协议 | 传输 | 拉起 |
+| --- | --- | --- | --- | --- |
+| `codex` | Codex CLI | acp | stdio | `npx -y @zed-industries/codex-acp` |
+| `codex-app-server` | Codex (app-server) | codex-app-server | stdio | `codex app-server` |
+| `claude-code` | Claude Code | acp | stdio | `npx -y @anthropics/claude-code --stdio` |
+| `gemini-cli` | Gemini CLI | acp | stdio | `npx -y @google/gemini-cli --stdio` |
+| `cursor-cli` | Cursor CLI | acp | stdio | `cursor-agent` |
+| `copilot-cli` | GitHub Copilot CLI | acp | stdio | `copilot --acp` |
+| `kiro` | Kiro CLI | acp | stdio | `kiro-cli acp` |
+| `qwen-code` | Qwen Code | acp | stdio | `npx -y @qwen-code/qwen-code --acp` |
+| `pi` | Pi（社区适配器） | acp | stdio | `npx -y pi-acp` |
+| `droid` | Factory Droid | acp | stdio | `droid exec --output-format acp` |
+| `custom` | — | — | — | `null`（用户自定义） |
 
-`ExternalAgentPresetId`（`:25`）是一个封闭联合，但预设不是——见下一节。
+`ExternalAgentPresetId`（`:26`）是一个封闭联合，但预设不是——见下一节。Pi 条目由社区 `pi-acp` 适配器
+桥接（Pi 尚无原生 ACP 支持），在目录中打有 `community-adapter` / `experimental` 标签。
 
 ### 物化一个配置
 

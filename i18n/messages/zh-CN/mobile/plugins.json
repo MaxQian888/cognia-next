@@ -1,8 +1,11 @@
 {
+  "backAria": "返回我的",
   "disabled": "已禁用",
   "empty": "尚未安装任何插件。",
   "enabled": "已启用",
+  "intro": "启用或禁用已安装的插件。更改会在配对的桌面端下次上线时同步。",
   "queueLabel": "已排队——桌面上线后会同步。",
+  "title": "插件",
   "toggleAria": "切换插件状态",
   "toggleFailed": "切换失败：{message}"
 }

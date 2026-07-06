@@ -7,13 +7,25 @@
 
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createAzure } from "@ai-sdk/azure"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
 import type { LanguageModel } from "ai"
 import type { ProviderName } from "@cognia/provider-types"
+import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
+// Single source of truth for the OpenAI Responses-vs-Chat decision and the
+// provider→protocol map (shared with the sidecar; the file lives under
+// `sidecar/` because the sidecar ships standalone and can't import TS).
+import {
+  isGenuineOpenAiEndpoint,
+  resolveProviderProtocol,
+  decideOpenAiEndpointFlavor,
+} from "../../../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
 
 export type { ProviderName } from "@cognia/provider-types"
+// Re-exported for back-compat with importers that pulled it from here.
+export { isGenuineOpenAiEndpoint }
 
 export interface ProviderModelOptions {
   provider: ProviderName
@@ -26,62 +38,12 @@ export interface ProviderModelOptions {
    * `OpenAI-Beta`, `Originator`, etc. alongside the bearer token.
    */
   headers?: Record<string, string>
-}
-
-/**
- * Providers that expose an OpenAI-compatible `/v1` surface, so they dispatch
- * through the OpenAI client with a custom `baseURL`. Mirrors the sidecar's
- * `resolveProtocol()` (sidecar/dispatch/ai-sdk.mjs) so the renderer and the
- * sidecar agree on which family a provider id belongs to.
- */
-const OPENAI_COMPATIBLE_PROVIDERS = new Set<string>([
-  "openai",
-  "openrouter",
-  "opencode",
-  "opencode-go",
-  "deepseek",
-  "groq",
-  "mistral-openai-compat",
-  "ollama",
-  "lmstudio",
-  "llamacpp",
-  "llamafile",
-  "vllm",
-  "localai",
-  "jan",
-  "textgenwebui",
-  "koboldcpp",
-  "tabbyapi",
-  "codex",
-])
-
-/**
- * Providers that serve ONLY the OpenAI Responses API (never `/chat/completions`),
- * regardless of host. Codex's ChatGPT backend lives at `chatgpt.com`, so the
- * `*.openai.com` host check in `isGenuineOpenAiEndpoint` would misroute it to
- * `/chat/completions` (which the backend rejects). Force `.responses()` for it.
- */
-const RESPONSES_ONLY_PROVIDERS = new Set<string>(["codex"])
-
-/**
- * Decide whether an openai-protocol base URL is genuine OpenAI (api.openai.com),
- * which serves the modern Responses API, versus an OpenAI-*compatible* gateway
- * (DeepSeek / Groq / OpenRouter / Ollama / LM Studio / vLLM / …) that only
- * implements Chat Completions. A missing base URL means the default OpenAI
- * endpoint. Anything that doesn't parse, or whose host isn't *.openai.com, is
- * treated as a compatible gateway so we fail safe onto `/chat/completions`.
- *
- * Mirrors `isGenuineOpenAiEndpoint` in the sidecar's `ai-sdk-adapter.mjs` — the
- * renderer and sidecar must agree, or a gateway works in chat but 404s here.
- */
-export function isGenuineOpenAiEndpoint(baseURL: string | undefined): boolean {
-  if (!baseURL || typeof baseURL !== "string") return true
-  try {
-    const host = new URL(baseURL).host.toLowerCase()
-    return host === "api.openai.com" || host.endsWith(".openai.com")
-  } catch {
-    return false
-  }
+  /**
+   * Explicit OpenAI endpoint family. "responses" / "chat" override the host
+   * heuristic (this is what unlocks the Responses API on Azure / compatible
+   * gateways / custom base URLs); "auto" or omitted falls back to the heuristic.
+   */
+  apiFlavor?: "auto" | "responses" | "chat"
 }
 
 /**
@@ -97,8 +59,13 @@ export function isGenuineOpenAiEndpoint(baseURL: string | undefined): boolean {
  * `getEmbeddingModel`, rather than silently falling back to Anthropic.
  */
 export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
-  const { apiKey, baseURL } = opts
   const provider = opts.provider as string
+  const apiKey = opts.apiKey
+  // Catalog `defaultBaseURL`s are OpenAI-compat endpoints (e.g. Cohere's
+  // `/compatibility/v1`) — they are only valid for the OpenAI-compatible
+  // branch below. Native `@ai-sdk/*` clients must keep their own built-in
+  // defaults unless the caller passed an explicit override.
+  const baseURL = opts.baseURL
 
   switch (provider) {
     case "anthropic": {
@@ -112,20 +79,43 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
       return createMistral({ apiKey, baseURL })(opts.model) as LanguageModel
     case "cohere":
       return createCohere({ apiKey, baseURL })(opts.model) as LanguageModel
+    case "azure": {
+      // Azure serves the OpenAI surface; honor apiFlavor (auto → chat for Azure,
+      // "responses" opts into the Responses API) via the shared decision.
+      const client = createAzure({ apiKey, baseURL, headers: opts.headers })
+      const flavor = decideOpenAiEndpointFlavor({
+        apiFlavor: opts.apiFlavor,
+        baseURL,
+        providerId: "azure",
+      })
+      return (
+        flavor === "responses" ? client.responses(opts.model) : client.chat(opts.model)
+      ) as LanguageModel
+    }
+    case "bedrock":
+      // Bedrock's AWS SigV4 deps must not enter the renderer/mobile bundle; the
+      // sidecar chat path supports it natively. Keep it out of this in-renderer
+      // model factory.
+      throw new Error("getProviderModel: bedrock is only supported via the chat/sidecar path")
     default:
-      if (OPENAI_COMPATIBLE_PROVIDERS.has(provider)) {
+      if (resolveProviderProtocol(provider) === "openai") {
         // @ai-sdk/openai v3's bare `client(model)` returns a Responses-API
         // model (`/responses`) — an OpenAI-proprietary endpoint. Genuine OpenAI
         // serves it, but the OpenAI-*compatible* gateways this branch also
         // handles (DeepSeek, Groq, OpenRouter, Ollama, LM Studio, vLLM, …) only
         // implement `/chat/completions`, so the bare call 404s ("Not Found")
-        // for every one of them. Pick the endpoint family explicitly, matching
-        // the sidecar's ai-sdk dispatch path.
-        const client = createOpenAI({ apiKey, baseURL, headers: opts.headers })
-        const useResponses =
-          RESPONSES_ONLY_PROVIDERS.has(provider) || isGenuineOpenAiEndpoint(baseURL)
+        // for every one of them. The shared decision picks the family — honoring
+        // an explicit `apiFlavor` and otherwise the host/id heuristic — exactly
+        // as the sidecar's ai-sdk dispatch path does.
+        const compatBaseURL = baseURL ?? getBuiltInProviderDefaultBaseURL(provider)
+        const client = createOpenAI({ apiKey, baseURL: compatBaseURL, headers: opts.headers })
+        const flavor = decideOpenAiEndpointFlavor({
+          apiFlavor: opts.apiFlavor,
+          baseURL: compatBaseURL,
+          providerId: provider,
+        })
         return (
-          useResponses ? client.responses(opts.model) : client.chat(opts.model)
+          flavor === "responses" ? client.responses(opts.model) : client.chat(opts.model)
         ) as LanguageModel
       }
       throw new Error(

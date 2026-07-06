@@ -1,10 +1,10 @@
 "use client"
 
-// Font scale, language, reduce-motion + (v47) font families, density,
-// radius, motion-speed, and typography fine-tuning (line-height /
-// letter-spacing). The original three controls live at the top of the tab
-// so existing users don't have to learn a new layout; v47 additions are
-// gathered under labelled subsections below.
+// Pure typography: font scale, interface language, the sans/mono/serif family
+// pickers, and line-height / letter-spacing fine-tuning. Spacing (density),
+// shape (corner radius) and the display-density modes moved to the Layout tab;
+// motion controls live in the Accessibility tab. Keeping this tab focused on
+// type makes its label honest and shortens the scroll.
 
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
@@ -15,23 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Slider } from "@/components/ui/slider"
-import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 import type { AppFontScale, AppLanguage } from "@/lib/claude/types"
 import { responsiveSelectClass } from "@/lib/utils"
-import {
-  DEFAULT_MOTION,
-  DEFAULT_RADIUS,
-  DEFAULT_TYPOGRAPHY_EXT,
-  type MotionSpeed,
-  type RadiusSettings,
-  type TypographyExtSettings,
-} from "@/types/appearance"
-import { DensityCard } from "../components/density-card"
-import { AgentFlowCard } from "../components/agent-flow-card"
-import { UsageDisplayCard } from "../components/usage-display-card"
+import { DEFAULT_TYPOGRAPHY_EXT, type TypographyExtSettings } from "@/types/appearance"
 import { FontFamilyPicker } from "../components/font-family-picker"
+import { SettingSliderRow } from "../components/setting-slider-row"
 
 const FONT_SCALES: { value: AppFontScale; label: string }[] = [
   { value: "xs", label: "XS · 14px" },
@@ -46,12 +35,6 @@ const LANGUAGES: { value: AppLanguage; label: string }[] = [
   { value: "zh-CN", label: "简体中文" },
 ]
 
-const MOTION_SPEED_OPTIONS: { value: MotionSpeed; key: string }[] = [
-  { value: 0.5, key: "motion.speed.slow" },
-  { value: 1, key: "motion.speed.normal" },
-  { value: 1.5, key: "motion.speed.fast" },
-]
-
 export function TypographyTab() {
   const t = useTranslations("settings.appearance")
   const tLayout = useTranslations("settings.appearance.layoutType")
@@ -59,13 +42,10 @@ export function TypographyTab() {
   const save = useSettingsStore((s) => s.save)
   const fontScale: AppFontScale = settings?.fontScale ?? "md"
   const language: AppLanguage = settings?.language ?? "en"
-  const reduceMotion = Boolean(settings?.reduceMotion)
   const typographyExt: TypographyExtSettings = {
     ...DEFAULT_TYPOGRAPHY_EXT,
     ...(settings?.typographyExt ?? {}),
   }
-  const radius: RadiusSettings = { ...DEFAULT_RADIUS, ...(settings?.radius ?? {}) }
-  const motion = { ...DEFAULT_MOTION, ...(settings?.motion ?? {}) }
 
   return (
     <div className="space-y-6">
@@ -112,7 +92,7 @@ export function TypographyTab() {
         </Select>
       </div>
 
-      {/* v47 — font family / mono / serif pickers */}
+      {/* Font family / mono / serif pickers */}
       <div className="space-y-3 border-t pt-4">
         <Label className="text-sm">{tLayout("font.sectionLabel")}</Label>
         <FontFamilyPicker
@@ -134,120 +114,34 @@ export function TypographyTab() {
         />
       </div>
 
-      {/* v47 — line-height + letter-spacing sliders */}
+      {/* Line-height + letter-spacing fine-tuning */}
       <div className="space-y-4 border-t pt-4">
         <Label className="text-sm">{tLayout("fine.sectionLabel")}</Label>
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span>{tLayout("fine.lineHeight")}</span>
-            <span className="font-mono text-muted-foreground">
-              {typographyExt.lineHeightScale.toFixed(3)}
-            </span>
-          </div>
-          <Slider
-            min={0.875}
-            max={1.25}
-            step={0.005}
-            value={[typographyExt.lineHeightScale]}
-            onValueChange={([next]) =>
-              void save({
-                typographyExt: { ...typographyExt, lineHeightScale: next },
-              })
-            }
-          />
-        </div>
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span>{tLayout("fine.letterSpacing")}</span>
-            <span className="font-mono text-muted-foreground">
-              {typographyExt.letterSpacingEm.toFixed(3)}em
-            </span>
-          </div>
-          <Slider
-            min={-0.02}
-            max={0.02}
-            step={0.001}
-            value={[typographyExt.letterSpacingEm]}
-            onValueChange={([next]) =>
-              void save({
-                typographyExt: { ...typographyExt, letterSpacingEm: next },
-              })
-            }
-          />
-        </div>
-      </div>
-
-      {/* v47 — density */}
-      <div className="space-y-2 border-t pt-4">
-        <Label className="text-sm">{tLayout("density.sectionLabel")}</Label>
-        <DensityCard />
-      </div>
-
-      {/* Agent invocation-flow display mode */}
-      <div className="space-y-2 border-t pt-4">
-        <Label className="text-sm">{tLayout("agentFlow.sectionLabel")}</Label>
-        <AgentFlowCard />
-      </div>
-
-      {/* Usage / consumption statistics display mode */}
-      <div className="space-y-2 border-t pt-4">
-        <Label className="text-sm">{tLayout("usageDisplay.sectionLabel")}</Label>
-        <UsageDisplayCard />
-      </div>
-
-      {/* v47 — radius slider */}
-      <div className="space-y-2 border-t pt-4">
-        <Label className="text-sm">{tLayout("radius.sectionLabel")}</Label>
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span>{tLayout("radius.label")}</span>
-            <span className="font-mono text-muted-foreground">{radius.base.toFixed(3)}rem</span>
-          </div>
-          <Slider
-            min={0}
-            max={1.5}
-            step={0.025}
-            value={[radius.base]}
-            onValueChange={([next]) => void save({ radius: { base: next } })}
-          />
-        </div>
-        <p className="text-[11px] text-muted-foreground">{tLayout("radius.hint")}</p>
-      </div>
-
-      {/* v47 — motion speed (reduce-motion lives in a11y tab) */}
-      <div className="space-y-2 border-t pt-4">
-        <Label className="text-sm">{tLayout("motion.sectionLabel")}</Label>
-        <Select
-          value={String(motion.speed)}
-          onValueChange={(value) => {
-            const speed = Number(value) as MotionSpeed
-            void save({ motion: { ...motion, speed } })
-          }}
-        >
-          <SelectTrigger className={responsiveSelectClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {MOTION_SPEED_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={String(opt.value)}>
-                {tLayout(opt.key)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-start justify-between gap-4 border-t pt-4">
-        <div className="space-y-1">
-          <Label className="text-sm">{t("reduceMotionLabel")}</Label>
-          <p className="text-xs text-muted-foreground">{t("reduceMotionHint")}</p>
-        </div>
-        <Switch
-          checked={reduceMotion}
-          onCheckedChange={(checked) => {
-            void save({ reduceMotion: checked })
-          }}
-          aria-label={t("reduceMotionLabel")}
+        <SettingSliderRow
+          label={tLayout("fine.lineHeight")}
+          ariaLabel={tLayout("fine.lineHeight")}
+          value={typographyExt.lineHeightScale}
+          defaultValue={DEFAULT_TYPOGRAPHY_EXT.lineHeightScale}
+          min={0.875}
+          max={1.25}
+          step={0.005}
+          format={(v) => v.toFixed(3)}
+          onChange={(next) =>
+            void save({ typographyExt: { ...typographyExt, lineHeightScale: next } })
+          }
+        />
+        <SettingSliderRow
+          label={tLayout("fine.letterSpacing")}
+          ariaLabel={tLayout("fine.letterSpacing")}
+          value={typographyExt.letterSpacingEm}
+          defaultValue={DEFAULT_TYPOGRAPHY_EXT.letterSpacingEm}
+          min={-0.02}
+          max={0.02}
+          step={0.001}
+          format={(v) => `${v.toFixed(3)}em`}
+          onChange={(next) =>
+            void save({ typographyExt: { ...typographyExt, letterSpacingEm: next } })
+          }
         />
       </div>
     </div>

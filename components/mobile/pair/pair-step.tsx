@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
   ArrowLeftIcon,
+  InfoIcon,
   KeyIcon,
   Loader2Icon,
   LockIcon,
@@ -44,6 +45,12 @@ export interface PairStepProps {
   lockBaseUrl?: boolean
   /** Launch the QR scanner automatically on mount (the discover "Scan QR" shortcut). */
   autoScan?: boolean
+  /**
+   * Plain-browser pairing (ADR-0059 C2): hides the camera/QR affordances
+   * (no camera plugin on web), accepts a pasted `cgnp2|` payload in the
+   * token field, and surfaces the localStorage-persistence trade-off.
+   */
+  webMode?: boolean
   /** Bubble a successful pair up to the coordinator. */
   onPaired: (config: CompanionConfig) => void
   /** "Back to discover" handler. */
@@ -65,6 +72,7 @@ export function PairStep({
   prefilledFingerprint = "",
   lockBaseUrl = false,
   autoScan = false,
+  webMode = false,
   onPaired,
   onBack,
 }: PairStepProps) {
@@ -135,6 +143,23 @@ export function PairStep({
     setPhase({ kind: "error", message: t("scanError.failed", { message: result.message }) })
   }, [t])
 
+  // Pasting the full `cgnp2|…` payload into the token field behaves like a
+  // QR scan: baseUrl / JWT / fingerprint all populate from the payload. A
+  // partial or foreign string is kept verbatim — submit-time validation
+  // reports what's wrong.
+  const onPairJwtChange = useCallback(
+    (value: string) => {
+      setPairJwt(value)
+      if (!value.trim().startsWith("cgnp")) return
+      const decoded = decodePairPayload(value.trim())
+      if (decoded.kind !== "ok") return
+      if (!lockBaseUrl) setBaseUrl(decoded.payload.baseUrl)
+      setPairJwt(decoded.payload.pairJwt)
+      setServerFingerprint(decoded.payload.fingerprint || "")
+    },
+    [lockBaseUrl]
+  )
+
   // Discover "Scan QR" shortcut — launch the camera once on mount.
   const autoScanFiredRef = useRef(false)
   useEffect(() => {
@@ -156,6 +181,17 @@ export function PairStep({
     let result: RedeemResult
     if (mode === "jwt") {
       const trimmedJwt = pairJwt.trim()
+      // A `cgnp…` string surviving to submit means the paste-time decode
+      // failed — explain why instead of the generic "not a JWT" error.
+      if (trimmedJwt.startsWith("cgnp")) {
+        const decoded = decodePairPayload(trimmedJwt)
+        if (decoded.kind === "version_mismatch") {
+          setPhase({ kind: "error", message: t("payloadError.versionMismatch", { got: decoded.got }) })
+        } else {
+          setPhase({ kind: "error", message: t("payloadError.invalid") })
+        }
+        return
+      }
       const jwtError = validatePairJwt(trimmedJwt)
       if (jwtError) {
         setPhase({ kind: "error", message: jwtError })
@@ -266,9 +302,11 @@ export function PairStep({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <ScanLineIcon className="size-4" aria-hidden="true" />
-            {t("formCardTitle")}
+            {webMode ? t("web.formCardTitle") : t("formCardTitle")}
           </CardTitle>
-          <CardDescription>{t("formCardDescription")}</CardDescription>
+          <CardDescription>
+            {webMode ? t("web.formCardDescription") : t("formCardDescription")}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -278,32 +316,36 @@ export function PairStep({
               void onPair()
             }}
           >
-            <Button
-              type="button"
-              size="lg"
-              className="touch-target w-full"
-              onClick={() => void onScanQr()}
-              disabled={isPairing || phase.kind === "scanning"}
-              data-testid="pair-scan-qr"
-            >
-              {phase.kind === "scanning" ? (
-                <>
-                  <Loader2Icon className="size-5 animate-spin" aria-hidden="true" />
-                  {t("scanning")}
-                </>
-              ) : (
-                <>
-                  <ScanLineIcon className="size-5" aria-hidden="true" />
-                  {t("scanCta")}
-                </>
-              )}
-            </Button>
+            {webMode ? null : (
+              <>
+                <Button
+                  type="button"
+                  size="lg"
+                  className="touch-target w-full"
+                  onClick={() => void onScanQr()}
+                  disabled={isPairing || phase.kind === "scanning"}
+                  data-testid="pair-scan-qr"
+                >
+                  {phase.kind === "scanning" ? (
+                    <>
+                      <Loader2Icon className="size-5 animate-spin" aria-hidden="true" />
+                      {t("scanning")}
+                    </>
+                  ) : (
+                    <>
+                      <ScanLineIcon className="size-5" aria-hidden="true" />
+                      {t("scanCta")}
+                    </>
+                  )}
+                </Button>
 
-            <div className="flex items-center gap-3">
-              <Separator className="flex-1" />
-              <span className="text-xs text-muted-foreground">{t("manualDivider")}</span>
-              <Separator className="flex-1" />
-            </div>
+                <div className="flex items-center gap-3">
+                  <Separator className="flex-1" />
+                  <span className="text-xs text-muted-foreground">{t("manualDivider")}</span>
+                  <Separator className="flex-1" />
+                </div>
+              </>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <Label
@@ -314,7 +356,7 @@ export function PairStep({
                 {lockBaseUrl ? (
                   <LockIcon
                     className="size-3 text-muted-foreground"
-                    aria-label={t("discover.baseUrlLocked")}
+                    aria-label={webMode ? t("web.baseUrlLocked") : t("discover.baseUrlLocked")}
                   />
                 ) : null}
               </Label>
@@ -351,16 +393,19 @@ export function PairStep({
                 </Label>
                 <Textarea
                   id="pair-jwt"
-                  placeholder="eyJ..."
+                  placeholder={webMode ? "cgnp2|…" : "eyJ..."}
                   value={pairJwt}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  onChange={(e) => setPairJwt(e.target.value)}
+                  onChange={(e) => onPairJwtChange(e.target.value)}
                   className="min-h-24 font-mono text-xs"
                   disabled={isPairing}
                   data-testid="pair-jwt"
                 />
+                {webMode ? (
+                  <p className="text-xs text-muted-foreground">{t("web.pasteHint")}</p>
+                ) : null}
               </TabsContent>
               <TabsContent value="code" className="flex flex-col gap-1.5 pt-3">
                 <Label htmlFor="pair-code" className="text-sm font-medium">
@@ -382,7 +427,9 @@ export function PairStep({
                   disabled={isPairing}
                   data-testid="pair-code-input"
                 />
-                <p className="text-xs text-muted-foreground">{t("codeHint")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {webMode ? t("web.codeHint") : t("codeHint")}
+                </p>
               </TabsContent>
             </Tabs>
 
@@ -400,6 +447,16 @@ export function PairStep({
                     {serverFingerprint.slice(0, 16)}…{serverFingerprint.slice(-16)}
                   </span>
                   <span className="text-xs">{t("fingerprintHint")}</span>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {webMode ? (
+              <Alert data-testid="pair-web-storage-notice">
+                <InfoIcon aria-hidden="true" />
+                <AlertTitle>{t("web.storageNoticeTitle")}</AlertTitle>
+                <AlertDescription>
+                  <span className="text-xs">{t("web.storageNotice")}</span>
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -461,7 +518,7 @@ export function PairStep({
         </Button>
       ) : null}
 
-      <DiscoverHelp />
+      {webMode ? null : <DiscoverHelp />}
     </section>
   )
 }

@@ -33,7 +33,7 @@
 
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
-import { CheckCircle2Icon, HelpCircleIcon, LightbulbIcon } from "lucide-react"
+import { AtSignIcon, CheckCircle2Icon, HelpCircleIcon, LightbulbIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
@@ -49,6 +49,7 @@ import {
   type WorkflowQuickActionKind,
 } from "@/lib/workflow/editor/workflow-editor-context"
 import type { EditorState } from "@/lib/workflow/editor/store"
+import { buildMentionableWorkflowElements } from "@/lib/workflow/editor/use-mentionable-workflow-elements"
 import { dispatchWorkflowSlashAction } from "@/lib/slash-commands/actions/workflow"
 
 interface WorkflowBottomToolbarProps {
@@ -96,9 +97,29 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
 
 function QuickActions({ ctx, disabled }: { ctx: WorkflowEditorContextValue; disabled: boolean }) {
   const tw = useTranslations("chat.composer.toolbar.workflow")
-  const selectionCount = ctx.useEditorStore(
-    useShallow((s: EditorState) => s.selectedNodeIds.length)
+  const selection = ctx.useEditorStore(
+    useShallow((s: EditorState) => ({
+      nodes: s.selectedNodeIds.length,
+      edges: s.selectedEdgeIds.length,
+    }))
   )
+  const selectionCount = selection.nodes
+
+  // Stage the current canvas selection as copilot reference chips. Resolved on
+  // click via `getState()` (not a reactive subscription) so the toolbar doesn't
+  // re-render on every graph edit; a brief pulse confirms the link on-canvas.
+  const referenceSelection = () => {
+    const st = ctx.useEditorStore.getState()
+    const selected = new Set<string>([...st.selectedNodeIds, ...st.selectedEdgeIds])
+    if (selected.size === 0) return
+    const add = useChatStore.getState().addReferencedWorkflowElement
+    for (const el of buildMentionableWorkflowElements(st.nodes, st.edges)) {
+      if (selected.has(el.id)) {
+        add({ type: el.type, id: el.id, label: el.label, kind: el.kind })
+      }
+    }
+    if (st.selectedNodeIds[0]) st.pulseNode(st.selectedNodeIds[0], 1200)
+  }
 
   const dispatch = (kind: WorkflowQuickActionKind) => {
     // Single dispatch path with the formal slash commands so the button
@@ -117,9 +138,23 @@ function QuickActions({ ctx, disabled }: { ctx: WorkflowEditorContextValue; disa
   }
 
   const explainDisabled = disabled || selectionCount === 0
+  const referenceDisabled = disabled || (selection.nodes === 0 && selection.edges === 0)
 
   return (
     <div className="flex items-center gap-1" data-testid="workflow-quick-actions">
+      <QuickActionButton
+        icon={<AtSignIcon className="size-3.5" />}
+        label={tw("reference")}
+        ariaLabel={tw("referenceAria")}
+        tooltip={
+          referenceDisabled
+            ? tw("referenceNoSelection")
+            : tw("referenceTooltip", { count: selection.nodes + selection.edges })
+        }
+        disabled={referenceDisabled}
+        testId="workflow-quick-action-reference"
+        onClick={referenceSelection}
+      />
       <QuickActionButton
         icon={<CheckCircle2Icon className="size-3.5" />}
         label={tw("validate")}

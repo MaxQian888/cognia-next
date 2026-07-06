@@ -24,18 +24,41 @@ import { Separator } from "@/components/ui/separator"
 import { SessionListLoading } from "@/components/ui/loading-states"
 import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import { useIsNarrow, useRangeSelection } from "@/hooks/ui"
+import { useIsNarrow, useRangeSelection, useEdgeResize } from "@/hooks/ui"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
+import { searchSessionsByContent } from "@/lib/db/messages"
 import { getTeam } from "@/lib/db/teams"
 import { loggers } from "@/lib/logging"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
-import { useUIStore } from "@/stores/ui"
+import {
+  useUIStore,
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_MIN,
+  SIDEBAR_WIDTH_MAX,
+  type ChannelListView,
+} from "@/stores/ui"
+import { useSettingsStore } from "@/stores/settings"
 import { PerfBoundary } from "@/lib/perf"
+import { resolveConversationDrop } from "@/lib/chat/conversation-dnd"
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  useDroppable,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
+import type { ConversationSidebarDensity, ConversationSearchScope } from "@/lib/claude/types"
+import { conversationSectionKey } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
 import type { Character, ChatSession, SessionFolder, Team } from "@/lib/claude/types"
 import {
@@ -61,8 +84,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react"
 import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
 import { SessionRow } from "./session-row"
@@ -113,6 +139,11 @@ interface Props {
   onRenameFolder?: (id: string, name: string) => void | Promise<void>
   onDeleteFolder?: (id: string) => void | Promise<void>
   onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
+  /**
+   * Persist a manual ordering of one conversation section (drag-reorder).
+   * `sectionKey` is the `conversationSectionKey` of the section dragged in.
+   */
+  onReorderSessions?: (ids: string[], sectionKey: string) => void | Promise<void>
 }
 
 /**
@@ -124,6 +155,9 @@ export function ChannelList(props: Props) {
   const t = useTranslations("desktop.channelList")
   const isNarrow = useIsNarrow()
   const [openMobile, setOpenMobile] = useState(false)
+  const width = useUIStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
+  const resetWidth = useCallback(() => setSidebarWidth(SIDEBAR_WIDTH_DEFAULT), [setSidebarWidth])
 
   // Stable identity: passed down as `onSelect`, it feeds `handleSessionSelect`
   // (a useCallback that lists it as a dep). An inline function here changed
@@ -169,12 +203,60 @@ export function ChannelList(props: Props) {
 
   return (
     <aside
-      className="hidden h-full w-64 shrink-0 flex-col border-r bg-background md:flex"
+      className="relative hidden h-full shrink-0 flex-col border-r bg-background md:flex"
+      style={{ width }}
       aria-label={t("conversationsTitle")}
       data-bg-target="chat"
     >
       <ChannelListBody {...props} onSelect={handleSelect} />
+      <SidebarResizeHandle width={width} onChange={setSidebarWidth} onReset={resetWidth} />
     </aside>
+  )
+}
+
+/**
+ * Draggable divider on the right edge of the conversation sidebar. Controlled
+ * width lives in `useUIStore`; a11y mirrors `ResizableHandle` (focusable
+ * `role="separator"` with value + orientation). Double-click / Enter resets.
+ */
+function SidebarResizeHandle({
+  width,
+  onChange,
+  onReset,
+}: {
+  width: number
+  onChange: (width: number) => void
+  onReset: () => void
+}) {
+  const t = useTranslations("desktop.channelList")
+  const { dragging, onPointerDown, onPointerMove, onPointerUp, onKeyDown, onDoubleClick } =
+    useEdgeResize({
+      width,
+      min: SIDEBAR_WIDTH_MIN,
+      max: SIDEBAR_WIDTH_MAX,
+      onChange,
+      onReset,
+    })
+  return (
+    <div
+      role="separator"
+      tabIndex={0}
+      aria-orientation="vertical"
+      aria-label={t("resizeHandle")}
+      aria-valuenow={width}
+      aria-valuemin={SIDEBAR_WIDTH_MIN}
+      aria-valuemax={SIDEBAR_WIDTH_MAX}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onKeyDown={onKeyDown}
+      onDoubleClick={onDoubleClick}
+      className={cn(
+        "absolute inset-y-0 right-0 z-10 w-1.5 translate-x-1/2 cursor-col-resize",
+        "hover:bg-primary/30 focus-visible:bg-primary/40 focus-visible:outline-none",
+        dragging && "bg-primary/40"
+      )}
+    />
   )
 }
 
@@ -199,9 +281,19 @@ function ChannelListBody({
   onRenameFolder,
   onDeleteFolder,
   onAssignToFolder,
+  onReorderSessions,
 }: Props) {
   const t = useTranslations("desktop.channelList")
   const selectedGuild = useUIStore((s) => s.selectedGuild)
+
+  // Behavior preferences (Settings → Conversation). Absent settings fall back
+  // to today's defaults so the sidebar renders identically before load.
+  const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
+  const showPreview = sidebarSettings?.showPreview ?? false
+  const groupByDate = sidebarSettings?.groupByDate ?? true
+  const showUnreadBadges = sidebarSettings?.showUnreadBadges ?? true
+  const searchScope: ConversationSearchScope = sidebarSettings?.searchScope ?? "title"
   // Narrow once: this component is only ever rendered for the chat
   // (DM/team) guilds. The shell branches on `kind === "canvas"`
   // upstream and renders the CanvasDocumentRail instead.
@@ -222,11 +314,12 @@ function ChannelListBody({
   const sessionStates = useClientLiveQuery(() => listSessionStates(), [], [])
   const unreadById = useMemo(() => {
     const map = new Map<string, number>()
+    if (!showUnreadBadges) return map
     for (const s of sessionStates ?? []) {
       if (s.unreadCount > 0) map.set(s.sessionId, s.unreadCount)
     }
     return map
-  }, [sessionStates])
+  }, [sessionStates, showUnreadBadges])
 
   const team = useClientLiveQuery<Team | undefined>(
     () => (chatGuild.kind === "team" ? getTeam(chatGuild.teamId) : Promise.resolve(undefined)),
@@ -249,6 +342,7 @@ function ChannelListBody({
 
   // Search box: keep the field value immediate but debounce the value fed
   // to the grouping model so typing doesn't re-bucket on every keystroke.
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [searchInput, setSearchInput] = useState("")
   const [query, setQuery] = useState("")
   // Destructure the stable `call`/`cancel` identities — the handle object
@@ -271,13 +365,24 @@ function ChannelListBody({
     setQuery("")
   }, [cancelDebouncedQuery])
 
-  // Active ⇄ Archived view (local, ephemeral — resets on remount).
-  const [view, setView] = useState<"active" | "archived">("active")
+  // Active ⇄ Archived view — seeded from and written back to the persisted UI
+  // store so the choice survives reloads. Local state keeps re-render cheap.
+  const persistedView = useUIStore((s) => s.channelListView)
+  const setPersistedView = useUIStore((s) => s.setChannelListView)
+  const [view, setViewState] = useState<ChannelListView>(persistedView)
+  const setView = useCallback(
+    (next: ChannelListView) => {
+      setViewState(next)
+      setPersistedView(next)
+    },
+    [setPersistedView]
+  )
 
-  // Folder collapse is local/ephemeral — resets on reload (UX-acceptable and
-  // keeps the persisted UI store untouched).
+  // Folder collapse — seeded from the persisted store, mirrored back on change.
+  const persistedCollapsed = useUIStore((s) => s.collapsedFolderIds)
+  const setPersistedCollapsed = useUIStore((s) => s.setCollapsedFolders)
   const [collapsedFolderIds, setCollapsedFolderIds] = useState<ReadonlySet<string>>(
-    () => new Set<string>()
+    () => new Set(persistedCollapsed)
   )
   const toggleFolderCollapsed = useCallback((id: string) => {
     setCollapsedFolderIds((prev) => {
@@ -287,6 +392,39 @@ function ChannelListBody({
       return next
     })
   }, [])
+  useEffect(() => {
+    setPersistedCollapsed([...collapsedFolderIds])
+  }, [collapsedFolderIds, setPersistedCollapsed])
+
+  // Opt-in message-content search: when enabled, resolve the set of session ids
+  // whose message text matches the (debounced) query. Bounded scan; a truncated
+  // result surfaces a "may be incomplete" note rather than silently dropping
+  // matches. Scoped to the current workspace via any visible session's project.
+  const scopeProjectId = filtered.find((s) => s.projectId)?.projectId
+  const [contentMatchIds, setContentMatchIds] = useState<ReadonlySet<string> | undefined>(undefined)
+  const [contentTruncated, setContentTruncated] = useState(false)
+  useEffect(() => {
+    if (searchScope !== "titleAndContent" || query.trim().length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setContentMatchIds(undefined)
+      setContentTruncated(false)
+      return
+    }
+    let cancelled = false
+    void searchSessionsByContent(query, { projectId: scopeProjectId })
+      .then((res) => {
+        if (cancelled) return
+        setContentMatchIds(res.ids)
+        setContentTruncated(res.truncated)
+        if (res.truncated) log.warn("channel-list content-search truncated", { query })
+      })
+      .catch((err) => {
+        if (!cancelled) log.warn("channel-list content-search failed", { error: String(err) })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [searchScope, query, scopeProjectId])
 
   // Folders only group the active view (archived chats stay in date buckets).
   const modelFolders = view === "archived" ? undefined : folders
@@ -299,6 +437,8 @@ function ChannelListBody({
     query,
     view,
     collapsedFolderIds,
+    groupByDate,
+    contentMatchIds: searchScope === "titleAndContent" ? contentMatchIds : undefined,
   })
 
   // Per-row accent: team sessions inherit the team color, DM sessions inherit
@@ -316,13 +456,17 @@ function ChannelListBody({
   const { selected, handleClick, selectAll, clear, isSelected, lastInteractionWasModified } =
     selection
 
-  // Clear the multi-selection whenever the user pivots to a different
-  // guild — the visual context changes and stale "selected" rows would
-  // confuse the bulk-toolbar count. `clear` is a stable callback (it's
-  // `useCallback(..., [])` inside the hook) so its identity never trips
-  // this effect.
+  // Keyboard-navigation focus ring (independent of the multi-selection).
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+
+  // Clear the multi-selection AND the keyboard focus whenever the user pivots
+  // to a different guild/view — the visual context changes and stale state
+  // would confuse the bulk-toolbar count / focus ring. `clear` is a stable
+  // callback (`useCallback(..., [])` inside the hook) so it never trips this.
   useEffect(() => {
     clear()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFocusedId(null)
   }, [chatGuild, view, clear])
 
   const handleNewDirect = () => {
@@ -354,10 +498,20 @@ function ChannelListBody({
   const containerRef = useRef<HTMLDivElement>(null)
   const handleContainerKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement
+      const typing =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable ||
+        target.closest('[role="menu"],[role="dialog"]') != null
+
       if (e.key === "Escape") {
         if (selected.size > 0) {
           e.preventDefault()
           clear()
+        } else if (focusedId) {
+          e.preventDefault()
+          setFocusedId(null)
         }
         return
       }
@@ -365,9 +519,72 @@ function ChannelListBody({
       if (isCtrlA && orderedIds.length > 0) {
         e.preventDefault()
         selectAll()
+        return
+      }
+      // Row navigation is disabled while typing in the search box / inside a
+      // menu or dialog (mirrors the log-panel shortcut guards).
+      if (typing) return
+
+      if (e.key === "/") {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        return
+      }
+      if (orderedIds.length === 0) return
+      const current = focusedId ? orderedIds.indexOf(focusedId) : -1
+      const focusAt = (index: number) => {
+        e.preventDefault()
+        setFocusedId(orderedIds[Math.min(orderedIds.length - 1, Math.max(0, index))])
+      }
+      if (e.key === "ArrowDown" || e.key === "j") focusAt(current < 0 ? 0 : current + 1)
+      else if (e.key === "ArrowUp" || e.key === "k")
+        focusAt(current < 0 ? orderedIds.length - 1 : current - 1)
+      else if (e.key === "Home") focusAt(0)
+      else if (e.key === "End") focusAt(orderedIds.length - 1)
+      else if (e.key === "Enter" && focusedId) {
+        e.preventDefault()
+        onSelect(focusedId)
       }
     },
-    [clear, orderedIds.length, selectAll, selected.size]
+    [clear, orderedIds, selectAll, selected.size, focusedId, onSelect]
+  )
+
+  // Drag-and-drop: reorder any conversation section or drop a conversation onto
+  // a folder. A short activation distance keeps plain clicks from starting drags.
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor)
+  )
+  // Maps each session id to the ordered ids of the section it renders in (and
+  // that section's stable key), so a drop can reorder that section (pinned /
+  // date bucket / folder / recent) and tag the persisted order with the
+  // section it belongs to. Search results aren't reorderable and are
+  // intentionally excluded.
+  const sectionIdsBySession = useMemo(() => {
+    const map = new Map<string, { ids: string[]; key: string }>()
+    for (const section of sections) {
+      if (section.kind === "search") continue
+      const ids = section.sessions.map((s) => s.id)
+      const key = conversationSectionKey(section)
+      for (const id of ids) map.set(id, { ids, key })
+    }
+    return map
+  }, [sections])
+  const handleDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      // Reorder is scoped to the section the drop target lives in.
+      const overId = e.over ? String(e.over.id) : null
+      const overSection = overId ? sectionIdsBySession.get(overId) : undefined
+      const action = resolveConversationDrop(
+        e.active ? { id: String(e.active.id), data: e.active.data.current } : null,
+        e.over ? { id: overId!, data: e.over.data.current } : null,
+        overSection?.ids ?? []
+      )
+      if (!action) return
+      if (action.type === "assign") void onAssignToFolder?.(action.sessionId, action.folderId)
+      else if (overSection) void onReorderSessions?.(action.ids, overSection.key)
+    },
+    [sectionIdsBySession, onAssignToFolder, onReorderSessions]
   )
 
   // Toolbar visibility: show when ≥2 are selected OR when a single row was
@@ -433,7 +650,7 @@ function ChannelListBody({
           selectedGuild={chatGuild}
           team={team ?? null}
           view={view}
-          onToggleView={() => setView((v) => (v === "active" ? "archived" : "active"))}
+          onToggleView={() => setView(view === "active" ? "archived" : "active")}
           onNewFolder={
             view === "active" && onCreateFolder
               ? () => void onCreateFolder(t("newFolderName"))
@@ -446,6 +663,7 @@ function ChannelListBody({
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               type="search"
               value={searchInput}
               onChange={(e) => handleSearchChange(e.target.value)}
@@ -479,6 +697,11 @@ function ChannelListBody({
             onClear={clear}
           />
         ) : null}
+        {contentTruncated && query.trim() ? (
+          <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
+            {t("searchTruncated")}
+          </p>
+        ) : null}
         <Separator />
         <ScrollArea className="flex-1">
           {loading && total === 0 ? (
@@ -496,25 +719,35 @@ function ChannelListBody({
               {t("emptySearch", { query: searchInput.trim() })}
             </p>
           ) : (
-            <ConversationSections
-              sections={sections}
-              activeSessionId={activeSessionId}
-              unreadById={unreadById}
-              isSelected={isSelected}
-              accentFor={accentFor}
-              folders={folders ?? EMPTY_FOLDERS}
-              onSelect={handleSessionSelect}
-              onDelete={onDelete}
-              onRename={onRename}
-              onTogglePinned={onTogglePinned}
-              onArchive={onArchive}
-              onUnarchive={onUnarchive}
-              onAssignToFolder={onAssignToFolder}
-              onToggleFolder={toggleFolderCollapsed}
-              onRenameFolder={onRenameFolder}
-              onDeleteFolder={onDeleteFolder}
-              onJumpToParent={handleJumpToParent}
-            />
+            <DndContext
+              sensors={dndSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <ConversationSections
+                sections={sections}
+                orderedIds={orderedIds}
+                activeSessionId={activeSessionId}
+                focusedId={focusedId}
+                density={density}
+                showPreview={showPreview}
+                unreadById={unreadById}
+                isSelected={isSelected}
+                accentFor={accentFor}
+                folders={folders ?? EMPTY_FOLDERS}
+                onSelect={handleSessionSelect}
+                onDelete={onDelete}
+                onRename={onRename}
+                onTogglePinned={onTogglePinned}
+                onArchive={onArchive}
+                onUnarchive={onUnarchive}
+                onAssignToFolder={onAssignToFolder}
+                onToggleFolder={toggleFolderCollapsed}
+                onRenameFolder={onRenameFolder}
+                onDeleteFolder={onDeleteFolder}
+                onJumpToParent={handleJumpToParent}
+              />
+            </DndContext>
           )}
         </ScrollArea>
       </div>
@@ -608,7 +841,11 @@ function Header({
 
 function ConversationSections({
   sections,
+  orderedIds,
   activeSessionId,
+  focusedId,
+  density,
+  showPreview,
   unreadById,
   isSelected,
   accentFor,
@@ -626,7 +863,11 @@ function ConversationSections({
   onJumpToParent,
 }: {
   sections: import("@/lib/chat/conversation-list-model").ConversationSection[]
+  orderedIds: string[]
   activeSessionId: string | null
+  focusedId: string | null
+  density: ConversationSidebarDensity
+  showPreview: boolean
   unreadById: Map<string, number>
   isSelected: (id: string) => boolean
   accentFor: (session: ChatSession) => string | undefined
@@ -646,11 +887,14 @@ function ConversationSections({
   const t = useTranslations("desktop.channelList")
 
   const renderRow = (s: ChatSession) => (
-    <SessionRow
+    <SortableSessionRow
       key={s.id}
       session={s}
       active={s.id === activeSessionId}
       selected={isSelected(s.id)}
+      focused={s.id === focusedId}
+      density={density}
+      showPreview={showPreview}
       accentColor={accentFor(s)}
       unread={unreadById.get(s.id)}
       folders={folders}
@@ -666,56 +910,128 @@ function ConversationSections({
   )
 
   return (
-    <div className="flex flex-col gap-3 p-2">
-      {sections.map((section) => {
-        if (section.kind === "folder") {
-          const { folder, collapsed } = section
-          return (
-            <section key={`folder:${folder.id}`} aria-label={folder.name}>
-              <FolderSectionHeader
+    <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
+      <div className="flex flex-col gap-3 p-2">
+        {sections.map((section) => {
+          if (section.kind === "folder") {
+            const { folder, collapsed } = section
+            return (
+              <FolderSection
+                key={`folder:${folder.id}`}
                 folder={folder}
                 collapsed={collapsed}
-                count={section.sessions.length}
+                sessions={section.sessions}
                 onToggle={() => onToggleFolder(folder.id)}
                 onRename={onRenameFolder}
                 onDelete={onDeleteFolder}
+                renderRow={renderRow}
               />
-              {collapsed ? null : (
-                <ul className="flex flex-col gap-0.5">
-                  {section.sessions.length === 0 ? (
-                    <li className="px-3 py-1 text-[11px] text-muted-foreground">
-                      {t("emptyFolder")}
-                    </li>
-                  ) : (
-                    section.sessions.map(renderRow)
-                  )}
-                </ul>
-              )}
+            )
+          }
+
+          const label =
+            section.kind === "pinned"
+              ? t("sectionPinned")
+              : section.kind === "recent"
+                ? t("sectionRecent")
+                : section.kind === "date"
+                  ? t(BUCKET_LABEL_KEY[section.bucket])
+                  : null
+          const key = section.kind === "date" ? `date:${section.bucket}` : section.kind
+          return (
+            <section key={key} aria-label={label ?? t("searchAria")}>
+              {label ? (
+                <div className="flex items-center gap-2 px-2 pb-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {label}
+                  </span>
+                </div>
+              ) : null}
+              <ul className="flex flex-col gap-0.5">{section.sessions.map(renderRow)}</ul>
             </section>
           )
-        }
+        })}
+      </div>
+    </SortableContext>
+  )
+}
 
-        const label =
-          section.kind === "pinned"
-            ? t("sectionPinned")
-            : section.kind === "date"
-              ? t(BUCKET_LABEL_KEY[section.bucket])
-              : null
-        const key = section.kind === "date" ? `date:${section.bucket}` : section.kind
-        return (
-          <section key={key} aria-label={label ?? t("searchAria")}>
-            {label ? (
-              <div className="flex items-center gap-2 px-2 pb-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {label}
-                </span>
-              </div>
-            ) : null}
-            <ul className="flex flex-col gap-0.5">{section.sessions.map(renderRow)}</ul>
-          </section>
-        )
-      })}
-    </div>
+/**
+ * A conversation row wired for @dnd-kit sorting: draggable (grip handle) and a
+ * drop target so pinned rows can be reordered. Dropping onto a folder header is
+ * handled by that header's own droppable — see {@link FolderSection}.
+ */
+function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.session.id,
+    data: { type: "session", folderId: props.session.folderId ?? null },
+  })
+  const style: CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+  }
+  return (
+    <SessionRow
+      {...props}
+      dragRef={setNodeRef}
+      dragListeners={listeners as unknown as Record<string, unknown>}
+      dragAttributes={attributes as unknown as Record<string, unknown>}
+      dragStyle={style}
+      dragging={isDragging}
+    />
+  )
+}
+
+/**
+ * Folder group whose header is a drop target: dragging a conversation onto it
+ * assigns the session to the folder (@dnd-kit `useDroppable`).
+ */
+function FolderSection({
+  folder,
+  collapsed,
+  sessions,
+  onToggle,
+  onRename,
+  onDelete,
+  renderRow,
+}: {
+  folder: SessionFolder
+  collapsed: boolean
+  sessions: ChatSession[]
+  onToggle: () => void
+  onRename?: (id: string, name: string) => void | Promise<void>
+  onDelete?: (id: string) => void | Promise<void>
+  renderRow: (s: ChatSession) => ReactNode
+}) {
+  const t = useTranslations("desktop.channelList")
+  const { setNodeRef, isOver } = useDroppable({
+    id: `folder:${folder.id}`,
+    data: { type: "folder", folderId: folder.id },
+  })
+  return (
+    <section
+      ref={setNodeRef}
+      aria-label={folder.name}
+      className={cn("rounded-md", isOver && "bg-primary/10 ring-1 ring-primary/40")}
+    >
+      <FolderSectionHeader
+        folder={folder}
+        collapsed={collapsed}
+        count={sessions.length}
+        onToggle={onToggle}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
+      {collapsed ? null : (
+        <ul className="flex flex-col gap-0.5">
+          {sessions.length === 0 ? (
+            <li className="px-3 py-1 text-[11px] text-muted-foreground">{t("emptyFolder")}</li>
+          ) : (
+            sessions.map(renderRow)
+          )}
+        </ul>
+      )}
+    </section>
   )
 }
 

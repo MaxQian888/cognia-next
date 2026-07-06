@@ -47,6 +47,20 @@ describe("interpretKey", () => {
     })
   })
 
+  it("treats a bare line feed / CRLF Enter (Windows consoles) as submit", () => {
+    // Some terminals deliver Enter as `\n` or `\r\n` with NO key.return flag.
+    expect(interpretKey("\n", k({}), ctx())).toEqual({ type: "submit" })
+    expect(interpretKey("\r", k({}), ctx())).toEqual({ type: "submit" })
+    expect(interpretKey("\r\n", k({}), ctx())).toEqual({ type: "submit" })
+    expect(interpretKey("\n", k({}), ctx({ popupOpen: true }))).toEqual({ type: "popup-accept" })
+    expect(interpretKey("\n", k({ shift: true }), ctx())).toEqual({ type: "newline" })
+    // A pasted multi-line body is a longer chunk → stays text, never submits.
+    expect(interpretKey("line1\nline2", k({}), ctx())).toEqual({
+      type: "insert",
+      text: "line1\nline2",
+    })
+  })
+
   it("Up/Down move the popup, navigate history, or move the cursor", () => {
     expect(interpretKey("", k({ upArrow: true }), ctx({ popupOpen: true }))).toEqual({
       type: "popup-move",

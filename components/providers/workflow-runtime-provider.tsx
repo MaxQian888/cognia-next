@@ -6,6 +6,16 @@ import {
   initTriggerSubscriptions,
   disposeTriggerSubscriptions,
 } from "@/lib/workflow/runtime/trigger-subscriptions"
+import {
+  initDesktopEventTrigger,
+  disposeDesktopEventTrigger,
+} from "@/lib/workflow/runtime/desktop-event-trigger"
+import {
+  initPetEventTrigger,
+  disposePetEventTrigger,
+} from "@/lib/workflow/runtime/pet-event-trigger"
+import { installApprovalNotificationActions } from "@/lib/workflow/runtime/approval-notify"
+import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
@@ -63,6 +73,45 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
         log.info?.("workflow runtime: trigger subscriptions initialised")
       } catch (err) {
         log.warn?.("workflow runtime: initTriggerSubscriptions failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // Live desktop UI events (trigger.desktop.event) ride the Rust
+      // automation backend — Tauri-only; web/Capacitor have no event source.
+      if (isTauri()) {
+        try {
+          initDesktopEventTrigger()
+          disposers.push(() => disposeDesktopEventTrigger())
+          log.info?.("workflow runtime: desktop-event trigger initialised")
+        } catch (err) {
+          log.warn?.("workflow runtime: initDesktopEventTrigger failed", {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      // Pet lifecycle events (trigger.pet.event) ride the in-renderer pet
+      // event bus — NOT Tauri-gated, the pet runs on web too.
+      try {
+        initPetEventTrigger()
+        disposers.push(() => disposePetEventTrigger())
+        log.info?.("workflow runtime: pet-event trigger initialised")
+      } catch (err) {
+        log.warn?.("workflow runtime: initPetEventTrigger failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // Approval-gate notification actions (ADR 0061 P2) — the Approve /
+      // Reject buttons on `action.approval.request` notification rows.
+      // Not Tauri-gated: the notification center resolves approvals on web
+      // too (companion fan-out inside the notifier is Tauri-gated itself).
+      try {
+        disposers.push(installApprovalNotificationActions())
+        log.info?.("workflow runtime: approval notification actions installed")
+      } catch (err) {
+        log.warn?.("workflow runtime: installApprovalNotificationActions failed", {
           error: err instanceof Error ? err.message : String(err),
         })
       }

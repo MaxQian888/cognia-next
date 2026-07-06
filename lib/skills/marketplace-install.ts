@@ -12,6 +12,26 @@ import { validateSkill } from "./validate"
 import type { FetchSkillContent, MarketplaceItem } from "./marketplace-types"
 import type { Skill, SkillStatus, SkillValidationError } from "@/lib/claude/types"
 
+/** Options for a marketplace install. */
+export interface MarketplaceInstallOptions {
+  /**
+   * When true, a clean install lands `disabled` instead of `enabled` — the
+   * caller passes `!autoEnableNew` so the "auto-enable new skills" preference
+   * applies to marketplace/URL installs too. Rows with validation errors still
+   * go in as `error` regardless (they must stay out of the injection query).
+   */
+  disabledByDefault?: boolean
+}
+
+/** Resolve the initial status for a freshly-installed marketplace row. */
+function resolveInstallStatus(
+  validationErrors: SkillValidationError[],
+  opts?: MarketplaceInstallOptions
+): SkillStatus {
+  if (validationErrors.length > 0) return "error"
+  return opts?.disabledByDefault ? "disabled" : "enabled"
+}
+
 export async function fetchMarketplaceContent(item: MarketplaceItem): Promise<FetchSkillContent> {
   switch (item.source) {
     case "registry":
@@ -32,13 +52,14 @@ export async function fetchMarketplaceContent(item: MarketplaceItem): Promise<Fe
  * Idempotent — re-running replaces content, resources, and hash in place.
  */
 async function installSkillsShItem(
-  item: MarketplaceItem
+  item: MarketplaceItem,
+  opts?: MarketplaceInstallOptions
 ): Promise<{ skill: Skill; created: boolean; validationErrors: SkillValidationError[] }> {
   const detail = await fetchSkillsShDetail(item)
   const bundled = filesToBundleResult(detail.files, item.name)
   const marketplaceHash = await computeSkillsShFilesHash(detail.files)
   const validationErrors = bundled.nonFatalValidationErrors
-  const status: SkillStatus = validationErrors.length > 0 ? "error" : "enabled"
+  const status: SkillStatus = resolveInstallStatus(validationErrors, opts)
   const canonicalId = `skillssh:${item.sourceId}`
   const { skill, created } = await upsertSkillByCanonicalId({
     draft: {
@@ -70,11 +91,12 @@ async function installSkillsShItem(
  * so any silent skip is impossible.
  */
 export async function installMarketplaceItem(
-  item: MarketplaceItem
+  item: MarketplaceItem,
+  opts?: MarketplaceInstallOptions
 ): Promise<{ skill: Skill; created: boolean; validationErrors: SkillValidationError[] }> {
   // skills.sh installs carry the full file set (multi-file bundle path).
   if (item.source === "skillssh") {
-    return installSkillsShItem(item)
+    return installSkillsShItem(item, opts)
   }
   const fetched = await fetchMarketplaceContent(item)
   const { draft } = parseSkillMarkdown(fetched.content, {
@@ -95,8 +117,9 @@ export async function installMarketplaceItem(
   // Non-fatal errors (long name, format issues) are stored on the row so
   // the editor flags them in-place. The row goes in with status "error"
   // to keep it out of the send-time enabled-skills query until the user
-  // fixes it.
-  const status: SkillStatus = validationErrors.length > 0 ? "error" : "enabled"
+  // fixes it. When `disabledByDefault` is set (the "auto-enable new skills"
+  // preference is off) a clean install lands disabled instead of enabled.
+  const status: SkillStatus = resolveInstallStatus(validationErrors, opts)
   // Delegate the find-by-canonicalId + idempotent upsert to the shared
   // helper so the marketplace, the bundle dialog, and the plugin
   // resolution path all stay in lock-step. Marketplace adapters always

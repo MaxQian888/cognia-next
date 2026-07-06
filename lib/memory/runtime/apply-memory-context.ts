@@ -29,6 +29,15 @@ export interface ApplyMemoryContextInput {
   /** Current turn's Twin chunk texts, for overlap dedupe. */
   twinChunkTexts?: string[]
   proceduralMaxTokens?: number
+  /**
+   * Query embedding already computed for this turn (e.g. for twin RAG). Passed
+   * through to the retriever's vector leg so the same query isn't re-embedded.
+   */
+  precomputedQueryEmbedding?: number[]
+  /** Heuristic synonym expansion of the memory BM25 keyword leg. Off by default. */
+  enableQueryExpansion?: boolean
+  /** Base recency half-life (days), from `MemoryConfig.decayHalfLifeDays`. */
+  recencyHalfLifeDays?: number
   deps: ApplyMemoryContextDeps
 }
 
@@ -87,6 +96,9 @@ export async function applyMemoryContext(
               topK: input.topK,
               relevanceFloor: input.relevanceFloor,
               types: RECALLED_TYPES,
+              precomputedQueryEmbedding: input.precomputedQueryEmbedding,
+              enableQueryExpansion: input.enableQueryExpansion,
+              recencyHalfLifeDays: input.recencyHalfLifeDays,
             },
             input.deps
           )

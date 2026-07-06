@@ -36,6 +36,64 @@ describe("GoalDefaultsForm", () => {
     expect(screen.getByTestId("goal-defaults-start-paused")).toBeInTheDocument()
   })
 
+  it("renders the previously-dormant defaults (budget / provider / pacing / gate)", () => {
+    render(<GoalDefaultsForm />)
+    expect(screen.getByTestId("goal-defaults-max-budget-usd")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-defaults-judge-provider")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-defaults-adaptive-pacing")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-defaults-max-promise-denials")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-defaults-reset")).toBeInTheDocument()
+  })
+
+  it("persists a per-turn USD ceiling default", async () => {
+    render(<GoalDefaultsForm />)
+    fireEvent.change(screen.getByTestId("goal-defaults-max-budget-usd"), { target: { value: "5" } })
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ goals: expect.objectContaining({ maxBudgetUsd: 5 }) })
+      )
+    })
+  })
+
+  it("persists a default judge provider", async () => {
+    render(<GoalDefaultsForm />)
+    fireEvent.change(screen.getByTestId("goal-defaults-judge-provider"), {
+      target: { value: "anthropic" },
+    })
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ goals: expect.objectContaining({ judgeProvider: "anthropic" }) })
+      )
+    })
+  })
+
+  it("persists the adaptive-pacing opt-in", async () => {
+    render(<GoalDefaultsForm />)
+    fireEvent.click(screen.getByTestId("goal-defaults-adaptive-pacing"))
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ goals: expect.objectContaining({ adaptivePacing: true }) })
+      )
+    })
+  })
+
+  it("reset stages the hard defaults, clearing a stored override on save", async () => {
+    mockedSettings = { goals: { maxTurns: 7 } }
+    render(<GoalDefaultsForm />)
+    expect((screen.getByTestId("goal-defaults-max-turns") as HTMLInputElement).value).toBe("7")
+    fireEvent.click(screen.getByTestId("goal-defaults-reset"))
+    expect((screen.getByTestId("goal-defaults-max-turns") as HTMLInputElement).value).toBe("20")
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ goals: expect.objectContaining({ maxTurns: 20 }) })
+      )
+    })
+  })
+
   it("save button starts disabled when no edits made", () => {
     render(<GoalDefaultsForm />)
     expect(screen.getByTestId("goal-defaults-save")).toBeDisabled()

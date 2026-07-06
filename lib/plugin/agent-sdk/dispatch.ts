@@ -136,8 +136,15 @@ export async function dispatchSubagent(
   const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
   const result = await executeAgent(prompt, {
     toolsEnabled: options.toolsEnabled ?? true,
+    // Every run dispatched here is a subagent. Without a dispatchContext (leaf,
+    // allowNesting unset) build-options must WITHHOLD dispatch_agent — including
+    // the plan-mode force-offer — instead of treating the child as top-level.
+    isDispatchedSubagent: true,
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     ...(def.model ? { model: def.model } : {}),
+    // Cross-provider subagent: route the run to the def's provider (with its own
+    // credentials) instead of the dispatching session's provider.
+    ...(def.provider ? { provider: def.provider } : {}),
     ...(def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}),
     // Parent ceiling: clamp THIS child's resolved tool surface against the
     // dispatching agent's ceiling (fail-closed). The child's own dispatchContext
@@ -196,10 +203,26 @@ async function runExternalSubagent(
   def: PluginSubagentDef,
   options: PluginDispatchSubagentOptions
 ): Promise<PluginSubagentDispatchResult> {
-  const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-  const { createAgentFromPreset, isFromPreset } = await import("@/lib/ai/agent/external/presets")
-  const manager = getExternalAgentManager()
+  const [
+    { getExternalAgentManager },
+    { createAgentFromPreset, isFromPreset },
+    { supportsExternalAgents },
+  ] = await Promise.all([
+    import("@/lib/ai/agent/external/manager"),
+    import("@/lib/ai/agent/external/presets"),
+    import("@/lib/ai/agent/external/agent-transport"),
+  ])
 
+  // External CLIs only run on the desktop / headless host — never in the browser
+  // shell. Fail loudly with an actionable message instead of an opaque spawn
+  // error deep inside the manager.
+  if (!supportsExternalAgents()) {
+    throw new Error(
+      `dispatchSubagent: external agent "${presetId}" requires the Cognia desktop app (external CLI agents don't run in the browser shell).`
+    )
+  }
+
+  const manager = getExternalAgentManager()
   const existing = manager.getAllAgents().find((inst) => isFromPreset(inst.config) === presetId)
   let agentId: string
   if (existing) {
@@ -207,21 +230,42 @@ async function runExternalSubagent(
   } else {
     const config = createAgentFromPreset(presetId)
     if (!config) {
-      throw new Error(`dispatchSubagent: external preset "${presetId}" is not registered`)
+      throw new Error(
+        `dispatchSubagent: external preset "${presetId}" is not registered — enable the plugin that contributes it, or use a built-in preset.`
+      )
     }
     await manager.addAgent(config)
     agentId = config.id
   }
 
+  // Clamp the child's tool surface against the dispatching agent's permission
+  // ceiling (fail-closed) and derive the external permission mode from it.
+  const { deriveExternalSessionPermission } =
+    await import("@/lib/ai/agent/external/permission-cascade")
+  const merged = deriveExternalSessionPermission(
+    options._permissionCeiling ?? {},
+    def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}
+  )
+
+  // Live progress: translate the external protocol stream into the same
+  // CaptureStreamEvent shape the subagent runtime store already renders, so an
+  // external subagent lights up `SubagentPart`'s live progress like a built-in.
+  const { pipeExternalEventsToCapture } =
+    await import("@/lib/ai/agent/external/external-event-progress")
+  const onEvent = options._onEvent ? pipeExternalEventsToCapture(options._onEvent) : undefined
+
   const result = await manager.execute(agentId, prompt, {
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
+    ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
     ...(options.cwd ? { workingDirectory: options.cwd } : {}),
     ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+    ...(onEvent ? { onEvent } : {}),
   })
 
   if (!result.success) {
     throw new Error(
-      result.error || `dispatchSubagent: external agent ${agentId} returned a failure`
+      result.error ||
+        `dispatchSubagent: external agent "${presetId}" (${agentId}) returned a failure.`
     )
   }
 
@@ -268,6 +312,7 @@ export async function runTeam(
   }
 
   await agentTeamManager.start(teamId, {
+    origin: options.origin ?? "plugin",
     ...(options.ultracode !== undefined ? { ultracode: options.ultracode } : {}),
   })
 

@@ -19,6 +19,7 @@ import {
   type WebFetchDeps,
   type WebSearchDeps,
 } from "@/lib/web/web-tools-core"
+import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 
 export const WEB_SEARCH_TOOL_NAME = "web_search"
 export const WEB_FETCH_TOOL_NAME = "web_fetch"
@@ -54,6 +55,11 @@ const WEB_FETCH_SCHEMA = {
       type: "string",
       description:
         "Optional. What you want from the page — when set, only the content relevant to this is returned instead of the full page (far fewer tokens). Use it whenever you're after specific facts.",
+    },
+    offset: {
+      type: "number",
+      description:
+        "Optional read-window start (char offset) for paging through a long page. When a result is `truncated`, it returns a `nextOffset` — pass it back here to read the next segment instead of re-fetching.",
     },
   },
   required: ["url"],
@@ -105,6 +111,21 @@ export async function runWebBuiltinTool(
   args: Record<string, unknown>,
   deps: WebToolRunDeps
 ): Promise<unknown> {
+  // Governance: the promoted web built-ins run host-side and so bypass the
+  // plugin permission-guard/rate-limiter that clamps `ctx.network`. Re-apply an
+  // outbound token bucket here (reusing the shared limiter) so a runaway agent
+  // can't hammer providers/hosts. A refused call becomes a structured error the
+  // model can read, not a thrown exception.
+  const op = name === WEB_SEARCH_TOOL_NAME ? "network:search" : "network:fetch"
+  try {
+    getPluginRateLimiter().check(WEB_BUILTIN_PLUGIN_ID, op)
+  } catch (err) {
+    if (err instanceof RateLimitError) {
+      return { ok: false as const, error: `Rate limit exceeded for ${name}; try again shortly.` }
+    }
+    throw err
+  }
+
   if (name === WEB_FETCH_TOOL_NAME) {
     return webFetch(args as unknown as WebFetchArgs, {
       userAgent: deps.userAgent,
@@ -112,6 +133,9 @@ export async function runWebBuiltinTool(
       summarize: deps.summarize,
       signal: deps.signal,
       cache: deps.cache,
+      jinaFallback: deps.jinaFallback,
+      allowPrivateHosts: deps.allowPrivateHosts,
+      alwaysDistill: deps.alwaysDistill,
     })
   }
   if (name === WEB_SEARCH_TOOL_NAME) {

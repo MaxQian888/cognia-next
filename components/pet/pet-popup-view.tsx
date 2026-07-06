@@ -23,6 +23,8 @@ import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { startOverlayPetBridge, type OverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
+import type { PetBridgeInteractionKind } from "@/lib/pet/events/cross-window-protocol"
+import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import {
   closePetPopup,
   closePetWindow,
@@ -62,6 +64,13 @@ export function PetPopupView() {
     }
   }, [])
 
+  // Reveal the popup only AFTER the first painted frame. Rust creates it
+  // `visible(false)` and no longer shows it on the create path, so the user
+  // never sees the pre-hydration opaque page background flash inside what must
+  // be a transparent window (see `lib/pet/reveal.ts`). Focus after showing so
+  // the native blur-to-close behaves exactly like a system context menu.
+  useEffect(() => schedulePetWindowReveal({ focus: true }), [])
+
   // Cross-window bridge: post interactions back to the main window. Held in a
   // ref so the panel callbacks don't re-bind every render.
   const bridgeRef = useRef<OverlayPetBridge | null>(null)
@@ -73,7 +82,7 @@ export function PetPopupView() {
       bridgeRef.current = null
     }
   }, [])
-  const send = (kind: "fed" | "played" | "petted" | "talked", text?: string) =>
+  const send = (kind: PetBridgeInteractionKind, text?: string) =>
     bridgeRef.current?.sendInteraction(kind, text)
 
   // Esc dismisses the popup (blur dismissal is handled natively in Rust).
@@ -139,7 +148,19 @@ export function PetPopupView() {
             onPlay={() => send("played")}
             onPet={() => send("petted")}
             onTalk={(text) => send("talked", text)}
+            onSleep={() => send("slept")}
+            onClean={() => send("cleaned")}
+            onTreat={() => send("treated")}
             skinId={effectiveSkin}
+            // No controller in this window: the consume event would be lost.
+            showInventory={false}
+            // Console navigation happens in the main window (it owns the
+            // router); raise it first, then dismiss like a menu selection.
+            onOpenConsole={(tab) => {
+              void showMainWindow()
+              bridgeRef.current?.sendOpenConsole(tab)
+              void closePetPopup()
+            }}
           />
         ) : null}
         <div className="mt-3 flex flex-col gap-1 border-t pt-3">

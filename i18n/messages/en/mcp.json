@@ -168,7 +168,17 @@
     "running": "Running",
     "startedAt": "Started {time}",
     "stopped": "Stopped",
-    "title": "Health & logs"
+    "title": "Health & logs",
+    "sectionOutbound": "Outbound",
+    "outboundTitle": "MCP servers",
+    "outboundSubtitle": "Live sessions and recent logs for the MCP servers this app connects to.",
+    "statServers": "Servers",
+    "statLogs": "Log lines",
+    "statErrors": "Errors",
+    "logsTitle": "Recent logs",
+    "logsSubtitle": "The latest log lines emitted by connected MCP servers.",
+    "sectionInbound": "Inbound",
+    "windowNote": "Showing the most recent log lines."
   },
   "import": {
     "back": "Back",
@@ -204,9 +214,13 @@
   "importLabel": "Import",
   "list": {
     "clearFilters": "Clear filters",
+    "clearSelection": "Clear selection",
     "empty": "No MCP servers yet. Add one to expose external tools to Claude.",
+    "emptyBrowsePresets": "Browse presets",
     "noMatch": "No servers match these filters.",
-    "searchPlaceholder": "Filter servers by name, command, or URL…"
+    "searchPlaceholder": "Filter servers by name, command, or URL…",
+    "selectAll": "Select all ({count})",
+    "selectAllAria": "Select all servers"
   },
   "liveSession": {
     "disable": "Disable",
@@ -224,7 +238,10 @@
     },
     "subtitle": "Live status of the MCP servers the running agent session is connected to.",
     "title": "Live session servers",
-    "toolsCount": "{count} tools"
+    "toolsCount": "{count} tools",
+    "viewLogs": "View logs",
+    "viewLogsFor": "View logs for {name}",
+    "recentLogAt": "{time} · {message}"
   },
   "panel": {
     "searchPlaceholder": "Filter servers by name, command, or URL…"

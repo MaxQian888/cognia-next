@@ -96,6 +96,63 @@ describe("buildGatewaySnapshot", () => {
     const snap = buildGatewaySnapshot(slice, 1)
     expect(snap.providers.filter((p) => p.id === "openai")).toHaveLength(1)
   })
+
+  it("carries the upstream key pool + strategy when rotation is enabled", () => {
+    const slice: SnapshotSettingsSlice = {
+      providerSettings: {
+        openai: {
+          providerId: "openai",
+          apiKey: "sk-primary",
+          enabled: true,
+          apiKeys: ["sk-a", " sk-b ", "", "sk-a"], // blanks + dupes are cleaned
+          apiKeyRotationEnabled: true,
+          apiKeyRotationStrategy: "least-used",
+        },
+      } as unknown as SnapshotSettingsSlice["providerSettings"],
+    }
+    const openai = buildGatewaySnapshot(slice, 1).providers.find((p) => p.id === "openai")
+    expect(openai).toMatchObject({
+      apiKey: "sk-primary",
+      apiKeys: ["sk-a", "sk-b"],
+      rotationEnabled: true,
+      rotationStrategy: "least-used",
+    })
+  })
+
+  it("omits the pool when rotation is disabled", () => {
+    const slice: SnapshotSettingsSlice = {
+      providerSettings: {
+        openai: {
+          providerId: "openai",
+          apiKey: "sk-primary",
+          enabled: true,
+          apiKeys: ["sk-a", "sk-b"],
+          apiKeyRotationEnabled: false,
+        },
+      } as unknown as SnapshotSettingsSlice["providerSettings"],
+    }
+    const openai = buildGatewaySnapshot(slice, 1).providers.find((p) => p.id === "openai")
+    expect(openai?.apiKeys).toBeUndefined()
+    expect(openai?.rotationEnabled).toBeUndefined()
+  })
+
+  it("resolves a provider configured with only a rotation pool (blank primary key)", () => {
+    const slice: SnapshotSettingsSlice = {
+      providerSettings: {
+        openai: {
+          providerId: "openai",
+          apiKey: "",
+          enabled: true,
+          apiKeys: ["sk-pool-1", "sk-pool-2"],
+          apiKeyRotationEnabled: true,
+        },
+      } as unknown as SnapshotSettingsSlice["providerSettings"],
+    }
+    const openai = buildGatewaySnapshot(slice, 1).providers.find((p) => p.id === "openai")
+    // pool[0] stands in as the resolver's single key → provider becomes usable.
+    expect(openai).toMatchObject({ enabled: true, apiKey: "sk-pool-1" })
+    expect(openai?.apiKeys).toEqual(["sk-pool-1", "sk-pool-2"])
+  })
 })
 
 describe("enrichSnapshotWithSubscriptionCreds", () => {

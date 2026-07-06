@@ -12,6 +12,8 @@ jest.mock("@/lib/logging", () => {
     debug: jest.fn(),
   }
   return {
+    createLogger: () => ({ ...childLogger, child: () => childLogger }),
+    logger: { ...childLogger, child: () => childLogger },
     loggers: {
       agent: {
         child: () => childLogger,
@@ -92,7 +94,8 @@ describe("migrateAgentTeamPersisted", () => {
     expect(migrated.teams.live.status).toBe("idle")
     expect(migrated.teams.done.status).toBe("completed")
     expect(migrated.teammates).toEqual({})
-    expect(migrated.tasks).toEqual({ task_a: { id: "task_a" } })
+    // v5 backfills an empty comments thread on every legacy task.
+    expect(migrated.tasks).toEqual({ task_a: { id: "task_a", comments: [] } })
   })
 
   it("creates a default config when a legacy snapshot omitted it", () => {
@@ -101,6 +104,19 @@ describe("migrateAgentTeamPersisted", () => {
     expect(migrated.defaultConfig.governancePolicy).toEqual(DEFAULT_TEAM_CONFIG.governancePolicy)
     expect(migrated.defaultConfig).toHaveProperty("capabilities", undefined)
     expect(migrated.lastAdapterSyncVersion).toEqual({})
+  })
+
+  it("passes a v5 snapshot without dispatchDecision/externalPickup through unchanged", () => {
+    // Additive optional fields need no migration branch — a current-version
+    // snapshot missing them must load verbatim and consumers guard for
+    // absence (see store header docblock).
+    const snapshot = {
+      defaultConfig: DEFAULT_TEAM_CONFIG,
+      teams: { t1: { id: "t1", status: "idle" } },
+      teammates: {},
+      tasks: {},
+    }
+    expect(migrateAgentTeamPersisted(snapshot, 5)).toBe(snapshot)
   })
 
   it("defaults invalid legacy team maps to empty objects", () => {
@@ -140,6 +156,27 @@ describe("partializeAgentTeamState", () => {
       teams: { team_a: persistedTeam("team_a", "Alpha") },
       teammates: { mate_a: { id: "mate_a" } },
       tasks: { task_a: { id: "task_a" } },
+    })
+  })
+
+  it("keeps dispatchDecision and externalPickup on persisted teams", () => {
+    const decision = {
+      kind: "external-handoff",
+      fromPattern: "external_handoff",
+      confidence: 0.6,
+      reason: "needs external agent",
+    }
+    const pickup = { requestedAt: new Date("2026-07-02T00:00:00Z") }
+    const team = {
+      ...persistedTeam("team_x", "Xray"),
+      dispatchDecision: decision,
+      externalPickup: pickup,
+    }
+    const state = { ...initialState, teams: { team_x: team } } as never
+    const persisted = partializeAgentTeamState(state) as { teams: Record<string, unknown> }
+    expect(persisted.teams.team_x).toMatchObject({
+      dispatchDecision: decision,
+      externalPickup: pickup,
     })
   })
 })

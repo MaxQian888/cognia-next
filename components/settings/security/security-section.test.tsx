@@ -77,4 +77,19 @@ describe("SecuritySection", () => {
     expect(guardMock).toHaveBeenCalledTimes(1)
     expect(guardMock.mock.calls[0][0]).toMatchObject({ fallthroughWhenUnavailable: false })
   })
+
+  it("defaults the auto-lock select to Off and persists a chosen interval", () => {
+    render(<SecuritySection />)
+    const select = screen.getByTestId("account-auto-lock-select") as HTMLSelectElement
+    expect(select.value).toBe("0")
+
+    fireEvent.change(select, { target: { value: "15" } })
+    expect(saveMock).toHaveBeenCalledWith({ accountAutoLockMinutes: 15 })
+  })
+
+  it("reflects the persisted auto-lock interval", () => {
+    mockedSettings = { accountAutoLockMinutes: 30 }
+    render(<SecuritySection />)
+    expect((screen.getByTestId("account-auto-lock-select") as HTMLSelectElement).value).toBe("30")
+  })
 })

@@ -9,7 +9,7 @@
  *  - `lib/plugin/contracts/plugin-points.ts` — canonical extension-point
  *    enumeration, contract shapes, and the read-only
  *    `getExtensionPointContract(id)` accessor.
- *  - `types/plugin/plugin-extended.ts` — `ExtensionPoint` alias and the
+ *  - `types/plugin/plugin.ts` — `ExtensionPoint` alias and the
  *    `ExtensionOptions` / `ExtensionRegistration` / `ExtensionProps`
  *    surfaces consumed by `PluginExtensionAPI.register(...)`.
  *
@@ -41,4 +41,4 @@ export type {
   ExtensionOptions,
   ExtensionRegistration,
   ExtensionProps,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"

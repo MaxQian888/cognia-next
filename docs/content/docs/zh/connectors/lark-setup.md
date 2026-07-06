@@ -44,11 +44,13 @@ description: "创建飞书（Lark）机器人应用，并通过连接器适配�
 
 需要同一台机器上有一个公网 HTTPS 端点。
 
-1. 在应用菜单中进入 **事件与回调** 订阅页面。
-2. 在 **订阅方式** 下，选择 **配置请求地址**。
-3. 填写你的 webhook URL（例如 `https://your-host.example.com/connectors/lark/<adapterId>`）。
-4. 飞书会发送一个验证请求；cognia-next 的 Rust HTTP 代理会处理握手。
-5. 订阅以下事件：
+1. 在 cognia-next 中选择 **Webhook** 创建 Lark 适配器，保存后重新打开它。
+2. 在 **设置 → Companion → Tunnel** 中启动 Cloudflared 隧道。
+3. 从 Lark 配置对话框复制生成的回调 URL，形如 `https://.../webhook/lark/<adapterId>`。
+4. 在飞书应用菜单中进入 **事件与回调** 订阅页面。
+5. 在 **订阅方式** 下，选择 **配置请求地址**，并粘贴生成的回调 URL。
+6. 飞书会发送一个验证请求；cognia-next 的 Rust HTTP 代理会处理握手。
+7. 订阅以下事件：
    - `im.message.receive_v1` —— 机器人接收消息
 
 点击 **保存**。

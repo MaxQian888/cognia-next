@@ -10,6 +10,11 @@
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
+import {
+  runStructuredTurn,
+  type SchemaViolationMode,
+} from "@/lib/workflow/nodes/ai/structured-turn"
+import type { ExecuteAgentResult } from "@/lib/ai/agent/agent-executor"
 
 export interface AgentTurnParams {
   prompt?: string
@@ -31,6 +36,18 @@ export interface AgentTurnParams {
   requireTools?: boolean
   /** Working directory the tool-enabled run is scoped to. */
   cwd?: string
+  /**
+   * Optional JSON object schema the turn's output must satisfy (D3). When set,
+   * the turn parses + validates its reply, performs one bounded auto-fix retry
+   * on violation, and surfaces a validated `object` alongside `text`.
+   */
+  outputSchema?: Record<string, unknown>
+  /**
+   * Behaviour when the output still violates the schema after the auto-fix
+   * retry. `"fail"` (default) throws into the node's errorPolicy; `"soft"`
+   * returns the unvalidated object with `schemaValid: false`.
+   */
+  onSchemaViolation?: SchemaViolationMode
 }
 
 const DEFAULT_TIMEOUT_MS = 600_000
@@ -73,7 +90,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
     // its own provider through resolveSendOptions).
     const settings = await getSettings().catch(() => undefined)
 
-    const result = await executeAgent(prompt, {
+    const baseOptions = {
       systemPrompt: params.systemPrompt,
       model: params.model,
       maxSteps: params.maxTurns,
@@ -96,7 +113,49 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
             >["customProviders"],
           }
         : {}),
-    })
+    }
+
+    // Typed-output path (D3): parse + validate + one bounded auto-fix retry.
+    // Usage is accumulated across every model call (the retry counts).
+    const outputSchema = params.outputSchema
+    let result: ExecuteAgentResult
+    let structured: { object: unknown; schemaValid: boolean; schemaErrors?: string[] } | undefined
+
+    if (outputSchema && Object.keys(outputSchema).length > 0) {
+      let last: ExecuteAgentResult | undefined
+      const usageAcc = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+      let sawUsage = false
+      const outcome = await runStructuredTurn({
+        outputSchema,
+        onSchemaViolation: params.onSchemaViolation,
+        runOnce: async (fix) => {
+          // The corrective re-prompt rides the user message (prompt-injection
+          // is the only structured-output mechanism on the sidecar channel).
+          const turnPrompt = fix ? `${prompt}\n\n${fix}` : prompt
+          const r = await executeAgent(turnPrompt, {
+            ...baseOptions,
+            outputFormat: { type: "json_schema", schema: outputSchema },
+          })
+          last = r
+          if (r.usage) {
+            sawUsage = true
+            usageAcc.inputTokens += r.usage.inputTokens
+            usageAcc.outputTokens += r.usage.outputTokens
+            usageAcc.totalTokens += r.usage.totalTokens
+          }
+          return { object: r.object, parseError: r.parseError }
+        },
+      })
+      if (!last) throw new Error("action.agent.turn: structured turn produced no result")
+      result = sawUsage ? { ...last, usage: usageAcc } : last
+      structured = {
+        object: outcome.object,
+        schemaValid: outcome.schemaValid,
+        ...(outcome.schemaErrors ? { schemaErrors: outcome.schemaErrors } : {}),
+      }
+    } else {
+      result = await executeAgent(prompt, baseOptions)
+    }
 
     if (toolsEnabled && !result.toolsAvailable) {
       ctx.log(
@@ -137,6 +196,13 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
         toolsAvailable: result.toolsAvailable,
         ...(result.finishReason ? { finishReason: result.finishReason } : {}),
         ...(result.usage ? { usage: result.usage } : {}),
+        ...(structured
+          ? {
+              object: structured.object,
+              schemaValid: structured.schemaValid,
+              ...(structured.schemaErrors ? { schemaErrors: structured.schemaErrors } : {}),
+            }
+          : {}),
       },
     }
   } catch (err) {

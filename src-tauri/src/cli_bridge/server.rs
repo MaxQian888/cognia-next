@@ -73,10 +73,26 @@ pub fn build_router(state: SharedState) -> Router {
         )
         .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
         .route("/api/v1/dev/plugins/reload", post(handlers::reload))
+        // ── ACP bridge token broker ─────────────────────────────────────
+        // Mints a device-scope companion JWT for the `cognia acp` stdio↔WS
+        // bridge (same loopback + dev-token trust model as plugin install).
+        .route("/api/v1/dev/acp/token", post(handlers::acp_token))
         // ── Session handoff (standalone agent CLI → desktop) ────────────
         // The CLI POSTs a session transcript; we emit it on
         // `cli-bridge:session-handoff` for the renderer to import + open.
         .route("/api/v1/dev/sessions/handoff", post(handlers::handoff))
+        // ── Renderer-backed routes (twin context / agent teams) ─────────
+        // These round-trip through the WebView via the renderer bridge —
+        // twin retrieval reads Dexie + the vector store, and AgentTeam
+        // definitions live in the renderer's Zustand store, so the Rust
+        // side cannot answer them directly.
+        .route("/api/v1/dev/twin/context", post(handlers::twin_context))
+        .route("/api/v1/dev/teams/list", post(handlers::teams_list))
+        .route("/api/v1/dev/teams/run", post(handlers::teams_run))
+        .route(
+            "/api/v1/dev/teams/run-status",
+            post(handlers::teams_run_status),
+        )
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state)

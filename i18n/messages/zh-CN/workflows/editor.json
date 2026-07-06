@@ -86,10 +86,12 @@
   },
   "edge": {
     "edgeKind": {
+      "approved": "已批准",
       "default": "默认",
       "else": "否则",
       "error": "错误时",
       "false": "假",
+      "rejected": "已拒绝",
       "then": "然后",
       "true": "真"
     },

@@ -4,6 +4,7 @@
 // exercise it directly here so the auto-apply branch can't regress.
 
 import "fake-indexeddb/auto"
+import { liveQuery } from "dexie"
 import {
   createSession,
   getSession,
@@ -17,6 +18,7 @@ import {
   unarchiveSession,
   bulkArchiveSessions,
   bulkUnarchiveSessions,
+  setSessionOrder,
 } from "./sessions"
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
@@ -37,7 +39,18 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await getDb().promptPresets.clear()
-})
+  // Cold open builds the full Dexie schema (now v99); can exceed the default 5s
+  // hook budget under fake-indexeddb on the first test.
+}, 30_000)
+
+/** Poll until `pred` is true (liveQuery emissions land on microtask timing). */
+async function waitUntil(pred: () => boolean, timeoutMs = 3000): Promise<void> {
+  const start = Date.now()
+  while (!pred()) {
+    if (Date.now() - start > timeoutMs) throw new Error("waitUntil timed out")
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
 
 describe("createSession — without default preset", () => {
   it("creates a row with caller-supplied fields", async () => {
@@ -46,6 +59,54 @@ describe("createSession — without default preset", () => {
     expect(session.title).toBe("Test")
     expect(session.model).toBe("claude-y")
     expect(session.systemPrompt).toBeUndefined()
+  })
+})
+
+describe("setSessionOrder", () => {
+  it("writes each id's index into manualOrder without bumping updatedAt", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    const c = await createSession({ title: "C" })
+    const beforeA = (await getSession(a.id))!.updatedAt
+    await setSessionOrder([c.id, a.id, b.id], "date:today")
+    expect((await getSession(c.id))?.manualOrder).toBe(0)
+    expect((await getSession(a.id))?.manualOrder).toBe(1)
+    expect((await getSession(b.id))?.manualOrder).toBe(2)
+    // The order is tagged with the section it was dragged in, so it doesn't
+    // leak into other sections the session later migrates to.
+    expect((await getSession(c.id))?.manualOrderSection).toBe("date:today")
+    // Ordering is organizational — recency is intentionally left untouched.
+    expect((await getSession(a.id))?.updatedAt).toBe(beforeA)
+  })
+
+  it("is a no-op for an empty id list", async () => {
+    await expect(setSessionOrder([], "pinned")).resolves.toBeUndefined()
+  })
+
+  // Regression: the sidebar's liveQuery must re-emit after a reorder. It broke
+  // when `listScopedSessions` awaited `resolveScopeProjectId` before the Dexie
+  // read even for an explicit pid — the await hops through a native promise,
+  // Dexie's dependency-tracking zone is lost, and the (non-indexed)
+  // `manualOrder` write never re-emits → drag-reorder visually snaps back.
+  it("re-emits an explicit-pid liveQuery after a reorder", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    const c = await createSession({ title: "C" })
+    const pid = (await getSession(a.id))!.projectId!
+
+    const emissions: Array<Map<string, number | undefined>> = []
+    const sub = liveQuery(() => listScopedSessions(pid)).subscribe({
+      next: (rows) => emissions.push(new Map(rows.map((r) => [r.id, r.manualOrder]))),
+    })
+    await waitUntil(() => emissions.length >= 1)
+    await setSessionOrder([c.id, a.id, b.id], "date:today")
+    await waitUntil(() => emissions.length >= 2)
+    sub.unsubscribe()
+
+    const last = emissions[emissions.length - 1]
+    expect(last.get(c.id)).toBe(0)
+    expect(last.get(a.id)).toBe(1)
+    expect(last.get(b.id)).toBe(2)
   })
 })
 

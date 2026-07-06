@@ -44,10 +44,33 @@ const stubNextPlugin = {
       // `__esModule` MUST be falsy: esbuild's __toESM then sets `default` to the
       // whole (callable) proxy, so a default import like next/dynamic stays
       // callable. Any named export resolves to the same no-op.
+      //
+      // The `apply` trap MUST return the callable `noop`, NOT its result: a
+      // module-top-level `const C = dynamic(() => import(...))` then does
+      // `C.displayName` / renders `<C/>`. If calling the stub returned `null`
+      // (the target's return value), `C` is null and `C.displayName` throws
+      // "Cannot read properties of null". Returning `noop` makes `C` a no-op
+      // component whose props access is harmless.
       contents:
-        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop) });",
+        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop), apply: () => noop });",
       loader: "js",
     }))
+  },
+}
+
+// Load the i18n aggregate messages as DEFAULT-ONLY JSON modules. esbuild's
+// json loader also emits a named export per top-level key, and the messages
+// contain an `eval` namespace — `var eval = ...` is a SyntaxError in the
+// strict-mode ESM chunk, which crashed `cognia-agent serve` at the runtimes
+// import (ADR-0059 T-B3 hand-run). Default-only sidesteps the reserved names.
+const jsonDefaultOnlyPlugin = {
+  name: "json-default-only-messages",
+  setup(build) {
+    build.onLoad({ filter: /i18n[\\/]messages[\\/][^\\/]+\.json$/ }, async (args) => {
+      const { readFile } = await import("node:fs/promises")
+      const raw = await readFile(args.path, "utf8")
+      return { contents: `export default ${raw}`, loader: "js" }
+    })
   },
 }
 
@@ -80,7 +103,7 @@ await esbuild.build({
     ".woff": "empty",
     ".woff2": "empty",
   },
-  plugins: [stubNextPlugin],
+  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "info",
 })
 

@@ -34,9 +34,11 @@ import { cn } from "@/lib/utils"
 import { WorkflowCreateDialog } from "@/components/workflow/library/workflow-create-dialog"
 import { WorkflowCreateFolderDialog } from "@/components/workflow/library/workflow-create-folder-dialog"
 import { WorkflowFolderBreadcrumb } from "@/components/workflow/library/workflow-folder-breadcrumb"
+import { PendingApprovalsCard } from "./pending-approvals-card"
 import { PinnedSection } from "./pinned-section"
 import { RecentRunsFeed } from "./recent-runs-feed"
 import { TriggerButton } from "./trigger-button"
+import { usePendingWorkflowTriggers } from "./use-pending-triggers"
 import { WorkflowListToolbar } from "./workflow-list-toolbar"
 import { WorkflowRowActionsSheet } from "./workflow-row-actions-sheet"
 import { useMobileWorkflowView } from "./use-mobile-workflow-view"
@@ -93,6 +95,10 @@ export function WorkflowList({ className }: WorkflowListProps) {
       () => getDb().workflowRuns.where("status").equals("running").toArray(),
       []
     ) ?? []
+  // Manual triggers tapped on this device live in the outbound queue until the
+  // desktop runs them and the run row syncs back — surface them so the list
+  // reflects the "sending" state instead of looking inert after a tap.
+  const pendingTriggerIds = usePendingWorkflowTriggers()
 
   const visible = useMemo(() => {
     if (!folderWorkflows) return undefined
@@ -131,7 +137,9 @@ export function WorkflowList({ className }: WorkflowListProps) {
 
   const handleRefresh = async (): Promise<void> => {
     try {
-      await runSyncDown()
+      // This screen renders workflows + their run state (active/sending
+      // badges, recent-runs feed) — pull both, but not the other eight tables.
+      await runSyncDown({ only: ["workflows", "workflowRuns"] })
     } catch {
       // Orchestrator swallows handler-level failures; nothing more to do.
     }
@@ -163,6 +171,10 @@ export function WorkflowList({ className }: WorkflowListProps) {
           <WorkflowFolderBreadcrumb path={folderPath ?? []} />
         </div>
       ) : null}
+
+      {/* HITL gates blocked on a human decision (ADR 0061 P2) — surfaced
+          above everything else because a run is actively waiting. */}
+      {atRoot ? <PendingApprovalsCard className="mx-4" /> : null}
 
       {atRoot ? <PinnedSection workflows={rows} pinnedIds={pinnedIds} /> : null}
 
@@ -270,6 +282,14 @@ export function WorkflowList({ className }: WorkflowListProps) {
                                   data-testid={`workflow-active-${wf.id}`}
                                 >
                                   ● {t("activeBadge")}
+                                </Badge>
+                              ) : pendingTriggerIds.has(wf.id) ? (
+                                <Badge
+                                  variant="outline"
+                                  className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-600 dark:text-amber-300"
+                                  data-testid={`workflow-sending-${wf.id}`}
+                                >
+                                  ● {t("sending")}
                                 </Badge>
                               ) : null}
                             </div>

@@ -13,8 +13,9 @@ import { BreakdownBarPanel } from "./breakdown-bar-panel"
 import { RecentTracesPanel } from "./recent-traces-panel"
 import type { PanelDef } from "./panel-registry"
 import type { ObservabilitySeries } from "@/hooks/observability/use-observability-series"
-import type { BreakdownRow } from "@/lib/observability/breakdown"
-import type { Dimension } from "@/lib/observability/breakdown"
+import type { BreakdownRow, Dimension } from "@/lib/observability/breakdown"
+import type { TraceFilters } from "@/lib/observability/filters"
+import type { ThresholdConfig, ThresholdMetric } from "@/lib/observability/thresholds"
 
 function breakdownFor(
   dimension: Dimension | undefined,
@@ -39,6 +40,12 @@ export interface ObservabilityPanelProps {
   series: ObservabilitySeries
   editMode: boolean
   onSelectTrace: (traceId: string) => void
+  /** Resolved thresholds (defaults + user overrides). */
+  thresholds: Record<ThresholdMetric, ThresholdConfig>
+  /** Active variable filters — drives breakdown highlight + toggle. */
+  filters: TraceFilters
+  /** Toggle a dimension value in the filters (click-to-filter). */
+  onFilterValue: (dim: Dimension, value: string) => void
 }
 
 export function ObservabilityPanel({
@@ -46,18 +53,36 @@ export function ObservabilityPanel({
   series,
   editMode,
   onSelectTrace,
+  thresholds,
+  filters,
+  onFilterValue,
 }: ObservabilityPanelProps) {
   switch (panel.kind) {
     case "stat":
-      return <StatPanel panel={panel} kpis={series.kpis} editMode={editMode} />
+      return (
+        <StatPanel panel={panel} kpis={series.kpis} editMode={editMode} thresholds={thresholds} />
+      )
     case "timeseries":
-      return <TimeSeriesPanel panel={panel} series={series} editMode={editMode} />
+      return (
+        <TimeSeriesPanel
+          panel={panel}
+          series={series}
+          editMode={editMode}
+          thresholds={thresholds}
+        />
+      )
     case "donut":
       return (
         <DonutPanel
           panel={panel}
           rows={breakdownFor(panel.dimension, series)}
           editMode={editMode}
+          onSelectValue={
+            panel.dimension ? (value) => onFilterValue(panel.dimension!, value) : undefined
+          }
+          selectedValues={
+            panel.dimension ? (filters[panel.dimension] as string[] | undefined) : undefined
+          }
         />
       )
     case "bar":
@@ -66,6 +91,12 @@ export function ObservabilityPanel({
           panel={panel}
           rows={breakdownFor(panel.dimension, series)}
           editMode={editMode}
+          onSelectValue={
+            panel.dimension ? (value) => onFilterValue(panel.dimension!, value) : undefined
+          }
+          selectedValues={
+            panel.dimension ? (filters[panel.dimension] as string[] | undefined) : undefined
+          }
         />
       )
     case "traces":

@@ -18,6 +18,10 @@ jest.mock("./compaction-settings", () => ({
   CompactionSettings: () => <div data-testid="compaction-stub" />,
 }))
 
+jest.mock("./conversation-sidebar-card", () => ({
+  ConversationSidebarCard: () => <div data-testid="conversation-sidebar-stub" />,
+}))
+
 let mockSettings: Record<string, unknown> | null
 const mockSave = jest.fn()
 jest.mock("@/stores/settings", () => ({
@@ -45,6 +49,11 @@ describe("ConversationSection", () => {
   it("renders the composer-assistance card", () => {
     render(<ConversationSection />)
     expect(screen.getByTestId("composer-assistance-stub")).toBeInTheDocument()
+  })
+
+  it("renders the conversation-sidebar card", () => {
+    render(<ConversationSection />)
+    expect(screen.getByTestId("conversation-sidebar-stub")).toBeInTheDocument()
   })
 
   it("renders the input-&-send card with the behavior card alongside assistance", () => {

@@ -55,7 +55,8 @@
     "export": "导出为 SKILL.md",
     "open": "打开",
     "openInEditor": "在编辑器中打开",
-    "selectAria": "选择 {name}"
+    "selectAria": "选择 {name}",
+    "usageCount": "已用 {count} 次"
   },
   "category": {
     "communication": "沟通",
@@ -306,6 +307,33 @@
     "selectSkillTitle": "未选择技能",
     "selectSourceAria": "按来源筛选",
     "statsBar": "已启用 {enabled} · 共 {total}"
+  },
+  "prefs": {
+    "autoEnableNew": "新技能自动启用",
+    "autoEnableNewHint": "新建或导入的技能会立即启用并注入到提示词中。",
+    "budgetWarning": "已启用 {count} 个技能，超过预算 {threshold} 个。每个都会追加到系统提示词中。",
+    "defaultSort": "默认排序",
+    "defaultStatus": "默认状态筛选",
+    "defaultTab": "默认标签页",
+    "density": "列表密度",
+    "densityComfortable": "舒适",
+    "densityCompact": "紧凑",
+    "display": "展示",
+    "enabledWarnThreshold": "启用数量提示",
+    "enabledWarnThresholdHint": "启用技能数超过该值时给出提示。填 0 关闭提示。",
+    "injection": "注入",
+    "openAria": "技能面板偏好设置",
+    "panel": "面板",
+    "rememberLastView": "记住上次视图",
+    "rememberLastViewHint": "恢复上次访问时的标签页、排序和筛选。",
+    "showDescription": "显示描述",
+    "showSource": "显示来源徽章",
+    "showTags": "显示标签",
+    "showUsage": "显示使用次数",
+    "title": "偏好设置",
+    "viewGrid": "网格",
+    "viewList": "列表",
+    "viewMode": "布局"
   },
   "recorder": {
     "attachScreenshots": "将截图作为资源附加",

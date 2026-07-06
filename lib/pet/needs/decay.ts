@@ -55,6 +55,22 @@ export function applyDecay(
   }
 }
 
+/** Settle decay to `now`, then add an arbitrary needs effect (item consumption). */
+export function applyNeedEffect(
+  needs: PetNeeds,
+  effect: Partial<Record<PetNeedKind, number>>,
+  now: number,
+  config: NeedDecayConfig = DEFAULT_NEED_DECAY
+): PetNeeds {
+  const settled = applyDecay(needs, now, config)
+  return {
+    energy: clamp(settled.energy + (effect.energy ?? 0)),
+    mood: clamp(settled.mood + (effect.mood ?? 0)),
+    bond: clamp(settled.bond + (effect.bond ?? 0)),
+    lastTickAt: settled.lastTickAt,
+  }
+}
+
 /** Settle decay to `now`, then apply an interaction's restore. */
 export function applyInteraction(
   needs: PetNeeds,
@@ -62,12 +78,5 @@ export function applyInteraction(
   now: number,
   config: NeedDecayConfig = DEFAULT_NEED_DECAY
 ): PetNeeds {
-  const settled = applyDecay(needs, now, config)
-  const effect = INTERACTION_EFFECTS[interaction]
-  return {
-    energy: clamp(settled.energy + (effect.energy ?? 0)),
-    mood: clamp(settled.mood + (effect.mood ?? 0)),
-    bond: clamp(settled.bond + (effect.bond ?? 0)),
-    lastTickAt: settled.lastTickAt,
-  }
+  return applyNeedEffect(needs, INTERACTION_EFFECTS[interaction], now, config)
 }

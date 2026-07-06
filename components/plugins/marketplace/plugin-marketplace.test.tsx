@@ -18,6 +18,20 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(async () => installedRows),
 }))
 
+// GitHub marketplace catalogs the user/org added — the "Workspace" section.
+const githubSourceEntries: Array<{ id: string; name: string }> = []
+jest.mock("@/hooks/plugins/use-github-marketplace-sources", () => ({
+  useGithubMarketplaceSources: () => ({
+    sources: [],
+    entries: githubSourceEntries,
+    loading: false,
+    errors: [],
+    add: jest.fn(async () => undefined),
+    remove: jest.fn(async () => undefined),
+    refresh: jest.fn(async () => undefined),
+  }),
+}))
+
 import { __resetPluginMarketplaceClientForTests } from "@/hooks/plugins"
 import { PluginMarketplace } from "./plugin-marketplace"
 
@@ -40,6 +54,7 @@ const ENTRIES = [
 
 beforeEach(() => {
   installedRows.length = 0
+  githubSourceEntries.length = 0
   __resetPluginMarketplaceClientForTests({
     searchPlugins: jest.fn(async () => ENTRIES),
     getFeaturedPlugins: jest.fn(async () => ENTRIES.slice(0, 1)),
@@ -162,5 +177,33 @@ describe("PluginMarketplace", () => {
     fireEvent.click(screen.getByText("sections.popular"))
     await waitFor(() => expect(screen.getByText("PopularOne")).toBeInTheDocument())
     expect(screen.queryByText("SearchOne")).not.toBeInTheDocument()
+  })
+
+  it("scopes Workspace to GitHub sources and Shared to the remote registry", async () => {
+    const remoteOnly = [{ id: "remote-1", name: "RemoteOne", version: "1.0.0", type: "plugin" }]
+    githubSourceEntries.push({ id: "ws-1", name: "WorkspaceOne" })
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => remoteOnly),
+      getFeaturedPlugins: jest.fn(async () => []),
+      getPopularPlugins: jest.fn(async () => []),
+      getRecentPlugins: jest.fn(async () => []),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+      uninstallPlugin: jest.fn(async () => undefined),
+    })
+    render(<PluginMarketplace />)
+    // Default "all" merges both sources.
+    await waitFor(() => expect(screen.getByText("RemoteOne")).toBeInTheDocument())
+    expect(screen.getByText("WorkspaceOne")).toBeInTheDocument()
+
+    // Workspace = git sources only.
+    fireEvent.click(screen.getByText("sections.workspace"))
+    await waitFor(() => expect(screen.getByText("WorkspaceOne")).toBeInTheDocument())
+    expect(screen.queryByText("RemoteOne")).not.toBeInTheDocument()
+
+    // Shared = remote registry only.
+    fireEvent.click(screen.getByText("sections.shared"))
+    await waitFor(() => expect(screen.getByText("RemoteOne")).toBeInTheDocument())
+    expect(screen.queryByText("WorkspaceOne")).not.toBeInTheDocument()
   })
 })

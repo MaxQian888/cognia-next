@@ -123,6 +123,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
         ...(typeof input.perTurnTimeoutMs === "number"
           ? { timeoutMs: input.perTurnTimeoutMs }
           : {}),
+        execution: { kind: "goal", label: `Goal ${goalId.slice(0, 8)}`, taskId: goalId },
       })
       captureText = capture.text
       lastResponse = capture.text

@@ -8,6 +8,12 @@
       "title": "Token 预算到达临界"
     },
     "cancel": "取消",
+    "capabilityAudit": {
+      "approveLabel": "仍然运行",
+      "body": "团队引用的部分能力已失效（相关插件可能已被禁用或移除）。可以带着剩余能力继续运行，或取消运行先修复配置。",
+      "rejectLabel": "取消运行",
+      "title": "检测到失效能力"
+    },
     "deadlock": {
       "body": "全部 teammate 因连续失败而被熔断。请选择恢复操作。",
       "resetAll": "重置全部 teammate",

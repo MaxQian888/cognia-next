@@ -11,6 +11,7 @@ import {
   compareBy,
   getProcessSnapshot,
   resetProcessSnapshot,
+  MAX_CMDLINE_CHARS,
 } from "./inventory.mjs"
 
 test("getProcessSnapshot serves a cached listing within the TTL, refreshing after", async () => {
@@ -52,6 +53,18 @@ test("formatProcess converts memoryBytes → memoryMB", () => {
 test("formatProcess tolerates missing memory", () => {
   const out = formatProcess({ pid: 1, name: "x" })
   assert.equal(out.memoryMB, undefined)
+})
+
+test("formatProcess clips an overlong cmdLine to MAX_CMDLINE_CHARS", () => {
+  const long = "x".repeat(MAX_CMDLINE_CHARS + 500)
+  const out = formatProcess({ pid: 1, name: "x", cmdLine: long })
+  assert.equal(out.cmdLine.length, MAX_CMDLINE_CHARS + 1) // capped + ellipsis
+  assert.ok(out.cmdLine.endsWith("…"))
+})
+
+test("formatProcess leaves a short cmdLine untouched", () => {
+  const out = formatProcess({ pid: 1, name: "x", cmdLine: "node app.js" })
+  assert.equal(out.cmdLine, "node app.js")
 })
 
 test("parsePosixPs decodes a representative line", () => {

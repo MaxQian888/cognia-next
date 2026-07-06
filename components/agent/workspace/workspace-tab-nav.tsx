@@ -35,7 +35,7 @@ export const WORKSPACE_TABS: ReadonlyArray<{ value: string; icon: LucideIcon }> 
 export function WorkspaceTabNav() {
   const tTabs = useTranslations("agentTeamsWorkspace.tabs")
   return (
-    <div className="overflow-x-auto lg:shrink-0 lg:overflow-visible">
+    <div className="overflow-x-auto lg:sticky lg:top-0 lg:shrink-0 lg:self-start lg:overflow-visible">
       <TabsList className="inline-flex h-9 w-max gap-1 lg:h-auto lg:w-48 lg:flex-col lg:items-stretch lg:bg-transparent lg:p-0">
         {WORKSPACE_TABS.map(({ value, icon: Icon }) => (
           <TabsTrigger

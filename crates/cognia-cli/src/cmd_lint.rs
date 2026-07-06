@@ -11,6 +11,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::Value;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::read_plugin_manifest;
@@ -89,6 +90,8 @@ const VALID_PERMISSIONS: &[&str] = &[
     "native:screen",
     "native:filesystem",
     "native:process",
+    "pet:read",
+    "pet:interact",
 ];
 
 /// Canonical plugin capabilities. MUST stay in lockstep with
@@ -169,6 +172,9 @@ const VALID_CAPABILITIES: &[&str] = &[
     "auth-provider",
     // C2 — deep-link handler (ctx.uri + onUri activation; no manifest field).
     "uri-handler",
+    "pet",
+    "pet-achievement",
+    "pet-item",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] = &["frontend", "python", "hybrid", "wasm", "vscode-extension"];
@@ -220,6 +226,8 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("fonts", &["fonts"]),
     ("wallpapers", &["wallpapers"]),
     ("cli-tools", &["cliTools"]),
+    ("pet-achievement", &["petAchievements"]),
+    ("pet-item", &["petItems"]),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +257,8 @@ pub struct LintReport {
     /// version-pin without parsing the whole payload speculatively.
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
+    pub ok: bool,
+    pub action: &'static str,
     pub manifest_path: PathBuf,
     pub valid: bool,
     pub diagnostics: Vec<Diagnostic>,
@@ -270,37 +280,115 @@ impl LintReport {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct LintError {
+    pub report: LintReport,
+}
+
+impl LintError {
+    pub fn error_count(&self) -> usize {
+        self.report.error_count()
+    }
+
+    pub fn warning_count(&self) -> usize {
+        self.report.warning_count()
+    }
+}
+
+impl fmt::Display for LintError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "manifest lint failed: {} error(s), {} warning(s)",
+            self.error_count(),
+            self.warning_count()
+        )
+    }
+}
+
+impl std::error::Error for LintError {}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry points
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// CLI entry: `cognia plugin lint`. Prints human-readable diagnostics by
-/// default or JSON when `as_json` is true.
+/// default or JSON when `as_json` is true, and returns `LintError` when
+/// diagnostics contain errors so callers can choose their own exit policy.
 ///
 /// `_ui` is accepted but unused in Phase 1; Phase 2 paints diagnostics
 /// with severity color and uses `ui.json()` instead of the bool argument.
-pub fn run(path: PathBuf, as_json: bool, _ui: &mut RuntimeUi) -> Result<()> {
-    let crate_root = path
-        .canonicalize()
-        .with_context(|| format!("resolve {}", path.display()))?;
-    let (manifest, manifest_path) = read_plugin_manifest(&crate_root)?;
+pub fn run(path: PathBuf, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
+    let crate_root = match path.canonicalize() {
+        Ok(root) => root,
+        Err(err) if as_json => {
+            return emit_json_input_failure(
+                &path,
+                format!("resolve {}: {err}", path.display()),
+                "lint.input.unreadable",
+            );
+        }
+        Err(err) => return Err(err).with_context(|| format!("resolve {}", path.display())),
+    };
+    let (manifest, manifest_path) = match read_plugin_manifest(&crate_root) {
+        Ok(manifest) => manifest,
+        Err(err) if as_json => {
+            return emit_json_input_failure(&crate_root, err.to_string(), "lint.input.manifest");
+        }
+        Err(err) => return Err(err),
+    };
     let diagnostics = validate_manifest(&manifest);
+    let valid = !diagnostics.iter().any(|d| d.severity == Severity::Error);
     let report = LintReport {
         schema_version: 1,
+        ok: valid,
+        action: "lint",
         manifest_path,
-        valid: !diagnostics.iter().any(|d| d.severity == Severity::Error),
+        valid,
         diagnostics,
     };
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
+    } else if !ui.flags.quiet || !report.valid {
         print_human(&report);
     }
     if report.valid {
         Ok(())
     } else {
-        std::process::exit(1);
+        Err(LintError { report }.into())
     }
+}
+
+#[derive(Debug, Serialize)]
+struct LintFailureReport {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    path: PathBuf,
+    valid: bool,
+    diagnostics: Vec<Diagnostic>,
+}
+
+fn emit_json_input_failure(path: &Path, error: String, code: &'static str) -> Result<()> {
+    let report = LintFailureReport {
+        schema_version: 1,
+        ok: false,
+        action: "lint",
+        stage: "input",
+        path: path.to_path_buf(),
+        valid: false,
+        diagnostics: vec![Diagnostic {
+            severity: Severity::Error,
+            field: "path".into(),
+            code: code.into(),
+            message: error,
+            hint: Some("Pass --path pointing at a plugin directory containing plugin.json.".into()),
+        }],
+    };
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Err(crate::JsonFailureExit.into())
 }
 
 /// Library entry used by `cmd_build::run` to pre-validate before building.
@@ -309,10 +397,13 @@ pub fn run(path: PathBuf, as_json: bool, _ui: &mut RuntimeUi) -> Result<()> {
 pub fn validate_at(path: &Path) -> Result<LintReport> {
     let (manifest, manifest_path) = read_plugin_manifest(path)?;
     let diagnostics = validate_manifest(&manifest);
+    let valid = !diagnostics.iter().any(|d| d.severity == Severity::Error);
     Ok(LintReport {
         schema_version: 1,
+        ok: valid,
+        action: "lint",
         manifest_path,
-        valid: !diagnostics.iter().any(|d| d.severity == Severity::Error),
+        valid,
         diagnostics,
     })
 }
@@ -1897,6 +1988,25 @@ mod tests {
     }
 
     #[test]
+    fn run_returns_error_instead_of_exiting_on_invalid_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("plugin.json"), r#"{"id":"x"}"#).unwrap();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags {
+            json: true,
+            ..crate::ui::runtime::UiFlags::default()
+        });
+
+        let err = run(tmp.path().to_path_buf(), true, &mut ui).unwrap_err();
+        let err = err
+            .downcast_ref::<LintError>()
+            .expect("invalid lint reports should return a downcastable LintError");
+
+        assert_eq!(err.error_count(), err.report.error_count());
+        assert!(err.error_count() >= 5);
+        assert_eq!(err.warning_count(), 0);
+    }
+
+    #[test]
     fn vscode_extension_requires_vscode_main() {
         let mut m = minimal_frontend();
         m["type"] = json!("vscode-extension");
@@ -1908,6 +2018,8 @@ mod tests {
     fn report_serializes_to_json() {
         let report = LintReport {
             schema_version: 1,
+            ok: false,
+            action: "lint",
             manifest_path: PathBuf::from("/tmp/plugin.json"),
             valid: false,
             diagnostics: vec![Diagnostic {
@@ -1919,6 +2031,8 @@ mod tests {
             }],
         };
         let json_str = serde_json::to_string(&report).unwrap();
+        assert!(json_str.contains("\"ok\":false"));
+        assert!(json_str.contains("\"action\":\"lint\""));
         assert!(json_str.contains("\"valid\":false"));
         assert!(json_str.contains("\"severity\":\"error\""));
         assert!(json_str.contains("\"schemaVersion\":1"), "got: {json_str}");

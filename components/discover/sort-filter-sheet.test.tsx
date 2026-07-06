@@ -9,9 +9,46 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+let platform = "web"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platform,
+}))
+
 import { SortFilterSheet } from "./sort-filter-sheet"
 
+beforeEach(() => {
+  platform = "web"
+})
+
 describe("<SortFilterSheet />", () => {
+  it("renders a Sheet on mobile and a Popover on desktop", async () => {
+    const user = userEvent.setup()
+    platform = "mobile"
+    const { rerender } = render(
+      <SortFilterSheet
+        sort="name"
+        filter="all"
+        onSortChange={jest.fn()}
+        onFilterChange={jest.fn()}
+      />
+    )
+    await user.click(screen.getByTestId("discover-sort-filter-trigger"))
+    expect(screen.getByTestId("discover-sort-filter-sheet")).toBeInTheDocument()
+
+    platform = "web"
+    rerender(
+      <SortFilterSheet
+        sort="name"
+        filter="all"
+        onSortChange={jest.fn()}
+        onFilterChange={jest.fn()}
+      />
+    )
+    // Desktop path still exposes the same content container + options.
+    await user.click(screen.getByTestId("discover-sort-filter-trigger"))
+    expect(screen.getByTestId("discover-sort-name")).toBeInTheDocument()
+  })
+
   it("renders a trigger button with the sortFilter.trigger label", () => {
     render(
       <SortFilterSheet

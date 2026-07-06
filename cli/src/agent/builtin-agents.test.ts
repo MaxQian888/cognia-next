@@ -3,10 +3,15 @@
  */
 import {
   BUILTIN_AGENT_IDS,
+  EXPLORE_AGENT_ID,
   GENERAL_PURPOSE_AGENT_ID,
+  PLAN_AGENT_ID,
+  exploreAgent,
   generalPurposeAgent,
+  planAgent,
   withBuiltinAgents,
 } from "./builtin-agents"
+import { READ_ONLY_BUILTIN_TOOLS } from "./tool-suppression"
 import type { AgentSummary } from "./discover-agents"
 
 function agent(id: string): AgentSummary {
@@ -37,6 +42,39 @@ describe("generalPurposeAgent", () => {
   })
 })
 
+describe("exploreAgent / planAgent", () => {
+  it("Explore is a read-only leaf whitelisted to the read-only tool surface", () => {
+    const a = exploreAgent()
+    expect(a.id).toBe(EXPLORE_AGENT_ID)
+    expect(a.def.prompt.trim().length).toBeGreaterThan(0)
+    // A non-empty allowlist locked to the read-only surface — no mutating tools.
+    expect(a.def.tools).toEqual([...READ_ONLY_BUILTIN_TOOLS])
+    expect(a.def.tools?.length).toBeGreaterThan(0)
+    // The concrete mutating tools never appear in the read-only allowlist.
+    const mutating = [
+      "write",
+      "edit",
+      "multi_edit",
+      "bash",
+      "shell_execute_advanced",
+      "file_append",
+    ].map((n) => `mcp__cognia-tools__${n}`)
+    for (const name of mutating) expect(a.def.tools).not.toContain(name)
+  })
+
+  it("Plan is a read-only leaf whitelisted to the read-only tool surface", () => {
+    const a = planAgent()
+    expect(a.id).toBe(PLAN_AGENT_ID)
+    expect(a.def.prompt.trim().length).toBeGreaterThan(0)
+    expect(a.def.tools).toEqual([...READ_ONLY_BUILTIN_TOOLS])
+  })
+
+  it("both are canonical built-ins", () => {
+    expect(BUILTIN_AGENT_IDS).toContain(EXPLORE_AGENT_ID)
+    expect(BUILTIN_AGENT_IDS).toContain(PLAN_AGENT_ID)
+  })
+})
+
 describe("withBuiltinAgents", () => {
   it("appends the built-in general-purpose agent when nothing is discovered", () => {
     const merged = withBuiltinAgents([])
@@ -45,7 +83,12 @@ describe("withBuiltinAgents", () => {
 
   it("keeps discovered agents and appends built-ins with distinct ids", () => {
     const merged = withBuiltinAgents([agent("reviewer")])
-    expect(merged.map((a) => a.id)).toEqual(["reviewer", GENERAL_PURPOSE_AGENT_ID])
+    expect(merged.map((a) => a.id)).toEqual([
+      "reviewer",
+      GENERAL_PURPOSE_AGENT_ID,
+      EXPLORE_AGENT_ID,
+      PLAN_AGENT_ID,
+    ])
   })
 
   it("lets a user-authored agent override a built-in of the same id", () => {

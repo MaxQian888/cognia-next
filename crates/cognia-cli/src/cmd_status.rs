@@ -10,6 +10,8 @@ use crate::ui::{style, RuntimeUi};
 pub(crate) struct BridgeStatusReport {
     #[serde(rename = "schemaVersion")]
     pub(crate) schema_version: u32,
+    pub(crate) ok: bool,
+    pub(crate) action: &'static str,
     pub(crate) running: bool,
     #[serde(rename = "endpointFile")]
     pub(crate) endpoint_file: Option<String>,
@@ -23,15 +25,17 @@ pub fn run(json: bool, ui: &mut RuntimeUi) -> Result<()> {
     run_with_report(json, report, ui)
 }
 
-fn run_with_report(json: bool, report: BridgeStatusReport, _ui: &mut RuntimeUi) -> Result<()> {
+fn run_with_report(json: bool, report: BridgeStatusReport, ui: &mut RuntimeUi) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
+    } else if !ui.flags.quiet {
         print_human(&report);
     }
 
     if report.running {
         Ok(())
+    } else if json {
+        Err(crate::JsonFailureExit.into())
     } else {
         bail!(
             "cognia CLI bridge is not running: {}",
@@ -61,6 +65,8 @@ where
         Err(err) => {
             return BridgeStatusReport {
                 schema_version: 1,
+                ok: false,
+                action: "status",
                 running: false,
                 endpoint_file,
                 base_url: None,
@@ -73,6 +79,8 @@ where
     match health(&endpoint) {
         Ok(()) => BridgeStatusReport {
             schema_version: 1,
+            ok: true,
+            action: "status",
             running: true,
             endpoint_file,
             base_url: Some(base_url),
@@ -80,6 +88,8 @@ where
         },
         Err(err) => BridgeStatusReport {
             schema_version: 1,
+            ok: false,
+            action: "status",
             running: false,
             endpoint_file,
             base_url: Some(base_url),
@@ -131,6 +141,9 @@ mod tests {
 
         assert!(report.running);
         let json = serde_json::to_string(&report).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["action"], "status");
         assert!(json.contains("http://127.0.0.1:4567"));
         assert!(!json.contains("secret-token"));
     }
@@ -151,6 +164,9 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("no running cognia detected"));
+        let parsed = serde_json::to_value(&report).unwrap();
+        assert_eq!(parsed["ok"], false);
+        assert_eq!(parsed["action"], "status");
     }
 
     #[test]

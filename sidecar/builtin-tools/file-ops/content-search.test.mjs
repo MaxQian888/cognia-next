@@ -148,6 +148,36 @@ test("content_search omits the truncation note when results fit", async () => {
   assert.equal(data.note, undefined)
 })
 
+test("content_search preserves deterministic file+line order under concurrent reads", async () => {
+  const dir = path.join(TMP, "cs-order")
+  fs.mkdirSync(dir, { recursive: true })
+  // More files than READ_CONCURRENCY (16) so batching is exercised; each file
+  // has the needle so every batch produces matches. Zero-padded names keep
+  // fast-glob's lexical order unambiguous.
+  const names = []
+  for (let i = 0; i < 40; i++) {
+    const name = `f${String(i).padStart(3, "0")}.txt`
+    names.push(name)
+    fs.writeFileSync(path.join(dir, name), "noise\nneedle\n")
+  }
+  const r = await execContentSearch({
+    directory: dir,
+    pattern: "needle",
+    regex: false,
+    caseSensitive: false,
+    recursive: true,
+    maxResults: 100,
+  })
+  const data = decode(r)
+  assert.equal(data.matches.length, 40)
+  // File order is fast-glob lexical; line is always 2 (1-based, after "noise").
+  assert.deepEqual(
+    data.matches.map((m) => m.file),
+    [...names].sort()
+  )
+  assert.ok(data.matches.every((m) => m.line === 2))
+})
+
 test("content_search rejects non-directory roots", async () => {
   const f = path.join(TMP, "cs.txt")
   fs.writeFileSync(f, "x")

@@ -133,7 +133,9 @@ describe("consolidate", () => {
     expect(res.applied[0].op).toBe("ADD")
   })
 
-  it("treats UPDATE/DELETE with an unknown targetId as NOOP", async () => {
+  it("keeps the new fact (ADD) when UPDATE/DELETE names an unknown targetId", async () => {
+    // Regression: a hallucinated id used to fall through to NOOP, silently
+    // discarding a genuinely new memory. The safe default is to ADD.
     const deps = makeDeps({
       findSimilar: async () => [existing("x", { id: "t1" })],
       client: {
@@ -141,7 +143,22 @@ describe("consolidate", () => {
       },
     })
     const res = await consolidate({ ...baseInput, candidates: [cand("y")] }, deps)
-    expect(res.applied).toEqual([{ op: "NOOP" }])
+    expect(res.applied[0].op).toBe("ADD")
+    expect(deps.persisted).toHaveLength(1)
+    expect(deps.updates).toHaveLength(0)
+  })
+
+  it("keeps the new fact (ADD) when DELETE names an unknown targetId", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("x", { id: "t1" })],
+      client: {
+        complete: jest.fn(async () => JSON.stringify({ op: "DELETE", targetId: "ghost" })),
+      },
+    })
+    const res = await consolidate({ ...baseInput, candidates: [cand("z")] }, deps)
+    expect(res.applied[0].op).toBe("ADD")
+    expect(deps.persisted).toHaveLength(1)
+    expect(deps.invalidations).toHaveLength(0)
   })
 
   it("passes character scope + characterId through to persist", async () => {

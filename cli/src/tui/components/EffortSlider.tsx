@@ -1,30 +1,44 @@
 /**
- * A horizontal reasoning-effort slider overlay (replaces the old vertical
- * thinking-level list). Renders a "Faster → Smarter" track over the non-off
- * effort tiers (`low … ultracode`), with a separate "use model default (off)"
- * checkbox above it and a one-line description of the focused tier below it.
+ * A responsive reasoning-effort slider overlay. Renders a proportional gauge
+ * ("Faster → Smarter") over the non-off effort tiers (`low … ultracode`), with a
+ * separate "use model default (off)" checkbox above it and a one-line
+ * description of the focused tier below it.
+ *
+ * Responsive: on a wide terminal the full inline tier scale (every level
+ * labelled) is shown under the gauge; on a narrow one it collapses to a compact
+ * "N/total · level" readout so the scale never wraps into noise. The gauge width
+ * itself scales with the overlay width. All of that math lives in the pure
+ * {@link ./effort-slider-view} helpers so it stays unit-testable.
  *
  * Controlled only for its SEED: the parent passes the initial `off` / `index`
  * derived from the persisted thinking level; live edits during the overlay live
- * in this component's own state and are reported back on confirm. This mirrors
- * the SelectList conventions (`useTheme`, `useInput`, `width`) but owns its
- * cursor because a slider is not a list (no reducer movement action).
+ * in this component's own state and are reported back on confirm.
  *
- * Keyboard: ←/→ move the slider (and auto-clear off, always — regardless of
- * which control has focus, since moving implies engaging the slider) · Tab
- * switches focus (off ↔ slider) · Space toggles off when focused · Enter
+ * Keyboard: ←/→ move the slider (auto-clears off) · 1-9 jump to a tier · 0
+ * selects off · Home/End jump to the fastest/smartest tier · Tab switches focus
+ * (off ↔ slider) · Space toggles off when the checkbox has focus · Enter
  * confirms · Esc cancels.
  *
  * When `supported === false` the slider still works (the choice persists and
  * re-applies on a reasoning-capable model) but shows an inline warning so the
- * user isn't surprised by a no-op — the same fact the post-confirm notice gave,
- * surfaced up-front.
+ * user isn't surprised by a no-op.
  */
-import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import React, { useRef, useState } from "react"
+import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
-import { EFFORT_SLIDER_LEVELS, type ThinkingLevel } from "../../config/schema"
+import { EFFORT_SLIDER_LEVELS } from "../../config/schema"
+import { parseMouseEvent } from "../input/mouse"
+import { absoluteTopLeft } from "../input/element-position"
+import {
+  EFFORT_LEVEL_DESCRIPTIONS,
+  effortGaugeCells,
+  effortGaugeWidth,
+  effortKeyToIndex,
+  effortLayout,
+  effortPositionLabel,
+  effortSliderClick,
+} from "./effort-slider-view"
 
 /** The result reported to the parent on confirm. */
 export interface EffortSliderResult {
@@ -37,16 +51,8 @@ type Focus = "off" | "slider"
 const LEVELS = EFFORT_SLIDER_LEVELS
 const LAST = LEVELS.length - 1
 
-/** One-line description of what each tier does — replaces the old sublabel that
- * always read "xhigh + workflows" regardless of the selected tier. */
-const LEVEL_DESCRIPTIONS: Record<Exclude<ThinkingLevel, "off">, string> = {
-  low: "minimal extra reasoning — fastest",
-  medium: "balanced reasoning depth",
-  high: "deeper reasoning — slower",
-  xhigh: "near-maximum reasoning depth",
-  max: "maximum reasoning budget",
-  ultracode: "xhigh effort + dynamic workflow tools",
-}
+/** Glyph for one gauge cell. */
+const GAUGE_GLYPH = { filled: "█", marker: "◉", empty: "░" } as const
 
 export function EffortSlider({
   off: seedOff,
@@ -73,17 +79,46 @@ export function EffortSlider({
   const [off, setOff] = useState(seedOff)
   const [index, setIndex] = useState(() => Math.min(Math.max(seedIndex, 0), LAST))
   const [focus, setFocus] = useState<Focus>(seedOff ? "off" : "slider")
+  const boxRef = useRef<DOMElement | null>(null)
 
-  /** Move the slider and engage it — moving always clears off and focuses the
-   * track, so an arrow press does the obvious thing from either control. */
-  const move = (delta: number) => {
+  /** Jump to a specific tier and engage the slider (clears off, focuses track). */
+  const jump = (to: number) => {
     setOff(false)
     setFocus("slider")
-    setIndex((i) => Math.min(LAST, Math.max(0, i + delta)))
+    setIndex(Math.min(LAST, Math.max(0, to)))
   }
+  const move = (delta: number) => jump(index + delta)
+
+  const gaugeWidth = effortGaugeWidth(typeof width === "number" ? width : undefined)
 
   useInput(
     (input, key) => {
+      // Mouse (fullscreen `scroll` only): wheel nudges the tier; a click on the
+      // off-checkbox row toggles it, a click on the gauge track jumps to a tier.
+      const mouse = parseMouseEvent(input)
+      if (mouse) {
+        if (mouse.kind === "wheel") move(mouse.dir === "up" ? -1 : 1)
+        else if (mouse.kind === "click") {
+          const pos = absoluteTopLeft(boxRef.current)
+          if (pos) {
+            const act = effortSliderClick({
+              clickRow: mouse.row - 1,
+              clickCol: mouse.col - 1,
+              boxTop: pos.top,
+              boxLeft: pos.left,
+              gaugeWidth,
+              last: LAST,
+            })
+            if (act?.kind === "off") {
+              setOff(true)
+              setFocus("off")
+            } else if (act?.kind === "tier") {
+              jump(act.index)
+            }
+          }
+        }
+        return
+      }
       if (key.tab) {
         setFocus((f) => (f === "off" ? "slider" : "off"))
         return
@@ -96,34 +131,37 @@ export function EffortSlider({
         onCancel()
         return
       }
-      if (key.leftArrow) {
-        move(-1)
+      if (key.leftArrow) return move(-1)
+      if (key.rightArrow) return move(1)
+      // "0" selects off; 1-9 jump to a tier (1-based).
+      if (input === "0") {
+        setOff(true)
+        setFocus("off")
         return
       }
-      if (key.rightArrow) {
-        move(1)
-        return
-      }
+      const tier = effortKeyToIndex(input)
+      if (tier !== null) return jump(tier)
       // Space toggles off only while the checkbox has focus (so an accidental
       // Space on the slider can't silently disable thinking).
-      if (focus === "off" && input === " ") {
-        setOff((v) => !v)
-      }
+      if (focus === "off" && input === " ") setOff((v) => !v)
     },
     { isActive }
   )
 
   const activeLevel = LEVELS[index]
+  const layout = effortLayout(typeof width === "number" ? width : undefined)
+  const cells = effortGaugeCells(index, LAST, gaugeWidth)
 
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}
       paddingX={1}
       width={width}
     >
-      <Text bold>Effort</Text>
+      <Text bold>Reasoning effort</Text>
 
       {/* off checkbox */}
       <Text color={focus === "off" ? theme.accent : undefined} bold={focus === "off"}>
@@ -131,32 +169,59 @@ export function EffortSlider({
         {off ? "[✓]" : "[ ]"} Use model default (off)
       </Text>
 
-      {/* Faster … Smarter caption */}
-      <Text color={theme.muted}>{"  "}Faster · Smarter</Text>
-
-      {/* Single inline track: each tier is its own label, the active one marked
-          with ● and accented. Self-aligning — no separate tick/label rows to
-          drift out of sync (the old layout's misalignment). */}
-      <Text>
-        {focus === "slider" ? "❯ " : "  "}
-        {LEVELS.map((lvl, i) => {
-          const isActiveTier = !off && i === index
-          return (
-            <Text key={lvl}>
-              <Text color={isActiveTier ? theme.accent : theme.muted} bold={isActiveTier}>
-                {isActiveTier ? "●" : "○"}
-                {lvl}
+      {/* Gauge: Faster ▕███◉░░░▏ Smarter. Dimmed entirely while off. */}
+      <Box>
+        <Text color={focus === "slider" && !off ? theme.accent : undefined}>
+          {focus === "slider" ? "❯ " : "  "}
+        </Text>
+        <Text color={theme.muted}>Faster </Text>
+        <Text>
+          {cells.map((cell, i) => {
+            const dim = off
+            const color = dim ? theme.muted : cell === "empty" ? theme.muted : theme.accent
+            return (
+              <Text key={i} color={color} bold={!dim && cell === "marker"} dimColor={dim}>
+                {GAUGE_GLYPH[cell]}
               </Text>
-              {i < LAST ? <Text color={theme.muted}> ─ </Text> : null}
-            </Text>
-          )
-        })}
-      </Text>
+            )
+          })}
+        </Text>
+        <Text color={theme.muted}> Smarter</Text>
+      </Box>
+
+      {layout === "wide" ? (
+        // Full inline tier scale — each tier labelled, the active one accented.
+        <Text>
+          {"  "}
+          {LEVELS.map((lvl, i) => {
+            const isActiveTier = !off && i === index
+            return (
+              <Text key={lvl}>
+                <Text color={isActiveTier ? theme.accent : theme.muted} bold={isActiveTier}>
+                  {isActiveTier ? "●" : "○"}
+                  {lvl}
+                </Text>
+                {i < LAST ? <Text color={theme.muted}> ─ </Text> : null}
+              </Text>
+            )
+          })}
+        </Text>
+      ) : (
+        // Compact: position readout instead of the (too-wide) inline scale.
+        <Text color={theme.muted}>
+          {"  "}Tier{" "}
+          <Text color={off ? theme.muted : theme.accent} bold={!off}>
+            {effortPositionLabel(index, off)}
+          </Text>
+        </Text>
+      )}
 
       {/* Description of the focused tier (or the off default). */}
       <Text color={theme.secondary}>
         {"  "}
-        {off ? "model default — no thinking level forwarded" : LEVEL_DESCRIPTIONS[activeLevel]}
+        {off
+          ? "model default — no thinking level forwarded"
+          : EFFORT_LEVEL_DESCRIPTIONS[activeLevel]}
       </Text>
 
       {/* Inline warning when the active model won't honour effort. */}
@@ -167,7 +232,7 @@ export function EffortSlider({
       ) : null}
 
       <Text color={theme.muted} dimColor>
-        ←/→ to adjust · Tab to switch · Space to toggle off · Enter to confirm · Esc to cancel
+        ←/→ or click · 1-{LEVELS.length} jump · 0 off · Tab focus · Enter confirm · Esc cancel
       </Text>
     </Box>
   )

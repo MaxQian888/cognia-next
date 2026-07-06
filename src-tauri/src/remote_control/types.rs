@@ -31,6 +31,19 @@ pub struct RemoteControlInboundConfig {
     /// this field existed deserialize as `Write`.
     #[serde(default)]
     pub capability: Capability,
+    /// When false, sensitive command targets (`SENSITIVE_TARGETS` — model-cost /
+    /// off-device side effects) are rejected with 403 even for a `write` token.
+    /// `#[serde(default)]` so older persisted configs deserialize as `false`
+    /// (the safe default).
+    #[serde(default)]
+    pub allow_sensitive_targets: bool,
+    /// Per-target permission denylist (least-privilege ACL). Any target here is
+    /// rejected with `403 target_disabled` even for a `write` token. Mirrors
+    /// `RemoteControlInboundConfig.disabledTargets` in
+    /// `types/remote-control/index.ts`. `#[serde(default)]` so older persisted
+    /// configs deserialize as an empty list (every target dispatchable).
+    #[serde(default)]
+    pub disabled_targets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +76,8 @@ impl Default for RemoteControlConfig {
                 allowlist: vec!["127.0.0.1/32".to_string()],
                 rate_limit_per_min: 60,
                 capability: Capability::Write,
+                allow_sensitive_targets: false,
+                disabled_targets: Vec::new(),
             },
             outbound: RemoteControlOutboundConfig {
                 has_signing_secret: false,

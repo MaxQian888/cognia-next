@@ -7,7 +7,7 @@
 
 use parking_lot::Mutex;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
@@ -34,20 +34,19 @@ pub struct IdempotencyCache {
 }
 
 struct CacheInner {
-    /// Ordered map (insertion order preserved by Vec for O(1) eviction).
     map: HashMap<(String, String), CachedResponse>,
     /// Insertion-order queue used to pick the oldest entry on eviction.
-    ///
-    /// We keep this in sync with `map` so eviction is O(1) scan of at most
-    /// 1 entry (we only need to remove the oldest when `map.len() > capacity`).
-    order: Vec<(String, String)>,
+    /// A `VecDeque` so popping the oldest entry is O(1) — a `Vec::remove(0)`
+    /// shifted every remaining element on each eviction once the cache was
+    /// full.
+    order: VecDeque<(String, String)>,
 }
 
 impl CacheInner {
     fn new() -> Self {
         Self {
             map: HashMap::new(),
-            order: Vec::new(),
+            order: VecDeque::new(),
         }
     }
 }
@@ -108,13 +107,12 @@ impl IdempotencyCache {
 
         // Evict oldest entry if at capacity.
         if inner.map.len() >= self.capacity {
-            if let Some(oldest) = inner.order.first().cloned() {
+            if let Some(oldest) = inner.order.pop_front() {
                 inner.map.remove(&oldest);
-                inner.order.remove(0);
             }
         }
 
-        inner.order.push(map_key.clone());
+        inner.order.push_back(map_key.clone());
         inner.map.insert(
             map_key,
             CachedResponse {

@@ -274,6 +274,57 @@ describe("subagent-runtime-store — runtime slice", () => {
       snapshot().applyRunEvent("missing", { progress: 10 })
       expect(snapshot().subAgents.missing).toBeUndefined()
     })
+
+    it("toolStart pushes a running tool call", () => {
+      snapshot().upsert(makeSubAgent({ toolCalls: [] }))
+      snapshot().applyRunEvent("sa-1", {
+        toolStart: { id: "t1", name: "read", input: { path: "a.ts" } },
+      })
+      const calls = snapshot().subAgents["sa-1"]!.toolCalls!
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({
+        id: "t1",
+        name: "read",
+        state: "running",
+        input: { path: "a.ts" },
+      })
+    })
+
+    it("toolEnd resolves the matching call by id", () => {
+      snapshot().upsert(makeSubAgent({ toolCalls: [] }))
+      snapshot().applyRunEvent("sa-1", { toolStart: { id: "t1", name: "grep" } })
+      snapshot().applyRunEvent("sa-1", { toolEnd: { id: "t1", output: "5 matches" } })
+      const call = snapshot().subAgents["sa-1"]!.toolCalls![0]
+      expect(call.state).toBe("done")
+      expect(call.output).toBe("5 matches")
+    })
+
+    it("toolEnd marks error state when isError", () => {
+      snapshot().upsert(makeSubAgent({ toolCalls: [] }))
+      snapshot().applyRunEvent("sa-1", { toolStart: { id: "t1", name: "bash" } })
+      snapshot().applyRunEvent("sa-1", { toolEnd: { id: "t1", output: "boom", isError: true } })
+      const call = snapshot().subAgents["sa-1"]!.toolCalls![0]
+      expect(call.state).toBe("error")
+      expect(call.isError).toBe(true)
+    })
+
+    it("toolEnd is a no-op (no change) when the id is unknown", () => {
+      snapshot().upsert(makeSubAgent({ toolCalls: [] }))
+      const before = snapshot().subAgents
+      snapshot().applyRunEvent("sa-1", { toolEnd: { id: "nope", output: "x" } })
+      expect(snapshot().subAgents).toBe(before)
+    })
+
+    it("caps the tool-call list at the last 100 entries", () => {
+      snapshot().upsert(makeSubAgent({ toolCalls: [] }))
+      for (let i = 0; i < 110; i++) {
+        snapshot().applyRunEvent("sa-1", { toolStart: { id: `t${i}`, name: "x" } })
+      }
+      const calls = snapshot().subAgents["sa-1"]!.toolCalls!
+      expect(calls).toHaveLength(100)
+      expect(calls[0].id).toBe("t10")
+      expect(calls[99].id).toBe("t109")
+    })
   })
 
   it("remove drops a single subagent", () => {

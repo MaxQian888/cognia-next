@@ -71,6 +71,31 @@ describe("useTranscriptCursor", () => {
     expect(result.current.targetRow).toBeNull()
   })
 
+  it("alwaysMeasure keeps measuring on even when idle (for click-to-expand)", () => {
+    const { result } = renderHook(() => useTranscriptCursor(cells, true))
+    expect(result.current.state.find).toBeNull()
+    expect(result.current.focused).toBeNull()
+    expect(result.current.measuring).toBe(true)
+  })
+
+  it("maps a content row to the cell under it once heights are reported", () => {
+    const { result } = renderHook(() => useTranscriptCursor(cells, true))
+    act(() => {
+      result.current.reportCellHeight("a", 2) // rows 0-1
+      result.current.reportCellHeight("b", 3) // rows 3-5 (after gap)
+      result.current.reportCellHeight("c", 1) // row 7
+    })
+    expect(result.current.cellIdAtContentRow(0)).toBe("a")
+    expect(result.current.cellIdAtContentRow(4)).toBe("b")
+    expect(result.current.cellIdAtContentRow(7)).toBe("c")
+    expect(result.current.cellIdAtContentRow(2)).toBeNull() // gap row
+  })
+
+  it("returns null from cellIdAtContentRow before any height is measured", () => {
+    const { result } = renderHook(() => useTranscriptCursor(cells, true))
+    expect(result.current.cellIdAtContentRow(0)).toBeNull()
+  })
+
   it("ignores a repeated height report (stable identity)", () => {
     const { result } = renderHook(() => useTranscriptCursor(cells))
     const report = result.current.reportCellHeight

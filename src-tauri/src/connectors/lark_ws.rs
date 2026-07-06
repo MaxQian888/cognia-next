@@ -326,6 +326,25 @@ pub async fn close(handle_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Cancel **every** live Lark long-connection and return how many were closed.
+///
+/// The bootstrap counterpart to [`ws_client::close_all`](super::ws_client::close_all):
+/// Feishu's reconnect loop self-heals forever until an explicit `close`, so a
+/// webview hard reload (whose JS cleanup never fires the per-handle close)
+/// otherwise leaks a self-reconnecting connection per reload. Mirrors
+/// [`close`]'s drain-then-`notify_waiters` semantics for the whole registry.
+pub fn close_all() -> usize {
+    let cancels: Vec<Arc<Notify>> = {
+        let mut map = handles().lock().unwrap();
+        map.drain().map(|(_, c)| c).collect()
+    };
+    let count = cancels.len();
+    for cancel in cancels {
+        cancel.notify_waiters();
+    }
+    count
+}
+
 /// One connect → read-until-close cycle. Returns `Ok(())` on a cancel-driven
 /// shutdown, `Err` on a transport failure (so the caller backs off + retries).
 async fn connect_and_run(
@@ -583,6 +602,23 @@ mod tests {
         let gz = enc.finish().unwrap();
         assert_eq!(maybe_inflate("gzip", gz), b"payload-body".to_vec());
         assert_eq!(maybe_inflate("", b"raw".to_vec()), b"raw".to_vec());
+    }
+
+    #[test]
+    fn close_all_cancels_every_connection() {
+        // Reap any residue so the count is deterministic under shared statics.
+        close_all();
+        {
+            let mut map = handles().lock().unwrap();
+            map.insert("h1".into(), Arc::new(Notify::new()));
+            map.insert("h2".into(), Arc::new(Notify::new()));
+        }
+        assert!(is_live("h1"));
+        let closed = close_all();
+        assert_eq!(closed, 2);
+        assert!(!is_live("h1"));
+        assert!(!is_live("h2"));
+        assert!(handles().lock().unwrap().is_empty());
     }
 
     #[test]

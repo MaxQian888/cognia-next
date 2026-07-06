@@ -1,0 +1,72 @@
+---
+title: "WeCom AI Bot Setup"
+description: "Connect a WeCom AI Bot with BotID and long-connection Secret, including streaming replies, welcome cards, and quick-command menu cards."
+---
+
+# WeCom AI Bot Setup Guide
+
+This guide walks through creating a **WeCom AI Bot**, collecting the long-connection credentials, and configuring cognia-next to connect through WeCom's long-lived WebSocket channel. The long connection is maintained by the desktop connector runtime, so it does not require a public URL, encrypted callback mode, or an IP allowlist.
+
+---
+
+## 1. Create a WeCom AI Bot
+
+1. Sign in to the [WeCom admin console](https://work.weixin.qq.com).
+2. Open **App Management** and create an **AI Bot**.
+3. Record these credentials from the bot detail page:
+   - **BotID** — the AI Bot identifier, usually shaped like `wb1234567890abcdef`.
+   - **Long-connection Secret** — the secret dedicated to the AI Bot long connection.
+
+> **Important:** the long-connection Secret is not the same as callback-mode `Token` / `EncodingAESKey`. The AI Bot long connection does not use callback mode, does not need a public URL, does not encrypt callback payloads, and does not require an IP allowlist.
+
+---
+
+## 2. Configure cognia-next
+
+1. Open cognia-next and navigate to **Settings → Platform Connections → Adapters**.
+2. Click **Add connector**, then choose **WeCom AI Bot**.
+3. In the **Identity** section, fill in:
+   - **Display name** — a recognizable name for this bot.
+   - **Bot ID** — the `wb...` BotID from the WeCom admin console.
+   - **Secret** — the long-connection Secret from the bot detail page.
+   - **Welcome message** (optional) — text to send when WeCom emits an `enter_chat` event. Leave it blank to skip welcome text.
+4. Click **Create**.
+
+The **Bot ID** and **Secret** are encrypted in the OS keyring. Non-secret settings such as the welcome message are stored in adapter settings. After the adapter is enabled, it performs the `aibot_subscribe` handshake, sends a `ping` every 30 seconds, and reconnects with exponential backoff after disconnects.
+
+---
+
+## 3. Configure Quick Commands (Optional)
+
+WeCom AI Bot does **not** have a persistent native menu. cognia-next approximates one by sending a `template_card` menu card on `enter_chat`:
+
+1. In the dialog, open the **Quick commands** section.
+2. Add command rows. Each row becomes a menu-card button bound to either a **prompt** or a **slash command**.
+3. When a user clicks a menu button, cognia-next routes the mapped prompt or slash command as a user message into the runtime.
+
+The menu card displays up to six buttons. When quick commands are configured, the menu card takes priority over the plain-text welcome message so users get a tappable entry point. Without quick commands, the adapter falls back to the plain-text welcome message.
+
+---
+
+## 4. Verify the Connection
+
+1. Open the bot conversation in WeCom and send it a message.
+2. The message should appear in cognia-next within a few seconds.
+3. Check **Platform Connections** — the adapter status should show **running**.
+
+If the adapter shows **stopped** or **degraded**:
+
+- Confirm the **Bot ID** is correct and starts with `wb`.
+- Confirm the **Secret** is the long-connection Secret, not callback-mode `Token` / `EncodingAESKey`.
+- Open **Settings → Platform Connections → Audit Log** and inspect the `aibot_subscribe` error code.
+
+---
+
+## Notes
+
+- **Proactive-send restriction**: WeCom only delivers proactive `aibot_send_msg` pushes to conversations where the user has already messaged the bot at least once. Scheduled tasks and workflows can send to previously active conversations, but a first-contact proactive push may be dropped by the platform.
+- **Streaming replies**: replies to a triggering message can stream by reusing the callback `req_id` and one stream id. The reply window is about 10 minutes. After it expires, cognia-next falls back to proactive `aibot_send_msg`.
+- **Runtime location**: the long-lived socket is owned by the desktop Tauri connector runtime through the generic Rust WebSocket bridge, so it can survive webview reloads.
+- **Unsupported capabilities**: the AI Bot long-connection protocol has no generic message edit, message delete, typing indicator, or history-fetch frame. `aibot_respond_update_msg` only updates an interactive `template_card`; it is not a generic edit API.
+- **A2UI and cards**: A2UI surfaces map to `template_card` buttons when possible. Other interactive components degrade to their plain-text mirror appended to the markdown body. WeCom markdown content is capped at 20,480 bytes.
+- **Media**: outbound images, voice, video, and files are uploaded through WeCom's three-step `aibot_upload_media_*` flow before the message references the returned `media_id`. Inbound image content is decrypted best-effort for vision / OCR paths when the platform provides the encrypted media URL and AES key.

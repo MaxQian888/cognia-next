@@ -1,11 +1,11 @@
-"""Tests for cognia_next.external_agent_presets."""
+"""Tests for cognia.external_agent (presets)."""
 
 from __future__ import annotations
 
 import pytest
 
 import cognia
-from cognia_next import (
+from cognia import (
     ExternalAgentPreset,
     define_external_agent_preset,
     register_external_agent_preset,

@@ -4,6 +4,11 @@
  * ConnectorBusProvider — Task 41 + im-refactored-crayon.
  *
  * Boots the ConnectorBus singleton on Tauri startup:
+ *   0. Registers the two connector scheduler-task executors
+ *      (`connection:outbound:send` / `connection:scheduled:digest`) so
+ *      `TaskSchedulerImpl` can find them when a due task fires — this must
+ *      happen synchronously, before step 1's async adapter boot, in case a
+ *      task is already due.
  *   1. Reads enabled adapter rows from Dexie.
  *   2. Calls buildAdapterFromRow for each row.
  *   3. Registers each adapter with the bus.
@@ -16,6 +21,8 @@
  * Cleanup on unmount: aborts the runner signal AND calls `adapter.stop()`
  * on every adapter the provider successfully started, in parallel, with
  * each failure swallowed so one stuck adapter does not block the others.
+ * Scheduler-task executor registration is process-lifetime (mirrors
+ * `registerBuiltInExecutors()`) and is not undone on unmount.
  *
  * No-op in web mode (isTauri() === false).
  */
@@ -27,11 +34,23 @@ import { isTauri } from "@/lib/tauri"
 import { getBus } from "@/lib/connectors/bus"
 import { installRuntime } from "@/lib/connectors/runtime"
 import { startOutboundRunner } from "@/lib/connectors/outbound-runner"
+import { installScheduledOutboundHandlers } from "@/lib/connectors/scheduled-outbound"
+import {
+  connectorsRegisterAdapter,
+  connectorsResetAllWs,
+  connectorsStartServer,
+  connectorsStopServer,
+  connectorsUnregisterAdapter,
+} from "@/lib/connectors/tauri/commands"
+import {
+  CONNECTORS_SERVER_PORT,
+  adapterNeedsInboundServer,
+} from "@/lib/connectors/server-transport"
 import { listEnabledAdapterInstances } from "@/lib/db/adapter-instances"
 import { buildAdapterFromRow } from "@/lib/connectors/adapter-registry"
 import { buildAdapterContext } from "@/lib/connectors/adapter-context"
 import { appendAudit } from "@/lib/connectors/audit"
-import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
+import { safeSendPrompt } from "@/lib/connectors/ai-loop/safe-send-prompt"
 import { defaultConnectorCallbackHandler } from "@/lib/a2ui/connector-callback-handler"
 import {
   startHeartbeatSweep,
@@ -55,9 +74,15 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!isTauri()) return
 
+    installScheduledOutboundHandlers()
+
     const ac = new AbortController()
     let cancelled = false
     const startedAdapters: PlatformAdapter[] = []
+    // Ids of adapters registered with the Rust axum server (webhook /
+    // reverse-WS). Single source of truth for both "does the inbound server
+    // need to start" and "which registrations to reap on teardown".
+    const serverAdapterIds = new Set<string>()
     let cleanupHandle: CallbackBindingCleanupHandle | null = null
     let heartbeatSweep: HeartbeatSweepHandle | null = null
     let stopWorkflowProgressRunner: (() => void) | null = null
@@ -86,6 +111,31 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
         bus,
         publicUrl: row.publicUrl,
       })
+      // Webhook / reverse-WS adapters receive inbound events over the Rust
+      // axum server. Register this adapter's type with that server BEFORE the
+      // transport starts — otherwise the webhook handler 404s every inbound
+      // POST because the id was never recorded (`verify_webhook` /
+      // `wechat_oa_handler` resolve the branch off the registered type). The
+      // Rust insert is idempotent, so a StrictMode double-mount or a
+      // credential-rotation restart (this closure runs on both) is safe.
+      if (adapterNeedsInboundServer(adapter, row)) {
+        serverAdapterIds.add(row.id)
+        try {
+          await connectorsRegisterAdapter({
+            adapterId: row.id,
+            adapterType: adapter.meta.type,
+          })
+        } catch (err) {
+          // Best-effort — a register failure must not block the boot. The
+          // provider early-returns in web mode, so this only throws on a
+          // genuine Tauri command error.
+          console.error(
+            `[connector-bus] adapter ${row.id} webhook registration failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          )
+        }
+      }
       try {
         await adapter.start(ctx)
       } catch (err) {
@@ -146,6 +196,28 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
     }
 
     void (async () => {
+      // Reap any connector WS / Lark long-connection sockets leaked by a
+      // PREVIOUS webview load (hard reload / Fast-Refresh full reload / crash)
+      // whose React cleanup never ran. The Rust core process survives a webview
+      // reload, so those sockets — and Lark's self-reconnect loop — would
+      // otherwise accumulate and deliver duplicate inbound events on every
+      // reload. This MUST run before any `adapter.start()` opens a fresh socket.
+      // Best-effort: a reset failure must not block the boot (first-ever load
+      // reaps nothing and returns 0).
+      try {
+        const reaped = await connectorsResetAllWs()
+        if (reaped > 0) {
+          console.info(
+            `[connector-bus] reaped ${reaped} leaked WS handle(s) from a prior webview load`
+          )
+        }
+      } catch (err) {
+        console.warn(
+          `[connector-bus] ws reset failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+      if (cancelled) return
+
       let enabled: Awaited<ReturnType<typeof listEnabledAdapterInstances>>
       try {
         enabled = await listEnabledAdapterInstances()
@@ -169,12 +241,22 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
 
       const bus = getBus()
 
-      // Wire the runtime to the real `runAndCaptureAssistantReply` so the
-      // ai-run branch drives a real Claude turn (subscribe → sendPrompt →
-      // accumulate assistant text → resolve) instead of enqueueing a
-      // placeholder. The wrapper handles its own subscription lifecycle and
-      // unlistens before resolving / rejecting.
-      installRuntime(bus, { runAndCapture: runAndCaptureAssistantReply })
+      // Wire the runtime through `safeSendPrompt` — the PII gate that walks
+      // the inbound prompt + injected system-prompt through `hasNoLeakingPii`
+      // (fail-closed) BEFORE the model call, then delegates to the real
+      // `runAndCaptureAssistantReply` (subscribe → sendPrompt → accumulate →
+      // resolve). This closes the asymmetry where the primary inbound auto-
+      // reply bypassed the pre-model PII gate that the digest/callback path
+      // already used. `adapterId`/`conversationKey` ride in on `cap` from the
+      // runtime call site so the gate attributes blocks + usage correctly.
+      installRuntime(bus, {
+        runAndCapture: (sessionId, prompt, options, cap) =>
+          safeSendPrompt(sessionId, prompt, options, {
+            ...cap,
+            adapterId: cap?.adapterId ?? "",
+            conversationKey: cap?.conversationKey ?? "",
+          }),
+      })
 
       // Wire the connector callback handler so inbound interactive events
       // (Slack block_actions / Lark interactive card / Telegram callback_query
@@ -184,6 +266,11 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
 
       // Instantiate and register each enabled adapter.
       const { getDb } = await import("@/lib/db/schema")
+      // Whether any enabled adapter receives inbound events over the Rust axum
+      // server (webhook / reverse-WS) is derived from `serverAdapterIds`, which
+      // `bootAdapter` populates as it registers each such adapter. The server
+      // is started once, after the boot loop, only when the set is non-empty —
+      // long-poll / gateway adapters dial out and need no local listener.
       for (const row of enabled) {
         const adapter = await buildAdapterFromRow(row)
         if (cancelled) return
@@ -212,6 +299,30 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
       }
 
       if (cancelled) return
+
+      // Start the Rust axum inbound server iff a webhook / reverse-WS adapter
+      // is enabled. Bind loopback-only — public reachability for webhook
+      // adapters comes from the cloudflared tunnel, never a bound public
+      // interface. The Rust command is idempotent (returns an "already
+      // running" Err if a handle exists), which we treat as success so a
+      // StrictMode double-mount can't spuriously audit a failure.
+      if (!cancelled && serverAdapterIds.size > 0) {
+        try {
+          await connectorsStartServer(CONNECTORS_SERVER_PORT, true)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          if (!/already running/i.test(message)) {
+            console.error(`[connector-bus] inbound server failed to start: ${message}`)
+            await appendAudit({
+              adapterId: "__connectors_server__",
+              kind: "adapter.error",
+              at: Date.now(),
+              reason: "server_start_failed",
+              message,
+            }).catch(() => undefined)
+          }
+        }
+      }
 
       // Build the adapter map for the outbound runner.
       const adapters = new Map(bus.listAdapters().map((a) => [a.id, a]))
@@ -293,6 +404,17 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
           )
         })
       }
+      // Reap this provider's webhook / reverse-WS registrations so the Rust
+      // registered-adapter map doesn't retain stale entries across a remount.
+      // Mirrors the per-adapter registration in `bootAdapter`.
+      for (const adapterId of serverAdapterIds) {
+        void connectorsUnregisterAdapter(adapterId).catch(() => undefined)
+      }
+      serverAdapterIds.clear()
+      // Stop the inbound axum server (provider-lifetime). Safe no-op in Rust
+      // when it was never started (no webhook / reverse-WS adapter), so we
+      // call it unconditionally and swallow any error.
+      void connectorsStopServer().catch(() => undefined)
     }
   }, [])
 

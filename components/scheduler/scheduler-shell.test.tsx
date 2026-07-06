@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 // jsdom does not implement `window.matchMedia`; motion hooks read it.
 beforeAll(() => {
@@ -56,11 +56,18 @@ jest.mock("@/components/ui/resizable", () => ({
   ResizablePanelGroup: ({
     children,
     defaultLayout,
+    onLayoutChanged,
   }: {
     children: React.ReactNode
     defaultLayout?: Record<string, number>
+    onLayoutChanged?: (next: Record<string, number>) => void
   }) => (
     <div data-testid="resizable-group" data-default-layout={JSON.stringify(defaultLayout ?? null)}>
+      <button
+        type="button"
+        data-testid="mock-layout-change"
+        onClick={() => onLayoutChanged?.({ "scheduler-list": 30, "scheduler-detail": 70 })}
+      />
       {children}
     </div>
   ),
@@ -82,6 +89,7 @@ jest.mock("@/components/ui/resizable", () => ({
     <div
       className={className}
       data-testid={rest["data-testid"] as string}
+      data-collapsed={rest["data-collapsed"] as string | undefined}
       data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
       data-min-size={minSize === undefined ? undefined : String(minSize)}
       data-max-size={maxSize === undefined ? undefined : String(maxSize)}
@@ -89,13 +97,32 @@ jest.mock("@/components/ui/resizable", () => ({
       {children}
     </div>
   ),
-  ResizableHandle: () => <div data-testid="resizable-handle" />,
+  ResizableHandle: ({ className }: { className?: string }) => (
+    <div data-testid="resizable-handle" className={className} />
+  ),
 }))
 
-// Sidebar primitives — stub to render children directly.
+// Sidebar primitives — stub to render children directly. The provider mock
+// exposes its controlled open/onOpenChange wiring so tests can drive the
+// collapse toggle exactly like the header's SidebarTrigger would.
 jest.mock("@/components/ui/sidebar", () => ({
-  SidebarProvider: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="sidebar-provider">{children}</div>
+  SidebarProvider: ({
+    children,
+    open,
+    onOpenChange,
+  }: {
+    children: React.ReactNode
+    open?: boolean
+    onOpenChange?: (open: boolean) => void
+  }) => (
+    <div data-testid="sidebar-provider" data-open={open === undefined ? undefined : String(open)}>
+      <button
+        type="button"
+        data-testid="mock-sidebar-toggle"
+        onClick={() => onOpenChange?.(!(open ?? true))}
+      />
+      {children}
+    </div>
   ),
   SidebarInset: ({ children, ...rest }: { children?: React.ReactNode; [k: string]: unknown }) => (
     <main data-testid="scheduler-inset" {...rest}>
@@ -108,7 +135,11 @@ jest.mock("@/components/ui/sidebar", () => ({
 // Subject
 // ---------------------------------------------------------------------------
 
-import { SchedulerShell, SCHEDULER_PANEL_STORAGE_KEY } from "./scheduler-shell"
+import {
+  SchedulerShell,
+  SCHEDULER_PANEL_STORAGE_KEY,
+  SCHEDULER_LIST_COLLAPSED_KEY,
+} from "./scheduler-shell"
 
 function renderShell(overrides: Partial<React.ComponentProps<typeof SchedulerShell>> = {}) {
   return render(
@@ -177,6 +208,75 @@ describe("SchedulerShell", () => {
       renderShell({ isMobileDetailOpen: true })
       expect(screen.getByTestId("shell-rail")).toBeInTheDocument()
       expect(screen.queryByTestId("scheduler-mobile-detail-shell")).not.toBeInTheDocument()
+    })
+
+    describe("list-panel collapse", () => {
+      beforeEach(() => window.localStorage.removeItem(SCHEDULER_LIST_COLLAPSED_KEY))
+
+      it("starts expanded and wires the provider as controlled-open", () => {
+        renderShell()
+        expect(screen.getByTestId("sidebar-provider").dataset.open).toBe("true")
+        expect(screen.getByTestId("scheduler-list-pane").dataset.collapsed).toBeUndefined()
+      })
+
+      it("collapses the list pane to 0% when the sidebar trigger toggles", () => {
+        renderShell()
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+
+        const list = screen.getByTestId("scheduler-list-pane")
+        expect(list.dataset.collapsed).toBe("true")
+        expect(list.dataset.defaultSize).toBe("0%")
+        expect(list.dataset.minSize).toBe("0%")
+        // Handle disappears so no phantom drag affordance remains.
+        expect(screen.getByTestId("resizable-handle").className).toContain("hidden")
+        // Collapsed flag persists for the next mount.
+        expect(window.localStorage.getItem(SCHEDULER_LIST_COLLAPSED_KEY)).toBe("1")
+      })
+
+      it("expands back to percent sizes on a second toggle", () => {
+        renderShell()
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+
+        const list = screen.getByTestId("scheduler-list-pane")
+        expect(list.dataset.collapsed).toBeUndefined()
+        expect(list.dataset.defaultSize).toMatch(/^\d+(\.\d+)?%$/)
+        expect(list.dataset.minSize).not.toBe("0%")
+        expect(window.localStorage.getItem(SCHEDULER_LIST_COLLAPSED_KEY)).toBe("0")
+      })
+
+      it("restores the collapsed state from localStorage on mount", () => {
+        window.localStorage.setItem(SCHEDULER_LIST_COLLAPSED_KEY, "1")
+        renderShell()
+        expect(screen.getByTestId("sidebar-provider").dataset.open).toBe("false")
+        expect(screen.getByTestId("scheduler-list-pane").dataset.collapsed).toBe("true")
+      })
+
+      it("does not persist the collapsed 0% split through useResizableLayout", () => {
+        renderShell()
+        // Expanded: layout changes flow through to the persistence hook.
+        fireEvent.click(screen.getByTestId("mock-layout-change"))
+        expect(mockOnLayoutChanged).toHaveBeenCalledTimes(1)
+
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+        // The group remounts collapsed with an all-or-nothing layout override…
+        expect(screen.getByTestId("resizable-group").dataset.defaultLayout).toBe(
+          JSON.stringify({ "scheduler-list": 0, "scheduler-detail": 100 })
+        )
+        // …and layout writes are swallowed while collapsed.
+        fireEvent.click(screen.getByTestId("mock-layout-change"))
+        expect(mockOnLayoutChanged).toHaveBeenCalledTimes(1)
+      })
+
+      it("re-seeds the expanded group with the last settled split, not the mount seed", () => {
+        renderShell()
+        fireEvent.click(screen.getByTestId("mock-layout-change"))
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+        expect(screen.getByTestId("resizable-group").dataset.defaultLayout).toBe(
+          JSON.stringify({ "scheduler-list": 30, "scheduler-detail": 70 })
+        )
+      })
     })
   })
 

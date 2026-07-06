@@ -16,6 +16,7 @@ import {
   Shield,
   Sparkles,
   Wand2,
+  Zap,
 } from "lucide-react"
 
 import {
@@ -31,6 +32,7 @@ import { RoutingTestPanel } from "./routing-test-panel"
 import { ReliabilitySection } from "./reliability-section"
 import { SemanticRoutingSection } from "./semantic-routing-section"
 import { DifficultyRoutingSection } from "./difficulty-routing-section"
+import { AutoRoutingSection } from "./auto-routing-section"
 
 export function RoutingConfigPanel() {
   const t = useTranslations("providers.routingView")
@@ -101,6 +103,18 @@ export function RoutingConfigPanel() {
         defaultOpen={false}
       >
         <SemanticRoutingSection />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<Zap className="h-4 w-4" />}
+        title={t("auto.title")}
+        description={t("auto.desc")}
+        collapsible
+        defaultOpen={false}
+      >
+        <AutoRoutingSection />
       </SettingsCard>
 
       <SettingsDivider />

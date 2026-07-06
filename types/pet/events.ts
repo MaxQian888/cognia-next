@@ -11,8 +11,12 @@ export type PetEventSource =
   | "connector"
   | "terminal"
   | "workflow"
+  | "twin"
   | "user"
   | "system"
+  // Plugin-originated interactions/rewards via ctx.pet (rate-limited +
+  // budget-clamped in lib/plugin/api/pet-api.ts; meta carries pluginId).
+  | "plugin"
 
 /** Neutral event vocabulary the reducer + XP table understand. */
 export type PetEventKind =
@@ -30,6 +34,9 @@ export type PetEventKind =
   | "inboundMessage"
   | "scheduledRun"
   | "workflowRun"
+  // ambient twin-awareness signals (opt-in; job metadata only, never content)
+  | "twinBusy"
+  | "twinMilestone"
   // direct user interactions
   | "fed"
   | "played"
@@ -44,6 +51,8 @@ export type PetEventKind =
   | "evolved"
   | "achievementUnlocked"
   | "greeting"
+  // care transition (controller-emitted on well → unwell; 0 XP)
+  | "unwell"
 
 export interface PetEvent {
   source: PetEventSource

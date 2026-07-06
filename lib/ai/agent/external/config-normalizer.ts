@@ -12,6 +12,7 @@ import type {
 } from "@/types/agent/external-agent"
 import { normalizeExternalAgentValiditySnapshot } from "./canonical-contract"
 import { resolveExternalAgentSurfaceFromMetadata } from "./ecosystem-adapters"
+import { adaptPermissionMode } from "./permission-modes"
 import { protocolAdapterRegistry } from "./protocol-adapter"
 
 // The four protocols with a built-in adapter registered by
@@ -459,8 +460,13 @@ export function normalizeExternalAgentConfigInput(
     enabled: options?.enabled ?? true,
     process: input.process,
     network: input.network,
-    defaultPermissionMode:
+    // Clamp the stored default to a mode this protocol can actually enforce so
+    // a persisted config never carries a backend-incompatible mode (e.g. Codex
+    // has no `dontAsk`). The runtime applies the same adaptation per session.
+    defaultPermissionMode: adaptPermissionMode(
       input.defaultPermissionMode ?? options?.defaultPermissionMode ?? "default",
+      protocol
+    ).mode,
     autoApprovePatterns: input.autoApprovePatterns,
     requireApprovalFor: input.requireApprovalFor,
     timeout: input.timeout ?? DEFAULT_TIMEOUT,

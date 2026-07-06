@@ -12,6 +12,12 @@ import {
   TeamTriggerConfig,
   TeamTaskDispatchConfig,
   DesktopEventTriggerConfig,
+  PetEventTriggerConfig,
+  PetInteractConfig,
+  AiPromptConfig,
+  AiClassifyConfig,
+  AiExtractConfig,
+  AiCouncilConfig,
   GoalCompletedTriggerConfig,
   GoalAnalyticsConfig,
   GoalCreateConfig,
@@ -74,7 +80,20 @@ const messages = {
         usePicker: "Pick from list",
         none: "None",
       },
-      teamTrigger: { intro: "Fired internally by the agent-team runtime." },
+      teamTrigger: {
+        intro: "Fires when an agent-team run finishes.",
+        teamId: { label: "Team", hint: "Leave empty to fire for every team." },
+        status: {
+          label: "Status",
+          hint: "Only fire on this terminal status.",
+          options: {
+            any: "Any terminal status",
+            completed: "Completed",
+            failed: "Failed",
+            cancelled: "Cancelled",
+          },
+        },
+      },
       teamTaskDispatch: {
         teamId: { label: "Team" },
         taskId: { label: "Task id", hint: "Stable id", placeholder: "task_" },
@@ -84,6 +103,7 @@ const messages = {
       },
       desktopEventTrigger: {
         desktopOnly: "Desktop only.",
+        cooldownMs: { label: "Cooldown (ms)", hint: "Minimum time between fires." },
         kinds: {
           label: "Event kinds",
           hint: "Fire on UIA events.",
@@ -93,6 +113,170 @@ const messages = {
             "property-changed": "Property changed",
           },
         },
+      },
+      petEventTrigger: {
+        intro: "Fires when the desktop pet lifecycle changes.",
+        cooldownMs: { label: "Cooldown (ms)", hint: "Minimum time between fires." },
+        kinds: {
+          label: "Pet events",
+          hint: "Leave all off to fire on every supported pet lifecycle event.",
+          options: {
+            levelUp: "Level up",
+            evolved: "Evolved",
+            achievementUnlocked: "Achievement unlocked",
+            unwell: "Unwell",
+          },
+        },
+      },
+      petInteract: {
+        kind: {
+          label: "Interaction",
+          options: {
+            fed: "Feed",
+            played: "Play",
+            petted: "Pet",
+            talked: "Talk",
+            slept: "Sleep",
+            cleaned: "Clean",
+            treated: "Treat",
+          },
+        },
+        itemId: {
+          label: "Item id",
+          hint: "Optional shop item consumed by the pet controller.",
+          placeholder: "pet_item_",
+        },
+      },
+      aiCouncil: {
+        prompt: { label: "Prompt" },
+        councillorsJson: {
+          label: "Councillors JSON",
+          hint: "Array of { name, modelAlias, systemPrompt? } objects.",
+          placeholder: '[{"name":"Reviewer","modelAlias":"smart"}]',
+        },
+        synthesizerAlias: {
+          label: "Synthesizer alias",
+          hint: "Routing alias for the final synthesizer model.",
+          placeholder: "quality",
+        },
+        synthesisInstructions: {
+          label: "Synthesis instructions",
+          hint: "Optional instructions for the final synthesis pass.",
+        },
+        executionMode: {
+          label: "Execution mode",
+          options: { parallel: "Parallel", serial: "Serial" },
+        },
+        timeoutMs: { label: "Timeout (ms)", hint: "Per councillor timeout." },
+        maxConcurrency: { label: "Max concurrency", hint: "Parallel councillor limit." },
+        piiGate: {
+          label: "PII gate",
+          hint: "Runs before prompt egresses to every councillor and synthesizer.",
+          off: "Off",
+          block: "Block",
+          redact: "Redact",
+        },
+      },
+      aiPrompt: {
+        apiFlavor: {
+          auto: "Auto",
+          chat: "Chat Completions",
+          hint: "Controls the OpenAI endpoint family.",
+          label: "OpenAI endpoint",
+          responses: "Responses API",
+        },
+        apiKey: { hint: "Inline key", label: "API key" },
+        baseURL: {
+          hint: "Override endpoint.",
+          label: "Base URL (optional)",
+          placeholder: "https://api.openai.com/v1",
+        },
+        headersJson: {
+          hint: "Static provider headers as JSON.",
+          label: "Headers JSON (optional)",
+          placeholder: '{ "HTTP-Referer": "https://app.example" }',
+        },
+        jsonSchema: {
+          hint: "JSON shape.",
+          label: "JSON shape (optional)",
+          placeholder: "{}",
+        },
+        mode: {
+          explicit: "Explicit provider",
+          hint: "Provider mode.",
+          label: "Provider mode",
+          routed: "Routed (auto)",
+        },
+        model: { hint: "Model id.", label: "Model", placeholder: "gpt-4.1" },
+        modelAlias: { hint: "Routing alias.", label: "Model alias", placeholder: "fast" },
+        piiGate: {
+          block: "Block",
+          hint: "PII gate.",
+          label: "PII gate",
+          off: "Off",
+          redact: "Redact",
+        },
+        provider: { hint: "Provider id.", label: "Provider", placeholder: "openrouter" },
+        responseFormat: {
+          hint: "Format.",
+          json: "JSON",
+          label: "Response format",
+          text: "Text",
+        },
+        systemPrompt: { label: "System prompt" },
+        temperature: { hint: "Temperature.", label: "Temperature" },
+        userPrompt: { label: "User prompt" },
+      },
+      aiClassify: {
+        apiFlavor: {
+          auto: "Auto",
+          chat: "Chat Completions",
+          hint: "Controls the OpenAI endpoint family.",
+          label: "OpenAI endpoint",
+          responses: "Responses API",
+        },
+        apiKey: { label: "API key" },
+        baseURL: { label: "Base URL (optional)" },
+        headersJson: {
+          hint: "Static provider headers as JSON.",
+          label: "Headers JSON (optional)",
+          placeholder: '{ "HTTP-Referer": "https://app.example" }',
+        },
+        hint: { label: "Guidance (optional)" },
+        input: { hint: "Supports expressions.", label: "Input" },
+        labelsRaw: {
+          hint: "Classifier labels.",
+          label: "Labels (comma-separated)",
+          placeholder: "urgent, normal",
+        },
+        model: { label: "Model", placeholder: "gpt-4.1" },
+        provider: { hint: "Provider id.", label: "Provider", placeholder: "openrouter" },
+      },
+      aiExtract: {
+        apiFlavor: {
+          auto: "Auto",
+          chat: "Chat Completions",
+          hint: "Controls the OpenAI endpoint family.",
+          label: "OpenAI endpoint",
+          responses: "Responses API",
+        },
+        apiKey: { label: "API key" },
+        baseURL: { label: "Base URL (optional)" },
+        headersJson: {
+          hint: "Static provider headers as JSON.",
+          label: "Headers JSON (optional)",
+          placeholder: '{ "HTTP-Referer": "https://app.example" }',
+        },
+        hint: { label: "Guidance (optional)" },
+        input: { label: "Input" },
+        model: { label: "Model" },
+        provider: { hint: "Provider id.", label: "Provider", placeholder: "openrouter" },
+        required: {
+          hint: "Required fields.",
+          label: "Required fields (optional)",
+          placeholder: "name, amount",
+        },
+        schemaJson: { hint: "Schema object.", label: "Schema (JSON)" },
       },
       goalCompletedTrigger: {
         goalId: { label: "Goal id (optional)", hint: "Limit to a specific goal." },
@@ -415,9 +599,19 @@ function wrap(ui: React.ReactNode) {
 }
 
 describe("TeamTriggerConfig", () => {
-  it("renders the informational intro", () => {
-    wrap(<TeamTriggerConfig />)
-    expect(screen.getByText(/agent-team runtime/i)).toBeInTheDocument()
+  it("renders the scoping fields (team picker + terminal-status select)", () => {
+    const onChange = jest.fn()
+    wrap(<TeamTriggerConfig params={{}} onChange={onChange} />)
+    expect(screen.getByText(/finishes/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Team/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Status/i)).toBeInTheDocument()
+    // Unscoped default shows the any-status option in the closed trigger.
+    expect(screen.getByText(/Any terminal status/i)).toBeInTheDocument()
+  })
+
+  it("shows the persisted status filter", () => {
+    wrap(<TeamTriggerConfig params={{ status: "failed" }} onChange={jest.fn()} />)
+    expect(screen.getByText("Failed")).toBeInTheDocument()
   })
 })
 
@@ -445,6 +639,168 @@ describe("DesktopEventTriggerConfig", () => {
     wrap(<DesktopEventTriggerConfig params={{ kinds: ["focus-changed"] }} onChange={onChange} />)
     fireEvent.click(screen.getByTestId("desktop-event-focus-changed"))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kinds: [] }))
+  })
+
+  it("edits the cooldown loop-guard (clamped to ≥0, default 2000)", () => {
+    const onChange = jest.fn()
+    wrap(<DesktopEventTriggerConfig params={{}} onChange={onChange} />)
+    const input = screen.getByTestId("desktop-event-cooldown") as HTMLInputElement
+    expect(input.value).toBe("2000")
+    fireEvent.change(input, { target: { value: "5000" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ cooldownMs: 5000 }))
+    fireEvent.change(input, { target: { value: "-3" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ cooldownMs: 0 }))
+  })
+})
+
+describe("PetEventTriggerConfig", () => {
+  it("toggles lifecycle kinds and edits the cooldown", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<PetEventTriggerConfig params={{}} onChange={onChange} />)
+    expect(container.querySelector('[data-field="kinds"]')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("pet-event-levelUp"))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kinds: ["levelUp"] }))
+    fireEvent.change(fieldInput(container, "cooldownMs"), { target: { value: "999999" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ cooldownMs: 300000 }))
+  })
+
+  it("removes a lifecycle kind when toggled off", () => {
+    const onChange = jest.fn()
+    wrap(<PetEventTriggerConfig params={{ kinds: ["levelUp"] }} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId("pet-event-levelUp"))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kinds: [] }))
+  })
+})
+
+describe("PetInteractConfig", () => {
+  it("renders interaction controls and propagates item id edits", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<PetInteractConfig params={{ kind: "fed" }} onChange={onChange} />)
+    expect(container.querySelector('[data-field="kind"]')).toBeInTheDocument()
+    fireEvent.change(fieldInput(container, "itemId"), { target: { value: "snack_1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ itemId: "snack_1" }))
+  })
+})
+
+describe("AiCouncilConfig", () => {
+  it("edits prompt, synthesizer alias, and parses councillor JSON into structured params", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<AiCouncilConfig params={{}} onChange={onChange} />)
+    expect(container.querySelector('[data-field="prompt"]')).toBeInTheDocument()
+    fireEvent.change(fieldInput(container, "synthesizerAlias"), {
+      target: { value: "quality" },
+    })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ synthesizerAlias: "quality" }))
+    fireEvent.change(fieldInput(container, "councillors"), {
+      target: {
+        value:
+          '[{"name":"Fast reviewer","modelAlias":"fast"},{"name":"Careful reviewer","modelAlias":"smart","systemPrompt":"Find risks."}]',
+      },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        councillors: [
+          { name: "Fast reviewer", modelAlias: "fast" },
+          { name: "Careful reviewer", modelAlias: "smart", systemPrompt: "Find risks." },
+        ],
+      })
+    )
+  })
+
+  it("clamps timeout and concurrency to schema bounds", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<AiCouncilConfig params={{}} onChange={onChange} />)
+    fireEvent.change(fieldInput(container, "timeoutMs"), { target: { value: "1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 1000 }))
+    fireEvent.change(fieldInput(container, "maxConcurrency"), { target: { value: "99" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ maxConcurrency: 16 }))
+  })
+
+  it("binds the councillors textarea to the raw councillorsJson so invalid intermediate text survives", () => {
+    // Regression: the value used to be re-stringified from the parsed array, so
+    // a partially-typed (invalid) JSON reverted every keystroke. Raw-first means
+    // the in-progress string is echoed verbatim even while it doesn't parse.
+    const onChange = jest.fn()
+    const { container } = wrap(
+      <AiCouncilConfig
+        params={{ councillorsJson: "[{ partial", councillors: [{ name: "Old", modelAlias: "x" }] }}
+        onChange={onChange}
+      />
+    )
+    expect(fieldInput(container, "councillors")).toHaveValue("[{ partial")
+  })
+})
+
+describe("AI provider protocol fields", () => {
+  it("AiPromptConfig authors OpenAI-compatible provider metadata", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(
+      <AiPromptConfig
+        typeVersion={2}
+        params={{ provider: "openrouter", apiFlavor: "chat", headersJson: "{}" }}
+        onChange={onChange}
+      />
+    )
+
+    expect(fieldInput(container, "provider")).toHaveValue("openrouter")
+    expect(container.querySelector('[data-field="apiFlavor"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-field="headersJson"]')).toBeInTheDocument()
+
+    fireEvent.change(fieldInput(container, "provider"), { target: { value: "deepseek" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ provider: "deepseek" }))
+
+    fireEvent.change(fieldInput(container, "headersJson"), {
+      target: { value: '{ "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" }' },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headersJson: '{ "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" }',
+        headers: { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" },
+      })
+    )
+  })
+
+  it("AiClassifyConfig authors protocol metadata for its delegated prompt", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(
+      <AiClassifyConfig
+        params={{ provider: "openrouter", apiFlavor: "chat", headersJson: "{}" }}
+        onChange={onChange}
+      />
+    )
+
+    expect(fieldInput(container, "provider")).toHaveValue("openrouter")
+    expect(container.querySelector('[data-field="apiFlavor"]')).toBeInTheDocument()
+    fireEvent.change(fieldInput(container, "headersJson"), {
+      target: { value: '{ "X-Title": "Cognia" }' },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headersJson: '{ "X-Title": "Cognia" }',
+        headers: { "X-Title": "Cognia" },
+      })
+    )
+  })
+
+  it("AiExtractConfig authors protocol metadata for its delegated prompt", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(
+      <AiExtractConfig
+        params={{ provider: "openrouter", apiFlavor: "chat", headersJson: "{}" }}
+        onChange={onChange}
+      />
+    )
+
+    expect(fieldInput(container, "provider")).toHaveValue("openrouter")
+    expect(container.querySelector('[data-field="apiFlavor"]')).toBeInTheDocument()
+    fireEvent.change(fieldInput(container, "headersJson"), {
+      target: { value: "{ not json" },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        headers: expect.anything(),
+      })
+    )
   })
 })
 

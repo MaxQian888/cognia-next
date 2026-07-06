@@ -4,6 +4,7 @@ import dynamic from "next/dynamic"
 import { useSyncExternalStore } from "react"
 
 import { isTauri } from "@/lib/native/utils"
+import { getPetWindowRole } from "@/lib/pet/window-role"
 
 /**
  * Client-mount probe via `useSyncExternalStore` (not `useState` + effect, which
@@ -49,6 +50,10 @@ function useIsClient(): boolean {
  */
 const WindowShowInitializer = dynamic(
   () => import("./window-show-initializer").then((m) => m.WindowShowInitializer),
+  { ssr: false }
+)
+const WebviewHeartbeatInitializer = dynamic(
+  () => import("./webview-heartbeat-initializer").then((m) => m.WebviewHeartbeatInitializer),
   { ssr: false }
 )
 const CodexUsageSchedulerInitializer = dynamic(
@@ -108,9 +113,21 @@ export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
   if (!isClient || !isTauri()) return null
 
+  // The transparent desktop-pet windows (sprite overlay + click popup) load this
+  // same root layout, but every initializer bundled here is a MAIN-window boot
+  // concern (window show/heartbeat, terminal + CLI bridges, local character-pack
+  // disk scan, updater, deep-link routers, exit/crash dialogs). Running them in a
+  // pet window is wasted work and actively wrong — e.g. the character-pack scan
+  // calls `fs.read_dir`, which the least-privilege pet capabilities deny, logging
+  // a spurious warning. Skip the whole bundle there; the pet windows start their
+  // own cross-window bridge from the pet view, and need nothing here.
+  const role = getPetWindowRole()
+  if (role === "overlay" || role === "popup") return null
+
   return (
     <>
       <WindowShowInitializer />
+      <WebviewHeartbeatInitializer />
       <CodexUsageSchedulerInitializer />
       <CliSyncInitializer />
       <ComputerUseKillSwitchInitializer />

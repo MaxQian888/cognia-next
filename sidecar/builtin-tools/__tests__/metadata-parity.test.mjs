@@ -13,6 +13,7 @@ import assert from "node:assert/strict"
 import data from "../../../lib/settings/builtin-tools-data.json" with { type: "json" }
 import { collectCogniaToolDefs, READ_ONLY_TOOL_NAMES, TOOL_NAMES_BY_CATEGORY } from "../index.mjs"
 import { CORE_TOOL_NAMES } from "../core/core-tools.mjs"
+import { CODE_GRAPH_TOOL_NAMES } from "../code/names.mjs"
 
 /** Every category enabled, so collectCogniaToolDefs emits the full set. */
 const ALL_ENABLED = Object.fromEntries(data.categories.map((c) => [c.id, true]))
@@ -27,12 +28,16 @@ const fakeReadTracker = {
   clear() {},
 }
 const fakeLspResolver = { getDiagnostics: async () => [] }
+// The code-graph tools are only built (not invoked) at collection time, so any
+// object satisfies the resolver-bound branch.
+const fakeCodeGraphResolver = { syncStale: async () => {}, status: () => ({}) }
 
 function collectAll() {
   return collectCogniaToolDefs({
     enabled: ALL_ENABLED,
     readTracker: fakeReadTracker,
     lspResolver: fakeLspResolver,
+    codeGraphResolver: fakeCodeGraphResolver,
     dispatchPath: "ai-sdk",
   })
 }
@@ -103,6 +108,20 @@ test("host-routed tools are NOT declared as sidecar-resident built-ins", () => {
       !metadataNames.has(name),
       `"${name}" is host-routed and must not appear in builtin-tools-data.json`
     )
+  }
+})
+
+test("codeGraph category matches CODE_GRAPH_TOOL_NAMES and is fully read-only", () => {
+  const cat = data.categories.find((c) => c.id === "codeGraph")
+  assert.ok(cat, "codeGraph category missing from metadata")
+  assert.deepEqual(
+    cat.tools.map((t) => t.name),
+    CODE_GRAPH_TOOL_NAMES
+  )
+  // All read-only → auto-allowed in plan mode (no per-call approval).
+  for (const t of cat.tools) {
+    assert.equal(t.requiresApproval, false, `${t.name} must be read-only`)
+    assert.ok(READ_ONLY_TOOL_NAMES.has(t.name), `${t.name} missing from READ_ONLY_TOOL_NAMES`)
   }
 })
 

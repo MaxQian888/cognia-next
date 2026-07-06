@@ -47,6 +47,7 @@ import { ExternalPresetSection } from "@/components/settings/presets/editor-sect
 import { TeamCapabilityOverlaySection } from "@/components/settings/presets/editor-sections/team-capability-overlay-section"
 import { listSkills } from "@/lib/db/skills"
 import { listMcpServers } from "@/lib/db/mcp-servers"
+import { listTwins } from "@/lib/db/twins"
 import {
   presetStateToTeammateConfig,
   teammateToPresetState,
@@ -69,6 +70,9 @@ const RUNTIME_OPTIONS: ReadonlyArray<TeammateRuntime> = [
   "cursor-cli",
 ]
 
+/** Sentinel for the "no twin" Select option (Radix reserves the empty string). */
+const TWIN_NONE_VALUE = "__none__"
+
 export function TeammateConfigDialog({
   open,
   onOpenChange,
@@ -79,8 +83,10 @@ export function TeammateConfigDialog({
 
   const skillsRaw = useLiveQuery(() => listSkills(), [])
   const mcpRaw = useLiveQuery(() => listMcpServers(), [])
+  const twinsRaw = useLiveQuery(() => listTwins({ includeArchived: false }), [])
   const skills = useMemo(() => skillsRaw ?? [], [skillsRaw])
   const mcpServers = useMemo(() => mcpRaw ?? [], [mcpRaw])
+  const twins = useMemo(() => twinsRaw ?? [], [twinsRaw])
 
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
 
@@ -175,6 +181,37 @@ export function TeammateConfigDialog({
                         }}
                       />
                     </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t("rosterSection.twin")}</Label>
+                    <Select
+                      value={teammate.config.twinId ?? TWIN_NONE_VALUE}
+                      onValueChange={(v) => {
+                        updateTeammate(teammate.id, {
+                          config: {
+                            ...teammate.config,
+                            twinId: v === TWIN_NONE_VALUE ? undefined : v,
+                          },
+                        })
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={TWIN_NONE_VALUE}>
+                          {t("rosterSection.twinNone")}
+                        </SelectItem>
+                        {twins.map((tw) => (
+                          <SelectItem key={tw.id} value={tw.id}>
+                            {tw.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted-foreground">
+                      {t("rosterSection.twinHint")}
+                    </p>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">

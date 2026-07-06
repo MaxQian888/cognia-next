@@ -35,6 +35,7 @@ import { PluginsSection } from "./settings/section-plugins"
 import { GovernanceSection } from "./settings/section-governance"
 import { UltracodeSection } from "./settings/section-ultracode"
 import { MemorySection } from "./settings/section-memory"
+import { TeamKnowledgeTwinsCard } from "./settings/team-knowledge-twins-card"
 import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
 import { ConfirmActionDialog } from "./settings/confirm-action-dialog"
 
@@ -103,7 +104,8 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
             {t("accordion.memory")}
           </AccordionTrigger>
-          <AccordionContent className="pt-3">
+          <AccordionContent className="space-y-3 pt-3">
+            <TeamKnowledgeTwinsCard team={team} />
             <MemorySection team={team} />
           </AccordionContent>
         </AccordionItem>

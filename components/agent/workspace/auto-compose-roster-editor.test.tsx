@@ -5,7 +5,11 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 import { AutoComposeRosterEditor } from "./auto-compose-roster-editor"
-import type { CapabilityCatalog, ProposedTeammate } from "@/lib/ai/agent/team/auto/types"
+import type {
+  CapabilityCatalog,
+  ProposedTeammate,
+  TwinRosterEntry,
+} from "@/lib/ai/agent/team/auto/types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -26,7 +30,11 @@ const roster = (): ProposedTeammate[] => [
   { name: "Worker", role: "teammate", description: "does work", specialization: "bugs" },
 ]
 
-function setup(catalog: CapabilityCatalog = EMPTY_CATALOG, members = roster()) {
+function setup(
+  catalog: CapabilityCatalog = EMPTY_CATALOG,
+  members = roster(),
+  twinRoster?: TwinRosterEntry[]
+) {
   const onChange = jest.fn()
   const onAdd = jest.fn()
   const onRemove = jest.fn()
@@ -35,6 +43,7 @@ function setup(catalog: CapabilityCatalog = EMPTY_CATALOG, members = roster()) {
     <AutoComposeRosterEditor
       roster={members}
       catalog={catalog}
+      twinRoster={twinRoster}
       onChange={onChange}
       onAdd={onAdd}
       onRemove={onRemove}
@@ -125,5 +134,54 @@ describe("AutoComposeRosterEditor", () => {
   it("renders no capability section when the catalog is empty", () => {
     setup()
     expect(screen.queryByText("capabilitiesLabel")).not.toBeInTheDocument()
+  })
+})
+
+describe("AutoComposeRosterEditor — twin roster", () => {
+  const TWIN_ROSTER: TwinRosterEntry[] = [
+    { twinId: "tw1", name: "Alice", expertise: "billing" },
+    { twinId: "tw2", name: "Bob", expertise: "" },
+  ]
+
+  it("renders no twin chips when twinRoster is empty or omitted", () => {
+    setup()
+    expect(screen.queryByText("twinLabel")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("auto-compose-twin-0-tw1")).not.toBeInTheDocument()
+  })
+
+  it("renders a twin chip per roster entry per member under the digital-employee label", () => {
+    setup(EMPTY_CATALOG, roster(), TWIN_ROSTER)
+    // One "Digital employee" label per member row.
+    expect(screen.getAllByText("twinLabel")).toHaveLength(2)
+    expect(screen.getByTestId("auto-compose-twin-0-tw1")).toBeInTheDocument()
+    expect(screen.getByTestId("auto-compose-twin-0-tw2")).toBeInTheDocument()
+    expect(screen.getByTestId("auto-compose-twin-1-tw1")).toBeInTheDocument()
+    expect(screen.getByTestId("auto-compose-twin-1-tw2")).toBeInTheDocument()
+  })
+
+  it("clicking an unselected chip binds the member's twinId", () => {
+    const { onChange } = setup(EMPTY_CATALOG, roster(), TWIN_ROSTER)
+    const chip = screen.getByTestId("auto-compose-twin-1-tw2")
+    expect(chip).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(chip)
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ name: "Lead" }),
+      expect.objectContaining({ name: "Worker", twinId: "tw2" }),
+    ])
+  })
+
+  it("clicking the already-selected chip clears the member's twinId", () => {
+    const members: ProposedTeammate[] = [
+      { name: "Lead", role: "lead", description: "coordinates" },
+      { name: "Worker", role: "teammate", description: "does work", twinId: "tw1" },
+    ]
+    const { onChange } = setup(EMPTY_CATALOG, members, TWIN_ROSTER)
+    const chip = screen.getByTestId("auto-compose-twin-1-tw1")
+    expect(chip).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(chip)
+    expect(onChange).toHaveBeenCalledWith([
+      expect.anything(),
+      expect.objectContaining({ twinId: undefined }),
+    ])
   })
 })

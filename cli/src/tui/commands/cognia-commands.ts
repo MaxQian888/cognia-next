@@ -116,11 +116,21 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "agents",
-    description: "list and dispatch subagents",
+    description: "view running subagents, list, and dispatch",
     category: "cognia",
-    handler: rt("agents", "list"),
+    handler: rt("agents", "panel"),
     subcommands: [
-      { name: "list", description: "list subagents", handler: rt("agents", "list") },
+      {
+        name: "panel",
+        description: "open the interactive running-agents panel (Ctrl+B)",
+        handler: rt("agents", "panel"),
+      },
+      { name: "list", description: "list subagents (text list)", handler: rt("agents", "list") },
+      {
+        name: "models",
+        description: "assign a provider/model to each subagent",
+        handler: rt("agents", "models"),
+      },
       {
         name: "run",
         description: "dispatch a subagent: run <id> <prompt>",
@@ -142,7 +152,11 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
         description: "auto-compose a team from an objective",
         handler: rt("team", "auto"),
       },
-      { name: "run", description: "(desktop-only) run a team", handler: rt("team", "run") },
+      {
+        name: "run",
+        description: "run a desktop agent team and watch its progress",
+        handler: rt("team", "run"),
+      },
     ],
   },
   {
@@ -175,9 +189,16 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     name: "plan",
     description: "review the last plan, or browse saved plans",
     category: "cognia",
-    argumentHint: "<(empty: show last) | list | show <id> | diff | delete <id> | refine>",
+    argumentHint:
+      "<(empty: show last) | explore <task> | list | show <id> | diff | delete <id> | refine>",
     handler: planRootHandler,
     subcommands: [
+      {
+        name: "explore",
+        description: "research with Explore/Plan subagents, then propose a plan",
+        argumentHint: "<task to plan>",
+        handler: rt("plan", "explore"),
+      },
       { name: "list", description: "browse saved plans", handler: rt("plan", "list") },
       { name: "show", description: "open a saved plan by id", handler: rt("plan", "show") },
       {
@@ -206,6 +227,20 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
       { name: "pause", description: "pause a task by id", handler: rt("tasks", "pause") },
       { name: "resume", description: "resume a task by id", handler: rt("tasks", "resume") },
     ],
+  },
+  {
+    name: "council",
+    description: "ask several models the same question and synthesize a consensus",
+    category: "cognia",
+    argumentHint: "<question> [--models a,b,c] [--synth alias]",
+    handler: rt("council", "run"),
+  },
+  {
+    name: "orchestrate",
+    description: "analyze a task and run the best multi-model shape (council / ensemble / team)",
+    category: "cognia",
+    argumentHint: "<objective> [--consensus] [--verify]",
+    handler: rt("orchestrate", "run"),
   },
   {
     name: "status",

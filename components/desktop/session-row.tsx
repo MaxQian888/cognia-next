@@ -23,6 +23,7 @@ import {
   FolderIcon,
   FolderInputIcon,
   GitBranchIcon,
+  GripVerticalIcon,
   HashIcon,
   MessageSquareIcon,
   MoreHorizontalIcon,
@@ -40,6 +41,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react"
@@ -84,6 +86,22 @@ export interface SessionRowProps {
    * this to jump back to the parent conversation. Omitted → no indicator.
    */
   onJumpToParent?: (parentSessionId: string) => void
+  /** Keyboard-navigation focus ring — scrolls the row into view when set. */
+  focused?: boolean
+  /** Row density (Settings → Conversation). Defaults to `"comfortable"`. */
+  density?: "comfortable" | "compact"
+  /** Render a second line with the denormalized last-message preview. */
+  showPreview?: boolean
+  /** @dnd-kit node ref from the Sortable wrapper (applied to the `<li>`). */
+  dragRef?: (el: HTMLElement | null) => void
+  /** @dnd-kit drag listeners — applied to the hover grip handle. */
+  dragListeners?: Record<string, unknown>
+  /** @dnd-kit a11y attributes for the grip handle. */
+  dragAttributes?: Record<string, unknown>
+  /** Transform/transition style from the Sortable wrapper. */
+  dragStyle?: CSSProperties
+  /** True while this row is being dragged. */
+  dragging?: boolean
 }
 
 /**
@@ -112,11 +130,20 @@ function SessionRowImpl({
   folders,
   onAssignToFolder,
   onJumpToParent,
+  focused = false,
+  density = "comfortable",
+  showPreview = false,
+  dragRef,
+  dragListeners,
+  dragAttributes,
+  dragStyle,
+  dragging = false,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(session.title)
   const inputRef = useRef<HTMLInputElement>(null)
+  const liRef = useRef<HTMLLIElement>(null)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -129,6 +156,17 @@ function SessionRowImpl({
       inputRef.current?.select()
     }
   }, [editing])
+
+  // Keep the keyboard-focused row visible as the user arrows through the list.
+  useEffect(() => {
+    if (focused) liRef.current?.scrollIntoView({ block: "nearest" })
+  }, [focused])
+
+  // Merge the @dnd-kit sortable ref with our local ref for scroll-into-view.
+  const setLiRef = (el: HTMLLIElement | null) => {
+    liRef.current = el
+    dragRef?.(el)
+  }
 
   const commit = () => {
     const next = draft.trim()
@@ -216,13 +254,29 @@ function SessionRowImpl({
 
   return (
     <li
+      ref={setLiRef}
+      style={dragStyle}
       className={cn(
-        "group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent",
+        "group flex items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-accent",
+        density === "compact" ? "py-1" : "py-1.5",
         active && "bg-accent",
-        selected && "bg-accent/60 ring-1 ring-primary/50"
+        selected && "bg-accent/60 ring-1 ring-primary/50",
+        focused && "ring-2 ring-ring",
+        dragging && "opacity-50"
       )}
       data-selected={selected || undefined}
+      data-focused={focused || undefined}
     >
+      {dragListeners && !editing ? (
+        <span
+          {...dragAttributes}
+          {...dragListeners}
+          className="flex size-4 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100"
+          aria-label={t("dragHandle")}
+        >
+          <GripVerticalIcon className="size-3.5" />
+        </span>
+      ) : null}
       {editing ? (
         <div className="flex flex-1 items-center gap-2">
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -240,7 +294,7 @@ function SessionRowImpl({
           type="button"
           onClick={handleSelect}
           onDoubleClick={() => setEditing(true)}
-          className="flex flex-1 items-center gap-2 truncate text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title={session.title}
         >
           {accentColor ? (
@@ -255,9 +309,16 @@ function SessionRowImpl({
           {session.pinned ? (
             <PinIcon className="size-3 shrink-0 text-muted-foreground" aria-label={t("pinned")} />
           ) : null}
-          <span className="truncate">{session.title || t("untitled")}</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate">{session.title || t("untitled")}</span>
+            {showPreview && session.lastMessagePreview ? (
+              <span className="truncate text-xs text-muted-foreground">
+                {session.lastMessagePreview}
+              </span>
+            ) : null}
+          </span>
           {unread && unread > 0 ? (
-            <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
+            <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
               {unread > 99 ? "99+" : unread}
             </span>
           ) : null}

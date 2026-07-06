@@ -10,6 +10,7 @@ import { authCommand as defaultAuth } from "./auth-command"
 import { configCommand as defaultConfig } from "./config-command"
 import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from "./handoff-cmd"
 import { chatCommand as defaultChat } from "./chat"
+import { serveCommand as defaultServe } from "../serve/serve-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
 
@@ -29,6 +30,10 @@ Usage:
   cognia-agent resume <id> "<prompt>"       continue a desktop hand-back
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
   cognia-agent config <get|set|path>
+  cognia-agent serve [--server-url u] [--account id] [--home dir]
+                     [--flush-debounce ms]           headless brain for cognia-server
+                     (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
+                      COGNIA_LOCAL_ACCOUNT_ID / COGNIA_DATA_DIR via env)
 
 Headless prompt is read from the argument AND piped stdin
   (echo "context" | cognia-agent -p "summarize this").
@@ -46,7 +51,7 @@ Flags:
 `
 
 /** Real subcommands — anything else under `--print` is treated as a prompt. */
-const KNOWN_COMMANDS = new Set(["run", "auth", "config", "handoff", "resume", "chat"])
+const KNOWN_COMMANDS = new Set(["run", "auth", "config", "handoff", "resume", "chat", "serve"])
 
 export interface MainDeps {
   run?: typeof defaultRun
@@ -55,6 +60,7 @@ export interface MainDeps {
   handoff?: typeof defaultHandoff
   resume?: typeof defaultResume
   chat?: typeof defaultChat
+  serve?: typeof defaultServe
   out?: OutputSink
 }
 
@@ -100,6 +106,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.resume ?? defaultResume)(args, { out })
     case "chat":
       return (deps.chat ?? defaultChat)(args, { out })
+    case "serve":
+      return (deps.serve ?? defaultServe)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

@@ -41,7 +41,11 @@ interface Props {
 export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }: Props) {
   const t = useTranslations("plugins.panel")
   const tSort = useTranslations("plugins.filterSheet")
-  const filters = usePluginsStore((s) => s.filters)
+  // Narrow selectors — subscribing to the whole `filters` object would
+  // re-render the header (and its toolbar subtree) on every filter change,
+  // including ones this component doesn't display.
+  const query = usePluginsStore((s) => s.filters.query)
+  const sort = usePluginsStore((s) => s.filters.sort)
   const setQuery = usePluginsStore((s) => s.setQuery)
   const setFilters = usePluginsStore((s) => s.setFilters)
   const setFilterSheetOpen = usePluginsStore((s) => s.setFilterSheetOpen)
@@ -57,7 +61,7 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
         <div className="relative flex-1 min-w-0">
           <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
-            value={filters.query}
+            value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("searchPlaceholder")}
             className="pl-7 h-8 text-sm"
@@ -78,10 +82,7 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
             equivalent affordance as a Sheet trigger so the capability
             filter axis stays reachable. */}
         <PluginCategorySheet className="lg:hidden" />
-        <Select
-          value={filters.sort}
-          onValueChange={(v) => setFilters({ sort: v as PluginSortMode })}
-        >
+        <Select value={sort} onValueChange={(v) => setFilters({ sort: v as PluginSortMode })}>
           <SelectTrigger
             className="h-8 w-auto gap-1.5 text-xs"
             aria-label={t("sortBy")}

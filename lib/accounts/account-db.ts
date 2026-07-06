@@ -117,6 +117,28 @@ export class LocalAccountRegistry {
     return updated as LocalAccountRecord
   }
 
+  async updatePasswordVerifier(
+    accountId: string,
+    passwordVerifier: PasswordVerifierRecord,
+    now = Date.now()
+  ): Promise<LocalAccountRecord> {
+    assertAccountId(accountId)
+    let updated: LocalAccountRecord | undefined
+
+    await this.db.transaction("rw", this.db.accounts, async () => {
+      const account = await this.db.accounts.get(accountId)
+      if (!account) throw accountNotFound(accountId)
+      updated = {
+        ...account,
+        passwordVerifier: clonePasswordVerifier(passwordVerifier),
+        updatedAt: nextTimestamp(now, account.updatedAt),
+      }
+      await this.db.accounts.put(updated)
+    })
+
+    return updated as LocalAccountRecord
+  }
+
   async setActiveAccountId(accountId: string, now = Date.now()): Promise<void> {
     assertAccountId(accountId)
     await this.db.transaction("rw", this.db.accounts, this.db.state, async () => {

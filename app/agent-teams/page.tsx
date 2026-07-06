@@ -70,6 +70,7 @@ import { toast } from "sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useUIStore } from "@/stores/ui/ui-store"
+import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import { type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
@@ -565,6 +566,9 @@ function TeamCard({
 }: TeamCardProps) {
   const t = useTranslations("agentTeamsWorkspace")
   const locale = useLocale()
+  // Authoritative run status from the workflowRuns subscription — the store's
+  // team.status is only an optimistic in-flight bridge (see agent-team.ts).
+  const liveStatus = useTeamLiveStatus(team)
   const memberNames = team.teammateIds.map((id) => teammates[id]?.name ?? "?").slice(0, 3)
   const overflow = Math.max(0, team.teammateIds.length - 3)
 
@@ -618,7 +622,7 @@ function TeamCard({
               <p className="text-sm font-medium truncate">{team.name}</p>
             )}
             <StatusBadge
-              value={team.status}
+              value={liveStatus}
               labelNamespace="agentTeam.status"
               className="text-[10px] shrink-0"
             />
@@ -665,7 +669,7 @@ function TeamCard({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={onOpen}>
                 <PlayIcon className="mr-2 size-3.5" />
-                {team.status === "executing" || team.status === "planning"
+                {liveStatus === "executing" || liveStatus === "planning"
                   ? t("viewWorkspace")
                   : t("openWorkspace")}
               </DropdownMenuItem>

@@ -1,0 +1,8 @@
+{
+  "_comment": "Canonical share-service constants shared by the Rust axum server (core/codegen.rs + src/server.rs) and the TypeScript Cloudflare Worker (worker/src/index.ts). Both test suites assert against this file (core: tests/constants_parity.rs, worker: src/constants-parity.test.ts) so drift on either side fails that side's CI. kvMinTtlSeconds is a Cloudflare KV platform constraint and is asserted only by the Worker.",
+  "codeLength": 12,
+  "codeAlphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+  "defaultMaxBodyBytes": 10485760,
+  "defaultMaxTtlSeconds": 2592000,
+  "kvMinTtlSeconds": 60
+}

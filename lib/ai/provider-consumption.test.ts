@@ -1,3 +1,7 @@
+import { createAnthropic } from "@ai-sdk/anthropic"
+import { createAzure } from "@ai-sdk/azure"
+import { createOpenAI } from "@ai-sdk/openai"
+
 import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
@@ -6,6 +10,43 @@ import {
   type ProviderSettingsSnapshot,
   type ResolvedProvider,
 } from "./provider-consumption"
+
+// Mock only the Anthropic factory so we can assert what settings (fetch /
+// headers) reach the AI SDK client. The other create*() factories stay real,
+// so the "builds a client for each protocol family" suite is unaffected.
+jest.mock("@ai-sdk/anthropic", () => ({
+  createAnthropic: jest.fn((settings: unknown) => {
+    const make = (id: string) => ({ __provider: "anthropic", id, settings })
+    const fn = (id: string) => make(id)
+    ;(fn as { chat?: unknown }).chat = (id: string) => make(id)
+    return fn
+  }),
+}))
+
+function makeEndpointFamilyFactory(provider: string) {
+  return jest.fn((settings: unknown) => {
+    const fn = Object.assign(
+      jest.fn((id: string) => ({ __provider: provider, id, settings })),
+      {
+        chat: jest.fn((id: string) => ({ __provider: `${provider}.chat`, id, settings })),
+        responses: jest.fn((id: string) => ({
+          __provider: `${provider}.responses`,
+          id,
+          settings,
+        })),
+      }
+    )
+    return fn
+  })
+}
+
+jest.mock("@ai-sdk/openai", () => ({
+  createOpenAI: makeEndpointFamilyFactory("openai"),
+}))
+
+jest.mock("@ai-sdk/azure", () => ({
+  createAzure: makeEndpointFamilyFactory("azure"),
+}))
 
 describe("createProviderSettingsSnapshot", () => {
   it("defaults missing inputs to empty collections", () => {
@@ -83,6 +124,88 @@ describe("resolveFeatureProvider — explicit provider", () => {
     expect(resolved.apiKey).toBe("sk-openai")
     expect(resolved.model).toBe("gpt-4o-mini")
     expect(resolved.isCustomProvider).toBe(false)
+  })
+
+  it("forwards a built-in provider's apiFlavor onto the resolution", () => {
+    const flavored: ProviderSettingsSnapshot = {
+      defaultProvider: "openai",
+      providers: {
+        openai: { enabled: true, apiKey: "sk", defaultModel: "gpt-5", apiFlavor: "responses" },
+      },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "openai",
+        fallbackMode: "none",
+      },
+      flavored
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.apiFlavor).toBe("responses")
+  })
+
+  it("honors a built-in provider's apiProtocol override over the catalog-derived protocol", () => {
+    const overridden: ProviderSettingsSnapshot = {
+      defaultProvider: "deepseek",
+      providers: {
+        // deepseek's catalog protocol is "openai" — the user has pointed it
+        // at a relay that actually speaks the native Anthropic format.
+        deepseek: {
+          enabled: true,
+          apiKey: "sk-deepseek",
+          baseURL: "https://relay.test",
+          defaultModel: "deepseek-v4-flash",
+          apiProtocol: "anthropic",
+        },
+      },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "deepseek",
+        fallbackMode: "none",
+      },
+      overridden
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.protocol).toBe("anthropic")
+  })
+
+  it("forwards a custom provider's apiFlavor onto the resolution", () => {
+    const flavored: ProviderSettingsSnapshot = {
+      defaultProvider: "az",
+      providers: {},
+      customProviders: [
+        {
+          id: "az",
+          name: "Azure-ish",
+          protocol: "openai",
+          apiFlavor: "responses",
+          baseURL: "https://x.openai.azure.com",
+          apiKey: "k",
+          defaultModel: "gpt-5",
+        },
+      ],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "az",
+        fallbackMode: "none",
+      },
+      flavored
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.apiFlavor).toBe("responses")
   })
 
   it("resolves a custom provider and marks isCustomProvider", () => {
@@ -194,6 +317,125 @@ describe("resolveFeatureProvider — local provider base URL defaults", () => {
   })
 })
 
+describe("resolveFeatureProvider — built-in cloud aggregator base URL defaults", () => {
+  it("supplies the catalog default base URL for an OpenRouter key with no base URL", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: { openrouter: { enabled: true, apiKey: "sk-or-v1-xxx", defaultModel: "free" } },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "openrouter",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    const resolved = r as ResolvedProvider
+    expect(resolved.kind).toBe("resolved")
+    expect(resolved.protocol).toBe("openai")
+    // Without the fallback the openai client defaults to api.openai.com and the
+    // OpenRouter key is rejected by OpenAI — the bug this guards against.
+    expect(resolved.baseURL).toBe("https://openrouter.ai/api/v1")
+    expect(resolved.apiKey).toBe("sk-or-v1-xxx")
+  })
+
+  it("does not override an explicit user-set base URL for a built-in cloud provider", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: {
+        openrouter: { enabled: true, apiKey: "sk-or-v1-xxx", baseURL: "https://proxy.test/v1" },
+      },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "openrouter",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect((r as ResolvedProvider).baseURL).toBe("https://proxy.test/v1")
+  })
+})
+
+describe("resolveFeatureProvider — custom provider vs providerSettings shadow", () => {
+  const customRow = {
+    id: "gateway",
+    name: "Gateway",
+    protocol: "openai" as const,
+    baseURL: "https://gateway.test/v1",
+    apiKey: "gw-key",
+    defaultModel: "gw-model",
+  }
+  const explicitArgs = {
+    featureId: "f",
+    routeProfile: "general-text" as const,
+    selectionMode: "explicit-provider" as const,
+    providerId: "gateway",
+    fallbackMode: "none" as const,
+  }
+
+  it("custom row wins over a stale providerSettings shadow with blank fields", () => {
+    // A parameter edit / legacy write can mint providerSettings["gateway"]
+    // with empty strings — those must NOT blank out the real base URL, or an
+    // openai-protocol turn silently falls back to api.openai.com.
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "gateway",
+      providers: { gateway: { enabled: true, apiKey: "", baseURL: "", defaultModel: "" } },
+      customProviders: [customRow],
+    }
+    const r = resolveFeatureProvider(explicitArgs, snap) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.baseURL).toBe("https://gateway.test/v1")
+    expect(r.apiKey).toBe("gw-key")
+    expect(r.model).toBe("gw-model")
+    expect(r.isCustomProvider).toBe(true)
+  })
+
+  it("a disabled custom provider is skipped even when a shadow entry is enabled", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "gateway",
+      providers: { gateway: { enabled: true, apiKey: "shadow-key" } },
+      customProviders: [{ ...customRow, enabled: false }],
+    }
+    const r = resolveFeatureProvider(explicitArgs, snap)
+    expect(r.kind).toBe("unresolved")
+    if (r.kind !== "resolved") expect(r.nextAction).toBe("enable_provider")
+  })
+
+  it("a shadow entry's enabled:false does not disable the custom provider", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "gateway",
+      providers: { gateway: { enabled: false } },
+      customProviders: [customRow],
+    }
+    const r = resolveFeatureProvider(explicitArgs, snap) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.baseURL).toBe("https://gateway.test/v1")
+  })
+
+  it("treats a whitespace-only built-in base URL as unset and falls back to the catalog default", () => {
+    const snap: ProviderSettingsSnapshot = {
+      defaultProvider: "openrouter",
+      providers: { openrouter: { enabled: true, apiKey: "sk-or-1", baseURL: "  " } },
+      customProviders: [],
+    }
+    const r = resolveFeatureProvider(
+      { ...explicitArgs, providerId: "openrouter" },
+      snap
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.baseURL).toBe("https://openrouter.ai/api/v1")
+  })
+})
+
 describe("resolveFeatureProvider — selection + fallback modes", () => {
   const snap: ProviderSettingsSnapshot = {
     defaultProvider: "google",
@@ -256,6 +498,58 @@ describe("resolveFeatureProvider — selection + fallback modes", () => {
     expect((r as ResolvedProvider).kind).toBe("resolved")
   })
 
+  it("'any' mode can settle on a custom provider when nothing else is configured", () => {
+    const onlyCustom: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: {},
+      customProviders: [
+        {
+          id: "gw",
+          name: "GW",
+          protocol: "openai",
+          baseURL: "https://gw.test/v1",
+          apiKey: "k",
+          defaultModel: "m",
+        },
+      ],
+    }
+    const r = resolveFeatureProvider(
+      { featureId: "f", routeProfile: "general-text", selectionMode: "any", fallbackMode: "none" },
+      onlyCustom
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.providerId).toBe("gw")
+    expect(r.isCustomProvider).toBe(true)
+  })
+
+  it("first-eligible fallback also scans custom providers", () => {
+    const onlyCustom: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: { broken: { enabled: true } },
+      customProviders: [
+        {
+          id: "gw",
+          name: "GW",
+          protocol: "openai",
+          baseURL: "https://gw.test/v1",
+          apiKey: "k",
+        },
+      ],
+    }
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "broken",
+        fallbackMode: "first-eligible",
+      },
+      onlyCustom
+    ) as ResolvedProvider
+    expect(r.kind).toBe("resolved")
+    expect(r.providerId).toBe("gw")
+  })
+
   it("returns the last failure reason when no candidate resolves", () => {
     const empty: ProviderSettingsSnapshot = {
       defaultProvider: undefined,
@@ -271,6 +565,11 @@ describe("resolveFeatureProvider — selection + fallback modes", () => {
 })
 
 describe("createFeatureProviderClient / createFeatureProviderModel", () => {
+  beforeEach(() => {
+    ;(createOpenAI as jest.Mock).mockClear()
+    ;(createAzure as jest.Mock).mockClear()
+  })
+
   const base = {
     providerId: "p",
     apiKey: "k",
@@ -280,10 +579,21 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
   }
 
   it("builds a client for each protocol family", () => {
-    for (const protocol of ["openai", "anthropic", "google", "mistral", "cohere"] as const) {
+    for (const protocol of [
+      "openai",
+      "anthropic",
+      "google",
+      "mistral",
+      "cohere",
+      "azure",
+    ] as const) {
       const client = createFeatureProviderClient({ ...base, protocol })
       expect(client).toBeDefined()
     }
+  })
+
+  it("rejects bedrock in the in-renderer feature client (chat/sidecar path only)", () => {
+    expect(() => createFeatureProviderClient({ ...base, protocol: "bedrock" })).toThrow(/bedrock/i)
   })
 
   it("builds a model handle from a resolved provider, backfilling a default model", () => {
@@ -313,5 +623,130 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
       useProxy: false,
     }
     expect(createFeatureProviderModel(resolved)).toBeDefined()
+  })
+
+  it("routes OpenAI-compatible gateways to Chat Completions by default", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "openrouter",
+      protocol: "openai",
+      apiKey: "sk-or-v1",
+      baseURL: "https://openrouter.ai/api/v1",
+      model: "openrouter/auto",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string; id?: string }
+    expect(model.__provider).toBe("openai.chat")
+    expect(model.id).toBe("openrouter/auto")
+  })
+
+  it("honors apiFlavor when building an OpenAI-compatible feature model", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "openai",
+      protocol: "openai",
+      apiFlavor: "responses",
+      apiKey: "sk-test",
+      baseURL: "https://gateway.example/v1",
+      model: "gpt-4o",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    expect(model.__provider).toBe("openai.responses")
+  })
+
+  it("routes Codex feature models through Responses on the ChatGPT backend", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "codex",
+      protocol: "openai",
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      model: "gpt-5.2-codex",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    expect(model.__provider).toBe("openai.responses")
+  })
+
+  it("routes Azure feature models with the shared endpoint-family decision", () => {
+    const auto = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "azure",
+      protocol: "azure",
+      apiKey: "sk-azure",
+      baseURL: "https://x.openai.azure.com",
+      model: "gpt-5",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    const responses = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "azure",
+      protocol: "azure",
+      apiFlavor: "responses",
+      apiKey: "sk-azure",
+      baseURL: "https://x.openai.azure.com",
+      model: "gpt-5",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string }
+    expect(auto.__provider).toBe("azure.chat")
+    expect(responses.__provider).toBe("azure.responses")
+  })
+})
+
+describe("provider client fetch/headers seam (standalone BYOK)", () => {
+  beforeEach(() => (createAnthropic as jest.Mock).mockClear())
+
+  const anthropicBase = {
+    providerId: "anthropic",
+    apiKey: "k",
+    baseURL: undefined,
+    protocol: "anthropic" as const,
+    isCustomProvider: false,
+    useProxy: false,
+  }
+  const lastSettings = () =>
+    (createAnthropic as jest.Mock).mock.calls.at(-1)?.[0] as
+      | { fetch?: unknown; headers?: unknown }
+      | undefined
+
+  it("threads custom fetch + headers into the AI SDK provider settings", () => {
+    const customFetch = (() => undefined) as unknown as typeof globalThis.fetch
+    createFeatureProviderClient({
+      ...anthropicBase,
+      fetch: customFetch,
+      headers: { "anthropic-dangerous-direct-browser-access": "true" },
+    })
+    expect(lastSettings()?.fetch).toBe(customFetch)
+    expect(lastSettings()?.headers).toEqual({
+      "anthropic-dangerous-direct-browser-access": "true",
+    })
+  })
+
+  it("omits fetch/headers by default (back-compat — global fetch)", () => {
+    createFeatureProviderClient(anthropicBase)
+    expect(lastSettings()?.fetch).toBeUndefined()
+    expect(lastSettings()?.headers).toBeUndefined()
+  })
+
+  it("createFeatureProviderModel forwards transport fetch/headers", () => {
+    const customFetch = (() => undefined) as unknown as typeof globalThis.fetch
+    createFeatureProviderModel(
+      {
+        kind: "resolved",
+        providerId: "anthropic",
+        protocol: "anthropic",
+        apiKey: "k",
+        baseURL: undefined,
+        model: "claude-sonnet-4-6",
+        isCustomProvider: false,
+        useProxy: false,
+      },
+      { fetch: customFetch, headers: { "x-test": "1" } }
+    )
+    expect(lastSettings()?.fetch).toBe(customFetch)
+    expect(lastSettings()?.headers).toEqual({ "x-test": "1" })
   })
 })

@@ -104,6 +104,18 @@ pub struct TauriHttpResponse {
     pub body: String,
 }
 
+/// Generic binary media upload request used by adapters whose platform wants
+/// raw bytes at an upload URL before the message can reference the asset.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorMediaUploadRequest {
+    pub upload_url: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub source_url: Option<String>,
+    pub local_path: Option<String>,
+    pub content_type: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

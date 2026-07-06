@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -33,6 +34,7 @@ import {
   createMcpServer,
   deleteMcpServer,
   getMcpServer,
+  listMcpServers,
   updateMcpServer,
 } from "@/lib/db/mcp-servers"
 import { applyPresetFields, type McpPreset } from "@/lib/claude/mcp-presets"
@@ -78,6 +80,16 @@ export function McpPanel({ className }: { className?: string }) {
   const setSearch = useMcpPanelStore((s) => s.setSearch)
   const openCreate = useMcpPanelStore((s) => s.openCreate)
   const reduce = useReducedMotion()
+
+  // Lowercased names of the servers already configured, so the Preset Market can
+  // flag / disable presets that are already added and warn on duplicates. The
+  // preset id becomes the server name on add (see `onPresetSelected`), so a
+  // case-insensitive name match is the right membership test.
+  const liveServers = useLiveQuery(() => listMcpServers(), [])
+  const existingNames = useMemo(
+    () => (liveServers ?? []).map((s) => s.name.toLowerCase()),
+    [liveServers]
+  )
 
   const fade = reduce ? { duration: 0 } : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
 
@@ -170,7 +182,7 @@ export function McpPanel({ className }: { className?: string }) {
             >
               {activeTab === "my-servers" && <McpMyServersTab />}
               {activeTab === "presets" && (
-                <McpPresetGrid existingNames={[]} onPresetSelected={onPresetSelected} />
+                <McpPresetGrid existingNames={existingNames} onPresetSelected={onPresetSelected} />
               )}
               {activeTab === "agents" && (
                 <div className="space-y-4">

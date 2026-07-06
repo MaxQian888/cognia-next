@@ -6,6 +6,8 @@ import {
   resolveShellDescriptor,
   bashToolDescription,
   activeShellDescriptor,
+  applyNonInteractiveEnv,
+  NON_INTERACTIVE_ENV,
   __resetShellDetectCache,
 } from "./shell-detect.mjs"
 
@@ -173,4 +175,47 @@ test("activeShellDescriptor caches and __reset clears it", () => {
   __resetShellDetectCache()
   const c = activeShellDescriptor()
   assert.notEqual(a, c) // fresh object after reset
+})
+
+// --- non-interactive env hardening ---------------------------------------
+
+test("applyNonInteractiveEnv pins pager/editor/prompt vars over the inherited env", () => {
+  const out = applyNonInteractiveEnv({ PAGER: "less", FOO: "bar" }, { isWin: false })
+  // Ambient PAGER=less would re-hang `git log` — hardening must win.
+  assert.equal(out.PAGER, "cat")
+  assert.equal(out.GIT_PAGER, "cat")
+  assert.equal(out.GIT_TERMINAL_PROMPT, "0")
+  assert.equal(out.GIT_EDITOR, "true")
+  assert.equal(out.GCM_INTERACTIVE, "never")
+  assert.equal(out.FOO, "bar") // unrelated vars are preserved
+})
+
+test("applyNonInteractiveEnv forces TERM=dumb on POSIX only", () => {
+  const posix = applyNonInteractiveEnv({ TERM: "xterm-256color" }, { isWin: false })
+  assert.equal(posix.TERM, "dumb")
+  const win = applyNonInteractiveEnv({ TERM: "xterm-256color" }, { isWin: true })
+  assert.equal(win.TERM, "xterm-256color") // untouched on Windows
+})
+
+test("applyNonInteractiveEnv does not mutate its input", () => {
+  const input = { PAGER: "less" }
+  const out = applyNonInteractiveEnv(input, { isWin: false })
+  assert.equal(input.PAGER, "less") // original untouched
+  assert.notEqual(out, input)
+  assert.equal(out.PAGER, "cat")
+})
+
+test("NON_INTERACTIVE_ENV is frozen and covers the hang-causing vars", () => {
+  assert.throws(() => {
+    NON_INTERACTIVE_ENV.PAGER = "less"
+  })
+  for (const key of [
+    "GIT_PAGER",
+    "PAGER",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_EDITOR",
+    "GCM_INTERACTIVE",
+  ]) {
+    assert.ok(key in NON_INTERACTIVE_ENV)
+  }
 })

@@ -89,6 +89,35 @@ describe("materializeProposal", () => {
     expect(team.config.preferredExecutionPattern).toBe("parallel_specialists")
   })
 
+  it("stamps the proposal's executor decision onto the team and result", () => {
+    const withExecutor: AutoOrchestrationProposal = {
+      ...proposal,
+      executor: {
+        kind: "background-handoff",
+        fromPattern: "background_handoff",
+        confidence: 0.7,
+        reason: "long-running",
+      },
+    }
+    const result = materializeProposal(withExecutor)
+    const team = useAgentTeamStore.getState().teams[result.teamId]
+    expect(team.dispatchDecision).toEqual(withExecutor.executor)
+    expect(result.decision).toEqual(withExecutor.executor)
+  })
+
+  it("computes the decision via chooseExecutor when the proposal predates the field", () => {
+    const result = materializeProposal(proposal)
+    const team = useAgentTeamStore.getState().teams[result.teamId]
+    // parallel_specialists maps to team-flat; reason echoes the assessment.
+    expect(team.dispatchDecision).toEqual({
+      kind: "team-flat",
+      fromPattern: "parallel_specialists",
+      confidence: 0.8,
+      reason: assessment.reason,
+    })
+    expect(result.decision).toEqual(team.dispatchDecision)
+  })
+
   it("uses the provided name, falling back to the objective", () => {
     const named = materializeProposal(proposal, { name: "Billing Review" })
     expect(useAgentTeamStore.getState().teams[named.teamId].name).toBe("Billing Review")
@@ -168,6 +197,22 @@ describe("materializeProposal", () => {
     expect(result.teammateIds).toHaveLength(2)
     expect(state.tasks[result.taskIds[0]].assignedTo).toBe(result.teammateIds[1])
     expect(state.tasks[result.taskIds[1]].dependencies).toEqual([result.taskIds[0]])
+  })
+
+  it("carries a proposal's twinId through onto the materialized lead + worker config", () => {
+    const withTwins: AutoOrchestrationProposal = {
+      ...proposal,
+      roster: [
+        { ...proposal.roster[0], twinId: "tw-lead" },
+        { ...proposal.roster[1], twinId: "tw-worker" },
+        proposal.roster[2],
+      ],
+    }
+    const result = materializeProposal(withTwins)
+    const state = useAgentTeamStore.getState()
+    expect(state.teammates[result.teammateIds[0]].config.twinId).toBe("tw-lead")
+    expect(state.teammates[result.teammateIds[1]].config.twinId).toBe("tw-worker")
+    expect(state.teammates[result.teammateIds[2]].config.twinId).toBeUndefined()
   })
 
   it("handles a lead-only roster", () => {

@@ -46,7 +46,7 @@ export function assertPathInside(rootCwd, target) {
   return canonicalTarget
 }
 
-function safeRealpath(p) {
+export function safeRealpath(p) {
   try {
     return fs.realpathSync.native(p)
   } catch {
@@ -65,7 +65,7 @@ function safeRealpath(p) {
  * @param {string} absTarget  An absolute path.
  * @returns {string}
  */
-function canonicalisePartial(absTarget) {
+export function canonicalisePartial(absTarget) {
   let current = absTarget
   const missing = [] // segments collected deepest-first
   for (;;) {

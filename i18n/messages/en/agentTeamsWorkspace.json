@@ -70,13 +70,27 @@
   "allCategories": "All",
   "autoCompose": {
     "approve": "Create team",
+    "awaitingExternal": "Team created and marked for external pickup — an external agent can claim it via the Cognia bridge.",
     "cancel": "Cancel",
+    "clarifyContinue": "Continue",
+    "clarifySkip": "Skip",
     "compose": "Compose",
     "composing": "Composing…",
     "confidence": "{pct}% confidence",
+    "consensusOption": "Consensus (council of models)",
     "created": "Team composed.",
     "dependsOn": "after {deps}",
     "description": "Describe an objective and let the system propose a specialist roster and task plan for your review.",
+    "executorLabel": "Executor: {executor}",
+    "executors": {
+      "background-handoff": "Background handoff",
+      "council": "Council",
+      "ensemble": "Ensemble",
+      "external-handoff": "External handoff",
+      "single-send": "Single agent",
+      "team-flat": "Agent team",
+      "team-ultracode": "Ultracode team"
+    },
     "failed": "Auto-compose failed: {error}",
     "lead": "lead",
     "noClient": "Auto-compose needs a provider with a renderer-side API key — configure one in settings.",
@@ -85,12 +99,18 @@
     "objectiveRequired": "Enter an objective first.",
     "openButton": "Auto-compose",
     "piiRefused": "Refused: the objective still contains sensitive data after redaction.",
+    "queuedBackground": "Team created and queued to run in the background — you'll be notified when it finishes.",
+    "queuedBackgroundNoScheduler": "Team created. Background scheduling is unavailable here — start it from the team workspace.",
+    "quickCreate": "Quick create",
     "reject": "Back",
+    "resultDone": "Done",
     "rosterLabel": "Roster ({count})",
     "tasksLabel": "Tasks ({count})",
     "teamNameLabel": "Team name",
     "teamNamePlaceholder": "Name this team",
-    "title": "Auto-compose a team"
+    "title": "Auto-compose a team",
+    "verifyOption": "Verify (sampling ensemble)",
+    "twinLabel": "Digital employee"
   },
   "builtInBadge": "Built-in",
   "cancel": "Cancel",
@@ -314,6 +334,7 @@
       "ultracode": "Ultracode"
     },
     "autoShutdown": "Auto-shutdown on completion",
+    "awaitingExternalPickup": "Awaiting external pickup",
     "cancel": "Cancel",
     "confirm": {
       "cancelLabel": "Cancel",
@@ -340,6 +361,7 @@
     "deleteAction": "Delete permanently",
     "deleteWarning": "This permanently removes the team, all members, tasks, and messages.",
     "description": "Description",
+    "dispatchDecisionLabel": "Dispatch decision",
     "enableMessaging": "Inter-agent messaging",
     "executionMode": "Execution mode",
     "executionModeOption": {
@@ -355,19 +377,13 @@
       "parallelSpecialists": "Parallel specialists",
       "singleAgent": "Single agent (recommended)"
     },
+    "externalClaimedBy": "Claimed by {claimer}",
     "governance": {
       "adaptiveReplan": {
         "description": "Between waves of a run, the lead reviews results and can inject, cancel, reorder, or finish the remaining tasks.",
         "enabled": "Enable adaptive re-planning",
         "heading": "Adaptive re-planning",
         "requireApproval": "Require approval before applying a re-plan"
-      },
-      "progressLedger": {
-        "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
-        "allowAutonomousDelegation": "Allow autonomously delegating work on stall",
-        "description": "After a wave stalls (no new completed tasks or output), a judge diagnoses the run and can re-plan, open a consensus, or delegate to break the stall.",
-        "enabled": "Enable progress ledger",
-        "heading": "Autonomous progress ledger"
       },
       "approval": {
         "heading": "Approvals",
@@ -392,6 +408,13 @@
         "notify": "Notify only",
         "pause_for_review": "Pause for review",
         "reduce_concurrency": "Reduce concurrency to 1"
+      },
+      "progressLedger": {
+        "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
+        "allowAutonomousDelegation": "Allow autonomously delegating work on stall",
+        "description": "After a wave stalls (no new completed tasks or output), a judge diagnoses the run and can re-plan, open a consensus, or delegate to break the stall.",
+        "enabled": "Enable progress ledger",
+        "heading": "Autonomous progress ledger"
       },
       "refusal": {
         "detect": "Detect refusal patterns in teammate output",
@@ -505,6 +528,11 @@
         "label": "Working directory",
         "placeholder": "/absolute/path/to/repo"
       }
+    },
+    "knowledgeTwins": {
+      "title": "Digital employee knowledge",
+      "hint": "Twins selected here can be searched by any teammate via the knowledge tool during a run.",
+      "empty": "No digital employees yet. Create one in the Twin workbench."
     }
   },
   "stats": {
@@ -524,6 +552,14 @@
     "addTask": "Add task",
     "assignee": "Assignee",
     "cancel": "Cancel",
+    "comments": {
+      "add": "Add comment",
+      "added": "Comment added",
+      "count": "{count, plural, =0 {No comments} =1 {# comment} other {# comments}}",
+      "empty": "No comments yet. Findings, decisions, and results posted here are visible on the board.",
+      "placeholder": "Add a finding, decision, or result… (⌘/Ctrl+Enter to send)",
+      "refCopied": "Reference copied to clipboard"
+    },
     "createTask": "Create task",
     "delete": "Delete",
     "deleteBody": "This task will be permanently removed. This cannot be undone.",
@@ -557,7 +593,10 @@
       "runtime": "Runtime",
       "specialization": "Specialization",
       "temperature": "Temperature ({value})",
-      "title": "Roster fields"
+      "title": "Roster fields",
+      "twin": "Digital twin",
+      "twinNone": "None",
+      "twinHint": "This teammate acts with the selected digital employee's knowledge and style."
     },
     "save": "Save",
     "title": "Configure {name}"

@@ -1,6 +1,17 @@
 import "fake-indexeddb/auto"
+
+// The cascade dynamically imports the project-knowledge deps resolver for its
+// best-effort remote vector-collection drop. Mock it so tests control whether a
+// (fake) vector store is present.
+jest.mock("@/lib/project-knowledge/runtime/build-deps", () => ({
+  tryBuildProjectKnowledgeDeps: jest.fn(async () => undefined),
+}))
+
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import { getSettings, saveSettings } from "./settings"
+import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/build-deps"
+
+const projectDepsMock = tryBuildProjectKnowledgeDeps as jest.Mock
 import {
   deleteProjectCascade,
   ensureDefaultProject,
@@ -18,7 +29,7 @@ describe("project-scope helper", () => {
     // multi-table cascades, so seeding transactions don't race the test.
     getDb()
     await whenSeeded()
-  })
+  }, 30000)
 
   describe("resolveScopeProjectId", () => {
     it("returns an explicit id verbatim without touching settings", async () => {
@@ -144,9 +155,48 @@ describe("project-scope helper", () => {
         { messageId: "mA", sessionId: "sA", at: 1 },
         { messageId: "mB", sessionId: "sB", at: 1 },
       ] as never)
+      // Project-scoped RAG chunks (v100) — dropped by projectId.
+      await db.projectChunks.bulkPut([
+        {
+          id: "pcA",
+          projectId: "A",
+          fileId: "f",
+          vectorDocId: "A__f__0",
+          content: "",
+          contentRedacted: "",
+          charStart: 0,
+          charEnd: 0,
+          vectorBackend: "native",
+          vectorCollection: "cognia_project_A",
+          strategy: "paragraph",
+          tokenCount: 1,
+          metadata: {},
+          contentHash: "h",
+          createdAt: 1,
+        },
+        {
+          id: "pcB",
+          projectId: "B",
+          fileId: "f",
+          vectorDocId: "B__f__0",
+          content: "",
+          contentRedacted: "",
+          charStart: 0,
+          charEnd: 0,
+          vectorBackend: "native",
+          vectorCollection: "cognia_project_B",
+          strategy: "paragraph",
+          tokenCount: 1,
+          metadata: {},
+          contentHash: "h",
+          createdAt: 1,
+        },
+      ] as never)
 
       await deleteProjectCascade("A")
 
+      expect(await db.projectChunks.get("pcA")).toBeUndefined()
+      expect(await db.projectChunks.get("pcB")).toBeDefined()
       expect(await db.sessions.get("sA")).toBeUndefined()
       expect(await db.messages.get("mA")).toBeUndefined()
       expect(await db.chatGoals.get("gA")).toBeUndefined()
@@ -166,6 +216,41 @@ describe("project-scope helper", () => {
 
     it("is a no-op for a project with no data", async () => {
       await expect(deleteProjectCascade("empty")).resolves.toBeUndefined()
+    }, 30000)
+
+    it("drops the remote vector collection best-effort when a backend exists", async () => {
+      const deleteCollection = jest.fn(async () => undefined)
+      projectDepsMock.mockResolvedValueOnce({ store: { deleteCollection } })
+      await deleteProjectCascade("A")
+      expect(deleteCollection).toHaveBeenCalledWith("cognia_project_A")
+    }, 30000)
+
+    it("does not throw when the remote collection drop fails", async () => {
+      const deleteCollection = jest.fn(async () => {
+        throw new Error("remote down")
+      })
+      projectDepsMock.mockResolvedValueOnce({ store: { deleteCollection } })
+      const db = getDb()
+      await db.projectChunks.put({
+        id: "pc",
+        projectId: "A",
+        fileId: "f",
+        vectorDocId: "A__f__0",
+        content: "",
+        contentRedacted: "",
+        charStart: 0,
+        charEnd: 0,
+        vectorBackend: "native",
+        vectorCollection: "cognia_project_A",
+        strategy: "paragraph",
+        tokenCount: 1,
+        metadata: {},
+        contentHash: "h",
+        createdAt: 1,
+      } as never)
+      await expect(deleteProjectCascade("A")).resolves.toBeUndefined()
+      // Local rows are still dropped despite the remote failure.
+      expect(await db.projectChunks.get("pc")).toBeUndefined()
     }, 30000)
   })
 })

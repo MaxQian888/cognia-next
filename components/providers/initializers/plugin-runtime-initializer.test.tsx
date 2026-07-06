@@ -1,10 +1,13 @@
 import { render, waitFor } from "@testing-library/react"
 
 import { PluginRuntimeInitializer } from "./plugin-runtime-initializer"
-import { isTauri } from "@/lib/native/utils"
+import { detectPlatform } from "@/lib/platform/detect"
 
-jest.mock("@/lib/native/utils", () => ({
-  isTauri: jest.fn(() => false),
+// Preserve the real module's other exports (isTauri/isCapacitor/…) so any
+// transitive importer keeps working; only `detectPlatform` is driven per-test.
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: jest.fn(() => "web"),
 }))
 
 jest.mock("@/lib/logging", () => ({
@@ -42,7 +45,7 @@ jest.mock("@tauri-apps/api/path", () => ({
   join: (...parts: string[]) => mockJoin(...parts),
 }))
 
-const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
+const mockDetectPlatform = detectPlatform as jest.MockedFunction<typeof detectPlatform>
 
 describe("PluginRuntimeInitializer", () => {
   beforeEach(() => {
@@ -51,7 +54,7 @@ describe("PluginRuntimeInitializer", () => {
   })
 
   it("boots the manager with the browser profile when not in Tauri", async () => {
-    mockIsTauri.mockReturnValue(false)
+    mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({
       shouldInitialize: true,
       config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
@@ -62,6 +65,7 @@ describe("PluginRuntimeInitializer", () => {
     await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
     expect(mockResolveBootstrap).toHaveBeenCalledWith({
       isTauri: false,
+      isMobile: false,
       windowLabel: null,
       pluginDirectory: undefined,
     })
@@ -75,8 +79,34 @@ describe("PluginRuntimeInitializer", () => {
     expect(mockAppDataDir).not.toHaveBeenCalled()
   })
 
+  it("boots the manager with the mobile profile in the Capacitor shell", async () => {
+    mockDetectPlatform.mockReturnValue("mobile")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "mobile", pluginDirectory: "", enablePython: false },
+    })
+
+    render(<PluginRuntimeInitializer />)
+
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
+    expect(mockResolveBootstrap).toHaveBeenCalledWith({
+      isTauri: false,
+      isMobile: true,
+      windowLabel: null,
+      pluginDirectory: undefined,
+    })
+    expect(mockInitializeManager).toHaveBeenCalledWith({
+      runtimeProfile: "mobile",
+      pluginDirectory: "",
+      enablePython: false,
+    })
+    // Mobile has no Tauri bridge — the window/path APIs stay untouched.
+    expect(mockGetCurrentWindow).not.toHaveBeenCalled()
+    expect(mockAppDataDir).not.toHaveBeenCalled()
+  })
+
   it("resolves window label + plugin directory on Tauri before booting", async () => {
-    mockIsTauri.mockReturnValue(true)
+    mockDetectPlatform.mockReturnValue("tauri")
     mockGetCurrentWindow.mockReturnValue({ label: "main" })
     mockAppDataDir.mockResolvedValue("C:\\Users\\u\\AppData\\Roaming\\app")
     mockJoin.mockResolvedValue("C:\\Users\\u\\AppData\\Roaming\\app\\cognia\\plugins")
@@ -99,13 +129,14 @@ describe("PluginRuntimeInitializer", () => {
     )
     expect(mockResolveBootstrap).toHaveBeenCalledWith({
       isTauri: true,
+      isMobile: false,
       windowLabel: "main",
       pluginDirectory: "C:\\Users\\u\\AppData\\Roaming\\app\\cognia\\plugins",
     })
   })
 
   it("skips manager boot when the bootstrap resolution refuses", async () => {
-    mockIsTauri.mockReturnValue(true)
+    mockDetectPlatform.mockReturnValue("tauri")
     mockGetCurrentWindow.mockReturnValue({ label: "plugin-devtools" })
     mockAppDataDir.mockResolvedValue("/data")
     mockJoin.mockResolvedValue("/data/cognia/plugins")
@@ -121,7 +152,7 @@ describe("PluginRuntimeInitializer", () => {
   })
 
   it("swallows boot errors instead of crashing the layout", async () => {
-    mockIsTauri.mockReturnValue(false)
+    mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({
       shouldInitialize: true,
       config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
@@ -139,7 +170,7 @@ describe("PluginRuntimeInitializer", () => {
   })
 
   it("emits APP_READY on the plugin bus after the manager boots", async () => {
-    mockIsTauri.mockReturnValue(false)
+    mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({
       shouldInitialize: true,
       config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
@@ -152,7 +183,7 @@ describe("PluginRuntimeInitializer", () => {
   })
 
   it("emits APP_CLOSING on the plugin bus on beforeunload", async () => {
-    mockIsTauri.mockReturnValue(false)
+    mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({
       shouldInitialize: true,
       config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
@@ -166,7 +197,7 @@ describe("PluginRuntimeInitializer", () => {
   })
 
   it("does not re-initialize on re-render", async () => {
-    mockIsTauri.mockReturnValue(false)
+    mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({
       shouldInitialize: true,
       config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },

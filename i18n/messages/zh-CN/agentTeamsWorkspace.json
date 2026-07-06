@@ -70,13 +70,27 @@
   "allCategories": "全部",
   "autoCompose": {
     "approve": "创建团队",
+    "awaitingExternal": "团队已创建并标记为等待外部认领——外部代理可通过 Cognia 桥接认领。",
     "cancel": "取消",
+    "clarifyContinue": "继续",
+    "clarifySkip": "跳过",
     "compose": "组建",
     "composing": "组建中…",
     "confidence": "置信度 {pct}%",
+    "consensusOption": "共识（模型议会）",
     "created": "团队已组建。",
     "dependsOn": "依赖 {deps}",
     "description": "描述一个目标，系统将提出专家阵容和任务计划，供你审阅。",
+    "executorLabel": "执行器：{executor}",
+    "executors": {
+      "background-handoff": "后台移交",
+      "council": "议会",
+      "ensemble": "集成",
+      "external-handoff": "外部移交",
+      "single-send": "单一智能体",
+      "team-flat": "智能体团队",
+      "team-ultracode": "Ultracode 团队"
+    },
     "failed": "自动组建失败：{error}",
     "lead": "组长",
     "noClient": "自动组建需要一个在渲染端可用 API 密钥的提供方——请在设置中配置。",
@@ -85,12 +99,18 @@
     "objectiveRequired": "请先输入一个目标。",
     "openButton": "自动组建",
     "piiRefused": "已拒绝：脱敏后目标仍包含敏感数据。",
+    "queuedBackground": "团队已创建并加入后台队列——完成后将收到通知。",
+    "queuedBackgroundNoScheduler": "团队已创建。当前环境无法后台调度——请在团队工作区手动启动。",
+    "quickCreate": "快速创建",
     "reject": "返回",
+    "resultDone": "完成",
     "rosterLabel": "阵容（{count}）",
     "tasksLabel": "任务（{count}）",
     "teamNameLabel": "团队名称",
     "teamNamePlaceholder": "为团队命名",
-    "title": "自动组建团队"
+    "title": "自动组建团队",
+    "verifyOption": "验证（采样集成）",
+    "twinLabel": "数字员工"
   },
   "builtInBadge": "内置",
   "cancel": "取消",
@@ -314,6 +334,7 @@
       "ultracode": "Ultracode"
     },
     "autoShutdown": "完成后自动关闭",
+    "awaitingExternalPickup": "等待外部认领",
     "cancel": "取消",
     "confirm": {
       "cancelLabel": "取消",
@@ -340,6 +361,7 @@
     "deleteAction": "永久删除",
     "deleteWarning": "将永久删除该团队及其所有成员、任务和消息。",
     "description": "描述",
+    "dispatchDecisionLabel": "调度决策",
     "enableMessaging": "智能体间消息",
     "executionMode": "执行模式",
     "executionModeOption": {
@@ -355,19 +377,13 @@
       "parallelSpecialists": "并行专家",
       "singleAgent": "单一智能体（推荐）"
     },
+    "externalClaimedBy": "已由 {claimer} 认领",
     "governance": {
       "adaptiveReplan": {
         "description": "在每一波运行之间，组长会复盘结果，并可对剩余任务进行新增、取消、重排或提前结束。",
         "enabled": "启用自适应重规划",
         "heading": "自适应重规划",
         "requireApproval": "应用重规划前需要审批"
-      },
-      "progressLedger": {
-        "allowAutonomousConsensus": "停滞时允许自主发起共识",
-        "allowAutonomousDelegation": "停滞时允许自主委派任务",
-        "description": "当某一波停滞（无新完成任务或新产出）时，由判断器诊断运行状态，并可重新规划、发起共识或委派以打破停滞。",
-        "enabled": "启用进度账本",
-        "heading": "自主进度账本"
       },
       "approval": {
         "heading": "审批",
@@ -392,6 +408,13 @@
         "notify": "仅通知",
         "pause_for_review": "暂停以待审核",
         "reduce_concurrency": "并发降到 1"
+      },
+      "progressLedger": {
+        "allowAutonomousConsensus": "停滞时允许自主发起共识",
+        "allowAutonomousDelegation": "停滞时允许自主委派任务",
+        "description": "当某一波停滞（无新完成任务或新产出）时，由判断器诊断运行状态，并可重新规划、发起共识或委派以打破停滞。",
+        "enabled": "启用进度账本",
+        "heading": "自主进度账本"
       },
       "refusal": {
         "detect": "在队员输出中检测拒答模式",
@@ -505,6 +528,11 @@
         "label": "工作目录",
         "placeholder": "/仓库的绝对路径"
       }
+    },
+    "knowledgeTwins": {
+      "title": "数字员工知识",
+      "hint": "在此选中的孪生可被任意成员在运行中通过知识工具检索。",
+      "empty": "还没有数字员工，请在孪生工作台创建。"
     }
   },
   "stats": {
@@ -524,6 +552,14 @@
     "addTask": "新建任务",
     "assignee": "负责人",
     "cancel": "取消",
+    "comments": {
+      "add": "添加评论",
+      "added": "评论已添加",
+      "count": "{count, plural, =0 {暂无评论} other {# 条评论}}",
+      "empty": "暂无评论。在此记录的发现、决策与结果会显示在看板上。",
+      "placeholder": "记录一条发现、决策或结果……（⌘/Ctrl+Enter 发送）",
+      "refCopied": "引用已复制到剪贴板"
+    },
     "createTask": "创建任务",
     "delete": "删除",
     "deleteBody": "该任务将被永久删除，且无法撤销。",
@@ -557,7 +593,10 @@
       "runtime": "运行时",
       "specialization": "专长",
       "temperature": "温度（{value}）",
-      "title": "队员字段"
+      "title": "队员字段",
+      "twin": "数字孪生",
+      "twinNone": "无",
+      "twinHint": "该成员将带着所选数字员工的知识与风格工作。"
     },
     "save": "保存",
     "title": "配置 {name}"

@@ -1,6 +1,6 @@
 ---
 title: Rust Layer
-description: The native Tauri backend of the Platform Connectors subsystem — an axum webhook receiver with per-platform signature verification, OS-keyring credential custody, a OneBot reverse-WS bridge, a generic outbound WS client, the Feishu protobuf long-connection, a rate-limited HTTP client, and an AES-256-GCM attachment cache, exposed to the renderer through 18 Tauri commands and four event-channel families.
+description: The native Tauri backend of the Platform Connectors subsystem — an axum webhook receiver with per-platform signature verification, OS-keyring credential custody, a OneBot reverse-WS bridge, a generic outbound WS client, the Feishu protobuf long-connection, a rate-limited HTTP client, media upload, and an AES-256-GCM attachment cache, exposed to the renderer through 21 Tauri commands and four event-channel families.
 ---
 
 # Rust Layer
@@ -15,13 +15,13 @@ description: The native Tauri backend of the Platform Connectors subsystem — a
   and an AES-256-GCM on-disk attachment cache (`attachments.rs`). The axum router (`axum_app.rs`) dispatches each
   `POST /webhook/{type}/{id}` by the **registered** adapter type — never the URL segment — so a spoofed path cannot
   skip verification, then emits the parsed (and for Lark, decrypted) body on `connectors://webhook/<id>`. All of it
-  is reachable from the TS side through 18 `#[tauri::command]`s (`commands.rs`) registered in `lib.rs`, and surfaces
+  is reachable from the TS side through 21 `#[tauri::command]`s (`commands.rs`) registered in `lib.rs`, and surfaces
   inbound traffic on four Tauri event-channel families.
 </TLDR>
 
 <StatGrid>
   <Stat label="Rust source files" value="~14" hint="connectors/ + sigverify/" />
-  <Stat label="Tauri commands" value="18" hint="registered in lib.rs:579-596" />
+  <Stat label="Tauri commands" value="21" hint="registered in lib.rs" />
   <Stat label="Signature algorithms" value="5" hint="telegram / slack / discord / lark / wechat" />
   <Stat label="Event-channel families" value="4" hint="webhook / onebot / ws / lark-ws" />
 </StatGrid>
@@ -339,14 +339,22 @@ without touching the network:
         return Ok(AttachmentRef {
 ```
 
-On a miss it `reqwest::get`s the source, AES-256-GCM-encrypts with a 12-byte random nonce prepended to the
-ciphertext, and writes both the `.enc` blob and the decrypted copy. The master key is 32 bytes from `OsRng`,
+On a miss it fetches the source with optional adapter-supplied headers, AES-256-GCM-encrypts with a 12-byte
+random nonce prepended to the ciphertext, and writes both the `.enc` blob and the decrypted copy. The optional
+header path is required for authenticated Matrix `mxc://` downloads. The master key is 32 bytes from `OsRng`,
 auto-generated into the keyring on first use.
+
+## Media Upload
+
+`media_upload.rs` handles the inverse path for platforms such as Matrix: load bytes from either a remote
+`sourceUrl` or a local path, apply adapter-supplied upload headers, POST the raw body to the platform media
+repository, and return the response `content_uri`. Matrix uses this to upload images, files, voice, and video
+segments before sending native `m.room.message` media events.
 
 ## Tauri Command Surface
 
-`commands.rs` exposes exactly 18 `#[tauri::command]`s — the only entry points the renderer can reach. They are
-registered in `src-tauri/src/lib.rs:579-596` (alongside `.manage(ConnectorsState)`), and called through the typed
+`commands.rs` exposes exactly 21 `#[tauri::command]`s — the only entry points the renderer can reach. They are
+registered in `src-tauri/src/lib.rs` (alongside `.manage(ConnectorsState)`), and called through the typed
 wrappers in `lib/connectors/tauri/commands.ts`.
 
 | Line | Rust command | TS wrapper |
@@ -356,6 +364,7 @@ wrappers in `lib/connectors/tauri/commands.ts`.
 | `commands.rs:37` | `connectors_health` | `connectorsHealth` |
 | `commands.rs:57` | `connectors_start_server` | `connectorsStartServer` |
 | `commands.rs:88` | `connectors_stop_server` | `connectorsStopServer` |
+| `commands.rs:116` | `connectors_reset_all_ws` | `connectorsResetAllWs` |
 | `commands.rs:109` | `connectors_keyring_set` | `connectorsKeyringSet` |
 | `commands.rs:118` | `connectors_keyring_get` | `connectorsKeyringGet` |
 | `commands.rs:126` | `connectors_keyring_delete` | `connectorsKeyringDelete` |
@@ -366,13 +375,17 @@ wrappers in `lib/connectors/tauri/commands.ts`.
 | `commands.rs:170` | `connectors_ws_close` | `connectorsWsClose` |
 | `commands.rs:182` | `connectors_lark_ws_open` | `connectorsLarkWsOpen` |
 | `commands.rs:190` | `connectors_lark_ws_close` | `connectorsLarkWsClose` |
+| `commands.rs:222` | `connectors_onebot_probe` | `connectorsOnebotProbe` |
 | `commands.rs:199` | `connectors_attachment_fetch` | `connectorsAttachmentFetch` |
+| `commands.rs:241` | `connectors_media_upload` | `connectorsMediaUpload` |
 | `commands.rs:216` | `connectors_lark_upload_file` | `connectorsLarkUploadFile` |
 | `commands.rs:233` | `connectors_lark_upload_image` | `connectorsLarkUploadImage` |
 
 `connectors_start_server` takes a `bind_loopback_only` flag that selects `LOCALHOST` vs `UNSPECIFIED`
 (`commands.rs:68-72`), and the `connectors_ws_send` command is wrapped in a `perf::guard` so outbound throughput
-shows up in the performance dashboard.
+shows up in the performance dashboard. `connectors_reset_all_ws` is called from connector bootstrap to reap
+generic WS and Lark long-connection handles left behind by a webview hard reload, preventing duplicate inbound
+delivery from stale sockets.
 
 ## Event Channels
 

@@ -141,6 +141,31 @@ export async function agentDispatchCore(input: AgentDispatchInput): Promise<Agen
 export interface TeamRunInput {
   teamId: string
   ultracode?: boolean
+  /**
+   * Structured claimant identity (ADR 0061 P4). Optional — the MCP bridge
+   * defaults to `{ kind: "external-agent", id: "external-bridge" }`; future
+   * device-originated claims pass their paired-device identity.
+   */
+  claimant?: import("@/types/agent/agent-team").TeamPickupClaimant
+}
+
+/** How long a claim may sit undispatched before the pickup re-advertises. */
+const CLAIM_LEASE_MS = 10 * 60_000
+
+/**
+ * A pickup is free when never claimed, or when a prior claim's lease
+ * expired while the team never left `idle` — the claimant died between
+ * claim and dispatch (ADR 0061 P4 contention rule).
+ */
+export function isPickupFree(
+  pickup: import("@/types/agent/agent-team").TeamExternalPickup | undefined,
+  teamStatus: string,
+  nowMs: number = Date.now()
+): boolean {
+  if (!pickup) return false
+  if (!pickup.claimedAt) return true
+  if (!pickup.claimLeaseExpiresAt) return false
+  return new Date(pickup.claimLeaseExpiresAt).getTime() < nowMs && teamStatus === "idle"
 }
 
 export interface TeamRunOutput {
@@ -160,11 +185,109 @@ export async function teamRunCore(input: TeamRunInput): Promise<TeamRunOutput> {
   if (!input.teamId) return { ok: false, error: "team_run requires a teamId" }
 
   try {
+    // External-handoff pickup: stamp the claim idempotently BEFORE dispatch so
+    // `team_list` stops advertising the team. A second run never overwrites a
+    // LIVE claim; an expired claim lease on a still-idle team re-claims
+    // (ADR 0061 P4 contention rule). A pickup addressed to a specific
+    // executor (`targetId`) rejects other claimants.
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const store = useAgentTeamStore.getState()
+    const team = store.teams[input.teamId]
+    const claimant = input.claimant ?? { kind: "external-agent" as const, id: "external-bridge" }
+    if (team?.externalPickup) {
+      const pickup = team.externalPickup
+      if (pickup.targetId && pickup.targetId !== claimant.id) {
+        return {
+          ok: false,
+          error: `this pickup is addressed to '${pickup.targetId}'`,
+        }
+      }
+      if (isPickupFree(pickup, team.status)) {
+        store.updateTeam(input.teamId, {
+          externalPickup: {
+            ...pickup,
+            claimedBy: claimant.id,
+            claimant,
+            claimedAt: new Date(),
+            claimLeaseExpiresAt: new Date(Date.now() + CLAIM_LEASE_MS),
+          },
+        })
+      }
+    }
+
     const { runTeam } = await import("@/lib/plugin/agent-sdk/dispatch")
     const result = await runTeam(input.teamId, {
+      origin: "external",
       ...(input.ultracode !== undefined ? { ultracode: input.ultracode } : {}),
     })
     return { ok: true, teamId: result.teamId, status: result.status }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// team_list
+// ---------------------------------------------------------------------------
+
+export interface TeamListInput {
+  /** Only teams marked for external pickup that no agent has claimed yet. */
+  awaitingExternalOnly?: boolean
+}
+
+export interface TeamListOutput {
+  ok: boolean
+  teams?: Array<{
+    id: string
+    name: string
+    status: string
+    /** PII-redacted objective (the team's `task`). */
+    objective: string
+    awaitingExternalPickup: boolean
+    requestedAt?: string
+    claimedBy?: string
+  }>
+  error?: string
+}
+
+export async function teamList(input: TeamListInput = {}): Promise<TeamListOutput> {
+  if (isTauri()) return teamListCore(input)
+  return proxyToRenderer<TeamListOutput>("team_list", { ...input })
+}
+
+/**
+ * Renderer-side `team_list` execution. Reads the AGENT-TEAM store (the
+ * runnable entity `team_run` accepts) — NOT the Dexie `teams` table, which
+ * holds character chat-teams. Name + objective are PII-redacted before they
+ * cross the boundary, mirroring {@link agentDispatchCore}'s outward gate.
+ */
+export async function teamListCore(input: TeamListInput = {}): Promise<TeamListOutput> {
+  try {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const { redactText } = await import("@/lib/twin/ingest/redact")
+    const teams = Object.values(useAgentTeamStore.getState().teams)
+    const rows = teams
+      .filter(
+        (team) => !input.awaitingExternalOnly || isPickupFree(team.externalPickup, team.status)
+      )
+      .map((team) => {
+        // Persist layer round-trips Dates as ISO strings — tolerate both.
+        const requestedAt = team.externalPickup?.requestedAt
+        return {
+          id: team.id,
+          name: redactText(team.name ?? "").redacted,
+          status: team.status,
+          objective: redactText(team.task ?? "").redacted,
+          // ADR 0061 P4: an expired claim lease on a still-idle team
+          // re-advertises the pickup (the claimant died pre-dispatch).
+          awaitingExternalPickup: isPickupFree(team.externalPickup, team.status),
+          ...(requestedAt ? { requestedAt: new Date(requestedAt).toISOString() } : {}),
+          ...(team.externalPickup?.claimedBy ? { claimedBy: team.externalPickup.claimedBy } : {}),
+          ...(team.externalPickup?.claimant ? { claimant: team.externalPickup.claimant } : {}),
+          ...(team.externalPickup?.targetId ? { targetId: team.externalPickup.targetId } : {}),
+        }
+      })
+    return { ok: true, teams: rows }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
@@ -235,12 +358,14 @@ export async function pluginToolInvokeCore(
 export async function runOrchestrationExec(
   command: string,
   args: Record<string, unknown>
-): Promise<AgentDispatchOutput | TeamRunOutput | PluginToolInvokeOutput> {
+): Promise<AgentDispatchOutput | TeamRunOutput | TeamListOutput | PluginToolInvokeOutput> {
   switch (command) {
     case "agent_dispatch":
       return agentDispatchCore(args as unknown as AgentDispatchInput)
     case "team_run":
       return teamRunCore(args as unknown as TeamRunInput)
+    case "team_list":
+      return teamListCore(args as unknown as TeamListInput)
     case "plugin_tool_invoke":
       return pluginToolInvokeCore(args as unknown as PluginToolInvokeInput)
     default:

@@ -3,6 +3,7 @@ import type { SandboxResourcePolicy } from "@/lib/claude/types"
 import {
   __resetSandboxPolicyBridgeForTesting,
   clampPolicyRequest,
+  clampSandboxPolicy,
   getActiveSandboxPolicy,
   isPathUnderRoot,
   setActiveSandboxPolicy,
@@ -203,5 +204,54 @@ describe("clampPolicyRequest — writable-root ceiling", () => {
       { writableRoots: ["/home/me/proj"] }
     )
     expect((out as { readable: string[] }).readable).toEqual(["/usr"])
+  })
+})
+
+describe("clampSandboxPolicy — monotonic parent/child merge", () => {
+  it("returns undefined when neither side has a policy", () => {
+    expect(clampSandboxPolicy(undefined, undefined)).toBeUndefined()
+    expect(clampSandboxPolicy(null, null)).toBeUndefined()
+  })
+
+  it("passes the child through when there is no parent ceiling", () => {
+    const child: SandboxResourcePolicy = { writableRoots: ["/a"], network: "on" }
+    expect(clampSandboxPolicy(undefined, child)).toEqual(child)
+  })
+
+  it("passes the parent through when there is no child override", () => {
+    const parent: SandboxResourcePolicy = { writableRoots: ["/a"], network: "allowlist" }
+    expect(clampSandboxPolicy(parent, undefined)).toEqual(parent)
+  })
+
+  it("narrows child writable roots to those under the parent's", () => {
+    const out = clampSandboxPolicy(
+      { writableRoots: ["/ws"] },
+      { writableRoots: ["/ws/pkg", "/other"] }
+    )
+    expect(out?.writableRoots).toEqual(["/ws/pkg"])
+  })
+
+  it("caps the network down (allowlist parent beats an `on` child)", () => {
+    const out = clampSandboxPolicy(
+      { network: "allowlist", networkAllowlist: ["api.github.com"] },
+      { network: "on" }
+    )
+    expect(out?.network).toBe("allowlist")
+    expect(out?.networkAllowlist).toEqual(["api.github.com"])
+  })
+
+  it("an `off` parent forces the child offline", () => {
+    const out = clampSandboxPolicy({ network: "off" }, { network: "on" })
+    expect(out?.network).toBe("off")
+  })
+
+  it("takes the tighter CPU/memory caps", () => {
+    const out = clampSandboxPolicy(
+      { maxCpuSeconds: 60, maxMemoryMb: 1024 },
+      { maxCpuSeconds: 300, maxMemoryMb: 512 }
+    )
+    // Child CPU (300) exceeds ceiling (60) → clamped to 60; child mem (512) < 1024 → kept.
+    expect(out?.maxCpuSeconds).toBe(60)
+    expect(out?.maxMemoryMb).toBe(512)
   })
 })

@@ -39,9 +39,15 @@ afterAll(() => {
   global.cancelAnimationFrame = origCAF
 })
 
-function Probe({ onChange }: { onChange: (r: ElementRect) => void }) {
+function Probe({
+  onChange,
+  trackState,
+}: {
+  onChange: (r: ElementRect) => void
+  trackState?: boolean
+}) {
   const ref = useRef<HTMLDivElement>(null)
-  const rect = useElementRect(ref, onChange)
+  const rect = useElementRect(ref, onChange, { trackState })
   return <div ref={ref} data-rect={rect ? `${rect.width}x${rect.height}` : "none"} />
 }
 
@@ -74,6 +80,21 @@ it("skips no-op updates when the rect is unchanged", () => {
     window.dispatchEvent(new Event("scroll", { bubbles: true }))
   })
   expect(onChange).not.toHaveBeenCalled()
+})
+
+it("delivers rects via onChange only (no state) when trackState is false", () => {
+  rectValue = { left: 0, top: 0, width: 60, height: 30 }
+  const onChange = jest.fn()
+  const { container } = render(<Probe onChange={onChange} trackState={false} />)
+  expect(onChange).toHaveBeenCalledWith({ x: 0, y: 0, width: 60, height: 30 })
+  // No state tracked — the returned rect stays null across changes.
+  expect(container.firstChild).toHaveAttribute("data-rect", "none")
+  rectValue = { left: 0, top: 0, width: 90, height: 30 }
+  act(() => {
+    window.dispatchEvent(new Event("resize"))
+  })
+  expect(onChange).toHaveBeenCalledWith({ x: 0, y: 0, width: 90, height: 30 })
+  expect(container.firstChild).toHaveAttribute("data-rect", "none")
 })
 
 it("works without an onChange callback", () => {

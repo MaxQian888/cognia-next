@@ -6,9 +6,10 @@
  */
 import type { RuntimeRequest } from "../commands/types"
 import type { ResolvedConfig } from "../../config/schema"
-import type { TuiAction, UsageInfo } from "../state/types"
+import type { ToolCell, TuiAction, UsageInfo } from "../state/types"
 import os from "node:os"
-import { agentsDispatch, agentsList } from "./agents-controller"
+import { agentsDispatch, agentsList, agentsModelsPanel, agentsPanel } from "./agents-controller"
+import { inflightSubagentRows } from "../format/subagent"
 import { agentModeList } from "./agent-mode-controller"
 import { buildAgentsRunDispatch } from "../../agent/agents-run-dispatch"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
@@ -17,6 +18,7 @@ import {
   mcpAuth,
   mcpList,
   mcpLogout,
+  mcpLogsPanel,
   mcpPanel,
   mcpPresets,
   mcpPrompts,
@@ -59,7 +61,7 @@ import {
   skillShow,
   skillToggle,
 } from "./skill-controller"
-import { teamAuto, teamList, teamRunUnavailable, teamShow } from "./team-controller"
+import { teamAuto, teamList, teamRun, teamShow } from "./team-controller"
 import {
   workflowInspect,
   workflowList,
@@ -81,11 +83,16 @@ import { runInit } from "./init-controller"
 import { permissionsClear, permissionsList, permissionsRemove } from "./permissions-controller"
 import { runStatus } from "./status-controller"
 import { runLimits } from "./limits-controller"
+import { runAgentStats } from "./agent-stats-controller"
 import { runContextReport } from "./context-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 import { viewFile } from "./view-controller"
-import { planList, planShow, planDelete, planDiff } from "./plan-controller"
+import { planList, planShow, planDelete, planDiff, planExplore } from "./plan-controller"
 import { hooksList } from "./hooks-controller"
+import { councilRun } from "./council-controller"
+import { orchestrateRun } from "./orchestrate-controller"
+import { runCommit } from "./commit-controller"
+import { runPr } from "./pr-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -113,6 +120,15 @@ export interface RuntimeDeps {
   rateLimits?: import("../format/rate-limits").RateLimitSnapshot
   /** Pending `/init` staged draft (read by `/init apply`). */
   initDraft?: { target: string; content: string }
+  /** Pending `/commit` staged message (read by `/commit apply`). */
+  commitDraft?: { message: string }
+  /** Pending `/pr` staged draft (read by `/pr apply`). */
+  prDraft?: { title: string; body: string; base: string }
+  /** Live in-flight tool cells — feeds the `/agents` panel's in-turn rows. */
+  inflightTools?: ToolCell[]
+  /** Shared MCP probe cache (App-owned) so command-path `/mcp` mutators keep it
+   * coherent with the panel — clearing a toggled/removed server's stale entry. */
+  mcpProbeCache?: import("./mcp-cache").McpProbeCache
 }
 
 /** The controller surface the router calls — swappable in tests. */
@@ -130,10 +146,12 @@ export interface RuntimeImpl {
   copilotExit: typeof copilotExit
   agentsList: typeof agentsList
   agentsDispatch: typeof agentsDispatch
+  agentsPanel: typeof agentsPanel
+  agentsModelsPanel: typeof agentsModelsPanel
   agentModeList: typeof agentModeList
   teamList: typeof teamList
   teamShow: typeof teamShow
-  teamRunUnavailable: typeof teamRunUnavailable
+  teamRun: typeof teamRun
   teamAuto: typeof teamAuto
   memoryList: typeof memoryList
   memoryShow: typeof memoryShow
@@ -157,6 +175,7 @@ export interface RuntimeImpl {
   mcpLogout: typeof mcpLogout
   mcpPresets: typeof mcpPresets
   mcpPanel: typeof mcpPanel
+  mcpLogsPanel: typeof mcpLogsPanel
   mcpReconnect: typeof mcpReconnect
   mcpRemove: typeof mcpRemove
   skillList: typeof skillList
@@ -193,6 +212,7 @@ export interface RuntimeImpl {
   permissionsRemove: typeof permissionsRemove
   runStatus: typeof runStatus
   runLimits: typeof runLimits
+  runAgentStats: typeof runAgentStats
   runContextReport: typeof runContextReport
   tasksList: typeof tasksList
   tasksShow: typeof tasksShow
@@ -203,7 +223,12 @@ export interface RuntimeImpl {
   planShow: typeof planShow
   planDelete: typeof planDelete
   planDiff: typeof planDiff
+  planExplore: typeof planExplore
   hooksList: typeof hooksList
+  councilRun: typeof councilRun
+  orchestrateRun: typeof orchestrateRun
+  runCommit: typeof runCommit
+  runPr: typeof runPr
 }
 
 const REAL: RuntimeImpl = {
@@ -220,10 +245,12 @@ const REAL: RuntimeImpl = {
   copilotExit,
   agentsList,
   agentsDispatch,
+  agentsPanel,
+  agentsModelsPanel,
   agentModeList,
   teamList,
   teamShow,
-  teamRunUnavailable,
+  teamRun,
   teamAuto,
   memoryList,
   memoryShow,
@@ -247,6 +274,7 @@ const REAL: RuntimeImpl = {
   mcpLogout,
   mcpPresets,
   mcpPanel,
+  mcpLogsPanel,
   mcpReconnect,
   mcpRemove,
   skillList,
@@ -283,6 +311,7 @@ const REAL: RuntimeImpl = {
   permissionsRemove,
   runStatus,
   runLimits,
+  runAgentStats,
   runContextReport,
   tasksList,
   tasksShow,
@@ -293,7 +322,12 @@ const REAL: RuntimeImpl = {
   planShow,
   planDelete,
   planDiff,
+  planExplore,
   hooksList,
+  councilRun,
+  orchestrateRun,
+  runCommit,
+  runPr,
 }
 
 export async function runRuntimeRequest(
@@ -323,11 +357,22 @@ export async function runRuntimeRequest(
       return impl.workflowList(wd)
     }
     case "agents": {
+      if (req.action === "panel")
+        return impl.agentsPanel({
+          dispatch,
+          sessionId,
+          inflight: inflightSubagentRows(deps.inflightTools ?? []),
+        })
+      if (req.action === "models")
+        return impl.agentsModelsPanel({ dispatch, cwd, roots: deps.roots, config })
       const ad = {
         dispatch,
         cwd,
         roots: deps.roots,
         signal,
+        // The override map is read by the row builder for the panel, but the
+        // list/run paths overlay it so `/agents run` honours a saved choice.
+        ...(config.subagentModels ? { subagentModels: config.subagentModels } : {}),
         // `/agents run` executes a subagent over the live sidecar with the CLI's
         // own config/provider (the desktop `dispatchSubagent` default is gated on
         // `isTauri()` and reads provider from Dexie — neither holds in the CLI).
@@ -355,7 +400,7 @@ export async function runRuntimeRequest(
     case "team": {
       const td = { dispatch }
       if (req.action === "show") return impl.teamShow(arg, td)
-      if (req.action === "run") return impl.teamRunUnavailable(td)
+      if (req.action === "run") return impl.teamRun(arg, { dispatch, signal })
       if (req.action === "auto") {
         return impl.teamAuto(arg, {
           dispatch,
@@ -374,7 +419,12 @@ export async function runRuntimeRequest(
       return impl.memoryList(md)
     }
     case "mcp": {
-      const mc = { dispatch, roots: deps.roots, home: deps.home }
+      const mc = {
+        dispatch,
+        roots: deps.roots,
+        home: deps.home,
+        ...(deps.mcpProbeCache ? { probeCache: deps.mcpProbeCache } : {}),
+      }
       if (req.action === "add") return impl.mcpAdd(arg, mc)
       if (req.action === "enable") return impl.mcpSetEnabled(arg, true, mc)
       if (req.action === "disable") return impl.mcpSetEnabled(arg, false, mc)
@@ -390,6 +440,7 @@ export async function runRuntimeRequest(
       if (req.action === "remove") return impl.mcpRemove(arg, mc)
       if (req.action === "panel") return impl.mcpPanel(mc)
       if (req.action === "list") return impl.mcpList(mc)
+      if (req.action === "logs") return impl.mcpLogsPanel(mc)
       return impl.mcpPanel(mc)
     }
     case "skill": {
@@ -511,6 +562,12 @@ export async function runRuntimeRequest(
         toolStats: deps.toolStats,
         rateLimits: deps.rateLimits,
       })
+    case "agentStats":
+      return impl.runAgentStats({
+        dispatch,
+        osHome: deps.osHome ?? os.homedir(),
+        ...(signal ? { signal } : {}),
+      })
     case "context":
       return impl.runContextReport({
         dispatch,
@@ -528,6 +585,28 @@ export async function runRuntimeRequest(
     }
     case "hooks":
       return impl.hooksList({ dispatch, home: deps.home, osHome: deps.osHome })
+    case "council":
+      return impl.councilRun(arg, { dispatch, signal })
+    case "orchestrate":
+      return impl.orchestrateRun(arg, { dispatch, config, sessionId, signal })
+    case "commit":
+      return impl.runCommit({
+        dispatch,
+        cwd,
+        action: req.action,
+        config,
+        home: deps.home,
+        ...(deps.commitDraft ? { commitDraft: deps.commitDraft } : {}),
+      })
+    case "pr":
+      return impl.runPr({
+        dispatch,
+        cwd,
+        action: req.action,
+        config,
+        home: deps.home,
+        ...(deps.prDraft ? { prDraft: deps.prDraft } : {}),
+      })
     case "view":
       return impl.viewFile(arg, { dispatch, cwd })
     case "plan": {
@@ -535,6 +614,15 @@ export async function runRuntimeRequest(
       if (req.action === "show") return impl.planShow(arg, pd)
       if (req.action === "delete") return impl.planDelete(arg, pd)
       if (req.action === "diff") return impl.planDiff(arg, pd)
+      if (req.action === "explore") {
+        // The deterministic Explore→Plan pipeline runs the read-only built-in
+        // subagents over the live sidecar (same seam as `/agents run`).
+        return impl.planExplore(arg, {
+          dispatch,
+          dispatchAgent: buildAgentsRunDispatch({ config, home: deps.home, sessionId, signal }),
+          ...(signal ? { signal } : {}),
+        })
+      }
       return impl.planList(pd)
     }
     default:

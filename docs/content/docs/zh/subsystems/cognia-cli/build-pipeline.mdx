@@ -20,9 +20,13 @@ description: cognia 插件构建 —— 强制 lint、工具链预检、按 mani
 
 ## Flags
 
-`cognia plugin build [--path .] [--out <zip>] [--skip-build]` —— 对有编译/打包步骤的运行时
+`cognia plugin build [--path .] [--out <zip>] [--skip-build] [--json]` —— 对有编译/打包步骤的运行时
 （`wasm`、`frontend`），`--skip-build` 会跳过该步骤，直接把磁盘上已有的内容重新打包。
 从 CLI 视角看，Python、hybrid 和 VS Code-extension 插件始终是 build-free：声明的入口文件必须在打包前已经存在。
+`--json` 模式下，缺失或不可读取的插件根目录 / manifest 使用 `stage: "input"` 并带上 `{path, error}`；
+lint 失败使用 `stage: "lint"` 并嵌入 lint 报告；工具链、构建、嵌入和打包失败则输出
+结构化的 `{ok:false, action:"build", stage, pluginId, version, pluginType, bundle, error}` payload，
+所有 JSON 失败都会保持 stderr 为空。
 
 ## 端到端流程
 
@@ -103,8 +107,9 @@ pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
 
 `strip_section`（`packaging.rs:67-106`）用 `wasmparser` 丢弃任何已存在的副本，因此
 重新构建和手动重新嵌入都是幂等的。独立的应急出口是
-`cognia plugin embed-version <wasm> <ver> [--out]`（`main.rs:395-408`），它用
-`looks_like_semver` 校验版本（`--version must be MAJOR.MINOR.PATCH`），默认就地覆盖输入。
+`cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]`，它用 `looks_like_semver`
+校验版本（`--version must be MAJOR.MINOR.PATCH`），默认就地覆盖输入。JSON 模式下失败会用
+`stage: "input" | "read" | "embed" | "write"` 标明失败阶段。
 
 <Callout type="info" title="一句话说清契约版本管理">
   CLI 把 WIT 契约版本（当前为 0.1.0）写入每一个 WASM bundle；没有匹配 linker 的 host

@@ -14,6 +14,7 @@
  */
 import type { SlashParamSpec } from "@/lib/slash-commands/builtin"
 
+import type { BooleanFlagKey } from "../../config/mutate"
 import type {
   ResolvedConfig,
   StatusBarConfig,
@@ -29,7 +30,15 @@ import type { Overlay, TuiState } from "../state/types"
 export type CommandArgSpec = SlashParamSpec
 
 /** Grouping buckets shown as sections in `/help` and (optionally) the palette. */
-export type CommandCategory = "chat" | "session" | "cognia" | "mcp" | "plugin" | "config" | "system"
+export type CommandCategory =
+  | "chat"
+  | "session"
+  | "cognia"
+  | "mcp"
+  | "plugin"
+  | "config"
+  | "system"
+  | "custom"
 
 /** A nested verb, e.g. `/goal status` or `/mcp add`. */
 export interface SubcommandSpec {
@@ -88,6 +97,9 @@ export type CommandEffect =
   | { kind: "openSessions" }
   | { kind: "resumeLast" }
   | { kind: "runBash"; command: string }
+  /** Ask the agent to diagnose the last failed `!command` (`/analyze`). The App
+   * holds the captured command + output and builds the prompt. */
+  | { kind: "analyzeBash" }
   | { kind: "runtime"; runtime: RuntimeRequest }
   /** Persist + live-apply a status-bar customization (`/statusbar`). */
   | { kind: "statusBar"; patch: StatusBarConfig }
@@ -104,6 +116,10 @@ export type CommandEffect =
    * (`/settings <field> <value>`): systemPrompt (scalar) or skillDirs /
    * allowedTools (whitespace-split array). App persists + live-merges. */
   | { kind: "settingsSet"; field: string; value: string }
+  /** Toggle a top-level boolean config flag (`/route auto on|off` → `autoRoute`).
+   * App persists via `setBooleanFlag`, live-merges the patch, and re-resolves
+   * SendOptions so the next turn honors it. */
+  | { kind: "flag"; key: BooleanFlagKey; value: boolean }
   /** Rebind (or reset) a keyboard chord (`/keybind <action> <spec>`). An empty
    * `spec` resets the action to its default. App persists via `setKeybindings`
    * and live-merges into `config.keybindings`. */
@@ -135,14 +151,32 @@ export type CommandEffect =
       intervalMs?: number
       maxIterations?: number
     }
+  /** Run `/fix`: a bounded test-fix loop — run `testCommand`, feed failures to the
+   * agent, re-run, up to `maxRounds` rounds or until green. Streams each fix turn. */
+  | { kind: "fixRun"; testCommand: string; maxRounds: number }
   /** Re-enter plan mode and ask the agent to revise the last plan (`/plan refine`). */
   | { kind: "planRefine" }
   /** Manage `/add-dir` extra working roots (App validates + persists + applies). */
   | { kind: "addDir"; op: "add" | "remove" | "list"; arg: string }
+  /** Switch the session working directory (`/cd <dir>`). The App resolves `dir`
+   * against the current cwd, validates it is an existing directory, then trusts
+   * it + dispatches `SET_CWD` + re-resolves SendOptions so the next turn (and the
+   * respawned sidecar) operates there. */
+  | { kind: "changeCwd"; dir: string }
   /** Open the `/rewind` checkpoint picker (App reads the live capture). */
   | { kind: "rewindList" }
   /** Restore a checkpoint by seq — files and/or conversation. */
   | { kind: "rewind"; seq: number; scope: "conversation" | "files" | "both" }
+  /** Open a file in the external editor (`/open`). App resolves the editor and
+   * spawns it, reporting success/failure as a notice. */
+  | { kind: "openFile"; file: string; line?: number; col?: number }
+  /** Report the detected editor context (`/editor`). App reads `process.env`. */
+  | { kind: "editorInfo" }
+  /** Persist + live-apply the preferred external editor (`/editor <command>`). */
+  | { kind: "setEditor"; command: string }
+  /** Show the working-tree git diff (`/diff`) in the scrollable document pager.
+   * App shells `git diff` (+ `--staged`) and renders the result. */
+  | { kind: "gitDiff" }
   | { kind: "exit" }
 
 /** What `openForm` carries — enough for the App to mount a {@link FormOverlay}. */
@@ -177,6 +211,7 @@ export interface RuntimeRequest {
     | "tasks"
     | "status"
     | "limits"
+    | "agentStats"
     | "context"
     | "view"
     | "plan"
@@ -184,6 +219,10 @@ export interface RuntimeRequest {
     | "addDir"
     | "bashes"
     | "rewind"
+    | "council"
+    | "orchestrate"
+    | "commit"
+    | "pr"
   /** Verb within the feature, e.g. "start" | "run" | "list" | "pause". */
   action: string
   /** Free-form argument payload (an id, an objective, etc.). */

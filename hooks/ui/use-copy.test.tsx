@@ -3,6 +3,11 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
+const capWriteText = jest.fn()
+jest.mock("@/lib/capacitor/clipboard", () => ({
+  writeText: (value: string) => capWriteText(value),
+}))
+
 import { useCopy } from "./use-copy"
 
 describe("useCopy", () => {
@@ -11,6 +16,8 @@ describe("useCopy", () => {
 
   beforeEach(() => {
     jest.useFakeTimers()
+    capWriteText.mockClear()
+    capWriteText.mockResolvedValue({ kind: "unsupported" })
     originalClipboard = navigator.clipboard
     writeText = jest.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, "clipboard", {
@@ -44,6 +51,18 @@ describe("useCopy", () => {
       jest.advanceTimersByTime(500)
     })
     expect(result.current.copied).toBe(false)
+  })
+
+  it("uses the native Capacitor clipboard on mobile without touching navigator", async () => {
+    capWriteText.mockResolvedValueOnce({ kind: "ok" })
+    const { result } = renderHook(() => useCopy())
+    await act(async () => {
+      const ok = await result.current.copy("native")
+      expect(ok).toBe(true)
+    })
+    expect(capWriteText).toHaveBeenCalledWith("native")
+    expect(writeText).not.toHaveBeenCalled()
+    expect(result.current.copied).toBe(true)
   })
 
   it("accepts a numeric arg as the legacy resetMs shortcut", async () => {

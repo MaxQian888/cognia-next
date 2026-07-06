@@ -10,9 +10,22 @@
  * the visual order (text → tool → text → …) faithful to arrival order.
  */
 import { emptyInputState } from "./initial"
+import { filterByQuery } from "../components/select-list-state"
+import {
+  filterInspectItems,
+  filterQuickActions,
+  filterSelectItems,
+  filterSessionItems,
+} from "./overlay-search"
 import { isTodoTool, parseTodos } from "../format/tools"
 import { formatCompactBoundary } from "../format/compaction"
-import { accumulateUsage, contextTokens, emptySessionTotals, turnCostUsd } from "../format/usage"
+import {
+  accumulateModelTotals,
+  accumulateUsage,
+  contextTokens,
+  emptySessionTotals,
+  turnCostUsd,
+} from "../format/usage"
 import { resolveActiveModel } from "../../config/active-model"
 import {
   isExitPlanTool,
@@ -26,17 +39,64 @@ import type {
   Cell,
   Inflight,
   InputBuffer,
+  InputEditOp,
+  McpLogEntry,
   Overlay,
   ToolCell,
   TodoCell,
   ToolStat,
+  Toast,
   TuiAction,
   TuiState,
   UsageInfo,
 } from "./types"
+import {
+  insertText,
+  insertNewline,
+  backspace,
+  deleteWordLeft,
+  deleteToLineStart,
+  deleteToLineEnd,
+  moveLeft,
+  moveRight,
+  moveUp,
+  moveDown,
+  moveHome,
+  moveEnd,
+  moveWordLeft,
+  moveWordRight,
+} from "../input/buffer"
 
 function makeId(seq: number): string {
   return `c${seq}`
+}
+
+/** Max transient toasts kept on screen at once (newest win; oldest drop). */
+const MAX_TOASTS = 3
+
+/** Max captured MCP log lines kept in the session ring buffer (oldest drop). */
+const MAX_MCP_LOGS = 1000
+
+/** Append a toast, keeping only the most recent {@link MAX_TOASTS}. Pure. */
+function pushToast(list: Toast[], toast: Toast): Toast[] {
+  const next = [...list, toast]
+  return next.length > MAX_TOASTS ? next.slice(next.length - MAX_TOASTS) : next
+}
+
+/**
+ * Locate the bash cell a streamed-output action targets. With an `id`, find that
+ * exact cell (running or not); without one, fall back to the most recent
+ * still-running bash cell (legacy behaviour for callers that don't pass ids).
+ */
+function bashCellIndex(cells: Cell[], id: string | undefined): number {
+  if (id !== undefined) {
+    return cells.findIndex((c) => c.id === id && c.kind === "bash")
+  }
+  for (let i = cells.length - 1; i >= 0; i--) {
+    const c = cells[i]
+    if (c.kind === "bash" && c.status === "running") return i
+  }
+  return -1
 }
 
 /** Index of the last user-message cell, or null when there are none. */
@@ -93,6 +153,35 @@ const UNDO_LIMIT = 100
 function pushBounded(stack: InputBuffer[], entry: InputBuffer): InputBuffer[] {
   const next = [...stack, entry]
   return next.length > UNDO_LIMIT ? next.slice(next.length - UNDO_LIMIT) : next
+}
+
+/** Apply one editor op to a buffer (the reducer side of INPUT_EDIT). */
+function applyInputEdit(buffer: InputBuffer, edit: InputEditOp): InputBuffer {
+  switch (edit.op) {
+    case "insert":
+      return insertText(buffer, edit.text)
+    case "newline":
+      return insertNewline(buffer)
+    case "backspace":
+      return backspace(buffer)
+    case "delete-word":
+      return deleteWordLeft(buffer)
+    case "kill-to-start":
+      return deleteToLineStart(buffer)
+    case "kill-to-end":
+      return deleteToLineEnd(buffer)
+    case "move":
+      return {
+        left: moveLeft,
+        right: moveRight,
+        up: moveUp,
+        down: moveDown,
+        home: moveHome,
+        end: moveEnd,
+        "word-left": moveWordLeft,
+        "word-right": moveWordRight,
+      }[edit.dir](buffer)
+  }
 }
 
 function sameBufferText(a: InputBuffer, b: InputBuffer): boolean {
@@ -173,19 +262,29 @@ function overlayLength(overlay: Overlay): number | null {
     case "permission":
       return overlay.choices.length
     case "model":
+      // The `/model` overlay navigates the FILTERED view, so its length must
+      // reflect the active typeahead query (else OVERLAY_MOVE/SET_INDEX would
+      // range over hidden rows and the highlight could land off-screen).
+      return filterByQuery(overlay.options, overlay.query).length
     case "mode":
     case "provider":
       return overlay.options.length
     case "config":
       return overlay.rows.length
+    case "subagentModels":
+      return overlay.rows.length
     case "settings":
       return overlay.sections[overlay.section]?.rows.length ?? 0
     case "sessions":
-      return overlay.items.length
+      // Searchable overlays navigate the FILTERED view (same reason as `model`),
+      // so the length must reflect the active typeahead query.
+      return filterSessionItems(overlay.items, overlay.query ?? "").length
     case "select":
-      return overlay.items.length
+      return filterSelectItems(overlay.items, overlay.query ?? "").length
     case "inspect":
-      return overlay.items.length
+      return filterInspectItems(overlay.items, overlay.query ?? "").length
+    case "quickActions":
+      return filterQuickActions(overlay.rows, overlay.query ?? "").length
     case "files":
       return overlay.completions.length
     case "plan":
@@ -201,7 +300,27 @@ function withOverlayIndex(overlay: Overlay, index: number): Overlay {
   return { ...overlay, index } as Overlay
 }
 
+/** Actions that signal live stream activity — each bumps `streamSeq` so the App
+ * can timestamp "last activity" for the stall hint without the reducer touching
+ * a clock (which is unavailable in the build and would break determinism). */
+const STREAM_ACTIVITY = new Set<TuiAction["type"]>([
+  "INFLIGHT_TEXT",
+  "INFLIGHT_THINKING",
+  "TOOL_CALL",
+  "TOOL_RESULT",
+  "SET_USAGE",
+])
+
 export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
+  const next = reduceInner(state, action)
+  // Bump the monotonic stream-activity counter on each delta (only when the
+  // action actually produced new state) so the stall watcher re-arms.
+  return next !== state && STREAM_ACTIVITY.has(action.type)
+    ? { ...next, streamSeq: next.streamSeq + 1 }
+    : next
+}
+
+function reduceInner(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
     // ── Streaming ─────────────────────────────────────────────────────────────
     case "INFLIGHT_TEXT": {
@@ -230,6 +349,26 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         ...state,
         inflight: { ...state.inflight, thinking: state.inflight.thinking + action.delta },
       }
+    case "COMMIT_PLAN": {
+      // Programmatic plan capture from the `/plan explore` pipeline: the Plan
+      // subagent's markdown IS the plan (no ExitPlanMode tool call). Route it
+      // through the SAME commit path as the tool signal so it lands in `lastPlan`
+      // and the App opens the approval overlay. Independent of permission mode —
+      // the pipeline can be kicked from any mode.
+      const raw = action.raw.trim()
+      if (!raw) return state
+      const p = commitPlan(state.cells, state.inflight, state.seq, raw, state.lastPlan?.raw, {
+        keepText: true,
+      })
+      return {
+        ...state,
+        cells: p.cells,
+        seq: p.seq,
+        inflight: p.inflight,
+        lastPlan: p.lastPlan,
+        planCapturedThisTurn: true,
+      }
+    }
     case "TOOL_CALL": {
       // Primary plan-ready signal: in plan mode, an `ExitPlanMode` /
       // `exit_plan_mode` tool call means the agent is presenting its final plan
@@ -359,7 +498,11 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         : -1
       if (idx < 0 && action.toolName)
         idx = runningOf(state.inflight.tools, (c) => c.toolName === action.toolName)
-      if (idx < 0) idx = soleRunning(state.inflight.tools)
+      // The sole-running fallback is ONLY for a nameless, keyless result — a
+      // result that DID carry a key/name but matched nothing (a late/duplicate
+      // result, or its tool already moved to cells) must NOT be force-attached to
+      // an unrelated tool that happens to be the lone one in flight.
+      if (idx < 0 && !action.callKey && !action.toolName) idx = soleRunning(state.inflight.tools)
       if (idx >= 0) {
         // Found in inflight — update in place so the live frame re-renders it
         // (⏳→✓/✗). Do NOT move it to cells yet; it stays in inflight.tools until
@@ -390,9 +533,10 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         fallbackIdx = state.cells.findIndex(
           (c) => c.kind === "tool" && c.status === "running" && c.toolName === action.toolName
         )
-      if (fallbackIdx < 0) {
-        // Same single-candidate guard as inflight: only pair a nameless result to
-        // a lone running cell, never guess among several.
+      if (fallbackIdx < 0 && !action.callKey && !action.toolName) {
+        // Same single-candidate guard as inflight, and likewise only for a
+        // nameless, keyless result: pair it to a lone running cell, never guess
+        // among several and never override an unmatched keyed/named result.
         const running = state.cells.filter((c) => c.kind === "tool" && c.status === "running")
         if (running.length === 1) fallbackIdx = state.cells.indexOf(running[0])
       }
@@ -414,15 +558,25 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
     }
 
     // ── Usage (per-turn, streamed from the SDK result message) ──────────────────
-    case "SET_USAGE":
+    case "SET_USAGE": {
+      // Attribute this turn to the model that ran it (resolved from the active
+      // config) so the panel can break usage down per model like `/usage`.
+      const turnModel = resolveActiveModel(state.config) ?? "default"
       return {
         ...state,
         usage: action.usage,
         sessionTotals: accumulateUsage(state.sessionTotals, action.usage, state.modelMeta?.pricing),
+        modelTotals: accumulateModelTotals(
+          state.modelTotals,
+          turnModel,
+          action.usage,
+          state.modelMeta?.pricing
+        ),
         usageHistory: pushUsageHistory(state.usageHistory, action.usage),
         costHistory: pushCostHistory(state.costHistory, action.usage, state.modelMeta?.pricing),
         usageSeenThisTurn: true,
       }
+    }
     case "SET_RATE_LIMITS":
       // Account-level live quota — persists across /clear (a fresh chat doesn't
       // reset the API key's per-window remaining), overwritten by each response.
@@ -445,6 +599,8 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         usageSeenThisTurn: false,
         planCapturedThisTurn: false,
         overlay: { kind: "none" },
+        // A fresh send respawns a dead sidecar, so clear the "backend down" flag.
+        sidecarDown: false,
       }
     }
     case "TURN_COMMIT": {
@@ -496,11 +652,18 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
         lastPlan,
+        lastCompletion: { kind: "turn", status: "done", label: "Response ready" },
         ...(fallbackUsage
           ? {
               usage: fallbackUsage,
               sessionTotals: accumulateUsage(
                 state.sessionTotals,
+                fallbackUsage,
+                state.modelMeta?.pricing
+              ),
+              modelTotals: accumulateModelTotals(
+                state.modelTotals,
+                resolveActiveModel(state.config) ?? "default",
                 fallbackUsage,
                 state.modelMeta?.pricing
               ),
@@ -521,13 +684,20 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         state.inflight.tools.length > 0 ? [...state.cells, ...state.inflight.tools] : state.cells
       const committed = commitInflight(baseCells, state.inflight, state.seq)
       const finalCells = committed.cells
-      finalCells.push({ id: makeId(committed.seq), kind: "error", message: action.message })
+      finalCells.push({
+        id: makeId(committed.seq),
+        kind: "error",
+        message: action.message,
+        ...(action.hint ? { hint: action.hint } : {}),
+        ...(action.category ? { category: action.category } : {}),
+      })
       return {
         ...state,
         cells: finalCells,
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
+        lastCompletion: { kind: "turn", status: "error", label: action.title ?? "Error" },
       }
     }
     case "TURN_ABORTED": {
@@ -544,6 +714,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
+        lastCompletion: { kind: "turn", status: "aborted", label: "Interrupted" },
       }
     }
 
@@ -569,17 +740,36 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         },
       }
     case "ACTIVITY_END": {
-      const cells = action.summary
-        ? [
-            ...state.cells,
-            { id: makeId(state.seq), kind: "notice" as const, message: action.summary },
-          ]
-        : state.cells
+      // Human label for the notification + the error toast, derived from the
+      // running activity (kind + label) so a run that ends while you're tabbed
+      // away is identifiable. Falls back to a generic phrase if the pill is gone.
+      const runLabel = state.activity
+        ? `${state.activity.label || state.activity.kind} ${action.status}`
+        : `Background run ${action.status}`
+      let seq = state.seq
+      const cells = [...state.cells]
+      if (action.summary) {
+        cells.push({ id: makeId(seq++), kind: "notice" as const, message: action.summary })
+      }
+      // An errored run used to vanish silently when it carried no summary — the
+      // pill just disappeared. Always surface the failure as an error toast so it
+      // can't pass unnoticed (in addition to any summary notice above).
+      let toasts = state.toasts
+      if (action.status === "error") {
+        toasts = pushToast(toasts, {
+          id: makeId(seq++),
+          severity: "error",
+          message: runLabel,
+          ...(action.summary ? {} : { hint: "See the transcript above for details." }),
+        })
+      }
       return {
         ...state,
         cells,
-        seq: action.summary ? state.seq + 1 : state.seq,
+        seq,
+        toasts,
         activity: undefined,
+        lastCompletion: { kind: "activity", status: action.status, label: runLabel },
       }
     }
     case "WORKFLOW_RUN_START":
@@ -630,7 +820,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         cells: [
           ...state.cells,
           {
-            id: makeId(state.seq),
+            id: action.id ?? makeId(state.seq),
             kind: "bash",
             command: action.command,
             output: "",
@@ -640,17 +830,11 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         seq: state.seq + 1,
       }
     case "BASH_APPEND": {
-      // Stream a chunk into the most recent still-running bash cell so output
-      // appears live (the fullscreen transcript re-renders in place). A no-op if
-      // no bash cell is running (the result already landed).
-      let idx = -1
-      for (let i = state.cells.length - 1; i >= 0; i--) {
-        const c = state.cells[i]
-        if (c.kind === "bash" && c.status === "running") {
-          idx = i
-          break
-        }
-      }
+      // Stream a chunk into the target bash cell so output appears live (the
+      // fullscreen transcript re-renders in place). With an `id`, target that
+      // cell exactly; otherwise the most recent still-running one. A no-op when
+      // the cell is gone / already settled (the result already landed).
+      const idx = bashCellIndex(state.cells, action.id)
       if (idx < 0) return state
       const updated = [...state.cells]
       const cell = updated[idx] as Extract<Cell, { kind: "bash" }>
@@ -658,23 +842,26 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, cells: updated }
     }
     case "BASH_RESULT": {
-      // Fill the most recent still-running bash cell.
-      let idx = -1
-      for (let i = state.cells.length - 1; i >= 0; i--) {
-        const c = state.cells[i]
-        if (c.kind === "bash" && c.status === "running") {
-          idx = i
-          break
-        }
-      }
+      const idx = bashCellIndex(state.cells, action.id)
       if (idx < 0) return state
       const updated = [...state.cells]
       updated[idx] = {
         ...(updated[idx] as Extract<Cell, { kind: "bash" }>),
         output: action.output,
         status: action.status,
+        // The command has settled — drop the background marker so the cell
+        // renders as a plain done/error result.
+        background: false,
         ...(action.exitCode !== undefined ? { exitCode: action.exitCode } : {}),
       }
+      return { ...state, cells: updated }
+    }
+    case "BASH_BACKGROUND": {
+      const updated = state.cells.map((c) =>
+        c.id === action.id && c.kind === "bash" && c.status === "running"
+          ? { ...c, background: true }
+          : c
+      )
       return { ...state, cells: updated }
     }
 
@@ -740,12 +927,43 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       }
     case "EDIT_CLEAR":
       return state.editTarget ? { ...state, editTarget: undefined } : state
-    case "NOTICE":
+    case "NOTICE": {
+      const cells = [
+        ...state.cells,
+        { id: makeId(state.seq), kind: "notice" as const, message: action.message },
+      ]
+      // When flagged, also surface a transient toast so the message isn't lost in
+      // scrollback (uses a second seq tick for a stable, unique toast id).
+      if (action.toast) {
+        const toastId = makeId(state.seq + 1)
+        return {
+          ...state,
+          cells,
+          seq: state.seq + 2,
+          toasts: pushToast(state.toasts, {
+            id: toastId,
+            severity: action.severity ?? "info",
+            message: action.message,
+          }),
+        }
+      }
+      return { ...state, cells, seq: state.seq + 1 }
+    }
+    case "TOAST_PUSH":
       return {
         ...state,
-        cells: [...state.cells, { id: makeId(state.seq), kind: "notice", message: action.message }],
+        toasts: pushToast(state.toasts, {
+          id: makeId(state.seq),
+          severity: action.severity,
+          message: action.message,
+          ...(action.hint ? { hint: action.hint } : {}),
+        }),
         seq: state.seq + 1,
       }
+    case "TOAST_DISMISS":
+      return { ...state, toasts: state.toasts.filter((t) => t.id !== action.id) }
+    case "SIDECAR_STATUS":
+      return { ...state, sidecarDown: action.down }
     case "COMPACT_BOUNDARY":
       // Render the boundary inline as a notice cell (reuses the notice renderer).
       return {
@@ -766,6 +984,14 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, initDraft: { target: action.target, content: action.content } }
     case "CLEAR_INIT_DRAFT":
       return { ...state, initDraft: undefined }
+    case "SET_COMMIT_DRAFT":
+      return { ...state, commitDraft: { message: action.message } }
+    case "CLEAR_COMMIT_DRAFT":
+      return { ...state, commitDraft: undefined }
+    case "SET_PR_DRAFT":
+      return { ...state, prDraft: { title: action.title, body: action.body, base: action.base } }
+    case "CLEAR_PR_DRAFT":
+      return { ...state, prDraft: undefined }
     case "RESET":
       return {
         ...state,
@@ -775,6 +1001,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         overlay: { kind: "none" },
         usage: undefined,
         sessionTotals: emptySessionTotals(),
+        modelTotals: {},
         usageHistory: [],
         toolStats: {},
         usageSeenThisTurn: false,
@@ -782,8 +1009,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         lastPlan: undefined,
         planCapturedThisTurn: false,
         initDraft: undefined,
+        commitDraft: undefined,
+        prDraft: undefined,
         backtrack: undefined,
         editTarget: undefined,
+        toasts: [],
+        sidecarDown: false,
       }
 
     // ── Config switches ──────────────────────────────────────────────────────────
@@ -862,6 +1093,14 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
           mascot: { ...state.config.mascot, ...action.mascot },
         },
         overlay: { kind: "none" },
+      }
+    case "SET_EDITOR":
+      return {
+        ...state,
+        config: {
+          ...state.config,
+          editor: { ...state.config.editor, ...action.editor },
+        },
       }
     case "SET_THEME":
       return {
@@ -959,6 +1198,45 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       const clamped = Math.max(0, Math.min(action.index, len - 1))
       return { ...state, overlay: withOverlayIndex(state.overlay, clamped) }
     }
+    case "OVERLAY_REFRESH_MODEL_OPTIONS": {
+      // Only applies while the model picker is the active overlay (a close /
+      // other-open between dispatch and resolve silently drops it). Keep the
+      // current selection if its id survives the refresh, else clamp to range.
+      if (state.overlay.kind !== "model") return state
+      if (action.options.length === 0) return state
+      const { query } = state.overlay
+      // `index` points into the filtered view, so resolve the selected id there
+      // and re-find it within the freshly-filtered new catalog.
+      const currentId = filterByQuery(state.overlay.options, query)[state.overlay.index]
+      const nextIndex = Math.max(0, filterByQuery(action.options, query).indexOf(currentId))
+      return {
+        ...state,
+        overlay: { kind: "model", options: action.options, index: nextIndex, query },
+      }
+    }
+    case "OVERLAY_MODEL_QUERY": {
+      if (state.overlay.kind !== "model") return state
+      // Reset the highlight to the top of the freshly-filtered list — a typeahead
+      // refinement should land on the best (first) match, not a stale row index.
+      return { ...state, overlay: { ...state.overlay, query: action.query, index: 0 } }
+    }
+    case "OVERLAY_QUERY": {
+      // Generic typeahead for the searchable reducer-owned overlays. Reset the
+      // highlight to the top of the freshly-filtered list (best match first).
+      const k = state.overlay.kind
+      if (k !== "select" && k !== "sessions" && k !== "inspect" && k !== "quickActions")
+        return state
+      return { ...state, overlay: { ...state.overlay, query: action.query, index: 0 } }
+    }
+    case "MARKETPLACE_PATCH_ENTRY": {
+      // Live status from an in-place plugin action (enable/disable) — only applies
+      // while the marketplace browser is the active overlay.
+      if (state.overlay.kind !== "marketplace") return state
+      const entries = state.overlay.entries.map((e) =>
+        e.installRef === action.ref ? { ...e, ...action.patch } : e
+      )
+      return { ...state, overlay: { kind: "marketplace", entries } }
+    }
     case "FORM_UPDATE":
       if (state.overlay.kind !== "form") return state
       return { ...state, overlay: { kind: "form", form: action.form } }
@@ -979,6 +1257,20 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         },
       }
     }
+
+    case "MCP_LOG_APPEND": {
+      // Stamp a stable id from the monotonic seq (no Date.now/Math.random) and
+      // append to the bounded ring buffer. Independent of the open overlay — the
+      // buffer accrues even when the `/mcp logs` panel is closed.
+      const seq = state.seq + 1
+      const entry: McpLogEntry = { id: makeId(seq), ...action.entry }
+      const next = [...state.mcpLogs, entry]
+      const mcpLogs = next.length > MAX_MCP_LOGS ? next.slice(next.length - MAX_MCP_LOGS) : next
+      return { ...state, seq, mcpLogs }
+    }
+
+    case "MCP_LOG_CLEAR":
+      return state.mcpLogs.length === 0 ? state : { ...state, mcpLogs: [] }
 
     case "SKILL_ROW_TOGGLE": {
       if (state.overlay.kind !== "skills") return state
@@ -1009,6 +1301,23 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         input: {
           ...state.input,
           buffer: action.buffer,
+          undo: textChanged ? pushBounded(state.input.undo, prev) : state.input.undo,
+          redo: textChanged ? [] : state.input.redo,
+        },
+      }
+    }
+    case "INPUT_EDIT": {
+      // Apply the op to the LIVE buffer so a burst of keystrokes batched into one
+      // render compose sequentially (a→ab→abc) instead of each recomputing from a
+      // stale closure and the last one winning (which dropped all but one key).
+      const prev = state.input.buffer
+      const next = applyInputEdit(prev, action.edit)
+      const textChanged = !sameBufferText(prev, next)
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          buffer: next,
           undo: textChanged ? pushBounded(state.input.undo, prev) : state.input.undo,
           redo: textChanged ? [] : state.input.redo,
         },

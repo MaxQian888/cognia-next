@@ -6,7 +6,7 @@
 // shape of `components/skills/skill-card.tsx` so future shared treatments
 // (drag/drop, multi-select) port cleanly.
 
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { ShieldCheckIcon, AlertTriangleIcon, CircleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -35,7 +35,9 @@ interface Props {
   onRollback?: (id: string) => void
 }
 
-export function PluginCard({
+// Memoized for the same reason as PluginLibraryRow: grid re-renders track
+// store changes, while row objects stay identity-stable across re-filters.
+export const PluginCard = memo(function PluginCard({
   plugin,
   selected,
   onToggleSelect,
@@ -189,7 +191,7 @@ export function PluginCard({
       )}
     </Card>
   )
-}
+})
 
 interface CardCapabilityChipProps {
   capability: string

@@ -1,6 +1,6 @@
 import type { CircuitBreaker, CircuitBreakerSnapshot } from "@/lib/connectors/circuit-breaker"
 import { CircuitOpenError, runResilient } from "@/lib/plugin/resilience/run-resilient"
-import { TimeoutError } from "@/lib/utils/with-timeout"
+import { TimeoutError } from "@cognia/primitives"
 
 interface FakeBreaker extends CircuitBreaker {
   recordSuccess: jest.Mock

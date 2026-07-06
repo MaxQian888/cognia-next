@@ -47,6 +47,12 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // rotation set stays bounded.
     let builder = LogBuilder::default()
         .level(log::LevelFilter::Info)
+        // `fontdb::Database::load_system_fonts` (used by `os_list_fonts`) walks
+        // every installed OS font and logs a WARN for each one it can't parse.
+        // Windows ships proprietary/malformed faces like `mstmc.ttf` (Media
+        // Center) that no TrueType parser accepts — the face is simply skipped,
+        // so the warning is pure noise. Silence fontdb below Error.
+        .level_for("fontdb", log::LevelFilter::Error)
         .max_file_size(LOG_MAX_FILE_SIZE)
         .rotation_strategy(RotationStrategy::KeepAll)
         .targets(targets);

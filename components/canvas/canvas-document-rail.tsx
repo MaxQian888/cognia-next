@@ -24,6 +24,8 @@ import {
   Copy,
   Trash2,
   Edit2,
+  Clock,
+  ListTree,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -56,6 +58,7 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { LANGUAGE_OPTIONS } from "@/lib/canvas/constants"
+import { getFileExtension } from "@/lib/canvas/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { RenameDialog } from "./rename-dialog"
 
@@ -117,6 +120,8 @@ export function CanvasDocumentRail() {
   const pinnedDocIds = useCanvasLayoutStore((s) => s.pinnedDocIds)
   const pinDocument = useCanvasLayoutStore((s) => s.pinDocument)
   const unpinDocument = useCanvasLayoutStore((s) => s.unpinDocument)
+  const railViewMode = useCanvasLayoutStore((s) => s.railViewMode)
+  const setRailViewMode = useCanvasLayoutStore((s) => s.setRailViewMode)
 
   const [query, setQuery] = useState("")
   const [langFilter, setLangFilter] = useState<string>("all")
@@ -189,6 +194,132 @@ export function CanvasDocumentRail() {
     setActive(id)
   }
 
+  // Single row renderer shared by the time-grouped and flat file-list views.
+  // A plain function (not a nested component) so parent re-renders inline the
+  // JSX instead of remounting each row — remounting would close any open
+  // ContextMenu and drop the row's Radix state. In `fileMode` the title reads
+  // as `name.ext` (like a file explorer) and the language badge is dropped.
+  const renderDocRow = (doc: CanvasDocument, fileMode: boolean) => {
+    const isActive = doc.id === activeId
+    const isPinned = pinnedDocIds.has(doc.id)
+    const Icon = doc.type === "code" ? FileCode : FileText
+    const baseName = doc.title || t("untitledDefault")
+    const displayName = fileMode ? `${baseName}.${getFileExtension(doc.language)}` : baseName
+    return (
+      <motion.li
+        key={doc.id}
+        layout
+        variants={STAGGER_CHILD}
+        data-slot="sidebar-menu-item"
+        data-sidebar="menu-item"
+        className="group/menu-item relative"
+      >
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              className={cn(
+                "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition",
+                isActive
+                  ? "bg-primary/10 font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => setActive(doc.id)}
+                className="flex flex-1 min-w-0 items-center gap-2 bg-transparent text-left"
+              >
+                {isPinned && <Pin className="size-3 shrink-0 text-amber-500" />}
+                <Icon className="size-3.5 shrink-0" />
+                <span className="flex-1 truncate">{displayName}</span>
+                {!fileMode && (
+                  <Badge variant="outline" className="px-1 text-[10px] shrink-0">
+                    {doc.language}
+                  </Badge>
+                )}
+              </button>
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    aria-label={t("deleteAria", {
+                      name: doc.title || t("untitledDefault"),
+                    })}
+                    onClick={(ev) => {
+                      ev.stopPropagation()
+                      if (activeId === doc.id) setActive(null)
+                      remove(doc.id)
+                    }}
+                    className="size-5 shrink-0 opacity-0 transition group-hover:opacity-70 hover:opacity-100"
+                  >
+                    <X className="size-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{t("delete", { default: "Delete" })}</TooltipContent>
+              </Tooltip>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-40">
+            <ContextMenuItem onClick={() => handleStartRename(doc)}>
+              <Edit2 className="mr-2 size-3.5" />
+              {t("rename")}
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => {
+                const dupId = create({
+                  title: `${doc.title} ${t("copySuffix")}`,
+                  content: doc.content,
+                  language: doc.language,
+                  type: doc.type,
+                })
+                setActive(dupId)
+              }}
+            >
+              <Copy className="mr-2 size-3.5" />
+              {t("duplicate")}
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => handleExport(doc)}>
+              <Download className="mr-2 size-3.5" />
+              {t("export", { default: "Export" })}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onClick={() => {
+                if (isPinned) unpinDocument(doc.id)
+                else pinDocument(doc.id)
+              }}
+            >
+              {isPinned ? (
+                <>
+                  <PinOff className="mr-2 size-3.5" />
+                  {t("unpin", { default: "Unpin" })}
+                </>
+              ) : (
+                <>
+                  <Pin className="mr-2 size-3.5" />
+                  {t("pin", { default: "Pin" })}
+                </>
+              )}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onClick={() => {
+                remove(doc.id)
+                if (activeId === doc.id) setActive(null)
+              }}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 size-3.5" />
+              {t("delete")}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      </motion.li>
+    )
+  }
+
   return (
     <aside className="flex h-full w-full min-w-0 flex-col overflow-hidden border-r bg-muted/30">
       <SidebarHeader className="flex flex-row items-center justify-between gap-2 px-3 py-2">
@@ -220,6 +351,40 @@ export function CanvasDocumentRail() {
             placeholder={t("search", { default: "Search documents…" })}
             className="h-8 pl-7 text-xs"
           />
+        </div>
+        <div
+          className="flex items-center rounded-md border bg-muted/40 p-0.5 text-[11px]"
+          role="group"
+          aria-label={t("viewMode")}
+        >
+          <button
+            type="button"
+            aria-pressed={railViewMode === "grouped"}
+            onClick={() => setRailViewMode("grouped")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 transition",
+              railViewMode === "grouped"
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Clock className="size-3" />
+            {t("viewGrouped")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={railViewMode === "files"}
+            onClick={() => setRailViewMode("files")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 transition",
+              railViewMode === "files"
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <ListTree className="size-3" />
+            {t("viewFiles")}
+          </button>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex flex-wrap gap-1">
@@ -280,7 +445,7 @@ export function CanvasDocumentRail() {
       <SidebarSeparator className="mx-0" />
       <ScrollArea className="flex-1">
         <SidebarContent>
-          {grouped.length === 0 ? (
+          {filtered.length === 0 ? (
             <Empty className="border-0 p-4">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -289,6 +454,21 @@ export function CanvasDocumentRail() {
                 <EmptyDescription className="text-xs">{t("noDocuments")}</EmptyDescription>
               </EmptyHeader>
             </Empty>
+          ) : railViewMode === "files" ? (
+            // Flat file-list view: every matching document as `name.ext`, sorted
+            // by the active sort field, no time buckets — reads like an explorer.
+            <SidebarGroup className="gap-0.5 p-1">
+              <motion.ul
+                data-slot="sidebar-menu"
+                data-sidebar="menu"
+                className="flex w-full min-w-0 flex-col gap-0.5 pt-0.5"
+                variants={STAGGER_CONTAINER}
+                initial="initial"
+                animate="animate"
+              >
+                {filtered.map((doc) => renderDocRow(doc, true))}
+              </motion.ul>
+            </SidebarGroup>
           ) : (
             grouped.map((group) => (
               <SidebarGroup key={group.key} className="gap-0.5 p-1">
@@ -325,126 +505,7 @@ export function CanvasDocumentRail() {
                       initial="initial"
                       animate="animate"
                     >
-                      {group.docs.map((doc) => {
-                        const isActive = doc.id === activeId
-                        const isPinned = pinnedDocIds.has(doc.id)
-                        const Icon = doc.type === "code" ? FileCode : FileText
-                        return (
-                          <motion.li
-                            key={doc.id}
-                            layout
-                            variants={STAGGER_CHILD}
-                            data-slot="sidebar-menu-item"
-                            data-sidebar="menu-item"
-                            className="group/menu-item relative"
-                          >
-                            <ContextMenu>
-                              <ContextMenuTrigger asChild>
-                                <div
-                                  className={cn(
-                                    "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition",
-                                    isActive
-                                      ? "bg-primary/10 font-medium text-foreground"
-                                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                  )}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => setActive(doc.id)}
-                                    className="flex flex-1 min-w-0 items-center gap-2 bg-transparent text-left"
-                                  >
-                                    {isPinned && <Pin className="size-3 shrink-0 text-amber-500" />}
-                                    <Icon className="size-3.5 shrink-0" />
-                                    <span className="flex-1 truncate">
-                                      {doc.title || t("untitledDefault")}
-                                    </span>
-                                    <Badge variant="outline" className="px-1 text-[10px] shrink-0">
-                                      {doc.language}
-                                    </Badge>
-                                  </button>
-                                  <Tooltip delayDuration={300}>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        type="button"
-                                        aria-label={t("deleteAria", {
-                                          name: doc.title || t("untitledDefault"),
-                                        })}
-                                        onClick={(ev) => {
-                                          ev.stopPropagation()
-                                          if (activeId === doc.id) setActive(null)
-                                          remove(doc.id)
-                                        }}
-                                        className="size-5 shrink-0 opacity-0 transition group-hover:opacity-70 hover:opacity-100"
-                                      >
-                                        <X className="size-3" />
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="right">
-                                      {t("delete", { default: "Delete" })}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent className="w-40">
-                                <ContextMenuItem onClick={() => handleStartRename(doc)}>
-                                  <Edit2 className="mr-2 size-3.5" />
-                                  {t("rename")}
-                                </ContextMenuItem>
-                                <ContextMenuItem
-                                  onClick={() => {
-                                    const dupId = create({
-                                      title: `${doc.title} ${t("copySuffix")}`,
-                                      content: doc.content,
-                                      language: doc.language,
-                                      type: doc.type,
-                                    })
-                                    setActive(dupId)
-                                  }}
-                                >
-                                  <Copy className="mr-2 size-3.5" />
-                                  {t("duplicate")}
-                                </ContextMenuItem>
-                                <ContextMenuItem onClick={() => handleExport(doc)}>
-                                  <Download className="mr-2 size-3.5" />
-                                  {t("export", { default: "Export" })}
-                                </ContextMenuItem>
-                                <ContextMenuSeparator />
-                                <ContextMenuItem
-                                  onClick={() => {
-                                    if (isPinned) unpinDocument(doc.id)
-                                    else pinDocument(doc.id)
-                                  }}
-                                >
-                                  {isPinned ? (
-                                    <>
-                                      <PinOff className="mr-2 size-3.5" />
-                                      {t("unpin", { default: "Unpin" })}
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Pin className="mr-2 size-3.5" />
-                                      {t("pin", { default: "Pin" })}
-                                    </>
-                                  )}
-                                </ContextMenuItem>
-                                <ContextMenuSeparator />
-                                <ContextMenuItem
-                                  onClick={() => {
-                                    remove(doc.id)
-                                    if (activeId === doc.id) setActive(null)
-                                  }}
-                                  className="text-destructive focus:text-destructive"
-                                >
-                                  <Trash2 className="mr-2 size-3.5" />
-                                  {t("delete")}
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          </motion.li>
-                        )
-                      })}
+                      {group.docs.map((doc) => renderDocRow(doc, false))}
                     </motion.ul>
                   </CollapsibleContent>
                 </Collapsible>

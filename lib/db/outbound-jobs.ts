@@ -153,7 +153,7 @@ async function enforceQueueSoftCap(now: number): Promise<void> {
   const total = await db.outboundQueue.count()
   if (total <= OUTBOUND_QUEUE_SOFT_CAP) return
   const overflow = total - OUTBOUND_QUEUE_SOFT_CAP
-  const oldestPending = await db.outboundQueue.filter((r) => r.status === "pending").toArray()
+  const oldestPending = await db.outboundQueue.where("status").equals("pending").toArray()
   oldestPending.sort((a, b) => a.createdAt - b.createdAt)
   const victims = oldestPending.slice(0, overflow)
   for (const job of victims) {

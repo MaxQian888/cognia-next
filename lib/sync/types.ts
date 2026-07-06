@@ -31,6 +31,31 @@ export type SyncableTable =
   // Mobile mirrors these so the Inbox can render pinned/unread state when
   // the companion server is unreachable.
   | "conversationOverrides"
+  // Companion read-mostly views: mirror /goal console + long-term memory so
+  // the phone can show goal progress and recalled memories from Dexie while
+  // the desktop is unreachable. Both are authored on the desktop; mobile is
+  // a viewer.
+  | "goals"
+  | "memories"
+  // Workflow RUN history. Workflow *definitions* (`workflows`) already sync,
+  // but their runs never did — so every mobile run surface (the library's
+  // "active"/"sending" badges, RecentRunsFeed, MobileRunsList, the home
+  // active-runs card) sat permanently empty, and a workflow triggered from
+  // the phone vanished the moment its outbound job was sent. The phone is a
+  // read-only viewer; runs are authored on the desktop that executes them.
+  | "workflowRuns"
+  // ADR-0056 (Wave 4) — configured MCP servers. The standalone webview engine
+  // runs no MCP, and the phone has no `mcp_set_enabled` push RPC, so the mobile
+  // `/me/mcp` page is a paired-only read-only viewer of the desktop's servers.
+  // Mirroring this table is what lets it list the desktop's MCP config offline.
+  | "mcpServers"
+  // ADR-0039 (phase 2) — durable terminal command history. Authored on the
+  // desktop by the terminal spawn-orchestrator; the phone has no shell and
+  // never writes back, so this is a one-way read-only mirror powering the
+  // mobile `/me/command-history` browse/search viewer. Rows carry no
+  // `updatedAt`/`createdAt` — recency lives on the indexed `ts`, which the
+  // desktop projector cursors on (see readTerminalHistoryDelta).
+  | "terminalHistory"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

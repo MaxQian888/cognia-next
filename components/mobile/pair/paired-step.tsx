@@ -31,7 +31,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { transport } from "@/lib/tauri"
 import { clearCompanionConfig } from "@/lib/tauri/transport-companion"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 import { cn } from "@/lib/utils"
 
 const SMOKE_RPC = "claude_sidecar_status"

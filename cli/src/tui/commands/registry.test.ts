@@ -45,6 +45,11 @@ describe("command registry", () => {
     expect(names.indexOf("model")).toBeLessThan(names.indexOf("mode"))
   })
 
+  it("registers the /open and /editor commands in the system category", () => {
+    expect(getCommand("open")?.category).toBe("system")
+    expect(getCommand("editor")?.category).toBe("system")
+  })
+
   it("resolves a command by name or alias", () => {
     expect(getCommand("clear")?.name).toBe("clear")
     expect(getCommand("new")?.name).toBe("clear")
@@ -127,6 +132,15 @@ describe("command registry", () => {
       args: "systemPrompt be concise",
     } as never)
     expect(effect).toEqual({ kind: "settingsSet", field: "systemPrompt", value: "be concise" })
+  })
+
+  it("/cwd shows the directory bare and changes it with an arg (via the /cd alias)", () => {
+    const cwd = getCommand("cwd")
+    expect(getCommand("cd")?.name).toBe("cwd")
+    const ctx = (args: string) =>
+      ({ state: {}, config: { cwd: "/w" }, version: "0", args }) as never
+    expect(cwd?.handler?.(ctx(""))).toEqual({ kind: "notice", message: "/w" })
+    expect(cwd?.handler?.(ctx("  ../other  "))).toEqual({ kind: "changeCwd", dir: "../other" })
   })
 
   it("/clear confirms before wiping, and `--yes` performs the reset", () => {

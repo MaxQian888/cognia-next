@@ -92,6 +92,15 @@ describe("<QuickActionGrid />", () => {
     expect(selectionFeedbackMock).toHaveBeenCalledTimes(3)
   })
 
+  it("persists the theme through the settings store so a sync tick can't revert it", () => {
+    render(<QuickActionGrid />)
+    fireEvent.click(screen.getByTestId("quick-theme-toggle"))
+    // Both halves must fire: next-themes for instant feedback AND the store
+    // write that SettingsSyncProvider re-applies on every settings change.
+    expect(setThemeMock).toHaveBeenLastCalledWith("light")
+    expect(saveMock).toHaveBeenCalledWith({ theme: "light" })
+  })
+
   it("cycles language en ↔ zh-CN", () => {
     const { rerender } = render(<QuickActionGrid />)
     fireEvent.click(screen.getByTestId("quick-language-toggle"))

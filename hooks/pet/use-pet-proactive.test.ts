@@ -47,6 +47,9 @@ const view = {
   effectiveBones: { species: "cat", rarity: "common" },
   mood: "content",
   needs: { energy: 80, mood: 70, bond: 60, lastTickAt: "" },
+  // Wisdom 100 keeps the workflowRun comment gate wide open — these tests
+  // exercise the utterance pipeline, not the gate (covered in triggers.test).
+  effectiveStats: { debugging: 0, patience: 0, chaos: 0, wisdom: 100, snark: 0 },
 } as unknown as PetView
 
 interface SettingsOverrides {

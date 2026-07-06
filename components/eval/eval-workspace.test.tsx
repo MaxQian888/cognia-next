@@ -6,6 +6,8 @@ import { fireEvent, render, screen } from "@testing-library/react"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
+const push = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 jest.mock("./eval-dashboard", () => ({ EvalDashboard: () => <div>DASHBOARD</div> }))
 jest.mock("./runs-compare-panel", () => ({ RunsComparePanel: () => <div>COMPARE</div> }))
 jest.mock("./trace-annotation-panel", () => ({ TraceAnnotationPanel: () => <div>ANNOTATE</div> }))
@@ -14,6 +16,14 @@ jest.mock("./calibration-panel", () => ({ CalibrationPanel: () => <div>CALIBRATE
 import { EvalWorkspace } from "./eval-workspace"
 
 describe("EvalWorkspace", () => {
+  beforeEach(() => push.mockClear())
+
+  it("deep-links to the eval settings section", () => {
+    render(<EvalWorkspace />)
+    fireEvent.click(screen.getByLabelText("settings.title"))
+    expect(push).toHaveBeenCalledWith("/settings?section=eval")
+  })
+
   it("shows the dashboard by default", () => {
     render(<EvalWorkspace />)
     expect(screen.getByText("DASHBOARD")).toBeInTheDocument()

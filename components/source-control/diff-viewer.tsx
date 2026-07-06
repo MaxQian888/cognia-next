@@ -19,6 +19,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { FileQuestionIcon } from "lucide-react"
 import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
 import type { GitDiff, GitHunk } from "@/types/git"
 
@@ -64,6 +65,7 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null)
   const { themeId, registerMonaco } = useMonacoActiveTheme()
+  const { prefs } = useSourceControlPrefs()
 
   // Scroll the modified side to a hunk's first line and place the caret there.
   const revealHunk = useCallback((hunk: GitHunk) => {
@@ -96,14 +98,16 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
   const options = useMemo<MonacoEditor.IStandaloneDiffEditorConstructionOptions>(
     () => ({
       readOnly: true,
-      renderSideBySide: true,
+      // View mode + whitespace handling are user preferences (gear popover).
+      renderSideBySide: prefs.diffView === "sideBySide",
+      ignoreTrimWhitespace: prefs.ignoreWhitespace,
       automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       fontSize: 13,
       renderOverviewRuler: false,
     }),
-    []
+    [prefs.diffView, prefs.ignoreWhitespace]
   )
 
   if (!diff) {

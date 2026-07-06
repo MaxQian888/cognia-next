@@ -146,6 +146,12 @@ beforeEach(() => {
     leadId: "lead-9",
     teammateIds: ["lead-9"],
     taskIds: [],
+    decision: {
+      kind: "team-flat",
+      fromPattern: "parallel_specialists",
+      confidence: 0.82,
+      reason: "Independent angles benefit from specialists.",
+    },
   })
 })
 
@@ -512,6 +518,196 @@ describe("AutoComposeDialog — approve + options passthrough", () => {
     expect(sent.tasks[0].title).toBe("Edited scan")
     expect(sent.tasks).toHaveLength(2)
     expect(sent.assessment.recommendedPattern).toBe("manager_worker")
+  })
+})
+
+describe("AutoComposeDialog — executor dispatch (council / ensemble)", () => {
+  const councilProposal: AutoOrchestrationProposal = {
+    ...proposal,
+    executor: {
+      kind: "council",
+      fromPattern: "manager_worker",
+      confidence: 0.8,
+      reason: "consensus requested",
+    },
+  }
+
+  function setupExec(over: Partial<React.ComponentProps<typeof AutoComposeDialog>> = {}) {
+    const onResult = jest.fn()
+    const runCouncilExec = jest.fn(async () => ({ markdown: "COUNCIL REPORT", ok: true }))
+    const runEnsembleExec = jest.fn(async () => ({ markdown: "ENSEMBLE REPORT", ok: true }))
+    render(
+      <AutoComposeDialog
+        open
+        onOpenChange={jest.fn()}
+        onComposed={jest.fn()}
+        onResult={onResult}
+        getCatalog={getCatalog}
+        runCouncilExec={runCouncilExec}
+        runEnsembleExec={runEnsembleExec}
+        loadAliases={async () => ["fast", "balanced"]}
+        makeRunPrompt={async () => async () => ({ completion: "x" })}
+        {...over}
+      />
+    )
+    return { onResult, runCouncilExec, runEnsembleExec }
+  }
+
+  it("runs a council on approve (not materialize) and shows the report + onResult", async () => {
+    mockPlan.mockResolvedValue(councilProposal)
+    const { onResult, runCouncilExec } = setupExec()
+    typeObjective("decide the architecture")
+    fireEvent.click(screen.getByTestId("auto-compose-submit"))
+    await waitFor(() => screen.getByTestId("auto-compose-approve"))
+    // The preview shows the chosen executor.
+    expect(screen.getByTestId("auto-compose-executor")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("auto-compose-approve"))
+    await waitFor(() => screen.getByTestId("auto-compose-result"))
+    expect(runCouncilExec).toHaveBeenCalled()
+    expect(mockMaterialize).not.toHaveBeenCalled()
+    expect(screen.getByTestId("auto-compose-result")).toHaveTextContent("COUNCIL REPORT")
+    expect(onResult).toHaveBeenCalledWith("COUNCIL REPORT")
+  })
+
+  it("runs an ensemble when the executor is ensemble", async () => {
+    mockPlan.mockResolvedValue({
+      ...proposal,
+      executor: {
+        kind: "ensemble",
+        fromPattern: "manager_worker",
+        confidence: 0.8,
+        reason: "verify",
+      },
+    })
+    const { runEnsembleExec } = setupExec()
+    typeObjective("verify the proof")
+    fireEvent.click(screen.getByTestId("auto-compose-submit"))
+    await waitFor(() => screen.getByTestId("auto-compose-approve"))
+    fireEvent.click(screen.getByTestId("auto-compose-approve"))
+    await waitFor(() => screen.getByTestId("auto-compose-result"))
+    expect(runEnsembleExec).toHaveBeenCalled()
+    expect(screen.getByTestId("auto-compose-result")).toHaveTextContent("ENSEMBLE REPORT")
+  })
+
+  it("threads the consensus signal into plan when the toggle is on", async () => {
+    const user = userEvent.setup()
+    mockPlan.mockResolvedValue(councilProposal)
+    setupExec()
+    typeObjective("decide")
+    fireEvent.click(screen.getByTestId("auto-compose-advanced-trigger"))
+    await user.click(screen.getByTestId("auto-compose-consensus"))
+    fireEvent.click(screen.getByTestId("auto-compose-submit"))
+    await waitFor(() => expect(mockPlan).toHaveBeenCalled())
+    expect(mockPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ consensusSignal: { consensusNeeded: true } })
+    )
+  })
+})
+
+describe("AutoComposeDialog — handoff executors", () => {
+  const baseResult = {
+    leadId: "lead-h",
+    teammateIds: ["lead-h"],
+    taskIds: [],
+  }
+
+  it("routes background-handoff approvals through the background seam + toast", async () => {
+    const executor = {
+      kind: "background-handoff" as const,
+      fromPattern: "background_handoff" as const,
+      confidence: 0.7,
+      reason: "long-running",
+    }
+    mockPlan.mockResolvedValue({ ...proposal, executor })
+    const materializeBackground = jest.fn(async () => ({
+      ...baseResult,
+      teamId: "team-bg",
+      decision: executor,
+      scheduledTaskId: "task-1",
+    }))
+    const onComposed = jest.fn()
+    render(
+      <AutoComposeDialog
+        open
+        onOpenChange={jest.fn()}
+        onComposed={onComposed}
+        getCatalog={getCatalog}
+        materializeBackground={materializeBackground}
+      />
+    )
+    typeObjective("long migration")
+    fireEvent.click(screen.getByTestId("auto-compose-submit"))
+    await waitFor(() => screen.getByTestId("auto-compose-approve"))
+    fireEvent.click(screen.getByTestId("auto-compose-approve"))
+
+    await waitFor(() => expect(materializeBackground).toHaveBeenCalled())
+    expect(mockMaterialize).not.toHaveBeenCalled()
+    expect(onComposed).toHaveBeenCalledWith("team-bg")
+    expect(toastSuccess).toHaveBeenCalledWith("queuedBackground")
+  })
+
+  it("toasts the degraded message when scheduling was unavailable", async () => {
+    const executor = {
+      kind: "background-handoff" as const,
+      fromPattern: "background_handoff" as const,
+      confidence: 0.7,
+      reason: "long-running",
+    }
+    mockPlan.mockResolvedValue({ ...proposal, executor })
+    const materializeBackground = jest.fn(async () => ({
+      ...baseResult,
+      teamId: "team-bg2",
+      decision: executor,
+      // no scheduledTaskId → degraded
+    }))
+    render(
+      <AutoComposeDialog
+        open
+        onOpenChange={jest.fn()}
+        onComposed={jest.fn()}
+        getCatalog={getCatalog}
+        materializeBackground={materializeBackground}
+      />
+    )
+    typeObjective("long migration")
+    fireEvent.click(screen.getByTestId("auto-compose-quick"))
+    await waitFor(() => expect(materializeBackground).toHaveBeenCalled())
+    expect(toastSuccess).toHaveBeenCalledWith("queuedBackgroundNoScheduler")
+  })
+
+  it("routes external-handoff approvals through the external seam + toast", async () => {
+    const executor = {
+      kind: "external-handoff" as const,
+      fromPattern: "external_handoff" as const,
+      confidence: 0.6,
+      reason: "external agent",
+    }
+    mockPlan.mockResolvedValue({ ...proposal, executor })
+    const materializeExternal = jest.fn(async () => ({
+      ...baseResult,
+      teamId: "team-ext",
+      decision: executor,
+    }))
+    const onComposed = jest.fn()
+    render(
+      <AutoComposeDialog
+        open
+        onOpenChange={jest.fn()}
+        onComposed={onComposed}
+        getCatalog={getCatalog}
+        materializeExternal={materializeExternal}
+      />
+    )
+    typeObjective("hand to external")
+    fireEvent.click(screen.getByTestId("auto-compose-submit"))
+    await waitFor(() => screen.getByTestId("auto-compose-approve"))
+    fireEvent.click(screen.getByTestId("auto-compose-approve"))
+
+    await waitFor(() => expect(materializeExternal).toHaveBeenCalled())
+    expect(mockMaterialize).not.toHaveBeenCalled()
+    expect(onComposed).toHaveBeenCalledWith("team-ext")
+    expect(toastSuccess).toHaveBeenCalledWith("awaitingExternal")
   })
 })
 

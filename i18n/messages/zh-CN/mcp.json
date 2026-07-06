@@ -168,7 +168,17 @@
     "running": "运行中",
     "startedAt": "启动于 {time}",
     "stopped": "已停止",
-    "title": "健康与日志"
+    "title": "健康与日志",
+    "sectionOutbound": "出站",
+    "outboundTitle": "MCP 服务器",
+    "outboundSubtitle": "本应用所连接 MCP 服务器的实时会话与近期日志。",
+    "statServers": "服务器",
+    "statLogs": "日志行数",
+    "statErrors": "错误",
+    "logsTitle": "近期日志",
+    "logsSubtitle": "已连接 MCP 服务器最新输出的日志行。",
+    "sectionInbound": "入站",
+    "windowNote": "仅显示最近的日志行。"
   },
   "import": {
     "back": "返回",
@@ -204,9 +214,13 @@
   "importLabel": "导入",
   "list": {
     "clearFilters": "清空筛选",
+    "clearSelection": "清除选择",
     "empty": "暂无 MCP 服务器，添加一个让 Claude 可以使用外部工具。",
+    "emptyBrowsePresets": "浏览预设",
     "noMatch": "没有匹配当前筛选的服务器。",
-    "searchPlaceholder": "按名称、命令或 URL 筛选服务器…"
+    "searchPlaceholder": "按名称、命令或 URL 筛选服务器…",
+    "selectAll": "全选（{count}）",
+    "selectAllAria": "全选服务器"
   },
   "liveSession": {
     "disable": "停用",
@@ -224,7 +238,10 @@
     },
     "subtitle": "当前运行会话所连接 MCP 服务器的实时状态。",
     "title": "会话实时服务器",
-    "toolsCount": "{count} 个工具"
+    "toolsCount": "{count} 个工具",
+    "viewLogs": "查看日志",
+    "viewLogsFor": "查看 {name} 的日志",
+    "recentLogAt": "{time} · {message}"
   },
   "panel": {
     "searchPlaceholder": "按名称、命令或 URL 过滤服务器…"

@@ -20,6 +20,11 @@ export interface StartWorkflowFromRemoteInput {
   signal?: AbortSignal
   /** Caller-provided runId so the dispatch layer can correlate the audit row. */
   runId?: string
+  /**
+   * Paired-device id of the remote caller (ADR-0060), when the dispatch
+   * layer knows it. Stamped into `triggeredBy.deviceId` on the run row.
+   */
+  deviceId?: string
 }
 
 export type StartWorkflowFromRemoteResult =
@@ -50,7 +55,7 @@ export async function startWorkflowFromRemote(
     trigger,
     runId,
     signal: input.signal,
-    triggeredBy: { source: "api" },
+    triggeredBy: { source: "api", ...(input.deviceId ? { deviceId: input.deviceId } : {}) },
   })
 
   return { ok: true, runId }

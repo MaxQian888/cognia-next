@@ -4,6 +4,11 @@ import { __fireInput, __resetInk } from "ink"
 
 import { SelectList } from "./SelectList"
 
+// jsdom has no Yoga layout, so stub the absolute-position reader for click tests.
+jest.mock("../input/element-position", () => ({
+  absoluteTopLeft: () => ({ top: 0, left: 0 }),
+}))
+
 const items = [{ label: "One", hint: "first" }, { label: "Two" }, { label: "Three" }]
 
 describe("SelectList", () => {
@@ -68,6 +73,136 @@ describe("SelectList", () => {
       />
     )
     expect(without.container.textContent ?? "").not.toContain("Enter select")
+  })
+
+  it("selects the clicked row (highlight + select) in scroll mouse mode", () => {
+    const onMove = jest.fn()
+    const onSelect = jest.fn()
+    // No title → headerRows 0; border 1 → first item at 0-based row 1 (SGR row 2).
+    render(<SelectList items={items} index={0} onMove={onMove} onSelect={onSelect} />)
+    __fireInput("[<0;3;3M", {}) // SGR row 3 → 0-based 2 → item offset 1 (Two)
+    expect(onSelect).toHaveBeenCalledWith(1)
+    expect(onMove).toHaveBeenCalledWith(1) // move highlight from index 0 to 1
+  })
+
+  it("moves the highlight on the mouse wheel", () => {
+    const onMove = jest.fn()
+    render(<SelectList items={items} index={1} onMove={onMove} onSelect={() => {}} />)
+    __fireInput("[<64;1;1M", {}) // wheel up
+    __fireInput("[<65;1;1M", {}) // wheel down
+    expect(onMove).toHaveBeenNthCalledWith(1, -1)
+    expect(onMove).toHaveBeenNthCalledWith(2, 1)
+  })
+
+  it("swallows the wheel without moving the highlight when disableWheel is set", () => {
+    const onMove = jest.fn()
+    render(<SelectList items={items} index={1} onMove={onMove} onSelect={() => {}} disableWheel />)
+    __fireInput("[<64;1;1M", {}) // wheel up
+    __fireInput("[<65;1;1M", {}) // wheel down
+    expect(onMove).not.toHaveBeenCalled()
+  })
+
+  it("ignores a click on the border/title without selecting", () => {
+    const onSelect = jest.fn()
+    render(
+      <SelectList title="Pick" items={items} index={0} onMove={() => {}} onSelect={onSelect} />
+    )
+    __fireInput("[<0;1;1M", {}) // SGR row 1 → 0-based 0 = the top border
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  describe("searchable (typeahead)", () => {
+    it("renders the search line with a placeholder while the query is empty", () => {
+      const { container } = render(
+        <SelectList
+          items={items}
+          index={0}
+          query=""
+          onQueryChange={() => {}}
+          searchPlaceholder="type to filter models"
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("🔎")
+      expect(text).toContain("type to filter models")
+    })
+
+    it("shows the current query instead of the placeholder", () => {
+      const { container } = render(
+        <SelectList
+          items={items}
+          index={0}
+          query="opus"
+          onQueryChange={() => {}}
+          searchPlaceholder="type to filter models"
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("opus")
+      expect(text).not.toContain("type to filter models")
+    })
+
+    it("appends printable keys and trims on backspace", () => {
+      const onQueryChange = jest.fn()
+      render(
+        <SelectList
+          items={items}
+          index={0}
+          query="op"
+          onQueryChange={onQueryChange}
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      __fireInput("u", {})
+      expect(onQueryChange).toHaveBeenLastCalledWith("opu")
+      __fireInput("", { backspace: true })
+      expect(onQueryChange).toHaveBeenLastCalledWith("o")
+    })
+
+    it("keeps arrows/Enter/Esc as list controls (not typed into the query)", () => {
+      const onMove = jest.fn()
+      const onSelect = jest.fn()
+      const onCancel = jest.fn()
+      const onQueryChange = jest.fn()
+      render(
+        <SelectList
+          items={items}
+          index={0}
+          query=""
+          onQueryChange={onQueryChange}
+          onMove={onMove}
+          onSelect={onSelect}
+          onCancel={onCancel}
+        />
+      )
+      __fireInput("", { downArrow: true })
+      __fireInput("", { return: true })
+      __fireInput("", { escape: true })
+      expect(onMove).toHaveBeenCalledWith(1)
+      expect(onSelect).toHaveBeenCalledWith(0)
+      expect(onCancel).toHaveBeenCalled()
+      expect(onQueryChange).not.toHaveBeenCalled()
+    })
+
+    it("shows the empty hint when a search filters everything out", () => {
+      const { container } = render(
+        <SelectList
+          items={[]}
+          index={0}
+          query="zzz"
+          onQueryChange={() => {}}
+          emptyHint="no models match"
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      expect(container.textContent ?? "").toContain("no models match")
+    })
   })
 
   it("windows a long list around the selection with scroll hints", () => {

@@ -29,6 +29,7 @@ import type {
   CompressionSettings,
   CompressionStrategy,
   CompressionTrigger,
+  OpticalCompactionOptions,
   SessionCompressionOverrides,
 } from "@/types/system/compression"
 
@@ -46,6 +47,15 @@ export interface ResolvedCompaction {
   enabled?: boolean
   /** Window fraction (0..1) at which auto-compaction triggers. Default `AUTO_COMPACT_FRACTION`. */
   fraction?: number
+  /**
+   * Authoritative context-window size (tokens) for the active model, resolved
+   * from the provider catalog by `resolveSendOptions`. The generic (AI-SDK)
+   * compaction trigger prefers this over its own conservative regex table, which
+   * floors families like `deepseek*` at 128k and would otherwise auto-compact a
+   * real 1M model (e.g. deepseek-v4) at ~107k. Absent ⇒ the sidecar falls back
+   * to that table.
+   */
+  contextWindow?: number
   /** Number of most-recent turns kept verbatim. Default 6. */
   keepRecent?: number
   /** Free-form focus / compact instructions merged into the summary prompt. */
@@ -68,7 +78,12 @@ export interface ResolvedCompaction {
   summary?: {
     model?: string
     protocol?: string
-    credentials?: { apiKey?: string; baseURL?: string; headers?: Record<string, string> }
+    credentials?: {
+      apiKey?: string
+      baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
+    }
     protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   }
   /**
@@ -96,6 +111,9 @@ export interface ResolvedCompaction {
   retainedFraction?: number
   /** Attach the pre-compaction message snapshot to the boundary event (enables undo). */
   captureUndoSnapshot?: boolean
+  /** Shape + budget knobs for the "optical" strategy (ADR-0063); read only when
+   * `strategy === "optical"`. Absent ⇒ the sidecar renderer's own defaults. */
+  optical?: OpticalCompactionOptions
 }
 
 /**
@@ -146,6 +164,24 @@ export interface BuiltinToolsConfig {
    * (desktop only; reuses the vscode-ext-host LSP host). See `sidecar/lsp/*`.
    */
   lsp?: boolean
+  /**
+   * Tree-sitter code-graph tools (codegraph_search / node / callers / callees /
+   * impact / context / explore / files / status). Read-only; desktop only;
+   * per-session index built lazily. See `sidecar/builtin-tools/code/`.
+   */
+  codeGraph?: boolean
+  /**
+   * AST-aware structural code search/replace (ast_grep_search /
+   * ast_grep_replace) across 25 languages, backed by the `ast-grep` CLI.
+   * Desktop only; the binary is probed lazily. Off by default.
+   */
+  astGrep?: boolean
+  /**
+   * Dependency-source research (clone_dep_source / list_cloned_deps): clone a
+   * dependency's source repo into an ignored `.cognia/clonedeps/` workspace so
+   * the agent can read library internals. Desktop only; off by default.
+   */
+  dependencyResearch?: boolean
 }
 
 /** Default values when the user hasn't customised the toggles. Mirrors `lib/db/settings.ts`. */
@@ -158,6 +194,9 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   shellAdvanced: false,
   terminalRepl: false,
   lsp: false,
+  codeGraph: false,
+  astGrep: false,
+  dependencyResearch: false,
 }
 
 export interface SendOptions {
@@ -185,6 +224,15 @@ export interface SendOptions {
    * precedence. Ignored by the Anthropic Agent SDK path.
    */
   aiSdkMaxSteps?: number
+  /**
+   * Non-Anthropic (ai-sdk) channel only: per-leg agentic step cap (STEP_CHUNK).
+   * Each `streamText` leg re-sends the whole growing conversation, so a LARGER
+   * chunk means fewer legs → fewer full re-sends for a long tool-using turn (less
+   * prompt-token overhead), at the cost of inspecting the context window less
+   * often within a turn. Undefined ⇒ the dispatcher's default (16). Ignored by
+   * the Anthropic Agent SDK path.
+   */
+  aiSdkStepChunk?: number
   /**
    * Non-Anthropic (ai-sdk) channel only: per-tool execution deadline (ms) for
    * READ-ONLY built-in tools (`content_search`, `file_search`, `glob`, `grep`,
@@ -387,6 +435,17 @@ export interface SendOptions {
   suppressApprovalForTools?: string[]
 
   /**
+   * Session-global "always allow" tool names (from `AppSettings.alwaysAllowTools`).
+   * Honored by BOTH sidecar `canUseTool` gates (anthropic + ai-sdk) so a tool the
+   * user marked "Allow always" runs without a `permission_request` round-trip —
+   * previously only the ai-sdk path read this and the anthropic path relied on the
+   * renderer's `allowListRef` to auto-answer the round-trip. A confinement `deny`
+   * (credential path) still overrides this; a confinement `ask` does not (an
+   * explicit name-level grant is deliberate). Populated by `resolveSendOptions`.
+   */
+  alwaysAllowTools?: string[]
+
+  /**
    * OpenCode-style glob permission ruleset consulted by the sidecar
    * `canUseTool` before emitting a `permission_request`. A resolved
    * `tool → glob → allow|ask|deny` map (see
@@ -397,6 +456,20 @@ export interface SendOptions {
    * The fine-grained layer that augments the coarse allow/deny tool union.
    */
   permissionRuleset?: import("@/lib/claude/permissions/ruleset").Ruleset
+
+  /**
+   * Workspace confinement policy (ADR-0028 "lite") consulted by the sidecar
+   * `canUseTool` gates. When set, the built-in file/bash tools are confined to
+   * `roots`: a mutator call whose target escapes every root escalates to the
+   * approval round-trip ("ask"), and any op resolving into a protected
+   * credential path (`.ssh`/`.aws`/`.git-credentials`/…) — directly or via a
+   * symlink escape — is hard-denied. Read-only tools outside the roots are not
+   * confined (only secret paths deny). Populated by `resolveSendOptions` from
+   * the active workspace roots (`cwd` + `additionalDirectories`); omitted when
+   * the heavy OS sandbox is active for the session (that path enforces at the
+   * OS level instead, so the two never double-confine).
+   */
+  confinement?: { enabled: boolean; roots: string[] }
 
   /**
    * Extra HTTP headers the sidecar should merge into the Anthropic
@@ -482,7 +555,14 @@ export interface SendOptions {
      * adapters carry their namespaced id (`${pluginId}:${id}`) and ride a
      * `protocolAdapterSpec` alongside.
      */
-    protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere" | (string & {})
+    protocol?: import("@cognia/provider-types/provider").ResolverProtocol
+    /**
+     * Explicit OpenAI endpoint family (responses/chat/auto). Overrides the host
+     * heuristic so the Responses API can be used on Azure OpenAI, on compatible
+     * gateways that proxy `/responses`, and on custom base URLs. Consumed by the
+     * sidecar's `decideOpenAiEndpointFlavor`. Omitted = "auto".
+     */
+    apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
     /**
      * Extra default headers forwarded into the provider client. Used by the
      * Codex ChatGPT-login path (`ChatGPT-Account-Id`, `OpenAI-Beta`,
@@ -553,6 +633,24 @@ export interface SendOptions {
   }
 
   /**
+   * Set when opt-in auto routing rewrote a non-alias model to a tier alias
+   * (before `aliasResolution` resolved it): the difficulty `score` and the
+   * chosen `tier` alias, for the transparency badge. Sidecar-protocol metadata
+   * only — the sidecar ignores it (mirrors `routingDecision`).
+   */
+  autoRouting?: { score: number; tier: string }
+
+  /**
+   * Advisory capability-gate notice: the user requested a feature (e.g. a
+   * reasoning `effort` level) that the resolved model does not support per
+   * its models.dev metadata, so the parameter was silently dropped to avoid
+   * a provider 400. The renderer surfaces a once-per-model toast; the send
+   * proceeds regardless. Sidecar-protocol metadata only — the sidecar
+   * ignores it (mirrors `routingDecision`).
+   */
+  droppedCapabilityWarning?: { capability: "effort"; model: string; provider?: string }
+
+  /**
    * Inbox / connector-driven gate. Set by `resolveSendOptions` when the
    * caller passed a `conversationOverride` whose `trigger.quietHours`
    * window covers `now`, when the conversation is muted, or when the
@@ -589,6 +687,19 @@ export interface SendOptions {
       tone: string[]
     }>
     degraded: boolean
+    /**
+     * Optional formatted source citations for the retrieved chunks — metadata
+     * only, never part of the assembled prompt. Present when the character has
+     * `enableCitations` on. Structural mirror of `@cognia/rag` `Citation`.
+     */
+    citations?: Array<{
+      id: string
+      marker: string
+      fullCitation: string
+      source: string
+      title?: string
+      relevanceScore?: number
+    }>
   }
 
   /**
@@ -607,6 +718,24 @@ export interface SendOptions {
       score: number
     }>
     proceduralCount: number
+    degraded: boolean
+  }
+
+  /**
+   * Project (workspace) knowledge-base context injected this turn (project-scoped
+   * RAG). Set by `resolveSendOptions` when `applyProjectKnowledgeContext`
+   * retrieved any chunks from the active workspace's knowledge files. Mirrors
+   * `twinContext` / `memoryContext` — stashed so the chat hook can render a
+   * "Project knowledge" SourcesPart. Stripped before the SDK call. `degraded` is
+   * true when the runtime failed and fell back to no context.
+   */
+  projectKnowledgeContext?: {
+    retrievedChunks: Array<{
+      fileId: string
+      fileName?: string
+      content: string
+      score: number
+    }>
     degraded: boolean
   }
 
@@ -756,6 +885,17 @@ export function isPluginToolExecEvent(evt: ClaudeEvent): evt is PluginToolExecEv
   return evt.type === "plugin_tool_exec"
 }
 
+export interface ProtocolAdapterCancelEvent {
+  type: "protocol_adapter_cancel"
+  sessionId: string
+  execId: string
+  reason?: string
+}
+
+export function isProtocolAdapterCancelEvent(evt: ClaudeEvent): evt is ProtocolAdapterCancelEvent {
+  return evt.type === "protocol_adapter_cancel"
+}
+
 /**
  * Emitted by the ai-sdk dispatcher when `sendOptions.toolResultReviewEnabled`
  * is set: before a tool result is fed to the model, the sidecar pauses and asks
@@ -864,6 +1004,28 @@ export interface SdkSlashCommand {
   aliases?: string[]
 }
 
+/**
+ * Per-MCP-server diagnostic line emitted by the sidecar while it connects out
+ * to user-configured MCP servers (connect success/failure, `tools()` failures,
+ * captured child `stderr`). Mirror of `buildMcpLogEvent` in
+ * `sidecar/dispatch/mcp-log.mjs`. `server` is absent when a line can't be
+ * attributed to a named server. Consumed on the GUI side by the MCP log bridge
+ * (`lib/mcp/log-bridge.ts`), which forwards each into the unified logger.
+ */
+export interface McpLogEvent {
+  type: "mcp_log"
+  sessionId: string
+  ts: number
+  level: "error" | "warn" | "info" | "debug"
+  message: string
+  source?: "stderr" | "diagnostic" | "status"
+  server?: string
+}
+
+export function isMcpLogEvent(evt: ClaudeEvent): evt is McpLogEvent {
+  return evt.type === "mcp_log"
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -874,8 +1036,10 @@ export type ClaudeEvent =
   | SDKEventEnvelope
   | UsageHeadersEvent
   | PluginToolExecEvent
+  | ProtocolAdapterCancelEvent
   | ToolResultReviewEvent
   | ControlResponseEvent
+  | McpLogEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
@@ -885,12 +1049,14 @@ export interface BetaTextBlock {
   type: "text"
   text: string
   citations?: unknown
+  providerMetadata?: Record<string, Record<string, unknown>>
 }
 
 export interface BetaThinkingBlock {
   type: "thinking"
   thinking: string
   signature?: string
+  providerMetadata?: Record<string, Record<string, unknown>>
 }
 
 export interface BetaToolUseBlock {
@@ -898,6 +1064,18 @@ export interface BetaToolUseBlock {
   id: string
   name: string
   input: Record<string, unknown>
+  state?: "input-streaming" | "approval-requested"
+  providerExecuted?: boolean
+  providerMetadata?: Record<string, Record<string, unknown>>
+  toolMetadata?: Record<string, unknown>
+  dynamic?: boolean
+  title?: string
+  invalid?: boolean
+  error?: unknown
+  approval?: {
+    id: string
+    signature?: string
+  }
 }
 
 export interface BetaToolResultBlock {
@@ -907,11 +1085,24 @@ export interface BetaToolResultBlock {
   is_error?: boolean
 }
 
+export interface BetaFileBlock {
+  type: "file"
+  source?: {
+    type: "base64"
+    media_type: string
+    data: string
+  }
+  url?: string
+  media_type?: string
+  filename?: string
+}
+
 export type BetaContentBlock =
   | BetaTextBlock
   | BetaThinkingBlock
   | BetaToolUseBlock
   | BetaToolResultBlock
+  | BetaFileBlock
   | { type: string; [k: string]: unknown }
 
 export interface BetaMessage {
@@ -921,6 +1112,7 @@ export interface BetaMessage {
   stop_reason?: string | null
   model?: string
   usage?: Record<string, unknown>
+  metadata?: unknown
 }
 
 export interface SDKAssistantMessage {
@@ -1076,6 +1268,32 @@ export interface ChatSession {
   /** Skills the user has temporarily disabled for this session only. */
   disabledSkillIds?: string[]
   pinned?: boolean
+  /**
+   * Manual sort position within this session's ChannelList section — the
+   * Pinned block, a date bucket, a folder, or the flat "recent" list
+   * (ascending). Written by the ChannelList drag-reorder; `undefined` sorts by
+   * recency after manually-ordered rows. The order is per-section: two rows in
+   * different sections may share an index, only their relative order within one
+   * section is meaningful. Non-indexed optional column — no Dexie schema bump.
+   */
+  manualOrder?: number
+  /**
+   * Section the manual order was dragged in (see `conversationSectionKey` in
+   * `lib/chat/conversation-list-model.ts` — e.g. `"pinned"`, `"date:today"`,
+   * `"folder:<id>"`, `"recent"`). The order is honored only inside that
+   * section, so a session migrating to another date bucket falls back to
+   * recency instead of dragging its old rank along. Absent on legacy rows
+   * (pre-section-key orders apply wherever the row sits).
+   */
+  manualOrderSection?: string
+  /**
+   * Denormalized text preview of this session's most-recent message, written by
+   * `persistMessages` (only when it changes) so the ChannelList can render a
+   * second preview line without a per-row message query. Truncated (~120 chars).
+   */
+  lastMessagePreview?: string
+  /** Epoch ms of the most-recent message, paired with {@link lastMessagePreview}. */
+  lastMessageAt?: number
   /** Per-session overrides — take precedence over the character/app defaults. */
   model?: string
   /**
@@ -1104,6 +1322,13 @@ export interface ChatSession {
    * appSettings.sandboxDefaultEnabled. Undefined falls through.
    */
   sandboxEnabled?: boolean
+  /**
+   * Per-session override of the always-on workspace confinement layer
+   * (ADR-0028 "lite"). Precedence: session → character →
+   * `AppSettings.workspaceConfinementEnabled` (default true). Set false to opt
+   * this session out of confinement.
+   */
+  workspaceConfinementEnabled?: boolean
   /**
    * ADR-0020 remote-target — per-session override of the computer-use GUI
    * execution target. `"local"` forces the host even if the character defaults
@@ -1323,6 +1548,30 @@ export interface ConversationTimelineSettings {
   labelSummary?: UtilityModelConfig
 }
 
+/** Row density for the conversation sidebar (ChannelList). */
+export type ConversationSidebarDensity = "comfortable" | "compact"
+/** How far the conversation-sidebar search reaches. */
+export type ConversationSearchScope = "title" | "titleAndContent"
+
+/**
+ * Behavior preferences for the conversation sidebar (ChannelList). All fields
+ * optional; read sites derive the default with `?? <default>` so an absent
+ * object (legacy settings) keeps today's behavior. Layout state (width, view,
+ * collapsed folders) lives in `useUIStore`, not here.
+ */
+export interface ConversationSidebarSettings {
+  /** Row density. Defaults to `"comfortable"`. */
+  density?: ConversationSidebarDensity
+  /** Show a second line with the last-message preview + relative time. Default off. */
+  showPreview?: boolean
+  /** Group non-search results into date buckets. Defaults to on. */
+  groupByDate?: boolean
+  /** Show per-conversation unread badges. Defaults to on. */
+  showUnreadBadges?: boolean
+  /** Whether search also matches message content (async). Defaults to title-only. */
+  searchScope?: ConversationSearchScope
+}
+
 export type AppTheme = "light" | "dark" | "system"
 export type AppFontScale = "xs" | "sm" | "md" | "lg" | "xl"
 export type AppLanguage = "en" | "zh-CN"
@@ -1531,6 +1780,21 @@ export interface AppSettings {
      * native tools aren't available and the custom ones are always used.
      */
     nativeOnAnthropic?: boolean
+    /**
+     * Opt-in (default false): allow `web_fetch` to reach private / loopback /
+     * link-local hosts (localhost, 10./192.168., 169.254.x cloud metadata, …).
+     * Off by default — the SSRF guard blocks them so a model-supplied URL can't
+     * probe the user's internal network. Enable only for trusted local dev.
+     */
+    allowPrivateHosts?: boolean
+    /**
+     * Opt-in (default false): always run fetched page text through the cheap
+     * utility model before returning it, even when the model didn't pass a
+     * `prompt`. Narrows the prompt-injection surface (Claude-Code-style: the
+     * main agent never sees raw page text). No-op on hosts without a usable
+     * utility model.
+     */
+    alwaysDistill?: boolean
   }
   /**
    * Agent self-invocation tools (Claude Code parity). Opt-in (default off):
@@ -1575,6 +1839,16 @@ export interface AppSettings {
     /** Auto-check for updates on launch. Default true. */
     autoCheck: boolean
   }
+  /**
+   * Mobile runtime mode (ADR: standalone BYOK mobile). Decides whether the
+   * Capacitor shell drives a paired desktop ("paired") or runs chat / search /
+   * documents standalone in-webview against the user's own provider keys
+   * ("standalone"). `undefined` ≡ not yet chosen → the mobile onboarding shows
+   * the mode chooser. Device-local: deliberately excluded from the
+   * `CROSS_PLATFORM_SETTING_KEYS` sync allowlist (a phone's mode is its own).
+   * No-op off the Capacitor shell. See `lib/runtime/standalone-mode.ts`.
+   */
+  mobileRuntimeMode?: "paired" | "standalone"
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
@@ -1658,6 +1932,18 @@ export interface AppSettings {
    * `lib/ai/generation/title.ts` and the chat hook's turn-complete path.
    */
   conversationTitle?: UtilityModelConfig
+  /**
+   * Attention Radar — periodic AI "info-diet" analysis over recent memories +
+   * captured items, surfaced in the pet console. See `lib/radar/` and
+   * `types/radar`. Absent → defaults (disabled). Off by default.
+   */
+  attentionRadar?: import("@/types/radar").RadarSettings
+  /**
+   * Content capture (confirm-bubble flow) — clipboard watching + save +
+   * enrichment; captured items feed the Attention Radar. See `lib/capture/`
+   * and `types/capture`. Absent → defaults (disabled). Desktop-only.
+   */
+  capture?: import("@/types/capture").CaptureSettings
   /**
    * LLM input assistance for the main chat composer: prompt enhancement
    * (rewrite / variants), inline ghost-text autocomplete, and AI starter /
@@ -1756,6 +2042,8 @@ export interface AppSettings {
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings
+  /** Conversation sidebar (ChannelList) behavior preferences. */
+  conversationSidebar?: ConversationSidebarSettings
   // Tools the user has chosen to always allow for this app (per-tool name).
   alwaysAllowTools: string[]
   /**
@@ -1926,6 +2214,50 @@ export interface AppSettings {
      */
     cursorBlink?: boolean
     /**
+     * Line height as a multiplier of the font size (xterm `lineHeight`).
+     * Defaults to 1.0. Values > 1 add vertical breathing room between rows;
+     * changing it re-fits the terminal (the cell size shifts).
+     */
+    lineHeight?: number
+    /**
+     * Extra horizontal spacing between glyphs in pixels (xterm `letterSpacing`).
+     * Defaults to 0. Small positive values improve legibility for dense mono
+     * fonts; changing it re-fits the terminal.
+     */
+    letterSpacing?: number
+    /**
+     * Font weight for normal (non-bold) text (xterm `fontWeight`). Defaults to
+     * `"normal"`. Accepts CSS keywords or the 100–900 numeric-string scale.
+     */
+    fontWeight?:
+      | "normal"
+      | "bold"
+      | "100"
+      | "200"
+      | "300"
+      | "400"
+      | "500"
+      | "600"
+      | "700"
+      | "800"
+      | "900"
+    /**
+     * Font weight used for bold text (xterm `fontWeightBold`). Defaults to
+     * `"bold"`. Same accepted values as {@link fontWeight}.
+     */
+    fontWeightBold?:
+      | "normal"
+      | "bold"
+      | "100"
+      | "200"
+      | "300"
+      | "400"
+      | "500"
+      | "600"
+      | "700"
+      | "800"
+      | "900"
+    /**
      * Enable programming-font ligatures via `@xterm/addon-ligatures`. Off by
      * default — the addon shapes glyph runs at render time, a small cost only
      * worth paying for fonts that ship ligatures (Cascadia Code, JetBrains
@@ -1954,6 +2286,20 @@ export interface AppSettings {
      * escape hatch when WebGL renders blank/garbled in a given WebView2.
      */
     renderer?: "auto" | "webgl" | "canvas" | "dom"
+    /**
+     * Mouse-wheel scroll speed — number of lines scrolled per wheel notch
+     * (xterm `scrollSensitivity`). Defaults to 1. `fastScrollSensitivity`
+     * (Alt-scroll) is derived as 5× this value.
+     */
+    scrollSensitivity?: number
+    /**
+     * Minimum WCAG contrast ratio the renderer enforces between glyph and
+     * background by lightening/darkening the foreground (xterm
+     * `minimumContrastRatio`). `1` (default) disables it; `4.5` = WCAG AA,
+     * `7` = AAA, `21` = maximum (forces black/white). Improves legibility of
+     * low-contrast ANSI color output.
+     */
+    minimumContrastRatio?: number
     /**
      * Named launch profiles (Windows-Terminal style). Each bundles a shell +
      * cwd + env + args the dock's profile picker can spawn directly. See
@@ -2027,6 +2373,32 @@ export interface AppSettings {
      *  - `"run"` — run anyway (explicit trust-my-workflow opt-in).
      */
     unattendedAskPolicy?: "fail" | "consent" | "run"
+    /**
+     * Terminal quick fixes (VS Code parity). When a finished command matches a
+     * built-in matcher (`lib/terminal/quick-fix/`), a lightbulb at the command's
+     * gutter offers a fix — `git push --set-upstream`, "did you mean", create-PR
+     * link, free a busy port, pwsh command-not-found, … Default true.
+     */
+    quickFixes?: boolean
+    /**
+     * Make the per-command gutter decorations interactive: hovering/clicking a
+     * command dot opens a menu (Rerun, Copy command, Copy output, Copy command +
+     * output) with the exit code + duration. Default true.
+     */
+    commandActions?: boolean
+    /**
+     * Sticky scroll — pin the currently-scrolled-past command's prompt line at
+     * the top of the viewport while reading its output. Default true.
+     */
+    stickyScroll?: boolean
+    /**
+     * Ask for confirmation before closing a terminal tab whose shell is still
+     * running a command (status `"running"`). Guards against losing an
+     * in-flight command to an accidental × click. Default true — matches VS
+     * Code's `terminal.integrated.confirmOnKill`. Idle / exited tabs close
+     * immediately regardless.
+     */
+    confirmOnClose?: boolean
   }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string
@@ -2052,6 +2424,45 @@ export interface AppSettings {
    * installed) degrades to an info toast rather than an error.
    */
   skillBundleMirrors?: { claude?: boolean; codex?: boolean }
+  /**
+   * User-customizable Skills panel preferences (display density, list/grid
+   * view, per-row field visibility, default tab/sort/status filter, and the
+   * `autoEnableNew` / `enabledWarnThreshold` injection hints). All fields are
+   * optional; defaults are applied at read time by `resolveSkillPanelPrefs`
+   * (`lib/skills/preferences.ts`), so existing installs pick up new options
+   * without a Dexie migration — same pattern as `skillBundleMirrors`. The
+   * shape is typed structurally here (rather than importing
+   * `PartialSkillPanelPrefs`) so `types.ts` stays free of any store/lib import
+   * cycle.
+   */
+  skillPanelPrefs?: {
+    density?: "comfortable" | "compact"
+    viewMode?: "list" | "grid"
+    showDescription?: boolean
+    showTags?: boolean
+    showSource?: boolean
+    showUsage?: boolean
+    defaultTab?: "my-skills" | "browse" | "editor" | "analytics"
+    defaultSort?: "name" | "updated" | "usage"
+    defaultStatusFilter?: SkillStatus | "all"
+    rememberLastView?: boolean
+    autoEnableNew?: boolean
+    enabledWarnThreshold?: number
+  }
+  /**
+   * Last Skills panel view snapshot (tab + sort + non-query filters). Written
+   * only when `skillPanelPrefs.rememberLastView` is on, and re-seeded into the
+   * ephemeral skills store on the next mount. Lives in settings JSON so the
+   * ephemeral store stays free of persistence middleware.
+   */
+  lastSkillView?: {
+    tab?: "my-skills" | "browse" | "editor" | "analytics"
+    sort?: "name" | "updated" | "usage"
+    category?: SkillCategory | "all"
+    source?: SkillSource | "all"
+    status?: SkillStatus | "all"
+    tag?: string | null
+  }
   /**
    * Workflow ids the user has pinned in the mobile Workflows tab. Surfaced
    * as a "Pinned" section above the main list. Lives in settings JSON to
@@ -2113,6 +2524,31 @@ export interface AppSettings {
    */
   discoverFavorites?: string[]
   /**
+   * Global defaults for the `/discover` page. Lives in settings JSON (same
+   * pattern as `discoverViewByCategory` / `discoverFavorites`) so it syncs
+   * cross-device without a Dexie migration. Edited from
+   * `/settings?section=discover`.
+   *
+   *  - `landingCategory`: the category (or the `favorites` pseudo-category) the
+   *    page opens on when `?category=` is absent. Falls back to the first
+   *    visible category when unset, invalid, or currently hidden.
+   *  - `view`: the fallback view mode (`grid` | `list` | `compact`) applied to
+   *    categories that have no explicit per-category override in
+   *    `discoverViewByCategory`.
+   */
+  discoverDefaults?: {
+    landingCategory?: string
+    view?: import("@/lib/discover/categories").DiscoverViewMode
+  }
+  /**
+   * Execution Monitor view preferences ("围观设置") — hidden kinds, row sort,
+   * group-by-kind, and the live-elapsed toggle for the "what is running right
+   * now" panel. Lives in settings JSON (same pattern as `discoverDefaults`) so
+   * the chosen view follows the user across devices without a Dexie migration.
+   * See `@/lib/execution/monitor-prefs` for the model + defaults.
+   */
+  executionMonitorPrefs?: import("@/lib/execution/monitor-prefs").StoredExecutionMonitorPrefs
+  /**
    * Active view mode for the `/scheduler` dashboard (`overview` | `calendar` |
    * `timeline`). `overview` is the default static dashboard; `calendar` shows a
    * month grid of projected runs; `timeline` shows a day-grouped agenda. Lives
@@ -2127,6 +2563,14 @@ export interface AppSettings {
    * migration.
    */
   goalConsoleView?: "grid" | "list"
+  /**
+   * Persisted preferences for the `/goals` console (ADR-0019 Phase 3): the
+   * default landing tab and the open-goals default sort. Lives in settings
+   * JSON (same pattern as `goalConsoleView` / `executionMonitorPrefs`) so it
+   * follows the user across devices without a Dexie migration. Partial — unset
+   * fields fall back to `DEFAULT_GOAL_CONSOLE_PREFS`.
+   */
+  goalConsolePrefs?: import("@/lib/goal/console-prefs").StoredGoalConsolePrefs
   /**
    * Unified Notification Center preferences (ADR-0042): global default
    * channels, per-source overrides, OS/push level gates, DND/quiet-hours,
@@ -2348,6 +2792,14 @@ export interface AppSettings {
     reviewBeforeApply?: boolean
   }
 
+  // ---- Agent evaluation ----
+  /**
+   * Project-level Agent-Eval defaults (judge model, default k / scorers,
+   * new-dataset gate template, cost guard). Consumed by the run-config dialog
+   * and `createDataset`; see {@link import("@/types/eval/settings").EvalSettings}.
+   */
+  evalSettings?: import("@/types/eval/settings").EvalSettings
+
   // ---- Backup reminders & scheduling ----
   /**
    * Days between "you should back up" reminder toasts. 0 disables reminders.
@@ -2388,9 +2840,9 @@ export interface AppSettings {
   // =============================================================================
 
   /** Active color preset. Plugin Theme API surfaces this as `colorTheme`. */
-  colorTheme?: import("@/types/plugin/plugin-extended").ColorThemePreset
+  colorTheme?: import("@/types/plugin/plugin").ColorThemePreset
   /** User-defined custom theme palettes (UI colors, not export tokens). */
-  customThemes?: import("@/types/plugin/plugin-extended").CustomTheme[]
+  customThemes?: import("@/types/plugin/plugin").CustomTheme[]
   /** Currently active custom theme id; null when a preset is in use. */
   activeCustomThemeId?: string | null
 
@@ -2422,6 +2874,17 @@ export interface AppSettings {
    * everywhere unless a specific session / character opts out.
    */
   sandboxDefaultEnabled?: boolean
+  /**
+   * App-wide default for the always-on **workspace confinement** layer
+   * (ADR-0028 "lite"). When true (the default), the sidecar built-in file/bash
+   * tools are confined to the active workspace roots: out-of-root mutator calls
+   * escalate to approval and credential paths hard-deny. Cross-platform (incl.
+   * native Windows) and complementary to `sandboxDefaultEnabled` — the heavy OS
+   * sandbox, when active, takes over and this layer steps aside. Beaten by
+   * `Character.workspaceConfinementEnabled` / `ChatSession.workspaceConfinementEnabled`.
+   * Read by `resolveSendOptions`.
+   */
+  workspaceConfinementEnabled?: boolean
   /**
    * Confine code executed from the Canvas panel (Python especially) through
    * the OS sandbox. Independent of `sandboxDefaultEnabled` (which gates chat
@@ -2466,6 +2929,18 @@ export interface AppSettings {
    * (undefined ⇒ enabled); set false to suppress all surface auto-activation.
    */
   surfaceSkillsEnabled?: boolean
+  /**
+   * Plan-mode capture defaults (ADR-0045). Applied by `captureExitPlanMode`
+   * when an ExitPlanMode tool call materialises a draft `AgentPlan`:
+   * - `requireApproval` — gate execution behind the approval dock (default
+   *   true). False lands the capture `approved` and the dock auto-resumes the
+   *   implementing turn once (idempotent via a metadata stamp).
+   * - `maxAutoRefinements` — cap on automatic repair replans per plan.
+   */
+  planSettings?: {
+    requireApproval?: boolean
+    maxAutoRefinements?: number
+  }
   /**
    * Per-provider configuration. Stores the full `UserProviderSettings`
    * shape (api key, base URL, model list, key rotation, OAuth state,
@@ -2533,6 +3008,14 @@ export interface AppSettings {
    * strategy or per-request override once a model pair is configured.
    */
   difficultyRouting?: import("@/types/routing/tool-route").DifficultyRoutingSettings
+  /**
+   * Opt-in automatic tier routing (default OFF). When enabled,
+   * `resolveSendOptions` scores each non-alias prompt's difficulty and rewrites
+   * the model to one of `candidateAliases`, resolved by the existing alias
+   * engine. Strict no-op until opted in and until matching aliases exist in
+   * `modelMappings`. See `lib/routing/auto-tier.ts`.
+   */
+  autoRouting?: import("@/types/routing/tool-route").AutoRoutingSettings
   /**
    * When true, on a `session_ended.error` for a turn that resolved via an
    * alias with non-empty `aliasResolution.fallbackEntries`, the renderer
@@ -2699,6 +3182,15 @@ export interface AppSettings {
   biometricRequiredFor?: BiometricGuardPolicy
 
   /**
+   * Auto-lock the active local account after this many minutes of inactivity
+   * (Tauri-only — local accounts don't exist off desktop). `0` or `undefined`
+   * disables auto-lock; the account stays unlocked until a manual lock or app
+   * exit. Drives `use-auto-lock-on-idle`, which calls the account store's
+   * `lock()` on timeout.
+   */
+  accountAutoLockMinutes?: number
+
+  /**
    * Master switch for mobile-initiated Computer Use sessions (ADR-0020
    * follow-up). When `false`, the mobile `/me/computer-use` quick toggle
    * is off and the runtime refuses to enter a computer-use turn from a
@@ -2828,6 +3320,14 @@ export interface BiometricGuardPolicy {
    * user trusts.
    */
   signOut: boolean
+  /**
+   * ADR-0056 (decision D4) — re-prompt biometric before a remote write that
+   * ESCALATES the paired desktop's `permissionMode` toward a more autonomous
+   * mode (acceptEdits / bypassPermissions / dontAsk / auto) from the phone's
+   * `/me/agent` page. Optional for back-compat; treated as `true` (gated) when
+   * absent, since escalation is the security-sensitive direction.
+   */
+  escalatePermissionMode?: boolean
 }
 
 export const DEFAULT_BIOMETRIC_GUARD: BiometricGuardPolicy = {
@@ -2835,6 +3335,7 @@ export const DEFAULT_BIOMETRIC_GUARD: BiometricGuardPolicy = {
   exportBackup: false,
   revealSecrets: false,
   signOut: true,
+  escalatePermissionMode: true,
 }
 
 export interface BackupAutoSchedule {
@@ -3034,6 +3535,12 @@ export interface Character {
    */
   sandboxEnabled?: boolean
   /**
+   * Per-character override of the always-on workspace confinement layer
+   * (ADR-0028 "lite"). Beats `AppSettings.workspaceConfinementEnabled` but
+   * loses to `ChatSession.workspaceConfinementEnabled`.
+   */
+  workspaceConfinementEnabled?: boolean
+  /**
    * Sandbox tier (ADR-0028 T4). `"os"` (default) routes Bash / Edit / Write
    * through the per-platform OS sandbox (sandbox-exec / bwrap / windows-codex).
    * `"microvm"` routes them through the existing `plugins/e2b-sandbox/`
@@ -3136,6 +3643,11 @@ export interface Character {
     styleSamplesK?: number
     enableHybrid?: boolean
     hybridKeywordWeight?: number
+    enableQueryExpansion?: boolean
+    enableCorrectiveFilter?: boolean
+    correctiveMinKeep?: number
+    enableCitations?: boolean
+    citationStyle?: import("@/types/twin").TwinCitationStyle
   }
   platformDefaults?: import("@/types/connectors/binding").CharacterPlatformDefaults
   /**
@@ -3385,6 +3897,15 @@ export interface Skill {
   lastSyncedAt?: number
   /** Most recent sync failure, cleared on successful sync. */
   lastSyncError?: string | null
+  /**
+   * Skill body kind (D5). "markdown" (default) is a prose playbook appended to
+   * the system prompt. "workflow" is a graph-bodied skill: only its
+   * name+description are injected (progressive disclosure) and a tool is
+   * registered that runs the referenced workflow, returning typed output.
+   */
+  kind?: "markdown" | "workflow"
+  /** For kind:"workflow" — the published workflow this skill runs. */
+  workflowId?: string
   createdAt: number
   updatedAt: number
 }

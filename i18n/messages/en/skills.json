@@ -55,7 +55,8 @@
     "export": "Export as SKILL.md",
     "open": "Open",
     "openInEditor": "Open in editor",
-    "selectAria": "Select {name}"
+    "selectAria": "Select {name}",
+    "usageCount": "Used {count}×"
   },
   "category": {
     "communication": "Communication",
@@ -306,6 +307,33 @@
     "selectSkillTitle": "No skill selected",
     "selectSourceAria": "Filter by source",
     "statsBar": "{enabled} enabled · {total} total"
+  },
+  "prefs": {
+    "autoEnableNew": "Auto-enable new skills",
+    "autoEnableNewHint": "New or imported skills are enabled and appended to the prompt right away.",
+    "budgetWarning": "{count} skills enabled — over your budget of {threshold}. Each is appended to the system prompt.",
+    "defaultSort": "Default sort",
+    "defaultStatus": "Default status filter",
+    "defaultTab": "Default tab",
+    "density": "List density",
+    "densityComfortable": "Comfortable",
+    "densityCompact": "Compact",
+    "display": "Display",
+    "enabledWarnThreshold": "Enabled-skill warning",
+    "enabledWarnThresholdHint": "Warn when more than this many skills are enabled. 0 turns the warning off.",
+    "injection": "Injection",
+    "openAria": "Skill panel preferences",
+    "panel": "Panel",
+    "rememberLastView": "Remember last view",
+    "rememberLastViewHint": "Restore the tab, sort, and filters from your last visit.",
+    "showDescription": "Show description",
+    "showSource": "Show source badge",
+    "showTags": "Show tags",
+    "showUsage": "Show usage count",
+    "title": "Preferences",
+    "viewGrid": "Grid",
+    "viewList": "List",
+    "viewMode": "Layout"
   },
   "recorder": {
     "attachScreenshots": "Attach screenshots as resources",

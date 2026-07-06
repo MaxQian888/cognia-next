@@ -6,6 +6,12 @@
         "label": "Agent turn"
       }
     },
+    "approval": {
+      "request": {
+        "description": "Pause until a human approves or rejects — from the desktop notification center or a paired phone. Routes downstream via Approved / Rejected handles.",
+        "label": "Request approval"
+      }
+    },
     "character": {
       "create": {
         "description": "Creates a new character (employee) row.",
@@ -172,6 +178,28 @@
         "label": "Store memory"
       }
     },
+    "mobile": {
+      "camera": {
+        "description": "Opens the camera on a paired phone and returns the capture (base64) to the run.",
+        "label": "Take photo on phone"
+      },
+      "location": {
+        "description": "Reads the current GPS position from a paired phone.",
+        "label": "Get phone location"
+      },
+      "notify": {
+        "description": "Shows a local notification on a paired phone.",
+        "label": "Notify phone"
+      },
+      "scanBarcode": {
+        "description": "Opens the barcode/QR scanner on a paired phone and returns the raw value.",
+        "label": "Scan barcode on phone"
+      },
+      "share": {
+        "description": "Opens the native share sheet on a paired phone with the given text or link.",
+        "label": "Share from phone"
+      }
+    },
     "plugin": {
       "invoke": {
         "description": "Calls a plugin task handler registered in the plugin runtime.",
@@ -336,6 +364,12 @@
         "label": "Update goal objective"
       }
     },
+    "pet": {
+      "interact": {
+        "description": "Feed / play with / clean the desktop pet (optionally consuming a shop item by id).",
+        "label": "Nurture pet"
+      }
+    },
     "plan": {
       "approve": {
         "description": "Move a draft or pending plan into the approved state.",
@@ -482,6 +516,10 @@
       "description": "LLM-based classification into one of N labels.",
       "label": "Classify"
     },
+    "council": {
+      "description": "Fan the prompt out to several models, then synthesize a consensus answer.",
+      "label": "Council"
+    },
     "embed": {
       "description": "Generate an embedding vector for semantic similarity.",
       "label": "Embed text"
@@ -493,6 +531,10 @@
     "prompt": {
       "description": "Direct LLM call. Uses the configured provider routing.",
       "label": "AI prompt"
+    },
+    "ensemble": {
+      "label": "Ensemble",
+      "description": "Run a target N times, then vote / threshold / best-of / synthesize the samples."
     }
   },
   "annotation": {
@@ -517,6 +559,10 @@
     "transform": {
       "description": "Map / filter / reduce / sort over an input array or object.",
       "label": "Transform"
+    },
+    "aggregate": {
+      "label": "Aggregate",
+      "description": "Reduce a list: collect / concat / merge / group-by / dedupe / numeric / custom."
     }
   },
   "eval": {
@@ -585,6 +631,10 @@
         "description": "Respond to the inbound webhook trigger with a payload.",
         "label": "Webhook respond"
       }
+    },
+    "output": {
+      "label": "Output",
+      "description": "Declare the workflow's typed terminal output (the published interface)."
     }
   },
   "ocr": {
@@ -631,6 +681,12 @@
     "manual": {
       "description": "Fires when you click Run in the editor.",
       "label": "Run manually"
+    },
+    "pet": {
+      "event": {
+        "description": "Fires when the desktop pet levels up, evolves, unlocks an achievement, or becomes unwell.",
+        "label": "On pet event"
+      }
     },
     "team": {
       "description": "Internal trigger fired by the agent-team synthesizer when a team run starts. Not hand-authored.",

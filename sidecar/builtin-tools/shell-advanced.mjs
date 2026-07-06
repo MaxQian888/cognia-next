@@ -19,7 +19,13 @@ import { execFileAsync } from "./shared/exec.mjs"
 import { headTruncate } from "./shared/truncate.mjs"
 
 // Mirror src-tauri/src/shell.rs:17-19 caps so the two paths feel consistent.
-const MAX_OUTPUT_BYTES = 64 * 1024
+const MAX_OUTPUT_BYTES = 64 * 1024 // model-facing display cap (headTruncate)
+// Capture ceiling kept ABOVE the display cap: when the two were equal, a
+// SUCCESSFUL but verbose command (> 64 KB) tripped execFile's maxBuffer, which
+// rejects — so it was mislabelled as exitCode 1 instead of exit 0 + truncated.
+// Capturing up to 4 MB lets the command finish; headTruncate then trims the
+// displayed slice and flags it.
+const MAX_CAPTURE_BYTES = 4 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 30 * 1000
 const MAX_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -68,7 +74,7 @@ async function execShellExecuteAdvanced(args) {
       const result = await execFileAsync(args.command, args.args, {
         cwd: args.cwd,
         timeout: timeoutMs,
-        maxBuffer: MAX_OUTPUT_BYTES,
+        maxBuffer: MAX_CAPTURE_BYTES,
         windowsHide: true,
       })
       stdout = String(result.stdout)

@@ -81,6 +81,31 @@ describe("runRoutedPrompt", () => {
     ])
   })
 
+  it("forwards apiFlavor from resolved credentials into createLlmClient", async () => {
+    const makeClient = jest.fn(() => okClient("hello"))
+    const { deps } = makeDeps({
+      resolveCreds: jest.fn().mockResolvedValue({
+        protocol: "openai",
+        apiKey: "k",
+        baseURL: "https://gateway.example/v1",
+        apiFlavor: "responses",
+      }),
+      makeClient,
+    })
+
+    await runRoutedPrompt({ ...baseInput }, deps)
+
+    expect(makeClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "m1",
+        apiKey: "k",
+        baseURL: "https://gateway.example/v1",
+        apiFlavor: "responses",
+      })
+    )
+  })
+
   it("walks the fallback chain when the primary fails and records both outcomes", async () => {
     const clients: Record<string, LlmClient> = {
       m1: failClient("boom 500"),

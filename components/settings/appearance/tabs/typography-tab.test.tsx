@@ -20,20 +20,36 @@ import { TypographyTab } from "./typography-tab"
 
 beforeEach(() => {
   save.mockClear()
-  storeState.settings = { fontScale: "md", language: "en", reduceMotion: false }
+  storeState.settings = { fontScale: "md", language: "en" }
 })
 
 describe("TypographyTab", () => {
-  it("renders all three controls", () => {
+  it("renders type controls only: font scale, language, families, fine-tuning", () => {
     render(<TypographyTab />)
     expect(screen.getByText("fontScaleLabel")).toBeInTheDocument()
     expect(screen.getByText("languageLabel")).toBeInTheDocument()
-    expect(screen.getByText("reduceMotionLabel")).toBeInTheDocument()
+    expect(screen.getByText("font.sectionLabel")).toBeInTheDocument()
+    expect(screen.getByText("fine.sectionLabel")).toBeInTheDocument()
   })
 
-  it("toggles reduce-motion via the switch", () => {
+  it("no longer hosts motion / reduce-motion / density (moved to other tabs)", () => {
     render(<TypographyTab />)
-    fireEvent.click(screen.getByLabelText("reduceMotionLabel"))
-    expect(save).toHaveBeenCalledWith({ reduceMotion: true })
+    expect(screen.queryByText("reduceMotionLabel")).not.toBeInTheDocument()
+    expect(screen.queryByText("motion.sectionLabel")).not.toBeInTheDocument()
+    expect(screen.queryByText("density.sectionLabel")).not.toBeInTheDocument()
+  })
+
+  it("restores the default line-height via the slider-row reset", () => {
+    storeState.settings = {
+      fontScale: "md",
+      language: "en",
+      typographyExt: { lineHeightScale: 1.2, letterSpacingEm: 0 },
+    }
+    render(<TypographyTab />)
+    // Only line-height drifted from default → exactly one reset control shows.
+    fireEvent.click(screen.getByLabelText("resetToDefault"))
+    expect(save).toHaveBeenCalled()
+    const patch = save.mock.calls[0][0] as { typographyExt: { lineHeightScale: number } }
+    expect(patch.typographyExt.lineHeightScale).toBe(1)
   })
 })

@@ -28,6 +28,7 @@ interface TokenBucket {
 
 export const DEFAULT_RATE_LIMITS: Record<string, RateLimitConfig> = {
   "network:fetch": { capacity: 60, refillPerSecond: 1 },
+  "network:search": { capacity: 30, refillPerSecond: 0.5 },
   "network:download": { capacity: 20, refillPerSecond: 0.3 },
   "network:upload": { capacity: 20, refillPerSecond: 0.3 },
   "fs:read": { capacity: 120, refillPerSecond: 2 },
@@ -43,6 +44,8 @@ export const DEFAULT_RATE_LIMITS: Record<string, RateLimitConfig> = {
   "python:eval": { capacity: 10, refillPerSecond: 0.2 },
   "python:import": { capacity: 10, refillPerSecond: 0.2 },
   "ui:notification": { capacity: 30, refillPerSecond: 0.5 },
+  "pet:interact": { capacity: 10, refillPerSecond: 0.5 },
+  "pet:emit": { capacity: 20, refillPerSecond: 0.5 },
 }
 
 export class PluginRateLimiter {

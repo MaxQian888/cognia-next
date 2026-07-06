@@ -1,4 +1,11 @@
-import { scoreMemories, type ScorableMemory } from "./scoring"
+import {
+  PROVENANCE_VERACITY,
+  RECENCY_HALF_LIFE_MULTIPLIER,
+  recencyHalfLifeDaysForType,
+  scoreMemories,
+  veracityFor,
+  type ScorableMemory,
+} from "./scoring"
 
 const NOW = 1_700_000_000_000
 const DAY = 24 * 60 * 60 * 1000
@@ -92,5 +99,82 @@ describe("scoreMemories", () => {
     // Both rank fresh first; assert the function runs with either base.
     expect(slow[0].memory).toBe(fresh)
     expect(fast[0].memory).toBe(fresh)
+  })
+
+  it("uses a per-memory half-life for recency when `halfLifeDays` is set", () => {
+    // Same age; the longer half-life retains more recency after normalization.
+    const shortLived = mem({ lastAccessedAt: NOW - 30 * DAY, halfLifeDays: 15 })
+    const longLived = mem({ lastAccessedAt: NOW - 30 * DAY, halfLifeDays: 60 })
+    const out = scoreMemories([shortLived, longLived], {
+      now: NOW,
+      weights: { recency: 1, importance: 0, relevance: 0, veracity: 0 },
+    })
+    expect(out[0].memory).toBe(longLived)
+    expect(out.find((o) => o.memory === longLived)!.parts.recency).toBeGreaterThan(
+      out.find((o) => o.memory === shortLived)!.parts.recency
+    )
+  })
+
+  it("leaves recency on the generic decay path when `halfLifeDays` is absent", () => {
+    // No halfLifeDays → identical to the pre-existing `decay ^ ageDays` behavior.
+    const old = mem({ lastAccessedAt: NOW - 100 * DAY })
+    const out = scoreMemories([old], { now: NOW })
+    expect(out[0].parts.recency).toBeCloseTo(1) // single candidate normalizes to 1
+  })
+
+  it("adds veracity as a 4th factor when any candidate supplies it", () => {
+    const trusted = mem({ veracity: 1 })
+    const doubted = mem({ veracity: 0.5 })
+    const out = scoreMemories([doubted, trusted], {
+      now: NOW,
+      weights: { recency: 0, importance: 0, relevance: 0, veracity: 1 },
+    })
+    expect(out[0].memory).toBe(trusted)
+    expect(out.find((o) => o.memory === trusted)!.parts.veracity).toBeCloseTo(1)
+    expect(out.find((o) => o.memory === doubted)!.parts.veracity).toBeCloseTo(0)
+  })
+
+  it("contributes nothing (parts.veracity=0) when no candidate supplies veracity", () => {
+    const out = scoreMemories([mem({ importance: 8 }), mem({ importance: 3 })], { now: NOW })
+    expect(out.every((o) => o.parts.veracity === 0)).toBe(true)
+    // Score is exactly the prior three-factor sum (veracity term is 0).
+    for (const o of out) {
+      expect(o.score).toBeCloseTo(o.parts.recency + o.parts.importance + o.parts.relevance)
+    }
+  })
+})
+
+describe("recencyHalfLifeDaysForType", () => {
+  it("scales the base half-life by type: episodic < semantic < procedural", () => {
+    const base = 30
+    expect(recencyHalfLifeDaysForType("episodic", base)).toBeLessThan(
+      recencyHalfLifeDaysForType("semantic", base)
+    )
+    expect(recencyHalfLifeDaysForType("semantic", base)).toBeLessThan(
+      recencyHalfLifeDaysForType("procedural", base)
+    )
+    expect(recencyHalfLifeDaysForType("semantic", base)).toBe(
+      base * RECENCY_HALF_LIFE_MULTIPLIER.semantic
+    )
+  })
+
+  it("clamps a negative base to 0", () => {
+    expect(recencyHalfLifeDaysForType("semantic", -10)).toBe(0)
+  })
+})
+
+describe("veracityFor", () => {
+  it("ranks provenance user/explicit > system > inbound", () => {
+    expect(veracityFor({ provenance: "user" })).toBeGreaterThan(
+      veracityFor({ provenance: "system" })
+    )
+    expect(veracityFor({ provenance: "system" })).toBeGreaterThan(
+      veracityFor({ provenance: "inbound" })
+    )
+    expect(veracityFor({ provenance: "explicit" })).toBe(PROVENANCE_VERACITY.explicit)
+  })
+
+  it("treats a pinned memory as fully trusted regardless of provenance", () => {
+    expect(veracityFor({ provenance: "inbound", pinned: true })).toBe(1)
   })
 })

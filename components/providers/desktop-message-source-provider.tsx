@@ -5,6 +5,7 @@ import { useEffect } from "react"
 import { usePlatform } from "@/hooks/use-platform"
 import { installDesktopMessageSource } from "@/lib/companion/desktop-message-source"
 import { installDesktopWriteSource } from "@/lib/companion/desktop-write-source"
+import { installCliRendererRequestSource } from "@/lib/cli-bridge/renderer-request-source"
 
 /**
  * Tauri-only provider that installs the desktop-side bridge for the
@@ -32,6 +33,15 @@ export function DesktopMessageSourceProvider({ children }: { children: React.Rea
       teardowns.push(unsub)
     })
     void installDesktopWriteSource().then((unsub) => {
+      if (cancelled) {
+        unsub()
+        return
+      }
+      teardowns.push(unsub)
+    })
+    // CLI bridge renderer round-trips (twin context / agent teams) ride the
+    // same provider lifecycle — Tauri-only, torn down with the others.
+    void installCliRendererRequestSource().then((unsub) => {
       if (cancelled) {
         unsub()
         return

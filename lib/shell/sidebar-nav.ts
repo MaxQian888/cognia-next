@@ -65,12 +65,13 @@ export interface SidebarCatalogItem extends SidebarNavMeta {
 
 /**
  * The customizable nav catalog with icons attached, filtered for the platform.
- * On mobile, `desktopOnly` items are dropped so they never surface in the rail
- * or the customizer. Falls back to a question-mark-free no-op icon only if a
- * mapping is missing (shouldn't happen — covered by tests).
+ * Off the desktop shell (mobile AND plain/cloud-companion browsers — ADR-0059
+ * F5), `desktopOnly` items are dropped so they never surface in the rail or
+ * the customizer as dead ends. Falls back to a question-mark-free no-op icon
+ * only if a mapping is missing (shouldn't happen — covered by tests).
  */
 export function getSidebarCatalog(platform: Platform): SidebarCatalogItem[] {
-  return SIDEBAR_NAV_META.filter((m) => !(platform === "mobile" && m.desktopOnly)).map((m) => ({
+  return SIDEBAR_NAV_META.filter((m) => !(platform !== "tauri" && m.desktopOnly)).map((m) => ({
     ...m,
     Icon: SIDEBAR_NAV_ICONS[m.id] ?? ActivityIcon,
   }))

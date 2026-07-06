@@ -7,6 +7,7 @@ import {
   listNamespacedToolsInCategory,
   listToolNamesInCategory,
   namespaced,
+  readOnlyBuiltinToolNames,
   type BuiltinToolCategoryId,
   type BuiltinToolRiskLevel,
 } from "./builtin-tools"
@@ -17,11 +18,31 @@ describe("builtin-tools metadata", () => {
     expect(BUILTIN_SERVER_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
   })
 
+  it("derives the read-only tool surface from the approval metadata", () => {
+    const readOnly = readOnlyBuiltinToolNames()
+    const expected = listBuiltinTools()
+      .filter((t) => !t.requiresApproval)
+      .map((t) => namespaced(t.name))
+    expect(readOnly).toEqual(expected)
+    // Every name is SDK-namespaced, and no approval-required tool leaks in.
+    expect(readOnly.every((n) => n.startsWith(`mcp__${BUILTIN_SERVER_NAME}__`))).toBe(true)
+    const approvalRequired = new Set(
+      listBuiltinTools()
+        .filter((t) => t.requiresApproval)
+        .map((t) => namespaced(t.name))
+    )
+    expect(readOnly.some((n) => approvalRequired.has(n))).toBe(false)
+    expect(readOnly.length).toBeGreaterThan(0)
+  })
+
   it("registers all expected categories", () => {
     const ids = BUILTIN_TOOL_CATEGORIES.map((c) => c.id)
     expect(ids.sort()).toEqual(
       [
+        "astGrep",
+        "codeGraph",
         "coreFiles",
+        "dependencyResearch",
         "environment",
         "fileExtras",
         "git",

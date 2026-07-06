@@ -3,15 +3,25 @@ import { renderHook, act } from "@testing-library/react"
 // ── Controllable mock state ──────────────────────────────────────────────
 let chatState = { status: "idle" as string, activeSessionId: null as string | null }
 let liveGoal: { status?: string; safeObjective?: string } | null = null
+// `useLiveQuery` is mocked once for both call sites in `useTrayStateSnapshot`
+// (the goal query and the pet-profile query); they're told apart by `deps`
+// length (goal passes `[activeSessionId]`, pet profile passes `[]`).
+let livePetProfile: unknown = undefined
 let autostartValue = false
+let petSettingsEnabled = false
 const listenHandlers: Record<string, (e: { payload?: unknown }) => void> = {}
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@/stores/chat", () => ({
   useChatStore: <T>(selector: (s: typeof chatState) => T) => selector(chatState),
 }))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T>(selector: (s: { settings: unknown }) => T) =>
+    selector({ settings: { petSettings: { enabled: petSettingsEnabled } } }),
+}))
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => liveGoal,
+  useLiveQuery: (_fn: unknown, deps: unknown[] = []) =>
+    deps.length === 0 ? livePetProfile : liveGoal,
 }))
 jest.mock("@/lib/db/goals", () => ({
   getOpenGoalForSession: jest.fn().mockResolvedValue(undefined),
@@ -28,12 +38,17 @@ jest.mock("@tauri-apps/api/event", () => ({
 
 import { useTrayStateSnapshot } from "./state-snapshot"
 import { broadcastAutostartChanged } from "./autostart-control"
+import { createDefaultProfile } from "@/lib/pet/defaults"
 
 beforeEach(() => {
   chatState = { status: "idle", activeSessionId: null }
   liveGoal = null
+  livePetProfile = undefined
   autostartValue = false
+  petSettingsEnabled = false
   for (const k of Object.keys(listenHandlers)) delete listenHandlers[k]
+  // `isMainAppWindow` reads the real Tauri internals; clear any pet label.
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
 })
 
 describe("useTrayStateSnapshot", () => {
@@ -72,6 +87,51 @@ describe("useTrayStateSnapshot", () => {
       broadcastAutostartChanged(false)
     })
     expect(result.current.app.autostart).toBe(false)
+  })
+
+  it("does not read OS autostart in a least-privilege pet window", async () => {
+    autostartValue = true
+    // A "pet" webview label makes `isMainAppWindow()` false — the pet window
+    // isn't granted `autostart:allow-is-enabled`, so the read is skipped.
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      metadata: { currentWebview: { label: "pet" } },
+    }
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // Stays at the default despite autostartValue=true, proving the effect
+    // short-circuited before calling isAutostartEnabled().
+    expect(result.current.app.autostart).toBe(false)
+  })
+
+  it("reports pet=null when the pet subsystem is disabled, even with a profile present", () => {
+    petSettingsEnabled = false
+    livePetProfile = createDefaultProfile("acct-1", 0)
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    expect(result.current.pet).toBeNull()
+  })
+
+  it("reports pet=null when enabled but the profile hasn't hatched yet", () => {
+    petSettingsEnabled = true
+    livePetProfile = undefined
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    expect(result.current.pet).toBeNull()
+  })
+
+  it("reports decayed needs when the pet subsystem is enabled with a profile", () => {
+    petSettingsEnabled = true
+    livePetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+      // A recent tick so decay is negligible — this asserts the wiring
+      // reaches `computePetView`, not the decay-rate math (covered by that
+      // module's own tests).
+      needs: { energy: 70, mood: 65, bond: 40, lastTickAt: new Date().toISOString() },
+    }
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    expect(result.current.pet).toEqual({ enabled: true, energy: 70, mood: 65, bond: 40 })
   })
 
   it("marks automation running when an automation event arrives, then clears the kill switch", async () => {

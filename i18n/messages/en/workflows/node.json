@@ -20,8 +20,10 @@
     }
   },
   "outputHandles": {
+    "approved": "approved",
     "default": "default",
     "false": "false",
+    "rejected": "rejected",
     "true": "true"
   },
   "pinnedTitle": "Pinned test data"

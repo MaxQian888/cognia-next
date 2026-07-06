@@ -1,8 +1,38 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { ChangesView } from "./changes-view"
 import { useGitStore } from "@/stores/git/git-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { GitStatus } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+
+/** Set the confirm-discard panel preference (defaults to on when unset). */
+function setConfirmDiscard(confirmDiscard: boolean) {
+  act(() => {
+    useSettingsStore.setState({
+      settings: {
+        gitSettings: {
+          commitMessageAI: { enabled: false, conventionalCommits: true },
+          panel: { confirmDiscard },
+        },
+      } as never,
+    })
+  })
+}
+
+const renderView = (actions: UseGitActionsResult, s: GitStatus = status) =>
+  render(
+    <ChangesView
+      rootDir="/r"
+      status={s}
+      actions={actions}
+      committing={false}
+      selectedPath={null}
+      onSelectFile={() => {}}
+      onViewHistory={() => {}}
+      onViewBlame={() => {}}
+      onRestore={() => {}}
+    />
+  )
 
 const status: GitStatus = {
   branch: "main",
@@ -63,6 +93,7 @@ beforeEach(() => {
   act(() => {
     useGitStore.getState().reset()
     useGitStore.setState({ expandedGroups: { merge: true, staged: true, changes: true } })
+    useSettingsStore.setState({ settings: null as never })
   })
 })
 
@@ -168,5 +199,35 @@ describe("ChangesView", () => {
       />
     )
     expect(screen.getByTestId("no-changes")).toBeInTheDocument()
+  })
+
+  it("confirms before discarding a file when the pref is on (default)", async () => {
+    setConfirmDiscard(true)
+    const actions = makeActions()
+    renderView(actions)
+    fireEvent.click(screen.getByTestId("discard-work.ts"))
+    // Dialog intercepts — nothing discarded yet.
+    expect(actions.discard).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("discard-confirm-action"))
+    expect(actions.discard).toHaveBeenCalledWith(["work.ts"])
+  })
+
+  it("confirms before discarding all changes", async () => {
+    setConfirmDiscard(true)
+    const actions = makeActions()
+    renderView(actions)
+    fireEvent.click(screen.getByTestId("group-action-changes-discard-all"))
+    expect(actions.discardAll).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("discard-confirm-action"))
+    expect(actions.discardAll).toHaveBeenCalledWith(true)
+  })
+
+  it("discards immediately when the confirm pref is off", () => {
+    setConfirmDiscard(false)
+    const actions = makeActions()
+    renderView(actions)
+    fireEvent.click(screen.getByTestId("discard-work.ts"))
+    expect(actions.discard).toHaveBeenCalledWith(["work.ts"])
+    expect(screen.queryByTestId("discard-confirm")).not.toBeInTheDocument()
   })
 })

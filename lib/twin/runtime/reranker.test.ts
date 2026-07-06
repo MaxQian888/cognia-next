@@ -1,4 +1,5 @@
 import {
+  createLlmRerankScorer,
   identityScorer,
   lexicalRerankScorer,
   rerank,
@@ -143,5 +144,114 @@ describe("rerank — timeout guard", () => {
     })
     expect(result.reranked).toBe(false)
     expect(result.fallbackReason).toContain("timeout")
+  })
+
+  it("aborts the in-flight batchScorer when the timeout fires", async () => {
+    let seenSignal: AbortSignal | undefined
+    const batchScorer = (_q: string, _c: readonly unknown[], opts?: { signal?: AbortSignal }) => {
+      seenSignal = opts?.signal
+      return new Promise<number[]>((resolve) => setTimeout(() => resolve([1]), 200))
+    }
+    const result = await rerank("q", [c("a", 0.5)], {
+      model: "llm",
+      topK: 1,
+      batchScorer: batchScorer as never,
+      timeoutMs: 10,
+    })
+    expect(result.reranked).toBe(false)
+    expect(result.fallbackReason).toContain("timeout")
+    // The scorer received a signal that is now aborted → it can cancel its request.
+    expect(seenSignal?.aborted).toBe(true)
+  })
+})
+
+describe("rerank — batchScorer (model-backed) path", () => {
+  it("reorders by the whole-pool batch scores and takes precedence over scorer", async () => {
+    const candidates = [c("a", 0.9), c("b", 0.5), c("c", 0.7)]
+    const perCandidate = jest.fn(() => 0)
+    const result = await rerank("q", candidates, {
+      model: "llm",
+      topK: 2,
+      scorer: perCandidate,
+      // b most relevant, then c, then a.
+      batchScorer: (_q, cands) => cands.map((x) => ({ a: 0.1, b: 0.99, c: 0.6 })[x.id] ?? 0),
+    })
+    expect(result.reranked).toBe(true)
+    expect(result.candidates.map((x) => x.id)).toEqual(["b", "c"])
+    // batchScorer wins — the per-candidate scorer is never consulted.
+    expect(perCandidate).not.toHaveBeenCalled()
+  })
+
+  it("falls back to identity when the batch returns the wrong length", async () => {
+    const candidates = [c("a", 0.9), c("b", 0.5)]
+    const result = await rerank("q", candidates, {
+      model: "llm",
+      topK: 2,
+      batchScorer: () => [0.5], // one score for two candidates
+    })
+    expect(result.reranked).toBe(false)
+    expect(result.fallbackReason).toContain("wrong-length")
+    expect(result.candidates.map((x) => x.id)).toEqual(["a", "b"])
+  })
+
+  it("falls back to identity when a batch score is non-finite", async () => {
+    const result = await rerank("q", [c("a", 0.9), c("b", 0.5)], {
+      model: "llm",
+      topK: 2,
+      batchScorer: () => [0.5, Number.NaN],
+    })
+    expect(result.reranked).toBe(false)
+    expect(result.fallbackReason).toContain("non-finite")
+  })
+})
+
+describe("createLlmRerankScorer", () => {
+  const cands = [c("a", 0.9, "alpha doc"), c("b", 0.5, "beta doc")]
+
+  it("parses a JSON score array and clamps out-of-range values", async () => {
+    const client = { complete: jest.fn(async () => "Here you go: [1.5, -0.2]") }
+    const scorer = createLlmRerankScorer(client)
+    await expect(scorer("q", cands)).resolves.toEqual([1, 0])
+    // The whole candidate pool is scored in ONE call.
+    expect(client.complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("forwards the abort signal to client.complete", async () => {
+    const client = { complete: jest.fn(async () => "[0.5, 0.5]") }
+    const scorer = createLlmRerankScorer(client)
+    const controller = new AbortController()
+    await scorer("q", cands, { signal: controller.signal })
+    expect(client.complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ abortSignal: controller.signal })
+    )
+  })
+
+  it("drives rerank end-to-end (LLM output reorders the pool)", async () => {
+    const client = { complete: jest.fn(async () => "[0.1, 0.95]") }
+    const result = await rerank("q", cands, {
+      model: "llm",
+      topK: 2,
+      batchScorer: createLlmRerankScorer(client),
+    })
+    expect(result.reranked).toBe(true)
+    expect(result.candidates.map((x) => x.id)).toEqual(["b", "a"])
+  })
+
+  it("throws (→ rerank identity fallback) when the reply has no JSON array", async () => {
+    const client = { complete: jest.fn(async () => "sorry, I can't do that") }
+    const result = await rerank("q", cands, {
+      model: "llm",
+      topK: 2,
+      batchScorer: createLlmRerankScorer(client),
+    })
+    expect(result.reranked).toBe(false)
+    expect(result.candidates.map((x) => x.id)).toEqual(["a", "b"])
+  })
+
+  it("throws on a length mismatch from the model", async () => {
+    const client = { complete: jest.fn(async () => "[0.5]") }
+    const scorer = createLlmRerankScorer(client)
+    await expect(scorer("q", cands)).rejects.toThrow("length mismatch")
   })
 })

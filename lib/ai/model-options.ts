@@ -5,8 +5,30 @@
  */
 
 import { PROVIDERS } from "@cognia/provider-types/provider"
-import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
+import type {
+  UserProviderSettings,
+  CustomProviderSettings,
+  ProviderModelDiscoveryEntry,
+} from "@cognia/provider-types/provider"
 import { getModelDisplayName } from "@/lib/ai/icons"
+import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
+
+/**
+ * The synced OpenRouter live-models catalog (Dexie v93), as the synchronous
+ * model picker sees it. For the `openrouter` provider this stands in for the old
+ * per-account `discoveredModels` list: it is the auto-synced, real-time `/models`
+ * catalog shared identically across the GUI and the CLI. Returns `[]` until the
+ * cache is primed (first boot, before the first network sync), so the picker then
+ * degrades to the curated static `PROVIDERS.openrouter.models` subset.
+ */
+function openRouterCatalogModels(): ProviderModelDiscoveryEntry[] {
+  return getCachedOpenRouterCatalogModels()
+}
+
+/** Look up a single OpenRouter catalog entry by model id (synchronous). */
+function openRouterCatalogEntry(modelId: string): ProviderModelDiscoveryEntry | undefined {
+  return openRouterCatalogModels().find((m) => m.id === modelId)
+}
 
 export interface ModelOption {
   providerId: string
@@ -42,7 +64,12 @@ export function resolveModelMeta(
 ): Pick<ModelOption, "contextLength" | "supportsTools" | "supportsVision" | "supportsReasoning"> {
   if (!providerId) return {}
   const cpm = customProviders?.find((c) => c.id === providerId)?.customModelMetadata?.[modelId]
-  const discovered = providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
+  // OpenRouter's per-account list is the synced catalog; everyone else uses the
+  // settings-store `discoveredModels`.
+  const discovered =
+    providerId === "openrouter"
+      ? openRouterCatalogEntry(modelId)
+      : providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
   const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)
   const firstDefined = <T>(...vals: (T | undefined)[]): T | undefined =>
     vals.find((v) => v !== undefined)
@@ -86,9 +113,10 @@ export function resolveModelDisplayName(
     if (cpName) return cpName
     const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)?.name
     if (builtin) return builtin
-    const discovered = providerSettings?.[providerId]?.discoveredModels?.find(
-      (m) => m.id === modelId
-    )?.name
+    const discovered =
+      providerId === "openrouter"
+        ? openRouterCatalogEntry(modelId)?.name
+        : providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)?.name
     if (discovered) return discovered
   }
   return getModelDisplayName(modelId)
@@ -120,7 +148,10 @@ export function resolveModelContextLength(
   const cp = customProviders?.find((c) => c.id === providerId)
   const cpLen = positive(cp?.customModelMetadata?.[modelId]?.contextLength)
   if (cpLen) return cpLen
-  const discovered = providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
+  const discovered =
+    providerId === "openrouter"
+      ? openRouterCatalogEntry(modelId)
+      : providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
   const discoveredLen = positive(discovered?.contextLength)
   if (discoveredLen) return discoveredLen
   const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)
@@ -140,6 +171,76 @@ export function catalogModelIds(providerId: string): string[] {
   if (cfg.defaultModel) ids.add(cfg.defaultModel)
   for (const m of cfg.models ?? []) ids.add(m.id)
   return [...ids]
+}
+
+/**
+ * Model ids a provider can plausibly serve, from the same synchronous sources
+ * the picker uses: the user's whitelist/default/discovery for built-ins (plus
+ * the synced OpenRouter catalog and the curated static catalog), or the custom
+ * provider's own model list.
+ */
+function servableModelIds(
+  providerId: string,
+  providerSettings: Record<string, UserProviderSettings> | undefined,
+  customProviders: CustomProviderSettings[] | undefined
+): Set<string> {
+  const ids = new Set<string>()
+  const cp = customProviders?.find((c) => c.id === providerId)
+  if (cp) {
+    if (cp.defaultModel) ids.add(cp.defaultModel)
+    for (const mid of cp.customModels ?? []) ids.add(mid)
+    for (const m of cp.models ?? []) {
+      const mid = typeof m === "string" ? m : (m as { id?: string }).id
+      if (mid) ids.add(mid)
+    }
+    return ids
+  }
+  const settings = providerSettings?.[providerId]
+  for (const mid of settings?.enabledModels ?? []) ids.add(mid)
+  if (settings?.defaultModel) ids.add(settings.defaultModel)
+  for (const m of settings?.discoveredModels ?? []) {
+    if (m?.id) ids.add(m.id)
+  }
+  if (providerId === "openrouter") {
+    for (const m of openRouterCatalogModels()) {
+      if (m?.id) ids.add(m.id)
+    }
+  }
+  for (const mid of catalogModelIds(providerId)) ids.add(mid)
+  return ids
+}
+
+/**
+ * The `defaultModel` that should accompany a `defaultProvider` switch, keeping
+ * the (model, provider) pair coherent: switching the default provider while a
+ * foreign `defaultModel` sticks around sends that model to the new provider's
+ * base URL (or, worse, keeps routing turns to the OLD provider's endpoint).
+ *
+ * Returns `undefined` when the current default model is already servable by
+ * the new provider (keep it — never clobber a deliberate choice), or when the
+ * provider is unknown and no replacement can be derived. Otherwise returns
+ * the provider's own configured default → catalog default → first known model.
+ */
+export function resolveDefaultModelForProvider(
+  providerId: string,
+  currentDefaultModel: string | undefined,
+  providerSettings: Record<string, UserProviderSettings> | undefined,
+  customProviders: CustomProviderSettings[] | undefined
+): string | undefined {
+  const servable = servableModelIds(providerId, providerSettings, customProviders)
+  if (currentDefaultModel && servable.has(currentDefaultModel)) return undefined
+  const cp = customProviders?.find((c) => c.id === providerId)
+  if (cp) {
+    if (cp.defaultModel) return cp.defaultModel
+    const first = servable.values().next()
+    return first.done ? undefined : first.value
+  }
+  const configured = providerSettings?.[providerId]?.defaultModel
+  if (configured) return configured
+  const catalogDefault = PROVIDERS[providerId]?.defaultModel
+  if (catalogDefault) return catalogDefault
+  const first = servable.values().next()
+  return first.done ? undefined : first.value
 }
 
 /**
@@ -173,6 +274,14 @@ export function collectModelOptions(
     if (settings.defaultModel) allowed.add(settings.defaultModel)
     for (const m of settings.discoveredModels ?? []) {
       if (m?.id) allowed.add(m.id)
+    }
+    // OpenRouter's full real-time list lives in the synced catalog (Dexie v93),
+    // not `discoveredModels` — fold every catalogued id in so the picker shows
+    // the whole live `/models` catalog, auto-synced and shared with the CLI.
+    if (providerId === "openrouter") {
+      for (const m of openRouterCatalogModels()) {
+        if (m?.id) allowed.add(m.id)
+      }
     }
     // Nothing configured at all → fall back to the curated built-in catalog
     // so an enabled provider never renders as an empty group.

@@ -12,10 +12,20 @@ export const CATEGORY_LABELS: Record<CommandCategory, string> = {
   plugin: "Plugins",
   config: "Configuration",
   system: "System",
+  custom: "Custom",
 }
 
 /** Sections render in this order; anything else falls into "system". */
-const ORDER: CommandCategory[] = ["chat", "session", "cognia", "mcp", "plugin", "config", "system"]
+const ORDER: CommandCategory[] = [
+  "chat",
+  "session",
+  "cognia",
+  "mcp",
+  "plugin",
+  "config",
+  "system",
+  "custom",
+]
 
 export interface CategoryGroup {
   category: CommandCategory

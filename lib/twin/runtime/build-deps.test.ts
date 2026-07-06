@@ -10,8 +10,15 @@ jest.mock("@cognia/vector/store", () => ({
   createVectorStore: jest.fn().mockReturnValue({ provider: "qdrant" }),
 }))
 
+jest.mock("@/lib/twin/distill/llm", () => ({
+  createLlmClient: jest.fn().mockReturnValue({ complete: jest.fn() }),
+  createTwinLanguageModel: jest.fn().mockResolvedValue({ __model: true }),
+}))
+
 const { getTwinRuntimeSettings } = jest.requireMock("@/lib/db/twin-runtime-settings")
 const { createVectorStore } = jest.requireMock("@cognia/vector/store")
+const { createLlmClient } = jest.requireMock("@/lib/twin/distill/llm")
+const { createTwinLanguageModel } = jest.requireMock("@/lib/twin/distill/llm")
 
 function settings(patch: Partial<TwinRuntimeSettings> = {}): TwinRuntimeSettings {
   return {
@@ -68,6 +75,89 @@ describe("tryBuildTwinDeps", () => {
     expect(deps?.reranker?.model).toBe("lexical")
     expect(deps?.reranker?.overFetch).toBe(3)
     expect(typeof deps?.reranker?.scorer).toBe("function")
+  })
+
+  it("attaches an LLM batch reranker for a non-lexical model when the LLM is configured", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        reranker: { enabled: true, model: "llm" },
+        llm: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "sk-1" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.reranker?.model).toBe("llm")
+    expect(deps?.reranker?.overFetch).toBe(5)
+    expect(deps?.reranker?.timeoutMs).toBe(8000)
+    expect(typeof deps?.reranker?.batchScorer).toBe("function")
+    expect(deps?.reranker?.scorer).toBeUndefined()
+    expect(createLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "sk-1" })
+    )
+  })
+
+  it("accepts a baseURL-only (local) LLM endpoint for the model reranker", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        reranker: { enabled: true, model: "llm" },
+        llm: { provider: "openai", model: "local", apiKey: "", baseURL: "http://localhost:1234" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(typeof deps?.reranker?.batchScorer).toBe("function")
+  })
+
+  it("degrades a non-lexical model to the lexical scorer when the LLM is unconfigured", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        reranker: { enabled: true, model: "llm" },
+        llm: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    // No key / baseURL → fall back to the local lexical scorer, not a dead pass.
+    expect(deps?.reranker?.model).toBe("lexical")
+    expect(typeof deps?.reranker?.scorer).toBe("function")
+    expect(deps?.reranker?.batchScorer).toBeUndefined()
+    expect(createLlmClient).not.toHaveBeenCalled()
+  })
+
+  it("omits the expansion dep by default (queryExpansion disabled)", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({ storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } } })
+    )
+    expect((await tryBuildTwinDeps())?.expansion).toBeUndefined()
+  })
+
+  it("attaches the LLM expansion dep when enabled and the LLM is configured", async () => {
+    createTwinLanguageModel.mockResolvedValue({ __model: true })
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        queryExpansion: { enabled: true, strategy: "stepback" },
+        llm: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "sk-1" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.expansion?.strategy).toBe("stepback")
+    expect(createTwinLanguageModel).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "anthropic", apiKey: "sk-1" })
+    )
+  })
+
+  it("omits expansion when enabled but the LLM is unconfigured", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        queryExpansion: { enabled: true, strategy: "hyde" },
+        llm: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.expansion).toBeUndefined()
+    expect(createTwinLanguageModel).not.toHaveBeenCalled()
   })
 
   it("builds pinecone deps", async () => {

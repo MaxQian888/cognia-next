@@ -16,21 +16,29 @@
 //!     `processName` / `windowTitleContains`; deeper AXUIElement tree
 //!     walking is out of scope for the minimum-viable surface.
 //!
-//! `capabilities()` still reports `hasUia: false` because we don't
-//! return a full element tree — only enough metadata for whitelist
-//! gating, focus inspection, and the `pick_at_point` round trip. The
-//! Inspector tab continues to render its "macOS / Linux not yet
-//! supported" message until the full tree lands.
+//! ADR-0020 cross-platform bounded subset (macOS): `read_tree` / `find` now
+//! walk the frontmost application's AX element subtree via the high-level
+//! `accessibility` crate, capped through the shared `tree_shape` helper (depth +
+//! node budget). `capabilities()` therefore reports `hasA11yTree: true`.
+//! Coordinate hit-testing (`pick_at_point`) stays on the osascript frontmost-
+//! window path: `AXUIElementCopyElementAtPosition` would force a raw-`-sys` ref
+//! wrap across the `accessibility` crate's older core-foundation pin, which
+//! can't be verified from the Windows dev host — left as Phase-next. Element-
+//! targeted actions (`click`/`scroll`/`invoke_pattern`/`window_op` by ref) also
+//! remain coordinate-only / unsupported: a stable, re-resolvable element ref is
+//! the harder follow-on.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use accessibility::{AXUIElement, AXUIElementAttributes};
 use enigo::{Direction, Enigo, Keyboard, Mouse, Settings};
 use once_cell::sync::Lazy;
 
 use crate::automation::backend::AutomationBackend;
 use crate::automation::platform::shared::keymap::{parse_chord, KeyToken, Modifier, NamedKey};
 use crate::automation::platform::shared::screenshot;
+use crate::automation::platform::shared::tree_shape::{self, TreeBudget};
 use crate::automation::types::*;
 
 pub struct AxBackend;
@@ -49,7 +57,7 @@ impl AutomationBackend for AxBackend {
             has_input_sim: true,
             has_screenshot: true,
             has_events: false,
-            has_a11y_tree: false, // minimum-viable enigo backend: input only, no AX tree.
+            has_a11y_tree: true, // bounded AX subtree via read_tree/find (ADR-0020 subset).
             monitors: screenshot::list_monitors(),
         }
     }
@@ -59,41 +67,48 @@ impl AutomationBackend for AxBackend {
         Ok(focused_to_element_info(&snap))
     }
 
-    fn read_tree(&self, _root: Option<ElementRef>, _opts: TreeOpts) -> Result<Vec<ElementInfo>> {
-        // Full tree traversal requires AXUIElement.children walking; out
-        // of scope for the W2 minimum-viable surface.
-        Err(AutomationError::UnsupportedPlatform)
+    fn read_tree(&self, _root: Option<ElementRef>, opts: TreeOpts) -> Result<Vec<ElementInfo>> {
+        // Walk the frontmost application's focused-window subtree, depth- and
+        // node-capped via the shared budget. We resolve the pid from the same
+        // osascript snapshot the metadata path uses, then drive the high-level
+        // AX accessors. Element refs are observability-only (role/title) — they
+        // aren't re-resolvable to a live AXUIElement, hence no element-targeted
+        // actions yet.
+        let snap = read_focused_window()?;
+        let Some(pid) = snap.pid else {
+            return Err(AutomationError::BackendError {
+                message: "no frontmost application pid".into(),
+            });
+        };
+        let budget = TreeBudget::from_opts(opts.max_depth);
+        let app = AXUIElement::application(pid as i32);
+        let root = app
+            .focused_window()
+            .or_else(|_| app.main_window())
+            .unwrap_or_else(|_| app.clone());
+        let proc_name = snap.process_name.as_deref();
+        let to_info = |el: &AXUIElement| ax_element_to_info(el, Some(pid), proc_name);
+        let children = |el: &AXUIElement| -> Vec<AXUIElement> {
+            el.children()
+                .map(|arr| arr.iter().map(|c| (*c).clone()).collect())
+                .unwrap_or_default()
+        };
+        let tree = tree_shape::walk_tree(&root, budget, &to_info, &children);
+        Ok(vec![tree])
     }
 
     fn find(&self, locator: &Locator) -> Result<Option<ElementRef>> {
-        // Locator semantics on macOS are limited to the frontmost
-        // window: we match against processName / windowTitleContains.
-        // Anything else (controlType, automationId) returns None
-        // because we can't introspect deeper than the active window.
-        let snap = read_focused_window()?;
-        if let Some(want_proc) = locator.process_name.as_deref() {
-            let have = snap.process_name.as_deref().unwrap_or("");
-            if !have.eq_ignore_ascii_case(want_proc) {
-                return Ok(None);
+        // Materialize the bounded frontmost-window subtree, then delegate the
+        // (cross-platform) matching to tree_shape. This now satisfies
+        // name / name_contains / control_type constraints — not just
+        // processName / windowTitleContains as the pre-subset metadata path did.
+        let trees = self.read_tree(None, TreeOpts::default())?;
+        for tree in &trees {
+            if let Some(found) = tree_shape::find_in_tree(tree, locator) {
+                return Ok(Some(found));
             }
         }
-        if let Some(want_title) = locator.window_title_contains.as_deref() {
-            let have = snap.window_title.as_deref().unwrap_or("");
-            if !have.contains(want_title) {
-                return Ok(None);
-            }
-        }
-        if locator.name.is_some()
-            || locator.name_contains.is_some()
-            || locator.automation_id.is_some()
-            || locator.control_type.is_some()
-            || locator.class_name.is_some()
-        {
-            // We can't satisfy these constraints with osascript metadata
-            // alone; advertise as "no match" instead of pretending.
-            return Ok(None);
-        }
-        Ok(Some(snap_to_element_ref(&snap)))
+        Ok(None)
     }
 
     fn screenshot(&self, opts: ScreenshotOpts) -> Result<Screenshot> {
@@ -458,6 +473,44 @@ fn snap_to_element_ref(snap: &FocusedSnapshot) -> ElementRef {
     let pid_part = snap.pid.map(|p| p.to_string()).unwrap_or_default();
     let title_part = snap.window_title.clone().unwrap_or_default();
     ElementRef(format!("macos|pid={pid_part}|title={title_part}"))
+}
+
+/// Convert a live AX element into our `ElementInfo`. Reads role → `control_type`
+/// and title → `name` / `window_title` (both best-effort; AX accessors return
+/// `Err` when the attribute is absent). `bounding_rect` is left `None` — geometry
+/// (`AXPosition`/`AXSize` are `AXValue`-wrapped) is a follow-on; the bounded
+/// subset only needs role/title for `read_tree` + `find`. The ref is an
+/// observability string, not a re-resolvable handle.
+fn ax_element_to_info(el: &AXUIElement, pid: Option<u32>, proc_name: Option<&str>) -> ElementInfo {
+    let role = el
+        .role()
+        .ok()
+        .map(|r| r.to_string())
+        .filter(|s| !s.is_empty());
+    let title = el
+        .title()
+        .ok()
+        .map(|t| t.to_string())
+        .filter(|s| !s.is_empty());
+    let element_ref = ElementRef(format!(
+        "macos|role={}|title={}",
+        role.as_deref().unwrap_or(""),
+        title.as_deref().unwrap_or("")
+    ));
+    ElementInfo {
+        element_ref,
+        name: title.clone(),
+        automation_id: None,
+        control_type: role,
+        class_name: None,
+        bounding_rect: None,
+        is_enabled: true,
+        is_focused: false,
+        process_id: pid,
+        process_name: proc_name.map(|s| s.to_string()),
+        window_title: title,
+        children: None,
+    }
 }
 
 fn focused_to_element_info(snap: &FocusedSnapshot) -> ElementInfo {

@@ -23,18 +23,28 @@ import { listActiveForReader, listActiveProcedural, touchMemories } from "@/lib/
 /** Single global collection for memory vectors. */
 export const MEMORY_VECTOR_COLLECTION = "cognia_memory"
 
+/** The (non-undefined) shape returned by `tryBuildTwinDeps`. */
+type PrebuiltTwinDeps = NonNullable<Awaited<ReturnType<typeof tryBuildTwinDeps>>>
+
 interface MemoryBackend {
-  store: NonNullable<Awaited<ReturnType<typeof tryBuildTwinDeps>>>["store"]
-  embedding: NonNullable<Awaited<ReturnType<typeof tryBuildTwinDeps>>>["embedding"]
+  store: PrebuiltTwinDeps["store"]
+  embedding: PrebuiltTwinDeps["embedding"]
 }
 
 /**
  * Resolve the shared embedding + vector backend, applying the privacy gate
  * once. Returns `undefined` (→ BM25-only) when no usable, privacy-compliant
  * backend is available.
+ *
+ * `prebuiltTwinDeps`: when the caller already built twin deps this turn, pass
+ * them to skip the second `tryBuildTwinDeps()` (a Dexie read + vector-client
+ * construction). Falls back to building them when omitted.
  */
-async function resolveMemoryBackend(config: MemoryConfig): Promise<MemoryBackend | undefined> {
-  const twinDeps = await tryBuildTwinDeps()
+async function resolveMemoryBackend(
+  config: MemoryConfig,
+  prebuiltTwinDeps?: PrebuiltTwinDeps
+): Promise<MemoryBackend | undefined> {
+  const twinDeps = prebuiltTwinDeps ?? (await tryBuildTwinDeps())
   const store = twinDeps?.store
   const embedding = twinDeps?.embedding
   const canEmbed =
@@ -47,7 +57,8 @@ async function resolveMemoryBackend(config: MemoryConfig): Promise<MemoryBackend
 }
 
 export async function tryBuildMemoryDeps(
-  config: MemoryConfig
+  config: MemoryConfig,
+  prebuiltTwinDeps?: PrebuiltTwinDeps
 ): Promise<ApplyMemoryContextDeps | undefined> {
   if (!config.enabled) return undefined
 
@@ -58,7 +69,7 @@ export async function tryBuildMemoryDeps(
   }
 
   try {
-    const backend = await resolveMemoryBackend(config)
+    const backend = await resolveMemoryBackend(config, prebuiltTwinDeps)
     if (backend) {
       const embedConfig = backend.embedding as unknown as EmbeddingConfig
       deps.embed = async (text) => {

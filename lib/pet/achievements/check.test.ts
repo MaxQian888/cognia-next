@@ -1,5 +1,9 @@
 import { checkAchievements } from "./check"
 import { PET_ACHIEVEMENTS, getAchievement } from "./registry"
+import {
+  __resetPetAchievementsForTesting,
+  registerPetAchievement,
+} from "@/lib/plugin/registries/pet-achievement-registry"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { DEFAULT_CARE_STATE, effectiveStats } from "@/types/pet"
 import type {
@@ -112,5 +116,38 @@ describe("checkAchievements", () => {
     expect(checkAchievements(ctx({ care: { careQuality: 79 } }), [])).not.toContain(
       "devoted-caretaker"
     )
+  })
+
+  it("evaluates plugin-contributed achievements alongside the static registry", () => {
+    try {
+      registerPetAchievement(
+        "feeder",
+        {
+          id: "feeder",
+          labels: { en: "Feeder" },
+          condition: { type: "counter", kind: "fed", gte: 1 },
+        },
+        { pluginId: "p1" }
+      )
+      const newly = checkAchievements(ctx({ counters: { fed: 1 } }), [])
+      expect(newly).toContain("plugin:p1:feeder")
+      // Already-unlocked namespaced ids are excluded like static ones.
+      expect(checkAchievements(ctx({ counters: { fed: 1 } }), ["plugin:p1:feeder"])).not.toContain(
+        "plugin:p1:feeder"
+      )
+    } finally {
+      __resetPetAchievementsForTesting()
+    }
+  })
+
+  it("unlocks streak achievements at their day thresholds", () => {
+    const at = (days: number) =>
+      checkAchievements(ctx({ profile: { streak: { days, lastDay: "2026-07-02" } } }), [])
+    expect(at(6)).not.toContain("streak-week")
+    expect(at(7)).toContain("streak-week")
+    expect(at(29)).not.toContain("streak-month")
+    expect(at(30)).toEqual(expect.arrayContaining(["streak-week", "streak-month"]))
+    // Legacy profile without a streak cache stays locked.
+    expect(checkAchievements(ctx({}), [])).not.toContain("streak-week")
   })
 })

@@ -100,6 +100,40 @@ describe("LocalAccountRegistry", () => {
     db.close()
   })
 
+  it("updates the password verifier with validation and monotonic updatedAt", async () => {
+    const { db, registry } = await freshRegistry("update-verifier")
+    await registry.createAccount({
+      id: "acct_one",
+      displayName: "One",
+      passwordVerifier: verifier,
+      now: 10,
+    })
+
+    const nextVerifier: PasswordVerifierRecord = {
+      algorithm: "argon2id-v1",
+      salt: "salt-2",
+      hash: "hash-2",
+      params: { iterations: 2 },
+    }
+
+    await expect(
+      registry.updatePasswordVerifier("acct_one", nextVerifier, 20)
+    ).resolves.toMatchObject({
+      id: "acct_one",
+      displayName: "One",
+      passwordVerifier: nextVerifier,
+      updatedAt: 20,
+    })
+    await expect(registry.listAccounts()).resolves.toEqual([
+      expect.objectContaining({ passwordVerifier: nextVerifier }),
+    ])
+    await expect(registry.updatePasswordVerifier("acct_missing", nextVerifier, 30)).rejects.toThrow(
+      /does not exist/i
+    )
+
+    db.close()
+  })
+
   it("does not delete the last account and requires a replacement when deleting the active account", async () => {
     const { db, registry } = await freshRegistry("delete-account")
     await registry.createAccount({

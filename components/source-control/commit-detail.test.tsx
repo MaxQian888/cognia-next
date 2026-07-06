@@ -2,6 +2,10 @@ jest.mock("@/lib/git/commands", () => ({
   gitCommitFiles: jest.fn(),
   gitDiffCommit: jest.fn(),
 }))
+let mockSettings: unknown = { gitSettings: {} }
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (sel: (s: unknown) => unknown) => sel({ settings: mockSettings }),
+}))
 jest.mock("./diff-viewer", () => ({
   DiffViewer: ({ diff }: { diff: unknown }) => (
     <div data-testid="diff-viewer-stub" data-has-diff={diff ? "yes" : "no"} />
@@ -42,6 +46,7 @@ beforeEach(() => {
     hunks: [],
     isBinary: false,
   })
+  mockSettings = { gitSettings: {} }
   act(() => useGitStore.getState().reset())
 })
 
@@ -66,6 +71,34 @@ describe("CommitDetail", () => {
   it("hides the reset control without actions", () => {
     render(<CommitDetail rootDir="/r" commit={commit} />)
     expect(screen.queryByTestId("commit-reset")).not.toBeInTheDocument()
+  })
+
+  it("shows the explain button for a selected file when the feature is enabled", async () => {
+    mockSettings = { gitSettings: { explainAI: { enabled: true } } }
+    diffMock.mockResolvedValue({
+      path: "a.ts",
+      oldContent: "o",
+      newContent: "n",
+      hunks: [
+        { header: "@@", oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, patch: "P", lines: [] },
+      ],
+      isBinary: false,
+    })
+    render(<CommitDetail rootDir="/r" commit={commit} />)
+    const file = await screen.findByTestId("commit-file-a.ts")
+    await act(async () => {
+      fireEvent.click(file)
+    })
+    expect(await screen.findByTestId("ai-explain-trigger")).toBeInTheDocument()
+  })
+
+  it("hides the explain button when the feature is disabled", async () => {
+    render(<CommitDetail rootDir="/r" commit={commit} />)
+    const file = await screen.findByTestId("commit-file-a.ts")
+    await act(async () => {
+      fireEvent.click(file)
+    })
+    expect(screen.queryByTestId("ai-explain-trigger")).not.toBeInTheDocument()
   })
 
   it("cherry-picks and reverts the commit", async () => {

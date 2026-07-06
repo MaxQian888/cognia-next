@@ -109,3 +109,38 @@ describe("deriveCapabilityGuards", () => {
     expect(deriveCapabilityGuards({ multiTurn: true }).allowImages).toBe(true)
   })
 })
+
+describe("deriveExternalSessionPermission — sandboxPolicy cascade", () => {
+  it("clamps a child sandbox policy DOWN to the parent ceiling (child cannot widen)", () => {
+    const out = deriveExternalSessionPermission(
+      {
+        sandboxPolicy: {
+          writableRoots: ["/ws"],
+          network: "allowlist",
+          networkAllowlist: ["a.com"],
+        },
+      },
+      { sandboxPolicy: { writableRoots: ["/ws/pkg", "/escape"], network: "on" } }
+    )
+    // Writable narrowed to under the parent; network capped to the allowlist.
+    expect(out.sandboxPolicy?.writableRoots).toEqual(["/ws/pkg"])
+    expect(out.sandboxPolicy?.network).toBe("allowlist")
+    expect(out.sandboxPolicy?.networkAllowlist).toEqual(["a.com"])
+  })
+
+  it("passes the parent policy through when the child has none", () => {
+    const out = deriveExternalSessionPermission(
+      { sandboxPolicy: { writableRoots: ["/ws"] } },
+      { allowedTools: ["Read"] }
+    )
+    expect(out.sandboxPolicy?.writableRoots).toEqual(["/ws"])
+  })
+
+  it("omits sandboxPolicy when neither side sets one", () => {
+    const out = deriveExternalSessionPermission(
+      { permissionMode: "default" },
+      { allowedTools: ["Read"] }
+    )
+    expect(out.sandboxPolicy).toBeUndefined()
+  })
+})

@@ -31,6 +31,27 @@ function interpolate(template, vars) {
   return template.replace(/\{(apiKey|model|baseURL)\}/g, (_, key) => vars[key] ?? "")
 }
 
+/**
+ * Conservative app-effort → wire value map for generic openai-compatible
+ * channels. Most one-api channels accept only `low|medium|high`, so the two
+ * high tiers fold to `high` and `minimal` folds to `low` — a channel that truly
+ * supports finer levels overrides this via `spec.reasoningEffortMap`.
+ */
+const GENERIC_REASONING_EFFORT = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "high",
+  max: "high",
+}
+
+/** Resolve the wire reasoning-effort value, honoring a per-channel override map. */
+function resolveVariantEffort(effort, map) {
+  if (map && typeof map[effort] === "string") return map[effort]
+  return GENERIC_REASONING_EFFORT[effort] ?? "medium"
+}
+
 /** Apply `requestRenames` to modelParams keys (e.g. maxOutputTokens → max_tokens). */
 function renameParams(params, renames) {
   if (!renames) return { ...params }
@@ -58,6 +79,18 @@ async function* sseDataLines(body) {
   if (tail.startsWith("data:")) yield tail.slice(5).trim()
 }
 
+function mayBeIncompleteJson(payload) {
+  const trimmed = payload.trim()
+  return trimmed.startsWith("{") || (trimmed.startsWith("[") && trimmed !== "[DONE]")
+}
+
+/**
+ * Hard ceiling on the multi-line-JSON reassembly buffer. A real SSE event is
+ * a few KB of delta text; anything past this is a poisoned buffer (a garbage
+ * `{`-prefixed line that will never parse), not a legitimate continuation.
+ */
+const MAX_PENDING_SSE_BYTES = 1024 * 1024
+
 /**
  * @param {any} spec  Validated openai-compatible-variant spec.
  * @returns {import("./types.mjs").ProtocolAdapter}
@@ -79,11 +112,26 @@ export function makeOpenAiCompatVariantAdapter(spec) {
       for (const [name, value] of Object.entries(spec.headers ?? {})) {
         headers[name.toLowerCase()] = interpolate(value, vars)
       }
+      // Reasoning-effort translation (opt-in): a channel that supports a
+      // thinking level declares the wire field name via `spec.reasoningEffortField`
+      // (e.g. "reasoning_effort"); we then map the app's effort to a safe value.
+      // Omitted by default so channels that reject the field never 400. `requestInject`
+      // still wins (spread last) if a spec sets the same key explicitly.
+      const reasoningInject =
+        spec.reasoningEffortField && req.reasoning?.effort
+          ? {
+              [spec.reasoningEffortField]: resolveVariantEffort(
+                req.reasoning.effort,
+                spec.reasoningEffortMap
+              ),
+            }
+          : {}
       const body = {
         model: req.model,
         messages: req.messages,
         stream: true,
         ...renameParams(req.modelParams ?? {}, spec.requestRenames),
+        ...reasoningInject,
         ...(spec.requestInject ?? {}),
       }
 
@@ -92,15 +140,21 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: req.abortSignal,
       })
       if (!res.ok) {
         // Surface status + body text so the renderer's error classifier can
         // pick up the class and any Retry-After hint embedded in the payload.
         const retryAfter = res.headers?.get?.("retry-after")
         const text = await res.text().catch(() => "")
-        throw new Error(
+        const err = new Error(
           `HTTP ${res.status}${retryAfter ? ` retry-after: ${retryAfter}` : ""}: ${text.slice(0, 500)}`
         )
+        // Structured fields so extractHttpErrorMeta can read the status and
+        // Retry-After header instead of falling back to message parsing.
+        err.statusCode = res.status
+        if (retryAfter != null) err.responseHeaders = { "retry-after": retryAfter }
+        throw err
       }
       if (!res.body) throw new Error("upstream response has no body")
 
@@ -115,14 +169,38 @@ export function makeOpenAiCompatVariantAdapter(spec) {
         let promptTokens
         let completionTokens
         let cachedInputTokens
+        let cacheCreationInputTokens
+        let reasoningTokens
+        let pendingData = null
         try {
           for await (const data of sseDataLines(res.body)) {
             if (data === "[DONE]") break
+            const payload = pendingData ? `${pendingData}${data}` : data
             let parsed
+            let hasParsed = false
             try {
-              parsed = JSON.parse(data)
+              parsed = JSON.parse(payload)
+              hasParsed = true
+              pendingData = null
             } catch {
-              continue // tolerate keep-alive/comment payloads
+              // The glued payload didn't parse. If this line parses on its
+              // own, the stashed prefix was garbage (a malformed frame that
+              // will never complete) — drop it and recover with the line,
+              // instead of letting the poisoned buffer eat the whole stream.
+              if (pendingData !== null) {
+                try {
+                  parsed = JSON.parse(data)
+                  hasParsed = true
+                  pendingData = null
+                } catch {
+                  // Still ambiguous: genuine multi-line continuation.
+                }
+              }
+              if (!hasParsed) {
+                const stash = mayBeIncompleteJson(payload) ? payload : null
+                pendingData = stash !== null && stash.length <= MAX_PENDING_SSE_BYTES ? stash : null
+                continue // tolerate keep-alive/comment payloads
+              }
             }
             const text = getPath(parsed, paths.textDelta)
             if (typeof text === "string" && text.length > 0) {
@@ -144,21 +222,35 @@ export function makeOpenAiCompatVariantAdapter(spec) {
               const cacheRead = paths.usage.cacheRead
                 ? getPath(parsed, paths.usage.cacheRead)
                 : undefined
+              const cacheCreation = paths.usage.cacheCreation
+                ? getPath(parsed, paths.usage.cacheCreation)
+                : undefined
+              const reasoning = paths.usage.reasoning
+                ? getPath(parsed, paths.usage.reasoning)
+                : undefined
               if (typeof input === "number") promptTokens = input
               if (typeof output === "number") completionTokens = output
               if (typeof cacheRead === "number") cachedInputTokens = cacheRead
+              if (typeof cacheCreation === "number") cacheCreationInputTokens = cacheCreation
+              if (typeof reasoning === "number") reasoningTokens = reasoning
             }
           }
           const finalUsage = {
             ...(promptTokens !== undefined ? { promptTokens } : {}),
             ...(completionTokens !== undefined ? { completionTokens } : {}),
             ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+            ...(cacheCreationInputTokens !== undefined ? { cacheCreationInputTokens } : {}),
+            ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
           }
           yield { type: "finish", finishReason: finishReason ?? "stop", usage: finalUsage }
           resolveUsage(finalUsage)
-        } catch (err) {
+        } finally {
+          // Settles the usage promise on EVERY exit path — including the
+          // generator being closed early via .return() when the turn is
+          // interrupted. Without this the dispatcher's `await usage` after the
+          // stream loop hangs forever and the session stays `active`. A second
+          // resolve after the success path above is a harmless no-op.
           resolveUsage(null)
-          throw err
         }
       }
 

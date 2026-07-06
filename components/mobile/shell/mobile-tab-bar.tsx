@@ -182,7 +182,7 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
                 </Badge>
               )}
             </span>
-            <span>{t(tab.id)}</span>
+            <span className="max-w-full truncate px-0.5 leading-tight">{t(tab.id)}</span>
           </MotionLink>
         )
       })}

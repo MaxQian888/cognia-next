@@ -166,4 +166,91 @@ describe("runAgentTurn", () => {
       expect.objectContaining({ onDelta: emitStream })
     )
   })
+
+  describe("typed output (D3)", () => {
+    const schema = {
+      type: "object",
+      properties: { verdict: { type: "string" }, score: { type: "number" } },
+      required: ["verdict", "score"],
+    }
+
+    it("requests outputFormat and surfaces a validated object", async () => {
+      mockExecuteAgent.mockResolvedValue({
+        text: '{"verdict":"ok","score":1}',
+        channel: "text",
+        toolsAvailable: false,
+        object: { verdict: "ok", score: 1 },
+        usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+      })
+      const result = await runAgentTurn(makeCtx({ prompt: "judge", outputSchema: schema }))
+      const output = result.output as Record<string, unknown>
+      expect(output.object).toEqual({ verdict: "ok", score: 1 })
+      expect(output.schemaValid).toBe(true)
+      expect(mockExecuteAgent).toHaveBeenCalledWith(
+        "judge",
+        expect.objectContaining({ outputFormat: { type: "json_schema", schema } })
+      )
+    })
+
+    it("auto-fixes once, accumulating usage across the retry", async () => {
+      mockExecuteAgent
+        .mockResolvedValueOnce({
+          text: "{}",
+          channel: "text",
+          toolsAvailable: false,
+          object: { verdict: "ok" },
+          usage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 },
+        })
+        .mockResolvedValueOnce({
+          text: "{}",
+          channel: "text",
+          toolsAvailable: false,
+          object: { verdict: "ok", score: 3 },
+          usage: { inputTokens: 6, outputTokens: 6, totalTokens: 12 },
+        })
+      const result = await runAgentTurn(makeCtx({ prompt: "judge", outputSchema: schema }))
+      const output = result.output as Record<string, unknown>
+      expect(output.schemaValid).toBe(true)
+      expect(output.usage).toEqual({ inputTokens: 10, outputTokens: 10, totalTokens: 20 })
+      // Second call carries the corrective re-prompt.
+      expect(mockExecuteAgent.mock.calls[1][0]).toMatch(/score/)
+    })
+
+    it("throws into the errorPolicy when the schema is unmet (fail default)", async () => {
+      mockExecuteAgent.mockResolvedValue({
+        text: "{}",
+        channel: "text",
+        toolsAvailable: false,
+        object: { verdict: "ok" },
+      })
+      await expect(
+        runAgentTurn(makeCtx({ prompt: "judge", outputSchema: schema }))
+      ).rejects.toThrow(/did not satisfy/)
+      expect(mockExecuteAgent).toHaveBeenCalledTimes(2)
+    })
+
+    it("returns the unvalidated object in soft mode", async () => {
+      mockExecuteAgent.mockResolvedValue({
+        text: "{}",
+        channel: "text",
+        toolsAvailable: false,
+        object: { verdict: "ok" },
+      })
+      const result = await runAgentTurn(
+        makeCtx({ prompt: "judge", outputSchema: schema, onSchemaViolation: "soft" })
+      )
+      const output = result.output as Record<string, unknown>
+      expect(output.schemaValid).toBe(false)
+      expect(output.object).toEqual({ verdict: "ok" })
+      expect((output.schemaErrors as string[]).join("\n")).toMatch(/score/)
+    })
+
+    it("ignores an empty schema (no typed-output path)", async () => {
+      await runAgentTurn(makeCtx({ prompt: "go", outputSchema: {} }))
+      expect(mockExecuteAgent).toHaveBeenCalledWith(
+        "go",
+        expect.not.objectContaining({ outputFormat: expect.anything() })
+      )
+    })
+  })
 })

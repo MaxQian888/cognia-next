@@ -1,6 +1,6 @@
 ---
 title: Rust 层
-description: 平台连接器子系统的原生 Tauri 后端——一个带逐平台签名验证的 axum webhook 接收器、OS keyring 凭证托管、OneBot 反向 WS 桥接、通用出站 WS 客户端、飞书 protobuf 长连接、限速 HTTP 客户端，以及 AES-256-GCM 附件缓存，通过 18 个 Tauri 命令和四类事件通道暴露给渲染端。
+description: 平台连接器子系统的原生 Tauri 后端——一个带逐平台签名验证的 axum webhook 接收器、OS keyring 凭证托管、OneBot 反向 WS 桥接、通用出站 WS 客户端、飞书 protobuf 长连接、限速 HTTP 客户端、媒体上传，以及 AES-256-GCM 附件缓存，通过 21 个 Tauri 命令和四类事件通道暴露给渲染端。
 ---
 
 # Rust 层
@@ -13,13 +13,13 @@ description: 平台连接器子系统的原生 Tauri 后端——一个带逐平
   `lark_ws.rs` 中的飞书 protobuf 长连接）、OS keyring 密钥托管（`keyring.rs`）、按主机限速的 HTTP 客户端（`http_client.rs`），
   以及一个 AES-256-GCM 磁盘附件缓存（`attachments.rs`）。axum 路由（`axum_app.rs`）按**已注册**的 adapter 类型——而非 URL 段——
   分发每个 `POST /webhook/{type}/{id}`，因此伪造路径无法跳过验证；随后在 `connectors://webhook/<id>` 上发出已解析（对飞书为已解密）
-  的报文体。这一切都可由 TS 侧通过 `lib/connectors/tauri/commands.ts` 中的类型化封装抵达，它们 `invoke` 下列 18 个
+  的报文体。这一切都可由 TS 侧通过 `lib/connectors/tauri/commands.ts` 中的类型化封装抵达，它们 `invoke` 下列 21 个
   `#[tauri::command]`（`commands.rs`，注册于 `lib.rs`），并将入站流量呈现在四类 Tauri 事件通道上。
 </TLDR>
 
 <StatGrid>
   <Stat label="Rust 源文件" value="~14" hint="connectors/ + sigverify/" />
-  <Stat label="Tauri 命令" value="18" hint="注册于 lib.rs:579-596" />
+  <Stat label="Tauri 命令" value="21" hint="注册于 lib.rs" />
   <Stat label="签名算法" value="5" hint="telegram / slack / discord / lark / wechat" />
   <Stat label="事件通道族" value="4" hint="webhook / onebot / ws / lark-ws" />
 </StatGrid>
@@ -316,12 +316,17 @@ URL 在 bypass 列表上。
         return Ok(AttachmentRef {
 ```
 
-未命中时它 `reqwest::get` 源、用 12 字节随机 nonce（前置于密文）做 AES-256-GCM 加密，并同时写入 `.enc` 密文 blob 与解密副本。
-主密钥是来自 `OsRng` 的 32 字节，首次使用时自动生成进 keyring。
+未命中时它带上适配器提供的可选请求头去获取源、用 12 字节随机 nonce（前置于密文）做 AES-256-GCM 加密，并同时写入 `.enc`
+密文 blob 与解密副本。可选请求头路径用于需要 Bearer 鉴权的 Matrix `mxc://` 下载。主密钥是来自 `OsRng` 的 32 字节，首次使用时自动生成进 keyring。
+
+## 媒体上传
+
+`media_upload.rs` 负责平台媒体库的反向路径：从远端 `sourceUrl` 或本地路径读取字节，套用适配器提供的上传请求头，把原始二进制
+POST 到平台媒体库，并返回响应中的 `content_uri`。Matrix 用它在发送原生 `m.room.message` 媒体事件前上传图片、文件、语音与视频段。
 
 ## Tauri 命令面
 
-`commands.rs` 恰好暴露 18 个 `#[tauri::command]`——渲染端唯一能抵达的入口点。它们注册于 `src-tauri/src/lib.rs:579-596`
+`commands.rs` 恰好暴露 21 个 `#[tauri::command]`——渲染端唯一能抵达的入口点。它们注册于 `src-tauri/src/lib.rs`
 （连同 `.manage(ConnectorsState)`），并经 `lib/connectors/tauri/commands.ts` 中的类型化封装调用。
 
 | 行 | Rust 命令 | TS 封装 |
@@ -331,6 +336,7 @@ URL 在 bypass 列表上。
 | `commands.rs:37` | `connectors_health` | `connectorsHealth` |
 | `commands.rs:57` | `connectors_start_server` | `connectorsStartServer` |
 | `commands.rs:88` | `connectors_stop_server` | `connectorsStopServer` |
+| `commands.rs:116` | `connectors_reset_all_ws` | `connectorsResetAllWs` |
 | `commands.rs:109` | `connectors_keyring_set` | `connectorsKeyringSet` |
 | `commands.rs:118` | `connectors_keyring_get` | `connectorsKeyringGet` |
 | `commands.rs:126` | `connectors_keyring_delete` | `connectorsKeyringDelete` |
@@ -341,12 +347,15 @@ URL 在 bypass 列表上。
 | `commands.rs:170` | `connectors_ws_close` | `connectorsWsClose` |
 | `commands.rs:182` | `connectors_lark_ws_open` | `connectorsLarkWsOpen` |
 | `commands.rs:190` | `connectors_lark_ws_close` | `connectorsLarkWsClose` |
+| `commands.rs:222` | `connectors_onebot_probe` | `connectorsOnebotProbe` |
 | `commands.rs:199` | `connectors_attachment_fetch` | `connectorsAttachmentFetch` |
+| `commands.rs:241` | `connectors_media_upload` | `connectorsMediaUpload` |
 | `commands.rs:216` | `connectors_lark_upload_file` | `connectorsLarkUploadFile` |
 | `commands.rs:233` | `connectors_lark_upload_image` | `connectorsLarkUploadImage` |
 
 `connectors_start_server` 接受一个 `bind_loopback_only` 标志，用以在 `LOCALHOST` 与 `UNSPECIFIED` 间选择
 （`commands.rs:68-72`）；而 `connectors_ws_send` 命令被包在一个 `perf::guard` 中，使出站吞吐量显现于性能仪表盘。
+`connectors_reset_all_ws` 会在连接器 bootstrap 时清理 Webview 硬刷新遗留的通用 WS 与 Lark 长连接句柄，避免旧 socket 继续投递重复入站事件。
 
 ## 事件通道
 

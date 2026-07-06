@@ -22,6 +22,18 @@ import { useEffect } from "react"
 import { transport } from "@/lib/tauri"
 import { usePlatform } from "@/hooks/use-platform"
 import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbound-queue"
+import { runSyncDown } from "@/lib/sync/companion-sync"
+
+/**
+ * After a manual workflow trigger reaches the desktop, the desktop creates a
+ * run row moments later. Pull `workflowRuns` shortly after so the library's
+ * "sending" badge flips to the live "active" run (and the run shows up in the
+ * runs feed) without waiting for the next foreground/network sync. Best-effort
+ * and fire-and-forget; the standard sync triggers + pull-to-refresh remain the
+ * source of truth if this early pull races run creation.
+ */
+const POST_TRIGGER_RUN_SYNC_DELAY_MS = 2500
+
 
 /** Translate a queued row into a `transport.call` invocation.
  *
@@ -33,7 +45,13 @@ import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbo
  * through the payload would pollute the RPC argument shape, so we drop it. */
 const liveDispatcher: OutboundDispatcher = {
   async call(command, payload, _opts) {
-    return transport.call(command, payload)
+    const result = await transport.call(command, payload)
+    if (command === "workflow_trigger_manual") {
+      setTimeout(() => {
+        void runSyncDown({ only: ["workflowRuns"] }).catch(() => {})
+      }, POST_TRIGGER_RUN_SYNC_DELAY_MS)
+    }
+    return result
   },
 }
 

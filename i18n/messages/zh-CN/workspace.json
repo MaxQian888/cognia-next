@@ -13,6 +13,28 @@
     "deleted": "工作区已删除",
     "description": "工作区包含一个主目录和额外挂载的文件夹。活动工作区决定工作目录、源代码管理面板和终端范围。",
     "empty": "暂无工作区",
+    "knowledge": {
+      "addFile": "上传文件",
+      "backendHint": "检索需要已配置的向量后端和嵌入模型（Twin 设置）。未配置时将跳过入库与检索。",
+      "chunkCount": "{count, plural, other {# 个片段}}",
+      "enableRag": "将知识注入对话",
+      "listLabel": "知识文件",
+      "pasteText": "添加粘贴的文本",
+      "pasteNamePlaceholder": "笔记名称（可选）",
+      "pastePlaceholder": "粘贴要加入该工作区知识库的文本…",
+      "pastedDefaultName": "粘贴的笔记",
+      "reindex": "重新索引文件",
+      "reindexAll": "全部重新索引",
+      "removeFile": "移除文件",
+      "status": {
+        "indexed": "已索引",
+        "outdated": "已过期",
+        "pending": "待处理"
+      },
+      "summary": "{files, plural, other {# 个文件}} · {chunks, plural, other {# 个片段}}",
+      "title": "知识库",
+      "topK": "每条消息片段数"
+    },
     "listLabel": "工作区",
     "nameLabel": "名称",
     "namePlaceholder": "工作区名称",

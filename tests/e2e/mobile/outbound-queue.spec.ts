@@ -35,6 +35,8 @@ const COMMAND_KINDS = [
   "plugin_set_enabled",
   "adapter_update_policy",
   "app_settings_update",
+  // External agents (ADR-0056, Wave 4)
+  "external_agent_update",
 ] as const
 
 test.describe("mobile — outbound queue per command", () => {

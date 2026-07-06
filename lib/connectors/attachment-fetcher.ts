@@ -36,6 +36,8 @@ export interface FetchAttachmentInput {
   mimeType?: string
   /** Optional size hint; persisted alongside the row when present. */
   sizeBytes?: number
+  /** Optional request headers for authenticated media repositories. */
+  headers?: Record<string, string>
   /**
    * Custom TTL in ms. Defaults to 7 days. Pass `0` to opt out — the
    * row stays until LRU evicts it.
@@ -78,7 +80,12 @@ export async function fetchAttachment(input: FetchAttachmentInput): Promise<Fetc
   }
 
   // Either fresh fetch or refresh after TTL — delegate to Rust.
-  const ref = await connectorsAttachmentFetch(input.adapterId, input.remoteRef, input.sourceUrl)
+  const ref = await connectorsAttachmentFetch(
+    input.adapterId,
+    input.remoteRef,
+    input.sourceUrl,
+    input.headers
+  )
 
   const ttl = input.ttlMs ?? DEFAULT_TTL_MS
   const row: ConnectorAttachmentRow = {

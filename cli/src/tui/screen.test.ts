@@ -3,6 +3,8 @@ import {
   ALT_SCREEN_ON,
   ALT_SCROLL_OFF,
   CLEAR_HOME,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
   MOUSE_TRACK_OFF,
   MOUSE_TRACK_ON,
   applyMouseMode,
@@ -18,16 +20,16 @@ function fakeStream(isTTY: boolean): { stream: ScreenStream; writes: string[] } 
 }
 
 describe("screen (alternate buffer)", () => {
-  it("enters the alt buffer and clears on a TTY", () => {
+  it("enters the alt buffer, clears, and hides the cursor on a TTY", () => {
     const { stream, writes } = fakeStream(true)
     enterAltScreen(stream)
-    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME])
+    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR])
   })
 
-  it("exits the alt buffer on a TTY", () => {
+  it("exits the alt buffer and restores the cursor on a TTY", () => {
     const { stream, writes } = fakeStream(true)
     exitAltScreen(stream)
-    expect(writes).toEqual([ALT_SCREEN_OFF])
+    expect(writes).toEqual([ALT_SCREEN_OFF, SHOW_CURSOR])
   })
 
   it("is a no-op on a non-TTY stream", () => {
@@ -41,7 +43,7 @@ describe("screen (alternate buffer)", () => {
     const { stream, writes } = fakeStream(true)
     enterAltScreen(stream)
     exitAltScreen(stream)
-    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, ALT_SCREEN_OFF])
+    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR, ALT_SCREEN_OFF, SHOW_CURSOR])
   })
 })
 

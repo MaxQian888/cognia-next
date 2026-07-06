@@ -35,6 +35,13 @@ export interface NodeDecoration {
   lastRun: LastRunSummary | undefined
   /** True when this node has pinned test data (editor runs use it). */
   pinned: boolean
+  /**
+   * True when the copilot composer references this node (a `@` chip / the
+   * "reference selection" action) OR it is under a transient highlight (the
+   * `@`-picker's active row / a proposal card hover). Drives the reference
+   * ring. Derived per-node so unrelated reference changes don't re-render.
+   */
+  referenced: boolean
 }
 
 const EMPTY_DECORATION: NodeDecoration = Object.freeze({
@@ -42,6 +49,7 @@ const EMPTY_DECORATION: NodeDecoration = Object.freeze({
   validation: undefined,
   lastRun: undefined,
   pinned: false,
+  referenced: false,
 })
 
 export function useNodeDecoration(nodeId: string): NodeDecoration {
@@ -55,6 +63,7 @@ export function useNodeDecoration(nodeId: string): NodeDecoration {
       validation: s.validationByStepId[nodeId],
       lastRun: s.lastRunByStepId[nodeId],
       pinned: s.baseWorkflow.pinData?.[nodeId] !== undefined,
+      referenced: !!(s.referencedNodeIds[nodeId] || s.highlightedNodeIds[nodeId]),
     })
   )
   // `store` is itself a hook (Zustand `useBoundStore`), so we either call

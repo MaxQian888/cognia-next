@@ -10,12 +10,13 @@
  * enable) · Space toggles enable/disable · Ctrl+N adds a server · Ctrl+X removes
  * one · Esc clears the filter, then closes.
  */
-import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import React, { useRef, useState } from "react"
+import { Box, Text, useInput, type DOMElement } from "ink"
 import Spinner from "ink-spinner"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
+import { usePanelClick } from "../input/use-panel-click"
 import { windowList } from "./list-window"
 import { OverlayFooter } from "./OverlayFooter"
 import {
@@ -61,13 +62,55 @@ export function McpPanel({
   const theme = useTheme()
   const [query, setQuery] = useState("")
   const [index, setIndex] = useState(0)
+  const boxRef = useRef<DOMElement | null>(null)
 
   const filtered = filterMcpServers(servers, query)
   const safeIndex = filtered.length > 0 ? Math.min(index, filtered.length - 1) : 0
   const current = filtered[safeIndex]
 
+  /** Run a server row's context action (shared by Enter and a click). */
+  const activate = (s: McpPanelServer) => {
+    switch (enterAction(s)) {
+      case "tools":
+        return onTools(s.name)
+      case "auth":
+        return onAuth(s.name)
+      case "reconnect":
+        return onReconnect(s.name)
+      case "enable":
+        return onToggle(s.name)
+      case "none":
+        return
+    }
+  }
+
+  const win = windowList(filtered.length, safeIndex, maxRows)
+  const visible = filtered.slice(win.start, win.end)
+
+  // Mouse (fullscreen `scroll` only): header = title + filter line (2 rows).
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: 2,
+    hasAboveMore: win.above > 0,
+    visibleCount: visible.length,
+    onPick: (offset) => {
+      const target = filtered[win.start + offset]
+      if (target) {
+        setIndex(win.start + offset)
+        activate(target)
+      }
+    },
+    onWheel: (dir) =>
+      setIndex((i) =>
+        dir === "up"
+          ? Math.max(0, Math.min(i, filtered.length - 1) - 1)
+          : Math.min(filtered.length - 1, i + 1)
+      ),
+  })
+
   useInput(
     (input, key) => {
+      if (handleMouse(input)) return
       if (key.escape) {
         if (query) {
           setQuery("")
@@ -95,19 +138,7 @@ export function McpPanel({
         return
       }
       if (key.return) {
-        if (!current) return
-        switch (enterAction(current)) {
-          case "tools":
-            return onTools(current.name)
-          case "auth":
-            return onAuth(current.name)
-          case "reconnect":
-            return onReconnect(current.name)
-          case "enable":
-            return onToggle(current.name)
-          case "none":
-            return
-        }
+        if (current) activate(current)
         return
       }
       if (key.backspace || key.delete) {
@@ -123,11 +154,9 @@ export function McpPanel({
     { isActive }
   )
 
-  const win = windowList(filtered.length, safeIndex, maxRows)
-  const visible = filtered.slice(win.start, win.end)
-
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}

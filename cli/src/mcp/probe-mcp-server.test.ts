@@ -108,14 +108,61 @@ describe("probeMcpServer", () => {
     expect(res.error).toMatch(/401/)
   })
 
-  it("reports failed on a generic connection error", async () => {
+  it("reports failed on a generic connection error (after exhausting retries)", async () => {
+    let calls = 0
     const res = await probeMcpServer(srv(), {
+      retryDelayMs: 0,
       open: async () => {
+        calls++
         throw new Error("ECONNREFUSED")
       },
     })
     expect(res.status).toBe("failed")
     expect(res.error).toBe("ECONNREFUSED")
+    expect(calls).toBe(2) // default: one automatic retry before giving up
+  })
+
+  it("recovers a server that fails its first connect (retry → connected)", async () => {
+    let calls = 0
+    const res = await probeMcpServer(srv(), {
+      retryDelayMs: 0,
+      open: async (s, o) => {
+        calls++
+        if (calls === 1) throw new Error("cold start")
+        return fakeOpen({})(s, o)
+      },
+    })
+    expect(res.status).toBe("connected")
+    expect(calls).toBe(2)
+  })
+
+  it("does not retry an auth failure", async () => {
+    let calls = 0
+    const res = await probeMcpServer(srv(), {
+      retryDelayMs: 0,
+      open: async () => {
+        calls++
+        const e = new Error("HTTP 401 Unauthorized")
+        e.name = "UnauthorizedError"
+        throw e
+      },
+    })
+    expect(res.status).toBe("needs_auth")
+    expect(calls).toBe(1)
+  })
+
+  it("honours attempts: 1 (no retry)", async () => {
+    let calls = 0
+    const res = await probeMcpServer(srv(), {
+      attempts: 1,
+      retryDelayMs: 0,
+      open: async () => {
+        calls++
+        throw new Error("down")
+      },
+    })
+    expect(res.status).toBe("failed")
+    expect(calls).toBe(1)
   })
 
   it("times out a hung connection as failed and aborts", async () => {

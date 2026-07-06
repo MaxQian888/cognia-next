@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation"
 import { memo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { MoreHorizontalIcon, PinIcon, WorkflowIcon } from "lucide-react"
+import { MoreHorizontalIcon, PinIcon, PlayIcon, WorkflowIcon } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +28,7 @@ import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { WorkflowActionItems } from "./workflow-action-items"
 import { WorkflowRenameDialog } from "./workflow-rename-dialog"
 import { WorkflowEditTagsDialog } from "./workflow-edit-tags-dialog"
+import { WorkflowRunDialog } from "./workflow-run-dialog"
 import { usePinnedWorkflows } from "./use-pinned-workflows"
 import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 
@@ -50,6 +51,7 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
   const pinned = isPinned(workflow.id)
   const [renameOpen, setRenameOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
+  const [runOpen, setRunOpen] = useState(false)
 
   const triggerCount = workflow.nodes.filter((n) => n.type.startsWith("trigger.")).length
   const actionCount = workflow.nodes.filter((n) => n.type.startsWith("action.")).length
@@ -121,30 +123,46 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
                   ) : null}
                 </div>
               </button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={(e) => e.stopPropagation()}
-                    className="size-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                    aria-label={t("moreActions")}
-                    data-testid={`workflow-card-menu-${workflow.id}`}
-                  >
-                    <MoreHorizontalIcon className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <WorkflowActionItems
-                    workflow={workflow}
-                    Item={DropdownMenuItem}
-                    Separator={DropdownMenuSeparator}
-                    onRename={() => setRenameOpen(true)}
-                    onEditTags={() => setTagsOpen(true)}
-                    onDelete={() => openDeleteDialog([workflow.id])}
-                  />
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setRunOpen(true)
+                  }}
+                  className="size-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  aria-label={t("run")}
+                  data-testid={`workflow-card-run-${workflow.id}`}
+                >
+                  <PlayIcon className="size-4" />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => e.stopPropagation()}
+                      className="size-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      aria-label={t("moreActions")}
+                      data-testid={`workflow-card-menu-${workflow.id}`}
+                    >
+                      <MoreHorizontalIcon className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <WorkflowActionItems
+                      workflow={workflow}
+                      Item={DropdownMenuItem}
+                      Separator={DropdownMenuSeparator}
+                      onRun={() => setRunOpen(true)}
+                      onRename={() => setRenameOpen(true)}
+                      onEditTags={() => setTagsOpen(true)}
+                      onDelete={() => openDeleteDialog([workflow.id])}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </CardHeader>
             <CardContent className="flex flex-wrap items-center gap-2 pt-0 text-xs text-muted-foreground">
               <Badge variant="outline" className="font-normal">
@@ -202,6 +220,7 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
             workflow={workflow}
             Item={ContextMenuItem}
             Separator={ContextMenuSeparator}
+            onRun={() => setRunOpen(true)}
             onRename={() => setRenameOpen(true)}
             onEditTags={() => setTagsOpen(true)}
             onDelete={() => openDeleteDialog([workflow.id])}
@@ -210,6 +229,7 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
       </ContextMenu>
       <WorkflowRenameDialog workflow={workflow} open={renameOpen} onOpenChange={setRenameOpen} />
       <WorkflowEditTagsDialog workflow={workflow} open={tagsOpen} onOpenChange={setTagsOpen} />
+      <WorkflowRunDialog workflow={workflow} open={runOpen} onOpenChange={setRunOpen} />
     </>
   )
 }

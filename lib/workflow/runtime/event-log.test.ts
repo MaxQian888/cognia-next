@@ -2,9 +2,16 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
-import { appendEvent, appendEvents, createRunLogger, listRunEvents } from "./event-log"
+import {
+  appendEvent,
+  appendEvents,
+  createRunLogger,
+  enqueueRunEvent,
+  listRunEvents,
+} from "./event-log"
 import { listUsageForSession } from "@/lib/db/session-usage"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -52,6 +59,51 @@ describe("event-log ts monotonicity", () => {
     } finally {
       nowSpy.mockRestore()
     }
+  })
+
+  it("coalesces a synchronous burst of events into a single bulkPut", async () => {
+    const bulkSpy = jest.spyOn(getDb().workflowRunEvents, "bulkPut")
+    // Emit three events WITHOUT awaiting between them (same microtask).
+    const p1 = enqueueRunEvent({ runId: "run_c", type: "step_started", stepId: "b1" })
+    const p2 = enqueueRunEvent({ runId: "run_c", type: "step_completed", stepId: "b2" })
+    const p3 = enqueueRunEvent({ runId: "run_c", type: "step_completed", stepId: "b3" })
+    const rows = await Promise.all([p1, p2, p3])
+    // All three landed in ONE bulkPut, not three separate puts.
+    expect(bulkSpy).toHaveBeenCalledTimes(1)
+    expect(bulkSpy.mock.calls[0][0]).toHaveLength(3)
+    // ts assigned at enqueue → order preserved on read.
+    expect(rows[1].ts).toBeGreaterThan(rows[0].ts)
+    const events = await listRunEvents("run_c")
+    expect(events.map((e) => e.stepId)).toEqual(["b1", "b2", "b3"])
+    bulkSpy.mockRestore()
+  })
+
+  it("isolates a bulkPut rejection to the failing run, not concurrent runs", async () => {
+    const real = getDb().workflowRunEvents.bulkPut.bind(getDb().workflowRunEvents)
+    const bulkSpy = jest
+      .spyOn(getDb().workflowRunEvents, "bulkPut")
+      .mockImplementation(((rows: WorkflowRunEventRow[]) =>
+        rows[0]?.runId === "run_bad" ? Promise.reject(new Error("idb boom")) : real(rows)) as never)
+
+    // Two runs enqueued in the SAME microtask → coalesced, then split per-run.
+    const good = enqueueRunEvent({ runId: "run_good", type: "step_completed", stepId: "g1" })
+    const bad = enqueueRunEvent({ runId: "run_bad", type: "step_completed", stepId: "b1" })
+
+    await expect(bad).rejects.toThrow("idb boom")
+    // The healthy run still resolves + persists despite the other run's failure.
+    await expect(good).resolves.toMatchObject({ runId: "run_good", stepId: "g1" })
+    const events = await listRunEvents("run_good")
+    expect(events.map((e) => e.stepId)).toEqual(["g1"])
+
+    bulkSpy.mockRestore()
+  })
+
+  it("createRunLogger writes are durable after await", async () => {
+    const logger = createRunLogger("run_d")
+    await logger.stepStarted("n1", { foo: 1 })
+    await logger.stepCompleted("n1", { ok: true })
+    const events = await listRunEvents("run_d")
+    expect(events.map((e) => e.type)).toEqual(["step_started", "step_completed"])
   })
 
   it("listRunEvents only returns the requested run's events", async () => {

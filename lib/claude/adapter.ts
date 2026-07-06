@@ -4,6 +4,7 @@
 import type { UIMessage } from "ai"
 import type {
   BetaContentBlock,
+  BetaFileBlock,
   BetaMessage,
   BetaToolResultBlock,
   BetaToolUseBlock,
@@ -15,8 +16,16 @@ import type {
   SendContent,
   SendContentBlock,
 } from "./types"
-import type { A2UIPart, ArtifactPart, SourcesPart, SourcesPartItem } from "./parts-extensions"
+import type {
+  A2UIPart,
+  ArtifactPart,
+  McpResultBlock,
+  SourcesPart,
+  SourcesPartItem,
+} from "./parts-extensions"
+import type { HookNoticePartData } from "./hooks"
 import { registerUndoSnapshot } from "./compaction-undo"
+import { persistOpticalArchive, type OpticalBoundaryMeta } from "./optical-archive-persist"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
 import {
   extractAnthropicCitations,
@@ -94,6 +103,15 @@ function buildAssistantParts(message: BetaMessage): Parts {
   return parts
 }
 
+function preserveStepStartParts(preview: UIMessage | undefined, finalParts: Parts): Parts {
+  if (!preview) return finalParts
+  const stepStarts = preview.parts.filter(
+    (part) => (part as { type?: string }).type === "step-start"
+  )
+  if (stepStarts.length === 0) return finalParts
+  return [...stepStarts, ...finalParts]
+}
+
 /**
  * Walk every text block of the assistant message and combine
  *  - Anthropic Citations API entries
@@ -136,22 +154,25 @@ function blockToParts(block: BetaContentBlock): Part[] {
     // consumers expect every text block to map to at least one Part — fall
     // back to an empty-string text Part to preserve that 1:1 contract.
     if (!text) {
-      return [{ type: "text", text: "", state: "done" } as unknown as Part]
+      return [textPart("", b.providerMetadata)]
     }
-    return splitTextForA2UI(text)
+    return splitTextForA2UI(text, b.providerMetadata)
   }
   const single = blockToPart(block)
   return single ? [single] : []
 }
 
-function splitTextForA2UI(text: string): Part[] {
+function splitTextForA2UI(
+  text: string,
+  providerMetadata?: Record<string, Record<string, unknown>>
+): Part[] {
   if (!text) return []
   // Fast-path: skip the regex if no a2ui marker in sight.
   if (!/```a2ui|"createSurface"|"updateComponents"|"surface"\s*:/i.test(text)) {
-    return [textPart(text)]
+    return [textPart(text, providerMetadata)]
   }
   const extracted = extractA2UIFromResponse(text)
-  if (!extracted) return [textPart(text)]
+  if (!extracted) return [textPart(text, providerMetadata)]
   // We don't get back the exact span the parser consumed, so we strip the
   // first ```a2ui|json fence (if any) to expose surrounding prose. When the
   // payload is raw JSON without a fence we keep the plain text part empty.
@@ -166,14 +187,25 @@ function splitTextForA2UI(text: string): Part[] {
     source: "codeblock",
   }
   const out: Part[] = []
-  if (before.trim()) out.push(textPart(before))
+  if (before.trim()) out.push(textPart(before, providerMetadata))
   out.push(a2ui as unknown as Part)
-  if (after.trim()) out.push(textPart(after))
+  if (after.trim()) out.push(textPart(after, providerMetadata))
   return out
 }
 
-function textPart(text: string): Part {
-  return { type: "text", text, state: "done" } as unknown as Part
+function textPart(text: string, providerMetadata?: Record<string, Record<string, unknown>>): Part {
+  return {
+    type: "text",
+    text,
+    state: "done",
+    ...providerMetadataPart({ providerMetadata }),
+  } as unknown as Part
+}
+
+function providerMetadataPart(block: {
+  providerMetadata?: Record<string, Record<string, unknown>>
+}): { providerMetadata?: Record<string, Record<string, unknown>> } {
+  return block.providerMetadata ? { providerMetadata: block.providerMetadata } : {}
 }
 
 function blockToPart(block: BetaContentBlock): Part | null {
@@ -184,14 +216,42 @@ function blockToPart(block: BetaContentBlock): Part | null {
         type: "text",
         text: b.text ?? "",
         state: "done",
+        ...providerMetadataPart(b),
       } as unknown as Part
     }
     case "thinking": {
-      const b = block as { type: "thinking"; thinking?: string }
+      const b = block as Extract<BetaContentBlock, { type: "thinking" }>
       return {
         type: "reasoning",
         text: b.thinking ?? "",
         state: "done",
+        ...providerMetadataPart(b),
+      } as unknown as Part
+    }
+    case "file": {
+      const b = block as BetaFileBlock
+      const source = b.source
+      if (typeof b.url === "string" && typeof b.media_type === "string") {
+        return {
+          type: "file",
+          url: b.url,
+          mediaType: b.media_type,
+          ...(b.filename ? { filename: b.filename } : {}),
+        } as unknown as Part
+      }
+      if (
+        !source ||
+        source.type !== "base64" ||
+        typeof source.media_type !== "string" ||
+        typeof source.data !== "string"
+      ) {
+        return null
+      }
+      return {
+        type: "file",
+        url: `data:${source.media_type};base64,${source.data}`,
+        mediaType: source.media_type,
+        ...(b.filename ? { filename: b.filename } : {}),
       } as unknown as Part
     }
     case "tool_use": {
@@ -200,11 +260,23 @@ function blockToPart(block: BetaContentBlock): Part | null {
       if (artifactPart) {
         return artifactPart as unknown as Part
       }
+      const state =
+        b.state === "input-streaming" || b.state === "approval-requested"
+          ? b.state
+          : "input-available"
       return {
         type: `tool-${b.name}`,
         toolCallId: b.id,
-        state: "input-available",
+        state,
         input: b.input,
+        ...(b.providerExecuted !== undefined ? { providerExecuted: b.providerExecuted } : {}),
+        ...(b.providerMetadata ? { providerMetadata: b.providerMetadata } : {}),
+        ...(b.toolMetadata ? { toolMetadata: b.toolMetadata } : {}),
+        ...(b.dynamic !== undefined ? { dynamic: b.dynamic } : {}),
+        ...(b.title ? { title: b.title } : {}),
+        ...(b.invalid !== undefined ? { invalid: b.invalid } : {}),
+        ...(b.error !== undefined ? { error: b.error } : {}),
+        ...(b.approval ? { approval: b.approval } : {}),
       } as unknown as Part
     }
     default:
@@ -229,6 +301,24 @@ function flattenToolResultContent(content: BetaToolResultBlock["content"]): stri
       .join("")
   }
   return JSON.stringify(content)
+}
+
+/**
+ * Preserve the structured MCP content blocks off a tool-result, but ONLY when
+ * at least one block is not plain text (image / resource / audio). Pure-text
+ * results stay on the flattened-string path — no behavior change, no
+ * persistence bloat. Returns undefined when there's nothing richer than text.
+ * (gap3 — see `parts-extensions.ts:McpResultBlock`.)
+ */
+function extractMcpContentBlocks(
+  content: BetaToolResultBlock["content"]
+): McpResultBlock[] | undefined {
+  if (!Array.isArray(content)) return undefined
+  const blocks = content.filter(
+    (c) => typeof c === "object" && c !== null && typeof (c as { type?: unknown }).type === "string"
+  ) as McpResultBlock[]
+  if (blocks.length === 0) return undefined
+  return blocks.some((b) => b.type !== "text") ? blocks : undefined
 }
 
 /**
@@ -412,23 +502,6 @@ function appendSessionNotice(
   return [...messages, marker]
 }
 
-/** Structured payload for the synthetic `hook-notice` system message. */
-export interface HookNoticePartData {
-  type: "hook-notice"
-  /** Lifecycle event name, e.g. "PreToolUse" / "UserPromptSubmit". */
-  event: string
-  /** Tool the hook gated, when the event is tool-scoped. */
-  toolName?: string
-  /** Derived status, by precedence block > context > warning. */
-  outcome: "blocked" | "context" | "warning"
-  /** Reason a hook blocked the action. */
-  block?: string
-  /** Context a hook injected into the turn. */
-  additionalContext?: string
-  /** Non-blocking diagnostics (timeouts, crashes). */
-  warnings: string[]
-}
-
 /**
  * Append a non-conversational "hook notice" marker projecting a consequential
  * hook fire into the transcript, mirroring `appendSessionNotice`. Only fired by
@@ -463,6 +536,12 @@ function appendCompactBoundary(
       // `captureUndoSnapshot` setting is on. Kept OUT of the persisted part —
       // it is moved into the in-memory undo registry instead.
       pre_messages?: unknown[]
+      // Optical-strategy archive (ADR-0063): rendered frames + token stats.
+      // Persisted to Dexie (durable, survives reload) rather than embedded in
+      // the transcript part; the part only carries a reference id + frame count.
+      optical?: OpticalBoundaryMeta
+      // True when the optical strategy fell back to a text summary this boundary.
+      opticalFallback?: boolean
     }
   }
 ): UIMessage[] {
@@ -483,6 +562,9 @@ function appendCompactBoundary(
     })
   }
 
+  // Persist the optical archive (durable) and reference it from the part.
+  const opticalArchiveId = meta?.optical ? persistOpticalArchive(id, meta) : undefined
+
   const marker: UIMessage = {
     id,
     role: "system",
@@ -494,6 +576,9 @@ function appendCompactBoundary(
         postTokens: meta?.post_tokens,
         strategy: meta?.strategy,
         ...(undoToken ? { undoToken } : {}),
+        ...(opticalArchiveId ? { opticalArchiveId } : {}),
+        ...(meta?.optical?.frameCount ? { opticalFrameCount: meta.optical.frameCount } : {}),
+        ...(meta?.opticalFallback ? { opticalFallback: true } : {}),
       } as unknown as UIMessage["parts"][number],
     ],
   }
@@ -501,15 +586,16 @@ function appendCompactBoundary(
 }
 
 function appendAssistantMessage(messages: UIMessage[], evt: SDKAssistantMessage): UIMessage[] {
-  const parts = buildAssistantParts(evt.message)
   // We key UI messages by the Anthropic message id. If a prior partial-stream
   // version is in the list, replace it with the canonical full version.
   const id = evt.message.id ?? evt.uuid
   const idx = messages.findIndex((m) => m.id === id)
+  const parts = preserveStepStartParts(messages[idx], buildAssistantParts(evt.message))
   const next: UIMessage = {
     id,
     role: "assistant",
     parts,
+    ...(evt.message.metadata !== undefined ? { metadata: evt.message.metadata } : {}),
   }
   if (idx >= 0) {
     const copy = messages.slice()
@@ -572,24 +658,106 @@ function appendDelta(
 }
 
 /**
+ * Extract a partial live {@link UsageInfo} from a raw Anthropic streaming
+ * event's `usage` block: `message_start` carries `input_tokens` + cache counts,
+ * `message_delta` carries the running `output_tokens`. Snake_case per the SDK.
+ * Returns null when no numeric usage is present (e.g. ai-sdk `message_start`
+ * frames, which carry only an id).
+ */
+function liveUsageFromStreamEvent(raw: {
+  type?: string
+  message?: { usage?: Record<string, unknown> }
+  usage?: Record<string, unknown>
+}): Partial<UsageInfo> | null {
+  const u = raw.type === "message_start" ? raw.message?.usage : raw.usage
+  if (!u || typeof u !== "object") return null
+  const num = (k: string) => (typeof u[k] === "number" ? (u[k] as number) : undefined)
+  const info: Partial<UsageInfo> = {
+    inputTokens: num("input_tokens"),
+    outputTokens: num("output_tokens"),
+    cacheCreationInputTokens: num("cache_creation_input_tokens"),
+    cacheReadInputTokens: num("cache_read_input_tokens"),
+  }
+  if (Object.values(info).every((v) => v === undefined)) return null
+  return info
+}
+
+/**
+ * Merge a partial live usage into the last assistant message's `metadata.usage`,
+ * only ADDING fields the frame carries — a later frame (or the trailing `result`)
+ * never gets a known value downgraded to undefined. Powers mid-turn ctx%.
+ */
+function mergeLiveUsage(messages: UIMessage[], partial: Partial<UsageInfo>): UIMessage[] {
+  const idx = findLastAssistantIndex(messages)
+  if (idx < 0) return messages
+  const msg = messages[idx]
+  const prior = ((msg as { metadata?: Record<string, unknown> }).metadata ?? {}) as Record<
+    string,
+    unknown
+  >
+  const usage: Record<string, unknown> = { ...((prior.usage as Record<string, unknown>) ?? {}) }
+  for (const [k, v] of Object.entries(partial)) {
+    if (v !== undefined) usage[k] = v
+  }
+  const out = messages.slice()
+  out[idx] = {
+    ...msg,
+    ...({ metadata: { ...prior, usage } } as { metadata: Record<string, unknown> }),
+  }
+  return out
+}
+
+/**
  * Apply a `stream_event` (SDKPartialAssistantMessage) to the in-progress
  * assistant message. `message_start` seeds an empty assistant message keyed by
- * the Anthropic message id; `content_block_delta` (text_delta / thinking_delta)
- * grows it. Other raw events (content_block_start/stop, message_delta/stop) are
- * ignored — the final `assistant` message carries the canonical content.
+ * the Anthropic message id (and attaches live input/cache usage); each
+ * `content_block_delta` (text_delta / thinking_delta) grows it; `message_delta`
+ * merges the running output-token usage. Other raw events (content_block
+ * start/stop, message_stop) are ignored — the final `assistant` message carries
+ * the canonical content and the `result` message the authoritative usage.
  */
 function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage): UIMessage[] {
   const raw = evt.event as unknown as {
     type?: string
-    message?: { id?: string }
+    message?: { id?: string; usage?: Record<string, unknown> }
+    usage?: Record<string, unknown>
     delta?: { type?: string; text?: string; thinking?: string }
   }
   if (!raw || typeof raw !== "object") return messages
 
   if (raw.type === "message_start") {
     const id = raw.message?.id
-    if (!id || messages.some((m) => m.id === id)) return messages
-    return [...messages, { id, role: "assistant", parts: [] } as UIMessage]
+    if (!id) return messages
+    let next = messages
+    if (!messages.some((m) => m.id === id)) {
+      next = [...messages, { id, role: "assistant", parts: [] } as UIMessage]
+    }
+    // Live context-usage refresh: the native Anthropic `message_start` carries the
+    // turn's real input + cache token counts. Attaching them to the in-progress
+    // assistant lets the ctx% indicator update mid-turn (the trailing `result`
+    // usage replaces them authoritatively at turn end). ai-sdk `message_start`
+    // frames carry no usage → this is a no-op there.
+    const live = liveUsageFromStreamEvent(raw)
+    return live ? mergeLiveUsage(next, live) : next
+  }
+
+  if (raw.type === "message_delta") {
+    // Anthropic emits the running `output_tokens` on each `message_delta`; merge
+    // it into the live usage so the ctx% window figure grows as the reply streams.
+    const live = liveUsageFromStreamEvent(raw)
+    return live ? mergeLiveUsage(messages, live) : messages
+  }
+
+  if (raw.type === "step_start") {
+    const idx = findLastAssistantIndex(messages)
+    if (idx < 0 || idx < findLastUserIndex(messages)) return messages
+    const msg = messages[idx]
+    const out = messages.slice()
+    out[idx] = {
+      ...msg,
+      parts: [...msg.parts, { type: "step-start" } as unknown as Part],
+    }
+    return out
   }
 
   if (raw.type === "content_block_delta") {
@@ -665,10 +833,12 @@ function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessa
       input?: unknown
     }
     const outputText = flattenToolResultContent(tr.content)
+    const mcpContent = tr.is_error ? undefined : extractMcpContentBlocks(tr.content)
     const newPart = {
       ...oldPart,
       state: tr.is_error ? "output-error" : "output-available",
       ...(tr.is_error ? { errorText: outputText } : { output: outputText }),
+      ...(mcpContent ? { mcpContent } : {}),
     } as unknown as Part
 
     const newParts = msg.parts.slice()

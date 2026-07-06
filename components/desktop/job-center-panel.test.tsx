@@ -24,6 +24,14 @@ jest.mock("@/lib/db/background-tasks", () => ({
   clearSettledBackgroundTasks: (...args: unknown[]) => clearSettledBackgroundTasks(...args),
 }))
 
+let runningCount = 0
+jest.mock("@/components/execution/use-execution-monitor", () => ({
+  useExecutionMonitor: () => ({ rows: [], runningCount, isLoading: false }),
+}))
+jest.mock("@/components/execution/execution-monitor-panel", () => ({
+  ExecutionMonitorPanel: () => <div data-testid="execution-monitor-panel">monitor</div>,
+}))
+
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
 jest.mock("sonner", () => ({
@@ -79,6 +87,7 @@ beforeEach(() => {
   })
   cancelRendererBackgroundRun.mockReturnValue(true)
   clearSettledBackgroundTasks.mockResolvedValue(undefined)
+  runningCount = 0
 })
 
 afterEach(() => {
@@ -170,6 +179,37 @@ it("surfaces collect and cancel failure states", async () => {
   expect(toastError).toHaveBeenCalledWith("That background run is no longer available.")
   expect(toastError).toHaveBeenCalledWith("Collected failure")
   expect(toastError).toHaveBeenCalledWith("Could not collect background result: network down")
+})
+
+it("shows live executions under the Running tab and counts them in the badge", async () => {
+  const user = userEvent.setup()
+  runningCount = 2
+
+  render(<JobCenterPanel />)
+
+  // Badge = 3 journal records + 2 live runs.
+  expect(screen.getByTestId("status-job-center")).toHaveTextContent("5")
+
+  await user.click(screen.getByTestId("status-job-center"))
+
+  // Running is the default tab when live activity exists → monitor is visible.
+  expect(screen.getByTestId("execution-monitor-panel")).toBeInTheDocument()
+  expect(screen.getByRole("tab", { name: /Running/ })).toBeInTheDocument()
+})
+
+it("defaults to the Active tab and reaches Running on demand when nothing is live", async () => {
+  const user = userEvent.setup()
+  runningCount = 0
+
+  render(<JobCenterPanel />)
+
+  await user.click(screen.getByTestId("status-job-center"))
+
+  // No live runs → Active is default, monitor not mounted until its tab is opened.
+  expect(screen.queryByTestId("execution-monitor-panel")).not.toBeInTheDocument()
+
+  await user.click(screen.getByRole("tab", { name: /Running/ }))
+  expect(screen.getByTestId("execution-monitor-panel")).toBeInTheDocument()
 })
 
 it("reports clear-settled failures", async () => {

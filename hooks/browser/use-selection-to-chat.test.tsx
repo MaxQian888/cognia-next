@@ -120,3 +120,48 @@ it("throws when there is no session", async () => {
     "No active chat session"
   )
 })
+
+describe("sendScreenshot", () => {
+  const RECT = { x: 0, y: 0, width: 100, height: 100 }
+
+  it("captures the rect and sends an image + context line", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    const ok = await result.current.sendScreenshot(RECT, { pageUrl: "http://localhost:3000/" })
+    expect(ok).toBe(true)
+    expect(mockCapture).toHaveBeenCalledWith(RECT)
+    const [content, opts, callOpts] = mockSend.mock.calls[0]
+    expect(Array.isArray(content)).toBe(true) // image + text blocks
+    expect(opts).toBeUndefined()
+    expect(callOpts).toEqual({ sessionId: "s1" })
+  })
+
+  it("returns false when no session is available", async () => {
+    mockStoreState = { activeSessionId: null, sessions: {} }
+    const { result } = renderHook(() => useSelectionToChat())
+    const ok = await result.current.sendScreenshot(RECT)
+    expect(ok).toBe(false)
+    expect(mockCapture).not.toHaveBeenCalled()
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it("interrupts a streaming session before sending", async () => {
+    mockStoreState.sessions.s1.status = "streaming"
+    const { result } = renderHook(() => useSelectionToChat())
+    await result.current.sendScreenshot(RECT)
+    expect(mockInterrupt).toHaveBeenCalledWith("s1")
+    expect(mockSend).toHaveBeenCalled()
+  })
+
+  it("targets an explicit session id over the active one", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    await result.current.sendScreenshot(RECT, { sessionId: "other" })
+    expect(mockSend.mock.calls[0][2]).toEqual({ sessionId: "other" })
+  })
+
+  it("throws when the capture yields no image", async () => {
+    mockCapture.mockResolvedValueOnce({ bytes: "", width: 0, height: 0 })
+    const { result } = renderHook(() => useSelectionToChat())
+    await expect(result.current.sendScreenshot(RECT)).rejects.toThrow("no image")
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+})

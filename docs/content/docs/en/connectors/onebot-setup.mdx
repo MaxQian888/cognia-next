@@ -1,12 +1,17 @@
 ---
 title: "OneBot (QQ) Setup"
-description: "Integrate QQ via the OneBot protocol using NapCat, Lagrange, or LLOneBot over reverse-WebSocket."
+description: "Integrate QQ via the OneBot protocol using NapCat, Lagrange, or LLOneBot over reverse or forward WebSocket."
 ---
 
 # OneBot (QQ) Setup Guide
 
-cognia-next integrates with QQ via the **OneBot** protocol using a **reverse-WebSocket** connection.
-NapCat, Lagrange, or LLOneBot runs alongside the QQ client and connects to cognia-next.
+cognia-next integrates with QQ via the **OneBot** protocol using either **reverse WebSocket**
+or **forward WebSocket**:
+
+- **Reverse WS**: NapCat, Lagrange, or LLOneBot runs alongside the QQ client and connects to
+  cognia-next's connectors server.
+- **Forward WS**: cognia-next connects to a WebSocket server exposed by NapCat or another OneBot
+  client.
 
 Supported clients:
 
@@ -20,7 +25,10 @@ Supported clients:
 
 - cognia-next running in **desktop mode** (`pnpm tauri dev` or installed app)
 - QQ account logged in via NapCat / Lagrange / LLOneBot
-- Port `8080` (or whichever connectors port you configured) reachable from the QQ client machine (usually the same machine)
+- For reverse WS: port `7842` (or whichever connectors port you configured) reachable from the QQ
+  client machine, usually the same machine.
+- For forward WS: the OneBot client's WebSocket server URL reachable from cognia-next, for example
+  `ws://127.0.0.1:3001`.
 
 ---
 
@@ -30,28 +38,39 @@ Supported clients:
 2. Click **Add adapter** → **OneBot (QQ)**.
 3. Fill in:
    - **Bot UIN** — the QQ number of the bot account (e.g. `123456789`).
-   - **Bearer Token** — leave blank unless you configure `accessToken` in NapCat (see Step 3).
+   - **Bearer Token** — paste the same value as the OneBot client's `accessToken` when using an
+     authenticated connection.
    - **Expected Client** — choose NapCat, Lagrange, or LLOneBot (cosmetic).
-4. Click **Create**. The dialog will show the **reverse-WS endpoint URL**, e.g.:
+   - **Connection mode** — choose **Reverse WS** when the client should connect to cognia-next, or
+     **Forward WS** when cognia-next should connect to the client's WebSocket server.
+4. Click **Create**.
+
+For **Reverse WS**, the dialog shows the endpoint URL, e.g.:
 
    ```
-   ws://127.0.0.1:8080/ws/onebot/<adapterId>
+   ws://127.0.0.1:7842/ws/onebot/<adapterId>
    ```
 
-   Copy this URL — you will paste it into NapCat config next.
+Copy this URL — you will paste it into NapCat / Lagrange / LLOneBot config next.
+
+For **Forward WS**, enter the OneBot client's WebSocket server URL in the dialog, e.g.
+`ws://127.0.0.1:3001`.
 
 ---
 
-## Step 2 — Configure NapCat reverse-WS
+## Step 2 — Choose a transport
 
-Edit your NapCat `napcat.json` (or use the NapCat WebUI) and add the reverse-WS URL:
+### Option A: Reverse WS
+
+Edit your NapCat `napcat.json` (or use the NapCat WebUI) and add the reverse-WS URL from
+cognia-next:
 
 ```json
 {
   "wsReverse": [
     {
       "enable": true,
-      "url": "ws://127.0.0.1:8080/ws/onebot/<adapterId>",
+      "url": "ws://127.0.0.1:7842/ws/onebot/<adapterId>",
       "reconnectInterval": 3000
     }
   ]
@@ -70,7 +89,7 @@ In `appsettings.json`:
     {
       "Type": "ReverseWebSocket",
       "Host": "127.0.0.1",
-      "Port": 8080,
+      "Port": 7842,
       "Suffix": "/ws/onebot/<adapterId>",
       "ReconnectInterval": 3000
     }
@@ -83,14 +102,30 @@ In `appsettings.json`:
 In the LLOneBot plugin settings, add a **Reverse WebSocket** entry with URL:
 
 ```
-ws://127.0.0.1:8080/ws/onebot/<adapterId>
+ws://127.0.0.1:7842/ws/onebot/<adapterId>
 ```
+
+### Option B: Forward WS
+
+Enable the OneBot client's WebSocket server and put its URL into cognia-next's **NapCat WebSocket
+URL** field. For NapCat, this is commonly:
+
+```
+ws://127.0.0.1:3001
+```
+
+When the **Bearer Token** field is set, cognia-next sends it as
+`Authorization: Bearer <token>` while opening the forward WebSocket.
 
 ---
 
-## Step 3 — Optional: configure bearer token
+## Step 3 — Configure bearer token
 
-If you want to protect the endpoint (recommended on shared machines):
+For reverse WS, the inbound endpoint is fail-closed by default: if no bearer token is configured,
+cognia-next rejects the connection unless you explicitly enable **Allow unauthenticated
+connections** in the adapter dialog.
+
+Recommended setup:
 
 1. In NapCat `napcat.json`, set:
 
@@ -102,15 +137,19 @@ If you want to protect the endpoint (recommended on shared machines):
 
 2. In cognia-next adapter dialog, paste `my-secret-token` into the **Bearer Token** field.
 
-cognia-next will reject connections that send a wrong or missing token.
+cognia-next will reject reverse-WS connections that send a wrong or missing token. Only enable
+**Allow unauthenticated connections** for a trusted local client that genuinely runs without an
+access token.
 
 ---
 
 ## Step 4 — Restart and verify
 
-1. Restart NapCat (or reload the LLOneBot plugin / restart Lagrange).
-2. NapCat will initiate the WebSocket connection to cognia-next within a few seconds.
-3. In the cognia-next adapter dialog, click **Verify connection** — it waits up to 10 s for the handshake.
+1. Restart or reconnect the OneBot client after changing its WebSocket or token settings.
+2. For reverse WS, the client initiates the WebSocket connection to cognia-next within a few seconds.
+   For forward WS, cognia-next dials the client WebSocket server.
+3. In the cognia-next adapter dialog, click **Verify connection** to wait up to 10 s for a fresh
+   reverse-WS handshake, or **Currently connected?** to read the live reverse-WS registry.
 4. Once connected, the adapter status in **Settings → Connections** shows **running** (green).
 
 ---

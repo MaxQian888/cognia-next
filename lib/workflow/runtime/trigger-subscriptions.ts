@@ -34,6 +34,9 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.chat.message",
   "trigger.goal.completed",
   "trigger.terminal.command",
+  "trigger.team",
+  "trigger.desktop.event",
+  "trigger.pet.event",
 ]
 
 interface SubscriptionState {
@@ -125,6 +128,20 @@ export interface TriggerMatchContext {
   status?: string
   /** Project id (terminal.command) — optional equality match. */
   projectId?: string
+  /** Team id (trigger.team) — optional; unspecified node matches any team. */
+  teamId?: string
+  /**
+   * Desktop UI event kind (trigger.desktop.event) — matched against the
+   * node's `kinds` array param ("focus-changed" / …). A node without a
+   * `kinds` filter matches every event kind.
+   */
+  desktopEventKind?: string
+  /**
+   * Pet lifecycle event kind (trigger.pet.event) — matched against the
+   * node's `kinds` array param (levelUp / evolved / achievementUnlocked /
+   * unwell). A node without a `kinds` filter matches every lifecycle kind.
+   */
+  petEventKind?: string
   /**
    * Command line (terminal.command) — matched as a *substring* against the
    * node's `commandContains` param. Already PII-gated by the dispatcher;
@@ -169,6 +186,17 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   }
   if (typeof p.projectId === "string" && p.projectId.length > 0) {
     if (ctx.projectId !== p.projectId) return false
+  }
+  if (typeof p.teamId === "string" && p.teamId.length > 0) {
+    if (ctx.teamId !== p.teamId) return false
+  }
+  if (Array.isArray(p.kinds) && p.kinds.length > 0) {
+    // Shared `kinds` filter shape — desktop and pet triggers each pass their
+    // own ctx field, and entries are already partitioned per trigger kind.
+    const eventKind = ctx.desktopEventKind ?? ctx.petEventKind
+    if (typeof eventKind !== "string" || !p.kinds.includes(eventKind)) {
+      return false
+    }
   }
   if (typeof p.commandContains === "string" && p.commandContains.length > 0) {
     if (typeof ctx.command !== "string" || !ctx.command.includes(p.commandContains)) return false

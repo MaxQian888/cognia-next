@@ -34,12 +34,20 @@
       "teacher": "Explanatory"
     },
     "permAcceptEdits": "Accept edits — auto-allow file writes",
+    "permAuto": "Auto — run most actions with background safety checks",
     "permBypass": "Bypass — allow everything (dangerous)",
     "permDefault": "Default — ask before edits",
+    "permDontAsk": "Don't ask — only pre-approved and read-only tools",
     "permPlan": "Plan — read-only, propose changes",
     "permissionDesc": "Default for new sessions — characters and individual sessions can still override.",
     "permissionMode": "Mode",
     "permissionTitle": "Permission mode",
+    "planDesc": "Defaults applied when a plan-mode turn proposes a plan (ExitPlanMode).",
+    "planMaxAutoRefinements": "Max automatic refinements",
+    "planMaxAutoRefinementsHint": "Cap on automatic repair replans after a step failure (0–10).",
+    "planRequireApproval": "Require plan approval",
+    "planRequireApprovalHint": "Show the approval card before implementing. When off, captured plans auto-resume in accept-edits mode.",
+    "planTitle": "Plan mode",
     "routingDesc": "When a turn fails, retry against the next entry in the alias's fallback chain. Disable to keep the original error visible.",
     "routingTitle": "Routing fallback",
     "thinkingActiveHint": "Active: up to {budget} tokens reserved per turn for reasoning before the visible reply.",
@@ -234,6 +242,7 @@
     "title": "Deferred tool loading",
     "toolsHelp": "These bare tool names stay resident and are never deferred.",
     "toolsLabel": "Always-loaded tools",
-    "toolsPlaceholder": "Tool name, e.g. read_file"
+    "toolsPlaceholder": "Tool name, e.g. read_file",
+    "unknownHint": "Not found in the current tool catalog — this pin won't take effect until a matching server or tool exists."
   }
 }

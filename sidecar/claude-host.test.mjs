@@ -12,6 +12,7 @@ import assert from "node:assert/strict"
 import {
   makeWrappedEmit,
   restartReason,
+  routeClose,
   routeRestore,
   runControlWithTimeout,
 } from "./claude-host.mjs"
@@ -146,6 +147,40 @@ test("routeRestore is a safe no-op for unknown / non-restorable sessions", () =>
 test("routeRestore reports false when the session declines the restore", () => {
   const sessions = new Map([["s1", { restoreConversation: () => false }]])
   assert.equal(routeRestore(sessions, { sessionId: "s1", messages: [] }), false)
+})
+
+// ── Close routing ───────────────────────────────────────────────────────────
+test("routeClose closes an ai-sdk session without requiring q.close", () => {
+  const calls = []
+  const logs = []
+  const session = {
+    multiTurn: true,
+    closeInput: () => calls.push("closeInput"),
+    drainPending: (reason) => calls.push(["drainPending", reason]),
+    q: { active: false },
+  }
+  const sessions = new Map([["s1", session]])
+
+  assert.equal(
+    routeClose(sessions, { sessionId: "s1" }, (level, message) => logs.push([level, message])),
+    true
+  )
+  assert.deepEqual(calls, ["closeInput", ["drainPending", "session closed"]])
+  assert.deepEqual(logs, [])
+  assert.equal(sessions.has("s1"), false)
+})
+
+test("routeClose calls q.close when the dispatch path provides it", () => {
+  const calls = []
+  const session = {
+    closeInput: () => calls.push("closeInput"),
+    q: { close: () => calls.push("q.close") },
+  }
+  const sessions = new Map([["a1", session]])
+
+  assert.equal(routeClose(sessions, { sessionId: "a1" }), true)
+  assert.deepEqual(calls, ["closeInput", "q.close"])
+  assert.equal(sessions.has("a1"), false)
 })
 
 // ── Identity guard: a superseded old loop must not evict its replacement ──────

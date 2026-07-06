@@ -62,6 +62,7 @@ import {
   probeExternalAgentEcosystemReadiness,
   projectExternalAgentReadinessMetadata,
 } from "./config-normalizer"
+import { adaptPermissionMode } from "./permission-modes"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
@@ -1508,11 +1509,26 @@ export class ExternalAgentManager {
       systemPrompt: options?.systemPrompt,
       context: options?.context as Record<string, unknown> | undefined,
       instructionEnvelope: options?.instructionEnvelope,
-      permissionMode: options?.permissionMode,
+      permissionMode: this.resolveEffectivePermissionMode(instance, options?.permissionMode),
       timeout: options?.timeout,
       mcpServers,
       metadata,
     }
+  }
+
+  /**
+   * Clamp a requested permission mode to what the agent's backend can actually
+   * enforce (e.g. Codex has no `dontAsk`). Returns `undefined` when no mode was
+   * requested so the adapter keeps its own default. Keeping this on the manager
+   * means the mode persisted on the session — and surfaced to the UI — always
+   * matches the mode the backend runs under.
+   */
+  private resolveEffectivePermissionMode(
+    instance: ExternalAgentInstance,
+    requested: AcpPermissionMode | undefined
+  ): AcpPermissionMode | undefined {
+    if (!requested) return undefined
+    return adaptPermissionMode(requested, instance.config.protocol).mode
   }
 
   private async resolveExecutionSession(
@@ -1768,12 +1784,16 @@ export class ExternalAgentManager {
 
     const session = await this.resolveExecutionSession(adapter, instance, options)
 
+    const effectivePermissionMode = this.resolveEffectivePermissionMode(
+      instance,
+      options?.permissionMode
+    )
     if (
-      options?.permissionMode &&
+      effectivePermissionMode &&
       adapter.setSessionMode &&
-      session.permissionMode !== options.permissionMode
+      session.permissionMode !== effectivePermissionMode
     ) {
-      await adapter.setSessionMode(session.id, options.permissionMode)
+      await adapter.setSessionMode(session.id, effectivePermissionMode)
     }
 
     const traceBridge = this.createTraceBridge(agentId, instance, session, options)
@@ -1991,12 +2011,16 @@ export class ExternalAgentManager {
 
     const session = await this.resolveExecutionSession(adapter, instance, options)
 
+    const effectivePermissionMode = this.resolveEffectivePermissionMode(
+      instance,
+      options?.permissionMode
+    )
     if (
-      options?.permissionMode &&
+      effectivePermissionMode &&
       adapter.setSessionMode &&
-      session.permissionMode !== options.permissionMode
+      session.permissionMode !== effectivePermissionMode
     ) {
-      await adapter.setSessionMode(session.id, options.permissionMode)
+      await adapter.setSessionMode(session.id, effectivePermissionMode)
     }
 
     const traceBridge = this.createTraceBridge(agentId, instance, session, options)

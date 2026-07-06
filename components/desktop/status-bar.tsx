@@ -34,9 +34,13 @@ import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 
-const log = loggers.ui
+import {
+  ADVANCED_MODES,
+  permissionRiskMarker,
+  SAFE_CYCLE_MODES,
+} from "@/lib/settings/permission-mode-meta"
 
-const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "acceptEdits", "bypassPermissions"]
+const log = loggers.ui
 
 /**
  * VSCode-style status bar mounted at the bottom of the desktop shell.
@@ -160,27 +164,30 @@ export function StatusBar() {
             {t("permissionMode")}: {permissionLabelFor(permissionMode, t)}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={4} className="w-48 p-1">
+        <PopoverContent align="start" sideOffset={4} className="w-52 p-1">
           <div className="flex flex-col gap-0.5">
-            {PERMISSION_MODES.map((mode) => (
-              <button
+            {SAFE_CYCLE_MODES.map((mode) => (
+              <PermissionModeOption
                 key={mode}
-                type="button"
-                onClick={() => {
-                  log.info("status-bar setPermissionMode", { mode })
-                  setPermissionMode(mode)
-                }}
-                className={cn(
-                  "flex items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-accent",
-                  permissionMode === mode && "bg-accent"
-                )}
-                data-testid={`status-permission-${mode}`}
-              >
-                <span>{permissionLabelFor(mode, t)}</span>
-                {permissionMode === mode && (
-                  <span aria-hidden className="size-1.5 rounded-full bg-primary" />
-                )}
-              </button>
+                mode={mode}
+                active={permissionMode === mode || (mode === "default" && permissionMode === null)}
+                onSelect={setPermissionMode}
+                t={t}
+              />
+            ))}
+            <div className="my-1 flex items-center gap-2 px-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              {t("permissionAdvanced")}
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            {ADVANCED_MODES.map((mode) => (
+              <PermissionModeOption
+                key={mode}
+                mode={mode}
+                active={permissionMode === mode}
+                onSelect={setPermissionMode}
+                t={t}
+              />
             ))}
           </div>
         </PopoverContent>
@@ -322,10 +329,55 @@ function permissionLabelFor(mode: PermissionMode | null, t: (key: string) => str
       return t("permissionAcceptEdits")
     case "bypassPermissions":
       return t("permissionBypass")
+    case "dontAsk":
+      return t("permissionDontAsk")
+    case "auto":
+      return t("permissionAuto")
     case "default":
     default:
       return t("permissionDefault")
   }
+}
+
+/** A single selectable permission mode inside the status-bar popover. Advanced
+ * (elevated / danger) modes carry a risk marker so a power mode never reads the
+ * same as a safe one. */
+function PermissionModeOption({
+  mode,
+  active,
+  onSelect,
+  t,
+}: {
+  mode: PermissionMode
+  active: boolean
+  onSelect: (mode: PermissionMode) => void
+  t: (key: string) => string
+}) {
+  const marker = permissionRiskMarker(mode)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        log.info("status-bar setPermissionMode", { mode })
+        onSelect(mode)
+      }}
+      className={cn(
+        "flex items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-accent",
+        active && "bg-accent"
+      )}
+      data-testid={`status-permission-${mode}`}
+    >
+      <span className="flex items-center gap-1.5">
+        {marker && (
+          <span aria-hidden className={cn(marker === "⚠" && "text-rose-500")}>
+            {marker}
+          </span>
+        )}
+        {permissionLabelFor(mode, t)}
+      </span>
+      {active && <span aria-hidden className="size-1.5 rounded-full bg-primary" />}
+    </button>
+  )
 }
 
 function statusLabelFor(

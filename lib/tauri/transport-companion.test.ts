@@ -17,6 +17,7 @@ import {
   CompanionError,
   CompanionTransport,
   __resetCompanionConfigCacheForTests,
+  __setBackoffRandomForTests,
   classifyWsHost,
   clearCompanionConfig,
   hydrateCompanionConfig,
@@ -248,6 +249,70 @@ describe("call() — success", () => {
 })
 
 // ---------------------------------------------------------------------------
+// configProvider injection (ADR-0059 T-B2)
+// ---------------------------------------------------------------------------
+
+describe("configProvider injection", () => {
+  it("calls use the injected config even when storage is empty", async () => {
+    // Storage cache deliberately empty — the provider is the only source.
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+    transport = new CompanionTransport({
+      configProvider: () => ({
+        baseUrl: "https://127.0.0.1:7999",
+        deviceJwt: "service.token.abc",
+        deviceId: "brain-1",
+        serverVersion: "headless",
+      }),
+    })
+
+    const result = await transport.call("claude_sidecar_status")
+    expect(result).toEqual({ ok: true })
+    const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(calledUrl).toBe("https://127.0.0.1:7999/api/v1/_rpc/claude_sidecar_status")
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer service.token.abc")
+    // Nothing was persisted — the provider config never touches storage.
+    expect(loadCompanionConfig()).toBeNull()
+  })
+
+  it("a provider returning null yields not_paired", async () => {
+    transport = new CompanionTransport({ configProvider: () => null })
+    await expect(transport.call("anything")).rejects.toMatchObject({ code: "not_paired" })
+  })
+
+  it("provider swaps (token refresh) take effect on the next call", async () => {
+    let token = "tok-1"
+    fetchSpy.mockResolvedValue(mockResponse({}, 200))
+    transport = new CompanionTransport({
+      configProvider: () => ({
+        baseUrl: "https://127.0.0.1:7999",
+        deviceJwt: token,
+        deviceId: "brain-1",
+        serverVersion: "headless",
+      }),
+    })
+
+    await transport.call("claude_sidecar_status")
+    token = "tok-2"
+    await transport.call("claude_sidecar_status")
+
+    const auths = fetchSpy.mock.calls.map(
+      (call) => ((call as [string, RequestInit])[1].headers as Record<string, string>).Authorization
+    )
+    expect(auths).toEqual(["Bearer tok-1", "Bearer tok-2"])
+  })
+
+  it("the provider does not shadow storage-configured instances", async () => {
+    // A plain instance still reads the storage cache (mobile behavior).
+    await setConfig()
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: 1 }, 200))
+    transport = new CompanionTransport()
+    await transport.call("claude_sidecar_status")
+    const [calledUrl] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(calledUrl).toContain(MOCK_CONFIG.baseUrl)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // call() — idempotency key
 // ---------------------------------------------------------------------------
 
@@ -303,6 +368,8 @@ describe("call() — idempotency key", () => {
       "default_export_dir",
       "fs_search_workspace",
       "fs_read_workspace_file",
+      "fs_list_workspace_dir",
+      "fs_stat_workspace_file",
       "terminal_list_all",
       "terminal_list_for_project",
       "plugin_list",
@@ -336,6 +403,10 @@ describe("call() — idempotency key", () => {
       "git_commit",
       "write_text_file",
       "fs_write_workspace_file",
+      "fs_create_workspace_dir",
+      "fs_delete_workspace_entry",
+      "fs_rename_workspace_entry",
+      "fs_copy_workspace_entry",
       "terminal_exec",
       "terminal_kill",
       "plugin_install",
@@ -673,6 +744,46 @@ describe("WebSocket reconnect", () => {
   beforeEach(() => {
     setConfig()
     jest.useFakeTimers()
+    // Pin the backoff jitter to its midpoint (factor 1.0) so these tests can
+    // assert the exact 1s → 2s → 4s schedule.
+    __setBackoffRandomForTests(() => 0.5)
+  })
+
+  afterEach(() => {
+    __setBackoffRandomForTests(null)
+  })
+
+  it("jitters the reconnect delay around the base backoff", async () => {
+    // Max jitter (factor 1.15) pushes the first 1s step out past 1000ms.
+    __setBackoffRandomForTests(() => 1)
+    transport = new CompanionTransport()
+    transport.subscribe("ch:test", jest.fn())
+    const ws1 = MockWebSocket.lastInstance!
+    ws1.triggerOpen()
+    ws1.triggerClose()
+
+    await jest.advanceTimersByTimeAsync(1000)
+    expect(MockWebSocket.instances.length).toBe(1) // not yet — jitter widened it
+    await jest.advanceTimersByTimeAsync(150)
+    expect(MockWebSocket.instances.length).toBe(2)
+  })
+
+  it("does not schedule a reconnect while the OS reports offline", async () => {
+    const onLineSpy = jest.spyOn(window.navigator, "onLine", "get").mockReturnValue(false)
+    try {
+      transport = new CompanionTransport()
+      transport.subscribe("ch:test", jest.fn())
+      const ws1 = MockWebSocket.lastInstance!
+      ws1.triggerOpen()
+      ws1.triggerClose()
+
+      // Even after well past every backoff step, no new socket is created —
+      // the online listener owns resumption when connectivity returns.
+      await jest.advanceTimersByTimeAsync(60_000)
+      expect(MockWebSocket.instances.length).toBe(1)
+    } finally {
+      onLineSpy.mockRestore()
+    }
   })
 
   it("reconnects after close with backoff 1s → 2s → 4s", async () => {

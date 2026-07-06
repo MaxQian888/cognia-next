@@ -18,6 +18,7 @@
  */
 
 import { parseDispatchAgentArgs, type NormalizedDispatch } from "./dispatch-agent-tool"
+import { runDispatchFanout } from "./dispatch-core"
 import {
   getDispatchContext,
   getResolvedPermissionCeiling,
@@ -37,9 +38,11 @@ import {
   recordDispatchStart,
   recordDispatchComplete,
   recordDispatchFailed,
+  recordDispatchCancelled,
   recordDispatchRejected,
   createDispatchEventSink,
 } from "./dispatch-runtime"
+import { registerSubagentRun, unregisterSubagentRun } from "./subagent-cancel-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
 
 /** Fallback cap when nesting settings can't be read. */
@@ -93,11 +96,34 @@ async function loadNesting(): Promise<{
   }
 }
 
+/**
+ * Belt-and-braces ceiling when `resolveSendOptions` never deposited one for
+ * this session (e.g. an early-returned send, or a caller that didn't pass
+ * `session.id`). The session row's own `permissionMode` is the FIRST link of
+ * the resolution chain, so a plan-mode parent still clamps its children even
+ * without a recorded ceiling. Only consulted when no recorded ceiling exists —
+ * a recorded ceiling is post-clamp and authoritative, never overridden.
+ * `auto` has no ACP equivalent (same convention as the ceiling recorder).
+ */
+async function fallbackCeilingFromSession(
+  sessionId: string
+): Promise<ExternalSessionPermissionSpec | undefined> {
+  try {
+    const { getSession } = await import("@/lib/db/sessions")
+    const mode = (await getSession(sessionId))?.permissionMode
+    if (mode && mode !== "auto") return { permissionMode: mode }
+  } catch {
+    // best-effort fallback — absence of a ceiling is the pre-existing behavior
+  }
+  return undefined
+}
+
 async function resolveCaller(sessionId: string): Promise<ResolvedCaller> {
   // The caller's resolved ceiling is deposited by `resolveSendOptions` under the
   // caller's own session id — whether the caller is the top-level chat or a
   // running subagent. Read it once and clamp every child it dispatches.
-  const parentCeiling = getResolvedPermissionCeiling(sessionId)
+  const parentCeiling =
+    getResolvedPermissionCeiling(sessionId) ?? (await fallbackCeilingFromSession(sessionId))
   const ctx = getDispatchContext(sessionId)
   if (ctx) {
     return {
@@ -138,7 +164,9 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
 
   const runOne = async (d: NormalizedDispatch, label: string): Promise<string> => {
     const childRunId = newRunId()
-    const backgroundAbort = d.background ? new AbortController() : null
+    // Every run (foreground OR background) gets a controller so the chat card's
+    // Abort button can stop it via the cancel registry.
+    const abort = new AbortController()
     const childDepth = caller.parentDepth + 1
     recordDispatchStart({
       id: childRunId,
@@ -149,6 +177,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       parentSessionId: req.sessionId,
       backgrounded: d.background,
     })
+    registerSubagentRun(childRunId, abort)
 
     const [{ dispatchSubagent }, { getDispatchableSubagentDef }] = await Promise.all([
       import("@/lib/plugin/agent-sdk/dispatch"),
@@ -165,7 +194,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       _parentChain: caller.parentChain,
       _budgetRootRunId: caller.budgetRoot,
       _onEvent: createDispatchEventSink(childRunId),
-      ...(backgroundAbort ? { abortSignal: backgroundAbort.signal } : {}),
+      abortSignal: abort.signal,
       ...(caller.deadlineMs ? { _deadlineMs: caller.deadlineMs } : {}),
       ...(caller.parentCeiling ? { _permissionCeiling: caller.parentCeiling } : {}),
     })
@@ -186,17 +215,24 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
             ...(r.usage ? { usage: r.usage } : {}),
           })
         }
+        unregisterSubagentRun(childRunId)
         return r
       })
       .catch((err): PluginSubagentDispatchResult => {
         const msg = err instanceof Error ? err.message : String(err)
-        recordDispatchFailed(childRunId, msg)
+        // An aborted run is a user cancellation, not a failure.
+        if (abort.signal.aborted) {
+          recordDispatchCancelled(childRunId)
+        } else {
+          recordDispatchFailed(childRunId, msg)
+        }
+        unregisterSubagentRun(childRunId)
         return {
           text: msg,
           channel: "text",
           toolsAvailable: false,
           runId: childRunId,
-          finishReason: "error",
+          finishReason: abort.signal.aborted ? "cancelled" : "error",
         }
       })
 
@@ -212,7 +248,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
           startedAt: Date.now(),
         },
         promise,
-        backgroundAbort ? { cancel: () => backgroundAbort.abort() } : undefined
+        { cancel: () => abort.abort() }
       )
       return `[${d.subagentId}] started in background (runId: ${childRunId}). Collect later with dispatch_agent({collect:"${childRunId}"}).`
     }
@@ -220,28 +256,22 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
     return formatResult(label, r)
   }
 
-  if (parsed.dispatches.length === 1) {
-    const d = parsed.dispatches[0]
-    return runOne(d, d.subagentId)
-  }
-  // Parallel fan-out shares the subtree budget. The guard is a post-hoc
-  // accumulator (`add` runs AFTER each run), so under a FINITE budget concurrent
-  // siblings would all clear the pre-spend exhaustion gate and overshoot in one
-  // batch. When the budget is finite, serialize the fan-out so each sibling sees
-  // the prior siblings' draw-down and `isDispatchBudgetExhausted` trips mid-batch.
-  // An unlimited budget has nothing to overshoot, so it stays fully parallel.
-  if (isDispatchBudgetFinite(caller.budgetRoot)) {
-    const out: string[] = []
-    for (let i = 0; i < parsed.dispatches.length; i++) {
-      const d = parsed.dispatches[i]
-      out.push(await runOne(d, `${d.subagentId}#${i + 1}`))
-    }
-    return out.join("\n\n---\n\n")
-  }
-  const settled = await Promise.all(
-    parsed.dispatches.map((d, i) => runOne(d, `${d.subagentId}#${i + 1}`))
-  )
-  return settled.join("\n\n---\n\n")
+  // Fan-out policy via the shared core (unified with the CLI handler so the two
+  // can't drift). The guard is a post-hoc accumulator (`add` runs AFTER each
+  // run), so under a FINITE budget concurrent siblings would all clear the
+  // pre-spend exhaustion gate and overshoot in one batch. When the budget is
+  // finite, serialize (`width: 1`) so each sibling sees the prior siblings'
+  // draw-down and the per-child budget check trips mid-batch. An unlimited
+  // budget has nothing to overshoot, so it stays fully parallel.
+  const width = isDispatchBudgetFinite(caller.budgetRoot) ? 1 : Infinity
+  const outcomes = await runDispatchFanout({
+    dispatches: parsed.dispatches,
+    width,
+    // The renderer collapses per-run errors into the result text itself (see
+    // `runOne`'s `.catch`), so every outcome is surfaced as `ok` text.
+    runOne: async (d, label) => ({ text: await runOne(d, label), ok: true }),
+  })
+  return outcomes.map((o) => o.text).join("\n\n---\n\n")
 }
 
 /**

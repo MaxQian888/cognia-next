@@ -3,6 +3,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { PassThrough } from "node:stream"
 import { buildAiSdkMcpTools, toMcpTransport, wrapMcpToolWithGate } from "./ai-sdk-mcp.mjs"
 
 // A no-op stdio transport stand-in so toMcpTransport doesn't construct the real
@@ -150,10 +151,11 @@ test("buildAiSdkMcpTools honours allow/deny (deny wins, whole-server allow)", as
 test("buildAiSdkMcpTools skips a server that fails to connect, keeps the rest", async () => {
   const warnings = []
   const log = (lvl, msg) => warnings.push(`${lvl}:${msg}`)
-  let i = 0
+  const attempts = {}
+  // Per-url failure so the retry never accidentally rescues the down server.
   const createClient = async ({ transport }) => {
-    i++
-    if (i === 1) throw new Error("ECONNREFUSED")
+    attempts[transport.url] = (attempts[transport.url] ?? 0) + 1
+    if (transport.url === "https://down") throw new Error("ECONNREFUSED")
     return { tools: async () => ({ ok: { execute: async () => "ok" } }), close: async () => {} }
   }
   const { tools } = await buildAiSdkMcpTools({
@@ -163,12 +165,99 @@ test("buildAiSdkMcpTools skips a server that fails to connect, keeps the rest", 
     },
     createClient,
     log,
+    retryDelayMs: 0,
   })
   assert.equal(tools["mcp__good__ok"] !== undefined, true, "healthy server still bridged")
   assert.ok(
     warnings.some((w) => w.includes('mcp "bad" failed to connect')),
-    "bad server logged"
+    "bad server logged after both attempts"
   )
+  // The down server exhausted all three attempts before giving up.
+  assert.equal(attempts["https://down"], 3, "connect retried until maxAttempts")
+  assert.equal(attempts["https://up"], 1, "healthy server connected on the first attempt")
+})
+
+test("buildAiSdkMcpTools recovers a server that fails once then connects (retry)", async () => {
+  let attempts = 0
+  const createClient = async () => {
+    attempts++
+    if (attempts === 1) throw new Error("cold start")
+    return { tools: async () => ({ ping: { execute: async () => "pong" } }), close: async () => {} }
+  }
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: { flaky: { type: "http", url: "https://cold" } },
+    createClient,
+    retryDelayMs: 0,
+  })
+  assert.equal(attempts, 2, "connected on the retry")
+  assert.ok(tools["mcp__flaky__ping"], "transiently-failing server recovered on retry")
+})
+
+test("buildAiSdkMcpTools recovers a server that fails twice then connects (backoff)", async () => {
+  let attempts = 0
+  const createClient = async () => {
+    attempts++
+    if (attempts <= 2) throw new Error("still cold")
+    return { tools: async () => ({ ping: { execute: async () => "pong" } }), close: async () => {} }
+  }
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: { flaky: { type: "http", url: "https://cold" } },
+    createClient,
+    retryDelayMs: 0,
+  })
+  assert.equal(attempts, 3, "third attempt connected")
+  assert.ok(tools["mcp__flaky__ping"], "recovered on the last attempt")
+})
+
+test("buildAiSdkMcpTools caps a hung connect with connectTimeoutMs and closes the late client", async () => {
+  const warnings = []
+  let lateClosed = false
+  // Never-yielding connect that eventually resolves AFTER the timeout.
+  const createClient = () =>
+    new Promise((resolve) =>
+      setTimeout(
+        () => resolve({ tools: async () => ({}), close: async () => (lateClosed = true) }),
+        40
+      )
+    )
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: { hung: { type: "http", url: "https://hang" } },
+    createClient,
+    log: (lvl, msg) => warnings.push(msg),
+    retryDelayMs: 0,
+    maxAttempts: 1,
+    connectTimeoutMs: 10,
+  })
+  assert.deepEqual(Object.keys(tools), [], "hung server contributes no tools")
+  assert.ok(
+    warnings.some((w) => w.includes("timed out")),
+    "timeout surfaced in the log"
+  )
+  await new Promise((r) => setTimeout(r, 60))
+  assert.equal(lateClosed, true, "late-resolving client torn down (no socket leak)")
+})
+
+test("buildAiSdkMcpTools connects servers concurrently (a slow one does not block)", async () => {
+  const order = []
+  const createClient = async ({ transport }) => {
+    order.push(`start:${transport.url}`)
+    // The "slow" server resolves last; a serial impl would push its start only
+    // after "fast" fully finished — concurrent starts interleave.
+    const delay = transport.url === "https://slow" ? 30 : 0
+    await new Promise((r) => setTimeout(r, delay))
+    order.push(`done:${transport.url}`)
+    return { tools: async () => ({ t: { execute: async () => "x" } }), close: async () => {} }
+  }
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: {
+      slow: { type: "sse", url: "https://slow" },
+      fast: { type: "sse", url: "https://fast" },
+    },
+    createClient,
+  })
+  assert.ok(tools["mcp__slow__t"] && tools["mcp__fast__t"], "both bridged")
+  // Both connects START before either finishes → concurrency (not serial).
+  assert.deepEqual(order.slice(0, 2), ["start:https://slow", "start:https://fast"])
 })
 
 test("buildAiSdkMcpTools skips a server whose tools() rejects", async () => {
@@ -199,4 +288,73 @@ test("buildAiSdkMcpTools with no servers returns an empty map and a no-op close"
 test("wrapMcpToolWithGate returns the tool unchanged when no gate is supplied", () => {
   const t = { description: "d", execute: async () => "x" }
   assert.equal(wrapMcpToolWithGate(t, "mcp__s__t", undefined), t)
+})
+
+test("toMcpTransport wires a provided stderr stream into the stdio config", () => {
+  const s = new PassThrough()
+  const t = toMcpTransport(
+    { type: "stdio", command: "node" },
+    { StdioTransport: FakeStdio, stderr: s }
+  )
+  assert.equal(t.cfg.stderr, s, "stderr stream forwarded to the transport config")
+})
+
+test("buildAiSdkMcpTools captures stdio server stderr into emitMcpLog", async () => {
+  const logs = []
+  let stderrStream = null
+  const createClient = async ({ transport }) => {
+    stderrStream = transport.cfg.stderr // the PassThrough wired by toMcpTransport
+    return { tools: async () => ({ ping: { execute: async () => "pong" } }), close: async () => {} }
+  }
+  const { close } = await buildAiSdkMcpTools({
+    mcpServers: { fs: { type: "stdio", command: "node" } },
+    createClient,
+    StdioTransport: FakeStdio,
+    emitMcpLog: (e) => logs.push(e),
+  })
+  assert.ok(stderrStream, "stderr stream wired for stdio server")
+  stderrStream.write("[error] boom\nwarn: slow\n")
+  await new Promise((r) => setImmediate(r))
+  const err = logs.find((l) => l.source === "stderr" && l.level === "error")
+  assert.ok(err, "stderr error line captured as an mcp_log")
+  assert.equal(err.server, "fs")
+  assert.equal(err.message, "[error] boom")
+  assert.ok(
+    logs.some((l) => l.source === "stderr" && l.level === "warn"),
+    "stderr warn line captured too"
+  )
+  // A successful connect also emits a diagnostic summary.
+  assert.ok(logs.some((l) => l.source === "diagnostic" && /connected/.test(l.message)))
+  await close()
+})
+
+test("buildAiSdkMcpTools emits a diagnostic mcp_log when a server fails to connect", async () => {
+  const logs = []
+  const createClient = async () => {
+    throw new Error("ECONNREFUSED")
+  }
+  await buildAiSdkMcpTools({
+    mcpServers: { bad: { type: "sse", url: "https://down" } },
+    createClient,
+    emitMcpLog: (e) => logs.push(e),
+    retryDelayMs: 0,
+  })
+  const d = logs.find((l) => l.source === "diagnostic" && /failed to connect/.test(l.message))
+  assert.ok(d, "connect failure surfaced as a diagnostic mcp_log")
+  assert.equal(d.server, "bad")
+  assert.equal(d.level, "warn")
+})
+
+test("stdio transport has no stderr stream when no emitMcpLog sink is supplied", async () => {
+  let cfg = null
+  const createClient = async ({ transport }) => {
+    cfg = transport.cfg
+    return { tools: async () => ({}), close: async () => {} }
+  }
+  await buildAiSdkMcpTools({
+    mcpServers: { fs: { type: "stdio", command: "node" } },
+    createClient,
+    StdioTransport: FakeStdio,
+  })
+  assert.equal(cfg.stderr, undefined, "no stderr stream spawned without a log sink")
 })

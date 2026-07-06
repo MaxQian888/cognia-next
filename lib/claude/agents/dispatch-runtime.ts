@@ -91,6 +91,20 @@ export function recordDispatchComplete(
   })
 }
 
+/** Record a subagent run cancelled by the user (abort). */
+export function recordDispatchCancelled(id: string): void {
+  const store = useSubagentRuntimeStore.getState()
+  const sa = store.subAgents[id]
+  if (!sa) return
+  store.upsert({
+    ...sa,
+    status: "cancelled",
+    backgrounded: false,
+    completedAt: new Date(),
+    lastActivityAt: new Date(),
+  })
+}
+
 /** Record a subagent run that failed (error text). */
 export function recordDispatchFailed(id: string, error: string): void {
   const store = useSubagentRuntimeStore.getState()
@@ -107,39 +121,52 @@ export function recordDispatchFailed(id: string, error: string): void {
 }
 
 /**
- * Indeterminate progress from the tool-call count — re-exported from the shared
- * {@link indeterminateSubagentProgress} so both subagent engines stay identical.
- * Kept as a named export for the existing callers/tests.
+ * Indeterminate progress from the tool-call count.
+ *
+ * @deprecated gap9 — no surface renders a subagent completion bar anymore; the
+ * honest tool-use count replaced it. Kept only as a named export for legacy
+ * callers/tests and is no longer used to drive the runtime store.
  */
 export const dispatchProgressForToolCount = indeterminateSubagentProgress
 
 /**
  * Build a {@link CaptureStreamEvent} sink for a single dispatched run. It folds
  * the child's live tool activity into the runtime store: each `tool-call` logs
- * the tool and advances the indeterminate progress bar; each `tool-result`
- * logs completion (a warning on error). Other event types (text/thinking/usage)
- * are ignored. Best-effort — a store error never propagates back into capture.
+ * the tool and bumps the honest tool-use count; each `tool-result` logs
+ * completion (a warning on error). Other event types (text/thinking/usage) are
+ * ignored. Best-effort — a store error never propagates back into capture.
  */
 export function createDispatchEventSink(id: string): (event: CaptureStreamEvent) => void {
   let toolCalls = 0
+  // When the SDK omits a tool_use id, synthesize one and pair the next
+  // result by tool name (best-effort) so the inline tool list still resolves.
+  let synthSeq = 0
+  const lastIdByName = new Map<string, string>()
   return (event) => {
     const store = useSubagentRuntimeStore.getState()
     if (event.type === "tool-call") {
       toolCalls += 1
-      // One batched store write (log + progress + toolUses) per tool-call —
-      // a single map spread + subscriber notification instead of three.
+      const callId = event.id ?? `tc-${id}-${(synthSeq += 1)}`
+      lastIdByName.set(event.toolName, callId)
+      // One batched store write (log + toolUses + toolStart) per tool-call —
+      // a single map spread + subscriber notification. gap9: no `progress`
+      // (the pseudo-percentage) — the honest `toolUses` count drives the UI.
       store.applyRunEvent(id, {
         log: { timestamp: new Date(), level: "info", message: `Running ${event.toolName}` },
-        progress: dispatchProgressForToolCount(toolCalls),
         toolUses: toolCalls,
+        toolStart: { id: callId, name: event.toolName, input: event.input },
       })
     } else if (event.type === "tool-result") {
+      const callId = event.id ?? lastIdByName.get(event.toolName)
       store.applyRunEvent(id, {
         log: {
           timestamp: new Date(),
           level: event.isError ? "warn" : "info",
           message: `${event.toolName} ${event.isError ? "failed" : "done"}`,
         },
+        ...(callId
+          ? { toolEnd: { id: callId, output: event.result, isError: event.isError } }
+          : {}),
       })
     }
   }

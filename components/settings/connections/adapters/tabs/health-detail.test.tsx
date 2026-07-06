@@ -59,6 +59,22 @@ describe("HealthDetail — base render", () => {
     renderWithProvider(<HealthDetail adapterId="tg-1" />)
     expect(screen.queryByTestId("health-detail-runtime")).not.toBeInTheDocument()
   })
+
+  it("localizes a known health reason code beside the state pill", () => {
+    mockUseAdapterHealth.mockReturnValue(
+      makeResult({ current: { state: "down", reason: "credentials_missing" } })
+    )
+    renderWithProvider(<HealthDetail adapterId="tg-1" />)
+    expect(screen.getByText(/Credentials missing/i)).toBeInTheDocument()
+  })
+
+  it("passes an unknown reason (raw transport error) through unchanged", () => {
+    mockUseAdapterHealth.mockReturnValue(
+      makeResult({ current: { state: "degraded", reason: "socket hang up" } })
+    )
+    renderWithProvider(<HealthDetail adapterId="tg-1" />)
+    expect(screen.getByText("socket hang up")).toBeInTheDocument()
+  })
 })
 
 describe("HealthDetail — runtime card", () => {

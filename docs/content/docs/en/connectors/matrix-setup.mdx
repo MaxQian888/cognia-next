@@ -1,0 +1,91 @@
+---
+title: "Matrix Connector Setup"
+description: "Provide a homeserver URL and bot access token, or sign in with a password, then connect Matrix through /sync."
+---
+
+# Matrix Connector Setup Guide
+
+This guide walks through preparing an access token for a Matrix bot account and configuring cognia-next to connect to your Matrix homeserver. cognia-next uses the standard client-server `/sync` long-poll transport, so no public URL is required.
+
+---
+
+## 1. Prepare a Homeserver and Bot Account
+
+1. Prepare a Matrix homeserver — either a public service such as `matrix.org` or a self-hosted Synapse instance.
+2. Register a **dedicated bot account** on that homeserver, for example `@bot:matrix.org`. Use a separate account rather than your personal one.
+3. Keep the bot account's username and password available; you can use either a pasted token or the built-in password login flow.
+
+---
+
+## 2. Get an Access Token
+
+cognia-next uses a long-lived `access_token` to call the Matrix API. There are two supported ways to get it.
+
+### Option A: Paste an Existing Token
+
+Use this when you already created the bot through an admin API or know how to retrieve a Matrix access token.
+
+- In Element: open **Settings → Help & About → Advanced → Access Token**, then copy the token.
+- Or issue a token for the bot account through your homeserver's **admin API**.
+
+The token usually starts with `syt_`. Treat it like a password for the bot account.
+
+### Option B: Sign In with Password (Desktop Only)
+
+The Matrix dialog includes a **Sign in with password** action. It calls `POST /_matrix/client/v3/login`, fills the access-token field, and stores the returned device id when the homeserver supplies one:
+
+1. Enter the **Homeserver URL** in the dialog.
+2. Enter the bot **username** (`@bot:matrix.org` or just `bot`) and **password**.
+3. Click **Sign in**. On success, the access-token field is filled automatically.
+
+> The password is used only for this token exchange and is **not saved**. This action is available only in the Tauri desktop app; the browser build disables it.
+
+---
+
+## 3. Configure cognia-next
+
+1. Open cognia-next and navigate to **Settings → Platform Connections → Adapters**.
+2. Click **Add connector**, then choose **Matrix**.
+3. Fill in:
+   - **Display name** — a recognizable name for the bot, for example "My Matrix Bot".
+   - **Homeserver URL** — your homeserver base URL, for example `https://matrix.org`. If you omit the scheme, cognia-next normalizes it to `https://`.
+   - **Access token** — paste the token from Option A, or use Option B to fill it automatically.
+4. Click **Create**.
+
+The access token is encrypted in the OS keyring under the account name `accessToken`. The non-secret homeserver URL is stored in adapter settings.
+
+---
+
+## 4. Invite the Bot to Rooms
+
+The bot can only receive and send messages in rooms it has joined:
+
+1. Open the target room in your Matrix client.
+2. Invite the bot account, for example `@bot:matrix.org`.
+3. Make sure the bot accepts the invite and joins the room. Depending on your homeserver setup, this may require a manual accept step or an auto-join rule.
+
+---
+
+## 5. Verify the Connection
+
+1. Mention the bot in a room, or send it a direct message.
+2. The message should appear in cognia-next within a few seconds.
+3. Check **Platform Connections** — the adapter status should show **running**.
+
+If the adapter shows **stopped** or **degraded**:
+
+- Confirm the access token is valid and has not been revoked.
+- Confirm the **Homeserver URL** is correct and reachable.
+- Confirm the bot has joined the target room.
+- Open **Settings → Platform Connections → Audit Log** for detailed errors.
+
+---
+
+## Notes
+
+- **Transport**: the Matrix adapter is a pure TypeScript `/sync` long-poll implementation. Requests go through the Tauri HTTP proxy. It does **not** need a public URL or WebSocket. The first cold-start `/sync` establishes the cursor and discards historical messages, so old room history is not replayed.
+- **Bot identity**: startup calls `whoami` to resolve the bot `user_id` and, when present, `device_id`. If `whoami` fails, the adapter still starts but self-mention detection is degraded.
+- **Password-login limit**: password login is desktop-only. The password is not saved; it is only used to mint an access token once.
+- **Encrypted rooms are not supported**: the current `/sync` path reads plaintext timeline events and does not perform olm / megolm decryption. Use the bot only in unencrypted rooms.
+- **Rich text and interaction**: outbound messages use Matrix `org.matrix.custom.html`, so Markdown, links, quotes, edits, redactions, reactions, replies, and threads are native. A2UI buttons and selects render as numbered lists; users choose by replying to the surface message rather than clicking inline controls.
+- **Images and files**: inbound `mxc://` media is resolved to an authenticated Matrix media download URL and fetched through the Bearer-aware attachment cache. Outbound image, file, voice, and video segments are uploaded to the homeserver media repository before sending native `m.image`, `m.file`, `m.audio`, or `m.video` events.

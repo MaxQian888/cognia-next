@@ -27,7 +27,7 @@ import type {
   VectorSearchResult,
   CollectionOptions,
   CollectionStats,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { nanoid } from "nanoid"
 
 /**

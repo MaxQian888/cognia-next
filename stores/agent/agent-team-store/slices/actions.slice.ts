@@ -4,6 +4,8 @@ import {
   type AgentTeam,
   type AgentTeammate,
   type AgentTeamTask,
+  type AgentTaskComment,
+  type TaskCommentAttachment,
   type AgentTeamMessage,
   type AgentTeamConfig,
   type AgentTeamTemplate,
@@ -697,6 +699,54 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
+  addTaskComment: (input) => {
+    const task = get().tasks[input.taskId]
+    if (!task) return null
+    const text = typeof input.text === "string" ? input.text.trim() : ""
+    if (!text) return null
+    const author = get().teammates[input.authorId]
+    const authorName =
+      input.authorId === "user"
+        ? "You"
+        : author?.name || (input.authorId === "system" ? "System" : "Unknown")
+    const comment: AgentTaskComment = {
+      id: nanoid(),
+      taskId: input.taskId,
+      authorId: input.authorId,
+      authorName,
+      text,
+      createdAt: new Date(),
+      ...(input.attachments && input.attachments.length > 0
+        ? { attachments: input.attachments.map((a) => ({ ...a, id: nanoid() })) }
+        : {}),
+    }
+    set((state) => {
+      const current = state.tasks[input.taskId]
+      if (!current) return state
+      return {
+        tasks: {
+          ...state.tasks,
+          [input.taskId]: { ...current, comments: [...(current.comments ?? []), comment] },
+        },
+      }
+    })
+    return comment
+  },
+
+  attachTaskFile: (taskId, attachment) => {
+    set((state) => {
+      const task = state.tasks[taskId]
+      if (!task) return state
+      const next: TaskCommentAttachment = { ...attachment, id: nanoid() }
+      return {
+        tasks: {
+          ...state.tasks,
+          [taskId]: { ...task, attachments: [...(task.attachments ?? []), next] },
+        },
+      }
+    })
+  },
+
   // ====================================================================
   // Messages
   // ====================================================================
@@ -1102,6 +1152,10 @@ export const createAgentTeamActionsSlice = (
       .map((id) => get().tasks[id])
       .filter((t): t is AgentTeamTask => t !== undefined)
       .sort((a, b) => a.order - b.order)
+  },
+
+  getTaskComments: (taskId) => {
+    return get().tasks[taskId]?.comments ?? []
   },
 
   getTeamMessages: (teamId) => {

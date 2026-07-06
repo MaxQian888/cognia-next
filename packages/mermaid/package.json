@@ -1,0 +1,31 @@
+{
+  "name": "@cognia/mermaid",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia cached Mermaid diagram rendering: (theme, source)-keyed LRU cache with in-flight de-duplication for the virtualized chat render path.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cognia/primitives": "workspace:*"
+  },
+  "peerDependencies": {
+    "mermaid": "*"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -27,7 +27,7 @@ import {
   type ConsolidateInput,
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
 
 export interface RunMemoryExtractionInput {
   rollingSummary?: string
@@ -45,6 +45,13 @@ export interface RunMemoryExtractionDeps {
   consolidate: (input: ConsolidateInput) => Promise<{ applied: ConsolidationOp[] }>
   /** PII gate; defaults to `hasNoLeakingPii`. */
   isPiiSafe?: (text: string) => boolean
+  /**
+   * Redact PII from the extraction inputs *before* they reach the utility LLM.
+   * Defaults to the twin redactor. The extraction model can differ from the
+   * conversation model the user chose, so raw turn text must not be sent to it
+   * verbatim — this matches the twin "redact before send" red-line.
+   */
+  redact?: (text: string) => string
 }
 
 /** Auto-extract emits semantic for everyone; procedural only for trusted provenance. */
@@ -65,16 +72,24 @@ export async function runMemoryExtraction(
     // Connector-inbound content is third-party — never auto-extracted.
     if (input.provenance === "inbound") return empty
 
+    // Salience runs on the RAW text — it's a local heuristic (no model call) and
+    // redaction would weaken its named-entity / specificity signals.
     const salience = assessSalience({
       userText: input.newPair.userText,
       assistantText: input.newPair.assistantText,
     })
     if (!salience.salient) return empty
 
+    // Redact before the LLM extract call. PII spans become placeholders; the
+    // rest of the turn is intact, so non-PII facts still extract normally.
+    const redact = deps.redact ?? ((t: string) => redactText(t).redacted)
     const candidates = await deps.extract({
-      rollingSummary: input.rollingSummary,
-      recentMessages: input.recentMessages,
-      newPair: input.newPair,
+      rollingSummary: input.rollingSummary ? redact(input.rollingSummary) : undefined,
+      recentMessages: input.recentMessages?.map((m) => ({ role: m.role, text: redact(m.text) })),
+      newPair: {
+        userText: redact(input.newPair.userText),
+        assistantText: redact(input.newPair.assistantText),
+      },
       allowTypes: allowedTypes(input.provenance),
     })
     if (candidates.length === 0) return empty

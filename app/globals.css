@@ -304,6 +304,34 @@ html.reduce-motion *::after {
     background: transparent !important;
   }
 
+  /* CRITICAL for real window transparency on Windows: next-themes writes an
+     inline `color-scheme: dark` on <html> (its `enableColorScheme` defaults to
+     true). Under a dark color-scheme, Chromium/WebView2 paints an OPAQUE base
+     backdrop *behind* the transparent <body>, so the frameless pet window shows
+     solid black even though the OS window and the webview are both transparent
+     — zeroing `background` alone can't reach that backdrop. `normal` removes the
+     forced scheme backdrop; `!important` beats next-themes' inline style. */
+  html[data-pet-overlay] {
+    color-scheme: normal !important;
+  }
+
+  /* Kill every wallpaper layer inside the pet windows. `<BackgroundApplier />`
+     mounts in this same root layout, so a user wallpaper is painted through TWO
+     pseudo-element layers — `body[data-bg-enabled]::before` (fixed, full-window)
+     and the `#app[data-bg-target]::before` layer used for global/all scope —
+     plus a legibility scrim `::after`. The base transparency rule above only
+     zeroes the `background` *property*, not these pseudos, so without this the
+     wallpaper fills what must be a transparent paint-through window. `!important`
+     beats the (unlayered, normal) wallpaper declarations regardless of cascade
+     layer. Belt-and-suspenders with the JS role gate in background-applier.tsx. */
+  html[data-pet-overlay] [data-bg-enabled="true"]::before,
+  html[data-pet-overlay] [data-bg-target]::before,
+  html[data-pet-overlay] [data-bg-scrim="true"]::after,
+  html[data-pet-overlay] [data-bg-target][data-bg-scrim="true"]::after {
+    display: none !important;
+    background: none !important;
+  }
+
   /* Window-blur dim. WindowFocusTracker writes data-window-focused on the
      <html> root; everything tagged [data-app-chrome] (title bar / status bar /
      resize handles) recedes when the user clicks away. */
@@ -435,6 +463,114 @@ body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="s
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="sidebar-inner"] {
   background-color: color-mix(in oklch, var(--sidebar) 55%, transparent);
   backdrop-filter: blur(8px);
+}
+
+/* ----------------------------------------------------------------------
+   Editor wallpaper pass-through.
+
+   Monaco (desktop canvas) and CodeMirror (mobile canvas) paint an opaque
+   editor background that would completely hide a wallpaper. When one targets
+   the canvas surface (scope canvas / all / global), drop the editor + gutter
+   background to transparent so the image shows through behind the code. The
+   syntax colors, cursor, and selection still come from the active theme, so
+   this composes with the theme fix rather than replacing it.
+
+   Monaco reads its surface color from the `--vscode-*-background` custom
+   properties in recent builds; the concrete `.monaco-editor-background` /
+   `.margin` overrides (with `!important`) cover the generated stylesheet that
+   older builds emit. Minimap is a <canvas> and can't go transparent via CSS —
+   it stays off by default so this is a non-issue in practice.
+---------------------------------------------------------------------- */
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor {
+  --vscode-editor-background: transparent;
+  --vscode-editorGutter-background: transparent;
+  --vscode-editorStickyScroll-background: transparent;
+  --vscode-breadcrumb-background: transparent;
+  --vscode-minimap-background: transparent;
+  --vscode-editorOverviewRuler-background: transparent;
+  --vscode-scrollbar-shadow: transparent;
+}
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .margin,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .margin,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .margin,
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .cm-gutters,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .cm-gutters,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .cm-gutters {
+  background-color: transparent !important;
+}
+/* Minimap container + scrollbar/overview surfaces. The minimap and overview
+   ruler are <canvas> elements — their pixels clear to `minimap.background` /
+   `editorOverviewRuler.background`, handled by the cognia-active theme above;
+   these rules zero the surrounding DOM boxes so no opaque strip frames them. */
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .minimap,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .scrollbar,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .minimap,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .scrollbar,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .minimap,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .scrollbar {
+  background-color: transparent !important;
+}
+/* Kill the scroll shadows Monaco paints at the scrolled edges — they read as
+   opaque dark bars over a wallpaper. The translucent scrollbar slider itself
+   (theme `scrollbarSlider.background`, alpha 55) stays, so the handle is still
+   visible against the image. */
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .scrollbar
+  .shadow,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .scrollbar
+  .shadow,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .scrollbar
+  .shadow {
+  box-shadow: none !important;
 }
 
 /* ----------------------------------------------------------------------
@@ -1373,6 +1509,22 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
       background: var(--border);
       border-radius: 9999px;
     }
+  }
+  /* Workflow editor — mobile/touch canvas. The mobile editor roots the React
+     Flow surface in `.wf-touch-canvas`; there, source handles drive
+     tap-to-connect, so they must receive pointer events (React Flow sets
+     `pointer-events: none` on non-connectable handles) and need a finger-sized
+     hit area. The visible 12px dot is unchanged — a transparent `::after`
+     pads the tap target to ~40px. Scoped to the class so desktop drag-connect
+     stays exactly as it was. */
+  .wf-touch-canvas .react-flow__handle {
+    pointer-events: all;
+  }
+  .wf-touch-canvas .react-flow__handle::after {
+    content: "";
+    position: absolute;
+    inset: -14px;
+    border-radius: 9999px;
   }
   /* Line numbers for Shiki-highlighted code blocks. Shiki wraps every source
      line in `<span class="line">`, so a CSS counter lets syntax colour and

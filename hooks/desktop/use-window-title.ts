@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
 import { isTauri } from "@/lib/tauri"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.ui
@@ -40,7 +41,11 @@ export function useWindowTitle(): void {
     lastRef.current = title
     document.title = title
 
-    if (!isTauri()) return
+    // Only the main window owns the OS title bar. Least-privilege pet windows
+    // aren't granted `core:window:allow-set-title` (see
+    // `src-tauri/capabilities/pet.json`), so the native write only warns there;
+    // the `document.title` write above is harmless and stays.
+    if (!isTauri() || !isMainAppWindow()) return
     void (async () => {
       try {
         const { getCurrentWindow } = await import("@tauri-apps/api/window")

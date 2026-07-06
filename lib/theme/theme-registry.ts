@@ -15,7 +15,7 @@
 // `useSyncExternalStore` can drive the appearance UI without re-render loops.
 // The snapshot reference is invalidated only on mutation.
 
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 export interface PluginTheme {
   /** Stable id (typically `${pluginId}.${themeName}`). */

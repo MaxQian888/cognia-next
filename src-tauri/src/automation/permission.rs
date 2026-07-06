@@ -20,6 +20,7 @@
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::types::AutomationError;
@@ -268,6 +269,27 @@ impl<'a> Call<'a> {
             _ => CallKind::ReadOnly,
         }
     }
+
+    /// Passive inspection reads the accessibility tree (or resolves an element
+    /// under the cursor) without driving the desktop or capturing pixels. These
+    /// power the Settings → Inspector diagnostic, which the operator opens
+    /// explicitly. On the operator-facing `Workflow` surface `evaluate` lets
+    /// them through regardless of the engine-enabled flag or the configured
+    /// tier (short of an engaged kill switch); other surfaces still gate them
+    /// normally. `screenshot` is deliberately excluded: it is read-only but
+    /// leaks on-screen content, so it stays fully gated everywhere.
+    pub fn is_passive_inspection(&self) -> bool {
+        matches!(
+            self.command,
+            "get_focus"
+                | "read_tree"
+                | "find"
+                | "cursor_position"
+                | "pick_at_point"
+                | "pick_session_start"
+                | "pick_session_cancel"
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -313,12 +335,18 @@ fn consent_prompt(call: &Call<'_>) -> ConsentPrompt {
 #[derive(Clone)]
 pub struct PermissionGate {
     inner: Arc<RwLock<AutomationSettings>>,
+    /// Runtime-only emergency stop, distinct from `settings.enabled` (the
+    /// operator's master toggle). Once engaged, EVERY call — passive
+    /// inspection included — is rejected with `KillSwitchActive` until the
+    /// operator re-enables the engine. Not persisted: a restart starts clear.
+    kill_switch: Arc<AtomicBool>,
 }
 
 impl PermissionGate {
     pub fn new(settings: AutomationSettings) -> Self {
         Self {
             inner: Arc::new(RwLock::new(settings)),
+            kill_switch: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -326,19 +354,58 @@ impl PermissionGate {
         self.inner.read().clone()
     }
 
+    /// Mutate the persisted settings. Deliberately does NOT touch the kill
+    /// switch: a bulk settings save (from any settings sub-panel) that happens
+    /// to carry `enabled == true` must never silently resume automation after an
+    /// emergency stop. Resuming is an explicit operator action via
+    /// `set_enabled(true)`.
     pub fn update<F: FnOnce(&mut AutomationSettings)>(&self, f: F) {
         let mut guard = self.inner.write();
         f(&mut guard);
     }
 
+    /// Explicit operator toggle of the master enable flag. Enabling is the
+    /// operator's deliberate "resume" action, so it releases the emergency stop;
+    /// disabling leaves the switch untouched (a disabled engine denies anyway).
+    pub fn set_enabled(&self, enabled: bool) {
+        self.inner.write().enabled = enabled;
+        if enabled {
+            self.kill_switch.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// Whether the runtime emergency stop is currently engaged.
+    pub fn kill_switch_engaged(&self) -> bool {
+        self.kill_switch.load(Ordering::SeqCst)
+    }
+
     pub fn engage_kill_switch(&self) {
+        self.kill_switch.store(true, Ordering::SeqCst);
         self.inner.write().enabled = false;
     }
 
     pub fn evaluate(&self, call: &Call<'_>) -> Decision {
-        let s = self.inner.read();
-        if !s.enabled {
+        // Emergency kill switch — a hard stop for every call, passive
+        // inspection included. Cleared only when the operator explicitly
+        // re-enables the engine (`set_enabled(true)`), never by a bulk save.
+        if self.kill_switch.load(Ordering::SeqCst) {
             return Decision::Deny(AutomationError::KillSwitchActive);
+        }
+        let s = self.inner.read();
+        // Passive inspection powers the Settings → Inspector diagnostic and is
+        // allowed regardless of the master enable flag or the configured tier
+        // (see `Call::is_passive_inspection`). Guarded above by the kill switch.
+        // Scoped to the `Workflow` surface — the operator-facing diagnostic path.
+        // External / less-trusted surfaces (MCP, plugin, computerUse) keep going
+        // through the full tier gate so they can't enumerate the UI tree
+        // unpermissioned.
+        if call.surface == Surface::Workflow && call.is_passive_inspection() {
+            return Decision::Allow;
+        }
+        if !s.enabled {
+            return Decision::Deny(AutomationError::PermissionDenied {
+                reason: "automation engine disabled".into(),
+            });
         }
         // Resolve effective policy: per-plugin override → per-surface → default.
         let (tier, whitelist_opt) = match call.surface {
@@ -484,6 +551,15 @@ mod tests {
         }
     }
 
+    fn inspect_call(surface: Surface) -> Call<'static> {
+        Call {
+            command: "read_tree",
+            surface,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        }
+    }
+
     #[test]
     fn settings_defaults_include_behavior_fields() {
         let s = AutomationSettings::default();
@@ -525,14 +601,80 @@ mod tests {
     }
 
     #[test]
-    fn kill_switch_blocks_every_call() {
+    fn disabled_engine_denies_driving_but_not_inspection() {
+        // A merely-disabled engine (master toggle off, kill switch NOT
+        // engaged) blocks anything that drives the desktop or captures pixels
+        // with a plain PermissionDenied — not the emergency KillSwitchActive.
         let g = PermissionGate::new(AutomationSettings {
             enabled: false,
             ..Default::default()
         });
-        let d = g.evaluate(&read_call(Surface::Workflow));
         assert!(matches!(
-            d,
+            g.evaluate(&read_call(Surface::Workflow)),
+            Decision::Deny(AutomationError::PermissionDenied { .. })
+        ));
+        assert!(matches!(
+            g.evaluate(&click_call(Surface::Workflow)),
+            Decision::Deny(AutomationError::PermissionDenied { .. })
+        ));
+        // Passive inspection (the Settings → Inspector diagnostic) still works
+        // even with the engine disabled and no tier configured.
+        assert!(matches!(
+            g.evaluate(&inspect_call(Surface::Workflow)),
+            Decision::Allow
+        ));
+    }
+
+    #[test]
+    fn engaged_kill_switch_blocks_even_passive_inspection() {
+        // The explicit emergency stop rejects EVERYTHING, inspection included,
+        // until the operator re-enables the engine.
+        let g = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            ..Default::default()
+        });
+        assert!(matches!(
+            g.evaluate(&inspect_call(Surface::Workflow)),
+            Decision::Allow
+        ));
+        g.engage_kill_switch();
+        assert!(matches!(
+            g.evaluate(&inspect_call(Surface::Workflow)),
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
+        assert!(matches!(
+            g.evaluate(&click_call(Surface::Workflow)),
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
+        // A bulk settings save carrying `enabled == true` must NOT release the
+        // emergency stop (the stale-save resume bug).
+        g.update(|s| s.enabled = true);
+        assert!(matches!(
+            g.evaluate(&inspect_call(Surface::Workflow)),
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
+        // Only the explicit operator resume (`set_enabled(true)`) releases it.
+        g.set_enabled(true);
+        assert!(matches!(
+            g.evaluate(&inspect_call(Surface::Workflow)),
+            Decision::Allow
+        ));
+    }
+
+    #[test]
+    fn set_enabled_false_leaves_kill_switch_untouched() {
+        // Disabling the engine is not a resume — an engaged kill switch stays
+        // engaged (and a disabled engine denies anyway).
+        let g = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        });
+        g.engage_kill_switch();
+        g.set_enabled(false);
+        assert!(g.kill_switch_engaged());
+        assert!(matches!(
+            g.evaluate(&inspect_call(Surface::Workflow)),
             Decision::Deny(AutomationError::KillSwitchActive)
         ));
     }
@@ -895,12 +1037,14 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_surface_passes_even_when_disabled() {
-        // Kill switch (`enabled: false`) still blocks even sandbox-tagged
-        // calls — the safety invariant is "automation engine off → all
-        // automation calls deny". Sandbox calls don't go through the
+    fn sandbox_surface_denied_when_disabled() {
+        // A disabled engine (master toggle off) still blocks even
+        // sandbox-tagged calls — the safety invariant is "automation engine
+        // off → all driving calls deny". Sandbox calls don't go through the
         // automation engine in practice, so this branch is mostly
-        // defence-in-depth.
+        // defence-in-depth. Now that the emergency stop is a distinct flag,
+        // a merely-disabled engine reports PermissionDenied rather than the
+        // KillSwitchActive it used to.
         let s = AutomationSettings {
             enabled: false,
             ..Default::default()
@@ -914,7 +1058,7 @@ mod tests {
         };
         assert!(matches!(
             g.evaluate(&call),
-            Decision::Deny(AutomationError::KillSwitchActive)
+            Decision::Deny(AutomationError::PermissionDenied { .. })
         ));
     }
 }

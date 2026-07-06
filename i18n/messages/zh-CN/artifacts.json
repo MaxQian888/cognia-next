@@ -27,6 +27,15 @@
   },
   "designerUnsupportedDescription": "本版本 cognia-next 未集成设计器。Artifact「{title}」在此处为只读。",
   "designerUnsupportedTitle": "设计器不可用",
+  "dock": {
+    "collapse": "折叠面板",
+    "hideHistory": "隐藏产物历史",
+    "openInNewTab": "在新标签页打开",
+    "showHistory": "显示产物历史",
+    "splitView": "分屏",
+    "title": "产物",
+    "toggleHint": "切换面板 (Ctrl/Cmd+J)"
+  },
   "download": "下载",
   "duplicate": "复制",
   "editInCanvas": "在画布中编辑",

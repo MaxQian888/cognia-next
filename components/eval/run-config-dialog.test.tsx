@@ -7,6 +7,13 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vals?: Record<string, unknown>) =>
     vals ? `${key}:${JSON.stringify(vals)}` : key,
 }))
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }))
+// The dialog reads the dataset's runs (cost estimate) + cases (units) via
+// useLiveQuery; jsdom has no IndexedDB, so stub both to empty.
+jest.mock("@/hooks/eval/use-eval-data", () => ({
+  useEvalRuns: () => [],
+  useEvalCases: () => [],
+}))
 
 import type { EvalRunConfig } from "@/types/eval/run-config"
 
@@ -82,7 +89,7 @@ describe("RunConfigDialog", () => {
 
   it("passes a scorer subset when some scorers are unchecked", async () => {
     render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
-    fireEvent.click(screen.getByLabelText("cost")) // uncheck one
+    fireEvent.click(screen.getByLabelText("scorerCatalog.cost")) // uncheck one
     fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "m" } })
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())

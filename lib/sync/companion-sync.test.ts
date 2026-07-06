@@ -10,6 +10,7 @@ import { getDb, whenSeeded } from "@/lib/db/schema"
 
 import {
   __resetSyncStateForTests,
+  SYNC_HANDLER_TABLES,
   installEventDrivenSync,
   installForegroundSync,
   installNetworkSync,
@@ -38,6 +39,14 @@ function makeTransport(): Transport {
 
 beforeEach(() => {
   __resetSyncStateForTests()
+})
+
+describe("SYNC_HANDLER_TABLES registry", () => {
+  it("registers the terminalHistory handler (change point c)", () => {
+    // Guards against a TS-only sync addition that never wires its handler into
+    // DEFAULT_HANDLERS — the orchestrator would then silently skip the table.
+    expect(SYNC_HANDLER_TABLES).toContain("terminalHistory")
+  })
 })
 
 describe("runSyncDown", () => {

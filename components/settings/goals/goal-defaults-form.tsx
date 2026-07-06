@@ -37,10 +37,13 @@ export function GoalDefaultsForm() {
 
   const maxTurns = draft.maxTurns ?? DEFAULT_GOAL_CONFIG.maxTurns
   const maxTokens = draft.maxTokens ?? DEFAULT_GOAL_CONFIG.maxTokens
+  const maxBudgetUsd = draft.maxBudgetUsd ?? 0
   const maxJudgeFailures = draft.maxJudgeFailures ?? DEFAULT_GOAL_CONFIG.maxJudgeFailures
   const timeoutMs = draft.timeoutMs ?? DEFAULT_GOAL_CONFIG.timeoutMs
   const startPaused = draft.startPaused ?? false
   const manualContinue = draft.manualContinue ?? false
+  const adaptivePacing = draft.adaptivePacing ?? false
+  const maxPromiseDenials = draft.maxPromiseDenials ?? 3
   const intervalSeconds = Math.round((draft.continuationIntervalMs ?? 0) / 1000)
   const quietHours = draft.quietHours
   const quietOn = Boolean(quietHours)
@@ -54,12 +57,17 @@ export function GoalDefaultsForm() {
       timeoutMs: d.timeoutMs ?? DEFAULT_GOAL_CONFIG.timeoutMs,
       startPaused: d.startPaused ?? false,
     }
+    if (typeof d.maxBudgetUsd === "number" && d.maxBudgetUsd > 0) out.maxBudgetUsd = d.maxBudgetUsd
     if (d.judgeModel?.trim()) out.judgeModel = d.judgeModel.trim()
+    if (d.judgeProvider?.trim()) out.judgeProvider = d.judgeProvider.trim()
     if (typeof d.judgeTemperature === "number") out.judgeTemperature = d.judgeTemperature
     if (typeof d.judgeMaxTokens === "number" && d.judgeMaxTokens > 0)
       out.judgeMaxTokens = d.judgeMaxTokens
     if (d.judgePromptOverride?.trim()) out.judgePromptOverride = d.judgePromptOverride.trim()
     if (d.manualContinue) out.manualContinue = true
+    if (d.adaptivePacing) out.adaptivePacing = true
+    if (typeof d.maxPromiseDenials === "number" && d.maxPromiseDenials > 0)
+      out.maxPromiseDenials = d.maxPromiseDenials
     if (d.continuationIntervalMs && d.continuationIntervalMs > 0)
       out.continuationIntervalMs = d.continuationIntervalMs
     if (d.quietHours?.from && d.quietHours.to) out.quietHours = d.quietHours
@@ -78,6 +86,15 @@ export function GoalDefaultsForm() {
     }
   }
 
+  /**
+   * Stage the hard defaults: an empty draft renders `DEFAULT_GOAL_CONFIG`
+   * values via the `?? default` fallbacks and drops every optional override.
+   * The user still confirms with Save (no accidental wipe).
+   */
+  function handleReset() {
+    setDraft({})
+  }
+
   function patchQuietHours(patch: Partial<GoalQuietHours>) {
     const base: GoalQuietHours = quietHours ?? { from: "22:00", to: "07:00", tz: appTimezone }
     setDraft({ ...draft, quietHours: { ...base, ...patch } })
@@ -85,6 +102,10 @@ export function GoalDefaultsForm() {
 
   return (
     <div className="space-y-3 text-sm" data-testid="goal-defaults-form">
+      {/* ── Budget & limits ─────────────────────────────────────────────── */}
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {t("defaults.budgetHeading")}
+      </h3>
       <Numeric
         label={t("defaults.maxTurns")}
         value={maxTurns}
@@ -98,6 +119,14 @@ export function GoalDefaultsForm() {
         onChange={(n) => setDraft({ ...draft, maxTokens: n })}
         hint={t("defaults.maxTokensHint")}
         testId="goal-defaults-max-tokens"
+      />
+      <Numeric
+        label={t("defaults.maxBudgetUsd")}
+        value={maxBudgetUsd}
+        onChange={(n) => setDraft({ ...draft, maxBudgetUsd: Math.max(0, n) })}
+        hint={t("defaults.maxBudgetUsdHint")}
+        step={0.5}
+        testId="goal-defaults-max-budget-usd"
       />
       <Numeric
         label={t("defaults.maxJudgeFailures")}
@@ -134,6 +163,16 @@ export function GoalDefaultsForm() {
           data-testid="goal-defaults-judge-model"
         />
         <p className="mt-1 text-[10px] text-muted-foreground">{t("judge.modelHint")}</p>
+      </div>
+      <div>
+        <Label className="text-xs font-medium">{t("judge.provider")}</Label>
+        <Input
+          value={draft.judgeProvider ?? ""}
+          placeholder={t("judge.providerPlaceholder")}
+          onChange={(e) => setDraft({ ...draft, judgeProvider: e.target.value })}
+          data-testid="goal-defaults-judge-provider"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">{t("judge.providerHint")}</p>
       </div>
       <Numeric
         label={t("judge.temperature")}
@@ -178,6 +217,13 @@ export function GoalDefaultsForm() {
         onChange={(n) => setDraft({ ...draft, continuationIntervalMs: Math.max(0, n) * 1000 })}
         hint={t("pacing.intervalHint")}
         testId="goal-defaults-interval"
+      />
+      <ToggleRow
+        label={t("pacing.adaptivePacing")}
+        hint={t("pacing.adaptivePacingHint")}
+        checked={adaptivePacing}
+        onChange={(checked) => setDraft({ ...draft, adaptivePacing: checked })}
+        testId="goal-defaults-adaptive-pacing"
       />
       <div className="rounded-md border p-3">
         <div className="flex items-center justify-between">
@@ -224,7 +270,27 @@ export function GoalDefaultsForm() {
         )}
       </div>
 
-      <div className="flex justify-end">
+      {/* ── Completion gate ─────────────────────────────────────────────── */}
+      <h3 className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {t("defaults.completionHeading")}
+      </h3>
+      <Numeric
+        label={t("defaults.maxPromiseDenials")}
+        value={maxPromiseDenials}
+        onChange={(n) => setDraft({ ...draft, maxPromiseDenials: Math.max(1, n) })}
+        hint={t("defaults.maxPromiseDenialsHint")}
+        testId="goal-defaults-max-promise-denials"
+      />
+
+      <div className="flex items-center justify-between pt-2">
+        <Button
+          variant="ghost"
+          disabled={saving}
+          onClick={handleReset}
+          data-testid="goal-defaults-reset"
+        >
+          {t("defaults.reset")}
+        </Button>
         <Button
           disabled={!dirty || saving}
           onClick={() => void handleSave()}

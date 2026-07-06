@@ -3,14 +3,22 @@
 
 use tauri::{AppHandle, State};
 
-use super::keyring as gw_keyring;
+use super::api_keys::{ApiKeyPatch, GatewayApiKey, RedactedApiKey};
 use super::snapshot::RoutingSnapshot;
-use super::types::{GatewayConfig, GatewayError, GatewayStatus};
+use super::types::{GatewayConfig, GatewayStatus};
 use super::GatewayState;
 
 #[tauri::command]
 pub async fn gateway_get_status(state: State<'_, GatewayState>) -> Result<GatewayStatus, String> {
     Ok(state.status())
+}
+
+/// Read the persisted config so the settings UI hydrates from the saved values
+/// (port, allowlist, timeouts, retry policy, model exposure, bind interface)
+/// rather than the compile-time defaults.
+#[tauri::command]
+pub async fn gateway_get_config(state: State<'_, GatewayState>) -> Result<GatewayConfig, String> {
+    Ok(state.config())
 }
 
 #[tauri::command]
@@ -31,43 +39,62 @@ pub async fn gateway_stop(state: State<'_, GatewayState>) -> Result<(), String> 
     state.stop().map_err(Into::into)
 }
 
+// ---- API key management -----------------------------------------------------
+
+/// List keys with secrets redacted (the settings UI shows a fingerprint only).
 #[tauri::command]
-pub async fn gateway_get_token(state: State<'_, GatewayState>) -> Result<Option<String>, String> {
-    let token = gw_keyring::read_token()?;
-    state.record_token_presence(token.is_some());
-    Ok(token)
+pub async fn gateway_list_keys(
+    state: State<'_, GatewayState>,
+) -> Result<Vec<RedactedApiKey>, String> {
+    Ok(state.list_keys())
+}
+
+/// Create a new key. Returns the FULL key (secret included) so the UI can show
+/// it once for copying — subsequent lists are redacted.
+#[tauri::command]
+pub async fn gateway_create_key(
+    state: State<'_, GatewayState>,
+    name: String,
+    model_allowlist: Vec<String>,
+    expires_at_ms: Option<i64>,
+    rate_limit_per_min: Option<u32>,
+    quota_tokens: Option<i64>,
+) -> Result<GatewayApiKey, String> {
+    state
+        .create_key(name, model_allowlist, expires_at_ms, rate_limit_per_min, quota_tokens)
+        .map_err(Into::into)
 }
 
 #[tauri::command]
-pub async fn gateway_rotate_token(state: State<'_, GatewayState>) -> Result<String, String> {
-    let token = gw_keyring::generate_token();
-    gw_keyring::write_token(&token)?;
-    state.record_token_presence(true);
-    Ok(token)
-}
-
-#[tauri::command]
-pub async fn gateway_clear_token(state: State<'_, GatewayState>) -> Result<(), String> {
-    clear_token_inner(&state, gw_keyring::clear_token)
-}
-
-fn clear_token_inner(
-    state: &GatewayState,
-    clear_token: impl FnOnce() -> Result<(), String>,
+pub async fn gateway_update_key(
+    state: State<'_, GatewayState>,
+    id: String,
+    patch: ApiKeyPatch,
 ) -> Result<(), String> {
-    clear_token()?;
-    if state.status().running {
-        match state.stop() {
-            Ok(()) => log::info!("gateway listener stopped because bearer token was cleared"),
-            Err(GatewayError::NotRunning) => {}
-            Err(error) => {
-                log::warn!("gateway listener stop failed after token clear: {error}");
-                return Err(error.into());
-            }
-        }
-    }
-    state.record_token_presence(false);
-    Ok(())
+    state.update_key(&id, patch).map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn gateway_delete_key(state: State<'_, GatewayState>, id: String) -> Result<(), String> {
+    state.delete_key(&id).map_err(Into::into)
+}
+
+/// Zero a key's consumed-quota counter (the "reset usage" action).
+#[tauri::command]
+pub async fn gateway_reset_key_quota(
+    state: State<'_, GatewayState>,
+    id: String,
+) -> Result<(), String> {
+    state.reset_key_quota(&id).map_err(Into::into)
+}
+
+/// Reveal a key's full secret (explicit user action — copy/rotate flow).
+#[tauri::command]
+pub async fn gateway_reveal_key(
+    state: State<'_, GatewayState>,
+    id: String,
+) -> Result<Option<String>, String> {
+    Ok(state.reveal_key(&id))
 }
 
 /// Push the renderer's latest routing+credential snapshot into the live
@@ -82,9 +109,6 @@ pub async fn gateway_push_snapshot(
 }
 
 /// Answer a live routing decision the server requested via `gateway://decide`.
-/// `entries` is the renderer's full-engine pre-ordered candidate chain; an
-/// empty list (or never answering) leaves the server to fall back to the
-/// snapshot. Unknown / timed-out request ids are a silent no-op.
 #[tauri::command]
 pub async fn gateway_decision_response(
     state: State<'_, GatewayState>,
@@ -109,49 +133,16 @@ mod tests {
     }
 
     #[test]
-    fn clear_token_inner_marks_gateway_as_tokenless_after_delete() {
+    fn create_then_delete_key_via_state() {
+        let _guard = super::super::api_keys::STORE_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let state = GatewayState::new();
-        state.record_token_presence(true);
-
-        clear_token_inner(&state, || Ok(())).unwrap();
-
-        assert!(!state.status().has_token);
-    }
-
-    #[test]
-    fn clear_token_inner_preserves_presence_when_delete_fails() {
-        let state = GatewayState::new();
-        state.record_token_presence(true);
-
-        let err = clear_token_inner(&state, || Err("keyring locked".to_string())).unwrap_err();
-
-        assert_eq!(err, "keyring locked");
-        assert!(state.status().has_token);
-    }
-
-    #[test]
-    fn clear_token_inner_stops_running_gateway_before_forgetting_token() {
-        let state = GatewayState::new();
-        let (shutdown, _shutdown_rx) = tokio::sync::watch::channel(());
-        {
-            let mut inner = state.inner.lock();
-            inner.config.enabled = true;
-            inner.status.running = true;
-            inner.status.bound_port = Some(47824);
-            inner.status.has_token = true;
-            inner.server = Some(crate::gateway::server::ServerHandle {
-                bound_port: 47824,
-                shutdown,
-            });
-        }
-
-        clear_token_inner(&state, || Ok(())).unwrap();
-
-        let status = state.status();
-        assert!(!status.running);
-        assert_eq!(status.bound_port, None);
-        assert!(!status.has_token);
-        assert!(!state.config().enabled);
-        assert!(state.inner.lock().server.is_none());
+        state.keys.write().clear();
+        state.refresh_key_presence();
+        let key = state.create_key("cli".into(), vec![], None, None, None).unwrap();
+        assert!(state.list_keys().iter().any(|k| k.id == key.id));
+        state.delete_key(&key.id).unwrap();
+        assert!(!state.list_keys().iter().any(|k| k.id == key.id));
     }
 }

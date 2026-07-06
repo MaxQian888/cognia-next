@@ -39,6 +39,29 @@ describe("generateImageCaption", () => {
     })
   })
 
+  it("forwards apiFlavor and headers to getProviderModel", async () => {
+    getProviderModel.mockReturnValue({ stub: true })
+    generateText.mockResolvedValue({ text: "a chart" })
+
+    await generateImageCaption("data:image/png;base64,xyz", {
+      apiKey: "sk",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "responses",
+      headers: { "OpenAI-Beta": "responses=experimental" },
+    })
+
+    expect(getProviderModel).toHaveBeenCalledWith({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      apiKey: "sk",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "responses",
+      headers: { "OpenAI-Beta": "responses=experimental" },
+    })
+  })
+
   it("defaults provider to openai and model to gpt-4o-mini", async () => {
     getProviderModel.mockReturnValue({})
     generateText.mockResolvedValue({ text: "x" })

@@ -23,6 +23,8 @@ import { ArrowLeftIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { StatusBadge } from "@/components/status-badge"
+import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import { toast } from "sonner"
 
 import { useShallow } from "zustand/react/shallow"
@@ -51,13 +53,27 @@ import {
 } from "@/lib/agent-team/runtime-targets"
 import { dispatchTeamMention } from "@/lib/agent-team/team-runtime-dispatcher"
 import { createCompositeStreamer } from "@/lib/agent-team/runtime-streamers"
+import { usePlatform } from "@/hooks/use-platform"
+import { TeamWorkspaceMobile } from "@/components/mobile/agent-teams/team-workspace-mobile"
 import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availability"
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
-import { getProviderModel } from "@cognia/provider-core/core/client"
-import type { TeammateRuntime } from "@/types/agent/agent-team"
+import { buildTeamClaudeRuntimeModel } from "@/lib/agent-team/provider-model"
+import type {
+  AgentTeam,
+  AgentTeamEvent,
+  AgentTeamMessage,
+  AgentTeamTask,
+  TeammateRuntime,
+} from "@/types/agent/agent-team"
 
 const ALL_TABS = ["overview", "tasks", "chat", "activity", "members", "settings"] as const
 type Tab = (typeof ALL_TABS)[number]
+
+// Stable empty slices returned by the tab-gated selectors below so
+// useShallow sees the same reference while a tab is inactive.
+const EMPTY_TASKS: AgentTeamTask[] = []
+const EMPTY_MESSAGES: AgentTeamMessage[] = []
+const EMPTY_EVENTS: AgentTeamEvent[] = []
 
 function AgentTeamWorkspaceInner() {
   const searchParams = useSearchParams()
@@ -74,13 +90,29 @@ function AgentTeamWorkspaceInner() {
   const teammates = useAgentTeamStore(
     useShallow((s) => Object.values(s.teammates).filter((m) => m.teamId === teamId))
   )
+  // Tab-gated slices: tasks / messages / events are only materialised while
+  // their tab is visible. During a live run the store receives a delta per
+  // streamed token and per emitted event — without the gate every delta
+  // re-rendered the whole workspace page regardless of the active tab.
   const tasks = useAgentTeamStore(
-    useShallow((s) => Object.values(s.tasks).filter((task) => task.teamId === teamId))
+    useShallow((s) =>
+      s.workspaceTab === "tasks"
+        ? Object.values(s.tasks).filter((task) => task.teamId === teamId)
+        : EMPTY_TASKS
+    )
   )
   const messages = useAgentTeamStore(
-    useShallow((s) => Object.values(s.messages).filter((m) => m.teamId === teamId))
+    useShallow((s) =>
+      s.workspaceTab === "chat"
+        ? Object.values(s.messages).filter((m) => m.teamId === teamId)
+        : EMPTY_MESSAGES
+    )
   )
-  const events = useAgentTeamStore(useShallow((s) => s.events.filter((e) => e.teamId === teamId)))
+  const events = useAgentTeamStore(
+    useShallow((s) =>
+      s.workspaceTab === "activity" ? s.events.filter((e) => e.teamId === teamId) : EMPTY_EVENTS
+    )
+  )
   const upsertMessage = useAgentTeamStore((s) => s.upsertMessage)
   const removeMessage = useAgentTeamStore((s) => s.removeMessage)
   const activeTab = useAgentTeamStore((s) => s.workspaceTab)
@@ -106,13 +138,6 @@ function AgentTeamWorkspaceInner() {
   const mentionables = useMemo(() => buildMentionableTargets(teammates), [teammates])
   const availability = useRuntimeAvailability()
 
-  // Snapshot the latest messages in a ref so handlers (which are memoised)
-  // always read the freshest list when building conversation history.
-  const messagesRef = useRef(messages)
-  useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
-
   const dispatchPair = useCallback(
     async (params: { targetId: string; prompt: string; rawText: string }): Promise<void> => {
       if (!teamId) return
@@ -122,14 +147,8 @@ function AgentTeamWorkspaceInner() {
         return
       }
 
-      const apiKey = settings?.apiKey ?? ""
-      const model = getProviderModel({
-        provider: "anthropic",
-        model: settings?.defaultModel ?? "claude-sonnet-4-5",
-        apiKey,
-      })
       const streamer = createCompositeStreamer({
-        claude: { model },
+        claude: { model: buildTeamClaudeRuntimeModel(settings) },
         external: {
           setActiveAgent,
           executeStreaming,
@@ -137,7 +156,12 @@ function AgentTeamWorkspaceInner() {
         },
       })
 
-      const history = buildConversationHistory(messagesRef.current)
+      // Read the freshest message list straight off the store — the rendered
+      // `messages` slice is tab-gated and may be empty when dispatching from
+      // a retry while another tab is active.
+      const history = buildConversationHistory(
+        Object.values(useAgentTeamStore.getState().messages).filter((m) => m.teamId === teamId)
+      )
 
       activeDispatchRef.current?.abort()
       const ac = new AbortController()
@@ -270,6 +294,7 @@ function AgentTeamWorkspaceInner() {
         </Button>
         <span className="hidden sm:inline text-xs text-muted-foreground">/</span>
         <span className="hidden sm:inline text-sm font-medium truncate">{team.name}</span>
+        <HeaderLiveStatus team={team} />
       </div>
 
       <Tabs
@@ -338,6 +363,26 @@ function AgentTeamWorkspaceInner() {
 }
 
 /**
+ * Compact live-status pill for the workspace breadcrumb, so the team's run
+ * state stays visible from every tab (Overview previously had the only badge).
+ * Split out so `useTeamLiveStatus` runs only when a team resolved.
+ */
+function HeaderLiveStatus({ team }: { team: AgentTeam }) {
+  const liveStatus = useTeamLiveStatus(team)
+  const isLive = liveStatus === "executing" || liveStatus === "planning"
+  return (
+    <StatusBadge
+      value={liveStatus}
+      labelNamespace="agentTeam.status"
+      pulse={isLive}
+      pulseClassName={isLive ? "bg-emerald-400 size-2" : undefined}
+      className="ml-auto shrink-0 sm:ml-1"
+      data-testid="workspace-header-status"
+    />
+  )
+}
+
+/**
  * Look up the configured external-agent id whose preset matches `runtime`.
  * Returns null when the user hasn't added one yet — the dispatcher surfaces
  * a friendly "open Settings → External Agents" message in that case.
@@ -352,10 +397,22 @@ function resolveExternalAgentIdByPreset(runtime: TeammateRuntime): string | null
   return match?.id ?? null
 }
 
+/**
+ * Platform router. The mobile companion renders a read-mostly workspace body
+ * (the desktop tab shell has no usable mobile layout); desktop keeps the full
+ * inner workspace. Dispatching here — not inside the inner component — keeps
+ * the rules-of-hooks intact (each branch is its own component).
+ */
+function AgentTeamWorkspaceRouter() {
+  const platform = usePlatform()
+  if (platform === "mobile") return <TeamWorkspaceMobile />
+  return <AgentTeamWorkspaceInner />
+}
+
 export default function AgentTeamWorkspacePage() {
   return (
     <Suspense fallback={null}>
-      <AgentTeamWorkspaceInner />
+      <AgentTeamWorkspaceRouter />
     </Suspense>
   )
 }

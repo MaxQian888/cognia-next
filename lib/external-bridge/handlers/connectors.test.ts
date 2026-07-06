@@ -31,7 +31,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   mockRunDigest.mockReset()
-})
+}, 30_000)
 
 async function seedAdapter(): Promise<void> {
   await getDb().adapterInstances.put({

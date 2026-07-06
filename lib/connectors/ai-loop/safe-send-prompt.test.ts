@@ -5,7 +5,13 @@
  * tests stay in-process (no Dexie writes, no event subscription).
  */
 
-import { PiiGateBlocked, isPiiSafeSendContent, safeSendPrompt } from "./safe-send-prompt"
+import {
+  PiiGateBlocked,
+  _resetSystemPromptPiiCacheForTest,
+  hasNoLeakingPiiCached,
+  isPiiSafeSendContent,
+  safeSendPrompt,
+} from "./safe-send-prompt"
 
 jest.mock("@/lib/claude/run-and-capture", () => {
   return {
@@ -110,7 +116,12 @@ describe("safeSendPrompt", () => {
   it("delegates to runAndCaptureAssistantReply when prompt is clean", async () => {
     const result = await safeSendPrompt("sess_1", "hello", undefined, auditCtx)
     expect(result).toEqual({ text: "model reply", messageId: "msg-1" })
-    expect(mockRun).toHaveBeenCalledWith("sess_1", "hello", undefined, expect.any(Object))
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "hello",
+      undefined,
+      expect.objectContaining({ execution: expect.objectContaining({ kind: "connector" }) })
+    )
     expect(mockAudit).not.toHaveBeenCalled()
   })
 
@@ -168,6 +179,22 @@ describe("safeSendPrompt", () => {
       "clean",
       undefined,
       expect.objectContaining({ signal: ac.signal, timeoutMs: 10_000 })
+    )
+  })
+
+  it("forwards onPermissionRequest + onEvent so IM HITL and live-activity survive the gate", async () => {
+    const onPermissionRequest = jest.fn()
+    const onEvent = jest.fn()
+    await safeSendPrompt("sess_1", "clean", undefined, {
+      ...auditCtx,
+      onPermissionRequest,
+      onEvent,
+    })
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      undefined,
+      expect.objectContaining({ onPermissionRequest, onEvent })
     )
   })
 
@@ -282,5 +309,30 @@ describe("safeSendPrompt", () => {
       usage,
     })
     expect(mockRecordProviderOutcome).not.toHaveBeenCalled()
+  })
+})
+
+describe("hasNoLeakingPiiCached", () => {
+  beforeEach(() => _resetSystemPromptPiiCacheForTest())
+
+  it("returns true for clean text and false for leaking text", () => {
+    expect(hasNoLeakingPiiCached("just a friendly hello")).toBe(true)
+    expect(hasNoLeakingPiiCached("email me at alice@example.com")).toBe(false)
+  })
+
+  it("returns the cached result on a repeat call (LRU recency-refresh path)", () => {
+    const text = "a stable system prompt with no pii in it"
+    expect(hasNoLeakingPiiCached(text)).toBe(true)
+    // Second call hits the cache (delete + re-set refreshes recency).
+    expect(hasNoLeakingPiiCached(text)).toBe(true)
+  })
+
+  it("evicts the oldest entry once the cap is exceeded and stays correct", () => {
+    for (let i = 0; i < 70; i++) {
+      expect(hasNoLeakingPiiCached(`clean system prompt number ${i}`)).toBe(true)
+    }
+    expect(hasNoLeakingPiiCached("clean system prompt number 69")).toBe(true)
+    // A never-seen leaking prompt is a cache miss and still fails the gate.
+    expect(hasNoLeakingPiiCached("reach me at bob@example.org any time")).toBe(false)
   })
 })

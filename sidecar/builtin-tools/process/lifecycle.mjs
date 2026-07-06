@@ -9,7 +9,19 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
 import { execFileAsync } from "../shared/exec.mjs"
+import { headTruncate } from "../shared/truncate.mjs"
 import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.mjs"
+
+// Per-stream display cap for captured output. The 1 MB `maxBuffer` bounds what
+// we read from the child; this bounds what we hand the model so a chatty
+// command can't flood the context. Mirrors the head-truncate contract the git
+// and shell-advanced tools use.
+export const OUTPUT_DISPLAY_CHARS = 16_000
+
+/** Head-truncate a captured stream for display. */
+function clipStream(text) {
+  return headTruncate(String(text), OUTPUT_DISPLAY_CHARS).text
+}
 
 // ---- start_process --------------------------------------------------------
 
@@ -45,18 +57,36 @@ async function execStartProcess(args) {
       return toolText({ pid: child.pid ?? null, detached: true, program: args.program })
     }
     // Synchronous-ish: capture output up to timeout.
-    const { stdout, stderr } = await execFileAsync(args.program, args.args, {
-      cwd: args.cwd,
-      timeout: args.timeoutSecs * 1000,
-      maxBuffer: MAX_OUTPUT_BYTES,
-      windowsHide: true,
-    })
-    return toolText({
-      program: args.program,
-      stdout: String(stdout),
-      stderr: String(stderr),
-      exitCode: 0,
-    })
+    try {
+      const { stdout, stderr } = await execFileAsync(args.program, args.args, {
+        cwd: args.cwd,
+        timeout: args.timeoutSecs * 1000,
+        maxBuffer: MAX_OUTPUT_BYTES,
+        windowsHide: true,
+      })
+      return toolText({
+        program: args.program,
+        stdout: clipStream(stdout),
+        stderr: clipStream(stderr),
+        exitCode: 0,
+      })
+    } catch (err) {
+      // A non-zero exit is a normal program outcome, not a tool failure: the
+      // rejection still carries the captured output and the real exit code.
+      // Surfacing them (instead of a bare error) lets the model see WHY the
+      // command failed — same philosophy as the bash tool. Only a genuine
+      // spawn failure (ENOENT, EACCES — no numeric `code`) is a tool error.
+      if (err && typeof err.code === "number") {
+        return toolText({
+          program: args.program,
+          stdout: clipStream(err.stdout ?? ""),
+          stderr: clipStream(err.stderr ?? ""),
+          exitCode: err.code,
+          ...(err.killed ? { killed: true, timedOut: true } : {}),
+        })
+      }
+      throw err
+    }
   } catch (err) {
     return toolError(err, "start_process")
   }

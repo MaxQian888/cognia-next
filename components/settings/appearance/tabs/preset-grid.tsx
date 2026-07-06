@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { synthesizeThemeSwatches } from "@/lib/appearance/synthesize-theme-icon"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { cn } from "@/lib/utils"
 
 export type PresetSource = "builtin" | "imported" | "plugin"

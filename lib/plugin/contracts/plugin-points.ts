@@ -141,6 +141,14 @@ export const CANONICAL_EXTENSION_POINTS = [
   // with `goalId` / `status`.
   "goal.toolbar",
   "goal.detail.actions",
+  // Pet surfaces (main-window only — the transparent overlay window stays
+  // plugin-free by the three-window-role model). `pet.console.tab` fills the
+  // /pet console's host-owned "Plugins" tab (shown only when ≥1 contribution);
+  // `pet.panel.actions` is the action row in the interaction panel. Context
+  // bag: `level` / `stage` / `mood` / `condition` — safe aggregates only,
+  // never soul/bones data.
+  "pet.console.tab",
+  "pet.panel.actions",
   // Performance dashboard — plugins mount a tile/panel (e.g. a custom metric)
   // alongside the native Rust-sampled graphs.
   "perf.panel",
@@ -222,6 +230,8 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "canvas.sidebar",
   "goal.toolbar",
   "goal.detail.actions",
+  "pet.console.tab",
+  "pet.panel.actions",
   "perf.panel",
   "terminal.toolbar",
   "agent.team.panel",
@@ -295,12 +305,14 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "chat.message.footer": "components/chat/message-renderer.tsx",
   "chat.tool-call.actions": "components/chat/message-renderer.tsx",
   "chat.message-part.actions": "components/chat/message-renderer.tsx",
-  "artifact.toolbar": "components/artifacts/artifact-panel.tsx",
-  "artifact.actions": "components/artifacts/artifact-panel.tsx",
+  "artifact.toolbar": "components/artifacts/artifact-panel-content.tsx",
+  "artifact.actions": "components/artifacts/artifact-panel-content.tsx",
   "canvas.toolbar": "components/canvas/canvas-panel.tsx",
   "canvas.sidebar": "components/canvas/canvas-side-panels.tsx",
   "goal.toolbar": "components/goal/console/goal-console.tsx",
   "goal.detail.actions": "components/goal/goal-detail-sheet.tsx",
+  "pet.console.tab": "components/pet/console/pet-console.tsx",
+  "pet.panel.actions": "components/pet/pet-interaction-panel.tsx",
   "perf.panel": "components/performance/performance-dashboard.tsx",
   "terminal.toolbar": "components/terminal/terminal-dock.tsx",
   "agent.team.panel": "components/agent/workspace/overview.tsx",
@@ -412,6 +424,15 @@ export const CANONICAL_HOOK_POINTS = [
   "onGoalProgress",
   "onGoalComplete",
   "onGoalDelete",
+  // Desktop-pet lifecycle. Dispatched by lib/pet/runtime/pet-controller.ts —
+  // onPetInteract fires only for the 7 direct care kinds (radar/passive kinds
+  // are deliberately excluded: they fire continuously), the rest fire on
+  // controller-detected transitions. Payloads carry NO event meta (PII).
+  "onPetInteract",
+  "onPetLevelUp",
+  "onPetEvolved",
+  "onPetAchievementUnlocked",
+  "onPetUnwell",
   // Public share-link lifecycle (ADR-0037). Dispatched by lib/share/client.ts.
   // Owner-observable transitions only — no onShareLinkAccess (reads happen on
   // the worker/viewer, not the owner). URL payload is fragment-stripped.
@@ -977,10 +998,14 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   "cli.tool": "cli:execute",
 }
 
-const RUNTIME_POINT_STABILITY: Partial<Record<CanonicalRuntimePoint, PluginPointStability>> = {
-  "lsp.server": "experimental",
-  "cli.tool": "experimental",
-}
+// Runtime points that are NOT yet stable (everything else defaults to
+// "stable" below). Currently empty: `lsp.server` and `cli.tool` graduated
+// experimental→stable alongside their capability promotions in
+// plugin-capabilities.ts — the host runtime is fully wired (lsp-registry /
+// cli-tools exec pipeline), the typed SDK helpers `defineLspServer()` /
+// `defineCliTool()` ship, and their required tests are in place. Add a point
+// here only while its wiring or plugin-facing API surface is still landing.
+const RUNTIME_POINT_STABILITY: Partial<Record<CanonicalRuntimePoint, PluginPointStability>> = {}
 
 const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> =
   Object.fromEntries(

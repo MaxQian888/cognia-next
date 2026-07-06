@@ -57,8 +57,14 @@ jest.mock("dexie-react-hooks", () => ({
 }))
 
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (selector: (s: { settings: Record<string, unknown> }) => unknown) =>
-    selector({ settings: mockSettings }),
+  useSettingsStore: Object.assign(
+    (selector: (s: { settings: Record<string, unknown> }) => unknown) =>
+      selector({ settings: mockSettings }),
+    { getState: () => ({ settings: mockSettings }) }
+  ),
+  resolveSkillPanelPrefs: (raw: { autoEnableNew?: boolean } | null | undefined) => ({
+    autoEnableNew: raw?.autoEnableNew ?? true,
+  }),
 }))
 
 import { SkillsShTokenError } from "@/lib/skills/marketplace-skillssh"

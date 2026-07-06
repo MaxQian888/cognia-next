@@ -56,6 +56,14 @@
       "description": "You own a shiny pet.",
       "title": "Shiny!"
     },
+    "streakMonth": {
+      "description": "Cared for your pet 30 days in a row.",
+      "title": "Month of Devotion"
+    },
+    "streakWeek": {
+      "description": "Cared for your pet 7 days in a row.",
+      "title": "Week of Care"
+    },
     "wellFed": {
       "description": "Fed your pet 50 times.",
       "title": "Well Fed"
@@ -108,6 +116,13 @@
       "0": "Zzz…",
       "1": "So cozy…"
     },
+    "snarky": {
+      "error": ["Who wrote this? …Oh.", "Not my bug."],
+      "fed": ["Finally.", "Acceptable."],
+      "petted": ["I'll allow it.", "Hmph. Nice."],
+      "played": ["I let you win.", "Again. Obviously."],
+      "success": ["I did most of that.", "As expected."]
+    },
     "success": ["Nailed it!", "Done and done.", "Yay!"],
     "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
     "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
@@ -115,6 +130,8 @@
       "0": "Yummy! Thank you!",
       "1": "Best treat ever! ♥"
     },
+    "twinBusy": ["Quietly going through your notes…", "Learning a bit more about you…"],
+    "twinMilestone": ["I just learned something new about you!", "Fresh insight unlocked!"],
     "waiting": ["Your call!", "Waiting on you…"]
   },
   "care": {
@@ -134,7 +151,10 @@
       "binding": "Characters",
       "customize": "Customize",
       "dex": "Dex",
-      "nurture": "Nurture"
+      "nurture": "Nurture",
+      "plugins": "Plugins",
+      "shop": "Shop",
+      "insights": "Insights"
     },
     "title": "Your Pet"
   },
@@ -249,6 +269,42 @@
     "label": "Pet name",
     "save": "Save name"
   },
+  "shop": {
+    "apply": "Apply",
+    "balance": "{coins} coins",
+    "buy": "Buy",
+    "categories": {
+      "decor": "Decor",
+      "food": "Food",
+      "toy": "Toys"
+    },
+    "insufficient": "Not enough coins",
+    "items": {
+      "berry": {
+        "description": "A quick snack — restores a little energy.",
+        "title": "Berry"
+      },
+      "puzzleCube": {
+        "description": "A calm brain-teaser that deepens your bond.",
+        "title": "Puzzle Cube"
+      },
+      "royalFeast": {
+        "description": "A lavish meal — deeply restores energy.",
+        "title": "Royal Feast"
+      },
+      "starCharm": {
+        "description": "A tiny crown charm your pet can wear.",
+        "title": "Star Charm"
+      },
+      "yarnBall": {
+        "description": "A bouncy toy for a big burst of fun.",
+        "title": "Yarn Ball"
+      }
+    },
+    "owned": "×{qty}",
+    "streak": "{days}-day care streak",
+    "use": "Use"
+  },
   "species": {
     "axolotl": "Axolotl",
     "blob": "Blob",
@@ -289,5 +345,21 @@
     "minimize": "Minimize pet",
     "restore": "Show pet",
     "toggle": "Open pet"
+  },
+  "mood": {
+    "content": "Content",
+    "happy": "Happy",
+    "tired": "Tired",
+    "lonely": "Lonely",
+    "grumpy": "Grumpy"
+  },
+  "condition": {
+    "unwell": "Needs care"
+  },
+  "wallet": {
+    "multiplier": "×{multiplier} coins"
+  },
+  "inventory": {
+    "title": "Items"
   }
 }

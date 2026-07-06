@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: The cognia plugin-author CLI — a standalone Rust binary (scaffold / lint / build / sign / verify / info / status / install / list / reload / dev) that talks to a running desktop instance over a token-gated loopback axum bridge, with renderer-side detection, managed download, and a DevTools UI surface.
+description: The cognia plugin-author CLI — a standalone Rust binary for scaffold / lint / build / sign / verify / info / status / install / list / reload / dev, plus ACP, release-key, and release-verify utilities, with renderer-side detection, managed download, and a DevTools UI surface.
 ---
 
 # Cognia CLI
@@ -8,8 +8,8 @@ description: The cognia plugin-author CLI — a standalone Rust binary (scaffold
 <Status variant="stable">cognia-cli 0.1.0 · binary `cognia` · MSRV 1.82</Status>
 
 <TLDR>
-  `cognia` is a separate Rust crate (`crates/cognia-cli/`, ~8.0k lines + UI layer) shipping **14
-  subcommands** under `cognia plugin …` — scaffold (`new`), validate (`lint`, 60 diagnostic codes), build
+  `cognia` is a separate Rust crate (`crates/cognia-cli/`, ~8.5k lines + UI layer) shipping **14
+  plugin subcommands** under `cognia plugin …` — scaffold (`new`), validate (`lint`, 60 diagnostic codes), build
   (`build` — cargo-component for WASM, esbuild for TypeScript, existing-entry packaging for
   Python/hybrid/VS Code-extension plugins), sign (`keygen`/`sign`/`verify`,
   Ed25519 over raw bundle bytes), inspect (`info` for `.zip` bundles or unpacked directories),
@@ -20,15 +20,16 @@ description: The cognia plugin-author CLI — a standalone Rust binary (scaffold
   through a **loopback-only axum bridge** (`src-tauri/src/cli_bridge/server.rs:28`) bound to an
   ephemeral `127.0.0.1` port, discovered via `<config_dir>/cognia/cli-endpoint.json` and gated by a
   per-launch 64-hex dev token compared in constant time. The renderer detects, downloads
-  (SHA-256 + optional Ed25519-verified), and launches the CLI from Plugin DevTools.
+  (SHA-256 + optional Ed25519-verified), and launches the CLI from Plugin DevTools. Top-level
+  utilities cover `cognia acp`, `cognia release-key`, and `cognia release-verify`.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Subcommands" value="14" hint="PluginCommand enum — crates/cognia-cli/src/main.rs:132-279" />
-  <Stat label="Lint codes" value="60" hint="distinct diagnostic codes — cmd_lint.rs:362-1306" />
-  <Stat label="Permissions / capabilities" value="45 / 45" hint="hard-coded whitelists, parity-tested against TS — cmd_lint.rs:28-223" />
+  <Stat label="Plugin commands" value="14" hint="PluginCommand enum — crates/cognia-cli/src/main.rs" />
+  <Stat label="Lint codes" value="60" hint="distinct diagnostic codes — cmd_lint::validate_manifest" />
+  <Stat label="Permissions / capabilities" value="45 / 45" hint="hard-coded whitelists, parity-tested against TS — cmd_lint.rs" />
   <Stat label="Bridge routes" value="7" hint="health · installed · install · install-directory · uninstall · reload · handoff — server.rs:57-80" />
-  <Stat label="Rust source" value="~8.0k lines" hint="crates/cognia-cli/src (26 files) + src-tauri/src/cli_bridge (6 files)" />
+  <Stat label="Rust source" value="~8.5k lines" hint="crates/cognia-cli/src (28 files) + src-tauri/src/cli_bridge (6 files)" />
   <Stat label="Renderer surface" value="4 + 4" hint="lib/cli-bridge (4 modules) + DevTools status card / install dialog / launcher / status chip" />
 </StatGrid>
 
@@ -86,9 +87,10 @@ crates/cognia-cli/                  # the standalone binary (Cargo.toml: bin nam
   src/cmd_sign.rs · cmd_verify.rs · cmd_keygen.rs · signing.rs   # Ed25519 author signing
   src/cmd_info.rs                   # bundle/directory inspection (manifest, files, signature, api-version)
   src/cmd_status.rs · cmd_install.rs · cmd_uninstall.rs · cmd_list.rs · cmd_reload.rs · cmd_dev.rs · http_client.rs   # bridge client
-  src/release_key.rs                # embedded release public key (canonical copy)
+  src/cmd_acp.rs                    # stdio <-> companion ACP WebSocket bridge
+  src/cmd_release_key.rs · cmd_release_verify.rs · release_key.rs   # release key inspection + artifact verification
   src/ui/                           # RuntimeUi, Prompter trait, spinners, palette, color-eyre
-  tests/integration.rs              # spawns the compiled binary (16 tests)
+  tests/integration.rs              # spawns the compiled binary (96 tests)
 
 crates/cognia-plugin-template/      # WASM scaffold source (include_str! into the binary)
 crates/cognia-plugin-template-ts/   # TypeScript scaffold source
@@ -115,27 +117,32 @@ scripts/release-sync-keys.mjs       # 3-copy release-key sync (--check in CI)
 
 ## Command surface
 
-All commands nest under one top-level group: `cognia plugin <cmd>`
-(`TopCommand::Plugin` — `crates/cognia-cli/src/main.rs:121`). Global flags apply everywhere:
+Plugin-author operations nest under `cognia plugin <cmd>` (`TopCommand::Plugin` in
+`crates/cognia-cli/src/main.rs`), with top-level utility commands such as `cognia acp`,
+`cognia release-key`, and `cognia release-verify` beside that group. Global flags apply everywhere:
 `--color auto|always|never`, `--no-color`, `-q/--quiet`, `-v/--verbose` (max `-vv`),
-`-y/--yes` (pre-confirm every prompt; required for CI) — `main.rs:97-114`.
+`-y/--yes` (pre-confirm every prompt; required for CI). Verbose mode emits a
+single parsed-command diagnostic to stderr for human runs; `--quiet` and per-command `--json`
+suppress it.
 
 | Command | What it does | Module | Talks to app? |
 | --- | --- | --- | --- |
-| `new <name> [--kind wasm\|ts\|python\|hybrid\|vscode-extension]` | Stamp a starter project (interactive wizard on TTY) | `cmd_new.rs` + `template.rs` | no |
+| `new [name] [--dir DIR] [--kind wasm\|ts\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | Stamp a starter project (interactive wizard on TTY) | `cmd_new.rs` + `template.rs` | no |
 | `lint [--path .] [--json]` | 60-code manifest validation; exit 1 on errors | `cmd_lint.rs` | no |
-| `build [--path .] [--out] [--skip-build]` | Lint → cargo-component / esbuild / existing-entry packaging → zip | `cmd_build.rs` / `build_ts.rs` / `packaging.rs` | no |
-| `info <bundle.zip\|directory> [--json] [--detailed]` | Manifest, file table, bundle signature status or directory `not-applicable`, `cognia:api-version` | `cmd_info.rs` | no |
-| `keygen [--out-dir .cognia]` | Ed25519 keypair → `.cognia/plugin.{private,public}.b64` | `cmd_keygen.rs` | no |
-| `sign <bundle> --key <priv> [--out]` | Sign raw zip bytes → `<bundle>.sig` | `cmd_sign.rs` | no |
-| `verify <bundle> [--public-key] [--signature] [--json]` | Verify `.sig` against `author.publicKey` | `cmd_verify.rs` | no |
-| `install <bundle.zip\|directory>` | Preflight collision check → POST bundle or unpacked-directory install | `cmd_install.rs` | **yes** |
-| `uninstall <id> [--purge-data]` | Confirmed removal (purge warns: one-way Dexie wipe) | `cmd_uninstall.rs` | **yes** |
+| `build [--path .] [--out P] [--skip-build] [--json]` | Lint → cargo-component / esbuild / existing-entry packaging → zip | `cmd_build.rs` / `build_ts.rs` / `packaging.rs` | no |
+| `info <bundle.zip\|directory> [--detailed] [--json]` | Manifest, file table, bundle signature status or directory `not-applicable`, `cognia:api-version` | `cmd_info.rs` | no |
+| `keygen [--out-dir .cognia] [--json]` | Ed25519 keypair → `.cognia/plugin.{private,public}.b64` | `cmd_keygen.rs` | no |
+| `sign <bundle> --key <priv> [--out sig] [--json]` | Sign raw zip bytes → `<bundle>.sig` unless `--out` is provided | `cmd_sign.rs` | no |
+| `verify <bundle> [--public-key b64] [--signature sig] [--json]` | Verify `.sig` against `author.publicKey` or an explicit key | `cmd_verify.rs` | no |
+| `install <bundle.zip\|directory> [--json]` | Preflight collision check → POST bundle or unpacked-directory install | `cmd_install.rs` | **yes** |
+| `uninstall <id> [--purge-data] [--json]` | Confirmed removal (purge warns: one-way Dexie wipe) | `cmd_uninstall.rs` | **yes** |
 | `list [--json]` | Print the running desktop bridge's installed-plugin snapshot | `cmd_list.rs` | **yes** |
-| `reload [--plugin-id ID] [--path P]` | POST a hot-reload request for an installed plugin id, rebuilt bundle, or unpacked directory; `--bundle` remains accepted for existing scripts | `cmd_reload.rs` | **yes** |
+| `reload [--plugin-id ID] [--path P] [--json]` | POST a hot-reload request for an installed plugin id, rebuilt bundle, or unpacked directory; `--bundle` remains accepted for existing scripts | `cmd_reload.rs` | **yes** |
 | `status [--json]` | Probe `/api/v1/dev/health`; JSON is token-free and exits non-zero when unavailable | `cmd_status.rs` | **yes** |
-| `dev [--path .] [--reload-url URL]` | Watch → debounce 250 ms → rebuild → POST reload | `cmd_dev.rs` | **yes** (graceful without) |
-| `embed-version <wasm> <ver> [--out]` | Re-inject the `cognia:api-version` custom section | `main.rs:395` + `packaging.rs` | no |
+| `dev [--path .] [--reload-url URL] [--once] [--json]` | Watch → debounce 250 ms → rebuild → POST reload; `--once` builds/reloads once and exits with optional JSON | `cmd_dev.rs` | **yes** (graceful without) |
+| `embed-version <wasm> <ver> [--out wasm] [--json]` | Re-inject the `cognia:api-version` custom section | `main.rs::cmd_embed_version` + `packaging.rs` | no |
+| `release-key [--json]` | Inspect the embedded CLI release public key, fingerprint, placeholder status, and signature policy | `cmd_release_key.rs` + `release_key.rs` | no |
+| `release-verify <artifact> --checksums <checksums.txt> [--artifact-name NAME] [--signature PATH] [--json]` | Offline-check a downloaded CLI release artifact against `checksums.txt` and the release-key policy | `cmd_release_verify.rs` + `release_key.rs` | no |
 
 ## An authoring session, end to end
 
@@ -208,5 +215,5 @@ sequenceDiagram
 | [Signing & keys](./signing-and-keys) | Ed25519 scheme, keygen/sign/verify, `info`, release-key 3-copy sync |
 | [Bridge client](./bridge-client) | endpoint discovery, ureq client, status/install/uninstall/list/reload flows, dev watch loop |
 | [Bridge server](./bridge-server) | axum spawn, auth middleware, the 7 routes, Tauri event fan-out |
-| [Detection & managed install](./detection-and-managed-install) | `detect_binary`, GitHub Releases download, checksum + signature verify |
+| [Detection & managed install](./detection-and-managed-install) | `detect_binary`, GitHub Releases download, checksum + signature verify, `release-verify` |
 | [DevTools UI](./devtools-ui) | status hook, status card, install dialog, launcher, status chip |

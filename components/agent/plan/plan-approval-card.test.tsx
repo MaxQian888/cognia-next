@@ -43,60 +43,127 @@ function plan(over: Partial<AgentPlan> = {}): AgentPlan {
   }
 }
 
+const noop = {
+  onApprove: jest.fn(),
+  onKeepPlanning: jest.fn(),
+  onDiscard: jest.fn(),
+}
+
 describe("PlanApprovalCard", () => {
   it("renders the title, status, source and steps", () => {
-    render(<PlanApprovalCard plan={plan()} onApprove={jest.fn()} onReject={jest.fn()} />)
+    render(<PlanApprovalCard plan={plan()} {...noop} />)
     expect(screen.getByTestId("plan-approval-card")).toBeInTheDocument()
     expect(screen.getByText("Ship the widget")).toBeInTheDocument()
     expect(screen.getByText("First step")).toBeInTheDocument()
     expect(screen.getByText("status.awaiting_approval")).toBeInTheDocument()
   })
 
-  it("fires onApprove", async () => {
+  it("caps the card height and scrolls the step list natively (selection-safe)", () => {
+    const { container } = render(<PlanApprovalCard plan={plan()} {...noop} />)
+    // Card max-h (not h): compact when short, capped when long.
+    expect(screen.getByTestId("plan-approval-card").className).toContain("max-h-[45vh]")
+    // Native overflow scroller wraps the step list (no hover-only Radix thumb).
+    const steps = screen.getByTestId("plan-approval-steps")
+    expect(steps.parentElement?.className).toContain("overflow-y-auto")
+    expect(container.querySelector("[data-radix-scroll-area-viewport]")).toBeNull()
+  })
+
+  it("maps the two primary approve buttons onto acceptEdits / default", async () => {
     const onApprove = jest.fn()
-    render(<PlanApprovalCard plan={plan()} onApprove={onApprove} onReject={jest.fn()} />)
-    await userEvent.click(screen.getByTestId("plan-approval-approve"))
-    expect(onApprove).toHaveBeenCalledTimes(1)
+    render(<PlanApprovalCard plan={plan()} {...noop} onApprove={onApprove} />)
+    await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+    expect(onApprove).toHaveBeenLastCalledWith("acceptEdits")
+    await userEvent.click(screen.getByTestId("plan-approval-approve-review"))
+    expect(onApprove).toHaveBeenLastCalledWith("default")
   })
 
-  it("fires onReject with trimmed feedback", async () => {
-    const onReject = jest.fn()
-    render(<PlanApprovalCard plan={plan()} onApprove={jest.fn()} onReject={onReject} />)
-    await userEvent.type(screen.getByTestId("plan-approval-feedback"), "  needs work  ")
-    await userEvent.click(screen.getByTestId("plan-approval-reject"))
-    expect(onReject).toHaveBeenCalledWith("needs work")
+  it("offers the fully-automated approve (auto mode) in the overflow menu", async () => {
+    const onApprove = jest.fn()
+    render(<PlanApprovalCard plan={plan()} {...noop} onApprove={onApprove} />)
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
+    await userEvent.click(await screen.findByTestId("plan-approval-approve-full-auto"))
+    expect(onApprove).toHaveBeenCalledWith("auto")
   })
 
-  it("passes undefined feedback when blank", async () => {
-    const onReject = jest.fn()
-    render(<PlanApprovalCard plan={plan()} onApprove={jest.fn()} onReject={onReject} />)
-    await userEvent.click(screen.getByTestId("plan-approval-reject"))
-    expect(onReject).toHaveBeenCalledWith(undefined)
+  it("fires onKeepPlanning with trimmed feedback (undefined when blank)", async () => {
+    const onKeepPlanning = jest.fn()
+    render(<PlanApprovalCard plan={plan()} {...noop} onKeepPlanning={onKeepPlanning} />)
+    await userEvent.click(screen.getByTestId("plan-approval-keep-planning"))
+    expect(onKeepPlanning).toHaveBeenLastCalledWith(undefined)
+    await userEvent.type(screen.getByTestId("plan-approval-feedback"), "  focus on tests  ")
+    await userEvent.click(screen.getByTestId("plan-approval-keep-planning"))
+    expect(onKeepPlanning).toHaveBeenLastCalledWith("focus on tests")
   })
 
-  it("shows refine controls only when onRefine is provided, and forwards the type", async () => {
+  it("fires onDiscard from the overflow menu with feedback", async () => {
+    const onDiscard = jest.fn()
+    render(<PlanApprovalCard plan={plan()} {...noop} onDiscard={onDiscard} />)
+    await userEvent.type(screen.getByTestId("plan-approval-feedback"), "wrong direction")
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
+    await userEvent.click(await screen.findByTestId("plan-approval-discard"))
+    expect(onDiscard).toHaveBeenCalledWith("wrong direction")
+  })
+
+  it("shows refine actions in the overflow menu only when onRefine is provided", async () => {
     const onRefine = jest.fn()
-    const { rerender } = render(
-      <PlanApprovalCard plan={plan()} onApprove={jest.fn()} onReject={jest.fn()} />
-    )
+    const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} />)
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
     expect(screen.queryByTestId("plan-refine-optimize")).not.toBeInTheDocument()
+    unmount()
 
-    rerender(
-      <PlanApprovalCard
-        plan={plan()}
-        onApprove={jest.fn()}
-        onReject={jest.fn()}
-        onRefine={onRefine}
-      />
-    )
-    await userEvent.click(screen.getByTestId("plan-refine-expand"))
+    render(<PlanApprovalCard plan={plan()} {...noop} onRefine={onRefine} />)
+    await userEvent.click(screen.getByTestId("plan-approval-more"))
+    await userEvent.click(await screen.findByTestId("plan-refine-expand"))
     expect(onRefine).toHaveBeenCalledWith("expand", undefined)
   })
 
+  it("disables all actions when disabled", () => {
+    render(<PlanApprovalCard plan={plan()} {...noop} onRefine={jest.fn()} disabled />)
+    expect(screen.getByTestId("plan-approval-approve-auto")).toBeDisabled()
+    expect(screen.getByTestId("plan-approval-approve-review")).toBeDisabled()
+    expect(screen.getByTestId("plan-approval-keep-planning")).toBeDisabled()
+    expect(screen.getByTestId("plan-approval-more")).toBeDisabled()
+  })
+
+  it("opens the inline editor only when onEdit is provided and the plan awaits approval", async () => {
+    const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} />)
+    expect(screen.queryByTestId("plan-approval-edit")).not.toBeInTheDocument()
+    unmount()
+
+    render(<PlanApprovalCard plan={plan({ status: "draft" })} {...noop} onEdit={jest.fn()} />)
+    expect(screen.queryByTestId("plan-approval-edit")).not.toBeInTheDocument()
+  })
+
+  it("edits title + steps inline and saves via onEdit (one step per line)", async () => {
+    const onEdit = jest.fn()
+    const steps = [step("a", { title: "one", order: 0 }), step("b", { title: "two", order: 1 })]
+    render(<PlanApprovalCard plan={plan({ steps })} {...noop} onEdit={onEdit} />)
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    // Prefilled from the current plan.
+    expect(screen.getByTestId("plan-edit-title")).toHaveValue("Ship the widget")
+    expect(screen.getByTestId("plan-edit-steps")).toHaveValue("one\ntwo")
+
+    await userEvent.clear(screen.getByTestId("plan-edit-title"))
+    await userEvent.type(screen.getByTestId("plan-edit-title"), "Better title")
+    await userEvent.clear(screen.getByTestId("plan-edit-steps"))
+    await userEvent.type(screen.getByTestId("plan-edit-steps"), "alpha{enter}{enter}  beta  ")
+    await userEvent.click(screen.getByTestId("plan-edit-save"))
+    // Blank lines dropped, titles trimmed; editor closes back to the actions.
+    expect(onEdit).toHaveBeenCalledWith({ title: "Better title", stepTitles: ["alpha", "beta"] })
+    expect(screen.queryByTestId("plan-approval-editor")).not.toBeInTheDocument()
+  })
+
+  it("cancels the inline editor without calling onEdit", async () => {
+    const onEdit = jest.fn()
+    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={onEdit} />)
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    await userEvent.click(screen.getByTestId("plan-edit-cancel"))
+    expect(onEdit).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("plan-approval-editor")).not.toBeInTheDocument()
+  })
+
   it("renders the empty state when there are no steps", () => {
-    render(
-      <PlanApprovalCard plan={plan({ steps: [] })} onApprove={jest.fn()} onReject={jest.fn()} />
-    )
+    render(<PlanApprovalCard plan={plan({ steps: [] })} {...noop} />)
     expect(screen.getByText("approval.noSteps")).toBeInTheDocument()
     expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
     // No steps → no progress bar.
@@ -110,7 +177,7 @@ describe("PlanApprovalCard", () => {
       step("c", { title: "three", order: 2, status: "in_progress" }),
       step("d", { title: "four", order: 3, status: "pending" }),
     ]
-    render(<PlanApprovalCard plan={plan({ steps })} onApprove={jest.fn()} onReject={jest.fn()} />)
+    render(<PlanApprovalCard plan={plan({ steps })} {...noop} />)
     expect(screen.getByTestId("plan-approval-progress")).toHaveTextContent("2/4")
     // 2 of 4 completed → 50%.
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50")

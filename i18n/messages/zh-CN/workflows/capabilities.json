@@ -1,0 +1,26 @@
+{
+  "names": {
+    "always-on": "常驻监听",
+    "barcode-scan": "扫码",
+    "biometric": "生物识别",
+    "camera": "相机",
+    "connector-runtime": "连接器运行时",
+    "geolocation": "定位",
+    "headless": "无头运行时",
+    "keyring": "系统钥匙串",
+    "mcp-runtime": "MCP 运行时",
+    "ocr": "OCR",
+    "pty": "集成终端",
+    "push-display": "通知",
+    "share-sheet": "分享面板",
+    "shell": "Shell",
+    "sidecar": "Node 边车",
+    "uia-automation": "桌面自动化",
+    "voice-record": "录音",
+    "webview": "交互界面"
+  },
+  "tooltip": "需要本设备缺少的能力：{caps}",
+  "tooltipRemote": "将在提供以下能力的已配对设备上执行：{caps}",
+  "unavailable": "本设备不可用",
+  "viaDevice": "手机执行"
+}

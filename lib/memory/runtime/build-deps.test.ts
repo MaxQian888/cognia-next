@@ -98,6 +98,19 @@ describe("tryBuildMemoryDeps", () => {
     const deps = await tryBuildMemoryDeps(cfg())
     expect(deps!.vectorSearch).toBeUndefined()
   })
+
+  it("reuses prebuilt twin deps and does not call tryBuildTwinDeps again", async () => {
+    const prebuilt = {
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    } as never
+    const deps = await tryBuildMemoryDeps(cfg(), prebuilt)
+    expect(deps!.embed).toBeDefined()
+    expect(deps!.vectorSearch).toBeDefined()
+    // The second tryBuildTwinDeps() call is skipped — the backend came from the
+    // caller-supplied deps.
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
 })
 
 describe("tryBuildMemoryVectorSink", () => {

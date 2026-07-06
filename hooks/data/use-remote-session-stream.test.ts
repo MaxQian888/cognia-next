@@ -5,7 +5,24 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 import { useRemoteSessionStream } from "./use-remote-session-stream"
+import { toast } from "sonner"
 import type { ClaudeEvent } from "@/lib/claude/types"
+
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+
+jest.mock("sonner", () => ({
+  toast: { error: jest.fn(), warning: jest.fn(), info: jest.fn(), success: jest.fn() },
+}))
+
+const runSyncDownMock = jest.fn().mockResolvedValue([])
+jest.mock("@/lib/sync/companion-sync", () => ({
+  runSyncDown: (...a: unknown[]) => runSyncDownMock(...a),
+}))
+
+const toastError = toast.error as jest.Mock
+const toastWarning = toast.warning as jest.Mock
 
 // ── transport mock: capture the claude://message handler + record calls ──
 let streamHandler: ((evt: ClaudeEvent) => void) | null = null
@@ -52,10 +69,13 @@ beforeEach(() => {
   streamHandler = null
   callMock.mockClear().mockResolvedValue(undefined)
   unsubMock.mockClear()
-  sendPromptMock.mockClear()
-  interruptMock.mockClear()
-  approveToolMock.mockClear()
+  sendPromptMock.mockClear().mockResolvedValue(undefined)
+  interruptMock.mockClear().mockResolvedValue(undefined)
+  approveToolMock.mockClear().mockResolvedValue(undefined)
   listMessagesMock.mockClear().mockResolvedValue([])
+  runSyncDownMock.mockClear().mockResolvedValue([])
+  toastError.mockClear()
+  toastWarning.mockClear()
 })
 
 describe("useRemoteSessionStream", () => {
@@ -144,6 +164,145 @@ describe("useRemoteSessionStream", () => {
       await result.current.interrupt()
     })
     expect(interruptMock).toHaveBeenCalledWith("sess-1")
+  })
+
+  it("marks the session ended on session_ended and clears any pending approval", async () => {
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    act(() => {
+      streamHandler?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-1",
+        toolUseID: "tu-1",
+        toolName: "write",
+        input: {},
+      } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(result.current.pendingApproval).not.toBeNull())
+    act(() => {
+      streamHandler?.({ type: "session_ended", sessionId: "sess-1" } as unknown as ClaudeEvent)
+    })
+    expect(result.current.sessionEnded).toBe(true)
+    expect(result.current.status).toBe("idle")
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it("treats a sidecar_exited frame (no sessionId) as a session end", async () => {
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    act(() => {
+      streamHandler?.({ type: "sidecar_exited" } as unknown as ClaudeEvent)
+    })
+    expect(result.current.sessionEnded).toBe(true)
+  })
+
+  it("re-seeds history from Dexie on a resync_required frame", async () => {
+    renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    expect(listMessagesMock).toHaveBeenCalledTimes(1)
+    act(() => {
+      // synthetic, non-session-scoped frame dispatched by the transport
+      streamHandler?.({ type: "resync_required" } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledTimes(2))
+  })
+
+  it("clears a pending approval when a later event advances the turn", async () => {
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    act(() => {
+      streamHandler?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-1",
+        toolUseID: "tu-1",
+        toolName: "write",
+        input: {},
+      } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(result.current.pendingApproval).not.toBeNull())
+    act(() => {
+      streamHandler?.({
+        type: "event",
+        sessionId: "sess-1",
+        event: { type: "assistant" },
+      } as unknown as ClaudeEvent)
+    })
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it("resets status to idle and toasts when a send fails", async () => {
+    sendPromptMock.mockRejectedValueOnce(new Error("network down"))
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(result.current.status).toBe("idle")
+    expect(toastError).toHaveBeenCalled()
+  })
+
+  it("downgrades to observe-only when a send is forbidden (control revoked)", async () => {
+    sendPromptMock.mockRejectedValueOnce({ code: "http_403", message: "forbidden" })
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(result.current.canControl).toBe(false)
+    expect(toastWarning).toHaveBeenCalled()
+  })
+
+  it("flags notFound when session_attach 404s", async () => {
+    callMock.mockImplementation(async (name: string) => {
+      if (name === "session_attach") throw { code: "http_404", message: "not found" }
+      return undefined
+    })
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(result.current.notFound).toBe(true))
+    expect(result.current.canControl).toBe(false)
+  })
+
+  it("downgrades to observe-only (not notFound) when session_attach 403s by code", async () => {
+    callMock.mockImplementation(async (name: string) => {
+      if (name === "session_attach") throw { code: "http_403", message: "forbidden" }
+      return undefined
+    })
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(result.current.canControl).toBe(false))
+    expect(result.current.notFound).toBe(false)
+  })
+
+  it("does not fire a spurious interrupt when nothing is in flight", async () => {
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    await act(async () => {
+      await result.current.interrupt()
+    })
+    expect(interruptMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps the approval card and toasts when respond fails", async () => {
+    approveToolMock.mockRejectedValueOnce(new Error("offline"))
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    act(() => {
+      streamHandler?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-1",
+        toolUseID: "tu-1",
+        toolName: "write",
+        input: {},
+      } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(result.current.pendingApproval).not.toBeNull())
+    await act(async () => {
+      await result.current.respond("deny")
+    })
+    expect(toastError).toHaveBeenCalled()
+    expect(result.current.pendingApproval).not.toBeNull()
   })
 
   it("detaches on unmount", async () => {

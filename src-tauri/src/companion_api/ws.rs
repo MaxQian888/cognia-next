@@ -109,6 +109,16 @@ async fn handle_socket(
         }
     };
 
+    // Gauge for /metrics (D9): decremented on every exit path via Drop.
+    struct WsMetricGuard;
+    impl Drop for WsMetricGuard {
+        fn drop(&mut self) {
+            crate::companion_api::metrics::ws_client_disconnected();
+        }
+    }
+    crate::companion_api::metrics::ws_client_connected();
+    let _ws_metric_guard = WsMetricGuard;
+
     // 2. Send replay frames.
     for frame in replay {
         match serde_json::to_string(&frame) {

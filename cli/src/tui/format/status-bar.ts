@@ -30,6 +30,7 @@ import {
 } from "./usage"
 import { tightestRemainingPct, type RateLimitSnapshot } from "./rate-limits"
 import type { SessionTotals, UsageInfo } from "../state/types"
+import { permissionModeMeta } from "../state/permission-mode-meta"
 
 /** One rendered footer segment. */
 export interface StatusSegmentView {
@@ -118,9 +119,11 @@ function segmentText(
     case "provider":
       return config.provider
     case "mode":
-      // bypassPermissions disarms every tool-approval gate — surface a loud,
-      // persistent warning so it can't run silently for a whole session.
-      return config.permissionMode === "bypassPermissions"
+      // A danger-tier mode (bypassPermissions) disarms every tool-approval gate —
+      // surface a loud, persistent warning so it can't run silently for a whole
+      // session. Sourced from the shared risk model so a future danger mode is
+      // covered without editing this branch.
+      return permissionModeMeta(config.permissionMode).risk === "danger"
         ? `⚠ ${config.permissionMode}`
         : config.permissionMode
     case "tokens": {
@@ -186,8 +189,9 @@ export function buildStatusBar(ctx: {
     const text = segmentText(id, ctx)
     if (text === null) continue
     const style = styleFor(theme, id, palette)
-    // Force the bypass-mode segment to a warning colour regardless of theme.
-    if (id === "mode" && ctx.config.permissionMode === "bypassPermissions") {
+    // Force a danger-tier mode segment (bypassPermissions) to a warning colour
+    // regardless of theme.
+    if (id === "mode" && permissionModeMeta(ctx.config.permissionMode).risk === "danger") {
       out.push({ id, text, color: palette.warning, dim: false })
       continue
     }

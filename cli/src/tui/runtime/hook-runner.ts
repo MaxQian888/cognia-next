@@ -57,6 +57,15 @@ export interface HookRunner {
   onPrompt(prompt: string): void
   /** Fire `PreToolUse` and await a deny decision for an approval-gated tool. */
   preToolUse(toolName: string, input: unknown): Promise<PreToolHookDecision>
+  /** Fire `SessionStart` when a chat session begins (mount / `/clear` / `/resume`). */
+  onSessionStart(sessionId: string): void
+  /** Fire `SessionEnd` when a session is torn down (`/clear`, exit). */
+  onSessionEnd(sessionId: string): void
+  /** Fire `PermissionRequest` + `Notification` when a tool needs approval — the
+   * "Claude needs your attention" moment (Claude Code parity). */
+  onPermissionRequest(toolName: string, input: unknown): void
+  /** Fire `PermissionDenied` when the user (or a hook) denies a tool. */
+  onPermissionDenied(toolName: string, reason?: string): void
 }
 
 const defaultReadFile: FileReader = (absPath) => {
@@ -115,6 +124,26 @@ export function createHookRunner(deps: HookRunnerDeps): HookRunner {
         payload: { tool_name: toolName, tool_input: input },
         groups,
         spawn,
+      })
+    },
+    onSessionStart(sessionId) {
+      fireLifecycle("SessionStart", { session_id: sessionId })
+    },
+    onSessionEnd(sessionId) {
+      fireLifecycle("SessionEnd", { session_id: sessionId })
+    },
+    onPermissionRequest(toolName, input) {
+      fireLifecycle("PermissionRequest", { tool_name: toolName, tool_input: input })
+      // A permission prompt is the canonical "needs your attention" event.
+      fireLifecycle("Notification", {
+        message: `Permission required for ${toolName}`,
+        tool_name: toolName,
+      })
+    },
+    onPermissionDenied(toolName, reason) {
+      fireLifecycle("PermissionDenied", {
+        tool_name: toolName,
+        ...(reason ? { reason } : {}),
       })
     },
   }

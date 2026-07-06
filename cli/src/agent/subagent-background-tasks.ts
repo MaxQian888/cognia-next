@@ -20,6 +20,8 @@ export interface CliBackgroundRunInfo {
   subagentId: string
   status: CliBackgroundRunStatus
   startedAt: number
+  /** The chat session that started the run — the cross-session isolation key. */
+  sessionId: string
 }
 
 export type CliBackgroundTaskMeta = BackgroundTaskStartMeta & {
@@ -28,6 +30,12 @@ export type CliBackgroundTaskMeta = BackgroundTaskStartMeta & {
 }
 
 const runHomes = new Map<string, string | undefined>()
+// The session that owns each live run — the cross-session isolation key. A run
+// may only be collected / listed / counted by the session that started it, so a
+// second chat session (or a post-`/clear` session, which gets a fresh id) can
+// never read another session's subagent output even though the registry +
+// journal are process-/disk-global.
+const runOwners = new Map<string, string>()
 const collectedRunIds = new Set<string>()
 const interruptedHomes = new Set<string>()
 const dexieJournal = createDexieBackgroundTaskJournal()
@@ -57,6 +65,7 @@ export function startCliBackgroundRun(
 ): void {
   const { home, ...journalMeta } = meta
   runHomes.set(runId, home)
+  runOwners.set(runId, journalMeta.sessionId)
   registry.start(runId, journalMeta, promise, controls)
 }
 
@@ -66,9 +75,17 @@ export function hasCliBackgroundRun(runId: string): boolean {
 
 export async function collectCliBackgroundResult(
   runId: string,
-  options: { home?: string } = {}
+  options: { home?: string; owner?: string } = {}
 ): Promise<string | undefined> {
   if (collectedRunIds.has(runId)) return undefined
+  // Cross-session isolation: when an owner is supplied, a run started by a
+  // different session is invisible — return `undefined` (the dispatch layer then
+  // reports it as an unknown run) WITHOUT consuming it, so the rightful owner can
+  // still collect later. Check the live registry first, then the journal record.
+  if (options.owner !== undefined) {
+    const liveOwner = runOwners.get(runId)
+    if (liveOwner !== undefined && liveOwner !== options.owner) return undefined
+  }
   try {
     const live = await registry.collect(runId)
     if (live !== undefined) {
@@ -80,10 +97,12 @@ export async function collectCliBackgroundResult(
     return errorMessage(err)
   } finally {
     runHomes.delete(runId)
+    runOwners.delete(runId)
   }
 
   const record = await readJournalRecord(runId, options.home)
   if (!record || record.host !== "cli") return undefined
+  if (options.owner !== undefined && record.sessionId !== options.owner) return undefined
   if (record.status === "done") return record.resultText ?? ""
   if (record.status === "error")
     return record.error ?? record.resultText ?? "Background run failed."
@@ -91,17 +110,23 @@ export async function collectCliBackgroundResult(
   return undefined
 }
 
-export function listCliBackgroundRuns(): CliBackgroundRunInfo[] {
-  return registry.list().map((entry) => ({
-    runId: entry.runId,
-    subagentId: entry.subagentId,
-    status: entry.status,
-    startedAt: entry.startedAt,
-  }))
+export function listCliBackgroundRuns(owner?: string): CliBackgroundRunInfo[] {
+  return registry
+    .list()
+    .filter((entry) => owner === undefined || entry.sessionId === owner)
+    .map((entry) => ({
+      runId: entry.runId,
+      subagentId: entry.subagentId,
+      status: entry.status,
+      startedAt: entry.startedAt,
+      sessionId: entry.sessionId,
+    }))
 }
 
-export function countRunningCliBackgroundRuns(): number {
-  return registry.countRunning()
+export function countRunningCliBackgroundRuns(owner?: string): number {
+  if (owner === undefined) return registry.countRunning()
+  return registry.list().filter((entry) => entry.status === "running" && entry.sessionId === owner)
+    .length
 }
 
 export async function countInterruptedCliBackgroundRuns(
@@ -114,6 +139,7 @@ export async function countInterruptedCliBackgroundRuns(
 export function __clearAllCliBackgroundRunsForTesting(): void {
   registry.__clearForTesting()
   runHomes.clear()
+  runOwners.clear()
   collectedRunIds.clear()
   interruptedHomes.clear()
   journalQueue = Promise.resolve()

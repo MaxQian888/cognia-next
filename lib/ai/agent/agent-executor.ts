@@ -90,6 +90,15 @@ export interface ExecuteAgentConfig {
   customProviders?: CustomProviderDefinition[]
   defaultProvider?: string
   /**
+   * Per-run provider override (cross-provider subagents). When set, this run
+   * targets THIS provider instead of the default — on the sidecar channel via
+   * the session's `providerOverride`, on the text channel as the explicit
+   * `resolveFeatureProvider` provider id. Lets a subagent run on a different
+   * provider than the dispatching session (e.g. a DeepSeek chat delegating to a
+   * Claude reviewer). Omit to inherit the default/session provider.
+   */
+  provider?: string
+  /**
    * Opt into the tool-enabled sidecar pipeline. When `true` AND the
    * desktop sidecar is reachable, the run goes through `resolveSendOptions`
    * + `runAndCaptureAssistantReply` so the host's tool surface (Bash, Read,
@@ -172,6 +181,14 @@ export interface ExecuteAgentConfig {
    */
   dispatchContext?: DispatchContext
   /**
+   * True when this run is a dispatched subagent (set unconditionally by
+   * `dispatchSubagent`). A dispatched run WITHOUT a `dispatchContext` is a
+   * LEAF (its def never opted into nesting): `resolveDispatchAgentGate` must
+   * withhold `dispatch_agent` from it — including the plan-mode force-offer —
+   * instead of treating it as a top-level chat (CLI leaf parity).
+   */
+  isDispatchedSubagent?: boolean
+  /**
    * Parent permission ceiling for this dispatched run. Threaded into
    * `resolveSendOptions` so the child's resolved tool surface is intersected /
    * unioned / mode-clamped against the parent (fail-closed). Set by the
@@ -217,7 +234,10 @@ function structuredInstruction(outputFormat: PluginAgentOutputFormat | undefined
 }
 
 /** Join a base system prompt with optional append + structured instruction. */
-function composeSystem(base: string | undefined, ...extra: Array<string | undefined>): string {
+export function composeSystem(
+  base: string | undefined,
+  ...extra: Array<string | undefined>
+): string {
   return [base, ...extra].filter((s): s is string => Boolean(s && s.trim())).join("\n\n")
 }
 
@@ -350,12 +370,20 @@ async function runToolEnabledStandalone(
   }
   try {
     const appSettings = await settingsDb.getSettings().catch(() => undefined)
-    const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
+    const baseSessionRow = (await sessionsDb.getSession(session.id)) ?? session
+    // Cross-provider override: route THIS run through the requested provider via
+    // the session's `providerOverride` (which `resolveSendOptions` honors over
+    // appSettings). Applied to an in-memory copy only — never persisted, so a
+    // reused persistent session keeps its own provider.
+    const sessionRow = config.provider
+      ? { ...baseSessionRow, providerOverride: config.provider }
+      : baseSessionRow
     const sendOptions = await buildOpts.resolveSendOptions({
       session: sessionRow,
       character,
       appSettings: appSettings ?? null,
       ...(config.dispatchContext ? { dispatchContext: config.dispatchContext } : {}),
+      ...(config.isDispatchedSubagent ? { isDispatchedSubagent: true } : {}),
       ...(config.permissionCeiling ? { permissionCeiling: config.permissionCeiling } : {}),
     })
     // Append-style system extension + structured-output instruction ride
@@ -383,6 +411,11 @@ async function runToolEnabledStandalone(
       signal: config.abortSignal,
       ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
       ...(config.onEvent ? { onEvent: config.onEvent } : {}),
+      execution: {
+        kind: "subagent",
+        label: `Subagent ${session.id.slice(0, 8)}`,
+        ...(session.projectId ? { projectId: session.projectId } : {}),
+      },
       ...(permissionResponderFor(config.canUseTool, config.abortSignal)
         ? { onPermissionRequest: permissionResponderFor(config.canUseTool, config.abortSignal) }
         : {}),
@@ -434,8 +467,11 @@ export async function executeAgent(
     // Requested tools but no sidecar — fall through to the text-only channel.
   }
 
+  // A per-run `provider` override wins over the snapshot default so a
+  // cross-provider subagent targets its own provider on the text channel too.
+  const overrideProvider = config.provider ?? config.defaultProvider
   const snapshot = createProviderSettingsSnapshot({
-    defaultProvider: config.defaultProvider,
+    defaultProvider: overrideProvider,
     providerSettings: config.providerSettings,
     customProviders: config.customProviders,
   })

@@ -40,12 +40,14 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         "quick-action",
         "view-container",
         "auth-provider",
+        "pet-achievement",
+        "pet-item",
       ])
     )
     // Lock the count too — a silent growth here would mean the
     // contributions block in PluginManager picked up new behaviour
     // that may need cross-checking against bespoke branches.
-    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(16)
+    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(18)
   })
 
   describe.each(OVERLAY_REGISTRY_CAPABILITY_KEYS)("%s", (key) => {

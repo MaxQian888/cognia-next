@@ -8,6 +8,7 @@ import {
 describe("cross-window-protocol", () => {
   const valid: PetBridgeMessage[] = [
     { v: 1, t: "visual-state", state: "thinking" },
+    { v: 1, t: "visual-state", state: "unwell" },
     { v: 1, t: "one-shot", shot: "levelUp" },
     { v: 1, t: "one-shot", shot: "sad" },
     { v: 1, t: "one-shot", shot: "surprised" },
@@ -18,8 +19,13 @@ describe("cross-window-protocol", () => {
     { v: 1, t: "bubble", bubble: null },
     { v: 1, t: "interaction", kind: "fed" },
     { v: 1, t: "interaction", kind: "talked", text: "hello pet" },
+    { v: 1, t: "interaction", kind: "slept" },
+    { v: 1, t: "interaction", kind: "cleaned" },
+    { v: 1, t: "interaction", kind: "treated" },
     { v: 1, t: "request-state" },
     { v: 1, t: "activity", at: 1717575600000 },
+    { v: 1, t: "open-console", tab: "shop" },
+    { v: 1, t: "open-console", tab: "achievements" },
   ]
 
   it("exposes the shared channel name", () => {
@@ -77,6 +83,9 @@ describe("cross-window-protocol", () => {
       ["interaction with non-string kind", { v: 1, t: "interaction", kind: 1 }],
       ["activity with non-number at", { v: 1, t: "activity", at: "now" }],
       ["activity with non-finite at", { v: 1, t: "activity", at: Number.NaN }],
+      ["open-console with unknown tab", { v: 1, t: "open-console", tab: "settings" }],
+      ["open-console with non-string tab", { v: 1, t: "open-console", tab: 3 }],
+      ["open-console with missing tab", { v: 1, t: "open-console" }],
     ]
 
     it.each(rejected)("rejects %s → null", (_label, raw) => {

@@ -17,6 +17,8 @@ import {
   ALT_SCREEN_ON,
   ALT_SCROLL_OFF,
   CLEAR_HOME,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
   MOUSE_TRACK_OFF,
   MOUSE_TRACK_ON,
   type ScreenStream,
@@ -77,14 +79,16 @@ describe("App — fullscreen layout", () => {
     )
     // Default config has no `mouse` set ⇒ "scroll": enable SGR wheel tracking so
     // the wheel scrolls the transcript out of the box.
-    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, MOUSE_TRACK_ON])
+    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR, MOUSE_TRACK_ON])
     unmount()
     expect(writes).toEqual([
       ALT_SCREEN_ON,
       CLEAR_HOME,
+      HIDE_CURSOR,
       MOUSE_TRACK_ON,
       MOUSE_TRACK_OFF,
       ALT_SCREEN_OFF,
+      SHOW_CURSOR,
     ])
   })
 
@@ -107,7 +111,7 @@ describe("App — fullscreen layout", () => {
     )
     expect(writes).toEqual([])
     unmount()
-    expect(writes).toEqual([MOUSE_TRACK_OFF, ALT_SCREEN_OFF])
+    expect(writes).toEqual([MOUSE_TRACK_OFF, ALT_SCREEN_OFF, SHOW_CURSOR])
   })
 
   it("renders the fixed banner with a live status line (mode + context)", () => {
@@ -164,7 +168,7 @@ describe("App — fullscreen layout", () => {
       />
     )
     // Scroll mode enables button tracking so the wheel reaches the App.
-    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, MOUSE_TRACK_ON])
+    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR, MOUSE_TRACK_ON])
     // SGR wheel-up / wheel-down reports as Ink surfaces them (leading ESC stripped).
     expect(() => {
       act(() => __fireInput("[<64;10;5M"))
@@ -188,7 +192,13 @@ describe("App — fullscreen layout", () => {
       />
     )
     // Select mode releases tracking + suppresses alternate-scroll (no wheel SGR).
-    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, MOUSE_TRACK_OFF, ALT_SCROLL_OFF])
+    expect(writes).toEqual([
+      ALT_SCREEN_ON,
+      CLEAR_HOME,
+      HIDE_CURSOR,
+      MOUSE_TRACK_OFF,
+      ALT_SCROLL_OFF,
+    ])
     expect(() => {
       act(() => __fireInput("[<64;10;5M"))
       act(() => __fireInput("[<65;10;5M"))
@@ -276,5 +286,58 @@ describe("App — fullscreen layout", () => {
       />
     )
     expect(writes).toEqual([])
+  })
+})
+
+describe("App — dynamic terminal title", () => {
+  beforeEach(() => __resetInk())
+
+  const OSC = (t: string) => `\x1b]0;${t}\x07`
+
+  it("sets an idle title with the cwd basename on mount and clears it on unmount", () => {
+    const { screen, writes } = fakeScreen()
+    const { create } = fakeSession()
+    const { unmount } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        titleOut={screen}
+        titleEnv={{ TERM: "xterm" }}
+      />
+    )
+    expect(writes[0]).toBe(OSC("cognia - work"))
+    unmount()
+    expect(writes[writes.length - 1]).toBe(OSC(""))
+  })
+
+  it("does not write a title when disabled via config", () => {
+    const { screen, writes } = fakeScreen()
+    const { create } = fakeSession()
+    render(
+      <App
+        config={{ ...config, terminalTitle: false }}
+        sessionId="s1"
+        createSession={create}
+        titleOut={screen}
+        titleEnv={{ TERM: "xterm" }}
+      />
+    )
+    expect(writes).toEqual([])
+  })
+
+  it("adapts the title sequence for a tmux session", () => {
+    const { screen, writes } = fakeScreen()
+    const { create } = fakeSession()
+    render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        titleOut={screen}
+        titleEnv={{ TMUX: "/tmp/tmux-1000/default,1,0" }}
+      />
+    )
+    expect(writes[0]).toBe(`\x1bkcognia - work\x1b\\${OSC("cognia - work")}`)
   })
 })

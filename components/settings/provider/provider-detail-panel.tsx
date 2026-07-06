@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { Settings, Trash2 } from "lucide-react"
+import { Settings, Star, Trash2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -20,10 +20,17 @@ interface ProviderDetailPanelProps {
   onTest?: () => void
   onToggleEnabled?: (enabled: boolean) => void
   onDelete?: () => void
+  /** This provider is the app-wide default for new chats. */
+  isDefault?: boolean
+  /**
+   * Make this provider the app-wide default (`AppSettings.defaultProvider`).
+   * Omit to hide the action (e.g. read-only contexts).
+   */
+  onSetDefault?: () => void
   isEnabled?: boolean
   isTesting?: boolean
   isCustom?: boolean
-  connectionStatus?: "connected" | "error" | "not-configured" | "warning"
+  connectionStatus?: "connected" | "error" | "not-configured" | "warning" | "limited"
   /** Tab content slots — passed by parent to inject actual tab components */
   configTab?: React.ReactNode
   modelsTab?: React.ReactNode
@@ -35,6 +42,8 @@ export function ProviderDetailPanel({
   provider,
   onToggleEnabled,
   onDelete,
+  isDefault,
+  onSetDefault,
   isEnabled,
   isCustom,
   connectionStatus,
@@ -73,6 +82,25 @@ export function ProviderDetailPanel({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {isDefault ? (
+            <Badge variant="secondary" data-testid="provider-default-badge" className="gap-1">
+              <Star className="h-3 w-3" />
+              {t("detailPanel.defaultBadge")}
+            </Badge>
+          ) : onSetDefault ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              data-testid="provider-set-default"
+              aria-label={t("detailPanel.setDefaultAria")}
+              title={t("detailPanel.setDefaultAria")}
+              onClick={onSetDefault}
+            >
+              <Star className="h-3 w-3" />
+              {t("detailPanel.setDefault")}
+            </Button>
+          ) : null}
           {connectionStatus === "connected" && (
             <Badge
               variant="outline"
@@ -87,6 +115,14 @@ export function ProviderDetailPanel({
               className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400"
             >
               {t("detailPanel.connectionFailed") || "Error"}
+            </Badge>
+          )}
+          {connectionStatus === "limited" && (
+            <Badge
+              variant="outline"
+              className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
+            >
+              {t("verificationLimitedShort") || "Limited"}
             </Badge>
           )}
           {isCustom && onDelete && (

@@ -102,6 +102,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   let abortController: AbortController | null = null
   let healthState: AdapterHealthState = "starting"
+  // Stable machine code (not a sentence) explaining a non-running health
+  // state, surfaced to the UI via `health().reason` → heartbeat →
+  // `useAdapterHealth`. Localized in the renderer by `healthReasonLabel`.
+  let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
 
@@ -178,6 +182,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // (reason attached for diagnosis) instead of a red ERROR that re-fires
       // on every boot.
       healthState = "down"
+      healthReason = "credentials_unavailable"
       loggers.network.warn("[lark] adapter skipped — credentials unavailable", {
         id: opts.id,
         reason: err instanceof Error ? err.message : String(err),
@@ -186,6 +191,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     }
     if (!creds.appId || !creds.appSecret) {
       healthState = "down"
+      healthReason = "credentials_missing"
       loggers.network.warn("[lark] adapter skipped — appId/appSecret not configured", {
         id: opts.id,
       })
@@ -196,6 +202,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     const signal = abortController.signal
 
     healthState = "running"
+    healthReason = undefined
 
     // Inbound observability — the long-conn path was previously silent on
     // success and swallowed failures, so a non-working bot left no trace.
@@ -277,6 +284,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           }
           if (!stopCalled) {
             healthState = "down"
+            healthReason = "no_data"
             loggers.network.warn("[lark] long-conn generator ended (no data, health=down)", {
               id: opts.id,
             })
@@ -284,6 +292,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         } catch (err) {
           if (!stopCalled) {
             healthState = "degraded"
+            healthReason = "transport_error"
             loggers.network.error("[lark] long-conn generator threw (health=degraded)", err, {
               id: opts.id,
             })
@@ -304,10 +313,12 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           }
           if (!stopCalled) {
             healthState = "down"
+            healthReason = "no_data"
           }
         } catch {
           if (!stopCalled) {
             healthState = "degraded"
+            healthReason = "transport_error"
           }
         }
       })()
@@ -319,11 +330,12 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     abortController?.abort()
     abortController = null
     healthState = "down"
+    healthReason = undefined
     uploadCache.clear()
   }
 
   function health(): AdapterHealth {
-    return { state: healthState, lastActivityAt }
+    return { state: healthState, reason: healthReason, lastActivityAt }
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {

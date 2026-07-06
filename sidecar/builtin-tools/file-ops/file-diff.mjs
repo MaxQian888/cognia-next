@@ -7,8 +7,12 @@ import { createPatch } from "diff"
 
 import { toolError, toolText } from "../safety.mjs"
 import { ensureExists } from "../shared/fs-stat.mjs"
+import { headTruncate } from "../shared/truncate.mjs"
 
 const MAX_DIFF_BYTES = 5 * 1024 * 1024 // 5 MB per side; bigger files refuse the diff
+// Two near-5 MB files can produce a multi-MB patch; cap the model-facing text
+// (git_diff does the same via trimTail) so a single diff can't flood context.
+const MAX_PATCH_CHARS = 256 * 1024
 
 const fileDiffShape = {
   pathA: z.string().min(1).describe("Absolute path to the original file."),
@@ -36,7 +40,11 @@ async function execFileDiff(args) {
       fsp.readFile(args.pathB, "utf-8"),
     ])
     const patch = createPatch(args.pathA, a, b, "", "", { context: args.context })
-    return toolText(patch)
+    const { text, truncated } = headTruncate(patch, MAX_PATCH_CHARS)
+    const guidance = truncated
+      ? "\n(diff truncated — the files differ by more than 256 KB; diff smaller regions or use a lower context.)"
+      : ""
+    return toolText(`${text}${guidance}`)
   } catch (err) {
     return toolError(err, "file_diff")
   }

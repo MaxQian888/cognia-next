@@ -6,7 +6,7 @@
  *
  * Gates (all read-only — none mutate the working tree):
  *   typecheck · lint · lint:i18n · audit:slots · audit:silent-flags
- *   lint:plugin-sdk-wit · release:sync-keys:check
+ *   lint:plugin-sdk-wit · release:sync-keys:check · version:sync:check
  *
  * Note: `i18n:sort:check` is intentionally NOT here — the message files are
  * not yet key-sorted, so it would always fail. Run `pnpm i18n:sort` once and
@@ -34,6 +34,7 @@ export const GATES = [
   "audit:silent-flags",
   "lint:plugin-sdk-wit",
   "release:sync-keys:check",
+  "version:sync:check",
 ]
 
 /**

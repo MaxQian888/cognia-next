@@ -23,9 +23,13 @@ import { LarkConfigDialog } from "../../forms/lark-config"
 import { TelegramConfigDialog } from "../../forms/telegram-config"
 import { DiscordConfigDialog } from "../../forms/discord-config"
 import { SlackConfigDialog } from "../../forms/slack-config"
+import { MatrixConfigDialog } from "../../forms/matrix-config"
 import { OneBotConfigDialog } from "../../forms/onebot-config"
+import { DingTalkConfigDialog } from "../../forms/dingtalk-config"
 import { WeComConfigDialog } from "../../forms/wecom-config"
+import { WechatOaConfigDialog } from "../../forms/wechat-oa-config"
 import { WeChatPersonalConfigDialog } from "../../forms/wechat-personal-config"
+import { QQOfficialConfigDialog } from "../../forms/qq-official-config"
 import { LarkWhoamiPanel } from "../../forms/lark/lark-whoami-panel"
 import { AdapterWhoamiPanel } from "../../forms/shared/adapter-whoami-panel"
 import { SendTestMessageSection } from "../../forms/shared/send-test-message-section"
@@ -39,6 +43,7 @@ import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import { getAdapterTransportLabelKey } from "../platform-meta"
 
 export interface ConfigDetailProps {
   row: AdapterInstanceRow
@@ -46,7 +51,10 @@ export interface ConfigDetailProps {
 
 export function ConfigDetail({ row }: ConfigDetailProps) {
   const t = useTranslations("settings.connections.adapters.detail")
+  const tAdapters = useTranslations("settings.connections.adapters")
   const [editing, setEditing] = useState(false)
+  const transportLabelKey = getAdapterTransportLabelKey(row.type, row.transportMode)
+  const transportLabel = transportLabelKey ? tAdapters(transportLabelKey) : row.transportMode
 
   return (
     <div className="space-y-4" data-testid="config-detail">
@@ -73,7 +81,9 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
           </div>
           <div>
             <span>transport: </span>
-            <span className="font-mono">{row.transportMode}</span>
+            <span className="font-mono" title={row.transportMode}>
+              {transportLabel}
+            </span>
           </div>
           <div>
             <span>mode: </span>
@@ -149,12 +159,26 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
         }}
         row={row.type === "slack" ? row : null}
       />
+      <MatrixConfigDialog
+        open={editing && row.type === "matrix"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "matrix" ? row : null}
+      />
       <OneBotConfigDialog
         open={editing && row.type === "onebot"}
         onOpenChange={(open) => {
           if (!open) setEditing(false)
         }}
         row={row.type === "onebot" ? row : null}
+      />
+      <DingTalkConfigDialog
+        open={editing && row.type === "dingtalk"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "dingtalk" ? row : null}
       />
       <WeComConfigDialog
         open={editing && row.type === "wecom"}
@@ -163,12 +187,26 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
         }}
         row={row.type === "wecom" ? row : null}
       />
+      <WechatOaConfigDialog
+        open={editing && row.type === "wechat-oa"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "wechat-oa" ? row : null}
+      />
       <WeChatPersonalConfigDialog
         open={editing && row.type === "wechat-personal"}
         onOpenChange={(open) => {
           if (!open) setEditing(false)
         }}
         row={row.type === "wechat-personal" ? row : null}
+      />
+      <QQOfficialConfigDialog
+        open={editing && row.type === "qq-official"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "qq-official" ? row : null}
       />
     </div>
   )

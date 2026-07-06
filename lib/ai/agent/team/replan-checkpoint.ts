@@ -70,6 +70,19 @@ function buildPrompt(
     remaining.length > 0
       ? remaining.map((t) => `- [${t.id}] ${t.title}: ${t.description}`).join("\n")
       : "(none)"
+  // Recruiting is only offered when the run can materialize members AND there
+  // are digital employees (twins) to bring in.
+  const canRecruit =
+    Boolean(teamCtx.storeWriter.addTeammate) && (teamCtx.availableTwins?.length ?? 0) > 0
+  const recruitLines = canRecruit
+    ? [
+        "",
+        "Digital employees you may recruit as new members (set newMembers with their twinId):",
+        (teamCtx.availableTwins ?? [])
+          .map((t) => `- [${t.id}] ${t.name}${t.expertise ? `: ${t.expertise}` : ""}`)
+          .join("\n"),
+      ]
+    : []
   return [
     `You are the lead of the agent team "${teamCtx.team.name}".`,
     `Objective: ${teamCtx.team.task ?? teamCtx.team.description ?? "(unspecified)"}`,
@@ -79,6 +92,7 @@ function buildPrompt(
     "",
     "Remaining planned tasks:",
     remainingLines,
+    ...recruitLines,
     "",
     "Decide how to proceed. Choose exactly one action:",
     '- "continue": keep the remaining plan as-is.',
@@ -86,6 +100,11 @@ function buildPrompt(
     '- "cancel": skip some remaining tasks that are now unnecessary (set cancelTaskIds).',
     '- "reorder": change the order of the remaining tasks (set reorderTaskIds to a permutation of their ids).',
     '- "finish": the objective is met; stop early.',
+    ...(canRecruit
+      ? [
+          '- "recruit": bring in a digital employee whose expertise fits the remaining work (set newMembers). You may also set newTasks to assign them work.',
+        ]
+      : []),
     "Be conservative — prefer continue unless the results clearly justify a change.",
   ].join("\n")
 }
@@ -151,6 +170,7 @@ export async function runReplanCheckpoint(
           runId,
           teamId: teamCtx.teamId,
           decision: d,
+          ...(teamCtx.gatePolicy ? { behavior: teamCtx.gatePolicy.replan } : {}),
           ...(signal ? { signal } : {}),
         }))
     const outcome = await gate(decision)
@@ -172,7 +192,41 @@ export async function runReplanCheckpoint(
   const knownIds = new Set<string>([...remaining.map((t) => t.id), ...justRanTaskIds])
   const rosterIds = new Set(teamCtx.team.teammateIds)
 
+  // ── Recruit digital employees as fresh members (before task injection so an
+  // injected task can target a just-recruited member). Registered live in the
+  // pool → claimable on the next wave. Fail-open: skipped without an addTeammate
+  // sink. Bounded by the same maxInjected knob. ──
+  if (decision.newMembers.length > 0 && teamCtx.storeWriter.addTeammate) {
+    const knownTwinIds = new Set((teamCtx.availableTwins ?? []).map((t) => t.id))
+    for (const nm of decision.newMembers.slice(0, maxInjected)) {
+      const twinBind = nm.twinId && knownTwinIds.has(nm.twinId) ? { twinId: nm.twinId } : {}
+      const created = teamCtx.storeWriter.addTeammate({
+        teamId: teamCtx.teamId,
+        name: nm.name,
+        description: nm.description ?? "",
+        role: "teammate",
+        config: {
+          ...twinBind,
+          ...(nm.specialization ? { specialization: nm.specialization } : {}),
+        },
+      })
+      teamCtx.pool.register(created)
+      rosterIds.add(created.id)
+      teamCtx.notifier.notify({
+        level: "info",
+        title: `Recruited teammate: ${created.name}`,
+        body: nm.twinId ? `Digital employee bound (${nm.twinId}).` : "New generalist member.",
+        runId,
+        teamId: teamCtx.teamId,
+      })
+    }
+  }
+
   switch (decision.action) {
+    case "recruit":
+      // Members already materialized + registered above; existing remaining
+      // tasks can now be claimed by them (round-robin). No task-graph change.
+      return { remaining, finish: false, decision }
     case "inject": {
       const titleToNewId = new Map<string, string>()
       for (const nt of decision.newTasks.slice(0, maxInjected)) {

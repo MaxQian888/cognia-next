@@ -1,6 +1,15 @@
 {
   "activeBadge": "活跃",
   "all": "全部",
+  "approvals": {
+    "approve": "批准",
+    "approvedToast": "已批准。",
+    "goneToast": "该审批已不在等待中。",
+    "heading": "{count, plural, one {# 项审批等待处理} other {# 项审批等待处理}}",
+    "reject": "拒绝",
+    "rejectedToast": "已拒绝。",
+    "respondFailedToast": "无法连接桌面端——请重试。"
+  },
   "density": {
     "comfortable": "宽松行距",
     "compact": "紧凑行距"
@@ -12,8 +21,15 @@
     "back": "返回工作流",
     "cancelConnect": "取消",
     "connect": "连线",
+    "connectFrom": "从 {label} 连出 — 点按目标节点",
     "connectTarget": "点按一个节点完成连线",
+    "copilot": "AI 助手",
+    "copilotClose": "关闭助手",
+    "copilotOffline": "请先连接桌面端以使用 AI 助手。",
+    "copilotTitle": "工作流助手",
+    "deleteConnection": "删除连接",
     "dirty": "未保存",
+    "errorOutput": "错误",
     "export": "导出 JSON",
     "exported": "工作流已导出。",
     "fitView": "适配屏幕",
@@ -48,6 +64,7 @@
   "runQueued": "已加入队列，桌面联线后将触发。",
   "runsBackAria": "返回工作流",
   "runsHeader": "最近运行",
+  "sending": "发送中",
   "statusCancelled": "已取消",
   "statusFailed": "失败",
   "statusRunning": "运行中",

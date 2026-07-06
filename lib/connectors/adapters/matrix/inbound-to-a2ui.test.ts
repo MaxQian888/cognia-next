@@ -100,6 +100,51 @@ describe("matrixInboundToA2UI", () => {
     })
   })
 
+  it("resolves media through the normalized segments (download URL / inline base64)", () => {
+    // Image with inlined bytes → data: URI (the only browser-loadable form,
+    // since the download endpoint needs a Bearer token).
+    const inlined = matrixInboundToA2UI(
+      ev({ msgtype: "m.image", body: "pic.png", url: "mxc://srv/abc" }),
+      {
+        segments: [
+          {
+            type: "image",
+            url: "https://srv/_matrix/client/v1/media/download/srv/abc",
+            rawUrl: "mxc://srv/abc",
+            mimeType: "image/png",
+            dataBase64: "QUJD",
+          },
+        ],
+      }
+    )
+    expect(inlined!.body[0]).toMatchObject({
+      kind: "image",
+      url: "data:image/png;base64,QUJD",
+    })
+
+    // File without inline bytes → the parser-resolved download URL.
+    const file = matrixInboundToA2UI(
+      ev({ msgtype: "m.file", url: "mxc://srv/doc", filename: "report.pdf" }),
+      {
+        segments: [
+          {
+            type: "file",
+            url: "https://srv/_matrix/client/v1/media/download/srv/doc",
+            rawUrl: "mxc://srv/doc",
+            name: "report.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+          },
+        ],
+      }
+    )
+    expect(file!.body[0]).toEqual({
+      kind: "link",
+      href: "https://srv/_matrix/client/v1/media/download/srv/doc",
+      label: "report.pdf",
+    })
+  })
+
   it("falls back to text when a media msgtype is missing its url", () => {
     const out = matrixInboundToA2UI(ev({ msgtype: "m.image", body: "caption only" }))
     expect(out!.body).toEqual([{ kind: "text", text: "caption only" }])

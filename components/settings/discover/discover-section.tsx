@@ -11,16 +11,22 @@ import * as React from "react"
 import { useTranslations } from "next-intl"
 
 import { DiscoverCustomizer } from "@/components/discover/discover-customizer"
+import { DiscoverPreferences } from "@/components/settings/discover/discover-preferences"
+import { Separator } from "@/components/ui/separator"
 
 export function DiscoverSection(): React.ReactElement {
   const t = useTranslations("discover")
   return (
-    <div className="space-y-4" data-testid="settings-discover-section">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold">{t("customize.title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("customize.description")}</p>
+    <div className="space-y-6" data-testid="settings-discover-section">
+      <DiscoverPreferences />
+      <Separator />
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">{t("customize.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("customize.description")}</p>
+        </div>
+        <DiscoverCustomizer />
       </div>
-      <DiscoverCustomizer />
     </div>
   )
 }

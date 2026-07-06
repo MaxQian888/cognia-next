@@ -20,6 +20,8 @@
     "save": "保存",
     "selectAll": "全选节点",
     "shortcuts": "显示键盘快捷键",
+    "togglePalette": "切换节点面板",
+    "toggleSidebar": "切换右侧栏",
     "undo": "撤销"
   },
   "title": "键盘快捷键"

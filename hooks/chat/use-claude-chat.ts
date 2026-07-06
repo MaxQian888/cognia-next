@@ -17,6 +17,8 @@ import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { runAutoModeForTool } from "@/lib/claude/permissions/auto-mode-runner"
+import { deriveAllowRuleFromApproval } from "@/lib/claude/permissions/approval-rule"
+import { setToolRule } from "@/lib/claude/permissions/ruleset-edit"
 import { getPluginCommandRulesets } from "@/lib/plugin/registries/command-safety-registry"
 import {
   runTitleTask,
@@ -33,6 +35,7 @@ import { renderLoopIterationMessage } from "@/lib/loop/prompts"
 import type { LoopStatus } from "@/types/loop"
 import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
+import { notifyDroppedCapabilityOnce } from "@/lib/claude/dropped-capability-toast"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import { buildSteerPayload, steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
@@ -98,11 +101,14 @@ import {
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import {
   buildChatMentionTargets,
   resolveTargetAgentId,
 } from "@/lib/claude/agents/chat-mention-targets"
+import { discoverMarkdownAgentTargets } from "@/lib/claude/agents/markdown-mention-targets"
 import { useProjectStore } from "@/stores/project/project-store"
+import { allRootPaths } from "@/lib/workspace/roots"
 import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
 import {
   dispatchChatError as dispatchPluginChatError,
@@ -116,8 +122,11 @@ setToolSpanEventPublisher((eventType, payload) => {
 })
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { resolveMemoryConfig } from "@/types/memory/memory"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { runStandaloneTurn } from "@/lib/ai/chat/standalone-engine"
 import type {
   ApprovalDecision,
   ChatSession,
@@ -127,7 +136,9 @@ import type {
   SendContent,
   SendOptions,
 } from "@/lib/claude/types"
-import { useChatStore, selectIsAtStreamCap, type ChatStatus } from "@/stores/chat"
+import { useChatStore, type ChatStatus } from "@/stores/chat"
+import { getExecutionBroker } from "@/lib/execution/broker"
+import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
   selectSessionSubagents,
@@ -139,6 +150,8 @@ import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { routeAiRevision } from "@/lib/artifacts/route-ai-revision"
 import { isTauri } from "@/lib/tauri"
+import { isCapacitor } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { mark as perfMark } from "@/lib/perf"
 import type { UIMessage } from "ai"
 
@@ -599,6 +612,11 @@ export function useClaudeChat() {
    */
   const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
+  // Per-session AbortControllers for in-flight standalone (BYOK) turns, so Stop
+  // can cancel the renderer streamText loop (the sidecar path uses
+  // `interruptSession` instead).
+  const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
+
   /**
    * Per-session streaming coalescers. Each open session gets its own
    * rAF-throttled React commit (≤1/frame) + debounced Dexie write so multiple
@@ -637,16 +655,13 @@ export function useClaudeChat() {
     }
   }, [registry])
 
-  // Subscribe to sidecar events once.
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: UnlistenFn | null = null
-    let cancelled = false
-
-    onClaudeMessage((evt) => {
-      // Key by session so same-session events serialize; events without a
-      // session id (ready/log/sidecar_exited) share one chain — they're cheap
-      // no-ops in handleEvent but still kept in arrival order.
+  // Route one ClaudeEvent into the per-session serialized queue → `handleEvent`.
+  // Keyed by session so same-session events serialize; events without a session
+  // id (ready/log/sidecar_exited) share one chain. Shared by the Tauri transport
+  // subscription AND the standalone (BYOK) engine, so both producers drive the
+  // identical store/coalescing/persistence path.
+  const enqueueClaudeEvent = useCallback(
+    (evt: ClaudeEvent) => {
       const key =
         typeof (evt as { sessionId?: unknown }).sessionId === "string"
           ? (evt as { sessionId: string }).sessionId
@@ -669,7 +684,21 @@ export function useClaudeChat() {
       void tail.finally(() => {
         if (queues.get(key) === tail) queues.delete(key)
       })
-    })
+    },
+    [registry]
+  )
+
+  // Subscribe to sidecar events once. Desktop gets them via Tauri events;
+  // Capacitor / web-companion renderers get the same `claude://message`
+  // channel mirrored over the companion events WebSocket (event_bus.rs), which
+  // is what carries the mobile workflow copilot's streamed turns. Plain web
+  // (WebStubTransport) has no event source — skip the subscription.
+  useEffect(() => {
+    if (!isTauri() && !isCapacitor() && !hasWebCompanionTarget()) return
+    let unlisten: UnlistenFn | null = null
+    let cancelled = false
+
+    onClaudeMessage((evt) => enqueueClaudeEvent(evt as ClaudeEvent))
       .then((u) => {
         if (cancelled) u()
         else unlisten = u
@@ -682,7 +711,7 @@ export function useClaudeChat() {
       cancelled = true
       unlisten?.()
     }
-  }, [registry])
+  }, [enqueueClaudeEvent])
 
   /**
    * Send a user prompt to the active session.
@@ -715,11 +744,14 @@ export function useClaudeChat() {
       if (typeof content === "string" && !content.trim()) return
       if (Array.isArray(content) && content.length === 0) return
 
-      // Concurrency cap backstop: never start a 4th concurrent stream. The
-      // composer already disables send + shows the inline over-cap notice; this
-      // guards programmatic sends too. A session that is already streaming is
-      // not blocked from continuing (it is excluded from the cap count).
-      if (selectIsAtStreamCap(useChatStore.getState(), sessionId)) {
+      // Concurrency cap backstop: never start a turn over the global execution
+      // ceiling. The composer already disables send + shows the inline over-cap
+      // notice; this guards programmatic sends too. A session that is already
+      // streaming is a continuation and never blocked (the broker exempts it).
+      // The cap now reflects the unified ExecutionBroker occupancy — headless
+      // legs (scheduler / connector / workflow / team) included — not just the
+      // renderer's streaming panels.
+      if (getExecutionBroker().isAtCapacity("ai-turn", sessionId)) {
         console.warn("send blocked: concurrent stream cap reached", { sessionId })
         return
       }
@@ -819,6 +851,13 @@ export function useClaudeChat() {
         tRouting("overBudgetToast", v)
       )
 
+      // Advisory capability drop — the chosen reasoning effort was silently
+      // dropped because the resolved model can't honour it. Surface once per
+      // model so the setting doesn't vanish without feedback; never blocks.
+      notifyDroppedCapabilityOnce(sendOptions.droppedCapabilityWarning, (v) =>
+        tRouting("droppedEffortToast", v)
+      )
+
       // Plugin opt-in — fire `onUserPromptSubmit` before the network call.
       // Block / modify / proceed semantics:
       //   • "block" — surface the plugin's reason as the chat error and bail.
@@ -894,6 +933,21 @@ export function useClaudeChat() {
       const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
       if (!callOptions?.skipUserAppend) {
         store.getState().replaceSessionMessages(sessionId, next)
+      }
+      // Register this chat turn with the global execution broker so it counts
+      // toward — and is observable / cancellable via — the same governor as
+      // every headless leg. Acquired before the `streaming` flip so the broker
+      // watcher releases it on settle; gated by the `isAtCapacity` check above,
+      // so it admits immediately. Best-effort: a broker hiccup never blocks the
+      // turn the user already committed to.
+      try {
+        await acquireChatLease({
+          sessionId,
+          projectId: session?.projectId,
+          label: session?.title || `#${sessionId.slice(0, 8)}`,
+        })
+      } catch (leaseErr) {
+        console.warn("chat lease acquire failed; sending without admission", leaseErr)
       }
       store.getState().setSessionStatus(sessionId, "streaming")
       perfMark("stream-start")
@@ -1118,7 +1172,26 @@ export function useClaudeChat() {
           })
           sendOptions = { ...sendOptions, traceId: handle.traceId, spanId: handle.spanId }
         }
-        await sendPrompt(sessionId, effectiveContent, sendOptions)
+        if (isStandaloneChatMode()) {
+          // Standalone (BYOK): run the turn in-renderer against the user's own
+          // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
+          // store via the same event queue; the engine emits `session_ended`.
+          const controller = new AbortController()
+          standaloneAbortRef.current.set(sessionId, controller)
+          void runStandaloneTurn({
+            sessionId,
+            messages: next,
+            sendOptions,
+            emit: enqueueClaudeEvent,
+            signal: controller.signal,
+          }).finally(() => {
+            if (standaloneAbortRef.current.get(sessionId) === controller) {
+              standaloneAbortRef.current.delete(sessionId)
+            }
+          })
+        } else {
+          await sendPrompt(sessionId, effectiveContent, sendOptions)
+        }
         // Conversation-branching: consume the one-shot context seed now that
         // `resolveSendOptions` has injected it into this send's
         // `appendSystemPrompt`. Provider-agnostic once-only consumption — the
@@ -1162,7 +1235,7 @@ export function useClaudeChat() {
         }
       }
     },
-    [store, tRouting, registry]
+    [store, tRouting, registry, enqueueClaudeEvent]
   )
 
   // Keep the module-scope `handleEvent` pointed at the latest `send` so it can
@@ -1198,9 +1271,19 @@ export function useClaudeChat() {
       useChatStore.getState().clearSteerQueue(sessionId)
       steerArmed.delete(sessionId)
       try {
-        await interruptSession(sessionId)
+        // Standalone (BYOK) turns are cancelled by aborting the renderer
+        // streamText loop; the engine then emits its own `session_ended`. The
+        // sidecar path interrupts the host instead. Both fall through to the
+        // same local seal below (idempotent with the follow-up session_ended).
+        const standaloneController = standaloneAbortRef.current.get(sessionId)
+        if (standaloneController) {
+          standaloneController.abort()
+          standaloneAbortRef.current.delete(sessionId)
+        } else {
+          await interruptSession(sessionId)
+        }
         // Commit + persist whatever partial we have, then drop this session's
-        // coalescing + mirror; the sidecar's follow-up session_ended is also
+        // coalescing + mirror; the follow-up session_ended is also
         // flush-safe (idempotent).
         const coalesce = registry.get(sessionId)
         coalesce?.commit.flush()
@@ -1245,9 +1328,20 @@ export function useClaudeChat() {
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
-      // Persist always-allow choice.
+      // Persist the always-allow choice. Prefer a TARGET-SCOPED rule
+      // (`Bash(git *)`, `Read(/path/x)`) so the grant is precise and future
+      // matching calls auto-resolve via the sidecar ruleset — falling back to a
+      // coarse tool-NAME grant only when no useful target can be extracted.
       if (decision === "allow_always") {
-        await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
+        const rule = deriveAllowRuleFromApproval(approval.toolName, approval.input)
+        if (rule) {
+          const settingsState = useSettingsStore.getState()
+          const ap = settingsState.settings?.agentPermissions ?? {}
+          const nextRules = setToolRule(ap.toolRules, rule.tool, rule.pattern, "allow")
+          await settingsState.save({ agentPermissions: { ...ap, toolRules: nextRules } })
+        } else {
+          await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
+        }
       }
       // ADR-0020 W3 — remember the operator's Allow for any computer-use
       // plugin tool so subsequent turns inside this session skip the chat
@@ -1464,10 +1558,24 @@ async function buildSendOptions(
   // `@agent` single-turn routing: resolve the first @-mentioned subagent in the
   // message to its dispatcher id. `resolveSendOptions` only honours it when the
   // id is actually registered in this turn's agent map (membership guard), so a
-  // stale / unknown mention is harmless here.
-  const targetAgentId = userMessage
-    ? (resolveTargetAgentId(userMessage, buildChatMentionTargets()) ?? undefined)
-    : undefined
+  // stale / unknown mention is harmless here. The target list unions the
+  // reactive subagents with on-disk markdown agents (`.cognia/agents/*.md`) —
+  // the SAME projection the composer `@` picker shows — so a picked markdown
+  // handle (handle === id === the `opts.agents` key) actually routes. Discovery
+  // is cached (3s) and returns `[]` off-Tauri, so this stays cheap.
+  let targetAgentId: string | undefined
+  if (userMessage) {
+    const ps = useProjectStore.getState()
+    const activeProjectForAgents = ps.activeProjectId
+      ? (ps.projects.find((p) => p.id === ps.activeProjectId) ?? null)
+      : null
+    const markdownTargets = await discoverMarkdownAgentTargets({
+      cwd: session?.workingDir ?? undefined,
+      roots: activeProjectForAgents ? allRootPaths(activeProjectForAgents) : [],
+    })
+    const mentionTargets = [...buildChatMentionTargets(), ...markdownTargets]
+    targetAgentId = resolveTargetAgentId(userMessage, mentionTargets) ?? undefined
+  }
 
   // Active workspace (project). Its `rootDir` joins the cwd resolution chain
   // and its `additionalDirs` are unioned into `additionalDirectories` for this
@@ -1492,11 +1600,25 @@ async function buildSendOptions(
   // run the injection based on `character.twinId`.
   const twinHandshake = userMessage?.trim() ? await tryBuildTwinDeps() : undefined
 
+  // Embed the user message ONCE per turn (when twin deps exist) so the twin RAG
+  // leg and the memory recall leg share one query vector instead of embedding
+  // the same text twice. Memory's vector backend shares the twin embedding model
+  // (resolveMemoryBackend), so the vector is valid for both. Best-effort — on
+  // failure the resolver falls back to per-leg embedding.
+  let turnEmbedding: number[] | undefined
+  if (twinHandshake && userMessage?.trim()) {
+    try {
+      turnEmbedding = (await generateEmbedding(userMessage, twinHandshake.embedding)).embedding
+    } catch {
+      turnEmbedding = undefined
+    }
+  }
+
   // Long-term memory: build the read-runtime deps when memory is enabled and
   // the turn carries a user message. `resolveSendOptions` decides (per its own
   // enabled/temporary gate) whether to actually recall + inject.
   const memoryHandshake = userMessage?.trim()
-    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory))
+    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory), twinHandshake)
     : undefined
 
   // Per-message ephemeral skills attached via the composer's SkillPicker.
@@ -1524,7 +1646,21 @@ async function buildSendOptions(
     activeLoop = false
   }
 
+  // One-shot post-compaction recovery: if a compaction boundary just landed and
+  // no assistant turn has followed it yet, this upcoming turn is the first of a
+  // new context phase — re-inject the recovery preamble. Stateless (derived from
+  // the transcript), so it fires exactly once per boundary.
+  const chatState = useChatStore.getState()
+  const sessionMessages = session?.id
+    ? chatState.activeSessionId === session.id
+      ? chatState.messages
+      : (chatState.sessions[session.id]?.messages ?? [])
+    : chatState.messages
+  const recoveryPhase = pendingRecoveryPhase(sessionMessages)
+  const postCompaction = recoveryPhase !== null ? { phaseNumber: recoveryPhase } : undefined
+
   return resolveSendOptions({
+    postCompaction,
     session,
     appSettings,
     activeProject,
@@ -1535,6 +1671,13 @@ async function buildSendOptions(
     twinUserMessage: twinHandshake ? userMessage : undefined,
     memoryDeps: memoryHandshake,
     memoryUserMessage: memoryHandshake ? userMessage : undefined,
+    // Project-scoped RAG (workspace knowledge base). Reuses the same twin deps
+    // (shared vector store + embedding); `resolveSendOptions` gates injection on
+    // the active workspace having knowledge files + project RAG enabled. Shares
+    // the turn's query embedding — no extra embed call.
+    projectKnowledgeDeps: twinHandshake,
+    projectKnowledgeUserMessage: twinHandshake ? userMessage : undefined,
+    precomputedQueryEmbedding: turnEmbedding,
     // Routing context-window pre-check input (B4): always pass the raw user
     // message (unlike twin/memory it needs no handshake gate).
     routingContextHint: userMessage ? { promptText: userMessage } : undefined,

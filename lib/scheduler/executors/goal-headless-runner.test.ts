@@ -103,6 +103,8 @@ describe("runGoalLoopHeadless", () => {
     // First turn sends the redacted objective; second sends the continuation.
     expect(runCaptureMock.mock.calls[0][1]).toBe("do the thing")
     expect(runCaptureMock.mock.calls[1][1]).toBe("keep going")
+    // Each turn registers a "goal" execution leg with the broker.
+    expect(runCaptureMock.mock.calls[0][3]).toMatchObject({ execution: { kind: "goal" } })
     // tokensDelta from usage is forwarded to the driver.
     expect(handleTurnCompleteMock.mock.calls[0][0].tokensDelta).toBe(7)
     expect(handleTurnCompleteMock.mock.calls[0][0].usage).toEqual({

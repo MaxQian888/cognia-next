@@ -28,6 +28,10 @@ jest.mock("@/lib/logging", () => {
     child: () => child,
   }
   return {
+    // `createLogger` + `logger` are needed by modules now pulled into the store's
+    // import graph (e.g. lib/execution/broker.ts calls createLogger at module load).
+    createLogger: () => ({ ...child, child: () => child }),
+    logger: { ...child, child: () => child },
     loggers: {
       agent: { ...child, child: () => child },
       plugin: { ...child, child: () => child },
@@ -356,6 +360,91 @@ describe("useAgentTeamStore Teammate CRUD", () => {
     useAgentTeamStore.getState().setTeammateProgress(tm.id, 50)
     expect(useAgentTeamStore.getState().teammates[tm.id].progress).toBe(50)
     useAgentTeamStore.getState().setTeammateProgress("missing", 50)
+  })
+})
+
+describe("useAgentTeamStore task comments & attachments", () => {
+  beforeEach(() => reset())
+
+  const seedTask = () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "C", task: "t" })
+    const member = useAgentTeamStore
+      .getState()
+      .addTeammate({ teamId: team.id, name: "Ada", role: "teammate" })
+    const task = useAgentTeamStore
+      .getState()
+      .createTask({ teamId: team.id, title: "Do", description: "" })
+    return { team, member, task }
+  }
+
+  it("addTaskComment appends a comment, resolving the author name", () => {
+    const { member, task } = seedTask()
+    const c = useAgentTeamStore
+      .getState()
+      .addTaskComment({ taskId: task.id, authorId: member.id, text: "  found a bug  " })
+    expect(c).not.toBeNull()
+    expect(c?.text).toBe("found a bug")
+    expect(c?.authorName).toBe("Ada")
+    expect(useAgentTeamStore.getState().getTaskComments(task.id)).toHaveLength(1)
+  })
+
+  it("addTaskComment labels the operator and system authors", () => {
+    const { task } = seedTask()
+    const u = useAgentTeamStore
+      .getState()
+      .addTaskComment({ taskId: task.id, authorId: "user", text: "hi" })
+    const s = useAgentTeamStore
+      .getState()
+      .addTaskComment({ taskId: task.id, authorId: "system", text: "yo" })
+    expect(u?.authorName).toBe("You")
+    expect(s?.authorName).toBe("System")
+  })
+
+  it("addTaskComment mints attachment ids", () => {
+    const { member, task } = seedTask()
+    const c = useAgentTeamStore.getState().addTaskComment({
+      taskId: task.id,
+      authorId: member.id,
+      text: "see file",
+      attachments: [{ name: "log.txt", kind: "file", ref: "logs/log.txt" }],
+    })
+    expect(c?.attachments?.[0].id).toBeTruthy()
+    expect(c?.attachments?.[0].name).toBe("log.txt")
+  })
+
+  it("addTaskComment returns null for an unknown task or empty text", () => {
+    const { member, task } = seedTask()
+    expect(
+      useAgentTeamStore
+        .getState()
+        .addTaskComment({ taskId: "ghost", authorId: member.id, text: "x" })
+    ).toBeNull()
+    expect(
+      useAgentTeamStore
+        .getState()
+        .addTaskComment({ taskId: task.id, authorId: member.id, text: "   " })
+    ).toBeNull()
+  })
+
+  it("attachTaskFile adds a task-level attachment with a minted id", () => {
+    const { task } = seedTask()
+    useAgentTeamStore
+      .getState()
+      .attachTaskFile(task.id, { name: "spec.md", kind: "link", ref: "https://x/spec" })
+    const stored = useAgentTeamStore.getState().tasks[task.id].attachments
+    expect(stored).toHaveLength(1)
+    expect(stored?.[0]).toMatchObject({ name: "spec.md", kind: "link" })
+    expect(stored?.[0].id).toBeTruthy()
+  })
+
+  it("attachTaskFile is a no-op for an unknown task", () => {
+    expect(() =>
+      useAgentTeamStore.getState().attachTaskFile("ghost", { name: "n", kind: "file", ref: "r" })
+    ).not.toThrow()
+  })
+
+  it("getTaskComments returns [] for an unknown task", () => {
+    expect(useAgentTeamStore.getState().getTaskComments("ghost")).toEqual([])
   })
 })
 

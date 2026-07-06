@@ -22,7 +22,7 @@ import {
 import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
 import { useSettingsStore } from "@/stores/settings"
 import { importedThemeSourceKey, type ImportedThemeRecord } from "@/types/appearance"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { cn } from "@/lib/utils"
 
 type Stage =

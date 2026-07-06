@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import type { ThemeColors as AppearanceColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors as AppearanceColors } from "@/types/plugin/plugin"
 import {
   buildCogniaActiveEditorTheme,
   COGNIA_ACTIVE_THEME_ID,
@@ -51,7 +51,8 @@ describe("buildCogniaActiveEditorTheme", () => {
     expect(theme.colors.background).toBe("#ffffff")
     expect(theme.colors.foreground).toBe("#0f172a")
     expect(theme.colors.cursor).toBe("#0f172a")
-    expect(theme.colors.minimap).toBe("#ffffff")
+    // Minimap clears fully transparent so a wallpaper shows through the canvas.
+    expect(theme.colors.minimap).toBe("#ffffff00")
     expect(theme.colors.gutterBackground).toBe("#ffffff")
   })
 

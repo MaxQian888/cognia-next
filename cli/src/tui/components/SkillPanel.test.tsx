@@ -3,7 +3,11 @@ import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { SkillPanel } from "./SkillPanel"
+import { absoluteTopLeft } from "../input/element-position"
 import type { SkillPanelRow } from "../runtime/skill-panel-model"
+
+jest.mock("../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+const mockPos = absoluteTopLeft as jest.Mock
 
 function key(input: string, k?: Record<string, boolean>) {
   act(() => __fireInput(input, k))
@@ -38,7 +42,18 @@ function wrap(props: Partial<React.ComponentProps<typeof SkillPanel>> = {}) {
 }
 
 describe("SkillPanel", () => {
-  beforeEach(() => __resetInk())
+  beforeEach(() => {
+    __resetInk()
+    mockPos.mockReturnValue(null)
+  })
+
+  it("opens the clicked skill's detail pager (header is 2 rows)", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onShow } = wrap()
+    // border(1)+title(1)+filter(1) → first item at SGR row 4 = web-search.
+    key("[<0;5;4M")
+    expect(onShow).toHaveBeenCalledWith("web-search")
+  })
 
   it("shows the summary and rich per-row metadata", () => {
     const text = wrap().container.textContent ?? ""

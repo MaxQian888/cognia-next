@@ -19,8 +19,10 @@ import {
   callWasmExport,
   unloadWasmPlugin,
   buildWasmToolDefinitions,
+  buildWasmNodeDefs,
 } from "./wasm-loader"
 import type { PluginToolContext } from "@/types/plugin"
+import type { StepExecutionContext } from "@/types/workflow/visual"
 
 const baseManifest: PluginManifest = {
   id: "demo.wasm",
@@ -101,6 +103,60 @@ describe("buildWasmToolDefinitions", () => {
 
   it("returns an empty list when the manifest declares no tools", () => {
     expect(buildWasmToolDefinitions(baseManifest)).toEqual([])
+  })
+})
+
+describe("buildWasmNodeDefs", () => {
+  beforeEach(() => setTauri(true))
+
+  const nodeManifest: PluginManifest = {
+    ...baseManifest,
+    workflows: {
+      nodes: [
+        {
+          kind: "action.format",
+          typeVersion: 1,
+          category: "plugin",
+          label: "Format",
+          description: "Format source",
+          iconName: "Box",
+          paramsSchema: { type: "object", properties: { source: { type: "string" } } },
+          retryable: false,
+          timeoutMs: 5000,
+        },
+      ],
+    },
+  }
+
+  it("projects manifest.workflows.nodes into executors that route through workflow-node-execute", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify({ formatted: "ok" }))
+    const defs = buildWasmNodeDefs(nodeManifest)
+    expect(defs).toHaveLength(1)
+    expect(defs[0].kind).toBe("action.format")
+    expect(defs[0].typeVersion).toBe(1)
+    expect(defs[0].retryable).toBe(false)
+    expect(defs[0].timeoutMs).toBe(5000)
+
+    const result = await defs[0].execute({
+      params: { source: "x" },
+      upstream: { n1: { out: 1 } },
+    } as unknown as StepExecutionContext)
+
+    // The guest dispatches by the UNPREFIXED manifest kind carried in the payload.
+    expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_call", {
+      pluginId: "demo.wasm",
+      exportName: "workflow-node-execute",
+      payloadJson: JSON.stringify({
+        kind: "action.format",
+        params: { source: "x" },
+        upstream: { n1: { out: 1 } },
+      }),
+    })
+    expect(result).toEqual({ output: { formatted: "ok" } })
+  })
+
+  it("returns an empty list when the manifest declares no workflow nodes", () => {
+    expect(buildWasmNodeDefs(baseManifest)).toEqual([])
   })
 })
 

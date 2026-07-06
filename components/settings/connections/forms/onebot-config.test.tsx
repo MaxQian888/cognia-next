@@ -211,6 +211,30 @@ describe("OneBotConfigDialog — edit existing", () => {
     expect(screen.getByDisplayValue("Prod QQ Bot")).toBeInTheDocument()
   })
 
+  it("falls back to the shared connectors port when health has no bound address", async () => {
+    mockConnectorsHealth.mockResolvedValueOnce({
+      serverRunning: false,
+      boundAddr: null,
+      registeredAdapterCount: 0,
+    })
+
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+
+    expect(await screen.findByTestId("onebot-endpoint-display")).toHaveTextContent(
+      "ws://127.0.0.1:7842/ws/onebot/ob-existing"
+    )
+  })
+
+  it("falls back to the shared connectors port when health lookup fails", async () => {
+    mockConnectorsHealth.mockRejectedValueOnce(new Error("health unavailable"))
+
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+
+    expect(await screen.findByTestId("onebot-endpoint-display")).toHaveTextContent(
+      "ws://127.0.0.1:7842/ws/onebot/ob-existing"
+    )
+  })
+
   it("calls updateAdapterInstance on Save", async () => {
     render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
     fireEvent.change(screen.getByDisplayValue("Prod QQ Bot"), { target: { value: "Updated Bot" } })

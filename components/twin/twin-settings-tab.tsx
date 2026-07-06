@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -114,6 +115,10 @@ function RuntimeConfigCard() {
   // unrelated tab; once the user saves, we clear the dirty flag and let
   // `live` resume driving the form.
   const [settings, setSettings] = useState<TwinRuntimeSettings>(live)
+  // Raw textarea text for extraNameHints — kept separate from the parsed
+  // array so in-progress separators ("Alice, ") aren't normalized away on
+  // every keystroke by a join/split round-trip.
+  const [nameHintsText, setNameHintsText] = useState(live.extraNameHints.join(", "))
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const dirtyRef = useRef(false)
@@ -131,6 +136,7 @@ function RuntimeConfigCard() {
   useEffect(() => {
     if (dirtyRef.current) return
     setSettings(live)
+    setNameHintsText(live.extraNameHints.join(", "))
   }, [live])
 
   const updateField = (next: TwinRuntimeSettings) => {
@@ -267,6 +273,103 @@ function RuntimeConfigCard() {
         </Label>
         <span className="text-muted-foreground text-xs">{t("rerankerToggleHint")}</span>
       </div>
+
+      <div className="flex items-center gap-3">
+        <Switch
+          id="twin-query-expansion-enabled"
+          checked={settings.queryExpansion?.enabled ?? false}
+          onCheckedChange={(v) =>
+            updateField({
+              ...settings,
+              queryExpansion: {
+                enabled: v,
+                strategy: settings.queryExpansion?.strategy ?? "hyde",
+              },
+            })
+          }
+        />
+        <Label htmlFor="twin-query-expansion-enabled" className="text-sm">
+          {t("queryExpansionToggleLabel")}
+        </Label>
+        <span className="text-muted-foreground text-xs">{t("queryExpansionToggleHint")}</span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="twin-extra-name-hints">{t("extraNameHintsLabel")}</Label>
+        <Textarea
+          id="twin-extra-name-hints"
+          data-testid="twin-settings-extra-name-hints"
+          value={nameHintsText}
+          placeholder={t("extraNameHintsPlaceholder")}
+          rows={2}
+          onChange={(e) => {
+            setNameHintsText(e.target.value)
+            updateField({
+              ...settings,
+              extraNameHints: e.target.value
+                .split(/[,\n]/)
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }}
+        />
+        <span className="text-muted-foreground text-xs">{t("extraNameHintsHelp")}</span>
+      </div>
+
+      {settings.reranker?.enabled ? (
+        <div className="flex flex-col gap-1 pl-11">
+          <Label htmlFor="twin-reranker-model">{t("rerankerModelLabel")}</Label>
+          <Select
+            value={settings.reranker?.model ?? "lexical"}
+            onValueChange={(next) =>
+              updateField({
+                ...settings,
+                reranker: { enabled: true, model: next },
+              })
+            }
+          >
+            <SelectTrigger
+              id="twin-reranker-model"
+              aria-label={t("rerankerModelLabel")}
+              className="w-full sm:w-[16rem]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lexical">{t("rerankerModelLexical")}</SelectItem>
+              <SelectItem value="llm">{t("rerankerModelLlm")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="text-muted-foreground text-xs">{t("rerankerModelHint")}</span>
+        </div>
+      ) : null}
+
+      {settings.queryExpansion?.enabled ? (
+        <div className="flex flex-col gap-1 pl-11">
+          <Label htmlFor="twin-query-expansion-strategy">{t("queryExpansionStrategyLabel")}</Label>
+          <Select
+            value={settings.queryExpansion?.strategy ?? "hyde"}
+            onValueChange={(next) =>
+              updateField({
+                ...settings,
+                queryExpansion: { enabled: true, strategy: next as "hyde" | "stepback" },
+              })
+            }
+          >
+            <SelectTrigger
+              id="twin-query-expansion-strategy"
+              aria-label={t("queryExpansionStrategyLabel")}
+              className="w-full sm:w-[16rem]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hyde">{t("queryExpansionStrategyHyde")}</SelectItem>
+              <SelectItem value="stepback">{t("queryExpansionStrategyStepback")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2">
         <FieldGroup legend={t("embedding")} fields={embeddingFields} />

@@ -90,6 +90,32 @@ test("jsGrep multiline matches across lines and reports the start line", async (
   }
 })
 
+test("jsGrep multiline reports correct start lines for multiple matches in one file", async () => {
+  const dir = await makeFixture()
+  try {
+    // Three separate start..end blocks at known line offsets; the incremental
+    // line counter must report each match's true start line, not drift.
+    await fsp.writeFile(
+      path.join(dir, "multi2.txt"),
+      "a\nstart\nx\nend\nb\nc\nstart\ny\nend\nd\nstart\nend\n"
+    )
+    const { matches } = await jsGrep({
+      pattern: "start[\\s\\S]*?end",
+      root: dir,
+      multiline: true,
+      glob: "multi2.txt",
+    })
+    assert.equal(matches.length, 3)
+    assert.deepEqual(
+      matches.map((m) => m.line),
+      [2, 7, 11]
+    )
+    assert.ok(matches.every((m) => m.text === "start"))
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("jsGrep caps matches and reports truncation", async () => {
   const dir = await makeFixture()
   try {

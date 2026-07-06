@@ -2,6 +2,7 @@ import {
   recordDispatchStart,
   recordDispatchComplete,
   recordDispatchFailed,
+  recordDispatchCancelled,
   recordDispatchRejected,
   dispatchProgressForToolCount,
   createDispatchEventSink,
@@ -115,15 +116,15 @@ describe("dispatchProgressForToolCount", () => {
 describe("createDispatchEventSink", () => {
   beforeEach(() => useSubagentRuntimeStore.getState().clearRuntime())
 
-  it("logs and advances progress on each tool-call", () => {
+  it("logs and bumps the honest tool-use count on each tool-call (gap9: no progress bar)", () => {
     recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
     const sink = createDispatchEventSink("n1")
     sink({ type: "tool-call", toolName: "Bash", input: {} })
     sink({ type: "tool-call", toolName: "Read", input: {} })
     const sa = read("n1")
     expect(sa.logs.map((l) => l.message)).toEqual(["Running Bash", "Running Read"])
-    expect(sa.progress).toBe(20) // derived pseudo-percentage
     expect(sa.toolUses).toBe(2) // honest raw count
+    expect(sa.progress).toBe(0) // pseudo-percentage no longer advanced (seed only)
   })
 
   it("logs tool results, warning on errors", () => {
@@ -142,5 +143,41 @@ describe("createDispatchEventSink", () => {
     sink({ type: "text-delta", delta: "hello" })
     sink({ type: "usage", usage: {} as never })
     expect(read("n1").logs).toHaveLength(0)
+  })
+
+  it("populates the inline tool list (toolStart/toolEnd) keyed by id", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const sink = createDispatchEventSink("n1")
+    sink({ type: "tool-call", toolName: "Read", input: { p: 1 }, id: "tc-a" })
+    sink({ type: "tool-result", toolName: "Read", result: "ok", id: "tc-a" })
+    const calls = read("n1").toolCalls!
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ id: "tc-a", name: "Read", state: "done", output: "ok" })
+  })
+
+  it("pairs result to call by name when the SDK omits ids", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const sink = createDispatchEventSink("n1")
+    sink({ type: "tool-call", toolName: "Grep", input: {} })
+    sink({ type: "tool-result", toolName: "Grep", result: "5", isError: false })
+    const calls = read("n1").toolCalls!
+    expect(calls).toHaveLength(1)
+    expect(calls[0].state).toBe("done")
+  })
+})
+
+describe("recordDispatchCancelled", () => {
+  beforeEach(() => useSubagentRuntimeStore.getState().clearRuntime())
+
+  it("marks a run cancelled", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    recordDispatchCancelled("n1")
+    expect(read("n1").status).toBe("cancelled")
+    expect(read("n1").completedAt).toBeInstanceOf(Date)
+  })
+
+  it("ignores cancellation for an unknown run", () => {
+    recordDispatchCancelled("ghost")
+    expect(useSubagentRuntimeStore.getState().subAgents.ghost).toBeUndefined()
   })
 })

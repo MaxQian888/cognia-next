@@ -108,6 +108,75 @@ pub async fn health(State(_state): State<SharedState>) -> Response {
     Json(json!({ "ok": true })).into_response()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Renderer-backed routes — twin context / agent teams
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Round-trip one renderer-backed command through the WebView and wrap the
+/// result in the bridge's `{ ok, result | error }` envelope. Renderer-side
+/// handler failures come back as 502 (the desktop is up but the renderer
+/// declined / errored); timeouts read the same way.
+async fn renderer_roundtrip(
+    state: &SharedState,
+    command: &str,
+    payload: serde_json::Value,
+) -> Response {
+    match state
+        .renderer
+        .clone()
+        .dispatch(
+            &state.app_handle,
+            command,
+            payload,
+            super::renderer_bridge::DEFAULT_TIMEOUT,
+        )
+        .await
+    {
+        Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "ok": false, "error": err })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/v1/dev/twin/context` — build the twin runtime context for a
+/// message (renderer runs `tryBuildTwinDeps` → `applyTwinContext`). The
+/// renderer handler returns REDACTED prompt segments only — raw chunk
+/// content never crosses this boundary.
+pub async fn twin_context(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "twin_context_get", payload).await
+}
+
+/// `POST /api/v1/dev/teams/list` — project the renderer's AgentTeam store.
+pub async fn teams_list(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_list", payload).await
+}
+
+/// `POST /api/v1/dev/teams/run` — fire-and-forget start of a team run.
+pub async fn teams_run(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_run", payload).await
+}
+
+/// `POST /api/v1/dev/teams/run-status` — newest run row + events since a
+/// cursor, projected without step payloads (PII posture).
+pub async fn teams_run_status(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_run_status", payload).await
+}
+
 /// Wire shape for `GET /api/v1/dev/plugins/installed` — a privacy-safe
 /// subset of [`PluginRuntimeSnapshot`]. Only the fields the CLI needs
 /// for a preflight install collision check are exposed; runtime_state
@@ -612,10 +681,125 @@ fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ACP token broker
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Synthetic device identity minted for the `cognia acp` stdio bridge. One
+/// fixed id (rather than one per connection) keeps the paired-devices view
+/// clean and lets the deny list revoke the whole surface in one entry.
+const ACP_DEVICE_ID: &str = "acp-cli";
+
+/// Account id stamped into ACP bridge tokens. Purely local (the companion
+/// JWT layer only validates the format), but stable so audit lines and
+/// `whoami` output are recognizable.
+const ACP_ACCOUNT_ID: &str = "local_acct_acp";
+
+/// Build the broker response payload from resolved inputs. Split from the
+/// axum handler so the token/URL contract is unit-testable without a Tauri
+/// app handle.
+fn build_acp_token_payload(
+    port: u16,
+    secret: &[u8],
+    tls_fingerprint: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let token = crate::companion_api::jwt::issue_device_jwt(secret, ACP_DEVICE_ID, ACP_ACCOUNT_ID)
+        .map_err(|e| anyhow::anyhow!("issue ACP device JWT: {e}"))?;
+    Ok(json!({
+        "ok": true,
+        "wsUrl": format!("wss://127.0.0.1:{port}/ws/v1/acp"),
+        "token": token,
+        "tlsFingerprint": tls_fingerprint,
+    }))
+}
+
+/// `POST /api/v1/dev/acp/token` — mint a device-scope JWT for the
+/// `cognia acp` stdio↔WS bridge and point it at the companion API's
+/// `/ws/v1/acp` endpoint.
+///
+/// Trust model: identical to plugin install — loopback origin + per-launch
+/// dev token (enforced by the router middleware). The minted JWT carries the
+/// baseline device scope only; the elevated control/service RPC arms stay
+/// out of reach of an ACP client.
+pub async fn acp_token(State(state): State<SharedState>) -> Response {
+    let Some(server_state) = state
+        .app_handle
+        .try_state::<crate::companion_api::CompanionServerState>()
+    else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion server state unavailable",
+        );
+    };
+    let Some(port) = server_state.bound_port() else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion API server is not running — start it from Settings → Companion",
+        );
+    };
+    let secret = match crate::companion_api::secret::load_or_generate() {
+        Ok(secret) => secret,
+        Err(e) => {
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("load companion signing secret: {e}"),
+            );
+        }
+    };
+    match build_acp_token_payload(port, &secret, &crate::companion_api::tls_fingerprint()) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+fn err_response(status: StatusCode, message: &str) -> Response {
+    (
+        status,
+        Json(ErrResponse {
+            ok: false,
+            error: message.to_string(),
+        }),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    const TEST_SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+
+    #[test]
+    fn acp_token_payload_mints_verifiable_device_jwt() {
+        let payload = build_acp_token_payload(7890, TEST_SECRET, "AA:BB").unwrap();
+        assert_eq!(payload["ok"], true);
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:7890/ws/v1/acp");
+        assert_eq!(payload["tlsFingerprint"], "AA:BB");
+
+        let token = payload["token"].as_str().unwrap();
+        let claims =
+            crate::companion_api::jwt::verify(TEST_SECRET, token, "device").expect("verify");
+        assert_eq!(claims.scope, "device");
+        assert_eq!(claims.device_id.as_deref(), Some(ACP_DEVICE_ID));
+        assert_eq!(claims.account_id.as_deref(), Some(ACP_ACCOUNT_ID));
+    }
+
+    #[test]
+    fn acp_token_payload_rejects_wrong_secret() {
+        let payload = build_acp_token_payload(7890, TEST_SECRET, "").unwrap();
+        let token = payload["token"].as_str().unwrap();
+        assert!(
+            crate::companion_api::jwt::verify(b"another-secret-32-bytes-exactly_", token, "device")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn acp_token_payload_uses_bound_port() {
+        let payload = build_acp_token_payload(43210, TEST_SECRET, "").unwrap();
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:43210/ws/v1/acp");
+    }
 
     fn make_test_bundle(manifest: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut buf = Vec::new();

@@ -1,4 +1,4 @@
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { adjustForegroundLightnessToTarget, wcagContrast } from "./contrast"
 import type { WcagTarget } from "@/types/appearance"
 

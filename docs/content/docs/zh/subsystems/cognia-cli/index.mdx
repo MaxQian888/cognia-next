@@ -1,6 +1,6 @@
 ---
 title: 概览
-description: cognia 插件作者 CLI —— 一个独立的 Rust 二进制（scaffold / lint / build / sign / verify / info / status / install / list / reload / dev），通过 token 门控的 loopback axum bridge 与运行中的桌面实例通信，并配有渲染端检测、托管下载和 DevTools UI 表面。
+description: cognia 插件作者 CLI —— 一个独立的 Rust 二进制，覆盖 scaffold / lint / build / sign / verify / info / status / install / list / reload / dev，并提供 ACP、release-key 与 release-verify 工具；配有渲染端检测、托管下载和 DevTools UI 表面。
 ---
 
 # Cognia CLI
@@ -8,8 +8,8 @@ description: cognia 插件作者 CLI —— 一个独立的 Rust 二进制（sca
 <Status variant="stable">cognia-cli 0.1.0 · 二进制 `cognia` · MSRV 1.82</Status>
 
 <TLDR>
-  `cognia` 是一个独立的 Rust crate（`crates/cognia-cli/`，约 8.0k 行 + UI 层），在 `cognia plugin …`
-  下提供 **14 个子命令** —— scaffold（`new`）、validate（`lint`，60 个诊断码）、build（`build` ——
+  `cognia` 是一个独立的 Rust crate（`crates/cognia-cli/`，约 8.5k 行 + UI 层），在 `cognia plugin …`
+  下提供 **14 个插件子命令** —— scaffold（`new`）、validate（`lint`，60 个诊断码）、build（`build` ——
   WASM 走 cargo-component，TypeScript 走 esbuild，Python/hybrid/VS Code-extension 走 existing-entry
   打包）、sign（`keygen`/`sign`/`verify`，对原始 bundle
   字节做 Ed25519）、inspect（`info`，支持 `.zip` bundle 或 unpacked 目录）以及 live-develop
@@ -18,15 +18,16 @@ description: cognia 插件作者 CLI —— 一个独立的 Rust 二进制（sca
   （`src-tauri/src/cli_bridge/server.rs:28`）触达运行中的桌面端 —— 该 bridge 绑定到临时的
   `127.0.0.1` 端口，经由 `<config_dir>/cognia/cli-endpoint.json` 发现，并由一个每次启动生成、以
   常量时间比对的 64-hex dev token 门控。渲染端从 Plugin DevTools 完成检测、下载（SHA-256 + 可选的
-  Ed25519 验证）和启动 CLI。
+  Ed25519 验证）和启动 CLI。顶层工具还覆盖 `cognia acp`、`cognia release-key` 与
+  `cognia release-verify`。
 </TLDR>
 
 <StatGrid>
-  <Stat label="子命令" value="14" hint="PluginCommand enum — crates/cognia-cli/src/main.rs:132-279" />
-  <Stat label="Lint 诊断码" value="60" hint="distinct diagnostic codes — cmd_lint.rs:362-1306" />
-  <Stat label="权限 / 能力" value="45 / 45" hint="hard-coded whitelists, parity-tested against TS — cmd_lint.rs:28-223" />
+  <Stat label="插件命令" value="14" hint="PluginCommand enum — crates/cognia-cli/src/main.rs" />
+  <Stat label="Lint 诊断码" value="60" hint="distinct diagnostic codes — cmd_lint::validate_manifest" />
+  <Stat label="权限 / 能力" value="45 / 45" hint="hard-coded whitelists, parity-tested against TS — cmd_lint.rs" />
   <Stat label="Bridge 路由" value="7" hint="health · installed · install · install-directory · uninstall · reload · handoff — server.rs:57-80" />
-  <Stat label="Rust 源码" value="~8.0k 行" hint="crates/cognia-cli/src (26 files) + src-tauri/src/cli_bridge (6 files)" />
+  <Stat label="Rust 源码" value="~8.5k 行" hint="crates/cognia-cli/src (28 files) + src-tauri/src/cli_bridge (6 files)" />
   <Stat label="渲染端表面" value="4 + 4" hint="lib/cli-bridge (4 modules) + DevTools status card / install dialog / launcher / status chip" />
 </StatGrid>
 
@@ -82,9 +83,10 @@ crates/cognia-cli/                  # the standalone binary (Cargo.toml: bin nam
   src/cmd_sign.rs · cmd_verify.rs · cmd_keygen.rs · signing.rs   # Ed25519 author signing
   src/cmd_info.rs                   # bundle/directory inspection (manifest, files, signature, api-version)
   src/cmd_status.rs · cmd_install.rs · cmd_uninstall.rs · cmd_list.rs · cmd_reload.rs · cmd_dev.rs · http_client.rs   # bridge client
-  src/release_key.rs                # embedded release public key (canonical copy)
+  src/cmd_acp.rs                    # stdio <-> companion ACP WebSocket bridge
+  src/cmd_release_key.rs · cmd_release_verify.rs · release_key.rs   # release key inspection + artifact verification
   src/ui/                           # RuntimeUi, Prompter trait, spinners, palette, color-eyre
-  tests/integration.rs              # spawns the compiled binary (16 tests)
+  tests/integration.rs              # spawns the compiled binary (96 tests)
 
 crates/cognia-plugin-template/      # WASM scaffold source (include_str! into the binary)
 crates/cognia-plugin-template-ts/   # TypeScript scaffold source
@@ -111,27 +113,31 @@ scripts/release-sync-keys.mjs       # 3-copy release-key sync (--check in CI)
 
 ## 命令表面
 
-所有命令都嵌套在一个顶层组下：`cognia plugin <cmd>`
-（`TopCommand::Plugin` —— `crates/cognia-cli/src/main.rs:121`）。全局 flag 处处生效：
+插件作者操作嵌套在 `cognia plugin <cmd>` 下
+（`TopCommand::Plugin`，位于 `crates/cognia-cli/src/main.rs`），旁边还有 `cognia acp`、
+`cognia release-key` 和 `cognia release-verify` 这样的顶层工具命令。全局 flag 处处生效：
 `--color auto|always|never`、`--no-color`、`-q/--quiet`、`-v/--verbose`（最多 `-vv`）、
-`-y/--yes`（预确认每个 prompt；CI 必需）—— `main.rs:97-114`。
+`-y/--yes`（预确认每个 prompt；CI 必需）。Verbose 模式会为人类运行在
+stderr 打印一条解析后的命令诊断；`--quiet` 和每个命令的 `--json` 都会抑制它。
 
 | 命令 | 作用 | 模块 | 是否与应用通信？ |
 | --- | --- | --- | --- |
-| `new <name> [--kind wasm\|ts\|python\|hybrid\|vscode-extension]` | 拓印一个起步项目（TTY 上为交互式 wizard） | `cmd_new.rs` + `template.rs` | 否 |
+| `new [name] [--dir DIR] [--kind wasm\|ts\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | 拓印一个起步项目（TTY 上为交互式 wizard） | `cmd_new.rs` + `template.rs` | 否 |
 | `lint [--path .] [--json]` | 60 个诊断码的 manifest 校验；出错时 exit 1 | `cmd_lint.rs` | 否 |
-| `build [--path .] [--out] [--skip-build]` | Lint → cargo-component / esbuild / existing-entry 打包 → zip | `cmd_build.rs` / `build_ts.rs` / `packaging.rs` | 否 |
-| `info <bundle.zip\|directory> [--json] [--detailed]` | Manifest、文件表、bundle 签名状态或目录 `not-applicable`、`cognia:api-version` | `cmd_info.rs` | 否 |
-| `keygen [--out-dir .cognia]` | Ed25519 密钥对 → `.cognia/plugin.{private,public}.b64` | `cmd_keygen.rs` | 否 |
-| `sign <bundle> --key <priv> [--out]` | 对原始 zip 字节签名 → `<bundle>.sig` | `cmd_sign.rs` | 否 |
-| `verify <bundle> [--public-key] [--signature] [--json]` | 用 `author.publicKey` 验证 `.sig` | `cmd_verify.rs` | 否 |
-| `install <bundle.zip\|directory>` | 预检冲突 → POST bundle 或 unpacked 目录安装 | `cmd_install.rs` | **是** |
-| `uninstall <id> [--purge-data]` | 确认后移除（purge 会警告：单向 Dexie 抹除） | `cmd_uninstall.rs` | **是** |
+| `build [--path .] [--out P] [--skip-build] [--json]` | Lint → cargo-component / esbuild / existing-entry 打包 → zip | `cmd_build.rs` / `build_ts.rs` / `packaging.rs` | 否 |
+| `info <bundle.zip\|directory> [--detailed] [--json]` | Manifest、文件表、bundle 签名状态或目录 `not-applicable`、`cognia:api-version` | `cmd_info.rs` | 否 |
+| `keygen [--out-dir .cognia] [--json]` | Ed25519 密钥对 → `.cognia/plugin.{private,public}.b64` | `cmd_keygen.rs` | 否 |
+| `sign <bundle> --key <priv> [--out sig] [--json]` | 对原始 zip 字节签名；未传 `--out` 时写入 `<bundle>.sig` | `cmd_sign.rs` | 否 |
+| `verify <bundle> [--public-key b64] [--signature sig] [--json]` | 用 `author.publicKey` 或显式公钥验证 `.sig` | `cmd_verify.rs` | 否 |
+| `install <bundle.zip\|directory> [--json]` | 预检冲突 → POST bundle 或 unpacked 目录安装 | `cmd_install.rs` | **是** |
+| `uninstall <id> [--purge-data] [--json]` | 确认后移除（purge 会警告：单向 Dexie 抹除） | `cmd_uninstall.rs` | **是** |
 | `list [--json]` | 打印运行中桌面端 bridge 的已安装插件快照 | `cmd_list.rs` | **是** |
-| `reload [--plugin-id ID] [--path P]` | 按已安装插件 id、重建后的 bundle 或 unpacked 目录触发 hot-reload；`--bundle` 仍兼容旧脚本 | `cmd_reload.rs` | **是** |
+| `reload [--plugin-id ID] [--path P] [--json]` | 按已安装插件 id、重建后的 bundle 或 unpacked 目录触发 hot-reload；`--bundle` 仍兼容旧脚本 | `cmd_reload.rs` | **是** |
 | `status [--json]` | 探测 `/api/v1/dev/health`；JSON 不含 token，bridge 不可用时返回非零 | `cmd_status.rs` | **是** |
-| `dev [--path .] [--reload-url URL]` | Watch → 去抖 250 ms → rebuild → POST reload | `cmd_dev.rs` | **是**（无连接时优雅降级） |
-| `embed-version <wasm> <ver> [--out]` | 重新注入 `cognia:api-version` 自定义段 | `main.rs:395` + `packaging.rs` | 否 |
+| `dev [--path .] [--reload-url URL] [--once] [--json]` | Watch → 去抖 250 ms → rebuild → POST reload；`--once` 只构建/重载一次后退出，并可输出 JSON | `cmd_dev.rs` | **是**（无连接时优雅降级） |
+| `embed-version <wasm> <ver> [--out wasm] [--json]` | 重新注入 `cognia:api-version` 自定义段 | `main.rs::cmd_embed_version` + `packaging.rs` | 否 |
+| `release-key [--json]` | 查看内置 CLI release 公钥、fingerprint、placeholder 状态和签名策略 | `cmd_release_key.rs` + `release_key.rs` | 否 |
+| `release-verify <artifact> --checksums <checksums.txt> [--artifact-name NAME] [--signature PATH] [--json]` | 离线校验下载得到的 CLI release 产物是否匹配 `checksums.txt` 与 release-key 策略 | `cmd_release_verify.rs` + `release_key.rs` | 否 |
 
 ## 一次端到端的作者会话
 
@@ -199,5 +205,5 @@ sequenceDiagram
 | [Signing & keys](./signing-and-keys) | Ed25519 方案、keygen/sign/verify、`info`、release-key 三副本同步 |
 | [Bridge client](./bridge-client) | endpoint 发现、ureq 客户端、status/install/uninstall/list/reload 流程、dev watch 循环 |
 | [Bridge server](./bridge-server) | axum spawn、auth middleware、7 条路由、Tauri 事件扇出 |
-| [Detection & managed install](./detection-and-managed-install) | `detect_binary`、GitHub Releases 下载、校验和 + 签名验证 |
+| [Detection & managed install](./detection-and-managed-install) | `detect_binary`、GitHub Releases 下载、校验和 + 签名验证、`release-verify` |
 | [DevTools UI](./devtools-ui) | status hook、status card、install dialog、launcher、status chip |

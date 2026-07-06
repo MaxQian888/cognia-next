@@ -319,17 +319,51 @@ describe("Slack adapter contract suite", () => {
   })
 
   // -------------------------------------------------------------------------
-  // history.fetch (Phase 1 stub — empty)
+  // history.fetch
   // -------------------------------------------------------------------------
 
   describe("history.fetch capability", () => {
-    it("fetchHistory() returns empty async iterable in Phase 1", async () => {
+    it("fetchHistory() calls conversations.history and yields parsed messages", async () => {
+      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd !== "connectors_http_request") return makeSendOkResp()
+        const req = (args as { req: { url: string } }).req
+        if (req.url.includes("conversations.history")) {
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({
+              ok: true,
+              messages: [
+                {
+                  type: "message",
+                  user: "U222",
+                  text: "contract history",
+                  ts: "1700000002.000003",
+                  channel_type: "channel",
+                },
+              ],
+              response_metadata: { next_cursor: "" },
+            }),
+          }
+        }
+        return makeSendOkResp()
+      })
+
       const adapter = makeAdapter()
-      const events: unknown[] = []
-      for await (const evt of adapter.fetchHistory!("slack:sl-contract:C01", {})) {
+      const events = []
+      for await (const evt of adapter.fetchHistory!("slack:sl-contract:C01", { max: 1 })) {
         events.push(evt)
       }
-      expect(events).toHaveLength(0)
+      expect(events).toHaveLength(1)
+      expect(events[0].messageId).toBe("1700000002.000003")
+      expect(events[0].plainText).toBe("contract history")
+
+      const call = lastHttpCall()
+      expect(call.url).toContain("conversations.history")
+      expect(call.method).toBe("GET")
+      const url = new URL(call.url)
+      expect(url.searchParams.get("channel")).toBe("C01")
+      expect(url.searchParams.get("limit")).toBe("200")
     })
   })
 

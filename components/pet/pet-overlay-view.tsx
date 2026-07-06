@@ -32,34 +32,27 @@ import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
 import { usePetLocomotion } from "@/hooks/pet/use-pet-locomotion"
+import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { startOverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
+import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import {
   getPetWindowPosition,
   getPetWorkArea,
   openPetPopup,
   setPetWindowPosition,
 } from "@/lib/tauri/pet-window"
-import {
-  MIN_THROW_SPEED,
-  overlayWindowSize,
-  releaseVelocityFromSamples,
-  type PointerSample,
-} from "@/lib/pet/overlay-geometry"
+import { MIN_THROW_SPEED, overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import {
   POPUP_INITIAL_HEIGHT,
   POPUP_INITIAL_WIDTH,
   resolvePopupPlacement,
 } from "@/lib/pet/popup-geometry"
 import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
+import { withCareCondition } from "@/lib/pet/state/reducer"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
-
-const DRAG_THRESHOLD_PX = 4
-
-/** Pointer samples kept for the release-velocity estimate. */
-const MAX_DRAG_SAMPLES = 8
 
 export function PetOverlayView() {
   const t = useTranslations("pet.overlay")
@@ -100,6 +93,12 @@ export function PetOverlayView() {
       delete root.dataset.petOverlay
     }
   }, [])
+
+  // Reveal the sprite window only AFTER the first painted frame. Rust creates
+  // it `visible(false)` and no longer shows it on open — see
+  // `lib/pet/reveal.ts` for the full Windows transparency rationale (shared
+  // with the click popup). No focus: the sprite must never steal it.
+  useEffect(() => schedulePetWindowReveal(), [])
 
   // Single cross-window bridge: subscribes the per-window store to inbound
   // messages (requesting the current snapshot on connect) and exposes
@@ -184,138 +183,54 @@ export function PetOverlayView() {
     paused: locomotionPaused,
     wander,
     lowPower: pet.lowPower ?? false,
+    statsChaos: view?.effectiveStats.chaos ?? 0,
     petSize: size,
     lastInteractionAtMs: () => lastInteractionRef.current,
     onSettle: (x, y) => void persistRef.current(x, y),
   })
 
-  // Drag the OS window. We capture the pointer's screen origin + the window's
-  // origin on pointerdown, then drive `setPetWindowPosition` (rAF-throttled)
-  // once movement crosses the threshold. A sequence that never crosses the
-  // threshold is a click → "pet" interaction; a fast release is a throw.
-  const dragRef = useRef<{
+  // Drag the OS window: the click-vs-drag threshold and release-velocity
+  // sampling live in the shared gesture hook (also used by the in-app
+  // widget); this view only owns what "moving" means here — the window's own
+  // screen origin, fetched async on pointerdown since drag deltas must apply
+  // relative to it once it lands.
+  const originRef = useRef<{
     pointerId: number
-    startScreenX: number
-    startScreenY: number
-    /** Window origin captured async on pointerdown; null until it lands. */
     winX: number | null
     winY: number | null
-    dragging: boolean
-    rafId: number | null
-    pending: { x: number; y: number } | null
-    /** Recent window positions for the release-velocity estimate. */
-    samples: PointerSample[]
   } | null>(null)
 
-  useEffect(() => {
-    // Cancel any in-flight rAF on unmount.
-    return () => {
-      const d = dragRef.current
-      if (d?.rafId != null) cancelAnimationFrame(d.rafId)
-      dragRef.current = null
-    }
-  }, [])
-
-  const flushMove = () => {
-    const d = dragRef.current
-    if (!d) return
-    d.rafId = null
-    if (!d.pending) return
-    const { x, y } = d.pending
-    d.pending = null
-    void setPetWindowPosition(x, y)
-  }
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return // left button only; right-click stays free for the menu
-    // Capture the screen origin synchronously so click-vs-drag disambiguation
-    // never races the async window-position fetch; fill the window origin when
-    // it lands (window moves only apply once it's known).
-    dragRef.current = {
-      pointerId: e.pointerId,
-      startScreenX: e.screenX,
-      startScreenY: e.screenY,
-      winX: null,
-      winY: null,
-      dragging: false,
-      rafId: null,
-      pending: null,
-      samples: [],
-    }
-    const id = e.pointerId
-    void (async () => {
-      const winPos = await getPetWindowPosition()
-      const base = winPos ?? { x: 0, y: 0 }
-      const d = dragRef.current
-      if (d && d.pointerId === id) {
-        d.winX = base.x
-        d.winY = base.y
+  const dragGesture = usePetDragGesture({
+    onDragStart: () => setDragging(true), // pause wandering while the user holds the pet
+    onDragMove: (dx, dy) => {
+      const o = originRef.current
+      if (!o || o.winX == null || o.winY == null) return // window origin not known yet
+      void setPetWindowPosition(o.winX + dx, o.winY + dy)
+    },
+    onRelease: ({ wasDrag, dx, dy, vx, vy, event }) => {
+      const o = originRef.current
+      originRef.current = null
+      if (wasDrag) {
+        setDragging(false)
+        if (o && o.winX != null && o.winY != null) {
+          const x = o.winX + dx
+          const y = o.winY + dy
+          if (!reduced && Math.hypot(vx, vy) >= MIN_THROW_SPEED) {
+            // A flick → ballistic fall; the landing persists the position.
+            beginThrow(x, y, vx, vy)
+          } else {
+            void persistOverlayPosition(x, y)
+          }
+        }
+        return
       }
-    })()
-    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
-  }
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const d = dragRef.current
-    if (!d || d.pointerId !== e.pointerId) return
-    const dx = e.screenX - d.startScreenX
-    const dy = e.screenY - d.startScreenY
-    if (!d.dragging && Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) {
-      return
-    }
-    if (!d.dragging) {
-      d.dragging = true
-      setDragging(true) // pause wandering while the user holds the pet
-    }
-    if (d.winX == null || d.winY == null) return // window origin not known yet
-    const x = d.winX + dx
-    const y = d.winY + dy
-    d.samples.push({ x, y, tMs: performance.now() })
-    if (d.samples.length > MAX_DRAG_SAMPLES) d.samples.shift()
-    d.pending = { x, y }
-    if (d.rafId == null) d.rafId = requestAnimationFrame(flushMove)
-  }
-
-  const endPointer = (e: React.PointerEvent, sendInteraction: () => void) => {
-    const d = dragRef.current
-    if (!d || d.pointerId !== e.pointerId) return
-    ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
-    if (d.rafId != null) {
-      cancelAnimationFrame(d.rafId)
-      d.rafId = null
-    }
-    const dx = e.screenX - d.startScreenX
-    const dy = e.screenY - d.startScreenY
-    const wasDrag = d.dragging
-    const winX = d.winX
-    const winY = d.winY
-    const samples = d.samples
-    dragRef.current = null
-    if (wasDrag) setDragging(false)
-    if (wasDrag && winX != null && winY != null) {
-      const x = winX + dx
-      const y = winY + dy
-      const { vx, vy } = releaseVelocityFromSamples(samples)
-      if (!reduced && Math.hypot(vx, vy) >= MIN_THROW_SPEED) {
-        // A flick → ballistic fall; the landing persists the position.
-        beginThrow(x, y, vx, vy)
-      } else {
-        void persistOverlayPosition(x, y)
-      }
-    } else if (!wasDrag) {
-      sendInteraction()
-    }
-  }
-
-  // A non-drag tap resolves the touched body zone → a zone-specific local
-  // flourish (head=love, belly=happy, tail=surprised, body=petted) while still
-  // sending the existing "petted" interaction over the bridge (XP unchanged).
-  // The touch SFX rides this genuine user gesture (autoplay-safe).
-  const onPointerUp = (e: React.PointerEvent) => {
-    const rect = (e.currentTarget as Element).getBoundingClientRect()
-    const localX = e.clientX - rect.left
-    const localY = e.clientY - rect.top
-    endPointer(e, () => {
+      // A non-drag tap resolves the touched body zone → a zone-specific local
+      // flourish (head=love, belly=happy, tail=surprised, body=petted) while
+      // still sending the existing "petted" interaction over the bridge (XP
+      // unchanged). The touch SFX rides this genuine user gesture (autoplay-safe).
+      const rect = (event.currentTarget as Element).getBoundingClientRect()
+      const localX = event.clientX - rect.left
+      const localY = event.clientY - rect.top
       const zone = resolveHitZone(localX, localY, rect.width || size, locomotion.facing)
       usePetStore.getState().enqueueOneShot(reactionForZone(zone))
       sendInteractionRef.current("petted")
@@ -326,14 +241,30 @@ export function PetOverlayView() {
           isUserGesture: true,
         })
       )
-    })
-  }
-  const onPointerCancel = (e: React.PointerEvent) => {
-    const d = dragRef.current
-    if (!d || d.pointerId !== e.pointerId) return
-    if (d.rafId != null) cancelAnimationFrame(d.rafId)
-    if (d.dragging) setDragging(false)
-    dragRef.current = null
+    },
+    onCancel: ({ wasDrag }) => {
+      if (wasDrag) setDragging(false)
+      originRef.current = null
+    },
+  })
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return // left button only; right-click stays free for the menu
+    // Capture the screen origin synchronously (inside the gesture hook) so
+    // click-vs-drag disambiguation never races this async window-position
+    // fetch; fill the window origin when it lands.
+    const id = e.pointerId
+    originRef.current = { pointerId: id, winX: null, winY: null }
+    void (async () => {
+      const winPos = await getPetWindowPosition()
+      const base = winPos ?? { x: 0, y: 0 }
+      const o = originRef.current
+      if (o && o.pointerId === id) {
+        o.winX = base.x
+        o.winY = base.y
+      }
+    })()
+    dragGesture.onPointerDown(e)
   }
 
   const containerStyle = useMemo(() => ({ width: size, height: size }), [size])
@@ -373,15 +304,16 @@ export function PetOverlayView() {
           className="cursor-grab touch-none active:cursor-grabbing"
           style={containerStyle}
           onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerCancel}
+          onPointerMove={dragGesture.onPointerMove}
+          onPointerUp={dragGesture.onPointerUp}
+          onPointerCancel={dragGesture.onPointerCancel}
         >
           <PetRenderer
             bones={view.effectiveBones}
             stage={profile.stage}
-            state={state}
+            state={withCareCondition(state, view.condition)}
             oneShot={oneShot}
+            flavor={profile.evolutionFlavor}
             reducedMotion={reduced}
             size={size}
             skinId={skinId}

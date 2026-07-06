@@ -28,16 +28,28 @@ export function measuredHeight(el: DOMElement | null): number {
 export function ScrollView({
   offset,
   onMeasure,
+  contentRef: externalContentRef,
   children,
 }: {
   /** Rows to hide above the viewport (from the scroll controller). */
   offset: number
   /** Reports measured `(contentHeight, viewportHeight)` after layout. */
   onMeasure: (contentHeight: number, viewportHeight: number) => void
+  /** Optional forward of the inner content box (whose `marginTop={-offset}`
+   * already encodes the scroll position) so the App can read its absolute top
+   * and map a click row to a transcript cell. */
+  contentRef?: React.MutableRefObject<DOMElement | null>
   children: React.ReactNode
 }) {
   const viewportRef = useRef<DOMElement | null>(null)
   const contentRef = useRef<DOMElement | null>(null)
+
+  // Set both the internal ref (for measurement) and the optional external one
+  // (for the App's click hit-test) from the single Box node.
+  const setContent = (node: DOMElement | null) => {
+    contentRef.current = node
+    if (externalContentRef) externalContentRef.current = node
+  }
 
   // Runs after every render (no deps): re-measure so streamed output and window
   // resizes keep the offset accurate. `onMeasure` ignores unchanged values, so
@@ -48,7 +60,7 @@ export function ScrollView({
 
   return (
     <Box ref={viewportRef} flexGrow={1} flexDirection="column" overflow="hidden">
-      <Box ref={contentRef} flexDirection="column" flexShrink={0} marginTop={-offset}>
+      <Box ref={setContent} flexDirection="column" flexShrink={0} marginTop={-offset}>
         {children}
       </Box>
     </Box>

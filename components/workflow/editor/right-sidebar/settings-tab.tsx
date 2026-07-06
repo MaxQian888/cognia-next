@@ -27,6 +27,7 @@ import { DurationField } from "../inspector/forms/shared/duration-field"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { WorkflowVariablesEditor } from "./settings/workflow-variables-editor"
 import { WorkflowCredentialsList } from "./settings/workflow-credentials-list"
+import { WorkflowPublishSection } from "./settings/workflow-publish-section"
 import { PluginCapabilitiesSection } from "./settings/plugin-capabilities-section"
 import { FanoutSubscriptionsPanel } from "@/components/workflow/library/fanout-subscriptions-panel"
 
@@ -42,6 +43,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
     variables,
     credentials,
     workflowId,
+    published,
     setSettings,
     setVariables,
     setCredentials,
@@ -51,6 +53,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
       variables: s.baseWorkflow.variables,
       credentials: s.baseWorkflow.credentials,
       workflowId: s.baseWorkflow.id,
+      published: s.baseWorkflow.published,
       setSettings: s.setSettings,
       setVariables: s.setVariables,
       setCredentials: s.setCredentials,
@@ -263,6 +266,15 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
           </h4>
           <p className="text-[11px] text-muted-foreground">{t("credentials.hint")}</p>
           <WorkflowCredentialsList value={credentials ?? {}} onChange={setCredentials} />
+        </section>
+
+        <Separator />
+
+        <section className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("publish.title")}
+          </h4>
+          <WorkflowPublishSection workflowId={workflowId} published={published} />
         </section>
 
         <Separator />

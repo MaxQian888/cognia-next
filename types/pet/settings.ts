@@ -30,7 +30,10 @@ export interface PetWanderSettings {
   range: PetWanderRange
   /**
    * Climb onto and perch on the top edges of real windows (Shimeji-style).
-   * Experimental, Windows only. Absent/false = floor-wander only.
+   * Experimental. Windows and macOS only — Wayland Linux has no stable
+   * cross-app window-geometry API (a deliberate security boundary), and X11
+   * support was judged not worth the maintenance surface for a shrinking
+   * minority of Linux sessions. Absent/false = floor-wander only.
    */
   climbWindows?: boolean
 }
@@ -86,6 +89,20 @@ export interface PetProactiveSettings {
   timeGreetings: boolean
 }
 
+/**
+ * Ambient twin-awareness (opt-in, off by default). When enabled, the pet's
+ * mood/animation reacts to the watched twin's background job activity
+ * (`lib/pet/events/sources/twin-activity-source.ts`) — job counts and
+ * timestamps only, never twin content, so no PII gate is needed on the signal
+ * itself (contrast `PetSettings.llmSpeak`'s persona text, which does need one).
+ */
+export interface PetTwinAwarenessSettings {
+  /** Master switch. Also requires `twinId` to actually wire a source. */
+  enabled: boolean
+  /** The single twin whose job activity is observed, or null (unset). */
+  twinId: string | null
+}
+
 export interface PetSettings {
   /** Master switch — when false the widget never mounts. */
   enabled: boolean
@@ -123,6 +140,8 @@ export interface PetSettings {
   llmSpeak?: UtilityModelConfig
   /** Proactive speech preferences. Absent = defaults (disabled). */
   proactive?: PetProactiveSettings
+  /** Ambient twin-awareness preferences. Absent = defaults (disabled). */
+  twinAwareness?: PetTwinAwarenessSettings
   /**
    * Pet conversation memory (rolling history fed back into the prompt).
    * Absent = enabled — turning it off stops recording AND injecting history.
@@ -172,6 +191,11 @@ export const DEFAULT_PET_PROACTIVE: PetProactiveSettings = {
   eventComments: true,
   idleChatter: true,
   timeGreetings: true,
+}
+
+export const DEFAULT_PET_TWIN_AWARENESS: PetTwinAwarenessSettings = {
+  enabled: false,
+  twinId: null,
 }
 
 export const DEFAULT_PET_SETTINGS: PetSettings = {

@@ -63,9 +63,12 @@ describe("LimitsPanel", () => {
     expect(text).toContain("moonshot")
     expect(text).toContain("Credit balance")
     expect(text).toContain("¥88.50 left")
-    // local session footer
+    // local session "what's contributing to your usage?" block
+    expect(text).toContain("What's contributing to your usage?")
     expect(text).toContain("Turns this session: 4")
-    expect(text).toContain("1 subagent dispatch")
+    expect(text).toContain("50% of turns ran at >150k context")
+    // 1 dispatch / 6 tool calls → 17%
+    expect(text).toContain("17% of tool calls dispatched a subagent")
   })
 
   it("renders the live API rate-limit block when a reading is present", () => {
@@ -221,21 +224,25 @@ describe("LimitsPanel", () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it("omits the high-context/dispatch lines when zero and pluralizes dispatches", () => {
+  it("omits the contributing-factor insights when zero and shows the subagent share otherwise", () => {
     const quiet: SessionAnalysis = { ...analysis, highContextPct: 0, dispatchCalls: 0 }
     const { container, rerender } = render(
       <LimitsPanel snapshots={[anthropic]} analysis={quiet} now={NOW} onClose={() => {}} />
     )
-    expect(container.textContent).not.toContain("subagent dispatch")
+    // No insight applies → only the header + turn count remain.
+    expect(container.textContent).not.toContain("dispatched a subagent")
+    expect(container.textContent).not.toContain("ran at >")
+    expect(container.textContent).toContain("What's contributing to your usage?")
     rerender(
       <LimitsPanel
         snapshots={[anthropic]}
-        analysis={{ ...analysis, dispatchCalls: 3 }}
+        analysis={{ ...analysis, highContextPct: 0, dispatchCalls: 3, totalToolCalls: 6 }}
         now={NOW}
         onClose={() => {}}
       />
     )
-    expect(container.textContent).toContain("3 subagent dispatches")
+    // 3 dispatches / 6 tool calls → 50%.
+    expect(container.textContent).toContain("50% of tool calls dispatched a subagent")
   })
 
   it("uses just the provider as the header when the label equals the provider", () => {

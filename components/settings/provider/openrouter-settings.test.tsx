@@ -77,7 +77,6 @@ jest.mock("@/stores", () => ({
 
 // Mock openrouter lib
 const mockGetCredits = jest.fn()
-const mockDiscoverOpenRouterModels = jest.fn()
 
 jest.mock("@cognia/provider-core/providers/openrouter", () => ({
   getCredits: (...args: unknown[]) => mockGetCredits(...args),
@@ -86,8 +85,17 @@ jest.mock("@cognia/provider-core/providers/openrouter", () => ({
   OpenRouterError: class extends Error {},
 }))
 
-jest.mock("@cognia/provider-core/providers/model-discovery", () => ({
-  discoverOpenRouterModels: (...args: unknown[]) => mockDiscoverOpenRouterModels(...args),
+// Mock the OpenRouter catalog hook (the shared Dexie-backed model list).
+const mockSyncCatalog = jest.fn().mockResolvedValue(undefined)
+let mockCatalogRow: { models: Array<Record<string, unknown>>; fetchedAt: number } | undefined
+jest.mock("@/hooks/settings/use-openrouter-catalog", () => ({
+  useOpenRouterCatalog: () => ({
+    row: mockCatalogRow,
+    modelCount: mockCatalogRow?.models.length ?? 0,
+    isSyncing: false,
+    error: null,
+    sync: mockSyncCatalog,
+  }),
 }))
 
 // Mock UI components
@@ -206,38 +214,23 @@ describe("OpenRouterSettings", () => {
     expect(cards.length).toBeGreaterThan(0)
   })
 
-  it("persists discovered models through the shared discovery cache when refresh is clicked", async () => {
-    mockDiscoverOpenRouterModels.mockResolvedValue([
-      {
-        id: "openai/o3",
-        name: "OpenAI o3",
-        contextLength: 200000,
-        supportsTools: true,
-        supportsVision: false,
-        supportsAudio: false,
-        supportsVideo: false,
-        supportsStreaming: true,
-      },
-    ])
-
+  it("syncs the shared catalog with the configured key when refresh is clicked", async () => {
     render(<OpenRouterSettings />)
     fireEvent.click(screen.getAllByTestId("button")[1])
 
     await waitFor(() => {
-      expect(mockDiscoverOpenRouterModels).toHaveBeenCalledWith("test-api-key")
+      expect(mockSyncCatalog).toHaveBeenCalledWith("test-api-key")
     })
-    expect(mockUpdateProviderSettings).toHaveBeenCalledWith(
-      "openrouter",
-      expect.objectContaining({
-        discoveredModels: [
-          expect.objectContaining({
-            id: "openai/o3",
-            name: "OpenAI o3",
-          }),
-        ],
-        discoveredModelsLastFetched: expect.any(Number),
-      })
-    )
+  })
+
+  it("renders the catalog model list from the shared catalog row", () => {
+    mockCatalogRow = {
+      fetchedAt: 1000,
+      models: [{ id: "openai/o3", name: "OpenAI o3", contextLength: 200000 }],
+    }
+    render(<OpenRouterSettings />)
+    expect(screen.getByText("OpenAI o3")).toBeInTheDocument()
+    mockCatalogRow = undefined
   })
 })
 

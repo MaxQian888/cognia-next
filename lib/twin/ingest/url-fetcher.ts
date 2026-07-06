@@ -1,26 +1,45 @@
 /**
  * URL → `RawSource` fetcher for the twin ingest pipeline.
  *
- * Fetches a remote document (article / docs page / Markdown gist / …)
- * and stages it as a twin source the workbench can ingest. We use the
- * native `fetch()` API everywhere — Tauri's window-context fetch is
- * already same-origin-bypass-friendly via `tauri.conf.json` allowlist,
- * and the web build accepts whatever CORS allows. A future M7 polish
- * could lazy-import `@tauri-apps/plugin-http` for CORS-bypass on Tauri,
- * but the plugin isn't a current dependency.
+ * Stages a remote document (article / docs page / Markdown gist / …) as a twin
+ * source. Extraction quality now goes through the shared web reader
+ * (`lib/web/reader/*`): a per-platform scraper (WeChat / X / YouTube) when the
+ * host matches, otherwise a generic fetch with cheerio readable-text
+ * extraction, and an optional Jina Reader fallback for JS-rendered pages.
  *
- * Returns the raw text + a heuristic title + a content-type hint. The
- * caller (source uploader) decides which `TwinSourceFormat` to assign
- * (markdown / html / code) — usually html.
+ * The `fetchImpl` is injectable so the caller can pass a CORS-free fetch
+ * (`createProxyFetch()` on Tauri, `pinnedFetch` on Capacitor); it defaults to
+ * the global `fetch` (browser CORS applies).
+ *
+ * Returns clean text/Markdown + a heuristic title + a content-type hint. The
+ * caller (source uploader) decides which `TwinSourceFormat` to assign.
  */
 
+import { parseHTML } from "@cognia/document/parsers/html-parser"
+import { scrapePlatform } from "@/lib/web/reader/dispatch"
+import { fetchViaJina } from "@/lib/web/reader/jina"
+import { assertFetchTargetAllowed } from "@/lib/web/fetch-guard"
+
 const HTTP_TIMEOUT_MS = 30_000
+/** Below this many extracted chars an HTML page is treated as locally unreadable. */
+const MIN_LOCAL_EXTRACT = 200
 
 export interface FetchedUrl {
   url: string
   title: string
   contentType: string
   text: string
+}
+
+export interface FetchUrlOptions {
+  /** CORS-free fetch (e.g. `createProxyFetch()` / `pinnedFetch`). Defaults to global fetch. */
+  fetchImpl?: typeof fetch
+  /** Abort signal; when omitted a 30 s timeout is applied internally. */
+  signal?: AbortSignal
+  /** Enable the Jina Reader fallback for thin HTML extraction. Default false. */
+  jinaFallback?: boolean
+  /** Allow private/loopback/link-local targets (SSRF guard opt-out). Default false. */
+  allowPrivateHosts?: boolean
 }
 
 function extractHtmlTitle(html: string): string | null {
@@ -44,24 +63,83 @@ function deriveTitleFromUrl(url: string): string {
  * can surface a meaningful message — silent failures are a footgun in
  * batch import flows.
  */
-export async function fetchUrlAsRawSource(url: string): Promise<FetchedUrl> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
-  let response: Response
+export async function fetchUrlAsRawSource(
+  url: string,
+  opts: FetchUrlOptions = {}
+): Promise<FetchedUrl> {
+  const fetchImpl = opts.fetchImpl ?? fetch
+
+  // 0. SSRF guard — reject non-http(s) schemes and private/loopback targets
+  //    before any network is touched (throws; caller surfaces the message).
+  assertFetchTargetAllowed(url, { allowPrivateHosts: opts.allowPrivateHosts })
+
+  // 1. Platform scraper (WeChat / X / YouTube) → clean Markdown. Returns null
+  //    (no network) for every other host.
   try {
-    response = await fetch(url, { signal: controller.signal })
-  } finally {
-    clearTimeout(timer)
+    const scraped = await scrapePlatform(url, fetchImpl, opts.signal)
+    if (scraped && scraped.markdown.trim()) {
+      return {
+        url,
+        title: scraped.title || deriveTitleFromUrl(url),
+        contentType: "text/markdown",
+        text: scraped.markdown,
+      }
+    }
+  } catch {
+    // Fall through to the generic path.
+  }
+
+  // 2. Generic fetch.
+  let response: Response
+  if (opts.signal) {
+    response = await fetchImpl(url, { signal: opts.signal })
+  } else {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
+    try {
+      response = await fetchImpl(url, { signal: controller.signal })
+    } finally {
+      clearTimeout(timer)
+    }
   }
   if (!response.ok) {
     throw new Error(`Fetch failed: ${response.status} ${response.statusText}`)
   }
+
   const contentType = response.headers.get("content-type") ?? ""
-  const text = await response.text()
-  const titleFromHtml = contentType.includes("html") ? extractHtmlTitle(text) : null
+  const raw = await response.text()
+  const isHtml = contentType.toLowerCase().includes("html")
+
+  let text = raw
+  let title: string | null = null
+  if (isHtml) {
+    title = extractHtmlTitle(raw)
+    try {
+      const parsed = await parseHTML(raw, { includeLinks: false, includeImages: false })
+      const extracted = parsed.text?.trim()
+      if (extracted) text = extracted
+      if (!title && parsed.title) title = parsed.title
+    } catch {
+      // Keep the raw body.
+    }
+  }
+
+  // 3. Jina Reader fallback (opt-in) for JS-rendered pages cheerio can't read.
+  if (opts.jinaFallback && isHtml && text.trim().length < MIN_LOCAL_EXTRACT) {
+    try {
+      const jina = await fetchViaJina(url, fetchImpl, opts.signal)
+      if (jina && jina.markdown.trim().length > text.trim().length) {
+        text = jina.markdown
+        if (jina.title) title = jina.title
+      }
+    } catch {
+      // Keep local extraction.
+    }
+  }
+
   return {
     url,
-    title: titleFromHtml || deriveTitleFromUrl(url),
+    title: title || deriveTitleFromUrl(url),
     contentType,
     text,
   }

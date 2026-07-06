@@ -25,7 +25,7 @@ import type {
   PluginCanvasDocument,
   CreateCanvasDocumentOptions,
   CanvasSelection,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type {
   ArtifactLanguage,
   CanvasDocumentVersion,
@@ -353,15 +353,43 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
     },
 
     insertText: (text: string) => {
-      const store = useArtifactStore.getState()
-      const activeId = store.activeCanvasId
-      if (!activeId) return
+      const { store, activeId, doc } = getActiveCanvasDocumentState()
+      if (!activeId || !doc) return
 
-      const doc = store.canvasDocuments[activeId]
-      if (!doc) return
+      // Prefer the live editor: insert at the caret / replace the selection.
+      const editor = getActiveCanvasEditor()
+      if (editor) {
+        const selection = editor.getSelection?.() as CanvasEditorSelectionLike | null | undefined
+        const position = editor.getPosition?.() as LineColumn | null | undefined
+        const range =
+          selection ??
+          (position
+            ? {
+                startLineNumber: position.lineNumber,
+                startColumn: position.column,
+                endLineNumber: position.lineNumber,
+                endColumn: position.column,
+              }
+            : null)
+        if (range) {
+          editor.executeEdits?.("plugin-canvas-api", [{ range, text }])
+          editor.focus?.()
+          const model = editor.getModel?.()
+          const nextContent = (model?.getValue?.() as string | undefined) ?? doc.content + text
+          store.updateCanvasDocument(activeId, { content: nextContent })
+          logger.info("Inserted text at the canvas caret")
+          return
+        }
+      }
 
-      // Insert at end for simplicity
-      const newContent = doc.content + text
+      // No live editor: insert at the store's tracked cursor, else append.
+      const tracked = doc.editorContext?.selection
+      const newContent = tracked
+        ? (() => {
+            const offset = lineColumnToOffset(doc.content, getSelectionStart(tracked))
+            return `${doc.content.slice(0, offset)}${text}${doc.content.slice(offset)}`
+          })()
+        : doc.content + text
       store.updateCanvasDocument(activeId, { content: newContent })
       logger.info("Inserted text into canvas")
     },

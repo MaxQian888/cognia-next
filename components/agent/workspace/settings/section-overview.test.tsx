@@ -229,6 +229,49 @@ describe("OverviewSection", () => {
     expect(screen.getByText("sectionControls")).toBeInTheDocument()
   })
 
+  it("shows the dispatch-decision badge only when the team carries one", () => {
+    render(<OverviewSection team={makeTeam()} />)
+    expect(screen.queryByTestId("overview-dispatch-decision")).not.toBeInTheDocument()
+
+    const withDecision = {
+      ...makeTeam(),
+      dispatchDecision: {
+        kind: "background-handoff" as const,
+        fromPattern: "background_handoff" as const,
+        confidence: 0.7,
+        reason: "long-running",
+      },
+    }
+    render(<OverviewSection team={withDecision} />)
+    const badge = screen.getByTestId("overview-dispatch-decision")
+    // tExecutors key passthrough → the executor kind itself.
+    expect(within(badge).getByText("background-handoff")).toBeInTheDocument()
+    expect(badge).toHaveAttribute("title", "long-running")
+  })
+
+  it("shows awaiting-external-pickup and claimed badges by pickup state", () => {
+    const awaiting = {
+      ...makeTeam(),
+      externalPickup: { requestedAt: new Date(0) },
+    }
+    const { unmount } = render(<OverviewSection team={awaiting} />)
+    expect(screen.getByTestId("overview-awaiting-external")).toBeInTheDocument()
+    expect(screen.queryByTestId("overview-external-claimed")).not.toBeInTheDocument()
+    unmount()
+
+    const claimed = {
+      ...makeTeam(),
+      externalPickup: {
+        requestedAt: new Date(0),
+        claimedBy: "external-bridge",
+        claimedAt: new Date(1),
+      },
+    }
+    render(<OverviewSection team={claimed} />)
+    expect(screen.queryByTestId("overview-awaiting-external")).not.toBeInTheDocument()
+    expect(screen.getByTestId("overview-external-claimed")).toBeInTheDocument()
+  })
+
   it("executionMode select calls updateTeamConfig via onValueChange", () => {
     render(<OverviewSection team={makeTeam()} />)
     // There are two comboboxes: executionMode and executionPattern.

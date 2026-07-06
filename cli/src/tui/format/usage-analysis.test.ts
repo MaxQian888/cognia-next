@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { analyzeSession, HIGH_CONTEXT_THRESHOLD } from "./usage-analysis"
+import { analyzeSession, HIGH_CONTEXT_THRESHOLD, sessionInsights } from "./usage-analysis"
 
 describe("analyzeSession", () => {
   it("returns zeros for an empty session", () => {
@@ -52,5 +52,38 @@ describe("analyzeSession", () => {
     const a = analyzeSession({ toolStats: stats, topToolLimit: 3 })
     // t0 has 0 calls → dropped; top 3 by calls are t7,t6,t5.
     expect(a.topTools.map((t) => t.name)).toEqual(["t7", "t6", "t5"])
+  })
+})
+
+describe("sessionInsights", () => {
+  it("returns no insights for a clean session", () => {
+    const a = analyzeSession({ usageHistory: [1000], toolStats: { read: { calls: 2, errors: 0 } } })
+    expect(sessionInsights(a)).toEqual([])
+  })
+
+  it("surfaces a high-context insight with a humanized threshold and advice", () => {
+    const a = analyzeSession({ usageHistory: [200_000, 10_000] })
+    const insights = sessionInsights(a)
+    const ctx = insights.find((i) => i.id === "high-context")
+    expect(ctx?.headline).toBe("50% of turns ran at >150k context")
+    expect(ctx?.advice).toMatch(/\/compact/)
+  })
+
+  it("surfaces a subagent-share insight from dispatch tool calls", () => {
+    const a = analyzeSession({
+      toolStats: {
+        bash: { calls: 6, errors: 0 },
+        dispatch_agent: { calls: 4, errors: 0 },
+      },
+    })
+    const sub = sessionInsights(a).find((i) => i.id === "subagent-heavy")
+    expect(sub?.headline).toBe("40% of tool calls dispatched a subagent")
+    expect(sub?.advice).toMatch(/cheaper model/)
+  })
+
+  it("honors a custom threshold in the high-context headline", () => {
+    const a = analyzeSession({ usageHistory: [60_000], highContextThreshold: 50_000 })
+    const ctx = sessionInsights(a).find((i) => i.id === "high-context")
+    expect(ctx?.headline).toBe("100% of turns ran at >50k context")
   })
 })

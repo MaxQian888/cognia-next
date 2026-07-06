@@ -12,6 +12,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CanvasPanel } from "./canvas-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 
 // Capture the most recent ResizeObserver callback so we can fire ticks at will.
 // Monaco's container resize handler is set up in an effect; the observer is
@@ -82,8 +83,15 @@ jest.mock("@/hooks/canvas/use-canvas-monaco-setup", () => ({
     onMount: jest.fn(),
   }),
 }))
+// Mutable so individual tests can surface an action error (mock-prefixed to
+// satisfy jest's out-of-scope factory rule).
+const mockActionsState = { running: false, error: null as string | null }
 jest.mock("@/hooks/canvas/use-canvas-actions", () => ({
-  useCanvasActions: () => ({ run: jest.fn(), running: false, error: null }),
+  useCanvasActions: () => ({
+    run: jest.fn(),
+    running: mockActionsState.running,
+    error: mockActionsState.error,
+  }),
 }))
 jest.mock("@/hooks/canvas/use-canvas-suggestions", () => ({
   useCanvasSuggestions: () => ({ generate: jest.fn(), running: false }),
@@ -130,8 +138,25 @@ describe("CanvasPanel", () => {
   beforeEach(() => {
     window.localStorage.clear()
     mobileRef.current = false
+    mockActionsState.running = false
+    mockActionsState.error = null
+    act(() => {
+      useCanvasSettingsStore.getState().resetSettings()
+    })
     resetStore()
   })
+
+  function seedActiveDoc() {
+    act(() => {
+      const id = useArtifactStore.getState().createCanvasDocument({
+        title: "Doc",
+        content: "x",
+        language: "javascript",
+        type: "code",
+      })
+      useArtifactStore.getState().setActiveCanvas(id)
+    })
+  }
 
   it("renders the Empty primitive when no document is active", () => {
     const { container } = renderWithProviders(<CanvasPanel />)
@@ -187,6 +212,31 @@ describe("CanvasPanel", () => {
     expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
       "hello world"
     )
+  })
+
+  describe("accessibility wiring", () => {
+    it("announces action errors as an assertive alert region when enabled", () => {
+      mockActionsState.error = "boom"
+      seedActiveDoc()
+      renderWithProviders(<CanvasPanel />)
+      const alert = screen.getByRole("alert")
+      expect(alert).toHaveTextContent("boom")
+      expect(alert).toHaveAttribute("aria-live", "assertive")
+    })
+
+    it("drops the alert role when announceErrors is disabled", () => {
+      act(() => {
+        const store = useCanvasSettingsStore.getState()
+        store.updateSettings({
+          accessibility: { ...store.settings.accessibility, announceErrors: false },
+        })
+      })
+      mockActionsState.error = "boom"
+      seedActiveDoc()
+      renderWithProviders(<CanvasPanel />)
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      expect(screen.getByText("boom")).toBeInTheDocument()
+    })
   })
 
   describe("ResizeObserver debounce", () => {

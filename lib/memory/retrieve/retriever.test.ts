@@ -1,5 +1,12 @@
 import type { Memory } from "@/types/memory/memory"
-import { retrieveMemories, type MemoryRetrieverDeps } from "./retriever"
+import { retrieveMemories, __resetMemoryBm25Cache, type MemoryRetrieverDeps } from "./retriever"
+
+// The BM25 index is cached by corpus signature at module scope; reset between
+// cases so a shared cache key (e.g. `global::`) can't return another test's
+// corpus.
+beforeEach(() => {
+  __resetMemoryBm25Cache()
+})
 
 let seq = 0
 function mem(text: string, over: Partial<Memory> = {}): Memory {
@@ -51,6 +58,20 @@ describe("retrieveMemories", () => {
     expect(out.map((r) => r.memory.id)).toContain("hit")
   })
 
+  it("still retrieves keyword matches with query expansion enabled", async () => {
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The user prefers pnpm over npm", { id: "hit" }),
+        mem("The user lives in Shanghai", { id: "miss" }),
+      ],
+    }
+    const out = await retrieveMemories(
+      { queryText: "pnpm", enableQueryExpansion: true, ...base },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toContain("hit")
+  })
+
   it("filters by type when `types` is set", async () => {
     const deps: MemoryRetrieverDeps = {
       loadCandidates: async () => [
@@ -99,6 +120,111 @@ describe("retrieveMemories", () => {
     }
     const out = await retrieveMemories({ queryText: "pnpm", ...base }, deps)
     expect(out.map((r) => r.memory.id)).toContain("hit")
+  })
+
+  it("does not inject a memory that overlaps the query only on stopwords", async () => {
+    // Regression: BM25 returns any doc sharing a token and min-max normalization
+    // promotes the lone hit to relevance 1.0, so a memory matching only
+    // "is"/"the" used to be force-injected every turn.
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [mem("The user is happy with the onboarding", { id: "noise" })],
+    }
+    const out = await retrieveMemories(
+      { queryText: "is the deploy done", topK: 5, relevanceFloor: 0 },
+      deps
+    )
+    expect(out).toEqual([])
+  })
+
+  it("still injects when a meaningful term is shared (stopword gate is not over-broad)", async () => {
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [mem("The user prefers the deploy on Fridays", { id: "real" })],
+    }
+    const out = await retrieveMemories(
+      { queryText: "is the deploy done", topK: 5, relevanceFloor: 0 },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["real"])
+  })
+
+  it("keeps a vector-only semantic hit even with no lexical overlap", async () => {
+    // The stopword gate filters the BM25 leg only; a pure semantic (vector) hit
+    // with no shared term must still surface.
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The customer churned last quarter", { id: "sem", vectorDocId: "vsem" }),
+      ],
+      embed: async () => [0.1, 0.2],
+      vectorSearch: async () => [{ id: "vsem", score: 0.88 }],
+    }
+    const out = await retrieveMemories(
+      { queryText: "retention numbers", topK: 5, relevanceFloor: 0 },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["sem"])
+  })
+
+  it("reuses the BM25 index for an unchanged corpus (rebuilds when it changes)", async () => {
+    const corpus = [mem("The user prefers pnpm", { id: "a", updatedAt: 100 })]
+    const loadCandidates = jest.fn(async () => corpus)
+    const deps: MemoryRetrieverDeps = { loadCandidates }
+    // Two retrievals over the same corpus (same characterId + types + signature).
+    await retrieveMemories({ queryText: "pnpm", ...base, characterId: "c1" }, deps)
+    await retrieveMemories({ queryText: "pnpm", ...base, characterId: "c1" }, deps)
+    // Candidates are loaded each turn, but the index is cached — both still work.
+    const out = await retrieveMemories({ queryText: "pnpm", ...base, characterId: "c1" }, deps)
+    expect(out.map((r) => r.memory.id)).toContain("a")
+    // A corpus change (new updatedAt) invalidates the cache and still resolves.
+    const corpus2 = [mem("The user prefers yarn now", { id: "a", updatedAt: 200 })]
+    const deps2: MemoryRetrieverDeps = { loadCandidates: async () => corpus2 }
+    const out2 = await retrieveMemories({ queryText: "yarn", ...base, characterId: "c1" }, deps2)
+    expect(out2.map((r) => r.memory.id)).toContain("a")
+  })
+
+  it("reuses precomputedQueryEmbedding and skips deps.embed", async () => {
+    const embed = jest.fn(async () => [0.1, 0.2])
+    const vectorSearch = jest.fn(async () => [{ id: "vsem", score: 0.88 }])
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The customer churned last quarter", { id: "sem", vectorDocId: "vsem" }),
+      ],
+      embed,
+      vectorSearch,
+    }
+    const out = await retrieveMemories(
+      {
+        queryText: "retention numbers",
+        topK: 5,
+        relevanceFloor: 0,
+        precomputedQueryEmbedding: [0.9, 0.8],
+      },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["sem"])
+    expect(embed).not.toHaveBeenCalled()
+    // The vector leg ran with the caller-supplied vector.
+    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number))
+  })
+
+  it("runs the vector leg from a precomputed embedding even without deps.embed", async () => {
+    const vectorSearch = jest.fn(async () => [{ id: "vsem", score: 0.88 }])
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [
+        mem("The customer churned last quarter", { id: "sem", vectorDocId: "vsem" }),
+      ],
+      vectorSearch,
+    }
+    const out = await retrieveMemories(
+      {
+        queryText: "retention numbers",
+        topK: 5,
+        relevanceFloor: 0,
+        precomputedQueryEmbedding: [0.9, 0.8],
+      },
+      deps
+    )
+    expect(out.map((r) => r.memory.id)).toEqual(["sem"])
+    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number))
   })
 
   it("applies the relevance floor (drops weak matches)", async () => {

@@ -97,6 +97,7 @@ export function PetVfx({
   rarity,
   reducedMotion,
   lowPower = false,
+  flavorAuraColor = null,
 }: {
   state: PetVisualState
   oneShot: PetOneShot | null
@@ -104,6 +105,8 @@ export function PetVfx({
   rarity: PetRarity
   reducedMotion: boolean
   lowPower?: boolean
+  /** Radiant evolution-flavor aura color, or null when none. */
+  flavorAuraColor?: string | null
 }) {
   if (reducedMotion) return null
 
@@ -113,6 +116,11 @@ export function PetVfx({
   return (
     <g data-pet-part="vfx">
       {rarityVfx?.aura && <Aura color={rarityVfx.auraColor} />}
+      {flavorAuraColor && (
+        <g data-pet-vfx="flavor-aura">
+          <Aura color={flavorAuraColor} />
+        </g>
+      )}
       {rarityVfx &&
         Array.from({ length: rarityVfx.particleCount }).map((_, i) => (
           <Mote

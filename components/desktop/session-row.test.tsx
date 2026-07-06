@@ -68,6 +68,43 @@ test("renders title and clicking the row selects the session", async () => {
   )
 })
 
+test("focused rows carry data-focused for the keyboard-nav ring", () => {
+  const { container } = setup({ focused: true })
+  expect(container.querySelector("li[data-focused]")).toBeInTheDocument()
+})
+
+test("compact density tightens the row padding", () => {
+  const { container } = setup({ density: "compact" })
+  expect(container.querySelector("li")?.className).toContain("py-1")
+})
+
+test("shows the message preview line only when showPreview is on", () => {
+  const withPreview = {
+    ...baseSession,
+    lastMessagePreview: "last thing said",
+  } as ChatSession
+  const { rerender } = setup({ session: withPreview, showPreview: true })
+  expect(screen.getByText("last thing said")).toBeInTheDocument()
+  rerender(
+    <ul>
+      <SessionRow
+        session={withPreview}
+        active={false}
+        showPreview={false}
+        onSelect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    </ul>
+  )
+  expect(screen.queryByText("last thing said")).toBeNull()
+})
+
+test("renders a drag grip handle when drag wiring is supplied", () => {
+  setup({ dragListeners: {}, dragAttributes: {} })
+  expect(screen.getByLabelText("dragHandle")).toBeInTheDocument()
+})
+
 test("Ctrl-click forwards the modifier flag through onSelect", async () => {
   const user = userEvent.setup()
   const { onSelect } = setup()

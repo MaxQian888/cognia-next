@@ -37,6 +37,7 @@ import {
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
@@ -57,10 +58,10 @@ interface OneBotConfigDialogProps {
 async function resolveWsEndpoint(adapterId: string): Promise<string> {
   try {
     const health = await connectorsHealth()
-    const addr = health.boundAddr ?? "127.0.0.1:8080"
+    const addr = health.boundAddr ?? `127.0.0.1:${CONNECTORS_SERVER_PORT}`
     return `ws://${addr}/ws/onebot/${adapterId}`
   } catch {
-    return `ws://127.0.0.1:8080/ws/onebot/${adapterId}`
+    return `ws://127.0.0.1:${CONNECTORS_SERVER_PORT}/ws/onebot/${adapterId}`
   }
 }
 

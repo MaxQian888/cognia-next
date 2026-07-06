@@ -16,13 +16,15 @@
  * `getSharedOcrRegistry()` this dispatcher reads from.
  */
 
+import type { UIMessage } from "ai"
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { extract, type ExtractDeps } from "@/lib/ocr/index"
 import { getSharedOcrRegistry } from "@/lib/ocr/registry"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import { type OcrInput, type OcrResult, type UserOcrSettings } from "@/types/ocr"
-import { handleOcrSlashCommand } from "@/lib/slash-commands/actions/ocr"
+import { buildOcrResultPart, handleOcrSlashCommand } from "@/lib/slash-commands/actions/ocr"
+import { OcrResultCard } from "./ocr-result-card"
 
 export interface OcrToolInput {
   source: { kind: "attachment_id" | "data_url" | "file_path" | "screen"; value?: string }
@@ -197,6 +199,18 @@ export const ocrPluginDefinition: PluginDefinition = {
       execute: async (args: Record<string, unknown>) => runOcrTool(args as unknown as OcrToolInput),
     })
 
+    // gap4 — render the recognized text as a rich `ocr-result` chat card
+    // instead of a plain markdown bubble. Registered here (startup-activated),
+    // before any `/ocr` can produce a part, so the part always has a renderer.
+    const messagePart = (
+      ctx as {
+        messagePart?: {
+          registerPartRenderer?: (type: string, c: typeof OcrResultCard) => () => void
+        }
+      }
+    ).messagePart
+    disposeOcrRenderer = messagePart?.registerPartRenderer?.("ocr-result", OcrResultCard)
+
     registerSlashCommand({
       id: "ocr.extract",
       name: "/ocr",
@@ -208,8 +222,15 @@ export const ocrPluginDefinition: PluginDefinition = {
           return { message: "OCR runtime is not ready." }
         }
         const out = await handleOcrSlashCommand({ argv: args, deps })
+        // gap4 — on success, emit the rich `ocr-result` card into the active
+        // chat (the slash dispatcher discards the return value for tray /
+        // command-palette invocations, so we self-append). Drop the markdown
+        // `message` on success so the card isn't duplicated by a text bubble.
+        if (out.result) {
+          await appendOcrResultMessage(buildOcrResultPart(out.result, out.sourceRef))
+        }
         return {
-          message: out.system,
+          ...(out.result ? {} : { message: out.system }),
           payload: out.composerText ? { dispatchPrompt: out.composerText } : undefined,
         }
       },
@@ -218,10 +239,31 @@ export const ocrPluginDefinition: PluginDefinition = {
     })
   },
   deactivate: async (ctx?: PluginContext) => {
+    disposeOcrRenderer?.()
+    disposeOcrRenderer = undefined
     if (ctx?.pluginId) {
       unregisterCommandsByPlugin(ctx.pluginId)
     }
   },
+}
+
+/** Disposer for the `ocr-result` part renderer (set on activate). */
+let disposeOcrRenderer: (() => void) | undefined
+/** Monotonic counter for unique system-message ids (avoids Math.random). */
+let ocrMessageSeq = 0
+
+/** Append an `ocr-result` system message to the active chat session. */
+async function appendOcrResultMessage(part: ReturnType<typeof buildOcrResultPart>): Promise<void> {
+  try {
+    const { useChatStore } = await import("@/stores/chat/chat-store")
+    useChatStore.getState().appendMessage({
+      id: `sys-ocr-${Date.now()}-${(ocrMessageSeq += 1)}`,
+      role: "system",
+      parts: [part],
+    } as unknown as UIMessage)
+  } catch {
+    // best-effort — a store/runtime hiccup must not fail the OCR command.
+  }
 }
 
 export default ocrPluginDefinition

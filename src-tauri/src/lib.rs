@@ -5,6 +5,7 @@ mod api_key;
 mod automation;
 mod browser;
 mod canvas;
+mod capture;
 mod ccswitch;
 mod claude;
 mod cli_bridge;
@@ -20,6 +21,7 @@ mod fs_atomic;
 mod gateway;
 mod git;
 mod github;
+pub mod headless;
 mod hooks;
 mod keyring_secrets;
 mod logging;
@@ -36,17 +38,21 @@ mod remote_control;
 pub mod sandbox;
 mod scheduler;
 mod secret_store;
+mod session_import;
 mod settings;
 mod shell;
 mod skills;
 mod subscription;
+mod supervision_backoff;
 mod terminal;
+mod timing;
 mod tts;
 mod twin;
 mod vector;
 mod wallpaper;
 mod workflow;
 
+mod webview_watchdog;
 mod window_behavior;
 mod window_recovery;
 mod window_utils;
@@ -93,8 +99,16 @@ async fn claude_set_provider_env(
     state: State<'_, ApiKeyState>,
     api_key: Option<String>,
     base_url: Option<String>,
+    // Ordered `[name, value]` pairs forwarded as `ANTHROPIC_CUSTOM_HEADER_*` at
+    // spawn (CCSwitch relays that gate 1M behind `anthropic-beta`, etc.). Only
+    // meaningful for callers that manage headers: `None` leaves the existing
+    // set untouched, `Some([])` explicitly clears it.
+    custom_headers: Option<Vec<(String, String)>>,
 ) -> Result<(), String> {
     state.set_provider(api_key, base_url).await;
+    if let Some(headers) = custom_headers {
+        state.set_custom_headers(headers).await;
+    }
     Ok(())
 }
 
@@ -238,6 +252,10 @@ pub fn run() {
         // env-builder) consume it via `subscription_get_active`.
         .manage(subscription::ActiveAccountState::new())
         .manage(WindowBehavior::new())
+        // Runtime white-screen watchdog state (ADR window-recovery). Written by
+        // the renderer heartbeat command, read by the polling loop spawned in
+        // setup() once the main window exists.
+        .manage(webview_watchdog::WebviewWatchdog::new())
         .manage(std::sync::Arc::new(shortcuts::ShortcutRegistry::default()))
         .manage(connectors::ConnectorsState::new())
         .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
@@ -370,6 +388,9 @@ pub fn run() {
             hooks::commands::set_trusted_workspaces,
             agents::commands::read_agent_config,
             agents::commands::write_agent_config,
+            // ADR-0062 — external-agent session-history import. Reads OpenCode's
+            // local SQLite store read-only for the session importer.
+            session_import::opencode_sessions_read,
             ccswitch::commands::ccswitch_status,
             ccswitch::commands::ccswitch_list_providers,
             ccswitch::commands::ccswitch_list_mcp_servers,
@@ -424,6 +445,8 @@ pub fn run() {
             window_behavior::set_close_behavior,
             window_behavior::get_close_behavior,
             window_behavior::resolve_close_request,
+            webview_watchdog::webview_heartbeat,
+            webview_watchdog::webview_take_recovery_notice,
             pet_window::open_pet_window,
             pet_window::close_pet_window,
             pet_window::destroy_pet_window,
@@ -433,6 +456,7 @@ pub fn run() {
             pet_window::pet_window_get_work_area,
             pet_window::pet_window_get_surfaces,
             pet_window::is_pet_window_open,
+            capture::get_foreground_app,
             pet_window::show_main_window,
             pet_window::open_pet_popup,
             pet_window::close_pet_popup,
@@ -466,6 +490,12 @@ pub fn run() {
             files::fs_search_workspace,
             files::fs_read_workspace_file,
             files::fs_write_workspace_file,
+            files::fs_list_workspace_dir,
+            files::fs_stat_workspace_file,
+            files::fs_create_workspace_dir,
+            files::fs_delete_workspace_entry,
+            files::fs_rename_workspace_entry,
+            files::fs_copy_workspace_entry,
             files::slash_commands_scan,
             files::memory_append,
             skills::native::skills_scan_dir,
@@ -506,6 +536,7 @@ pub fn run() {
             terminal::headless::terminal_headless_kill,
             terminal::commands::terminal_list_for_project,
             terminal::commands::terminal_list_all,
+            terminal::commands::terminal_kill_port,
             tts::keyring::tts_keyring_get,
             tts::keyring::tts_keyring_set,
             tts::keyring::tts_keyring_delete,
@@ -514,6 +545,7 @@ pub fn run() {
             keyring_secrets::keyring_secret_set,
             keyring_secrets::keyring_secret_clear,
             cli_bridge::cli_bridge_status,
+            cli_bridge::cli_bridge_renderer_response,
             cli_bridge::resolve_cli_home,
             cli_bridge::write_cli_home_file,
             cli_bridge::plugin_install_from_directory,
@@ -688,7 +720,21 @@ pub fn run() {
             connectors::commands::connectors_ws_close,
             connectors::commands::connectors_lark_ws_open,
             connectors::commands::connectors_lark_ws_close,
+            connectors::commands::connectors_reset_all_ws,
             connectors::commands::connectors_attachment_fetch,
+            connectors::commands::connectors_attachment_read,
+            connectors::commands::connectors_media_upload,
+            connectors::commands::connectors_matrix_crypto_init,
+            connectors::commands::connectors_matrix_crypto_outgoing_requests,
+            connectors::commands::connectors_matrix_crypto_mark_request_sent,
+            connectors::commands::connectors_matrix_crypto_receive_sync_changes,
+            connectors::commands::connectors_matrix_crypto_decrypt_event,
+            connectors::commands::connectors_matrix_crypto_encrypt_event,
+            connectors::commands::connectors_matrix_crypto_share_room_key,
+            connectors::commands::connectors_matrix_crypto_update_tracked_users,
+            connectors::commands::connectors_matrix_crypto_get_missing_sessions,
+            connectors::commands::connectors_matrix_crypto_encrypt_attachment,
+            connectors::commands::connectors_matrix_crypto_decrypt_attachment,
             connectors::commands::connectors_lark_upload_file,
             connectors::commands::connectors_lark_upload_image,
             connectors::commands::connectors_onebot_probe,
@@ -700,13 +746,18 @@ pub fn run() {
             remote_control::commands::remote_control_update_config,
             remote_control::commands::remote_control_set_signing_secret,
             remote_control::commands::remote_control_get_signing_secret,
+            remote_control::commands::remote_control_query_response,
             gateway::commands::gateway_get_status,
+            gateway::commands::gateway_get_config,
             gateway::commands::gateway_update_config,
             gateway::commands::gateway_start,
             gateway::commands::gateway_stop,
-            gateway::commands::gateway_get_token,
-            gateway::commands::gateway_rotate_token,
-            gateway::commands::gateway_clear_token,
+            gateway::commands::gateway_list_keys,
+            gateway::commands::gateway_create_key,
+            gateway::commands::gateway_update_key,
+            gateway::commands::gateway_delete_key,
+            gateway::commands::gateway_reveal_key,
+            gateway::commands::gateway_reset_key_quota,
             gateway::commands::gateway_push_snapshot,
             gateway::commands::gateway_decision_response,
             workflow::commands::workflow_register_trigger,
@@ -803,6 +854,8 @@ pub fn run() {
             plugin_api::devtools::plugin_reload,
             plugin_api::devtools::plugin_list_dev_plugins,
             automation::commands::desktop_capabilities,
+            automation::commands::desktop_subscribe_events,
+            automation::commands::desktop_unsubscribe,
             automation::commands::desktop_get_focus,
             automation::commands::desktop_read_tree,
             automation::commands::desktop_find,
@@ -830,6 +883,8 @@ pub fn run() {
             automation::commands::automation_policy_set,
             automation::commands::automation_settings_get,
             automation::commands::automation_settings_set,
+            automation::commands::automation_set_enabled,
+            automation::commands::automation_kill_switch_engaged,
             automation::commands::automation_kill_switch,
             automation::commands::automation_consent_respond,
             automation::commands::automation_drain_init_failure,
@@ -864,6 +919,9 @@ pub fn run() {
             browser::embedded::browser_embed_get_url,
             browser::embedded::browser_embed_get_title,
             browser::embedded::browser_embed_has_text,
+            browser::embedded::browser_embed_has_selector,
+            browser::embedded::browser_embed_evaluate,
+            browser::embedded::browser_embed_network_state,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
@@ -996,6 +1054,11 @@ pub fn run() {
                 // state the `cua_sandbox_*` lifecycle commands read and the
                 // `AutomationState` the `cua_route` dispatch layer reads, so
                 // both see the same running containers.
+                // Live UI-event delivery (trigger.desktop.event): watcher
+                // threads forward focus-changed events through this sink to
+                // `automation:uia-event`, which the TS workflow fan-out
+                // (`lib/workflow/runtime/desktop-event-trigger.ts`) consumes.
+                automation::events::wire_uia_event_sink(app.handle().clone());
                 let cua_registry = cua_sandbox::CuaSandboxRegistry::default();
                 app.manage(cua_registry.clone());
                 app.manage(automation::commands::AutomationState::new(
@@ -1222,6 +1285,44 @@ pub fn run() {
                     });
                 }
 
+                // Runtime white-screen watchdog. The renderer beats a
+                // realm-lifetime heartbeat; if it goes silent while the window
+                // is visible (renderer process crash, hung main thread, a page
+                // navigated to a blank/broken document) the React error
+                // boundaries can't fire — the JS realm is dead — so this loop
+                // reloads the page back to its last-known-good route. This is
+                // the runtime counterpart to the boot-time force-show above and
+                // window_recovery's off-screen recenter.
+                {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        loop {
+                            tokio::time::sleep(webview_watchdog::POLL_INTERVAL).await;
+                            let Some(window) = handle.get_webview_window("main") else {
+                                continue;
+                            };
+                            let watchdog = handle.state::<webview_watchdog::WebviewWatchdog>();
+                            let visible = window.is_visible().unwrap_or(false);
+                            match watchdog.poll(std::time::Instant::now(), visible) {
+                                webview_watchdog::WatchdogAction::Recover => {
+                                    let url = watchdog.last_url();
+                                    webview_watchdog::recover(&window, url.as_deref());
+                                    watchdog.note_recovery(std::time::Instant::now());
+                                }
+                                webview_watchdog::WatchdogAction::GaveUp => {
+                                    if watchdog.mark_gave_up_logged() {
+                                        log::error!(
+                                            "webview-watchdog: page still blank after {} reloads; giving up auto-recovery",
+                                            webview_watchdog::MAX_RECOVERIES
+                                        );
+                                    }
+                                }
+                                webview_watchdog::WatchdogAction::Idle => {}
+                            }
+                        }
+                    });
+                }
+
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1284,6 +1385,14 @@ pub fn run() {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let gw_state = app.state::<gateway::GatewayState>();
+                    // Load the persisted config (port / allowlist / timeouts /
+                    // retry / model exposure / bind interface / enabled) before
+                    // the auto-start check. A missing / corrupt file leaves the
+                    // in-memory defaults (gateway stays off).
+                    if let Ok(dir) = app.path().app_data_dir() {
+                        gw_state
+                            .hydrate_from_disk(dir.join("cognia").join("gateway-config.json"));
+                    }
                     if gw_state.config().enabled {
                         match gw_state.start(app.clone()).await {
                             Ok(()) => log::info!("inbound gateway listener started"),

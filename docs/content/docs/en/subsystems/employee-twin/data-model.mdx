@@ -56,7 +56,7 @@ erDiagram
 
 | Cluster | Key types (`types/twin/index.ts`) | Purpose |
 | --- | --- | --- |
-| **Sources** | `TwinSource` (L64), `TwinSourceKind` (L28), `TwinSourceFormat` (L34), `TwinSourceStatus` (L62) | Registry of every raw artifact ingested. 21 formats across document / chat / email / code families. |
+| **Sources** | `TwinSource` (L64), `TwinSourceKind` (L28), `TwinSourceFormat` (L34), `TwinSourceStatus` (L62) | Registry of every raw artifact ingested. 22 formats across document / chat / email / code families. |
 | **Chunks** | `TwinChunk` (L148), `TwinChunkMetadata` (L130), `ChunkingStrategyId` (L111), `VectorBackend` (L123) | Sliced fragments + vector-store pointer (`vectorDocId`) + provenance. Holds both `content` (display) and `contentRedacted` (embedded). |
 | **Profile** | `TwinProfile` (L270), `StyleSample` (L188), `Playbook` (L228), `ProfileEntity` (L245), `DecisionRecord` (L257) | The distilled 1:1-per-twin profile. Every sub-record carries a `pinned?` flag (re-distill protection). |
 | **Drafts** | `TwinDraft` (L330), `TwinDraftPayload` (L300), `TwinDraftProvenance` (L312), `TwinDraftEvaluation` (L321) | Synthesised Character / Skill drafts awaiting review, with provenance + evaluator scores. |
@@ -69,7 +69,7 @@ erDiagram
 `TwinSourceFormat` (`types/twin/index.ts:34-60`) is the union every importer and the ingest dispatcher key
 off. The families line up with `lib/twin/ingest/dispatch.ts:55` (`KIND_BY_FORMAT`):
 
-- **Document** → `markdown · pdf · docx · pptx · odt · odp · html · csv · epub · rtf · code` (routed to `lib/document/document-processor`).
+- **Document** → `markdown · pdf · docx · xlsx · pptx · odt · odp · html · csv · epub · rtf · code` (routed to `lib/document/document-processor`; `xlsx` also covers `.xls/.xlsm/.ods` spreadsheets).
 - **Chat** → `chatgpt-export · claude-export · gemini-export · slack-export · lark-export · dingtalk-export · wechat-export`.
 - **Email** → `mbox · eml`.
 - **Code** → `git-repo`.

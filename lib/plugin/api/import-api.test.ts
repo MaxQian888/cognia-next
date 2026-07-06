@@ -1,8 +1,26 @@
 import { createImportAPI, clearCustomImporters } from "./import-api"
+import { getSessionSource } from "@/lib/session-import/registry"
+import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
 
 jest.mock("../core/logger", () => ({
   createPluginSystemLogger: () => ({ info: jest.fn(), error: jest.fn(), warn: jest.fn() }),
 }))
+
+function fakeSessionSource(id: string): AgentSessionSourceAdapter {
+  return {
+    id,
+    displayName: id,
+    labelKey: id,
+    acceptedExtensions: [".jsonl"],
+    scanRoots: () => [],
+    detect: () => "no",
+    listSessions: async () => [],
+    parseSession: async () => ({
+      session: { id, title: "", createdAt: 0, updatedAt: 0 } as never,
+      messages: [],
+    }),
+  }
+}
 
 describe("createImportAPI", () => {
   beforeEach(() => clearCustomImporters())
@@ -71,6 +89,14 @@ describe("createImportAPI", () => {
     })
     const result = await api.importContent({ content: "x" }, "boom")
     expect(result).toEqual({ success: false, error: "kaboom" })
+  })
+
+  it("registers a plugin session source (namespaced) and disposes it", () => {
+    const api = createImportAPI("acme")
+    const dispose = api.registerSessionSource(fakeSessionSource("opencode-fork"))
+    expect(getSessionSource("acme:opencode-fork")).toBeDefined()
+    dispose()
+    expect(getSessionSource("acme:opencode-fork")).toBeUndefined()
   })
 
   it("isolates importers across plugins by namespacing", () => {

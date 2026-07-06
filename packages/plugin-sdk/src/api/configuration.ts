@@ -9,5 +9,5 @@
 
 export { defineConfiguration } from "../define/define-configuration"
 
-export type { PluginConfigAPI } from "@/types/plugin/plugin-extended"
+export type { PluginConfigAPI } from "@/types/plugin/plugin"
 export type { PluginConfigProperty, PluginConfigSchema } from "@/types/plugin"

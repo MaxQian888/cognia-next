@@ -10,6 +10,7 @@
 // this channel, so there is intentionally no profile-snapshot message.
 
 import type { PetOneShot, PetVisualState } from "@/types/pet"
+import { isPetConsoleTab, type PetConsoleTab } from "@/lib/pet/console-tabs"
 
 /** Bridge wire text for a speech bubble — already localized by the main side. */
 export interface PetBridgeBubble {
@@ -19,7 +20,14 @@ export interface PetBridgeBubble {
 }
 
 /** Interaction kinds the overlay can send back to the main controller. */
-export type PetBridgeInteractionKind = "fed" | "played" | "petted" | "talked"
+export type PetBridgeInteractionKind =
+  | "fed"
+  | "played"
+  | "petted"
+  | "talked"
+  | "slept"
+  | "cleaned"
+  | "treated"
 
 /** Discriminated union of every message that can cross the bridge. */
 export type PetBridgeMessage =
@@ -28,6 +36,9 @@ export type PetBridgeMessage =
   | { v: 1; t: "bubble"; bubble: PetBridgeBubble | null }
   | { v: 1; t: "interaction"; kind: PetBridgeInteractionKind; text?: string }
   | { v: 1; t: "request-state" }
+  // Popup → main: open the /pet console at a tab. The main window owns the
+  // router; the popup only shows/raises the main window before sending.
+  | { v: 1; t: "open-console"; tab: PetConsoleTab }
   // Throttled main-window user-activity ping (Smart-Moving). `at` is epoch ms
   // for ordering only — receivers stamp their OWN clock (the overlay's wander
   // gate runs on performance.now(), a different clock domain).
@@ -48,6 +59,7 @@ const VISUAL_STATES: ReadonlySet<string> = new Set<PetVisualState>([
   "greeting",
   "evolving",
   "interacting",
+  "unwell",
 ])
 
 const ONE_SHOTS: ReadonlySet<string> = new Set<PetOneShot>([
@@ -68,6 +80,9 @@ const INTERACTION_KINDS: ReadonlySet<string> = new Set<PetBridgeInteractionKind>
   "played",
   "petted",
   "talked",
+  "slept",
+  "cleaned",
+  "treated",
 ])
 
 const BUBBLE_ORIGINS: ReadonlySet<string> = new Set(["template", "llm", "system"])
@@ -134,6 +149,8 @@ export function decodePetBridgeMessage(raw: unknown): PetBridgeMessage | null {
     }
     case "request-state":
       return { v: 1, t: "request-state" }
+    case "open-console":
+      return isPetConsoleTab(raw.tab) ? { v: 1, t: "open-console", tab: raw.tab } : null
     case "activity":
       return typeof raw.at === "number" && Number.isFinite(raw.at)
         ? { v: 1, t: "activity", at: raw.at }

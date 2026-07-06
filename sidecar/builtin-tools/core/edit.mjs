@@ -9,11 +9,51 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { canonicalKey } from "./read-tracker.mjs"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
 import { replaceWithFallback } from "./fuzzy-replace.mjs"
-import { resolveToolPath } from "./read.mjs"
+import { resolveToolPath, formatCatN } from "./read.mjs"
 import { diagnosticsAfterWrite } from "./write.mjs"
+
+// Post-edit snippet (Claude Code parity): after a successful edit we echo the
+// changed region as `cat -n` so the model can confirm the edit landed in the
+// right place and in the right context WITHOUT a follow-up read. Context lines
+// frame the change; very large insertions are head-clipped to keep the result
+// compact.
+export const SNIPPET_CONTEXT = 4
+export const SNIPPET_MAX_LINES = 50
+
+/**
+ * Render the edited region of `content` (LF-normalized) as a `cat -n` block.
+ *
+ * @param {string} content   final file content, LF-normalized
+ * @param {number} anchorIndex  char offset where the first replacement begins
+ * @param {string} newText   the replacement text (LF-normalized); "" for a deletion
+ * @returns {string} a labelled snippet block, or "" when the anchor is unknown
+ */
+export function renderEditSnippet(content, anchorIndex, newText) {
+  if (!Number.isInteger(anchorIndex) || anchorIndex < 0) return ""
+  const lines = content.split("\n")
+  // 0-based line index of the anchor: count newlines before it.
+  let startLine = 0
+  for (let i = 0; i < anchorIndex && i < content.length; i++) {
+    if (content[i] === "\n") startLine++
+  }
+  const insertedLines = newText.length === 0 ? 0 : newText.split("\n").length - 1
+  const endLine = startLine + insertedLines
+  const from = Math.max(0, startLine - SNIPPET_CONTEXT)
+  let to = Math.min(lines.length - 1, endLine + SNIPPET_CONTEXT)
+  let clipped = false
+  if (to - from + 1 > SNIPPET_MAX_LINES) {
+    to = from + SNIPPET_MAX_LINES - 1
+    clipped = true
+  }
+  const window = lines.slice(from, to + 1)
+  const body = formatCatN(window, from + 1)
+  const note = clipped ? `\n… (${endLine - to} more changed line(s) not shown)` : ""
+  return `\n\n${body}${note}`
+}
 
 export const editShape = {
   file_path: z
@@ -78,6 +118,7 @@ export function createEditTool({ cwd, readTracker, lspResolver }) {
   async function execEdit(args) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
+      assertNotSecretEscape(cwd, abs)
       return await withFileLock(canonicalKey(abs), async () => {
         const traits = await loadForEdit(abs, readTracker)
         // fuzzy-replace operates on LF-normalized text; the model's strings
@@ -87,9 +128,10 @@ export function createEditTool({ cwd, readTracker, lspResolver }) {
         const r = replaceWithFallback(traits.content, oldLf, newLf, args.replace_all === true)
         await saveEdited(abs, r.content, traits, readTracker)
         const via = r.matched === "exact" ? "" : ` (matched via ${r.matched})`
+        const snippet = renderEditSnippet(r.content, r.firstIndex, newLf)
         const diag = await diagnosticsAfterWrite(lspResolver, abs)
         return toolText(
-          `Edited ${abs}: ${r.count} replacement${r.count === 1 ? "" : "s"}${via}.${diag}`
+          `Edited ${abs}: ${r.count} replacement${r.count === 1 ? "" : "s"}${via}.${snippet}${diag}`
         )
       })
     } catch (err) {
@@ -109,9 +151,14 @@ export function createMultiEditTool({ cwd, readTracker, lspResolver }) {
   async function execMultiEdit(args) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
+      assertNotSecretEscape(cwd, abs)
       return await withFileLock(canonicalKey(abs), async () => {
         const traits = await loadForEdit(abs, readTracker)
         let content = traits.content
+        // Anchor the post-edit snippet on the FIRST edit, tracking how later
+        // edits shift its position as the buffer mutates beneath it.
+        let anchorIndex = null
+        let anchorNewText = ""
         const applied = []
         for (let i = 0; i < args.edits.length; i++) {
           const e = args.edits[i]
@@ -119,6 +166,18 @@ export function createMultiEditTool({ cwd, readTracker, lspResolver }) {
             const oldLf = decodeText(e.old_string).content
             const newLf = decodeText(e.new_string).content
             const r = replaceWithFallback(content, oldLf, newLf, e.replace_all === true)
+            if (anchorIndex === null) {
+              anchorIndex = r.firstIndex
+              anchorNewText = newLf
+            } else {
+              // r.targets are in the same coordinate space as the current
+              // anchor (the buffer before this edit). Shift the anchor past
+              // every replacement that ends at or before it.
+              for (const t of r.targets) {
+                if (t.start + t.oldLen <= anchorIndex) anchorIndex += r.newLen - t.oldLen
+                else if (t.start < anchorIndex) anchorIndex = t.start
+              }
+            }
             content = r.content
             applied.push(
               `#${i + 1}: ${r.count} replacement${r.count === 1 ? "" : "s"}${r.matched === "exact" ? "" : ` (${r.matched})`}`
@@ -132,9 +191,10 @@ export function createMultiEditTool({ cwd, readTracker, lspResolver }) {
           }
         }
         await saveEdited(abs, content, traits, readTracker)
+        const snippet = renderEditSnippet(content, anchorIndex ?? -1, anchorNewText)
         const diag = await diagnosticsAfterWrite(lspResolver, abs)
         return toolText(
-          `Edited ${abs} with ${args.edits.length} edits:\n${applied.join("\n")}${diag}`
+          `Edited ${abs} with ${args.edits.length} edits:\n${applied.join("\n")}${snippet}${diag}`
         )
       })
     } catch (err) {

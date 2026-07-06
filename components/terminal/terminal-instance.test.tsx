@@ -23,7 +23,21 @@ const mockTermInstance: {
   registerLinkProvider?: jest.Mock
   scrollToLine?: jest.Mock
   buffer?: { active: { viewportY: number; getLine?: (n: number) => unknown } }
-  options: { fontFamily: string; fontSize: number; scrollback: number; theme?: unknown }
+  options: {
+    fontFamily: string
+    fontSize: number
+    scrollback: number
+    theme?: unknown
+    fontWeight?: string
+    fontWeightBold?: string
+    lineHeight?: number
+    letterSpacing?: number
+    scrollSensitivity?: number
+    fastScrollSensitivity?: number
+    minimumContrastRatio?: number
+    cursorStyle?: string
+    cursorBlink?: boolean
+  }
   unicode: { activeVersion: string }
   rows: number
   cols: number
@@ -455,6 +469,83 @@ describe("TerminalInstance", () => {
     expect(opts.cursorBlink).toBe(false)
   })
 
+  it("constructs the Terminal with font-weight, line-height, spacing and contrast", async () => {
+    mockTerminalSettings = {
+      fontWeight: "300",
+      fontWeightBold: "700",
+      lineHeight: 1.4,
+      letterSpacing: 1,
+      scrollSensitivity: 3,
+      minimumContrastRatio: 7,
+    }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      fontWeight: string
+      fontWeightBold: string
+      lineHeight: number
+      letterSpacing: number
+      scrollSensitivity: number
+      fastScrollSensitivity: number
+      minimumContrastRatio: number
+    }
+    expect(opts.fontWeight).toBe("300")
+    expect(opts.fontWeightBold).toBe("700")
+    expect(opts.lineHeight).toBe(1.4)
+    expect(opts.letterSpacing).toBe(1)
+    expect(opts.scrollSensitivity).toBe(3)
+    expect(opts.fastScrollSensitivity).toBe(15) // 5× the base sensitivity
+    expect(opts.minimumContrastRatio).toBe(7)
+  })
+
+  it("re-fits when the line height changes (cell metrics shift)", async () => {
+    // Explicit font props match the stub so only the line-height change registers.
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />
+    )
+    await flushAsync()
+    // Mirror the constructor-committed metric defaults onto the stub.
+    Object.assign(mockTermInstance.options, {
+      fontFamily: "Menlo",
+      fontSize: 13,
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      minimumContrastRatio: 1,
+    })
+    mockFit.mockClear()
+    mockTerminalSettings = { lineHeight: 1.5 }
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />)
+    await flushAsync()
+    expect(mockTermInstance.options.lineHeight).toBe(1.5)
+    expect(mockFit).toHaveBeenCalled()
+  })
+
+  it("live-updates minimum contrast without a re-fit", async () => {
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />
+    )
+    await flushAsync()
+    Object.assign(mockTermInstance.options, {
+      fontFamily: "Menlo",
+      fontSize: 13,
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      minimumContrastRatio: 1,
+    })
+    mockFit.mockClear()
+    mockTerminalSettings = { minimumContrastRatio: 7 }
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />)
+    await flushAsync()
+    expect(mockTermInstance.options.minimumContrastRatio).toBe(7)
+    expect(mockFit).not.toHaveBeenCalled()
+  })
+
   it("live-updates term.options.fontSize when prop changes", async () => {
     const { rerender } = render(<TerminalInstance sessionId="s-1" fontSize={13} />)
     await flushAsync()
@@ -497,10 +588,18 @@ describe("TerminalInstance", () => {
     )
     await flushAsync()
     // The mock Terminal ignores its constructor options, so mirror the committed
-    // font onto the stub the way the real constructor would — otherwise the next
-    // effect run would see a spurious font change.
+    // font + metric options onto the stub the way the real constructor would —
+    // otherwise the next effect run would see a spurious font change.
     mockTermInstance.options.fontFamily = "Menlo"
     mockTermInstance.options.fontSize = 13
+    Object.assign(mockTermInstance.options, {
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      minimumContrastRatio: 1,
+    })
     mockFit.mockClear()
     rerender(
       <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} scrollback={5000} />
@@ -574,9 +673,12 @@ describe("TerminalInstance", () => {
       cb!({ kind: "command_end", exit_code: 1 }) // failed → red
     })
     expect(painted).toHaveLength(2)
-    // Running marker: neutral colour, thin, and crucially row-height (not 100%).
+    // Running marker: neutral colour, and crucially row-height (not 100%).
+    // The "command actions" feature defaults on, so the tick is interactive
+    // (5px, pointer-events auto) — clicking opens the command menu.
     expect(painted[0]!.backgroundColor).toBe("#a1a1aa")
-    expect(painted[0]!.width).toBe("3px")
+    expect(painted[0]!.width).toBe("5px")
+    expect(painted[0]!.pointerEvents).toBe("auto")
     expect(painted[0]!.height).not.toBe("100%")
     expect(painted[0]!.height).toBe("17px") // xterm's per-row height is preserved
     // Recoloured marker after a non-zero exit.

@@ -240,6 +240,7 @@ async function sendWebhookNotification(
     },
     event,
     signingSecret: cfg.signingSecret,
+    limits: cfg.delivery,
   })
 
   // Also fan the same event out to any standalone egress endpoints.

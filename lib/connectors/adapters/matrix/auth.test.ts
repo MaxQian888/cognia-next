@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core"
-import { matrixLoginWithPassword, matrixWhoami, normalizeHomeserver } from "./auth"
+import {
+  matrixLoginWithPassword,
+  probeMatrixAccessToken,
+  matrixWhoami,
+  matrixWhoamiDetailed,
+  normalizeHomeserver,
+} from "./auth"
 
 const mockInvoke = invoke as jest.Mock
 
@@ -31,6 +37,14 @@ describe("matrixWhoami", () => {
     await expect(matrixWhoami("matrix.org", "tok")).resolves.toBe("@bot:matrix.org")
   })
 
+  it("returns user_id + device_id through the detailed helper", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { user_id: "@bot:matrix.org", device_id: "D" }))
+    await expect(matrixWhoamiDetailed("matrix.org", "tok")).resolves.toEqual({
+      userId: "@bot:matrix.org",
+      deviceId: "D",
+    })
+  })
+
   it("returns null on non-2xx", async () => {
     mockInvoke.mockResolvedValue(httpResp(401, { errcode: "M_UNKNOWN_TOKEN" }))
     await expect(matrixWhoami("matrix.org", "tok")).resolves.toBeNull()
@@ -48,16 +62,62 @@ describe("matrixWhoami", () => {
   })
 })
 
+describe("probeMatrixAccessToken", () => {
+  beforeEach(() => mockInvoke.mockReset())
+
+  it("returns the resolved Matrix identity on success", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { user_id: "@bot:matrix.org", device_id: "DEV" }))
+    await expect(probeMatrixAccessToken("matrix.org", "syt_secret")).resolves.toEqual({
+      ok: true,
+      userId: "@bot:matrix.org",
+      deviceId: "DEV",
+    })
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_http_request", {
+      req: expect.objectContaining({
+        url: "https://matrix.org/_matrix/client/v3/account/whoami",
+        headers: { Authorization: "Bearer syt_secret" },
+      }),
+    })
+  })
+
+  it("returns the Matrix error message when the token is rejected", async () => {
+    mockInvoke.mockResolvedValue(
+      httpResp(401, { errcode: "M_UNKNOWN_TOKEN", error: "Invalid access token" })
+    )
+    await expect(probeMatrixAccessToken("matrix.org", "bad")).resolves.toEqual({
+      ok: false,
+      error: "Matrix whoami failed: Invalid access token",
+    })
+  })
+
+  it("returns a clear error for a non-JSON whoami response", async () => {
+    mockInvoke.mockResolvedValue(httpResp(502, "<html>bad gateway</html>"))
+    await expect(probeMatrixAccessToken("matrix.org", "tok")).resolves.toEqual({
+      ok: false,
+      error: "Matrix whoami returned non-JSON body (status 502)",
+    })
+  })
+
+  it("returns request exceptions as probe errors", async () => {
+    mockInvoke.mockRejectedValue(new Error("network offline"))
+    await expect(probeMatrixAccessToken("matrix.org", "tok")).resolves.toEqual({
+      ok: false,
+      error: "network offline",
+    })
+  })
+})
+
 describe("matrixLoginWithPassword", () => {
   beforeEach(() => mockInvoke.mockReset())
 
   it("returns accessToken + userId on success", async () => {
     mockInvoke.mockResolvedValue(
-      httpResp(200, { access_token: "syt_abc", user_id: "@bot:matrix.org" })
+      httpResp(200, { access_token: "syt_abc", user_id: "@bot:matrix.org", device_id: "DEV" })
     )
     await expect(matrixLoginWithPassword("matrix.org", "bot", "pw")).resolves.toEqual({
       accessToken: "syt_abc",
       userId: "@bot:matrix.org",
+      deviceId: "DEV",
     })
   })
 

@@ -43,7 +43,11 @@ jobs:
     uses: ./.github/workflows/test.yml
 
   # Step 3: Build Tauri Desktop Apps (after quality & test pass)
+  # Only on push (to master/develop) — the 4-platform cargo release matrix is
+  # the largest CI-minute consumer and is not needed on every PR. Release builds
+  # run independently via release.yml (triggered by version tags).
   build-tauri:
     name: Build Tauri
+    if: github.event_name == 'push'
     needs: [quality, test]
     uses: ./.github/workflows/build-tauri.yml

@@ -69,6 +69,10 @@ function writeMessagesSse(res, chunks, model) {
  *
  * `replyFor(body, callIndex)` lets a test vary the reply per call (used by the
  * multi-turn test to echo prior context). Defaults to a single "PONG" reply.
+ *
+ * CAUTION: key `replyFor` on the request `body` content, not `callIndex` — the
+ * claude-code CLI can issue auxiliary /v1/messages calls (title generation,
+ * probes) whose count varies by CLI version, so call indices are not stable.
  */
 export function startMockAnthropic({ chunks = ["PONG"], replyFor } = {}) {
   const messagesCalls = []

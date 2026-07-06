@@ -480,6 +480,37 @@ describe("pluginMarketplace", () => {
     })
   })
 
+  it("annotates entries with install state from origins + the disabled set", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginMarketplace({
+      ...base,
+      dispatch,
+      getSources: () => ["owner/repo"],
+      getOrigins: () => ({
+        demo: {
+          repoRef: "owner/repo/plugins/demo",
+          version: "0.9.0",
+          fingerprint: "f",
+          installedAt: 0,
+        },
+      }),
+      getDisabled: () => new Set(["demo"]),
+      browse: async () => ({
+        entries: [{ name: "Demo", installRef: "owner/repo/plugins/demo", version: "1.0.0" }],
+        errors: [],
+      }),
+    })
+    const last = actions[actions.length - 1] as unknown as {
+      overlay: { entries: Array<Record<string, unknown>> }
+    }
+    expect(last.overlay.entries[0]).toMatchObject({
+      installed: true,
+      enabled: false,
+      updatable: true,
+      installedId: "demo",
+    })
+  })
+
   it("notices when no sources are configured", async () => {
     const { dispatch, actions } = recorder()
     await pluginMarketplace({ ...base, dispatch, getSources: () => [] })

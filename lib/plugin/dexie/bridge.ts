@@ -16,7 +16,7 @@
 
 import type Dexie from "dexie"
 import type { PluginManifestDexieBlock } from "@/types/plugin"
-import { createMutex } from "@/lib/utils/async-mutex"
+import { createMutex } from "@cognia/primitives"
 import { toNamespacedTableName, MAX_TABLES_PER_PLUGIN } from "./namespace"
 import {
   getPluginDexieMeta,

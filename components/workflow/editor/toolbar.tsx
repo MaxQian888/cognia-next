@@ -13,6 +13,8 @@ import {
   Link2 as ShareIcon,
   MoreHorizontal as MoreIcon,
   RotateCcw as RevertIcon,
+  PanelLeft as PanelLeftIcon,
+  PanelRight as PanelRightIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
@@ -53,6 +55,12 @@ export interface EditorToolbarProps {
   onImportJson?: (json: string) => void
   onOpenCommandPalette?: () => void
   onOpenShortcuts?: () => void
+  /** Collapse/expand the node palette (left panel). Ctrl/Cmd+B. */
+  onToggleLeftPanel?: () => void
+  leftPanelCollapsed?: boolean
+  /** Collapse/expand the right sidebar. Ctrl/Cmd+J. */
+  onToggleRightPanel?: () => void
+  rightPanelCollapsed?: boolean
 }
 
 export const EditorToolbar = memo(function EditorToolbar({
@@ -69,6 +77,10 @@ export const EditorToolbar = memo(function EditorToolbar({
   onImportJson,
   onOpenCommandPalette,
   onOpenShortcuts,
+  onToggleLeftPanel,
+  leftPanelCollapsed,
+  onToggleRightPanel,
+  rightPanelCollapsed,
 }: EditorToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [revertOpen, setRevertOpen] = useState(false)
@@ -117,6 +129,24 @@ export const EditorToolbar = memo(function EditorToolbar({
         </TooltipTrigger>
         <TooltipContent side="bottom">{t("tooltip.back")}</TooltipContent>
       </Tooltip>
+      {onToggleLeftPanel ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={onToggleLeftPanel}
+              aria-label={t("tooltip.togglePalette")}
+              aria-pressed={!leftPanelCollapsed}
+              data-testid="workflow-toggle-left-panel"
+              className={cn(leftPanelCollapsed && "text-muted-foreground")}
+            >
+              <PanelLeftIcon className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("tooltip.togglePalette")}</TooltipContent>
+        </Tooltip>
+      ) : null}
       <Input
         value={workflowName}
         onChange={(e) => onRename(e.target.value)}
@@ -236,6 +266,24 @@ export const EditorToolbar = memo(function EditorToolbar({
           <PlayIcon className="size-4 mr-1.5" />
           {t("run")}
         </Button>
+        {onToggleRightPanel ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onToggleRightPanel}
+                aria-label={t("tooltip.toggleSidebar")}
+                aria-pressed={!rightPanelCollapsed}
+                data-testid="workflow-toggle-right-panel"
+                className={cn(rightPanelCollapsed && "text-muted-foreground")}
+              >
+                <PanelRightIcon className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("tooltip.toggleSidebar")}</TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
       <AlertDialog open={revertOpen} onOpenChange={setRevertOpen}>
         <AlertDialogContent data-testid="workflow-revert-dialog">

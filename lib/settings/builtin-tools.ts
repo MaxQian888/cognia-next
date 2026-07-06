@@ -18,6 +18,9 @@ export type BuiltinToolCategoryId =
   | "shellAdvanced"
   | "terminalRepl"
   | "lsp"
+  | "codeGraph"
+  | "astGrep"
+  | "dependencyResearch"
 
 export type BuiltinToolRiskLevel = "low" | "medium" | "high"
 
@@ -82,6 +85,18 @@ export function namespaced(toolName: string): string {
 /** Iterator over every tool across every category. */
 export function listBuiltinTools(): BuiltinToolMeta[] {
   return BUILTIN_TOOL_CATEGORIES.flatMap((c) => c.tools)
+}
+
+/**
+ * The SDK-namespaced names of every built-in tool that does NOT require approval
+ * — the read-only research surface. Derived from the same metadata that drives
+ * the approval gate (never hand-listed) so a tool that becomes side-effecting is
+ * dropped automatically. Used to scope the read-only Explore / Plan subagents.
+ */
+export function readOnlyBuiltinToolNames(): string[] {
+  return listBuiltinTools()
+    .filter((t) => !t.requiresApproval)
+    .map((t) => namespaced(t.name))
 }
 
 /** All bare tool names belonging to a single category. */

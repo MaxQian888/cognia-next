@@ -147,3 +147,42 @@ the model as explicit limitations, not silent gaps.
 - The live webview eval bridge (`eval_with_callback`) cannot be covered by jest or
   cargo unit tests; a `pnpm tauri dev` smoke of one snapshot→click→snapshot loop is
   the manual gate.
+
+## Addendum (2026-06-27) — DOM tool coverage round
+
+Surgical additions to close real gaps in the Phase-1 tool surface (all behind
+the same embedded-engine / trust-tier router):
+
+- **`browser_press_key`** — named keys (Enter/Tab/Escape/Arrow*/Backspace/Delete/
+  Home/End/PageUp/PageDown/F1–F24) and chords (`ctrl+a`, `shift+Tab`) via a JS
+  chord parser mirroring the Rust `keymap` vocabulary. Optional `ref` target;
+  defaults to the focused element. Text entry still uses `browser_type`.
+- **`browser_click` modifiers** — optional `modifiers: ["ctrl","shift",…]` for
+  modifier-clicks.
+- **`browser_scroll`** — by `ref` (scroll-into-view) or page `direction`
+  (up/down/left/right/top/bottom) + optional `amount`.
+- **`browser_evaluate`** — evaluate a JS *expression*, returning a JSON
+  `{ok,value}` envelope (new `browser_embed_evaluate` Tauri command wrapping the
+  existing `eval_embed_with_result`, 200 KB result cap). **Trust-gated**: refused
+  on public origins (the plugin tool checks `resolveTrustTier`), steering to the
+  Playwright MCP.
+- **`browser_wait_for` variants** — now also waits for a CSS `selector`
+  (appear/disappear) or `networkIdle` (in-flight + completion counters, fed by a
+  new fetch/XHR pending tracker), in addition to text.
+- **Snapshot richness** — `buildSnapshot` now descends open shadow DOM and
+  same-origin iframes (frame-origin nodes carry `frame:true`), and an opt-in
+  `includeText` surfaces salient non-interactive text (headings/list items/…).
+  Bounded by depth + node caps.
+
+New read-only Tauri commands: `browser_embed_has_selector`,
+`browser_embed_network_state`. Still deferred (Phase-next): multi-tab/popup
+orchestration, drag-and-drop, file upload, cookie/storage/header access, and the
+closed-shadow-DOM / cross-origin-iframe limits (unchanged — Playwright MCP).
+
+## Addendum (2026-06-27) — surface guidance
+
+The computer-use plugin now registers a `computer-use:surface-guidance` context
+provider so the model picks the right family: `computer_use`/`click_text` for
+native apps & arbitrary screens, `browser_*` for the localhost preview,
+`mcp__playwright__*` for public sites, `web_fetch`/`web_search` for read-only
+content.

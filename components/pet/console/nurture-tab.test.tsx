@@ -5,6 +5,11 @@ jest.mock("../pet-renderer", () => ({
   PetRenderer: ({ size }: { size?: number }) => <div data-testid="pet-preview" data-size={size} />,
 }))
 
+// Inventory strip's reactive read — empty so the strip stays hidden here.
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => [],
+}))
+
 import { NurtureTab } from "./nurture-tab"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
@@ -75,6 +80,34 @@ describe("NurtureTab", () => {
     expect(h.onClean).toHaveBeenCalled()
     fireEvent.click(document.querySelector('[data-action="treated"]') as HTMLButtonElement)
     expect(h.onTreat).toHaveBeenCalled()
+  })
+
+  it("shows the wallet strip and jumps to the shop via onOpenShop", () => {
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    }
+    const view = computePetView(profile, null, 0)
+    const onOpenShop = jest.fn()
+    render(
+      <NurtureTab
+        profile={profile}
+        view={view}
+        onFeed={jest.fn()}
+        onPlay={jest.fn()}
+        onPet={jest.fn()}
+        onTalk={jest.fn()}
+        onSleep={jest.fn()}
+        onClean={jest.fn()}
+        onTreat={jest.fn()}
+        onOpenShop={onOpenShop}
+      />
+    )
+    fireEvent.click(screen.getByTestId("pet-wallet-strip"))
+    expect(onOpenShop).toHaveBeenCalledTimes(1)
+    // Mood/condition surface in the vitals card.
+    expect(screen.getByTestId("pet-mood-chip")).toBeInTheDocument()
   })
 
   it("submits typed talk text and clears the input", () => {

@@ -193,6 +193,25 @@ shadcn `Sheet`，渲染 `flattenWaterfall` 行，每行是一条按比例的计�
 `observability.toolbar.*`、`observability.range.*`、`observability.filters.*`、
 `observability.waterfall.*`）。guild-rail 导航标签为 `observability`。
 
+## 交互与设置
+
+除只读面板外，仪表盘还支持交互：
+
+- **点击即过滤** —— 点击环形图切片/图例行或柱条，会把该值切入变量过滤（`lib/observability/filters.ts`
+  的 `toggleFilterValue`），从而让拆解面板对整个仪表盘做交叉过滤。选中项会高亮；每个面板还有度量切换
+  （`BreakdownMetricToggle`）在 spans/cost/errors 间切换（`breakdownValue` + `topByMetric`）。
+- **图例开关** —— 多序列时序面板（延迟分位、Token 吞吐）提供可点击图例，隐藏/显示单条序列。
+- **设置抽屉**（`ObservabilitySettingsSheet`，齿轮按钮）—— 逐指标 warn/crit 阈值覆盖（`mergeThresholds`，
+  持久化于 store）、默认时间范围 + 刷新频率、面板显隐（`hiddenPanels`）、数据管理（span 计数 +
+  `pruneOlderThan` 保留 + `clearAllSpans`）。
+- **导出/导入**（`ExportMenu`）—— 最近 Trace → CSV（`tracesToCsv`）、整个仪表盘配置 → JSON
+  （`serializeDashboardConfig`/`parseDashboardConfig`），走跨平台 `saveExport`。
+- **手动刷新 + 上次更新**（`RefreshStatus` 基于 `useRefreshTick` 的 `{ tick, lastUpdated, refresh }`）。
+- **深链** —— 当前范围 + 过滤映射进 URL（`useObservabilityUrlSync` 基于 `lib/observability/url-state.ts`），
+  `/observability?range=6h&f=…` 链接可复现视图。
+- **快捷键**（`useObservabilityHotkeys`）—— `e` 编辑 · `r` 刷新 · `f` 聚焦过滤 · `s` 设置。
+- **空状态**（`ObservabilityEmptyState`）—— 窗口内无 span 时展示。
+
 ## 从哪里入手
 
 | 目标 | 文件 |
@@ -200,4 +219,7 @@ shadcn `Sheet`，渲染 `flattenWaterfall` 行，每行是一条按比例的计�
 | 添加面板 | 在 `components/observability/panel-registry.ts` 的 `PANELS` 中添加一个 `PanelDef` + 一个 `defaultLayouts` 槽位 |
 | 添加指标/序列 | `lib/observability/aggregate-series.ts` + `TimeSeriesPanel` 配置 |
 | 添加拆解维度 | `Dimension` 联合类型 + `lib/observability/breakdown.ts` 中的 `dimValue` + 过滤栏 |
-| 调整阈值 | `lib/observability/thresholds.ts` 中的 `DEFAULT_THRESHOLDS` |
+| 调整默认阈值 | `lib/observability/thresholds.ts` 中的 `DEFAULT_THRESHOLDS`（用户可在设置抽屉中覆盖） |
+| 修改设置抽屉 | `components/observability/observability-settings-sheet.tsx` + `stores/observability/observability-store.ts` 的 store 切片 |
+| 修改深链内容 | `lib/observability/url-state.ts` |
+| 修改导出格式 | `lib/observability/export-csv.ts` / `lib/observability/dashboard-config.ts` |

@@ -145,6 +145,15 @@ describe("stats", () => {
     // The shared upload secret must not grant access to another tenant's share.
     expect((await run(req(`/v1/share/${code}/stats`, authed("GET")))).status).toBe(401)
   })
+
+  it("returns 404 for expired shares while their KV metadata still exists", async () => {
+    const { code, ownerToken } = await create({ ttlSeconds: 0.001 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const res = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
+
+    expect(res.status).toBe(404)
+  })
 })
 
 describe("delete", () => {
@@ -168,6 +177,15 @@ describe("delete", () => {
   it("returns 204 idempotently for an unknown code without leaking existence", async () => {
     expect((await run(req(`/v1/share/does-not-exist-code`, { method: "DELETE" }))).status).toBe(204)
   })
+
+  it("returns 204 for expired shares without requiring owner proof", async () => {
+    const { code } = await create({ ttlSeconds: 0.001 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const res = await run(req(`/v1/share/${code}`, { method: "DELETE" }))
+
+    expect(res.status).toBe(204)
+  })
 })
 
 describe("cors + size guards", () => {
@@ -175,6 +193,25 @@ describe("cors + size guards", () => {
     const res = await run(req("/v1/share", { method: "OPTIONS" }))
     expect(res.status).toBe(204)
     expect(res.headers.get("Access-Control-Allow-Methods")).toContain("POST")
+  })
+
+  it("allows owner-token lifecycle requests in preflight", async () => {
+    const res = await run(
+      req("/v1/share", {
+        method: "OPTIONS",
+        headers: {
+          "Access-Control-Request-Method": "DELETE",
+          "Access-Control-Request-Headers": "X-Owner-Token",
+        },
+      })
+    )
+
+    expect(res.status).toBe(204)
+    const allowHeaders = res.headers
+      .get("Access-Control-Allow-Headers")
+      ?.split(",")
+      .map((header) => header.trim().toLowerCase())
+    expect(allowHeaders).toContain("x-owner-token")
   })
 
   it("rejects an oversized declared body", async () => {

@@ -26,6 +26,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { UIMessage } from "ai"
+import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { applySdkEvent } from "@/lib/claude/adapter"
 import { approveTool, interruptSession, sendPrompt } from "@/lib/claude/ipc"
 import type {
@@ -35,6 +37,7 @@ import type {
   SDKEventEnvelope,
 } from "@/lib/claude/types"
 import { listMessages } from "@/lib/db/messages"
+import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 
@@ -50,6 +53,18 @@ export interface RemoteSessionStream {
   pendingApproval: PendingApproval | null
   /** False when `session_attach` was rejected (device lacks the capability). */
   canControl: boolean
+  /**
+   * True once the host session has terminated (`session_ended`) or the host
+   * sidecar exited — the composer/interrupt controls lock out and the view
+   * shows an "ended" notice instead of looking deceptively live.
+   */
+  sessionEnded: boolean
+  /**
+   * True when `session_attach` failed because the session no longer exists on
+   * the desktop (404). Distinct from a permission denial (which downgrades to
+   * observe-only with `canControl=false` but a still-valid session).
+   */
+  notFound: boolean
   /** Send a follow-up prompt into the host session. */
   send: (text: string) => Promise<void>
   /** Interrupt the in-flight turn. */
@@ -62,24 +77,81 @@ function isForSession(evt: ClaudeEvent, sessionId: string): boolean {
   return (evt as { sessionId?: string }).sessionId === sessionId
 }
 
+function frameType(evt: unknown): string | undefined {
+  return (evt as { type?: string } | null)?.type
+}
+
+function errReason(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * A control RPC was rejected because this device lacks (or just lost) the
+ * `allowRemoteControl` capability. Matches the structured `CompanionError.code`
+ * the host returns and falls back to message text for generic errors.
+ */
+function isControlForbidden(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code
+  if (code === "remote_control_forbidden" || code === "http_403") return true
+  const msg = errReason(err)
+  return /\b403\b/.test(msg) || /forbidden/i.test(msg)
+}
+
+/** The attached session no longer exists on the desktop. */
+function isNotFound(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code
+  if (code === "http_404" || code === "session_not_found") return true
+  const msg = errReason(err)
+  return /\b404\b/.test(msg) || /not[_\s-]?found/i.test(msg)
+}
+
 export function useRemoteSessionStream(sessionId: string | null): RemoteSessionStream {
+  const t = useTranslations("mobile.remoteSessions")
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [status, setStatus] = useState<RemoteStreamStatus>("loading")
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [canControl, setCanControl] = useState(true)
+  const [sessionEnded, setSessionEnded] = useState(false)
+  const [notFound, setNotFound] = useState(false)
   // Keep the freshest message list for the long-lived stream handler without
   // resubscribing on every token. Seeded in the effect and maintained by the
   // stream handler — never written during render.
   const messagesRef = useRef<UIMessage[]>([])
+  // Mirror of `status` for the control callbacks: their closures must read the
+  // live value (e.g. the interrupt guard) without being recreated per token.
+  const statusRef = useRef<RemoteStreamStatus>("loading")
+  const setStatusBoth = useCallback((next: RemoteStreamStatus) => {
+    statusRef.current = next
+    setStatus(next)
+  }, [])
 
   useEffect(() => {
     let unsub: (() => void) | null = null
     let cancelled = false
 
+    // Re-seed the scrollback from Dexie. Used both for the initial paint and
+    // after a transport `resync_required` (a cursor gap can leave the streamed
+    // list permanently stale). Only adopt the Dexie snapshot when it is at
+    // least as complete as the in-memory stream so we never clobber freshly
+    // streamed deltas that the sync orchestrator hasn't persisted yet.
+    const reseedFromDexie = async () => {
+      if (!sessionId) return
+      try {
+        const history = await listMessages(sessionId)
+        if (cancelled) return
+        if (history.length >= messagesRef.current.length) {
+          messagesRef.current = history
+          setMessages(history)
+        }
+      } catch {
+        // best-effort — keep whatever we already have
+      }
+    }
+
     // Seed history from the synced-down Dexie store, then attach + stream.
     void (async () => {
       if (!sessionId) {
-        setStatus("idle")
+        setStatusBoth("idle")
         return
       }
       const deviceId = loadCompanionConfig()?.deviceId ?? ""
@@ -88,22 +160,51 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
         if (!cancelled) {
           messagesRef.current = history
           setMessages(history)
-          setStatus("idle")
+          setStatusBoth("idle")
         }
       } catch {
-        if (!cancelled) setStatus("idle")
+        if (!cancelled) setStatusBoth("idle")
       }
+      // Background freshness: the Dexie seed may be stale if sync hasn't pulled
+      // recent messages. Kick a one-shot pull (cheap, reuses the orchestrator);
+      // the streamed list stays authoritative — sync only refreshes the seed.
+      void runSyncDown({ only: ["messages"] }).catch(() => {})
 
-      // Attach as a live watcher. A 403 (no capability) downgrades to
-      // observe-only; the stream subscription below still runs.
+      // Attach as a live watcher. Branch on the failure: a permission denial
+      // (403) downgrades to observe-only with a still-valid session; a 404
+      // means the session is gone; a network error is left optimistic and the
+      // transport reconnect (surfaced by the detail view's connection UI)
+      // recovers it rather than falsely flagging observe-only.
       try {
         await transport.call("session_attach", { sessionId, deviceId })
         if (!cancelled) setCanControl(true)
-      } catch {
-        if (!cancelled) setCanControl(false)
+      } catch (err) {
+        if (cancelled) return
+        if (isNotFound(err)) {
+          setNotFound(true)
+          setCanControl(false)
+        } else if (isControlForbidden(err)) {
+          setCanControl(false)
+        }
+        // else: retryable/network — stay optimistic, let transport reconnect.
       }
 
       unsub = transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, (evt) => {
+        // `resync_required` is a synthetic, non-session-scoped frame the
+        // transport dispatches after a cursor gap — handle it BEFORE the
+        // session filter (it carries no `sessionId`).
+        if (frameType(evt) === "resync_required") {
+          void reseedFromDexie()
+          return
+        }
+        // `sidecar_exited` is also non-session-scoped but terminal for every
+        // host session — treat it as an end for the one we're watching.
+        if (frameType(evt) === "sidecar_exited") {
+          setSessionEnded(true)
+          setStatusBoth("idle")
+          setPendingApproval(null)
+          return
+        }
         if (!isForSession(evt, sessionId)) return
         switch (evt.type) {
           case "event": {
@@ -113,7 +214,11 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
               messagesRef.current = next
               setMessages(next)
             }
-            setStatus(turnComplete ? "idle" : "streaming")
+            setStatusBoth(turnComplete ? "idle" : "streaming")
+            // The host blocks the turn on a pending approval; a fresh event
+            // means it advanced, so the host already resolved the approval
+            // (typically via its 120s backstop). Clear our stale card.
+            setPendingApproval((cur) => (cur ? null : cur))
             return
           }
           case "permission_request": {
@@ -132,7 +237,9 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
             return
           }
           case "session_ended": {
-            setStatus("idle")
+            setSessionEnded(true)
+            setStatusBoth("idle")
+            setPendingApproval(null)
             return
           }
           default:
@@ -149,22 +256,46 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
       // Best-effort detach so the host stops routing approvals here.
       void transport.call("session_detach", { sessionId, deviceId: did }).catch(() => {})
     }
-  }, [sessionId])
+  }, [sessionId, setStatusBoth])
 
   const send = useCallback(
     async (text: string) => {
       if (!sessionId || !text.trim()) return
-      setStatus("streaming")
-      await sendPrompt(sessionId, text)
+      // Optimistic streaming state for immediate feedback; reverted on failure
+      // so a rejected/offline send never leaves the composer stuck showing the
+      // interrupt control over nothing in flight.
+      setStatusBoth("streaming")
+      try {
+        await sendPrompt(sessionId, text)
+      } catch (err) {
+        setStatusBoth("idle")
+        if (isControlForbidden(err)) {
+          setCanControl(false)
+          toast.warning(t("detail.controlLost"))
+        } else {
+          toast.error(t("detail.sendFailed", { reason: errReason(err) }))
+        }
+      }
     },
-    [sessionId]
+    [sessionId, setStatusBoth, t]
   )
 
   const interrupt = useCallback(async () => {
     if (!sessionId) return
-    await interruptSession(sessionId)
-    setStatus("idle")
-  }, [sessionId])
+    // Nothing in flight — don't fire a spurious interrupt RPC.
+    if (statusRef.current !== "streaming") return
+    try {
+      await interruptSession(sessionId)
+      setStatusBoth("idle")
+    } catch (err) {
+      if (isControlForbidden(err)) {
+        setCanControl(false)
+        toast.warning(t("detail.controlLost"))
+      } else {
+        toast.error(t("detail.interruptFailed", { reason: errReason(err) }))
+      }
+    }
+  }, [sessionId, setStatusBoth, t])
 
   const respond = useCallback(
     async (decision: ApprovalDecision) => {
@@ -176,12 +307,30 @@ export function useRemoteSessionStream(sessionId: string | null): RemoteSessionS
           approval.requestId,
           decision === "allow_always" ? "allow" : decision
         )
-      } finally {
         setPendingApproval(null)
+      } catch (err) {
+        if (isControlForbidden(err)) {
+          setCanControl(false)
+          setPendingApproval(null)
+          toast.warning(t("detail.controlLost"))
+        } else {
+          // Keep the card mounted so the user can retry the decision.
+          toast.error(t("approval.respondFailed", { reason: errReason(err) }))
+        }
       }
     },
-    [pendingApproval]
+    [pendingApproval, t]
   )
 
-  return { messages, status, pendingApproval, canControl, send, interrupt, respond }
+  return {
+    messages,
+    status,
+    pendingApproval,
+    canControl,
+    sessionEnded,
+    notFound,
+    send,
+    interrupt,
+    respond,
+  }
 }

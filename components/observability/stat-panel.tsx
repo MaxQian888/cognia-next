@@ -13,7 +13,9 @@ import type { WindowKpis } from "@/lib/observability/aggregate-series"
 import {
   DEFAULT_THRESHOLDS,
   evalThreshold,
+  type ThresholdConfig,
   type ThresholdLevel,
+  type ThresholdMetric,
 } from "@/lib/observability/thresholds"
 import { formatMs, formatPercent, formatRate, formatUsd } from "@/lib/observability/format-utils"
 import { cn } from "@/lib/utils"
@@ -51,21 +53,27 @@ export function resolveStat(panel: PanelDef, kpis: WindowKpis): { display: strin
   }
 }
 
-export function statLevel(panel: PanelDef, raw: number): ThresholdLevel | undefined {
+export function statLevel(
+  panel: PanelDef,
+  raw: number,
+  thresholds: Record<ThresholdMetric, ThresholdConfig> = DEFAULT_THRESHOLDS
+): ThresholdLevel | undefined {
   if (!panel.threshold) return undefined
-  return evalThreshold(raw, DEFAULT_THRESHOLDS[panel.threshold])
+  return evalThreshold(raw, thresholds[panel.threshold])
 }
 
 export interface StatPanelProps {
   panel: PanelDef
   kpis: WindowKpis
   editMode?: boolean
+  /** Resolved thresholds (defaults merged with user overrides). */
+  thresholds?: Record<ThresholdMetric, ThresholdConfig>
 }
 
-export function StatPanel({ panel, kpis, editMode }: StatPanelProps) {
+export function StatPanel({ panel, kpis, editMode, thresholds }: StatPanelProps) {
   const t = useTranslations("observability")
   const { display, raw } = resolveStat(panel, kpis)
-  const level = statLevel(panel, raw)
+  const level = statLevel(panel, raw, thresholds)
 
   return (
     <PanelFrame

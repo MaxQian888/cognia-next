@@ -66,7 +66,7 @@ export function Inflight({
           ))}
         </Box>
       )}
-      {hasText && <Markdown raw={revealedText} />}
+      {hasText && <Markdown raw={revealedText} streaming />}
     </Box>
   )
 }

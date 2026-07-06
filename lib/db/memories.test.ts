@@ -7,11 +7,13 @@ import {
   createMemory,
   getMemoriesByVectorDocIds,
   getMemory,
+  hardDeleteMemories,
   hardDeleteMemory,
   invalidateMemory,
   listActiveForReader,
   listActiveProcedural,
   listMemories,
+  setMemoriesPinned,
   setMemoryPinned,
   touchMemories,
   updateMemory,
@@ -216,6 +218,35 @@ describe("delete & clear", () => {
     await createMemory(buildInput({ id: "g2" }))
     expect(await clearMemories()).toBe(2)
     expect((await listMemories()).length).toBe(0)
+  })
+
+  it("hardDeleteMemories removes the listed rows and returns the count", async () => {
+    await createMemory(buildInput({ id: "a" }))
+    await createMemory(buildInput({ id: "b" }))
+    await createMemory(buildInput({ id: "c" }))
+    expect(await hardDeleteMemories(["a", "c"])).toBe(2)
+    expect(await getMemory("a")).toBeUndefined()
+    expect(await getMemory("b")).toBeDefined()
+    expect(await getMemory("c")).toBeUndefined()
+  })
+
+  it("hardDeleteMemories is a no-op on empty input", async () => {
+    expect(await hardDeleteMemories([])).toBe(0)
+  })
+
+  it("setMemoriesPinned pins/unpins the listed rows in one pass", async () => {
+    await createMemory(buildInput({ id: "a", pinned: false }))
+    await createMemory(buildInput({ id: "b", pinned: false }))
+    await setMemoriesPinned(["a", "b"], true)
+    expect((await getMemory("a"))?.pinned).toBe(true)
+    expect((await getMemory("b"))?.pinned).toBe(true)
+    await setMemoriesPinned(["a"], false)
+    expect((await getMemory("a"))?.pinned).toBe(false)
+    expect((await getMemory("b"))?.pinned).toBe(true)
+  })
+
+  it("setMemoriesPinned is a no-op on empty input", async () => {
+    await expect(setMemoriesPinned([], true)).resolves.toBeUndefined()
   })
 })
 

@@ -181,6 +181,25 @@ export async function hardDeleteMemory(id: string): Promise<void> {
   await getDb().memories.delete(id)
 }
 
+/** Hard-delete a specific set of memories (bulk panel action). Returns the count. */
+export async function hardDeleteMemories(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0
+  await getDb().memories.bulkDelete(ids)
+  return ids.length
+}
+
+/** Pin / unpin a specific set of memories in one transaction (bulk panel action). */
+export async function setMemoriesPinned(ids: string[], pinned: boolean): Promise<void> {
+  if (ids.length === 0) return
+  const db = getDb()
+  const now = Date.now()
+  await db.transaction("rw", db.memories, async () => {
+    for (const id of ids) {
+      await db.memories.update(id, { pinned, updatedAt: now })
+    }
+  })
+}
+
 /**
  * Hard-delete every memory, or just those in a scope/character. User-initiated
  * "clear all" from the panel.

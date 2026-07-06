@@ -17,6 +17,8 @@
 
 import type { ToolUIPart } from "ai"
 import { ToolBody } from "@/components/ai-elements/tool"
+import { hasMcpContent } from "@/lib/claude/parts-extensions"
+import { McpContentBlocksCard } from "./mcp-renderers/mcp-content-blocks-card"
 import { WikiSearchCard } from "./mcp-renderers/wiki-search-card"
 import { WikiReadCard } from "./mcp-renderers/wiki-read-card"
 import { RagSearchCard } from "./mcp-renderers/rag-search-card"
@@ -113,11 +115,11 @@ export function isStructuredMcpToolType(type: string): boolean {
 export function MCPToolCard({ part }: { part: ToolUIPart }) {
   const type = part.type
   if (typeof type !== "string" || !type.startsWith("tool-")) {
-    return <ToolBody part={part} />
+    return <McpToolBodyOrContent part={part} />
   }
   const toolName = normalizeToolName(type.slice("tool-".length))
   const Card = REGISTRY[toolName]
-  if (!Card) return <ToolBody part={part} />
+  if (!Card) return <McpToolBodyOrContent part={part} />
 
   return <McpCardWithFallback Card={Card} part={part} />
 }
@@ -125,6 +127,19 @@ export function MCPToolCard({ part }: { part: ToolUIPart }) {
 function McpCardWithFallback({ Card, part }: { Card: CardComponent; part: ToolUIPart }) {
   const rendered = Card({ part })
   if (rendered) return rendered
+  return <McpToolBodyOrContent part={part} />
+}
+
+/**
+ * Generic tool-result renderer (gap3). When the result preserved structured
+ * MCP content blocks (image / resource / audio / text), render them richly;
+ * otherwise fall back to the stringified ToolBody. This is the fallback for
+ * any tool with no dedicated card — including arbitrary third-party MCP tools.
+ */
+export function McpToolBodyOrContent({ part }: { part: ToolUIPart }) {
+  if (hasMcpContent(part)) {
+    return <McpContentBlocksCard part={part} blocks={part.mcpContent} />
+  }
   return <ToolBody part={part} />
 }
 

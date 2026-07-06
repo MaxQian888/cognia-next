@@ -225,25 +225,35 @@ export function replaceWithFallback(content, oldString, newString, replaceAll = 
 }
 
 function applyAtIndices(content, indices, oldLen, newString, matched, replaceAll) {
-  const targets = replaceAll ? indices : indices.slice(0, 1)
-  let out = ""
-  let prev = 0
-  for (const idx of targets) {
-    out += content.slice(prev, idx) + newString
-    prev = idx + oldLen
-  }
-  out += content.slice(prev)
-  return { content: out, matched, count: targets.length }
+  const idx = replaceAll ? indices : indices.slice(0, 1)
+  return applyAtRanges(
+    content,
+    idx.map((start) => ({ start, end: start + oldLen })),
+    newString,
+    matched
+  )
 }
 
 function applyAtRanges(content, ranges, newString, matched) {
   // Ranges from a single strategy never overlap; apply in order.
   let out = ""
   let prev = 0
+  // `targets` carries each replaced span in ORIGINAL-content coordinates so
+  // callers can locate the edit (the post-edit snippet, multi_edit anchor
+  // tracking). `firstIndex` is the start of the first replacement — identical
+  // in the produced text because everything before it is untouched.
+  const targets = ranges.map((r) => ({ start: r.start, oldLen: r.end - r.start }))
   for (const r of ranges) {
     out += content.slice(prev, r.start) + newString
     prev = r.end
   }
   out += content.slice(prev)
-  return { content: out, matched, count: ranges.length }
+  return {
+    content: out,
+    matched,
+    count: ranges.length,
+    firstIndex: ranges.length > 0 ? ranges[0].start : -1,
+    targets,
+    newLen: newString.length,
+  }
 }

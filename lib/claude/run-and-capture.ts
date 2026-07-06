@@ -44,6 +44,8 @@ import { listActiveChatMiddlewares } from "@/lib/claude/chat-middleware/registry
 import { isChatMiddlewareExecutionEnabled } from "@/lib/claude/chat-middleware/feature-flag"
 import type { ChatMiddlewareRequest } from "@/types/plugin/plugin-chat-middleware"
 import type { PluginMessage } from "@/types/plugin/plugin"
+import { runWithExecutionLease, combineAbortSignals } from "@/lib/execution/admit"
+import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 
 export interface RunAndCaptureResult {
   /** The accumulated assistant reply text (concatenated text blocks). */
@@ -221,12 +223,22 @@ export class RunAndCaptureError extends Error {
 export type CaptureStreamEvent =
   | { type: "text-delta"; delta: string }
   | { type: "thinking-delta"; delta: string }
-  | { type: "tool-call"; toolName: string; input: Record<string, unknown> }
+  | {
+      type: "tool-call"
+      toolName: string
+      input: Record<string, unknown>
+      /** The originating `tool_use` block id, when the SDK supplies one. A stable
+       * per-call identity so consumers can pair a later `tool-result` exactly and
+       * distinguish two concurrent calls with identical name+input. */
+      id?: string
+    }
   | {
       type: "tool-result"
       toolName: string
       /** Tool arguments correlated from the originating `tool_use` block, when known. */
       input?: Record<string, unknown>
+      /** The `tool_use_id` this result answers, when known (see `tool-call.id`). */
+      id?: string
       result: unknown
       isError?: boolean
     }
@@ -361,6 +373,21 @@ export interface RunAndCaptureOptions {
   onToolResultReview?: (
     request: CaptureToolResult
   ) => CaptureToolResultDecision | void | Promise<CaptureToolResultDecision | void>
+  /**
+   * Execution-broker admission metadata. This wrapper is the shared chokepoint
+   * for every headless leg (connector auto-reply, agent team, scheduled goal,
+   * plugin Agent SDK, eval) — none of which went through the foreground chat
+   * cap. Admitting here registers the leg with the global {@link
+   * getExecutionBroker} so all four subsystems share one ceiling, become
+   * observable in one place, and are cancellable as a unit. The broker's
+   * `lease.signal` is combined with any {@link signal} above and handed to the
+   * underlying capture, so a broker-side cancel actually stops the turn.
+   *
+   * Defaults: when omitted, the leg is still admitted with kind `"subagent"`
+   * and a session-derived label. Set `execution.skip` to bypass admission for a
+   * caller that is already governed elsewhere (e.g. a nested re-entry).
+   */
+  execution?: ExecutionLeaseInfo
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -379,6 +406,47 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
  * any text transformation is applied back onto the full result.
  */
 export async function runAndCaptureAssistantReply(
+  sessionId: string,
+  prompt: SendContent,
+  options?: SendOptions,
+  cap?: RunAndCaptureOptions
+): Promise<RunAndCaptureResult> {
+  // Admission bypass: a caller that is already governed (or a context with no
+  // broker, e.g. some CLI paths) opts out via `execution.skip`.
+  if (cap?.execution?.skip) {
+    return runCaptureWithMiddleware(sessionId, prompt, options, cap)
+  }
+
+  const info = cap?.execution
+  return runWithExecutionLease(
+    {
+      kind: info?.kind ?? "subagent",
+      label: info?.label ?? `Headless turn ${sessionId.slice(0, 8)}`,
+      sessionId: info?.sessionId ?? sessionId,
+      ...(info?.runId ? { runId: info.runId } : {}),
+      ...(info?.taskId ? { taskId: info.taskId } : {}),
+      ...(info?.projectId ? { projectId: info.projectId } : {}),
+      ...(info?.weight ? { weight: info.weight } : {}),
+    },
+    (lease) => {
+      // Combine the broker lease signal with any caller signal so a broker-side
+      // cancel (by id / session / project) aborts the underlying turn.
+      const combined = combineAbortSignals(cap?.signal, lease.signal)
+      const effectiveCap: RunAndCaptureOptions | undefined = combined
+        ? { ...cap, signal: combined.signal }
+        : cap
+      const run = runCaptureWithMiddleware(sessionId, prompt, options, effectiveCap)
+      return combined ? run.finally(combined.cleanup) : run
+    }
+  )
+}
+
+/**
+ * The middleware-aware capture. Was the body of {@link runAndCaptureAssistantReply}
+ * before broker admission was layered on top; kept as a private seam so the
+ * admission wrapper stays thin and the middleware logic is unchanged.
+ */
+async function runCaptureWithMiddleware(
   sessionId: string,
   prompt: SendContent,
   options?: SendOptions,
@@ -706,7 +774,14 @@ async function captureAssistantReplyCore(
       // Any other event for our session is provider progress → (re)arm the
       // idle watchdog. Arming on the first event (not before) means a slow
       // cold start is bounded by the wall-clock timeout, not this one.
-      armIdle()
+      //
+      // EXCEPT while a tool is in flight: the provider stream is legitimately
+      // silent until the tool returns (a `dispatch_agent` subagent run can take
+      // minutes), and the SDK re-includes the completed tool_use block in every
+      // later assistant snapshot — so an unconditional re-arm here would restart
+      // the idle timer off a stray repeat and trip the watchdog mid-tool. The
+      // `tool_result` handler re-arms once `inFlightToolIds` drains.
+      if (inFlightToolIds.size === 0) armIdle()
 
       if (evt.type === "sdk_session_id") {
         if (typeof evt.sdkSessionId === "string" && evt.sdkSessionId) {
@@ -828,6 +903,7 @@ async function captureAssistantReplyCore(
                     type: "tool-call",
                     toolName: block.name,
                     input: block.input,
+                    ...(blockId ? { id: blockId } : {}),
                   })
                 }
               } else if (
@@ -907,6 +983,7 @@ async function captureAssistantReplyCore(
                   type: "tool-result",
                   toolName: call?.name ?? "",
                   ...(call?.input ? { input: call.input } : {}),
+                  ...(typeof block.tool_use_id === "string" ? { id: block.tool_use_id } : {}),
                   result: block.content,
                   isError: Boolean(block.is_error),
                 })

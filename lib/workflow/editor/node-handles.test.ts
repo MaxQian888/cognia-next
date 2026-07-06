@@ -27,6 +27,18 @@ describe("outputHandlesFor", () => {
     ])
   })
 
+  it("approval gate exposes approved/rejected handles from v1 (ADR 0061)", () => {
+    const handles = outputHandlesFor({
+      kind: "action.approval.request",
+      typeVersion: 1,
+      params: {},
+    })
+    expect(handles).toEqual([
+      { id: "approved", kind: "approved" },
+      { id: "rejected", kind: "rejected" },
+    ])
+  })
+
   it("switch v2 exposes one handle per case plus default", () => {
     const handles = outputHandlesFor({
       kind: "flow.switch",

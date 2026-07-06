@@ -180,10 +180,82 @@ describe("TerminalCard", () => {
     })
   })
 
+  it.each([
+    ["terminal-card-quick-fixes", "quickFixes"],
+    ["terminal-card-command-actions", "commandActions"],
+    ["terminal-card-sticky-scroll", "stickyScroll"],
+  ] as const)("turns %s off (VS Code parity feature, defaults on)", async (testId, key) => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId(testId)
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ [key]: false }),
+    })
+  })
+
   it("renders the color-scheme and renderer selectors", () => {
     render(<TerminalCard />)
     expect(screen.getByTestId("terminal-card-color-scheme")).toBeInTheDocument()
     expect(screen.getByTestId("terminal-card-renderer")).toBeInTheDocument()
+  })
+
+  it("renders the font-weight, bold-weight and minimum-contrast selectors", () => {
+    render(<TerminalCard />)
+    expect(screen.getByTestId("terminal-card-font-weight")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-card-font-weight-bold")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-card-min-contrast")).toBeInTheDocument()
+  })
+
+  it("clamps line height between 0.8 and 2", async () => {
+    render(<TerminalCard />)
+    const input = screen.getByTestId("terminal-card-line-height") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "5" } })
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ lineHeight: 2 }),
+    })
+  })
+
+  it("persists letter spacing updates", async () => {
+    render(<TerminalCard />)
+    const input = screen.getByTestId("terminal-card-letter-spacing") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "1.5" } })
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ letterSpacing: 1.5 }),
+    })
+  })
+
+  it("clamps scroll sensitivity between 1 and 10", async () => {
+    render(<TerminalCard />)
+    const input = screen.getByTestId("terminal-card-scroll-sensitivity") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "99" } })
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ scrollSensitivity: 10 }),
+    })
+  })
+
+  it("turns confirm-on-close off (defaults on)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-confirm-on-close")
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ confirmOnClose: false }),
+    })
+  })
+
+  it("groups controls under section headers", () => {
+    render(<TerminalCard />)
+    expect(screen.getByText("settings.terminal.groups.appearance")).toBeInTheDocument()
+    expect(screen.getByText("settings.terminal.groups.behavior")).toBeInTheDocument()
   })
 
   it("mounts the launch-profiles manager", () => {

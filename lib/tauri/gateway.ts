@@ -1,16 +1,19 @@
 /**
  * Tauri-side wrappers for the inbound LLM gateway.
  *
- * The axum HTTP server, OS-keyring-backed bearer token, protocol
- * translation, and the routing snapshot live in `src-tauri/src/gateway/`.
- * Frontend code never calls Tauri IPC directly — every boundary goes through
- * this module so error normalization and typed signatures stay in one place.
+ * The axum HTTP server, keyring-backed scoped API keys, protocol translation,
+ * and the routing snapshot live in `src-tauri/src/gateway/`. Frontend code
+ * never calls Tauri IPC directly — every boundary goes through this module so
+ * error normalization and typed signatures stay in one place.
  *
  * Snake-cased command names match `generate_handler!` in `lib.rs`.
  */
 
 import { transport } from "@/lib/tauri"
 import type {
+  GatewayApiKey,
+  GatewayApiKeyPatch,
+  GatewayApiKeyRedacted,
   GatewayConfig,
   GatewayRoutingSnapshot,
   GatewaySnapshotEntry,
@@ -19,6 +22,11 @@ import type {
 
 export async function gatewayGetStatus(): Promise<GatewayStatus> {
   return transport.call<GatewayStatus>("gateway_get_status")
+}
+
+/** Read the persisted config so the settings UI hydrates from saved values. */
+export async function gatewayGetConfig(): Promise<GatewayConfig> {
+  return transport.call<GatewayConfig>("gateway_get_config")
 }
 
 export async function gatewayUpdateConfig(config: GatewayConfig): Promise<void> {
@@ -35,19 +43,49 @@ export async function gatewayStop(): Promise<void> {
   await transport.call<void>("gateway_stop")
 }
 
-/** Read the current bearer token (OS keyring). `null` when none generated. */
-export async function gatewayGetToken(): Promise<string | null> {
-  return transport.call<string | null>("gateway_get_token")
+// ---- API keys ---------------------------------------------------------------
+
+/** List keys with secrets redacted to a fingerprint. */
+export async function gatewayListKeys(): Promise<GatewayApiKeyRedacted[]> {
+  return transport.call<GatewayApiKeyRedacted[]>("gateway_list_keys")
 }
 
-/** Generate + persist a fresh token. Returns the new value. */
-export async function gatewayRotateToken(): Promise<string> {
-  return transport.call<string>("gateway_rotate_token")
+/**
+ * Create a scoped key. Returns the FULL key (secret included) so the UI can
+ * show it once for copying — subsequent lists are redacted.
+ */
+export async function gatewayCreateKey(input: {
+  name: string
+  modelAllowlist: string[]
+  expiresAtMs: number | null
+  rateLimitPerMin: number | null
+  quotaTokens?: number | null
+}): Promise<GatewayApiKey> {
+  return transport.call<GatewayApiKey>("gateway_create_key", {
+    name: input.name,
+    modelAllowlist: input.modelAllowlist,
+    expiresAtMs: input.expiresAtMs,
+    rateLimitPerMin: input.rateLimitPerMin,
+    quotaTokens: input.quotaTokens ?? null,
+  })
 }
 
-/** Delete the persisted bearer token from the OS keyring. */
-export async function gatewayClearToken(): Promise<void> {
-  await transport.call<void>("gateway_clear_token")
+export async function gatewayUpdateKey(id: string, patch: GatewayApiKeyPatch): Promise<void> {
+  await transport.call<void>("gateway_update_key", { id, patch })
+}
+
+export async function gatewayDeleteKey(id: string): Promise<void> {
+  await transport.call<void>("gateway_delete_key", { id })
+}
+
+/** Zero a key's consumed-quota counter (the "reset usage" action). */
+export async function gatewayResetKeyQuota(id: string): Promise<void> {
+  await transport.call<void>("gateway_reset_key_quota", { id })
+}
+
+/** Reveal a key's full secret (explicit user action). */
+export async function gatewayRevealKey(id: string): Promise<string | null> {
+  return transport.call<string | null>("gateway_reveal_key", { id })
 }
 
 /**

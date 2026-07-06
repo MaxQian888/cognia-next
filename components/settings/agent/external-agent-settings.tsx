@@ -74,6 +74,10 @@ import {
   isFromPreset,
   resolvePreferredCodexExecutablePresetId,
 } from "@/lib/ai/agent/external/presets"
+import {
+  adaptPermissionMode,
+  supportedPermissionModes,
+} from "@/lib/ai/agent/external/permission-modes"
 import type {
   ExternalAgentConnectionStatus,
   CreateExternalAgentInput,
@@ -81,6 +85,15 @@ import type {
   ExternalAgentProtocol,
   ExternalAgentTransport,
 } from "@/types/agent/external-agent"
+
+/** i18n label key (under `externalAgent.settings`) for each permission mode. */
+const PERMISSION_MODE_LABEL_KEY: Record<AcpPermissionMode, string> = {
+  default: "permissionDefault",
+  acceptEdits: "permissionAcceptEdits",
+  bypassPermissions: "permissionBypass",
+  plan: "permissionPlan",
+  dontAsk: "permissionDontAsk",
+}
 
 // =============================================================================
 // Types
@@ -520,12 +533,14 @@ function AgentEditorDialog({
             </>
           )}
 
-          {/* Permission Mode */}
+          {/* Permission Mode — narrowed to the modes the chosen backend can
+              enforce, and clamped for display so switching protocol never shows
+              a mode the backend would silently downgrade. */}
           <Separator />
           <div className="grid gap-2">
             <Label>{t("defaultPermissionMode")}</Label>
             <Select
-              value={formData.defaultPermissionMode}
+              value={adaptPermissionMode(formData.defaultPermissionMode, formData.protocol).mode}
               onValueChange={(v) =>
                 setFormData({ ...formData, defaultPermissionMode: v as AcpPermissionMode })
               }
@@ -534,10 +549,11 @@ function AgentEditorDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="default">{t("permissionDefault")}</SelectItem>
-                <SelectItem value="acceptEdits">{t("permissionAcceptEdits")}</SelectItem>
-                <SelectItem value="bypassPermissions">{t("permissionBypass")}</SelectItem>
-                <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
+                {supportedPermissionModes(formData.protocol).map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {t(PERMISSION_MODE_LABEL_KEY[mode])}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

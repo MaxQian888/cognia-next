@@ -278,6 +278,19 @@
   "description": "调整应用的视觉风格，所有改动会立即保存。",
   "fontScaleHint": "整体缩放界面。默认 16px。",
   "fontScaleLabel": "字号",
+  "io": {
+    "confirm": {
+      "body": "将用导入的主题、字体、颜色和自定义 CSS 替换当前设置（共 {count, plural, other {# 项}}）。已上传的壁纸会保留。",
+      "cancel": "取消",
+      "confirm": "应用",
+      "title": "应用导入的外观？"
+    },
+    "export": "导出",
+    "exportSuccess": "外观已导出。",
+    "import": "导入",
+    "importInvalid": "无法读取该文件：{message}",
+    "importSuccess": "已应用 {count, plural, other {# 项外观设置}}。"
+  },
   "languageLabel": "语言",
   "layoutType": {
     "agentFlow": {
@@ -340,6 +353,31 @@
     "styleRich": "丰富",
     "title": "个性化"
   },
+  "preview": {
+    "assistant": "这是你的主题预览。",
+    "badge": "示例",
+    "buttons": {
+      "destructive": "删除",
+      "ghost": "幽灵",
+      "outline": "描边",
+      "primary": "主要",
+      "secondary": "次要"
+    },
+    "code": "const theme = \"cognia\"",
+    "hint": "反映当前的主题、密度、间距与字体。",
+    "inputAria": "示例输入框",
+    "inputSample": "示例文本",
+    "switchAria": "示例开关",
+    "table": {
+      "col1": "项目",
+      "col2": "数值",
+      "row1": "消息",
+      "row2": "Token"
+    },
+    "title": "实时预览",
+    "user": "看起来不错！",
+    "windowTitle": "预览"
+  },
   "reduceMotionHint": "关闭非必要的动画和过渡。",
   "reduceMotionLabel": "减少动效",
   "reset": {
@@ -349,6 +387,7 @@
     "confirm": "重置",
     "title": "确认重置外观设置？"
   },
+  "resetToDefault": "将{name}恢复为默认",
   "tabs": {
     "a11y": "无障碍",
     "advanced": "高级",
@@ -356,6 +395,7 @@
     "components": "组件",
     "custom": "自定义主题",
     "import": "导入",
+    "layout": "布局",
     "theme": "主题",
     "themePack": "主题包",
     "typography": "字体",

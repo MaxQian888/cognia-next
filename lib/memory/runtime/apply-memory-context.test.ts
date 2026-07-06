@@ -1,5 +1,12 @@
 import type { Memory } from "@/types/memory/memory"
 import { applyMemoryContext, type ApplyMemoryContextDeps } from "./apply-memory-context"
+import { __resetMemoryBm25Cache } from "@/lib/memory/retrieve/retriever"
+
+// The retriever's BM25 index is module-level cached by a `{count}:{updatedAt}`
+// signature. These tests use a fixed `updatedAt`, so single-candidate corpora
+// across tests collide on that signature and would return a stale index —
+// reset it between tests so each case tokenises its own corpus (test isolation).
+beforeEach(() => __resetMemoryBm25Cache())
 
 let seq = 0
 function mem(text: string, over: Partial<Memory> = {}): Memory {

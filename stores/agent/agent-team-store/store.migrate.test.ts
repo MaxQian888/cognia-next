@@ -20,13 +20,27 @@ describe("migrateAgentTeamPersisted", () => {
     expect(migrateAgentTeamPersisted(42 as unknown, 1)).toBe(42)
   })
 
-  it("returns v3+ input unchanged (idempotency)", () => {
-    const v3 = {
+  it("returns current-version input unchanged (idempotency)", () => {
+    const current = {
       defaultConfig: { capabilities: { skillIds: ["s"] }, sharedMemoryAdapterId: undefined },
       lastAdapterSyncVersion: {},
     }
-    const out = migrateAgentTeamPersisted(v3, 3)
-    expect(out).toBe(v3)
+    const out = migrateAgentTeamPersisted(current, 5)
+    expect(out).toBe(current)
+  })
+
+  it("upgrades v4 → v5: backfills an empty comments array on every task", () => {
+    const v4 = {
+      defaultConfig: { governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy },
+      tasks: {
+        t1: { id: "t1", title: "a" },
+        t2: { id: "t2", title: "b", comments: [{ id: "c1", text: "keep me" }] },
+      },
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = migrateAgentTeamPersisted(v4, 4) as any
+    expect(out.tasks.t1.comments).toEqual([])
+    expect(out.tasks.t2.comments).toEqual([{ id: "c1", text: "keep me" }])
   })
 
   it("upgrades v2 → v3: backfills sharedMemoryAdapterId + lastAdapterSyncVersion", () => {

@@ -83,7 +83,13 @@ export interface ProviderConfig {
   apiKeyRequired: boolean
   baseURLRequired: boolean
   defaultBaseURL?: string
-  protocol?: "openai" | "anthropic" | "gemini"
+  protocol?: BuiltInApiProtocol
+  /**
+   * OpenAI endpoint family override (responses/chat/auto). Lets a provider opt
+   * into the Responses API regardless of host (Azure, compatible gateways,
+   * custom base URLs). Omitted = "auto" (host heuristic). See {@link ApiFlavor}.
+   */
+  apiFlavor?: ApiFlavor
   defaultEnabled?: boolean
   placeholderApiKey?: string
   models: ModelConfig[]
@@ -196,6 +202,23 @@ export interface UserProviderSettings {
   providerId: string
   apiKey?: string
   baseURL?: string
+  /**
+   * OpenAI endpoint family override (responses/chat/auto). Lets the user opt a
+   * provider into the Responses API regardless of host — Azure OpenAI, a
+   * compatible gateway that proxies `/responses`, or a custom base URL.
+   * Omitted = "auto" (host heuristic). See {@link ApiFlavor}.
+   */
+  apiFlavor?: ApiFlavor
+  /**
+   * Wire protocol override (openai/anthropic/gemini/plugin id). Built-in
+   * providers normally get a fixed protocol from the catalog (looked up by
+   * provider id) — this lets the user override it for providers that sit
+   * behind a proxy/relay speaking a different format than the catalog
+   * assumes. Not offered for the literal `"anthropic"` provider id, which
+   * always dispatches through the native Claude Agent SDK subprocess
+   * regardless of this field (see `sidecar/dispatch/index.mjs`).
+   */
+  apiProtocol?: ApiProtocol
   defaultModel: string
   enabled: boolean
   discoveredModels?: ProviderModelDiscoveryEntry[]
@@ -338,6 +361,34 @@ export const BUILTIN_API_PROTOCOLS: readonly BuiltInApiProtocol[] = [
  * literal autocompletion while accepting registered custom ids.
  */
 export type ApiProtocol = BuiltInApiProtocol | (string & {})
+
+/**
+ * The execution-layer protocol namespace (what actually reaches AI SDK
+ * dispatch). Distinct from the renderer-facing {@link ApiProtocol}, which names
+ * Google's family `gemini`; here it is `google`, plus `mistral`/`cohere` (which
+ * have no custom-provider picker entry but are dispatchable). The
+ * renderer→execution bridge is `normalizeProtocol` in
+ * `sidecar/dispatch/protocol-adapters/provider-protocol.mjs` (gemini → google),
+ * guarded by `protocol-adapter-spec.parity.test.ts`. Defined here so the two
+ * resolvers (`lib/ai/provider-consumption.ts`,
+ * `packages/provider-core/.../provider-persistence.ts`) share one definition.
+ */
+export type ResolverProtocol =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "mistral"
+  | "cohere"
+  | (string & {})
+
+/**
+ * OpenAI endpoint family selection. "responses"/"chat" override the host
+ * heuristic — this is what unlocks the Responses API on Azure OpenAI, on
+ * compatible gateways that proxy `/responses`, and on custom base URLs. "auto"
+ * (or undefined) falls back to the heuristic in
+ * `decideOpenAiEndpointFlavor` (provider-protocol.mjs).
+ */
+export type ApiFlavor = "auto" | "responses" | "chat"
 
 /**
  * Per-model capability/pricing overrides for a custom provider. Mirrors

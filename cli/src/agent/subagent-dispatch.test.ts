@@ -20,6 +20,11 @@ import {
   __clearAllCliBackgroundRunsForTesting,
   __disposeCliBackgroundJournalForTesting,
 } from "./subagent-background-tasks"
+import {
+  __clearLiveSubagentsForTesting,
+  getLiveSubagent,
+  listLiveSubagents,
+} from "./subagent-live-output"
 
 // For the end-to-end test below: mock the live-sidecar collaborators so a call
 // routed through the REAL handle → REAL handleCliDispatchAgent → REAL
@@ -77,6 +82,7 @@ afterEach(async () => {
   clearCliSubagentContext("s1")
   await __disposeCliBackgroundJournalForTesting()
   __clearAllCliBackgroundRunsForTesting()
+  __clearLiveSubagentsForTesting()
 })
 
 describe("buildCliSubagentToolManifest", () => {
@@ -129,8 +135,10 @@ describe("handleCliDispatchAgent", () => {
   it("reports an unknown subagent id with the available list", async () => {
     registerCliSubagentContext("s1", makeCtx())
     const resp = await handleCliDispatchAgent(req({ subagentId: "ghost", prompt: "go" }))
-    expect(resp.result).toContain('Unknown subagent "ghost"')
-    expect(resp.result).toContain("reviewer")
+    // An unknown id is a genuine failure → surfaced as a tool error (red ✗).
+    expect(resp.error).toContain('Unknown subagent "ghost"')
+    expect(resp.error).toContain("reviewer")
+    expect(resp.result).toBeUndefined()
   })
 
   it("fans out a parallel dispatch and joins the results", async () => {
@@ -152,6 +160,37 @@ describe("handleCliDispatchAgent", () => {
     expect(resp.result).toContain("---")
   })
 
+  it("runs a parallel dispatch concurrently (both start before either finishes)", async () => {
+    // Each run parks until released; track peak concurrency. A serial fan-out
+    // would never let `active` reach 2 — this locks in the `Promise.all` overlap
+    // so a future refactor can't silently serialize the batch form.
+    let active = 0
+    let peak = 0
+    const release: Array<() => void> = []
+    const run = jest.fn(async () => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise<void>((resolve) => release.push(resolve))
+      active -= 1
+      return { text: "done" }
+    })
+    registerCliSubagentContext("s1", makeCtx({ agents: [agent("a"), agent("b")], run }))
+    const pending = handleCliDispatchAgent(
+      req({
+        dispatches: [
+          { subagentId: "a", prompt: "pa" },
+          { subagentId: "b", prompt: "pb" },
+        ],
+      })
+    )
+    // Let both runs reach their barrier, then release them.
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(peak).toBe(2)
+    for (const r of release) r()
+    await pending
+  })
+
   it("surfaces a thrown run as a failed-line result", async () => {
     registerCliSubagentContext(
       "s1",
@@ -162,7 +201,30 @@ describe("handleCliDispatchAgent", () => {
       })
     )
     const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
-    expect(resp.result).toContain("failed: nope")
+    // A thrown run is a failure → tool error (so the dispatch cell renders red ✗,
+    // not a green ✓), while the text still reaches the model for recovery.
+    expect(resp.error).toContain("failed: nope")
+    expect(resp.result).toBeUndefined()
+  })
+
+  it("keeps a mixed fan-out (one ok, one failed) as a result, not an error", async () => {
+    const run = jest
+      .fn()
+      .mockResolvedValueOnce({ text: "A done" })
+      .mockRejectedValueOnce(new Error("B boom"))
+    registerCliSubagentContext("s1", makeCtx({ agents: [agent("a"), agent("b")], run }))
+    const resp = await handleCliDispatchAgent(
+      req({
+        dispatches: [
+          { subagentId: "a", prompt: "pa" },
+          { subagentId: "b", prompt: "pb" },
+        ],
+      })
+    )
+    // A partial success stays a result so the good half reads normally.
+    expect(resp.error).toBeUndefined()
+    expect(resp.result).toContain("A done")
+    expect(resp.result).toContain("failed: B boom")
   })
 
   it("returns the parse-error message for an unusable payload", async () => {
@@ -206,14 +268,122 @@ describe("handleCliDispatchAgent", () => {
     const resp = await handleCliDispatchAgent(
       req({ subagentId: "ghost", prompt: "go", background: true })
     )
-    expect(resp.result).toContain('Unknown subagent "ghost"')
-    expect(resp.result).not.toContain("started in background")
+    expect(resp.error).toContain('Unknown subagent "ghost"')
+    expect(resp.error).not.toContain("started in background")
+    expect(resp.result).toBeUndefined()
   })
 
   it("returns a clean message when collecting an unknown runId", async () => {
     registerCliSubagentContext("s1", makeCtx())
     const resp = await handleCliDispatchAgent(req({ collect: "nope" }))
     expect(resp.result).toContain('no background run "nope"')
+  })
+
+  it("cannot collect a background run started by a different session", async () => {
+    // Start a background run under session "other".
+    registerCliSubagentContext("other", makeCtx({ run: async () => ({ text: "x" }) }))
+    await handleCliDispatchAgent({
+      type: "plugin_tool_exec",
+      sessionId: "other",
+      toolUseId: "t",
+      name: DISPATCH_AGENT_TOOL_NAME,
+      args: { subagentId: "reviewer", prompt: "go", background: true },
+    })
+    clearCliSubagentContext("other")
+
+    // Session "s1" tries to collect it by guessing the runId — denied (the mint
+    // is deterministic here only because we don't override it; we assert by the
+    // foreign-collect message instead).
+    registerCliSubagentContext("s1", makeCtx())
+    const resp = await handleCliDispatchAgent(req({ collect: "bg-foreign" }))
+    expect(resp.result).toContain('no background run "bg-foreign"')
+  })
+
+  it("reports an interrupt (not a failure) when the parent signal aborted", async () => {
+    const controller = new AbortController()
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        signal: controller.signal,
+        run: async () => {
+          controller.abort()
+          throw new Error("aborted")
+        },
+      })
+    )
+    const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    expect(resp.result).toContain("[reviewer] interrupted.")
+    expect(resp.result).not.toContain("failed")
+  })
+})
+
+describe("live-output wiring", () => {
+  it("registers a live entry that settles done for a successful foreground run", async () => {
+    registerCliSubagentContext("s1", makeCtx({ run: async () => ({ text: "ran" }) }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "check this" }))
+    const live = listLiveSubagents("s1")
+    expect(live).toHaveLength(1)
+    expect(live[0]).toMatchObject({ name: "reviewer", task: "check this", status: "done" })
+    // Foreground runs get a minted `live-…` id (not a background runId).
+    expect(live[0].liveId).toMatch(/^live-/)
+  })
+
+  it("settles the live entry to error when the run throws", async () => {
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        run: async () => {
+          throw new Error("nope")
+        },
+      })
+    )
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    expect(listLiveSubagents("s1")[0].status).toBe("error")
+  })
+
+  it("settles the live entry to interrupted when the parent signal aborted", async () => {
+    const controller = new AbortController()
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        signal: controller.signal,
+        run: async () => {
+          controller.abort()
+          throw new Error("aborted")
+        },
+      })
+    )
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    expect(listLiveSubagents("s1")[0].status).toBe("interrupted")
+  })
+
+  it("forwards capture events into the live entry via onEvent", async () => {
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        run: async (_def, _prompt, _parent, deps) => {
+          deps.onEvent?.({ type: "text-delta", delta: "hello" })
+          deps.onEvent?.({ type: "thinking-delta", delta: "ponder" })
+          return { text: "ran" }
+        },
+      })
+    )
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    const entry = listLiveSubagents("s1")[0]
+    expect(entry.text).toBe("hello")
+    expect(entry.thinking).toBe("ponder")
+  })
+
+  it("shares the background runId as the live id so the panel shows one row", async () => {
+    let resolveRun!: (r: { text: string }) => void
+    const run = jest.fn(() => new Promise<{ text: string }>((res) => (resolveRun = res)))
+    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-shared" }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go", background: true }))
+    // While running, the live entry exists under the background runId.
+    expect(getLiveSubagent("bg-shared", "s1")?.status).toBe("running")
+    resolveRun({ text: "bg done" })
+    await Promise.resolve()
+    await Promise.resolve()
   })
 })
 

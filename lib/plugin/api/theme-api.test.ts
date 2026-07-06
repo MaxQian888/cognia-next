@@ -7,7 +7,7 @@ import {
   clearCustomThemesForPluginContext,
   __resetThemeApiOwnershipForTesting,
 } from "./theme-api"
-import type { CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomTheme } from "@/types/plugin/plugin"
 
 // Mock settings store
 let mockTheme = "light"

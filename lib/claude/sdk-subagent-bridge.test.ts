@@ -62,7 +62,7 @@ describe("applySdkSubagentBridge — lifecycle", () => {
     expect(Object.keys(useSubagentRuntimeStore.getState().subAgents)).toEqual(["T1"])
   })
 
-  it("logs the last tool and advances progress on task_progress", () => {
+  it("logs the last tool and bumps tool-use count on task_progress (gap9)", () => {
     applySdkSubagentBridge(started(), SID)
     applySdkSubagentBridge(
       {
@@ -80,8 +80,8 @@ describe("applySdkSubagentBridge — lifecycle", () => {
     )
     const n = node("T1")!
     expect(n.logs.some((l) => l.message.includes("Read"))).toBe(true)
-    expect(n.progress).toBe(30) // 3 tool_uses * 10 (derived pseudo-percentage)
     expect(n.toolUses).toBe(3) // honest raw count
+    expect(n.progress).toBe(0) // gap9: pseudo-percentage no longer set (seed only)
   })
 
   it("completes the subagent on task_updated status completed", () => {
@@ -224,6 +224,44 @@ describe("applySdkSubagentBridge — rich logs via parent_tool_use_id", () => {
     const entry = n.logs.find((l) => l.message === "tool_result")
     expect(entry).toBeTruthy()
     expect(entry!.level).toBe("error")
+  })
+
+  it("projects tool_use → tool_result into the node's toolCalls (running → error)", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      {
+        type: "assistant",
+        parent_tool_use_id: "tu1",
+        uuid: "u",
+        session_id: "sdk",
+        message: {
+          id: "m",
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call-1", name: "Grep", input: { q: "z" } }],
+        },
+      } as never,
+      SID
+    )
+    let n = node("T1")!
+    expect(n.toolCalls).toHaveLength(1)
+    expect(n.toolCalls![0]).toMatchObject({ name: "Grep", state: "running" })
+
+    applySdkSubagentBridge(
+      {
+        type: "user",
+        parent_tool_use_id: "tu1",
+        uuid: "u",
+        session_id: "sdk",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "call-1", content: "out", is_error: true }],
+        },
+      } as never,
+      SID
+    )
+    n = node("T1")!
+    expect(n.toolCalls).toHaveLength(1)
+    expect(n.toolCalls![0]).toMatchObject({ name: "Grep", state: "error", isError: true })
   })
 
   it("ignores parent_tool_use_id frames with no known task (dispatch_agent path)", () => {

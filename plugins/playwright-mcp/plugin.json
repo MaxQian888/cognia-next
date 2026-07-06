@@ -22,6 +22,10 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Spawns @playwright/mcp via npx — unavailable on mobile."
     }
   }
 }

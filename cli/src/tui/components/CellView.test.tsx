@@ -360,10 +360,109 @@ describe("CellView", () => {
     expect(renderCell({ id: "1", kind: "notice", message: "fyi" })).toContain("fyi")
   })
 
-  it("renders a plan cell as a labelled card with markdown body", () => {
-    const text = renderCell({ id: "1", kind: "plan", raw: "# Approach\n- step" })
-    expect(text).toContain("Proposed plan")
+  it("renders a running bash cell with the kill/background hint", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "bash",
+      command: "npm run dev",
+      output: "listening",
+      status: "running",
+    })
+    expect(text).toContain("npm run dev")
+    expect(text).toContain("Ctrl+C kill")
+    expect(text).toContain("Ctrl+B background")
+  })
+
+  it("labels a backgrounded bash cell and drops the kill hint", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "bash",
+      command: "npm run dev",
+      output: "",
+      status: "running",
+      background: true,
+    })
+    expect(text).toContain("(background)")
+    expect(text).not.toContain("Ctrl+C kill")
+  })
+
+  it("shows no hint once a bash cell has settled", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "bash",
+      command: "ls",
+      output: "a\nb",
+      status: "done",
+      exitCode: 0,
+    })
+    expect(text).not.toContain("Ctrl+C kill")
+  })
+
+  describe("clickable file paths (OSC-8)", () => {
+    const ORIG = { ...process.env }
+    afterEach(() => {
+      process.env = { ...ORIG }
+    })
+
+    it("wraps a read tool's path in a vscode://file link inside a VS Code terminal", () => {
+      process.env.FORCE_HYPERLINK = "1"
+      process.env.TERM_PROGRAM = "vscode"
+      const text = renderCell({
+        id: "1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { file_path: "/repo/a.ts", offset: 12 },
+        status: "done",
+        collapsed: true,
+      } as Cell)
+      expect(text).toContain("vscode://file/repo/a.ts:12")
+      expect(text).toContain("/repo/a.ts") // visible label unchanged
+    })
+
+    it("uses a file:// link outside a VS Code terminal", () => {
+      process.env.FORCE_HYPERLINK = "1"
+      delete process.env.TERM_PROGRAM
+      const text = renderCell({
+        id: "1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { file_path: "/repo/a.ts" },
+        status: "done",
+        collapsed: true,
+      } as Cell)
+      // The exact file:// form is platform-dependent (drive-resolved on Windows);
+      // assert it is an OSC-8 file link wrapping the visible path.
+      expect(text).toContain("]8;;file://")
+      expect(text).toContain("a.ts")
+    })
+
+    it("leaves the path plain when the terminal lacks hyperlink support", () => {
+      process.env.FORCE_HYPERLINK = "0"
+      const text = renderCell({
+        id: "1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { file_path: "/repo/a.ts" },
+        status: "done",
+        collapsed: true,
+      } as Cell)
+      expect(text).toContain("/repo/a.ts")
+      expect(text).not.toContain("file://")
+      expect(text).not.toContain("]8;;")
+    })
+  })
+
+  it("renders a plan cell as a compact reference card (full body lives in the approval overlay / /plan)", () => {
+    const text = renderCell({ id: "1", kind: "plan", raw: "# Approach\n- step one\n- step two" })
+    expect(text).toContain("Plan ready for review")
+    expect(text).toContain("2 steps")
     expect(text).toContain("Approach")
-    expect(text).toContain("step")
+    expect(text).toContain("full text via /plan")
+    // The full plan body is no longer duplicated in the transcript — it scrolls
+    // inside the approval overlay instead.
+    expect(text).not.toContain("step one")
   })
 })

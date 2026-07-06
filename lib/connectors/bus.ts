@@ -29,6 +29,7 @@ import type {
 } from "@/types/connectors"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { StoredMessage } from "@/lib/claude/types"
+import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution, setStatus, setSlaDue } from "@/lib/db/conversation-overrides"
 import { computeDueAt } from "@/lib/connectors/sla"
@@ -38,7 +39,7 @@ import { getDb } from "@/lib/db/schema"
 import { recordAndCheckInbound } from "./dedup"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
-import { runInboundOcr } from "./inbound-ocr"
+import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
 import { evaluatePolicy, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInbound, type RouteDecision } from "./mode-router"
@@ -56,11 +57,21 @@ export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
 }
 
-/** Called by the runtime (Task 37) to handle the final routing decision. */
+/**
+ * Called by the runtime (Task 37) to handle the final routing decision.
+ *
+ * `override` and `adapterRow` are the rows the bus already fetched in
+ * `dispatchInboundFull` (Steps 2 & 3). They are passed through so the
+ * runtime's ai-run path doesn't re-read the same immutable rows from Dexie —
+ * `adapterRow` is guaranteed non-null (the bus returns early on a missing
+ * adapter instance), `override` is null when the conversation has none.
+ */
 export type RouteHandler = (
   event: NormalizedInboundEvent,
   decision: RouteDecision,
-  resolved: ResolvedBinding
+  resolved: ResolvedBinding,
+  override: ConversationOverrideRow | null,
+  adapterRow: AdapterInstanceRow
 ) => void | Promise<void>
 
 /**
@@ -256,8 +267,12 @@ export class ConnectorBus {
     // ── Step 1.5: eager OCR of inbound images (ADR-0024) ─────────────────────
     // Attaches `ocrText` to image segments that carry inline bytes, so trigger
     // matching (Step 6), the stored message, the agent prompt, and the digest
-    // all see the image's text. Best-effort — never blocks delivery.
-    await runInboundOcr(event).catch(() => undefined)
+    // all see the image's text. Best-effort — never blocks delivery. Gated on
+    // an OCR-able image so a text-only / URL-only message skips the settings
+    // read + dep build entirely (the common case).
+    if (hasOcrableInboundImage(event.segments)) {
+      await runInboundOcr(event).catch(() => undefined)
+    }
 
     // ── Step 2: adapter instance lookup ──────────────────────────────────────
     const adapterRow = await getAdapterInstance(event.adapterId)
@@ -287,39 +302,43 @@ export class ConnectorBus {
       )
     }
 
-    // ── Step 3.6: response-SLA deadline (CRM, schema v83) ─────────────────────
-    // When the operator has set a per-conversation SLA target, stamp the
-    // next-response deadline so the inbox SlaBadge can count down. A fresh
-    // inbound always means a reply is now due — Step 3.5 has already reopened a
-    // resolved/snoozed conversation — so there's no status guard: an SLA is
-    // stamped whenever one is configured. Quiet hours are excluded from the
-    // budget (computeDueAt reuses the outbound-runner quiet-hours math).
-    // Best-effort: an SLA write failure must never break the inbound pipeline.
-    // No-op when no SLA is configured.
-    if (override?.slaResponseMinutes && override.slaResponseMinutes > 0) {
-      const dueAt = computeDueAt(now, override.slaResponseMinutes, override.quietHours ?? null)
-      await setSlaDue(
-        event.conversationKey,
-        { nextResponseDueAt: dueAt },
-        override.sessionId
-      ).catch(() => undefined)
-    }
-
-    // ── Step 3.7: platform-identity directory (CRM, schema v83) ───────────────
-    // Record the sender so the contact-profile drawer has a directory to show
-    // and cross-platform identity merge has rows to work with. Best-effort — an
-    // identity write failure must never break inbound routing.
-    await upsertIdentity({
-      platform: event.platform,
-      adapterId: event.adapterId,
-      remoteUserId: event.sender.remoteUserId,
-      displayName: event.sender.displayName,
-      avatarUrl: event.sender.avatarUrl,
-    }).catch(() => undefined)
-
-    // ── Step 4: character lookup ──────────────────────────────────────────────
+    // ── Steps 3.6 / 3.7 / 4: SLA deadline, identity directory, character ──────
+    // These three touch distinct Dexie tables (conversationOverrides /
+    // platformIdentities / characters) and have no inter-dependency, so they
+    // run concurrently. Step 3.5's lifecycle reopen above stays sequential —
+    // it shares the override row with the SLA write, so it must settle first.
+    //   • 3.6 response-SLA deadline (v83): stamp next-response deadline so the
+    //     inbox SlaBadge can count down; quiet hours excluded (computeDueAt
+    //     reuses the outbound-runner math). No-op when no SLA is configured.
+    //   • 3.7 platform-identity directory (v83): record the sender for the
+    //     contact-profile drawer + cross-platform identity merge.
+    //   • 4 character lookup: only this result feeds downstream binding.
+    // All three are best-effort — a write/read failure must never break the
+    // inbound pipeline.
     const charId = override?.characterId ?? adapterRow.defaultCharacterId
-    const character = charId ? ((await getCharacter(charId)) ?? null) : null
+    const [, , character] = await Promise.all([
+      override?.slaResponseMinutes && override.slaResponseMinutes > 0
+        ? setSlaDue(
+            event.conversationKey,
+            {
+              nextResponseDueAt: computeDueAt(
+                now,
+                override.slaResponseMinutes,
+                override.quietHours ?? null
+              ),
+            },
+            override.sessionId
+          ).catch(() => undefined)
+        : Promise.resolve(undefined),
+      upsertIdentity({
+        platform: event.platform,
+        adapterId: event.adapterId,
+        remoteUserId: event.sender.remoteUserId,
+        displayName: event.sender.displayName,
+        avatarUrl: event.sender.avatarUrl,
+      }).catch(() => undefined),
+      charId ? getCharacter(charId).then((c) => c ?? null) : Promise.resolve(null),
+    ])
 
     // ── Step 4.5: plugin onConnectorInbound (observe + veto + transform) ──────
     // A subscribed plugin may block this inbound (stop the turn) or rewrite its
@@ -443,8 +462,10 @@ export class ConnectorBus {
     }
 
     // ── Step 10: route handler ────────────────────────────────────────────────
+    // Thread the already-fetched adapter + override rows so the runtime's
+    // ai-run path reuses them instead of re-reading the same immutable rows.
     if (this.routeHandler && decision !== "drop") {
-      await this.routeHandler(event, decision, resolved)
+      await this.routeHandler(event, decision, resolved, override, adapterRow)
     }
 
     // ── Step 11: workflow fan-out ────────────────────────────────────────────

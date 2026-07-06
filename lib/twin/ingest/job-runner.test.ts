@@ -31,6 +31,14 @@ jest.mock("./persist", () => ({
   persistChunks: jest.fn(),
   vectorCollectionName: (twinId: string) => `cognia_twin_${twinId}`,
 }))
+// Real AES round-trip is covered by redaction-key.test.ts; here we assert the
+// job runner *wires* the encrypted map onto the source row (the shipped bug was
+// that it never did), so a deterministic stub keeps this a pure unit.
+jest.mock("./redaction-key", () => ({
+  encryptRedactionMap: jest.fn(async (map: Record<string, unknown>) =>
+    Object.keys(map).length > 0 ? `enc:${Object.keys(map).length}` : ""
+  ),
+}))
 
 import { getTwinSource, updateTwinSource } from "@/lib/db/twin-sources"
 import { ensureTwinProfile } from "@/lib/db/twin-profile"
@@ -38,10 +46,15 @@ import { updateJobProgress } from "@/lib/db/twin-jobs"
 import type { IVectorStore } from "@cognia/vector/store"
 import type { TwinJob, TwinSource } from "@/types/twin"
 import { embedRedactedChunks, type EmbeddingConfig } from "./embed"
-import { runIngestJob } from "./job-runner"
+import { deriveNameHints, runIngestJob } from "./job-runner"
 import { runTwinPdfOcr } from "./ocr-fallback"
 import { parseSource, type ParsedSource, type RawSource } from "./parse"
 import { persistChunks } from "./persist"
+import { encryptRedactionMap } from "./redaction-key"
+
+const mockEncryptRedactionMap = encryptRedactionMap as jest.MockedFunction<
+  typeof encryptRedactionMap
+>
 
 const mockGetTwinSource = getTwinSource as jest.MockedFunction<typeof getTwinSource>
 const mockUpdateTwinSource = updateTwinSource as jest.MockedFunction<typeof updateTwinSource>
@@ -161,5 +174,190 @@ describe("runIngestJob — pageMap threading", () => {
     for (const chunk of persisted.chunks) {
       expect(chunk.metadata.pageNumber).toBeUndefined()
     }
+  })
+})
+
+describe("deriveNameHints", () => {
+  function raw(speakers?: string[]): RawSource {
+    return {
+      id: "s",
+      filename: "chat.md",
+      format: "markdown",
+      ...(speakers ? { baseMetadata: { speakers } } : {}),
+    }
+  }
+
+  it("surfaces human chat speakers as hints", () => {
+    expect(deriveNameHints(raw(["张伟", "John Doe"]))).toEqual(["张伟", "John Doe"])
+  })
+
+  it("drops generic assistant/role labels (case-insensitive)", () => {
+    expect(deriveNameHints(raw(["User", "ChatGPT", "system", "Tool", "Alice"]))).toEqual(["Alice"])
+  })
+
+  it("reduces email-style speakers to the display name", () => {
+    expect(deriveNameHints(raw(['"Alice Smith" <alice@example.com>', "Bob <bob@x.com>"]))).toEqual([
+      "Alice Smith",
+      "Bob",
+    ])
+  })
+
+  it("merges job-level hints, de-dupes, and ignores blank/1-char speakers", () => {
+    expect(deriveNameHints(raw(["Alice", "  ", "X", "Alice"]), ["Carol", "Alice"])).toEqual([
+      "Carol",
+      "Alice",
+    ])
+  })
+
+  it("returns job hints only when there is no metadata", () => {
+    expect(deriveNameHints(raw(), ["Dave"])).toEqual(["Dave"])
+    expect(deriveNameHints(raw())).toEqual([])
+  })
+
+  it("filters parse-time speakers through the generic-label gate and de-dupes vs raw", () => {
+    expect(deriveNameHints(raw(["Alice"]), [], ["ChatGPT", "Alice", "李雷"])).toEqual([
+      "Alice",
+      "李雷",
+    ])
+  })
+
+  it("keeps job hints verbatim even when they look like generic labels", () => {
+    // extraNameHints are explicit user intent — never filtered.
+    expect(deriveNameHints(raw(), ["User"], ["User"])).toEqual(["User"])
+  })
+})
+
+describe("runIngestJob — name redaction (PII)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetTwinSource.mockResolvedValue(sourceRow())
+    mockUpdateTwinSource.mockResolvedValue(undefined as never)
+    mockEnsureTwinProfile.mockResolvedValue({} as never)
+    mockUpdateJobProgress.mockResolvedValue(undefined as never)
+    mockRunTwinPdfOcr.mockResolvedValue(null)
+    mockEmbed.mockImplementation(async (texts: string[]) => ({
+      embeddings: texts.map(() => [0.1, 0.2]),
+      tokensUsed: texts.length,
+    }))
+    mockPersist.mockImplementation(async (input) => ({
+      rows: input.chunks.map((_, i) => ({ id: `c${i}` })) as never,
+      vectorDocIds: [],
+    }))
+  })
+
+  it("redacts a chat speaker's name before it reaches the embedder", async () => {
+    // Regression for the shipped PII leak: the worker never passed nameHints, so
+    // participant names flowed verbatim to the cloud embedder + distill LLM.
+    const body = "### 张伟\nLet's ship the release on Friday, 张伟 said."
+    mockParseSource.mockResolvedValue({
+      ...parsedSource(),
+      originalText: body,
+      embeddableText: body,
+      pageMap: undefined,
+    })
+
+    await runIngestJob({
+      ...runInput(),
+      rawSources: [{ ...rawSource(), baseMetadata: { speakers: ["张伟"] } }],
+    })
+
+    // The text handed to the embedder must not contain the raw name.
+    const embedded = (mockEmbed.mock.calls[0][0] as string[]).join("\n")
+    expect(embedded).not.toContain("张伟")
+    expect(embedded).toContain("<NAME_")
+  })
+
+  it("redacts speakers discovered only at parse time (paste-mode importer path)", async () => {
+    // The raw source carries no speakers; parseSource surfaces them on the
+    // parsed baseMetadata (importer fan-out union). The redaction pass must
+    // read the parsed result, not just the raw input.
+    const body = "### 李雷\nShip it, said 李雷."
+    mockParseSource.mockResolvedValue({
+      ...parsedSource(),
+      originalText: body,
+      embeddableText: body,
+      baseMetadata: { speakers: ["李雷"] },
+      pageMap: undefined,
+    })
+
+    await runIngestJob(runInput())
+
+    const embedded = (mockEmbed.mock.calls[0][0] as string[]).join("\n")
+    expect(embedded).not.toContain("李雷")
+    expect(embedded).toContain("<NAME_")
+  })
+
+  it("redacts user-configured extraNameHints passed as job-level nameHints", async () => {
+    const body = "Signed off by Max Qian this morning."
+    mockParseSource.mockResolvedValue({
+      ...parsedSource(),
+      originalText: body,
+      embeddableText: body,
+      pageMap: undefined,
+    })
+
+    await runIngestJob({ ...runInput(), nameHints: ["Max Qian"] })
+
+    const embedded = (mockEmbed.mock.calls[0][0] as string[]).join("\n")
+    expect(embedded).not.toContain("Max Qian")
+    expect(embedded).toContain("<NAME_")
+  })
+})
+
+describe("runIngestJob — redaction map persistence", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetTwinSource.mockResolvedValue(sourceRow())
+    mockUpdateTwinSource.mockResolvedValue(undefined as never)
+    mockEnsureTwinProfile.mockResolvedValue({} as never)
+    mockUpdateJobProgress.mockResolvedValue(undefined as never)
+    mockRunTwinPdfOcr.mockResolvedValue(null)
+    mockEmbed.mockImplementation(async (texts: string[]) => ({
+      embeddings: texts.map(() => [0.1, 0.2]),
+      tokensUsed: texts.length,
+    }))
+    mockPersist.mockImplementation(async (input) => ({
+      rows: input.chunks.map((_, i) => ({ id: `c${i}` })) as never,
+      vectorDocIds: [],
+    }))
+  })
+
+  function redactionMapEncFromCalls(): string | undefined {
+    for (const [, patch] of mockUpdateTwinSource.mock.calls) {
+      const enc = (patch as { redactionMapEnc?: string }).redactionMapEnc
+      if (typeof enc === "string") return enc
+    }
+    return undefined
+  }
+
+  it("encrypts the redaction map and stores it on the source when PII is present", async () => {
+    // Regression: before the fix the map was computed-and-discarded, so the
+    // workbench's unredact flow always read an empty blob. Email is redacted by
+    // a built-in pattern (no nameHints needed) → a non-empty map.
+    const withPii = "Email alice@example.com or bob@example.org about the report."
+    mockParseSource.mockResolvedValue({
+      ...parsedSource(),
+      originalText: withPii,
+      embeddableText: withPii,
+      pageMap: undefined,
+    })
+
+    await runIngestJob(runInput())
+
+    // Encrypt was called with the (non-empty) real redaction map.
+    expect(mockEncryptRedactionMap).toHaveBeenCalledTimes(1)
+    const passedMap = mockEncryptRedactionMap.mock.calls[0][0]
+    expect(Object.keys(passedMap).length).toBeGreaterThan(0)
+    // …and the result was persisted onto the source row.
+    expect(redactionMapEncFromCalls()).toBe(`enc:${Object.keys(passedMap).length}`)
+  })
+
+  it("does not encrypt or persist a map when the source has no PII", async () => {
+    mockParseSource.mockResolvedValue({ ...parsedSource(), pageMap: undefined })
+
+    await runIngestJob(runInput())
+
+    expect(mockEncryptRedactionMap).not.toHaveBeenCalled()
+    expect(redactionMapEncFromCalls()).toBeUndefined()
   })
 })

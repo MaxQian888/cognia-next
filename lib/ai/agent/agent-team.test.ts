@@ -75,9 +75,38 @@ describe("agentTeamManager (real facade)", () => {
     expect(useAgentTeamStore.getState().teams["t1"]).toBeUndefined()
   })
 
-  it("start() throws when the runtime hasn't been configured", async () => {
+  it("start() auto-configures default deps (with a warning) when unconfigured", async () => {
+    // No configureAgentTeamRuntime() call — start() must self-heal via the
+    // lazy default deps instead of throwing. Empty task list → status=failed.
+    const team = makeTeam()
+    agentTeamManager.create(team)
+    useAgentTeamStore.getState().upsertTeammate({
+      id: "lead-1",
+      teamId: "t1",
+      name: "Lead",
+      description: "",
+      role: "lead",
+      status: "idle",
+      config: {},
+      completedTaskIds: [],
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      progress: 0,
+      createdAt: new Date(),
+    })
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    await expect(agentTeamManager.start("t1")).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("auto-configured with defaults"))
+    expect(useAgentTeamStore.getState().teams["t1"]?.status).toBe("failed")
+    warn.mockRestore()
+  })
+
+  it("start() uses the explicit deps and does not warn when configured", async () => {
     agentTeamManager.create(makeTeam())
-    await expect(agentTeamManager.start("t1")).rejects.toThrow(/not configured/)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    configureAgentTeamRuntime({})
+    await agentTeamManager.start("t1")
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("auto-configured with defaults"))
+    warn.mockRestore()
   })
 
   it("start() runs the lifecycle when configured (empty task list completes immediately)", async () => {

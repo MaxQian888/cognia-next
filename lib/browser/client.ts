@@ -9,7 +9,10 @@ import type {
   BrowserSnapshot,
   ConsoleEntry,
   ElementRect,
+  EvaluateResult,
   NetworkEntry,
+  NetworkState,
+  SnapshotOptions,
 } from "@/lib/browser/protocol"
 import { transport } from "@/lib/tauri"
 
@@ -31,9 +34,16 @@ export const browserClient = {
   embedDestroy: () => transport.call<void>("browser_embed_destroy", {}),
 
   // --- Agent browser loop (Phase 1) ---------------------------------------
-  /** Pull the accessibility-tree snapshot, unwrapping the ok/error envelope. */
-  embedSnapshot: async (): Promise<BrowserSnapshot> => {
-    const raw = await transport.call<string>("browser_embed_snapshot", {})
+  /**
+   * Pull the accessibility-tree snapshot, unwrapping the ok/error envelope.
+   * `opts.includeText` surfaces salient non-interactive text (headings, list
+   * items, etc.) in addition to interactive nodes.
+   */
+  embedSnapshot: async (opts?: SnapshotOptions): Promise<BrowserSnapshot> => {
+    const raw = await transport.call<string>(
+      "browser_embed_snapshot",
+      opts ? { args: JSON.stringify(opts) } : {}
+    )
     const env = JSON.parse(raw) as {
       ok: boolean
       error: string | null
@@ -42,6 +52,20 @@ export const browserClient = {
     if (!env.ok || !env.snapshot) throw new Error(env.error ?? "snapshot failed")
     return env.snapshot
   },
+  /**
+   * Evaluate a JS expression in the embedded page (trust-gated by the caller).
+   * Returns the page helper's `{ ok, value }` / `{ ok, error }` envelope.
+   */
+  embedEvaluate: async (expr: string): Promise<EvaluateResult> => {
+    const raw = await transport.call<string>("browser_embed_evaluate", { expr })
+    return JSON.parse(raw) as EvaluateResult
+  },
+  /** Whether the embedded page has an element matching the CSS selector. */
+  embedHasSelector: (selector: string) =>
+    transport.call<boolean>("browser_embed_has_selector", { selector }),
+  /** In-flight + completed request counters for network-idle detection. */
+  embedNetworkState: async (): Promise<NetworkState> =>
+    JSON.parse(await transport.call<string>("browser_embed_network_state", {})) as NetworkState,
   /** Act on a ref'd element (click/type/fill/select/hover/focus). */
   embedAct: async (
     reference: string,

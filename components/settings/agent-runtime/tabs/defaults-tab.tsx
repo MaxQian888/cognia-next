@@ -25,6 +25,11 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import type { AppSettings } from "@/lib/claude/types"
 import { OUTPUT_STYLE_IDS } from "@/lib/claude/output-styles"
+import {
+  ADVANCED_MODES,
+  permissionRiskMarker,
+  SAFE_CYCLE_MODES,
+} from "@/lib/settings/permission-mode-meta"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InstructionsCard } from "@/components/settings/instructions/instructions-card"
 import { DefaultModelPicker } from "../parts/default-model-picker"
@@ -35,14 +40,10 @@ const THINKING_BUDGET_STEP = 1024
 
 type PermissionMode = NonNullable<AppSettings["permissionMode"]>
 
-const PERMISSION_MODES: PermissionMode[] = [
-  "default",
-  "acceptEdits",
-  "bypassPermissions",
-  "plan",
-  "dontAsk",
-  "auto",
-]
+// Safe-core modes first, then the advanced (opt-in) ones — a single ordering
+// derived from the shared metadata so this selector never drifts from the
+// composer chip / status bar.
+const PERMISSION_MODES: PermissionMode[] = [...SAFE_CYCLE_MODES, ...ADVANCED_MODES]
 
 const PERMISSION_MODE_LABEL_KEY: Record<PermissionMode, string> = {
   default: "permDefault",
@@ -68,6 +69,8 @@ export function DefaultsTab() {
   const [customOutputStyle, setCustomOutputStyle] = useState("")
   const [bareMode, setBareMode] = useState(false)
   const [briefMode, setBriefMode] = useState(false)
+  const [planRequireApproval, setPlanRequireApproval] = useState(true)
+  const [planMaxAutoRefinements, setPlanMaxAutoRefinements] = useState<number>(2)
 
   useEffect(() => {
     if (!settings) return
@@ -79,12 +82,14 @@ export function DefaultsTab() {
     setWorkingDir(settings.defaultWorkingDir ?? "")
     setAppendSystem(settings.defaultSystemPrompt ?? "")
     setRoutingFallback(settings.routingFallbackEnabled !== false)
-    setCacheOptimization(settings.cacheOptimizationEnabled === true)
+    setCacheOptimization(settings.cacheOptimizationEnabled !== false)
     setThinkingBudget(settings.defaultMaxThinkingTokens ?? 0)
     setOutputStyle(settings.outputStyle ?? "default")
     setCustomOutputStyle(settings.customOutputStyle ?? "")
     setBareMode(Boolean(settings.bareMode))
     setBriefMode(Boolean(settings.briefMode))
+    setPlanRequireApproval(settings.planSettings?.requireApproval !== false)
+    setPlanMaxAutoRefinements(settings.planSettings?.maxAutoRefinements ?? 2)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -112,7 +117,9 @@ export function DefaultsTab() {
 
   const persistCacheOptimization = (value: boolean) => {
     setCacheOptimization(value)
-    void save({ cacheOptimizationEnabled: value || undefined })
+    // Persist the explicit boolean (not `value || undefined`) so an OFF choice
+    // sticks against the default-ON — `false` must survive the DEFAULTS merge.
+    void save({ cacheOptimizationEnabled: value })
   }
 
   // Clamp + round to the slider step so the number input can't drift away
@@ -150,6 +157,23 @@ export function DefaultsTab() {
     void save({ briefMode: value || undefined })
   }
 
+  const persistPlanRequireApproval = (value: boolean) => {
+    setPlanRequireApproval(value)
+    // Persist the explicit boolean so an OFF choice survives the default-ON
+    // merge (same rationale as cacheOptimizationEnabled).
+    void save({
+      planSettings: { ...settings?.planSettings, requireApproval: value },
+    })
+  }
+
+  const persistPlanMaxAutoRefinements = (raw: number) => {
+    const clamped = Math.max(0, Math.min(10, Number.isFinite(raw) ? Math.round(raw) : 2))
+    setPlanMaxAutoRefinements(clamped)
+    void save({
+      planSettings: { ...settings?.planSettings, maxAutoRefinements: clamped },
+    })
+  }
+
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       <Card className="md:col-span-2" data-setting-id="permission-mode">
@@ -166,11 +190,24 @@ export function DefaultsTab() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PERMISSION_MODES.map((mode) => (
-                <SelectItem key={mode} value={mode}>
-                  {t(PERMISSION_MODE_LABEL_KEY[mode])}
-                </SelectItem>
-              ))}
+              {PERMISSION_MODES.map((mode) => {
+                const marker = permissionRiskMarker(mode)
+                return (
+                  <SelectItem key={mode} value={mode}>
+                    <span className="flex items-center gap-1.5">
+                      {marker && (
+                        <span
+                          aria-hidden
+                          className={marker === "⚠" ? "text-rose-500" : "text-muted-foreground"}
+                        >
+                          {marker}
+                        </span>
+                      )}
+                      {t(PERMISSION_MODE_LABEL_KEY[mode])}
+                    </span>
+                  </SelectItem>
+                )
+              })}
             </SelectContent>
           </Select>
         </CardContent>
@@ -367,6 +404,52 @@ export function DefaultsTab() {
               checked={briefMode}
               onCheckedChange={persistBriefMode}
               aria-label={t("briefMode")}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="md:col-span-2" data-setting-id="plan-mode">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("planTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("planDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="agent-runtime-plan-approval" className="text-sm">
+                {t("planRequireApproval")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("planRequireApprovalHint")}</p>
+            </div>
+            <Switch
+              id="agent-runtime-plan-approval"
+              checked={planRequireApproval}
+              onCheckedChange={persistPlanRequireApproval}
+              aria-label={t("planRequireApproval")}
+              data-testid="plan-require-approval-switch"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="agent-runtime-plan-refinements" className="text-sm">
+                {t("planMaxAutoRefinements")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("planMaxAutoRefinementsHint")}</p>
+            </div>
+            <Input
+              id="agent-runtime-plan-refinements"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={10}
+              step={1}
+              className="w-24"
+              value={planMaxAutoRefinements}
+              onChange={(e) => setPlanMaxAutoRefinements(Number(e.target.value) || 0)}
+              onBlur={() => persistPlanMaxAutoRefinements(planMaxAutoRefinements)}
+              aria-label={t("planMaxAutoRefinements")}
+              data-testid="plan-max-refinements-input"
             />
           </div>
         </CardContent>

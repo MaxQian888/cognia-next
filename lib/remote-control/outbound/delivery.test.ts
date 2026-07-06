@@ -94,4 +94,26 @@ describe("deliverWebhook", () => {
     expect(r.error).toContain("ECONNREFUSED")
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
+
+  it("honors a custom maxRetries limit (fewer attempts)", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 502 })
+    const r = await deliverWebhook(
+      { endpoint: endpoint(), event: event(), limits: { maxRetries: 1 } },
+      instantSleep
+    )
+    expect(r.ok).toBe(false)
+    expect(r.httpStatus).toBe(502)
+    // 1 initial + 1 retry = 2 attempts (vs the default 4).
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("clamps an out-of-range limit before use", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 })
+    await deliverWebhook(
+      { endpoint: endpoint(), event: event(), limits: { maxRetries: 999 } },
+      instantSleep
+    )
+    // Clamped to the max of 10 → 1 + 10 = 11 attempts.
+    expect(fetchMock).toHaveBeenCalledTimes(11)
+  })
 })

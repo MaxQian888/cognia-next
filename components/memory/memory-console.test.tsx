@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Memory } from "@/types/memory/memory"
 
@@ -14,14 +14,29 @@ jest.mock("dexie-react-hooks", () => ({
 jest.mock("./external/external-memory-tab", () => ({
   ExternalMemoryTab: () => <div data-testid="external-tab" />,
 }))
+
+// Control the viewport so we can exercise both the desktop resizable pane and
+// the narrow sheet. `useResizableLayout` stays real (localStorage-backed).
+const mockUseMediaQuery = jest.fn((_q: string) => true)
+jest.mock("@/hooks/ui", () => {
+  const actual = jest.requireActual("@/hooks/ui")
+  return { ...actual, useMediaQuery: (q: string) => mockUseMediaQuery(q) }
+})
+
 const mockSetPinned = jest.fn()
+const mockSetManyPinned = jest.fn()
 const mockUpdate = jest.fn()
 const mockDelete = jest.fn()
+const mockDeleteMany = jest.fn()
+const mockCreate = jest.fn()
 jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(),
   setMemoryPinned: (...a: unknown[]) => mockSetPinned(...a),
+  setMemoriesPinned: (...a: unknown[]) => mockSetManyPinned(...a),
   updateMemory: (...a: unknown[]) => mockUpdate(...a),
   hardDeleteMemory: (...a: unknown[]) => mockDelete(...a),
+  hardDeleteMemories: (...a: unknown[]) => mockDeleteMany(...a),
+  createMemory: (...a: unknown[]) => mockCreate(...a),
 }))
 
 import { MemoryConsole } from "./memory-console"
@@ -52,13 +67,15 @@ function mem(over: Partial<Memory> = {}): Memory {
 beforeEach(() => {
   jest.clearAllMocks()
   seq = 0
+  mockUseMediaQuery.mockReturnValue(true)
 })
 
-describe("MemoryConsole", () => {
-  it("renders an empty state when there are no memories", () => {
+describe("MemoryConsole — list & filters", () => {
+  it("renders an empty state with an add CTA when there are no memories", () => {
     mockData = []
     render(<MemoryConsole />)
     expect(screen.getByText(/no memories yet/i)).toBeTruthy()
+    expect(screen.getByRole("button", { name: /add your first memory/i })).toBeTruthy()
   })
 
   it("renders a row per active memory", () => {
@@ -75,13 +92,12 @@ describe("MemoryConsole", () => {
     expect(screen.getAllByTestId("memory-row")).toHaveLength(2)
   })
 
-  it("filters by search query", () => {
+  it("filters by search query", async () => {
     mockData = [mem({ text: "prefers pnpm" }), mem({ text: "lives in Shanghai" })]
     render(<MemoryConsole />)
     fireEvent.change(screen.getByLabelText(/search memories/i), { target: { value: "pnpm" } })
-    const rows = screen.getAllByTestId("memory-row")
-    expect(rows).toHaveLength(1)
-    expect(within(rows[0]).getByText("prefers pnpm")).toBeTruthy()
+    await waitFor(() => expect(screen.getAllByTestId("memory-row")).toHaveLength(1))
+    expect(within(screen.getAllByTestId("memory-row")[0]).getByText("prefers pnpm")).toBeTruthy()
   })
 
   it("filters by type via the type chips", () => {
@@ -90,35 +106,192 @@ describe("MemoryConsole", () => {
       mem({ id: "e", type: "episodic", text: "epi" }),
     ]
     render(<MemoryConsole />)
-    // "Event" is the episodic label
-    fireEvent.click(screen.getByRole("button", { name: "Event" }))
+    fireEvent.click(screen.getByRole("button", { name: "Event" })) // episodic label
     const rows = screen.getAllByTestId("memory-row")
     expect(rows).toHaveLength(1)
     expect(within(rows[0]).getByText("epi")).toBeTruthy()
   })
 
-  it("wires row actions to the db helpers", () => {
+  it("filters by scope via the scope select", async () => {
+    const user = userEvent.setup()
+    mockData = [
+      mem({ id: "g", scope: "global", text: "global one" }),
+      mem({ id: "c", scope: "character", characterId: "x", text: "character one" }),
+    ]
+    render(<MemoryConsole />)
+    await user.click(screen.getByRole("combobox", { name: "Scope" }))
+    await user.click(screen.getByRole("option", { name: "Character" }))
+    const rows = screen.getAllByTestId("memory-row")
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText("character one")).toBeTruthy()
+  })
+
+  it("filters by provenance via the provenance select", async () => {
+    const user = userEvent.setup()
+    mockData = [
+      mem({ id: "u", provenance: "user", text: "auto one" }),
+      mem({ id: "x", provenance: "explicit", text: "explicit one" }),
+    ]
+    render(<MemoryConsole />)
+    await user.click(screen.getByRole("combobox", { name: "Source type" }))
+    await user.click(screen.getByRole("option", { name: "Explicit" }))
+    const rows = screen.getAllByTestId("memory-row")
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText("explicit one")).toBeTruthy()
+  })
+
+  it("filters by clicking a tag chip and clears it again", () => {
+    mockData = [
+      mem({ id: "a", text: "tagged", tags: ["work"] }),
+      mem({ id: "b", text: "untagged" }),
+    ]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByRole("button", { name: "#work" }))
+    expect(screen.getAllByTestId("memory-row")).toHaveLength(1)
+    // Active-tag chip appears; clearing restores the full list.
+    fireEvent.click(screen.getByRole("button", { name: /clear tags/i }))
+    expect(screen.getAllByTestId("memory-row")).toHaveLength(2)
+  })
+
+  it("sorts by recently created", async () => {
+    const user = userEvent.setup()
+    mockData = [
+      mem({ id: "old", text: "old", createdAt: 100, updatedAt: 500 }),
+      mem({ id: "new", text: "new", createdAt: 900, updatedAt: 100 }),
+    ]
+    render(<MemoryConsole />)
+    await user.click(screen.getByRole("combobox", { name: "Sort" }))
+    await user.click(screen.getByRole("option", { name: /recently created/i }))
+    const rows = screen.getAllByTestId("memory-row")
+    expect(within(rows[0]).getByText("new")).toBeTruthy()
+  })
+
+  it("shows a clearable no-results state when filters match nothing", async () => {
+    mockData = [mem({ text: "prefers pnpm" })]
+    render(<MemoryConsole />)
+    fireEvent.change(screen.getByLabelText(/search memories/i), { target: { value: "zzzz" } })
+    await waitFor(() => expect(screen.getByTestId("memory-empty-filtered")).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }))
+    await waitFor(() => expect(screen.getAllByTestId("memory-row")).toHaveLength(1))
+  })
+
+  it("shows the active count in the stats", () => {
+    mockData = [mem(), mem(), mem({ status: "invalidated" })]
+    render(<MemoryConsole />)
+    expect(within(screen.getByTestId("memory-stat-active")).getByText("2")).toBeTruthy()
+  })
+})
+
+describe("MemoryConsole — row & detail", () => {
+  it("wires per-row pin/delete to the db helpers", () => {
     mockData = [mem({ id: "m1", text: "x", pinned: false })]
     render(<MemoryConsole />)
-    fireEvent.click(screen.getByRole("button", { name: /^pin$/i }))
+    const row = screen.getByTestId("memory-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^pin$/i }))
     expect(mockSetPinned).toHaveBeenCalledWith("m1", true)
-    fireEvent.click(screen.getByRole("button", { name: /delete/i }))
+    fireEvent.click(within(row).getByRole("button", { name: /delete/i }))
     expect(mockDelete).toHaveBeenCalledWith("m1")
   })
 
-  it("shows active count in the stats", () => {
-    mockData = [mem(), mem(), mem({ status: "invalidated" })]
+  it("opens the detail sidebar on row click and navigates through the list", () => {
+    mockData = [
+      mem({ id: "a", text: "first", updatedAt: 200 }),
+      mem({ id: "b", text: "second", updatedAt: 100 }),
+    ]
     render(<MemoryConsole />)
-    // 2 active of 3 total
-    expect(within(screen.getByTestId("memory-stat-active")).getByText("2")).toBeTruthy()
+    fireEvent.click(screen.getByText("first"))
+    const panel = screen.getByTestId("memory-detail-panel")
+    expect(within(panel).getByTestId("memory-detail-text").textContent).toBe("first")
+    expect(within(panel).getByTestId("memory-detail-nav").textContent).toBe("1/2")
+    fireEvent.click(within(panel).getByRole("button", { name: /next memory/i }))
+    expect(screen.getByTestId("memory-detail-text").textContent).toBe("second")
   })
 
+  it("saves a detail edit through updateMemory with a version bump", () => {
+    mockData = [mem({ id: "m1", text: "before" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByText("before"))
+    const panel = screen.getByTestId("memory-detail-panel")
+    fireEvent.click(within(panel).getByRole("button", { name: "Edit" }))
+    fireEvent.change(within(panel).getByLabelText("Text"), { target: { value: "after" } })
+    fireEvent.click(within(panel).getByRole("button", { name: "Save" }))
+    expect(mockUpdate).toHaveBeenCalledWith("m1", { text: "after", bumpVersion: true })
+  })
+
+  it("renders the detail in a bottom sheet on narrow viewports", () => {
+    mockUseMediaQuery.mockReturnValue(false)
+    mockData = [mem({ id: "m1", text: "sheeted" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByText("sheeted"))
+    expect(screen.getByTestId("memory-detail-sheet")).toBeTruthy()
+  })
+
+  it("closes the detail pane on Escape", () => {
+    mockData = [mem({ id: "m1", text: "closes" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByText("closes"))
+    expect(screen.getByTestId("memory-detail-panel")).toBeTruthy()
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.queryByTestId("memory-detail-panel")).toBeNull()
+  })
+})
+
+describe("MemoryConsole — add & bulk", () => {
+  it("creates a memory through the add dialog with explicit provenance", async () => {
+    mockData = []
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByTestId("memory-add-button"))
+    fireEvent.change(screen.getByLabelText("Memory"), { target: { value: "new fact" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add memory" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalled())
+    expect(mockCreate).toHaveBeenCalledWith({
+      scope: "global",
+      type: "semantic",
+      text: "new fact",
+      importance: 5,
+      tags: [],
+      provenance: "explicit",
+    })
+  })
+
+  it("bulk-deletes the selected memories after confirmation", () => {
+    mockData = [mem({ id: "a" }), mem({ id: "b" })]
+    render(<MemoryConsole />)
+    const checks = screen.getAllByTestId("memory-select")
+    fireEvent.click(checks[0])
+    fireEvent.click(checks[1])
+    const toolbar = screen.getByTestId("memory-bulk-toolbar")
+    expect(within(toolbar).getByTestId("memory-bulk-count").textContent).toContain("2")
+    fireEvent.click(within(toolbar).getByRole("button", { name: /^delete$/i }))
+    const dialog = screen.getByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    expect(mockDeleteMany).toHaveBeenCalledWith(["a", "b"])
+  })
+
+  it("bulk-pins the selection", () => {
+    mockData = [mem({ id: "a" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByTestId("memory-select"))
+    const toolbar = screen.getByTestId("memory-bulk-toolbar")
+    fireEvent.click(within(toolbar).getByRole("button", { name: /^pin$/i }))
+    expect(mockSetManyPinned).toHaveBeenCalledWith(["a"], true)
+  })
+
+  it("select-all toggles every visible row", () => {
+    mockData = [mem({ id: "a" }), mem({ id: "b" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getAllByTestId("memory-select")[0])
+    fireEvent.click(screen.getByTestId("memory-bulk-select-all"))
+    const toolbar = screen.getByTestId("memory-bulk-toolbar")
+    expect(within(toolbar).getByTestId("memory-bulk-count").textContent).toContain("2")
+  })
+})
+
+describe("MemoryConsole — tabs", () => {
   it("exposes the external agent memory tab", async () => {
     mockData = []
     const user = userEvent.setup()
     render(<MemoryConsole />)
-    // App tab is active by default; the external tab content mounts on switch.
-    // Radix tabs activate via pointer focus → userEvent, not fireEvent.
     await user.click(screen.getByRole("tab", { name: /external agent memory/i }))
     expect(await screen.findByTestId("external-tab")).toBeTruthy()
   })

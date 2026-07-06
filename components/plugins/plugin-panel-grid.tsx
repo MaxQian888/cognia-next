@@ -5,11 +5,13 @@
 // shells) can reuse the grid without bringing in the full panel header
 // and tabs.
 
+import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { BoxesIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { setPluginEnabled } from "@/lib/db/plugins"
+import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginCard } from "./plugin-card"
@@ -26,6 +28,17 @@ export function PluginPanelGrid() {
   const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
+
+  // Stable handlers keep the memoized PluginCards from re-rendering when
+  // unrelated store state (search query, selection elsewhere) changes.
+  const handleToggleEnabled = useCallback(
+    (plugin: PluginRow) => void setPluginEnabled(plugin.id, !plugin.enabled),
+    []
+  )
+  const handleUninstall = useCallback(
+    (plugin: PluginRow) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name }),
+    [setDeleteTarget]
+  )
 
   if (loading) {
     return <PluginLibraryGridSkeleton />
@@ -67,8 +80,8 @@ export function PluginPanelGrid() {
             onToggleSelect={toggleSelection}
             onOpen={openDetail}
             onConfigure={openConfigure}
-            onToggleEnabled={(plugin) => void setPluginEnabled(plugin.id, !plugin.enabled)}
-            onUninstall={(plugin) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
+            onToggleEnabled={handleToggleEnabled}
+            onUninstall={handleUninstall}
             onReviewPermissions={openPermissionReview}
             onRollback={setRollbackTarget}
           />

@@ -6,7 +6,7 @@ import { createRef } from "react"
 import { render, screen, act } from "@testing-library/react"
 import { ComposerPopover, type ComposerPopoverHandle } from "./composer-popover"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
-import type { ComposerTrigger } from "./composer-trigger"
+import type { ComposerTrigger, MentionableWorkflowElement } from "./composer-trigger"
 
 // Stable `t` per the real next-intl contract (its `t` identity is memoized).
 // A fresh function each render would churn effect deps (the file-search effect
@@ -89,6 +89,106 @@ describe("ComposerPopover — slash fuzzy ranking", () => {
     const content = screen.getByRole("dialog")
     expect(content.className).toContain("max-w-[480px]")
     expect(content.className).toContain("var(--radix-popper-anchor-width)")
+  })
+})
+
+const wfElements: MentionableWorkflowElement[] = [
+  {
+    type: "node",
+    id: "n_a",
+    label: "Draft issue",
+    kind: "ai.prompt",
+    sublabel: "ai.prompt",
+    searchText: "n_a draft issue ai.prompt",
+  },
+  {
+    type: "node",
+    id: "n_b",
+    label: "Split path",
+    kind: "flow.branch",
+    sublabel: "flow.branch",
+    searchText: "n_b split path flow.branch",
+  },
+  {
+    type: "edge",
+    id: "e_1",
+    label: "A → B",
+    kind: "default",
+    sublabel: "A → B",
+    searchText: "e_1 a → b default",
+  },
+]
+
+function wfTrigger(kind: "wfNode" | "wfEdge", query: string): ComposerTrigger {
+  return { kind, tokenStart: 0, tokenEnd: query.length + 1, query }
+}
+
+function setupWf(
+  trigger: ComposerTrigger,
+  handlers: { onPick?: jest.Mock; onHighlightElement?: jest.Mock } = {}
+) {
+  const onPick = handlers.onPick ?? jest.fn()
+  const onHighlightElement = handlers.onHighlightElement ?? jest.fn()
+  const anchor = document.createElement("div")
+  document.body.appendChild(anchor)
+  const ref = createRef<ComposerPopoverHandle>()
+  render(
+    <ComposerPopover
+      ref={ref}
+      trigger={trigger}
+      cwd={null}
+      slashCommands={commands}
+      anchor={anchor}
+      workflowElements={wfElements}
+      onHighlightElement={onHighlightElement}
+      onPick={onPick}
+      onDismiss={jest.fn()}
+    />
+  )
+  return { ref, onPick, onHighlightElement }
+}
+
+describe("ComposerPopover — workflow node/edge picker", () => {
+  it("lists only nodes for a wfNode trigger", () => {
+    setupWf(wfTrigger("wfNode", ""))
+    const texts = rowTexts()
+    expect(texts.some((t) => t.includes("Draft issue"))).toBe(true)
+    expect(texts.some((t) => t.includes("Split path"))).toBe(true)
+    expect(texts.some((t) => t.includes("A → B"))).toBe(false)
+  })
+
+  it("lists only edges for a wfEdge trigger", () => {
+    setupWf(wfTrigger("wfEdge", ""))
+    const texts = rowTexts()
+    expect(texts.some((t) => t.includes("A → B"))).toBe(true)
+    expect(texts.some((t) => t.includes("Draft issue"))).toBe(false)
+  })
+
+  it("fuzzy-filters nodes by query", () => {
+    setupWf(wfTrigger("wfNode", "split"))
+    const texts = rowTexts()
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toContain("Split path")
+  })
+
+  it("shows the empty message when no nodes match", () => {
+    setupWf(wfTrigger("wfNode", "zzzzz"))
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0)
+    expect(screen.getByText(/noWorkflowNodeMatches/)).toBeInTheDocument()
+  })
+
+  it("reports the highlighted element via onHighlightElement", () => {
+    const { onHighlightElement } = setupWf(wfTrigger("wfNode", ""))
+    // Mount highlights row 0 (the first node).
+    expect(onHighlightElement).toHaveBeenCalledWith(wfElements[0])
+  })
+
+  it("picks a wfElement item on confirm", () => {
+    const { ref, onPick } = setupWf(wfTrigger("wfNode", ""))
+    act(() => {
+      ref.current?.confirm()
+    })
+    expect(onPick).toHaveBeenCalledWith({ kind: "wfElement", element: wfElements[0] })
   })
 })
 
@@ -235,6 +335,80 @@ describe("ComposerPopover — combined @ panel (subagents + files)", () => {
       />
     )
     expect(screen.queryByText("agentsSection")).not.toBeInTheDocument()
+  })
+})
+
+describe("ComposerPopover — @skill: / @preset: namespaced pickers", () => {
+  const chatSkills = [
+    { id: "sk_a", name: "Concise", description: "Short answers" },
+    { id: "sk_b", name: "Cite sources", description: "Cite everything" },
+  ]
+  const chatPresets = [
+    { id: "p1", name: "Coding", description: "Engineering preset" },
+    { id: "p2", name: "Writing", description: "Prose preset" },
+  ] as unknown as React.ComponentProps<typeof ComposerPopover>["chatPresets"]
+
+  function setupNamespaced(kind: "skill" | "preset", query: string, onPick = jest.fn()) {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const ref = createRef<ComposerPopoverHandle>()
+    render(
+      <ComposerPopover
+        ref={ref}
+        trigger={{ kind, tokenStart: 0, tokenEnd: query.length + 1, query }}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        chatSkills={chatSkills}
+        chatPresets={chatPresets}
+        onPick={onPick}
+        onDismiss={jest.fn()}
+      />
+    )
+    return { ref, onPick }
+  }
+
+  it("lists enabled skills and fuzzy-filters by name", () => {
+    setupNamespaced("skill", "")
+    expect(rowTexts().some((t) => t.includes("Concise"))).toBe(true)
+    expect(rowTexts().some((t) => t.includes("Cite sources"))).toBe(true)
+  })
+
+  it("confirm() picks a skill item (enable on pick, no text)", () => {
+    const { ref, onPick } = setupNamespaced("skill", "cite")
+    act(() => ref.current!.confirm())
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "skill",
+      skill: expect.objectContaining({ id: "sk_b", name: "Cite sources" }),
+    })
+  })
+
+  it("lists presets and confirm() picks one", () => {
+    const { ref, onPick } = setupNamespaced("preset", "writ")
+    expect(rowTexts().some((t) => t.includes("Writing"))).toBe(true)
+    act(() => ref.current!.confirm())
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "preset",
+      preset: expect.objectContaining({ id: "p2", name: "Writing" }),
+    })
+  })
+
+  it("shows the empty message when no skills are available", () => {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    render(
+      <ComposerPopover
+        ref={createRef<ComposerPopoverHandle>()}
+        trigger={{ kind: "skill", tokenStart: 0, tokenEnd: 1, query: "" }}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        chatSkills={[]}
+        onPick={jest.fn()}
+        onDismiss={jest.fn()}
+      />
+    )
+    expect(screen.getByText("noSkills")).toBeInTheDocument()
   })
 })
 

@@ -16,7 +16,7 @@
  */
 
 import { isRetryable } from "@/lib/queue/retry-policy"
-import { TimeoutError } from "@/lib/utils/with-timeout"
+import { TimeoutError } from "@cognia/primitives"
 
 export type ResilienceErrorKind = "retryable" | "fatal" | "timeout" | "aborted"
 

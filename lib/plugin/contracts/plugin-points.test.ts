@@ -434,8 +434,8 @@ describe("plugin point contracts", () => {
       { point: "exporter.format" },
       { point: "appearance.theme" },
       { point: "appearance.theme-pack" },
-      { point: "lsp.server", stability: "experimental" },
-      { point: "cli.tool", permission: "cli:execute", stability: "experimental" },
+      { point: "lsp.server" },
+      { point: "cli.tool", permission: "cli:execute" },
       { point: "tray.item" },
       { point: "uri.handler" },
     ] as const

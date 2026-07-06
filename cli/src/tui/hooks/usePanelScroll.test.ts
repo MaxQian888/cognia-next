@@ -93,6 +93,26 @@ describe("usePanelScroll", () => {
     expect(consumed).toBe(false)
   })
 
+  it("follows the tail with a sticky initial intent as content grows", () => {
+    const { result } = renderHook(() => usePanelScroll(20, { top: 0, stick: true }))
+    act(() => result.current.measure(50))
+    // Pinned to the bottom: everything hidden is above the viewport.
+    expect(result.current.offset).toBe(30)
+    expect(result.current.hidden).toEqual({ above: 30, below: 0 })
+    // New content keeps the pin engaged.
+    act(() => result.current.measure(60))
+    expect(result.current.offset).toBe(40)
+    // Scrolling up disengages the pin…
+    act(() => result.current.onKey("", key({ upArrow: true })))
+    expect(result.current.offset).toBe(39)
+    act(() => result.current.measure(70))
+    expect(result.current.offset).toBe(39)
+    // …and scrolling back to the bottom re-engages it.
+    act(() => result.current.onKey("", key({ pageDown: true })))
+    act(() => result.current.measure(90))
+    expect(result.current.offset).toBe(70)
+  })
+
   it("ignores a measure that doesn't change the height (stable identity)", () => {
     const { result } = renderHook(() => usePanelScroll(20))
     act(() => result.current.measure(50))

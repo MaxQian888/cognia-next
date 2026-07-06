@@ -27,6 +27,18 @@ describe("embedRedactedChunks", () => {
     expect(mockGenerateEmbeddings).not.toHaveBeenCalled()
   })
 
+  it("throws when the provider returns fewer vectors than the batch", async () => {
+    // Regression: an under-length response used to flow `undefined` vectors into
+    // the cache + remote upsert. Fail loudly so the per-source catch isolates it.
+    mockGenerateEmbeddings.mockResolvedValueOnce({
+      embeddings: [[1, 2]], // 1 vector for 2 inputs
+      usage: { tokens: 10 },
+    })
+    await expect(embedRedactedChunks(["a", "b"], baseConfig)).rejects.toThrow(
+      /returned 1 vectors for a batch of 2/
+    )
+  })
+
   it("uses the default batch size of 64 (1 batch for 50 inputs)", async () => {
     mockGenerateEmbeddings.mockResolvedValueOnce({
       embeddings: Array.from({ length: 50 }, (_, i) => [i, i, i]),

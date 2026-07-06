@@ -38,11 +38,26 @@ const EVENT_SEEDS: Partial<Record<PetEventKind, string>> = {
   workflowRun: "A workflow your human set up just ran. Comment on it in one short line.",
 }
 
-/** Event-comment trigger: fires only for claimed kinds with an authored seed. */
-export function evaluateEventComment(event: PetEvent): ProactiveDecision | null {
+/**
+ * Event-comment trigger: fires only for claimed kinds with an authored seed.
+ *
+ * The high-frequency `workflowRun` kind additionally passes a deterministic
+ * wisdom gate: a wiser pet comments on more of the runs (25% at wisdom 0 up
+ * to 100% at wisdom 100), seeded from the event time. Milestone kinds always
+ * fire. With `opts` omitted the gate is wide open (back-compat).
+ */
+export function evaluateEventComment(
+  event: PetEvent,
+  opts?: { wisdom?: number }
+): ProactiveDecision | null {
   if (!PROACTIVE_CLAIMED_KINDS.includes(event.kind)) return null
   const topicSeed = EVENT_SEEDS[event.kind]
   if (!topicSeed) return null
+  if (event.kind === "workflowRun" && opts) {
+    const wisdom = Math.max(0, Math.min(100, opts.wisdom ?? 100))
+    const roll = Math.abs(Math.trunc(event.at)) % 100
+    if (roll >= 25 + 75 * (wisdom / 100)) return null
+  }
   return { trigger: "event", topicSeed }
 }
 

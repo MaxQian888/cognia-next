@@ -57,17 +57,33 @@ const STATUS_GLYPH: Record<
   ToolUIPart["state"],
   { Icon: LucideIcon; className: string; key: string }
 > = {
-  "approval-requested": { Icon: ClockIcon, className: "text-yellow-600", key: "awaitingApproval" },
-  "approval-responded": { Icon: CheckCircleIcon, className: "text-blue-600", key: "responded" },
+  "approval-requested": {
+    Icon: ClockIcon,
+    className: "text-yellow-600 dark:text-yellow-500",
+    key: "awaitingApproval",
+  },
+  "approval-responded": {
+    Icon: CheckCircleIcon,
+    className: "text-blue-600 dark:text-blue-500",
+    key: "responded",
+  },
   "input-available": {
     Icon: ClockIcon,
     className: "animate-pulse text-muted-foreground",
     key: "running",
   },
   "input-streaming": { Icon: CircleIcon, className: "text-muted-foreground", key: "pending" },
-  "output-available": { Icon: CheckCircleIcon, className: "text-green-600", key: "completed" },
-  "output-denied": { Icon: XCircleIcon, className: "text-orange-600", key: "denied" },
-  "output-error": { Icon: XCircleIcon, className: "text-red-600", key: "error" },
+  "output-available": {
+    Icon: CheckCircleIcon,
+    className: "text-green-600 dark:text-green-500",
+    key: "completed",
+  },
+  "output-denied": {
+    Icon: XCircleIcon,
+    className: "text-orange-600 dark:text-orange-500",
+    key: "denied",
+  },
+  "output-error": { Icon: XCircleIcon, className: "text-red-600 dark:text-red-500", key: "error" },
 }
 
 export interface ToolCallRowProps {
@@ -113,7 +129,7 @@ export const ToolCallRow = memo(function ToolCallRow({
         onClick={handleToggle}
         aria-expanded={open}
         aria-label={t("rowAria", { name: summary.name, status: statusLabel })}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm hover:bg-muted/50 transition-colors"
+        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
       >
         <ChevronRightIcon
           className={cn(

@@ -20,6 +20,8 @@
     "more": "更多",
     "redo": "重做（Ctrl+Shift+Z）",
     "shortcuts": "键盘快捷键（Ctrl+/）",
+    "togglePalette": "切换节点面板（Ctrl+B）",
+    "toggleSidebar": "切换侧栏（Ctrl+J）",
     "undo": "撤销（Ctrl+Z）"
   },
   "unsavedChanges": "有未保存更改"

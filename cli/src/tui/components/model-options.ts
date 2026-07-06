@@ -7,8 +7,8 @@
  * (e.g. a Claude id pinned under Anthropic) never bleeds into, say, DeepSeek's
  * picker. Pure.
  */
-import { catalogModelIds, resolveModelDisplayName } from "@/lib/ai/model-options"
-import { PROVIDERS } from "@cognia/provider-types/provider"
+import { catalogModelIds, resolveModelDisplayName, resolveModelMeta } from "@/lib/ai/model-options"
+import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
 
 import type { ResolvedConfig } from "../../config/schema"
 
@@ -35,21 +35,23 @@ function formatContextWindow(tokens: number): string {
 
 /**
  * Secondary "hint" line for a `/model` row: the model's context window and a
- * short capability summary (reasoning / tools / vision) pulled from the shared
- * static catalog. Returns `undefined` when the catalog carries no metadata for
- * the id (custom / discovered ids), so the row falls back to just its label.
+ * short capability summary (reasoning / tools / vision). Resolved through the
+ * shared {@link resolveModelMeta} authority (built-in `PROVIDERS` catalog, plus
+ * the synced OpenRouter catalog for `openrouter` ids) so the CLI and the GUI
+ * picker read model metadata from a single source. Returns `undefined` when no
+ * catalog carries metadata for the id (custom / discovered ids), so the row
+ * falls back to just its label.
  */
 export function modelInfoHint(modelId: string, providerId: string): string | undefined {
-  const m = PROVIDERS[providerId]?.models?.find((x) => x.id === modelId)
-  if (!m) return undefined
+  const meta = resolveModelMeta(providerId, modelId)
   const parts: string[] = []
-  if (typeof m.contextLength === "number" && m.contextLength > 0) {
-    parts.push(formatContextWindow(m.contextLength))
+  if (typeof meta.contextLength === "number" && meta.contextLength > 0) {
+    parts.push(formatContextWindow(meta.contextLength))
   }
   const caps: string[] = []
-  if (m.supportsReasoning) caps.push("reasoning")
-  if (m.supportsTools) caps.push("tools")
-  if (m.supportsVision) caps.push("vision")
+  if (meta.supportsReasoning) caps.push("reasoning")
+  if (meta.supportsTools) caps.push("tools")
+  if (meta.supportsVision) caps.push("vision")
   if (caps.length > 0) parts.push(caps.join(", "))
   return parts.length > 0 ? parts.join(" · ") : undefined
 }
@@ -70,6 +72,13 @@ export function collectModelOptions(config: ResolvedConfig): string[] {
   // stops a stale top-level pin (or another provider's model) from leaking in.
   add(config.providers[config.provider]?.model)
   for (const id of catalogModelIds(config.provider)) add(id)
+  // OpenRouter's full real-time list lives in the synced catalog (Dexie v93,
+  // shared with the GUI and primed at TUI boot), not the static `PROVIDERS`
+  // subset — fold every catalogued id in so `/model` reflects the live `/models`
+  // list. Empty until the first sync, so it degrades to the curated subset above.
+  if (config.provider === "openrouter") {
+    for (const m of getCachedOpenRouterCatalogModels()) add(m.id)
+  }
   // Uncatalogued provider with no per-provider memory: the legacy top-level
   // model is all we know — surface it so an enabled provider never renders an
   // empty list. (Matches `resolveActiveModel`'s last-resort fallback.)

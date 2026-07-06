@@ -24,6 +24,8 @@
     "builtin": "Built-in",
     "featured": "Featured",
     "popular": "Popular",
-    "recent": "Recent"
+    "recent": "Recent",
+    "shared": "Shared",
+    "workspace": "Workspace"
   }
 }

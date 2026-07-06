@@ -15,11 +15,17 @@ import { useSettingsStore } from "@/stores/settings"
 
 const BUBBLE_VISIBLE_MS = 4000
 
-export function usePetBubbles(enabled: boolean): void {
+export function usePetBubbles(enabled: boolean, snark = 0): void {
   const t = useTranslations("pet")
   const setBubble = usePetStore((s) => s.setBubble)
   const customBubbles = useSettingsStore((s) => s.settings?.petSettings?.customBubbles)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Read through a ref so a slowly-growing snark stat never re-binds the bus
+  // subscription.
+  const snarkRef = useRef(snark)
+  useEffect(() => {
+    snarkRef.current = snark
+  }, [snark])
 
   useEffect(() => {
     if (!enabled) return
@@ -27,7 +33,7 @@ export function usePetBubbles(enabled: boolean): void {
       // While proactive speak is enabled it claims its milestone kinds — the
       // LLM hook owns those bubbles (with template fallback on failure).
       if (isClaimed(event.kind)) return
-      const key = pickBubbleKey(event.kind, event.at)
+      const key = pickBubbleKey(event.kind, event.at, { snark: snarkRef.current })
       if (!key) return
       // A user catchphrase sprinkles in over the template ~1/3 of the time.
       const custom = pickCustomBubble(customBubbles, event.at)

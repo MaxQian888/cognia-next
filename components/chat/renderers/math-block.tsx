@@ -6,7 +6,7 @@ import { AlertCircle, Copy, Check, Maximize2, Code2, RefreshCw } from "lucide-re
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
-import { renderMathSafe } from "@/lib/latex/cache"
+import { renderMathSafe } from "@cognia/latex"
 import { withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logging"

@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import type { CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomTheme } from "@/types/plugin/plugin"
 import { getShellColors } from "./shell-sync"
 
 describe("getShellColors", () => {

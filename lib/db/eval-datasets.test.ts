@@ -27,7 +27,7 @@ beforeEach(async () => {
   await getDb().evalRuns.clear()
   await getDb().evalRunCaseResults.clear()
   await getDb().evalDatasetVersions.clear()
-})
+}, 30_000) // cold-open of the fake-idb schema (v97+) can exceed the 5s default.
 
 describe("dataset CRUD", () => {
   it("creates a dataset with a generated id, version 1 and timestamps", async () => {
@@ -36,6 +36,20 @@ describe("dataset CRUD", () => {
     expect(ds.version).toBe(1)
     expect(ds.createdAt).toBeGreaterThan(0)
     expect(await getDataset(ds.id)).toMatchObject({ name: "Tool use" })
+  })
+
+  it("stamps a provided gate template onto the new dataset", async () => {
+    const ds = await createDataset({
+      name: "Gated",
+      capability: "chat.tool-use",
+      gate: { minPassAt1: 0.8 },
+    })
+    expect((await getDataset(ds.id))?.gate).toEqual({ minPassAt1: 0.8 })
+  })
+
+  it("omits the gate when the template is empty", async () => {
+    const ds = await createDataset({ name: "Ungated", capability: "chat.tool-use", gate: {} })
+    expect((await getDataset(ds.id))?.gate).toBeUndefined()
   })
 
   it("lists datasets and filters by capability", async () => {

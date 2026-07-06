@@ -38,6 +38,9 @@ export const CROSS_PLATFORM_SETTING_KEYS = [
   "briefMode",
   "conversationTitle",
   "conversationTimeline",
+  // ADR-0056 (Wave 3) — mirror the desktop's project-instruction loading config
+  // so the phone's `/me/instructions` page shows the live values it edits back.
+  "instructions",
 ] as const satisfies readonly (keyof AppSettings)[]
 
 /**

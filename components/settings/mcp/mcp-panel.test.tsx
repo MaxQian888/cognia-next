@@ -38,6 +38,7 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   updateMcpServer: jest.fn().mockResolvedValue(undefined),
   deleteMcpServer: jest.fn().mockResolvedValue(undefined),
   getMcpServer: jest.fn().mockResolvedValue(undefined),
+  listMcpServers: jest.fn().mockResolvedValue([]),
 }))
 jest.mock("@/lib/claude/mcp-presets", () => ({ applyPresetFields: jest.fn(() => ({})) }))
 jest.mock("./server-seed", () => ({ blankServerSeed: jest.fn().mockResolvedValue({}) }))
@@ -47,11 +48,13 @@ jest.mock("./mcp-my-servers-tab", () => ({
 }))
 jest.mock("./mcp-preset-grid", () => ({
   McpPresetGrid: ({
+    existingNames,
     onPresetSelected,
   }: {
+    existingNames: string[]
     onPresetSelected: (p: unknown, v: Record<string, string>) => void
   }) => (
-    <div data-testid="t-presets">
+    <div data-testid="t-presets" data-existing={JSON.stringify(existingNames)}>
       <button onClick={() => onPresetSelected({ id: "custom" }, {})}>pick-custom</button>
       <button
         onClick={() => onPresetSelected({ id: "github", name: "GitHub", transport: "stdio" }, {})}
@@ -114,6 +117,7 @@ import {
   updateMcpServer,
   deleteMcpServer,
   getMcpServer,
+  listMcpServers,
 } from "@/lib/db/mcp-servers"
 
 beforeEach(() => {
@@ -121,6 +125,7 @@ beforeEach(() => {
   ;(updateMcpServer as jest.Mock).mockClear()
   ;(deleteMcpServer as jest.Mock).mockClear()
   ;(getMcpServer as jest.Mock).mockReset().mockResolvedValue(undefined)
+  ;(listMcpServers as jest.Mock).mockReset().mockResolvedValue([])
   useMcpPanelStore.setState({
     activeTab: "my-servers",
     editorTarget: null,
@@ -175,6 +180,16 @@ describe("McpPanel", () => {
       transport: "stdio",
     })
     await waitFor(() => expect(useMcpPanelStore.getState().activeTab).toBe("my-servers"))
+  })
+
+  it("feeds the existing server names (lowercased) into the preset grid", async () => {
+    ;(listMcpServers as jest.Mock).mockResolvedValue([{ name: "GitHub" }, { name: "Slack" }])
+    useMcpPanelStore.setState({ activeTab: "presets" })
+    render(<McpPanel />)
+    const grid = await screen.findByTestId("t-presets")
+    await waitFor(() =>
+      expect(JSON.parse(grid.dataset.existing ?? "[]")).toEqual(["github", "slack"])
+    )
   })
 
   it("opens a seeded create editor for the custom preset", async () => {

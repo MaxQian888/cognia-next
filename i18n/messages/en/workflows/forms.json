@@ -37,12 +37,91 @@
       "label": "Enable tools"
     }
   },
+  "mobileCamera": {
+    "quality": {
+      "label": "JPEG quality (1–100)"
+    },
+    "width": {
+      "label": "Max width (px)"
+    }
+  },
+  "mobileLocation": {
+    "enableHighAccuracy": {
+      "label": "High accuracy (GPS)"
+    }
+  },
+  "mobileNotify": {
+    "body": {
+      "label": "Body"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
+  "mobileScanBarcode": {
+    "formats": {
+      "hint": "Comma-separated (e.g. QR_CODE, EAN_13). Empty = QR only.",
+      "label": "Formats"
+    }
+  },
+  "mobileShare": {
+    "text": {
+      "hint": "Text or URL is required.",
+      "label": "Text"
+    },
+    "title": {
+      "label": "Title (optional)"
+    },
+    "url": {
+      "label": "URL (optional)"
+    }
+  },
+  "mobileStep": {
+    "deviceId": {
+      "hint": "Empty = any capable paired device (freshest first).",
+      "label": "Device ID (optional)"
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)"
+    }
+  },
+  "approvalRequest": {
+    "message": {
+      "label": "Message (optional)"
+    },
+    "onTimeout": {
+      "fail": "Fail the step",
+      "label": "On timeout",
+      "reject": "Route as rejected"
+    },
+    "timeoutMs": {
+      "hint": "How long to wait for a decision. Default 1 hour.",
+      "label": "Timeout (ms)"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
   "aiClassify": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "label": "API key"
     },
     "baseURL": {
-      "label": "Base URL (optional)"
+      "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+      "label": "Base URL (optional)",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
     },
     "hint": {
       "label": "Guidance (optional)"
@@ -57,12 +136,14 @@
       "placeholder": "urgent, normal, spam"
     },
     "model": {
+      "hint": "Provider-specific model id.",
       "label": "Model",
       "placeholder": "claude-haiku-4-5-20251001"
     },
     "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
       "label": "Provider",
-      "placeholder": "Provider"
+      "placeholder": "openrouter"
     }
   },
   "aiEmbed": {
@@ -89,11 +170,25 @@
     }
   },
   "aiExtract": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "label": "API key"
     },
     "baseURL": {
-      "label": "Base URL (optional)"
+      "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+      "label": "Base URL (optional)",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
     },
     "hint": {
       "label": "Guidance (optional)"
@@ -102,11 +197,14 @@
       "label": "Input"
     },
     "model": {
-      "label": "Model"
+      "hint": "Provider-specific model id.",
+      "label": "Model",
+      "placeholder": "claude-haiku-4-5-20251001"
     },
     "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
       "label": "Provider",
-      "placeholder": "Provider"
+      "placeholder": "openrouter"
     },
     "required": {
       "hint": "Comma-separated. output.valid is false if any are missing.",
@@ -119,6 +217,13 @@
     }
   },
   "aiPrompt": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
     "apiKey": {
       "hint": "Embedded inline. For shared workflows, use a credential ref instead.",
       "label": "API key"
@@ -132,6 +237,11 @@
       "hint": "A sample shape the model should match. Injected into the prompt.",
       "label": "JSON shape (optional)",
       "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" }"
     },
     "mode": {
       "explicit": "Explicit provider",
@@ -157,8 +267,9 @@
       "redact": "Redact placeholders"
     },
     "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
       "label": "Provider",
-      "placeholder": "(stub)"
+      "placeholder": "openrouter"
     },
     "responseFormat": {
       "hint": "JSON parses the reply into structured output for downstream nodes.",
@@ -175,6 +286,47 @@
     },
     "userPrompt": {
       "label": "User prompt"
+    }
+  },
+  "aiCouncil": {
+    "councillorsJson": {
+      "hint": "Array of { name, modelAlias, systemPrompt? } objects. modelAlias uses Settings -> Routing aliases.",
+      "label": "Councillors JSON",
+      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+    },
+    "executionMode": {
+      "label": "Execution mode",
+      "options": {
+        "parallel": "Parallel",
+        "serial": "Serial"
+      }
+    },
+    "maxConcurrency": {
+      "hint": "Maximum councillor calls running at once in parallel mode.",
+      "label": "Max concurrency"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Runs before the prompt egresses to every councillor and the synthesizer.",
+      "label": "PII gate",
+      "off": "Off",
+      "redact": "Redact"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "synthesisInstructions": {
+      "hint": "Optional guidance for the final synthesis pass.",
+      "label": "Synthesis instructions"
+    },
+    "synthesizerAlias": {
+      "hint": "Routing alias for the model that merges councillor responses.",
+      "label": "Synthesizer alias",
+      "placeholder": "quality"
+    },
+    "timeoutMs": {
+      "hint": "Per-councillor timeout. Valid range: 1000-600000 ms.",
+      "label": "Timeout (ms)"
     }
   },
   "branch": {
@@ -392,9 +544,13 @@
     }
   },
   "desktopEventTrigger": {
-    "desktopOnly": "Desktop only — fires on UI Automation events; has no effect in the browser.",
+    "cooldownMs": {
+      "hint": "Minimum time between fires for this workflow — guards against the workflow's own desktop actions re-triggering it.",
+      "label": "Cooldown (ms)"
+    },
+    "desktopOnly": "Desktop only — fires on live UI Automation events (v1: focus-changed on Windows); has no effect in the browser.",
     "kinds": {
-      "hint": "Fire when any of the selected UI Automation events occur.",
+      "hint": "Fire when any of the selected UI Automation events occur. v1 delivers focus-changed; the other kinds are pending.",
       "label": "Event kinds",
       "options": {
         "focus-changed": "Focus changed",
@@ -1086,6 +1242,10 @@
     "timeoutMs": {
       "hint": "0 = wait forever. Otherwise abort the join after this long.",
       "label": "Timeout (ms, optional)"
+    },
+    "aggregate": {
+      "label": "Aggregate gathered results",
+      "hint": "Reduce the joined branch outputs in one step."
     }
   },
   "loop": {
@@ -1179,7 +1339,11 @@
     }
   },
   "manualTrigger": {
-    "intro": "Fires when you click the Run button in the editor. No additional configuration."
+    "intro": "Fires when you click the Run button in the editor. No additional configuration.",
+    "inputSchema": {
+      "label": "Input schema (optional)",
+      "hint": "Declares the run payload ($trigger.payload) for publishing this workflow as a callable unit."
+    }
   },
   "mcpInvokeTool": {
     "argsJson": {
@@ -1999,7 +2163,21 @@
     }
   },
   "teamTrigger": {
-    "intro": "Fired internally by the agent-team runtime. This trigger has no configuration."
+    "intro": "Fires when an agent-team run finishes. Leave the fields empty to fire for every team and every terminal status.",
+    "status": {
+      "hint": "Only fire when the run ends with this status.",
+      "label": "Status",
+      "options": {
+        "any": "Any terminal status",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "failed": "Failed"
+      }
+    },
+    "teamId": {
+      "hint": "Leave empty to fire for every team.",
+      "label": "Team"
+    }
   },
   "teamUpdate": {
     "patchJson": {
@@ -2300,6 +2478,190 @@
       "hint": "Optional. Defaults to the workflow run id.",
       "label": "Response body template",
       "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+    }
+  },
+  "outputSchema": {
+    "sectionTitle": "Typed output",
+    "hint": "Declare a JSON schema the reply must satisfy. Leave empty for free-form text.",
+    "editRaw": "Edit as JSON",
+    "editFields": "Edit as fields",
+    "rawLabel": "JSON Schema",
+    "empty": "No fields yet — add one to enforce typed output.",
+    "fieldName": "Field name",
+    "fieldNamePlaceholder": "e.g. verdict",
+    "fieldDescription": "Description",
+    "fieldDescriptionPlaceholder": "What this field means (helps the model)",
+    "fieldType": "Type",
+    "required": "Required",
+    "removeField": "Remove field",
+    "addField": "Add field",
+    "onSchemaViolation": {
+      "label": "On schema violation",
+      "hint": "What to do if the output still fails the schema after one auto-fix retry.",
+      "fail": "Fail the step",
+      "soft": "Keep unvalidated output"
+    }
+  },
+  "aggregate": {
+    "operation": {
+      "label": "Operation",
+      "hint": "How to reduce the input list into a single value.",
+      "options": {
+        "collect": "Collect (into a list)",
+        "concat": "Concat (flatten one level)",
+        "mergeObjects": "Merge objects",
+        "groupBy": "Group by key",
+        "dedupe": "Deduplicate",
+        "numeric": "Numeric (sum / avg / …)",
+        "custom": "Custom reducer"
+      }
+    },
+    "keyExpression": {
+      "label": "Key expression",
+      "hint": "Per-item key. $item is the current item, e.g. $item.category"
+    },
+    "numericOp": {
+      "label": "Function",
+      "options": {
+        "sum": "Sum",
+        "avg": "Average",
+        "min": "Min",
+        "max": "Max",
+        "count": "Count"
+      }
+    },
+    "numericField": {
+      "label": "Value expression",
+      "hint": "Per-item number. Empty = the item itself."
+    },
+    "reducerExpression": {
+      "label": "Reducer expression (JS)",
+      "hint": "JS expression returning the next accumulator. acc, item, index in scope.",
+      "placeholder": "acc + item.value"
+    }
+  },
+  "ensemble": {
+    "targetKind": {
+      "label": "Target",
+      "hint": "What to run N times.",
+      "options": {
+        "agentTurn": "Agent turn (inline)",
+        "subworkflow": "Sub-workflow"
+      }
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "targetModel": {
+      "label": "Model (optional)",
+      "hint": "Model for each agent sample."
+    },
+    "outputSchema": {
+      "label": "Sample output schema",
+      "hint": "Typed output enables field-based voting."
+    },
+    "workflowId": {
+      "label": "Sub-workflow",
+      "hint": "The workflow to run for each sample."
+    },
+    "n": {
+      "label": "Samples (N)",
+      "hint": "How many times to run the target."
+    },
+    "iterationConcurrency": {
+      "label": "Concurrency",
+      "hint": "Max samples running at once."
+    },
+    "lens": {
+      "label": "Lenses (optional)",
+      "hint": "One steering prompt per line; cycled across samples (e.g. adversarial verify).",
+      "placeholder": "Argue FOR the claim\nArgue AGAINST the claim"
+    },
+    "aggregation": {
+      "label": "Aggregation",
+      "hint": "How to reduce the N samples into one result.",
+      "options": {
+        "majority": "Majority vote on a field",
+        "threshold": "Threshold count",
+        "bestOf": "Best of (by score)",
+        "synthesize": "Synthesize (final agent)"
+      }
+    },
+    "aggField": {
+      "label": "Field",
+      "hint": "Object field to vote / count on. Empty = the whole result."
+    },
+    "threshold": {
+      "label": "Threshold",
+      "hint": "Minimum matching samples to pass."
+    },
+    "scoreField": {
+      "label": "Score field",
+      "hint": "Numeric field to maximize."
+    },
+    "synthesizerAlias": {
+      "label": "Synthesizer alias",
+      "hint": "Routing alias for the final merge model.",
+      "placeholder": "e.g. quality"
+    },
+    "piiGate": {
+      "label": "PII gate",
+      "hint": "Runs before the prompt egresses to every sample.",
+      "off": "Off",
+      "block": "Block (fail the step)",
+      "redact": "Redact"
+    }
+  },
+  "petEventTrigger": {
+    "cooldownMs": {
+      "hint": "Minimum time between fires for the same workflow. Prevents workflows from retriggering themselves.",
+      "label": "Cooldown (ms)"
+    },
+    "intro": "Fires when the desktop pet reaches a supported lifecycle event.",
+    "kinds": {
+      "hint": "Leave all off to fire on every supported pet lifecycle event.",
+      "label": "Pet events",
+      "options": {
+        "achievementUnlocked": "Achievement unlocked",
+        "evolved": "Evolved",
+        "levelUp": "Level up",
+        "unwell": "Unwell"
+      }
+    }
+  },
+  "petInteract": {
+    "itemId": {
+      "hint": "Optional shop item id consumed by the pet controller.",
+      "label": "Item id",
+      "placeholder": "pet_item_..."
+    },
+    "kind": {
+      "label": "Interaction",
+      "options": {
+        "cleaned": "Clean",
+        "fed": "Feed",
+        "petted": "Pet",
+        "played": "Play",
+        "slept": "Sleep",
+        "talked": "Talk",
+        "treated": "Treat"
+      }
+    }
+  },
+  "output": {
+    "value": {
+      "label": "Output value",
+      "hint": "Expression for the terminal output. Empty = the upstream value."
+    },
+    "outputSchema": {
+      "label": "Output schema",
+      "hint": "The published interface's output contract."
+    },
+    "onSchemaViolation": {
+      "label": "On schema violation",
+      "hint": "What to do if the output value fails the schema.",
+      "fail": "Fail the run",
+      "soft": "Pass through with a warning"
     }
   }
 }

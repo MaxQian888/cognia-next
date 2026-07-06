@@ -75,7 +75,13 @@ struct TokenQuery {
 // Middleware
 // ---------------------------------------------------------------------------
 
-/// Axum middleware: verify the device JWT and gate access to protected routes.
+/// Axum middleware: verify a companion JWT and gate access to protected routes.
+///
+/// Accepts two scopes (ADR-0059 W4):
+///   - `"device"` — a paired device (phone / browser), reachable from anywhere.
+///   - `"service"` — the headless Node brain's loopback-minted token. Honored
+///     ONLY when the request originates from loopback; a service token
+///     presented by a remote peer is rejected (`service_token_remote`).
 ///
 /// Wired in via `axum::middleware::from_fn_with_state(state.clone(), require_device_jwt)`.
 pub async fn require_device_jwt(
@@ -83,6 +89,17 @@ pub async fn require_device_jwt(
     mut request: Request,
     next: Next,
 ) -> Response {
+    // Peer address for the service-token loopback check. Read from extensions
+    // (populated by `into_make_service_with_connect_info`) rather than a
+    // `ConnectInfo` extractor param, because axum 0.8's `Option<ConnectInfo>`
+    // isn't a valid extractor and a required one would 500 the bare-request
+    // unit tests. Absent ⇒ treated as non-loopback, so a service token can
+    // never slip through without a verified peer.
+    let peer_is_loopback = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip().is_loopback())
+        .unwrap_or(false);
     // ── 1. Extract token ────────────────────────────────────────────────────
     let header_token = request
         .headers()
@@ -113,7 +130,25 @@ pub async fn require_device_jwt(
     let claims = match verify(&secret, &token, "device") {
         Ok(c) => c,
         Err(JwtError::WrongScope { .. }) => {
-            return error_response("wrong_scope", "JWT scope must be \"device\"");
+            // Not a device token — it may be the headless brain's service
+            // token, which we honor ONLY from loopback.
+            match verify(&secret, &token, "service") {
+                Ok(c) => {
+                    if !peer_is_loopback {
+                        return error_response(
+                            "service_token_remote",
+                            "service-scope tokens are only honored from loopback",
+                        );
+                    }
+                    c
+                }
+                Err(_) => {
+                    return error_response(
+                        "wrong_scope",
+                        "JWT scope must be \"device\" or \"service\"",
+                    );
+                }
+            }
         }
         Err(JwtError::WrongAccount { .. }) => {
             return error_response("wrong_account", "JWT account claim does not match");
@@ -195,6 +230,7 @@ pub async fn require_device_jwt(
 
 /// Wave 3.1: unified flat envelope `{ code, message, details? }`.
 fn error_response(code: &str, message: &str) -> Response {
+    super::metrics::record_auth_failure();
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({
@@ -267,7 +303,7 @@ mod tests {
     use super::*;
     use crate::companion_api::{
         deny_list::DenyList,
-        jwt::{issue_device_jwt, issue_pair_jwt},
+        jwt::{issue_device_jwt, issue_pair_jwt, issue_service_jwt},
         redemption_lru::RedemptionLru,
         CompanionState, SharedState,
     };
@@ -559,6 +595,50 @@ mod tests {
             }
         }
         assert!(saw_429, "non-loopback brute force must trip the limiter");
+    }
+
+    // ── Service-scope token (ADR-0059 W4) ────────────────────────────────────
+
+    fn service_request_from(ip: Option<&str>) -> Request<Body> {
+        let jwt = issue_service_jwt(SECRET, ACCOUNT_ID).expect("issue service jwt").0;
+        let mut req = Request::builder()
+            .uri("/protected")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .body(Body::empty())
+            .unwrap();
+        if let Some(ip) = ip {
+            let addr: SocketAddr = format!("{ip}:54321").parse().unwrap();
+            req.extensions_mut().insert(ConnectInfo(addr));
+        }
+        req
+    }
+
+    #[tokio::test]
+    async fn service_jwt_from_loopback_is_accepted() {
+        let router = build_router(test_state());
+        let resp = router.oneshot(service_request_from(Some("127.0.0.1"))).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body = body_json(resp).await;
+        assert_eq!(body["device_id"], crate::companion_api::jwt::SERVICE_DEVICE_ID);
+    }
+
+    #[tokio::test]
+    async fn service_jwt_from_remote_peer_is_rejected() {
+        let router = build_router(test_state());
+        let resp = router.oneshot(service_request_from(Some("192.0.2.50"))).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 401);
+        let body = body_json(resp).await;
+        assert_eq!(body["code"], "service_token_remote");
+    }
+
+    #[tokio::test]
+    async fn service_jwt_without_connect_info_is_rejected() {
+        // No ConnectInfo ⇒ peer unverifiable ⇒ treated as non-loopback.
+        let router = build_router(test_state());
+        let resp = router.oneshot(service_request_from(None)).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 401);
+        let body = body_json(resp).await;
+        assert_eq!(body["code"], "service_token_remote");
     }
 
     // ── Header takes precedence over query string ────────────────────────────

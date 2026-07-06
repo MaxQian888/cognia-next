@@ -35,6 +35,17 @@ const KIND_LABEL_KEY: Partial<Record<AuditKind, string>> = {
   "goal.started.im": "goalStartedIm",
   "goal.blocked.im": "goalBlockedIm",
   "override.computer_use_changed": "overrideComputerUseChanged",
+  // Silent-reply diagnostics — why THIS conversation produced no reply.
+  "inbound.policy_blocked": "inboundPolicyBlocked",
+  "inbound.deferred_manual_mode": "inboundDeferredManualMode",
+  "delivery.error": "deliveryError",
+  "delivery.deadlettered": "deliveryDeadlettered",
+  "plugin.inbound_blocked": "pluginInboundBlocked",
+  "plugin.rate_blocked": "pluginRateBlocked",
+  "plugin.transform_pii_blocked": "pluginTransformPiiBlocked",
+  "notify.im_pii_blocked": "notifyImPiiBlocked",
+  "workflow.dispatched": "workflowDispatched",
+  "team.dispatched": "teamDispatched",
 }
 
 /** Maps each assignment-trail kind to its i18n key under `inbox.activity.assignment`. */
@@ -53,6 +64,8 @@ const ASSIGNMENT_LABEL_KEY: Record<AssignmentEventKind, string> = {
 interface ActivityRow {
   id: string
   label: string
+  /** Machine reason code (e.g. `pii_blocked`) shown after the label for diagnostics. */
+  reason?: string
   at: number
 }
 
@@ -70,6 +83,7 @@ export function ConversationActivityLog({ conversationKey }: { conversationKey: 
     ...auditEntries.map((e) => ({
       id: e.id,
       label: KIND_LABEL_KEY[e.kind] ? t(`kind.${KIND_LABEL_KEY[e.kind]}`) : e.kind,
+      reason: e.reason,
       at: e.at,
     })),
     ...assignmentEvents.map((e) => ({
@@ -113,7 +127,12 @@ export function ConversationActivityLog({ conversationKey }: { conversationKey: 
                 data-testid={`activity-row-${entry.id}`}
               >
                 <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
-                <span className="flex-1 truncate">{entry.label}</span>
+                <span className="flex-1 truncate">
+                  {entry.label}
+                  {entry.reason ? (
+                    <span className="text-muted-foreground"> · {entry.reason}</span>
+                  ) : null}
+                </span>
                 <span className="whitespace-nowrap text-[10px] text-muted-foreground">
                   {format.relativeTime(new Date(entry.at))}
                 </span>

@@ -11,6 +11,21 @@
 import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
+import {
+  InlineCitation,
+  InlineCitationCard,
+  InlineCitationCardBody,
+  InlineCitationCardTrigger,
+  InlineCitationCarousel,
+  InlineCitationCarouselContent,
+  InlineCitationCarouselHeader,
+  InlineCitationCarouselIndex,
+  InlineCitationCarouselItem,
+  InlineCitationCarouselNext,
+  InlineCitationCarouselPrev,
+  InlineCitationSource,
+  InlineCitationText,
+} from "@/components/ai-elements/inline-citation"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -101,9 +116,12 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
         className={cn("not-prose my-2 text-primary text-xs", className)}
         defaultOpen={open}
       >
-        <CollapsibleTrigger className="flex items-center gap-2" data-testid="sources-part-trigger">
+        <CollapsibleTrigger
+          className="group flex items-center gap-2 rounded-sm transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          data-testid="sources-part-trigger"
+        >
           <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
-          <ChevronDownIcon className="h-4 w-4" />
+          <ChevronDownIcon className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent
           className={cn(
@@ -149,6 +167,7 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
           )}
           {other.length > 0 && (
             <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
+              <WebCitations sources={other} />
               {other.map((s) => (
                 <SourceRow key={s.id} source={s} />
               ))}
@@ -159,6 +178,51 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
     </>
   )
 }
+
+// Only absolute http(s) URLs are safe to feed the citation trigger, which
+// constructs `new URL(...)` to show the hostname.
+const ABSOLUTE_URL_RE = /^https?:\/\//i
+
+// Summarize the web/footnote sources (those carrying a URL) as a single
+// inline-citation badge whose hover-card flips through each source's
+// title/url/snippet. Additive to the per-source rows below — nothing renders
+// when none of the "other" sources have a usable URL (e.g. plain footnotes).
+const WebCitations = memo(function WebCitations({ sources }: { sources: SourcesPartItem[] }) {
+  const t = useTranslations("chat.sourcesPart")
+  const webSources = useMemo(
+    () => sources.filter((s) => s.url && ABSOLUTE_URL_RE.test(s.url)),
+    [sources]
+  )
+  if (webSources.length === 0) return null
+  const urls = webSources.map((s) => s.url as string)
+
+  return (
+    <InlineCitation className="mb-1" data-testid="sources-part-inline-citation">
+      <InlineCitationText className="text-[11px] font-medium text-muted-foreground">
+        {t("citationsLabel", { count: webSources.length })}
+      </InlineCitationText>
+      <InlineCitationCard>
+        <InlineCitationCardTrigger sources={urls} />
+        <InlineCitationCardBody>
+          <InlineCitationCarousel>
+            <InlineCitationCarouselHeader>
+              <InlineCitationCarouselPrev />
+              <InlineCitationCarouselNext />
+              <InlineCitationCarouselIndex />
+            </InlineCitationCarouselHeader>
+            <InlineCitationCarouselContent>
+              {webSources.map((s) => (
+                <InlineCitationCarouselItem key={s.id}>
+                  <InlineCitationSource title={s.title} url={s.url} description={s.snippet} />
+                </InlineCitationCarouselItem>
+              ))}
+            </InlineCitationCarouselContent>
+          </InlineCitationCarousel>
+        </InlineCitationCardBody>
+      </InlineCitationCard>
+    </InlineCitation>
+  )
+})
 
 function originIcon(origin: SourcesPartItem["origin"]) {
   if (origin === "twin-style") {
@@ -236,7 +300,7 @@ const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem 
   if (source.url) {
     return (
       <a
-        className="block rounded px-1 py-0.5 hover:bg-muted/60"
+        className="block rounded px-1 py-0.5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         href={source.url}
         target="_blank"
         rel="noopener noreferrer"

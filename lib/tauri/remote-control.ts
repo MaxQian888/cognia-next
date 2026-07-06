@@ -67,3 +67,15 @@ export async function remoteControlSetSigningSecret(secret: string | null): Prom
 export async function remoteControlGetSigningSecret(): Promise<string | null> {
   return transport.call<string | null>("remote_control_get_signing_secret")
 }
+
+/**
+ * Answer a GET read the inbound server requested via `remote-control://query`.
+ * `payload` is the renderer's Dexie read result (PII-gated). Unknown /
+ * already-timed-out request ids are a silent no-op on the Rust side.
+ */
+export async function remoteControlQueryResponse(
+  requestId: string,
+  payload: unknown
+): Promise<void> {
+  await transport.call<void>("remote_control_query_response", { requestId, payload })
+}

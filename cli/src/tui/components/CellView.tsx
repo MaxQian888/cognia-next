@@ -30,9 +30,15 @@ import {
   summarizeResult,
   summarizeToolCall,
   toolDisplayName,
+  toolFileLine,
+  toolFilePath,
   toolKind,
 } from "../format/tools"
 import { isSubagentTool, subagentName, subagentTask } from "../format/subagent"
+import { planStats, planTitle } from "../runtime/plan"
+import { fileUri } from "../runtime/editor"
+import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
+import path from "node:path"
 import type {
   AssistantCell,
   Cell,
@@ -126,6 +132,23 @@ function ToolBadge({ toolName }: { toolName: string }) {
   )
 }
 
+/**
+ * Wrap a tool card's summary in an OSC-8 hyperlink to the file it references, so
+ * a terminal click opens the editor. Returns the plain summary unchanged when
+ * the tool has no file path or the terminal can't render hyperlinks (no escape
+ * bytes leak). VS Code's integrated terminal opens `vscode://file/…:line`; other
+ * terminals get a `file://` URL handled by the OS.
+ */
+function linkifyToolSummary(cell: ToolCell, summary: string): string {
+  if (!summary) return summary
+  const filePath = toolFilePath(cell.toolName, cell.input)
+  if (!filePath || !supportsHyperlinks(process.env)) return summary
+  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)
+  const vscodeTerm = (process.env.TERM_PROGRAM ?? "").toLowerCase() === "vscode"
+  const line = toolFileLine(cell.toolName, cell.input)
+  return osc8Link(fileUri(abs, line, vscodeTerm ? "vscode" : "generic"), summary)
+}
+
 function ToolView({ cell }: { cell: ToolCell }) {
   const theme = useTheme()
   const STATUS_COLOR: Record<ToolCell["status"], string> = {
@@ -134,6 +157,11 @@ function ToolView({ cell }: { cell: ToolCell }) {
     error: theme.statusError,
   }
   const summary = summarizeToolCall(cell.toolName, cell.input)
+  // Make the file path a clickable OSC-8 hyperlink so a Ctrl/Cmd-click opens it
+  // in the editor (vscode://file inside a VS Code terminal, else file://). Only
+  // on terminals with confirmed OSC-8 support — the link bytes are zero-width, so
+  // the displayed text + column math are unchanged.
+  const summaryDisplay = linkifyToolSummary(cell, summary)
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
   const diffLang = diff.length > 0 ? langFromPath(diffFilePath(cell.input) ?? "") : undefined
   const stat = diffStat(cell.toolName, cell.input)
@@ -161,7 +189,7 @@ function ToolView({ cell }: { cell: ToolCell }) {
         <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
         <ToolBadge toolName={cell.toolName} />
         <Text bold>{toolDisplayName(cell.toolName)}</Text>
-        {summary ? <Text color={theme.muted}> {summary}</Text> : null}
+        {summary ? <Text color={theme.muted}> {summaryDisplay}</Text> : null}
         {stat.added > 0 ? <Text color={theme.diffAdded}> +{stat.added}</Text> : null}
         {stat.removed > 0 ? <Text color={theme.diffRemoved}> -{stat.removed}</Text> : null}
         <ElapsedHint status={cell.status} />
@@ -405,21 +433,42 @@ function TodoView({ cell }: { cell: TodoCell }) {
 }
 
 /** A plan-mode proposal, framed and labelled so it reads as a distinct artifact
- * the user is meant to review and approve (vs. an ordinary reply). */
+ * the user is meant to review and approve (vs. an ordinary reply). Compact by
+ * design: the full plan renders as a scrollable body inside the approval overlay
+ * (see `PlanApprovalOverlay`), so this transcript cell is just a reference line —
+ * the persistent full text stays reachable via `/plan`. */
 function PlanView({ cell }: { cell: PlanCell }) {
   const theme = useTheme()
+  const { steps, lines } = planStats(cell.raw)
+  const title = planTitle(cell.raw)
+  const size = steps > 0 ? `${steps} step${steps === 1 ? "" : "s"}` : `${lines} lines`
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text color={theme.accent} bold>
-        📋 Proposed plan
+        📋 Plan ready for review
       </Text>
-      <Markdown raw={cell.raw} />
+      <Text color={theme.muted} dimColor>
+        {`${title} · ${size} · review & approve below · full text via /plan`}
+      </Text>
     </Box>
   )
 }
 
 function ErrorView({ cell }: { cell: ErrorCell }) {
   const theme = useTheme()
+  // A classified error carries a remediation hint — render it dim on a second
+  // line under the message so the fix is right there (not just the raw fault).
+  if (cell.hint) {
+    return (
+      <Box flexDirection="column">
+        <Text color={theme.danger}>✗ {cell.message}</Text>
+        <Text color={theme.muted} dimColor>
+          {"  ↳ "}
+          {cell.hint}
+        </Text>
+      </Box>
+    )
+  }
   return <Text color={theme.danger}>✗ {cell.message}</Text>
 }
 
@@ -445,11 +494,18 @@ function BashView({ cell }: { cell: BashCell }) {
       <Text>
         <Text color={theme.secondary}>! </Text>
         <Text bold>{cell.command}</Text>
-        {cell.status === "running" ? <Text color={theme.statusRunning}> …</Text> : null}
+        {cell.status === "running" ? (
+          <Text color={theme.statusRunning}> {cell.background ? "(background) …" : "…"}</Text>
+        ) : null}
       </Text>
       {cell.output ? (
         <Text color={color} dimColor>
           {cell.output}
+        </Text>
+      ) : null}
+      {cell.status === "running" && !cell.background ? (
+        <Text color={theme.muted} dimColor>
+          Ctrl+C kill · Ctrl+B background
         </Text>
       ) : null}
     </Box>

@@ -51,7 +51,13 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   // PII-gated and plugin tools keep their own consent gate.
   agent_dispatch: "agent:dispatch",
   team_run: "agent:team",
+  team_list: "agent:team",
   plugin_tool_invoke: "plugin:tools",
+  // Inbound write tools (ADR-0008 Phase 4). All three share one scope; each
+  // submission lands in the `inboundDrafts` review queue, never live state.
+  record_lesson: "inbound:write",
+  save_skill_draft: "inbound:write",
+  ingest_note: "inbound:write",
 }
 
 /**

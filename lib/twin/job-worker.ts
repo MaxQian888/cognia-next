@@ -62,6 +62,12 @@ export interface JobWorkerConfig {
   vectorStoreConfig?: VectorStoreConfig
   /** Loader that materialises a `TwinSource` row into a `RawSource`. */
   sourceLoader: SourceLoader
+  /**
+   * User-configured names applied to EVERY source's redaction pass on top of
+   * the per-source `baseMetadata.speakers` (e.g. the user's own name, which
+   * chat exports label generically). See `TwinRuntimeSettings.extraNameHints`.
+   */
+  nameHints?: string[]
   /** Polling interval when running in `start()` mode. Defaults to 2 s. */
   pollIntervalMs?: number
   /**
@@ -118,6 +124,7 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
         embedding: config.embedding,
         vectorBackend: config.vectorBackend,
         store,
+        nameHints: config.nameHints,
       })
       // When every source in the batch failed, upgrade to a job-level failure
       // so the workbench surfaces the run as broken instead of "completed

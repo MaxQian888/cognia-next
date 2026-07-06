@@ -13,6 +13,9 @@ const MEMORY_COST_KIB: u32 = 19_456;
 const TIME_COST: u32 = 2;
 const PARALLELISM: u32 = 1;
 const MAX_PASSWORD_BYTES: usize = 4096;
+/// Minimum length enforced only when MINTING a new verifier. The verify path
+/// deliberately skips this so accounts created before the policy still unlock.
+const MIN_PASSWORD_LENGTH: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +73,11 @@ fn create_password_verifier_with_salt(
     salt: &[u8],
 ) -> Result<AccountPasswordVerifier, String> {
     validate_password(password)?;
+    if password.chars().count() < MIN_PASSWORD_LENGTH {
+        return Err(format!(
+            "password must be at least {MIN_PASSWORD_LENGTH} characters"
+        ));
+    }
     if salt.len() != SALT_LEN {
         return Err("password verifier salt length is invalid".into());
     }
@@ -221,6 +229,18 @@ mod tests {
         assert!(account_password_verify(password, verifier)
             .unwrap_err()
             .contains("too long"));
+    }
+
+    #[test]
+    fn enforces_minimum_length_on_create_but_not_on_verify() {
+        // Minting a verifier below the minimum length is rejected.
+        let err = create_password_verifier_with_salt("short", &[7_u8; 16]).unwrap_err();
+        assert!(err.contains("at least"));
+
+        // The verify path never enforces the minimum: a short password is a
+        // normal (wrong) input, not an error, so pre-policy accounts unlock.
+        let verifier = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
+        assert!(!account_password_verify("short".into(), verifier).unwrap());
     }
 
     #[test]

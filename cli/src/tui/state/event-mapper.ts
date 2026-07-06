@@ -28,25 +28,31 @@ export function captureEventToActions(event: CaptureStreamEvent): TuiAction[] {
       return [
         {
           type: "TOOL_CALL",
-          callKey: toolCallKey(event.toolName, event.input),
+          // Prefer the SDK's stable `tool_use` id: it pairs a result exactly and,
+          // unlike name+input, keeps two concurrent calls with identical args
+          // distinct. Fall back to name+input when the provider gives no id.
+          callKey: event.id ?? toolCallKey(event.toolName, event.input),
           toolName: event.toolName,
           input: event.input,
         },
       ]
-    case "tool-result":
+    case "tool-result": {
+      // Same correlation key the TOOL_CALL used, so the reducer pairs them
+      // exactly: the `tool_use_id` when present, else name+input when the result
+      // carries its originating input. Absent both ⇒ no callKey (nameless result).
+      const callKey =
+        event.id ?? (event.input ? toolCallKey(event.toolName, event.input) : undefined)
       return [
         {
           type: "TOOL_RESULT",
           toolName: event.toolName,
-          // When the result carries its originating input, derive the same
-          // callKey the TOOL_CALL used so the reducer can pair them exactly.
-          ...(event.input
-            ? { input: event.input, callKey: toolCallKey(event.toolName, event.input) }
-            : {}),
+          ...(event.input ? { input: event.input } : {}),
+          ...(callKey ? { callKey } : {}),
           result: event.result,
           ...(event.isError ? { isError: true } : {}),
         },
       ]
+    }
     case "usage":
       return [{ type: "SET_USAGE", usage: event.usage }]
     case "compact":

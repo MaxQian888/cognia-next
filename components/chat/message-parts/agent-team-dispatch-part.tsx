@@ -45,15 +45,21 @@ export const AgentTeamDispatchPart = memo(function AgentTeamDispatchPart({
     >
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <UsersIcon className="size-3 shrink-0" aria-hidden />
-        <span className="font-medium">{fromName ?? t("supervisor")}</span>
+        <span className="min-w-0 max-w-[40%] truncate font-medium">
+          {fromName ?? t("supervisor")}
+        </span>
         <ArrowRightIcon className="size-3 shrink-0" aria-hidden />
-        <Badge variant="secondary" className="text-[10px]" data-testid="dispatch-to">
+        <Badge
+          variant="secondary"
+          className="max-w-[45%] truncate text-[10px]"
+          data-testid="dispatch-to"
+        >
           {part.toName}
         </Badge>
         {compact ? (
           <Link
             href={memberHref}
-            className="ml-auto inline-flex items-center gap-1 underline"
+            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             data-testid="dispatch-open"
           >
             {t("openMember")}
@@ -63,10 +69,12 @@ export const AgentTeamDispatchPart = memo(function AgentTeamDispatchPart({
       </div>
       {compact ? null : (
         <>
-          <p className="mt-1 whitespace-pre-wrap text-xs">{part.task}</p>
+          <p className="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-xs">
+            {part.task}
+          </p>
           <Link
             href={memberHref}
-            className="mt-1.5 inline-flex items-center gap-1 text-[11px] underline"
+            className="mt-1.5 inline-flex items-center gap-1 rounded-sm text-[11px] underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             data-testid="dispatch-open"
           >
             {t("openMember")}

@@ -172,6 +172,28 @@ describe("createAgentSession", () => {
     expect(capOptions.idleTimeoutMs).toBe(30_000)
   })
 
+  it("marks the build context interactive so the live turn keeps partials (idle-watchdog feed)", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const resolveOptions = jest
+      .fn()
+      .mockResolvedValue({ model: "m", provider: "anthropic" } as never)
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_interactive",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const ctx = resolveOptions.mock.calls[0][0] as { interactive?: boolean }
+    expect(ctx.interactive).toBe(true)
+  })
+
   it("injects the config's aiSdkMaxSteps into the sendOptions handed to capture", async () => {
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({
@@ -763,9 +785,9 @@ describe("createAgentSession", () => {
   })
 
   it("surfaces dispatch_agent on the Anthropic channel when the SDK-native agents list is empty", async () => {
-    // The CLI host never populates `options.agents` (project-instruction fs is
-    // absent), so the SDK-native Task tool is unavailable on Anthropic too — we
-    // advertise the provider-agnostic plugin tool so subagents stay reachable.
+    // The CLI's own plugin dispatch tool is the single dispatch path on BOTH
+    // channels (it round-trips to `runCliSubagent`), so it is always advertised —
+    // here with an empty `options.agents`, the simplest case.
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({
       config: cfg(), // provider anthropic
@@ -784,9 +806,13 @@ describe("createAgentSession", () => {
     expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
   })
 
-  it("does NOT surface dispatch_agent when the SDK-native agents list is already populated", async () => {
-    // When `options.agents` carries SDK-native subagents, a second plugin-tool
-    // dispatch would just confuse the model — advertise nothing.
+  it("surfaces dispatch_agent AND drops the desktop-populated SDK-native agents map", async () => {
+    // Regression guard: `resolveSendOptions` now populates `options.agents` in
+    // direct chat with the desktop's subagents, which target a Dexie executor the
+    // CLI lacks AND on the ai-sdk channel never become a dispatch tool. The CLI
+    // must (a) still advertise its own plugin dispatch tool — the single working
+    // dispatch path — and (b) drop the desktop agent map so the Anthropic channel
+    // does not surface a second, non-functional native Task tool.
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({
       config: cfg(),
@@ -803,7 +829,8 @@ describe("createAgentSession", () => {
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     const sendOptions = capture.mock.calls[0][2] as SendOptions
-    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBeFalsy()
+    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
+    expect(sendOptions.agents).toBeUndefined()
   })
 
   it("does not surface dispatch_agent when there are no discovered subagents", async () => {
@@ -848,6 +875,35 @@ describe("createAgentSession", () => {
     const dispatchTool = sendOptions.pluginTools?.find((t) => t.name === DISPATCH_AGENT_TOOL_NAME)
     expect(dispatchTool).toBeDefined()
     // The built-in is targetable: its id is in the subagentId enum.
+    const enumIds =
+      (dispatchTool?.jsonSchema as { properties?: { subagentId?: { enum?: string[] } } })
+        ?.properties?.subagentId?.enum ?? []
+    expect(enumIds).toContain("general-purpose")
+  })
+
+  it("keeps the built-in general-purpose subagent when agent discovery throws", async () => {
+    // `resolveAgents` rejecting (corrupt `.cognia/agents` dir, fs error) must not
+    // strand the model with no dispatch tool — the fallback re-applies the
+    // built-ins so dispatch stays available.
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ provider: "opencode-go" }),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture,
+      resolveAgents: async () => {
+        throw new Error("discovery blew up")
+      },
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    const dispatchTool = sendOptions.pluginTools?.find((t) => t.name === DISPATCH_AGENT_TOOL_NAME)
+    expect(dispatchTool).toBeDefined()
     const enumIds =
       (dispatchTool?.jsonSchema as { properties?: { subagentId?: { enum?: string[] } } })
         ?.properties?.subagentId?.enum ?? []
@@ -987,5 +1043,91 @@ describe("createAgentSession.setPermissionMode", () => {
     expect(bootstrap).toHaveBeenCalledTimes(1)
     const followUpOptions = capture.mock.calls[1][2] as SendOptions
     expect(followUpOptions.permissionMode).toBe("acceptEdits")
+  })
+})
+
+describe("createAgentSession — twin grounding", () => {
+  const applied = { systemPrompt: "SP-FULL", stable: "TWIN-STABLE", dynamic: "TWIN-DYN" }
+  const twinOk = {
+    ok: true as const,
+    applied,
+    degraded: false,
+    sources: [],
+    styleSampleCount: 0,
+  }
+
+  function twinSession(opts: {
+    fetchTwin: jest.Mock
+    capture: jest.Mock
+    twin?: { enabled?: boolean; characterId?: string }
+  }) {
+    return createAgentSession({
+      config: cfg({ twin: opts.twin ?? { enabled: true, characterId: "char-1" } }),
+      sessionId: "s_twin",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () =>
+        ({ model: "m", provider: "anthropic", systemPrompt: "BASE" }) as never,
+      capture: opts.capture,
+      transcriptFs: memFs().fsx,
+      fetchTwin: opts.fetchTwin as never,
+    })
+  }
+
+  it("appends the stable segment once and prepends the dynamic block per turn", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const fetchTwin = jest.fn().mockResolvedValue(twinOk)
+    const session = twinSession({ fetchTwin, capture })
+    const gate = createPermissionGate({ yes: true })
+
+    await session.send("first question", { gate })
+    await session.send("second question", { gate })
+
+    expect(fetchTwin).toHaveBeenCalledTimes(2)
+    expect(fetchTwin.mock.calls[0][0]).toMatchObject({
+      characterId: "char-1",
+      message: "first question",
+      sessionId: "s_twin",
+    })
+    // Stable segment lands in the cached system prompt exactly once.
+    const optionsArg = capture.mock.calls[0][2] as SendOptions
+    expect(optionsArg.systemPrompt).toBe("BASE\n\nTWIN-STABLE")
+    const optionsArg2 = capture.mock.calls[1][2] as SendOptions
+    expect(optionsArg2.systemPrompt).toBe("BASE\n\nTWIN-STABLE")
+    // Dynamic block rides each turn's user content.
+    expect(capture.mock.calls[0][1]).toBe(
+      "<twin-context>\nTWIN-DYN\n</twin-context>\n\nfirst question"
+    )
+    expect(capture.mock.calls[1][1]).toBe(
+      "<twin-context>\nTWIN-DYN\n</twin-context>\n\nsecond question"
+    )
+  })
+
+  it("notices once per session when the desktop is unreachable and stays ungrounded", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const fetchTwin = jest.fn().mockResolvedValue(null)
+    const session = twinSession({ fetchTwin, capture })
+    const gate = createPermissionGate({ yes: true })
+    const notices: string[] = []
+
+    await session.send("q1", { gate, onTwinNotice: (m) => notices.push(m) })
+    await session.send("q2", { gate, onTwinNotice: (m) => notices.push(m) })
+
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toMatch(/not reachable/i)
+    // No twin material anywhere.
+    expect((capture.mock.calls[0][2] as SendOptions).systemPrompt).toBe("BASE")
+    expect(capture.mock.calls[0][1]).toBe("q1")
+  })
+
+  it("never fetches when twin grounding is disabled or unconfigured", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const fetchTwin = jest.fn()
+    const session = twinSession({ fetchTwin, capture, twin: { enabled: true } })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(fetchTwin).not.toHaveBeenCalled()
   })
 })

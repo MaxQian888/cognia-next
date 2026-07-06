@@ -18,7 +18,7 @@
  * Phase 8 of the ClaudeCode 完整化 plan.
  */
 
-import { memo, useEffect, useMemo, useState } from "react"
+import { memo, useEffect, useMemo, useState, type MouseEvent } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import {
@@ -41,8 +41,16 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
 import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
+import type { SubAgentToolCall, SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { AgentFlowMode } from "@/types/appearance"
+import { ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { BackgroundedRunControls } from "@/components/chat/message-parts/backgrounded-run-controls"
+import { ToolActivityGroup } from "@/components/chat/message-parts/tool-activity-group"
+import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
+import { toToolActivityEntries } from "@/lib/claude/subagent-tool-parts"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
 import { cn } from "@/lib/utils"
 
 /** Status → concrete glyph for the simplified row + card header. */
@@ -51,7 +59,7 @@ const STATUS_GLYPH: Record<string, { Icon: LucideIcon; className: string }> = {
   queued: { Icon: ClockIcon, className: "text-blue-500" },
   running: { Icon: Loader2Icon, className: "animate-spin text-primary" },
   waiting: { Icon: PauseIcon, className: "text-yellow-500" },
-  completed: { Icon: CheckCircleIcon, className: "text-green-600" },
+  completed: { Icon: CheckCircleIcon, className: "text-green-600 dark:text-green-500" },
   failed: { Icon: XCircleIcon, className: "text-destructive" },
   cancelled: { Icon: BanIcon, className: "text-orange-500" },
   timeout: { Icon: AlertTriangleIcon, className: "text-red-500" },
@@ -67,8 +75,19 @@ interface Props {
   onToggle?: () => void
 }
 
-/** Minimal structural shape of a runtime log entry (level + message). */
-type SubagentLogEntry = { level: string; message: string }
+/** Minimal structural shape of a runtime log entry (level + message + data). */
+type SubagentLogEntry = { level: string; message: string; data?: unknown }
+
+/**
+ * A coalesced sub-agent stream-text log — the child's narrated reasoning
+ * stream (gap8). The runtime store folds consecutive stream text into one
+ * trailing entry tagged `data.stream === "text"`. Only surfaced in `detailed`
+ * mode so a verbose child doesn't flood simplified/standard transcripts.
+ */
+function isStreamTextLog(log: { data?: unknown }): boolean {
+  const d = log.data
+  return typeof d === "object" && d !== null && (d as { stream?: unknown }).stream === "text"
+}
 
 /**
  * Shared progress-detail body — summary paragraph, the tail of the log stream,
@@ -82,31 +101,97 @@ const SubagentLogBody = memo(function SubagentLogBody({
   logs,
   lastLog,
   subagentId,
+  mode,
+  toolCalls,
+  finalResponse,
+  tokenUsage,
 }: {
   summary?: string
   logs: SubagentLogEntry[]
   lastLog?: SubagentLogEntry
   subagentId: string
+  mode: AgentFlowMode
+  toolCalls: SubAgentToolCall[]
+  finalResponse?: string
+  tokenUsage?: SubAgentTokenUsage
 }) {
   const t = useTranslations("chat.subagentPart")
   const tailLogs = useMemo(() => logs.slice(-50), [logs])
+  const entries = useMemo(() => toToolActivityEntries(toolCalls), [toolCalls])
+  const renderToolRow = (part: (typeof entries)[number]["part"], key: string) => (
+    <ToolCallRow key={key} part={part} />
+  )
   return (
     <>
       {summary ? <p className="rounded bg-muted/30 p-2 text-xs">{summary}</p> : null}
+
+      {/* Inline tool list (reuses the main chat's tool flow). */}
+      {entries.length >= 2 ? (
+        <div data-testid="subagent-tool-activity">
+          <ToolActivityGroup
+            entries={entries}
+            mode={mode}
+            renderCard={(part, key) => renderToolRow(part, key)}
+          />
+        </div>
+      ) : entries.length === 1 ? (
+        <div data-testid="subagent-tool-activity">
+          <ToolCallRow part={entries[0].part} />
+        </div>
+      ) : null}
+      {toolCalls.length >= 100 ? (
+        <p className="text-[10px] italic text-muted-foreground" data-testid="subagent-tools-tail">
+          {t("toolsTailNote", { n: 100 })}
+        </p>
+      ) : null}
+
+      {/* Final output, once the run produced one. */}
+      {finalResponse ? (
+        <div className="space-y-1" data-testid="subagent-result">
+          <p className="text-[11px] font-medium text-muted-foreground">{t("resultHeading")}</p>
+          <div className="rounded bg-muted/30 p-2 text-xs">
+            <MarkdownRenderer content={finalResponse} />
+          </div>
+        </div>
+      ) : null}
+
+      {/* Activity log (secondary to the tool list) — the sub-agent's narrated
+          chain of thought, rendered as a connected step timeline. */}
       {logs.length > 0 ? (
-        <div className="space-y-0.5" data-testid="subagent-logs">
+        <div className="space-y-2" data-testid="subagent-logs">
           {tailLogs.map((log, i) => (
-            <p key={i} className="font-mono text-[11px] text-muted-foreground">
-              <span className="mr-1 uppercase">[{log.level}]</span>
-              {log.message}
-            </p>
+            <ChainOfThoughtStep
+              key={i}
+              icon={log.level === "error" || log.level === "warn" ? AlertTriangleIcon : undefined}
+              status={i === tailLogs.length - 1 ? "active" : "complete"}
+              label={<span className="break-words font-mono text-[11px]">{log.message}</span>}
+            />
           ))}
+          {logs.length >= 50 ? (
+            <p
+              className="text-[10px] italic text-muted-foreground"
+              data-testid="subagent-logs-tail"
+            >
+              {t("logsTailNote", { n: 50 })}
+            </p>
+          ) : null}
         </div>
       ) : lastLog ? (
         <p className="font-mono text-[11px] text-muted-foreground">{lastLog.message}</p>
-      ) : (
+      ) : entries.length === 0 ? (
         <p className="text-[11px] italic text-muted-foreground">{t("noLogsYet")}</p>
-      )}
+      ) : null}
+
+      {tokenUsage ? (
+        <p className="text-[10px] text-muted-foreground" data-testid="subagent-tokens-breakdown">
+          {t("tokensBreakdown", {
+            prompt: tokenUsage.promptTokens,
+            completion: tokenUsage.completionTokens,
+            total: tokenUsage.totalTokens,
+          })}
+        </p>
+      ) : null}
+
       <Link
         href={`/agent-teams?focus=subagent:${subagentId}`}
         className="inline-flex items-center gap-1 text-xs underline"
@@ -133,16 +218,28 @@ export const SubagentPart = memo(function SubagentPart({
   const status = live?.status ?? part.status
   // Honest live tool-call count (Claude Code / Codex style) — replaces the old
   // pseudo-percentage progress bar, which implied a completion ratio a subagent
-  // run doesn't actually have.
-  const toolUses = live?.toolUses ?? 0
+  // run doesn't actually have. gap7: falls back to the persisted snapshot when
+  // the ephemeral runtime store no longer has the run (post-reload).
+  const toolUses = live?.toolUses ?? part.toolUses ?? 0
   const cfg = SUB_AGENT_STATUS_CONFIG[status]
-  const logs = live?.logs ?? []
+  // gap8: the narrated reasoning stream (coalesced stream-text logs) is only
+  // surfaced in `detailed`; simplified/standard show tools + final response.
+  const allLogs: SubagentLogEntry[] = live?.logs ?? part.logs ?? []
+  const logs = mode === "detailed" ? allLogs : allLogs.filter((l) => !isStreamTextLog(l))
   const lastLog = logs[logs.length - 1]
   const rejection = live?.rejection ?? part.rejection
   const backgrounded = (live?.backgrounded ?? part.backgrounded) === true && status === "running"
   const depth = live?.depth ?? part.depth
-  const tokenTotal = (live?.result?.tokenUsage ?? part.tokenUsage)?.totalTokens
+  const tokenUsage = live?.result?.tokenUsage ?? part.tokenUsage
+  const tokenTotal = tokenUsage?.totalTokens
+  const toolCalls = live?.toolCalls ?? part.toolCalls ?? []
+  const finalResponse = live?.result?.finalResponse ?? part.finalResponse
   const isRunning = part.completedAt == null && status === "running"
+  const canAbort = status === "running"
+  const handleAbort = (e: MouseEvent) => {
+    e.stopPropagation()
+    cancelSubagentRun(part.subagentId, { backgrounded })
+  }
   const [now, setNow] = useState<number>(() => Date.now())
   useEffect(() => {
     if (!isRunning) return
@@ -180,64 +277,74 @@ export const SubagentPart = memo(function SubagentPart({
         data-testid={`subagent-part-${part.subagentId}`}
         data-status={status}
       >
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={isOpen}
-          aria-label={t("rowAria", { name: part.name, status: statusLabel })}
-          data-testid={`subagent-toggle-${part.subagentId}`}
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted/50"
-        >
-          <ChevronRightIcon
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              isOpen && "rotate-90"
-            )}
-          />
-          <BotIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 font-medium">{part.name}</span>
-          {typeof depth === "number" ? (
-            <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
-              {t("depthBadge", { n: depth })}
-            </Badge>
-          ) : null}
-          {backgrounded ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] text-muted-foreground"
-              data-testid="subagent-background-badge"
-            >
-              {t("backgroundRunning")}
-            </Badge>
-          ) : null}
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {lastLog?.message ?? ""}
-          </span>
-          {typeof tokenTotal === "number" && tokenTotal > 0 ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] text-muted-foreground"
-              data-testid="subagent-tokens-badge"
-            >
-              {t("tokens", { n: tokenTotal })}
-            </Badge>
-          ) : null}
-          {isRunning && toolUses > 0 ? (
-            <span
-              className="shrink-0 text-[11px] text-muted-foreground tabular-nums"
-              data-testid="subagent-tools-count"
-            >
-              {t("toolsRunCount", { n: toolUses })}
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={isOpen}
+            aria-label={t("rowAria", { name: part.name, status: statusLabel })}
+            data-testid={`subagent-toggle-${part.subagentId}`}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+          >
+            <ChevronRightIcon
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                isOpen && "rotate-90"
+              )}
+            />
+            <BotIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="shrink-0 font-medium">{part.name}</span>
+            {typeof depth === "number" ? (
+              <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
+                {t("depthBadge", { n: depth })}
+              </Badge>
+            ) : null}
+            {backgrounded ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-muted-foreground"
+                data-testid="subagent-background-badge"
+              >
+                {t("backgroundRunning")}
+              </Badge>
+            ) : null}
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {lastLog?.message ?? ""}
             </span>
-          ) : null}
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            {t("durationMs", { ms: durationMs })}
-          </span>
-          <MotionStatusSwap swapKey={status} className="shrink-0">
-            <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
-          </MotionStatusSwap>
-          <span className="sr-only">{statusLabel}</span>
-        </button>
+            {typeof tokenTotal === "number" && tokenTotal > 0 ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-muted-foreground"
+                data-testid="subagent-tokens-badge"
+              >
+                {t("tokens", { n: tokenTotal })}
+              </Badge>
+            ) : null}
+            {isRunning && toolUses > 0 ? (
+              <span
+                className="shrink-0 text-[11px] text-muted-foreground tabular-nums"
+                data-testid="subagent-tools-count"
+              >
+                {t("toolsRunCount", { n: toolUses })}
+              </span>
+            ) : null}
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {t("durationMs", { ms: durationMs })}
+            </span>
+            <MotionStatusSwap swapKey={status} className="shrink-0">
+              <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
+            </MotionStatusSwap>
+            <span className="sr-only">{statusLabel}</span>
+          </button>
+          <BackgroundedRunControls
+            variant="icon"
+            isRunning={canAbort}
+            onAbort={handleAbort}
+            abortAria={t("abort")}
+            abortTestId={`subagent-abort-${part.subagentId}`}
+            className="mr-1"
+          />
+        </div>
         {rejectionBanner}
         <MotionCollapse open={isOpen}>
           <div className="space-y-2 border-t px-3 py-2.5">
@@ -246,6 +353,10 @@ export const SubagentPart = memo(function SubagentPart({
               logs={logs}
               lastLog={lastLog}
               subagentId={part.subagentId}
+              mode={mode}
+              toolCalls={toolCalls}
+              finalResponse={finalResponse}
+              tokenUsage={tokenUsage}
             />
           </div>
         </MotionCollapse>
@@ -263,7 +374,7 @@ export const SubagentPart = memo(function SubagentPart({
       <Collapsible open={isOpen}>
         <div className="flex items-center justify-between gap-2">
           <CollapsibleTrigger
-            className="flex flex-1 items-center gap-2 text-left"
+            className="flex flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
             data-testid={`subagent-toggle-${part.subagentId}`}
             onClick={toggle}
           >
@@ -316,6 +427,13 @@ export const SubagentPart = memo(function SubagentPart({
               {t("durationMs", { ms: durationMs })}
             </span>
           </CollapsibleTrigger>
+          <BackgroundedRunControls
+            variant="icon"
+            isRunning={canAbort}
+            onAbort={handleAbort}
+            abortAria={t("abort")}
+            abortTestId={`subagent-abort-${part.subagentId}`}
+          />
         </div>
         {rejectionBanner}
         <CollapsibleContent className="mt-2 space-y-2">
@@ -324,6 +442,10 @@ export const SubagentPart = memo(function SubagentPart({
             logs={logs}
             lastLog={lastLog}
             subagentId={part.subagentId}
+            mode={mode}
+            toolCalls={toolCalls}
+            finalResponse={finalResponse}
+            tokenUsage={tokenUsage}
           />
         </CollapsibleContent>
       </Collapsible>

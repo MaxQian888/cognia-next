@@ -68,7 +68,14 @@ jest.mock("@/lib/logging", () => {
     error: jest.fn(),
     child: () => child,
   }
-  return { loggers: { agent: { ...child, child: () => child } } }
+  return {
+    createLogger: () => ({ ...child, child: () => child }),
+    logger: { ...child, child: () => child },
+    loggers: {
+      agent: { ...child, child: () => child },
+      plugin: { ...child, child: () => child },
+    },
+  }
 })
 
 const baseState = (): AgentTeamState =>
@@ -625,15 +632,18 @@ describe("agent-team-store store-level config", () => {
     const stored = window.localStorage.getItem("cognia-agent-teams")
     expect(stored).not.toBeNull()
     const parsed = JSON.parse(stored as string)
-    expect(parsed.version).toBe(3)
+    expect(parsed.version).toBe(5)
     expect(parsed.state.displayMode).toBe("compact")
     // partialize keeps templates / defaultConfig / displayMode / workspaceTab /
-    // lastAdapterSyncVersion only
+    // lastAdapterSyncVersion AND (v4+) the durable team definitions.
     expect(parsed.state.workspaceTab).toBeDefined()
     expect(parsed.state.defaultConfig).toBeDefined()
     expect(parsed.state.lastAdapterSyncVersion).toBeDefined()
-    // teams should not be persisted (excluded by partialize)
-    expect(parsed.state.teams).toBeUndefined()
+    // v4+ persists durable team maps (empty after reset, but present).
+    expect(parsed.state.teams).toBeDefined()
+    expect(parsed.state.tasks).toBeDefined()
+    // live runtime ephemera stays out of the persisted slice
+    expect(parsed.state.messages).toBeUndefined()
   })
 
   it("identity-migrates persisted state across versions", async () => {

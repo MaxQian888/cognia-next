@@ -53,6 +53,48 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect(ctx.appSettings?.builtinTools).toEqual(ctx.appSettings?.builtinTools)
   })
 
+  it("falls back to the default base prompt when none is configured", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ cwd: "/work/here" }),
+    })
+    const prompt = (ctx.session as { systemPrompt?: string }).systemPrompt ?? ""
+    expect(prompt).toContain("Working directory: /work/here")
+    expect(prompt).toMatch(/prefer the `edit` tool/i)
+    expect(ctx.appSettings?.defaultSystemPrompt).toContain("Working directory: /work/here")
+  })
+
+  it("injects the plan-mode explore→plan section into the default prompt in plan mode", () => {
+    const planned = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ cwd: "/work/here", permissionMode: "plan" }),
+    })
+    const plannedPrompt = (planned.session as { systemPrompt?: string }).systemPrompt ?? ""
+    expect(plannedPrompt).toMatch(/`Explore` subagent/)
+    expect(plannedPrompt).toMatch(/exit_plan_mode/)
+
+    const plain = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ cwd: "/work/here" }),
+    })
+    const plainPrompt = (plain.session as { systemPrompt?: string }).systemPrompt ?? ""
+    expect(plainPrompt).not.toMatch(/exit_plan_mode/)
+  })
+
+  it("lets a user-configured systemPrompt win over the default base prompt", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ systemPrompt: "be terse" }),
+    })
+    const prompt = (ctx.session as { systemPrompt?: string }).systemPrompt ?? ""
+    expect(prompt).toBe("be terse")
+    expect(prompt).not.toContain("Working directory")
+  })
+
   it("appends the output-style instruction to the system prompt", () => {
     const ctx = toBuildContext({
       sessionId: "s1",
@@ -96,6 +138,16 @@ describe("toBuildContext — session + appSettings shaping", () => {
     const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
     expect(ctx.agentMode).toBeNull()
     expect(ctx.preloadedMcpServers).toEqual([])
+  })
+
+  it("omits the interactive flag by default (one-shot / subagent)", () => {
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
+    expect((ctx as { interactive?: boolean }).interactive).toBeUndefined()
+  })
+
+  it("threads interactive:true so the live TUI turn keeps partials (idle-watchdog feed)", () => {
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg(), interactive: true })
+    expect((ctx as { interactive?: boolean }).interactive).toBe(true)
   })
 
   it("threads provided MCP servers + ephemeral skill ids into the seams", () => {
@@ -238,6 +290,33 @@ describe("toBuildContext — provider credentials", () => {
     ])
   })
 
+  it("folds a protocol override for a non-anthropic built-in into providerSettings.apiProtocol", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "deepseek",
+        providers: { deepseek: { apiKey: "sk-d", protocol: "anthropic" } },
+      }),
+    })
+    expect(ctx.appSettings?.providerSettings?.deepseek?.apiProtocol).toBe("anthropic")
+    // A built-in id with an explicit protocol must NOT also be misclassified
+    // as a genuinely custom provider.
+    expect(ctx.appSettings?.customProviders).toBeUndefined()
+  })
+
+  it("never folds a protocol override into the literal anthropic provider slot", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "anthropic",
+        providers: { anthropic: { apiKey: "sk-a", protocol: "openai" } },
+      }),
+    })
+    expect(ctx.appSettings?.providerSettings?.anthropic?.apiProtocol).toBeUndefined()
+  })
+
   it("omits customProviders when no entry carries a protocol", () => {
     const ctx = toBuildContext({
       sessionId: "s1",
@@ -365,5 +444,52 @@ describe("toBuildContext — allowedTools shim", () => {
   it("uses no character when allowedTools is unset", () => {
     const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
     expect(ctx.character).toBeNull()
+  })
+})
+
+describe("toBuildContext — opt-in auto routing", () => {
+  it("omits modelMappings/autoRouting/routingContextHint when autoRoute is off (byte-identical shim)", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "anthropic" }),
+      routingPromptText: "some prompt",
+    })
+    const appSettings = ctx.appSettings as unknown as Record<string, unknown>
+    expect(appSettings.modelMappings).toBeUndefined()
+    expect(appSettings.autoRouting).toBeUndefined()
+    expect(ctx.routingContextHint).toBeUndefined()
+  })
+
+  it("seeds the tier ladder + autoRouting and threads the prompt when autoRoute is on", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "anthropic",
+        autoRoute: true,
+        providers: { anthropic: {}, openai: { apiKey: "sk-x" } },
+      }),
+      routingPromptText: "please refactor this algorithm step-by-step",
+    })
+    const appSettings = ctx.appSettings as {
+      modelMappings?: Array<{ alias: string }>
+      autoRouting?: { enabled: boolean }
+    }
+    expect(appSettings.autoRouting?.enabled).toBe(true)
+    // Seeded from the enabled providers → at least one tier alias present.
+    expect((appSettings.modelMappings ?? []).length).toBeGreaterThan(0)
+    expect(ctx.routingContextHint?.promptText).toBe("please refactor this algorithm step-by-step")
+  })
+
+  it("seeds mappings even without a prompt, but leaves routingContextHint off", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "anthropic", autoRoute: true }),
+    })
+    const appSettings = ctx.appSettings as { autoRouting?: { enabled: boolean } }
+    expect(appSettings.autoRouting?.enabled).toBe(true)
+    expect(ctx.routingContextHint).toBeUndefined()
   })
 })

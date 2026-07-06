@@ -275,7 +275,7 @@ export default function MobileSchedulerPage() {
         title={t("title") || tMobile("schedulerRow") || "Scheduler"}
         backAria={tMobile("appearanceBackAria") || "Back"}
         testid="mobile-scheduler-page"
-        bodyClassName="space-y-4 px-4 py-4"
+        bodyClassName="space-y-4 px-4 py-4 pb-28"
       >
         <MobileSchedulerStatStrip statistics={statistics} />
 
@@ -288,42 +288,50 @@ export default function MobileSchedulerPage() {
             <Input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={t("searchPlaceholder") || "Search tasks"}
-              aria-label={t("searchPlaceholder") || "Search tasks"}
+              placeholder={t("searchTasks")}
+              aria-label={t("searchTasks")}
               className="h-9 pl-8"
               data-testid="mobile-scheduler-search"
             />
           </div>
 
-          <FilterChips
-            filters={[
-              { key: "all", label: t("filter.all") || "All", count: unifiedItems.length },
-              {
-                key: "active",
-                label: t("statuses.active") || "Active",
-                count: unifiedItems.filter((i) => i.status === "active").length,
-              },
-              {
-                key: "paused",
-                label: t("statuses.paused") || "Paused",
-                count: unifiedItems.filter((i) => i.status === "paused").length,
-              },
-            ]}
-            activeFilter={activeFilter}
-            onFilterChange={setActiveFilter}
-          />
+          {/*
+            The shared chip components carry their own `px-3` (sized for the
+            desktop sidebar). Pull the row back by the same amount so the first
+            chip aligns flush with the search box / stat cards instead of
+            sitting visibly indented on the phone.
+          */}
+          <div className="-mx-3">
+            <FilterChips
+              filters={[
+                { key: "all", label: t("filter.all") || "All", count: unifiedItems.length },
+                {
+                  key: "active",
+                  label: t("statuses.active") || "Active",
+                  count: unifiedItems.filter((i) => i.status === "active").length,
+                },
+                {
+                  key: "paused",
+                  label: t("statuses.paused") || "Paused",
+                  count: unifiedItems.filter((i) => i.status === "paused").length,
+                },
+              ]}
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+            />
 
-          <KindFilterChips
-            selected={selectedKinds}
-            onToggle={(kind) => {
-              const next = new Set(selectedKinds)
-              if (next.has(kind)) next.delete(kind)
-              else next.add(kind)
-              setSelectedKinds(next)
-            }}
-            onClear={() => setSelectedKinds(new Set())}
-            countsByKind={countsByKind}
-          />
+            <KindFilterChips
+              selected={selectedKinds}
+              onToggle={(kind) => {
+                const next = new Set(selectedKinds)
+                if (next.has(kind)) next.delete(kind)
+                else next.add(kind)
+                setSelectedKinds(next)
+              }}
+              onClear={() => setSelectedKinds(new Set())}
+              countsByKind={countsByKind}
+            />
+          </div>
         </div>
 
         {grouped.length === 0 ? (
@@ -373,11 +381,16 @@ export default function MobileSchedulerPage() {
       </SubPageShell>
 
       {/* FAB → create new task. Anchored to viewport so it stays visible while
-          the list scrolls. */}
+          the list scrolls. The default FAB offset only clears the safe-area;
+          on `/me/*` the fixed `MobileTabBar` (h-14 + safe-area) is still
+          mounted, so lift the FAB above it — `theme(spacing.14)` matches the
+          shell's `pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]`
+          reservation — to stop it covering the bottom nav / "我" tab. */}
       {!showingDetail && (
         <FloatingActionButton
           aria-label={t("mobile.fabCreateAria") || t("createTask") || "Create task"}
           data-testid="mobile-scheduler-fab"
+          className="bottom-[calc(theme(spacing.14)+env(safe-area-inset-bottom,0px)+1rem)]"
           onClick={() => setShowCreateSheet(true)}
         />
       )}

@@ -271,6 +271,15 @@ def get_config() -> Dict[str, Any]:
     return get_active_runtime().get_config()
 
 
+def on_config_changed(
+    fn: Callable[[Dict[str, Any]], None]
+) -> Callable[[Dict[str, Any]], None]:
+    """``from cognia import on_config_changed`` — register a listener fired when
+    the host pushes new config. Module-level proxy to the active runtime, matching
+    the host shim's ``cognia.on_config_changed``."""
+    return get_active_runtime().on_config_changed(fn)
+
+
 def log(*args: Any) -> None:
     """Plugin logging that never corrupts the protocol channel.
 

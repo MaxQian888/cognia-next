@@ -99,7 +99,11 @@ export function writeBootMirror(payload: BootMirrorPayload): void {
   }
 }
 
-/** Test-only — clear the persisted mirror. */
+/**
+ * Clear the persisted mirror. Used by `SettingsHydrator` when the active theme
+ * is the default preset (which globals.css governs, so there is nothing to
+ * pre-paint) and by tests.
+ */
 export function clearBootMirror(): void {
   if (typeof window === "undefined") return
   try {

@@ -183,6 +183,20 @@ describe("createLive2dLoader", () => {
     restore()
   })
 
+  it("forwards modelOptions to Live2DModel.from", async () => {
+    const restore = installUrlStubs((b) => `blob:${(b as Blob).size}`, jest.fn())
+    const { engine } = fakeEngine()
+    const loader = createLive2dLoader({
+      ensureCore: async () => true,
+      importEngine: async () => engine,
+    })
+    const modelOptions = { autoFocus: false, textureOptions: { lod: "single-auto" } }
+    const result = await loader.load({ manifest: MANIFEST, entries: entries(), modelOptions })
+    expect(result.ok).toBe(true)
+    expect(engine.Live2DModel.from).toHaveBeenCalledWith(expect.anything(), modelOptions)
+    restore()
+  })
+
   it("disposes safely when the loaded model has no destroy method", async () => {
     const revoke = jest.fn()
     const restore = installUrlStubs((b) => `blob:${(b as Blob).size}`, revoke)

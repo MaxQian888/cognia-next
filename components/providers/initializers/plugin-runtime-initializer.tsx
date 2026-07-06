@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react"
 
-import { isTauri } from "@/lib/native/utils"
+import { detectPlatform } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 
@@ -39,7 +39,12 @@ export function PluginRuntimeInitializer() {
 
     const initialize = async () => {
       try {
-        const tauri = isTauri()
+        // Resolve the host platform once (tauri wins over mobile over web) and
+        // derive both signals so the bootstrap can pick the right runtime
+        // profile: tauri / mobile (Capacitor WebView) / browser.
+        const platform = detectPlatform()
+        const tauri = platform === "tauri"
+        const mobile = platform === "mobile"
         let windowLabel: string | null = null
         let pluginDirectory: string | undefined
         if (tauri) {
@@ -58,6 +63,7 @@ export function PluginRuntimeInitializer() {
         const { resolvePluginRuntimeBootstrap } = await import("@/lib/plugin/core/bootstrap")
         const resolution = resolvePluginRuntimeBootstrap({
           isTauri: tauri,
+          isMobile: mobile,
           windowLabel,
           pluginDirectory,
         })

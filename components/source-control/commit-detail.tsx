@@ -44,9 +44,11 @@ import {
   type GitResetMode,
 } from "@/types/git"
 import { useGitStore } from "@/stores/git/git-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { cn } from "@/lib/utils"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer } from "./diff-viewer"
+import { AiExplainPopover } from "./ai-explain-popover"
 import { splitPath, statusDecoration } from "./status-decoration"
 
 interface CommitDetailProps {
@@ -77,6 +79,9 @@ export function CommitDetail({
   const [diff, setDiff] = useState<GitDiff | null>(null)
   const cacheDiff = useGitStore((s) => s.cacheDiff)
   const getCachedDiff = useGitStore((s) => s.getCachedDiff)
+  const explainEnabled = useSettingsStore(
+    (s) => s.settings?.gitSettings?.explainAI?.enabled ?? false
+  )
 
   // Reset the selection when the displayed commit changes — done in render via
   // a previous-value guard rather than an effect (react-hooks/set-state-in-effect).
@@ -357,8 +362,18 @@ export function CommitDetail({
             )}
           </ul>
         </ScrollArea>
-        <div className="min-h-0 flex-1">
-          <DiffViewer diff={diff} staged={false} />
+        <div className="flex min-h-0 flex-1 flex-col">
+          {explainEnabled && diff && !diff.isBinary && diff.hunks.length > 0 && selected && (
+            <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
+              <AiExplainPopover
+                subject={`commit ${commit.shortHash} · ${selected}`}
+                diffText={diff.hunks.map((h) => h.patch).join("\n")}
+              />
+            </div>
+          )}
+          <div className="min-h-0 flex-1">
+            <DiffViewer diff={diff} staged={false} />
+          </div>
         </div>
       </div>
     </div>

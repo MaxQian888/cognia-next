@@ -249,9 +249,44 @@ export interface GitCommitAiSettings {
   model?: string
 }
 
+/**
+ * Shared shape for the diff-oriented AI features (per-hunk review, change
+ * explanation). Mirrors {@link GitCommitAiSettings} minus the commit-only
+ * `conventionalCommits` knob.
+ */
+export interface GitAiFeatureSettings {
+  /** Master toggle — when false the feature's entry button is hidden. */
+  enabled: boolean
+  /** Optional extra steering appended to the system prompt. */
+  customInstructions?: string
+  /** Provider/model override (mirrors `UtilityModelConfig`). Empty → chat default. */
+  providerOverride?: string
+  model?: string
+}
+
+/** Severity of an AI review finding on a single hunk. */
+export type HunkFindingSeverity = "info" | "warning" | "critical"
+
+/** An AI review note attached to one hunk (persisted advisory, not a git effect). */
+export interface HunkAiFinding {
+  severity: HunkFindingSeverity
+  note: string
+}
+
 /** Source Control feature preferences persisted on `AppSettings.gitSettings`. */
 export interface GitUiSettings {
   commitMessageAI: GitCommitAiSettings
+  /** AI per-hunk code review of a working-tree file diff. */
+  reviewAI?: GitAiFeatureSettings
+  /** AI natural-language explanation of a file/commit diff. */
+  explainAI?: GitAiFeatureSettings
+  /**
+   * Panel view/workflow preferences. Stored as an all-optional partial and
+   * resolved at read time by `resolveSourceControlPanelPrefs` (leaf module —
+   * imported type-only to avoid a cycle), so older installs pick up new fields
+   * without a Dexie migration.
+   */
+  panel?: import("@/lib/git/panel-prefs").PartialSourceControlPanelPrefs
 }
 
 /** Forward-compat defaults merged by `lib/db/settings.ts:getSettings()`. */
@@ -259,6 +294,12 @@ export const DEFAULT_GIT_SETTINGS: GitUiSettings = {
   commitMessageAI: {
     enabled: false,
     conventionalCommits: true,
+  },
+  reviewAI: {
+    enabled: false,
+  },
+  explainAI: {
+    enabled: false,
   },
 }
 

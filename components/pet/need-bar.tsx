@@ -25,7 +25,7 @@ export function NeedBar({ kind, value, label, className }: NeedBarProps) {
       <div className="h-2 overflow-hidden rounded-full bg-muted">
         <div
           className={cn(
-            "h-full rounded-full",
+            "h-full rounded-full transition-[width] duration-500",
             value < 25 ? "bg-destructive" : value < 50 ? "bg-amber-400" : "bg-primary"
           )}
           style={{ width: `${Math.round(value)}%` }}

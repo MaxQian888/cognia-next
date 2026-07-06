@@ -207,7 +207,10 @@ function RunDetailInner({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="safe-area-pt flex items-center gap-3 border-b px-4 py-4 sm:px-6">
+      {/* `flex-wrap` so the action cluster drops to a second row on a phone
+          instead of overflowing the viewport; desktop has the width to stay
+          on one line, so wrapping never triggers there. */}
+      <header className="safe-area-pt flex flex-wrap items-center gap-3 border-b px-4 py-4 sm:px-6">
         <Button asChild size="icon" variant="ghost" aria-label={t("backToRuns")}>
           <Link href={`/workflows/runs?id=${encodeURIComponent(workflowId)}`}>
             <ArrowLeftIcon className="size-4" />

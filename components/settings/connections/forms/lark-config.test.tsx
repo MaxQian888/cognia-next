@@ -26,6 +26,15 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
 
+// A running tunnel so the derived webhook URL renders in webhook transport mode.
+jest.mock("@/hooks/use-tunnel-status", () => ({
+  useTunnelStatus: () => ({
+    url: "https://demo.trycloudflare.com",
+    running: true,
+    loading: false,
+  }),
+}))
+
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
@@ -251,6 +260,19 @@ describe("LarkConfigDialog — edit existing", () => {
       )
       expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
     })
+  })
+
+  it("derives the webhook URL against the real axum route (/webhook/lark/<id>)", () => {
+    const webhookRow: AdapterInstanceRow = {
+      ...existingRow,
+      transportMode: "webhook",
+      settings: { transport: "webhook" },
+    }
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    const input = screen.getByTestId("lark-webhook-url-input") as HTMLInputElement
+    // Must be `/webhook/lark/...` (matches axum_app.rs), NOT the old
+    // `/connectors/lark/...` prefix that 404'd.
+    expect(input.value).toBe("https://demo.trycloudflare.com/webhook/lark/lark-existing")
   })
 })
 

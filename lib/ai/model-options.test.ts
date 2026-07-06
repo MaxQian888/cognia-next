@@ -4,9 +4,16 @@ import {
   resolveModelDisplayName,
   resolveModelContextLength,
   resolveModelMeta,
+  resolveDefaultModelForProvider,
 } from "./model-options"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
+import {
+  primeOpenRouterCatalogCache,
+  __resetOpenRouterCatalogCacheForTesting,
+} from "@cognia/provider-core/providers/openrouter-catalog-sync"
+
+afterEach(() => __resetOpenRouterCatalogCacheForTesting())
 
 describe("catalogModelIds", () => {
   it("returns an empty list for an unknown provider", () => {
@@ -16,6 +23,54 @@ describe("catalogModelIds", () => {
   it("includes the provider's default model", () => {
     const ids = catalogModelIds("anthropic")
     expect(ids.length).toBeGreaterThan(0)
+  })
+})
+
+describe("resolveDefaultModelForProvider", () => {
+  it("keeps the current default model when the new provider can serve it", () => {
+    const r = resolveDefaultModelForProvider(
+      "deepseek",
+      "deepseek-chat",
+      { deepseek: { providerId: "deepseek", enabledModels: ["deepseek-chat"] } as never },
+      undefined
+    )
+    expect(r).toBeUndefined()
+  })
+
+  it("replaces a foreign default model with the provider's configured default", () => {
+    const r = resolveDefaultModelForProvider(
+      "deepseek",
+      "gpt-4o",
+      { deepseek: { providerId: "deepseek", defaultModel: "deepseek-reasoner" } as never },
+      undefined
+    )
+    // "gpt-4o" isn't servable by deepseek; the provider's own configured
+    // default must ride along with the provider switch.
+    expect(r).toBe("deepseek-reasoner")
+  })
+
+  it("falls back to the catalog default when nothing is configured", () => {
+    const r = resolveDefaultModelForProvider("deepseek", "gpt-4o", undefined, undefined)
+    expect(r).toBe(PROVIDERS.deepseek?.defaultModel)
+  })
+
+  it("uses the custom provider's own default model", () => {
+    const r = resolveDefaultModelForProvider("gw", "claude-sonnet-4-5", undefined, [
+      { id: "gw", name: "GW", defaultModel: "gw-model", customModels: ["gw-model"] } as never,
+    ])
+    expect(r).toBe("gw-model")
+  })
+
+  it("keeps a custom provider's servable current model", () => {
+    const r = resolveDefaultModelForProvider("gw", "gw-model", undefined, [
+      { id: "gw", name: "GW", customModels: ["gw-model"] } as never,
+    ])
+    expect(r).toBeUndefined()
+  })
+
+  it("returns undefined for an unknown provider with no derivable default", () => {
+    const r = resolveDefaultModelForProvider("ghost", "gpt-4o", undefined, undefined)
+    expect(r).toBeUndefined()
   })
 })
 
@@ -68,6 +123,34 @@ describe("collectModelOptions", () => {
       undefined
     )
     expect(out).toContainEqual(expect.objectContaining({ modelId: "deepseek-reasoner" }))
+  })
+
+  it("folds the synced OpenRouter catalog into the openrouter model list", () => {
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1000,
+      source: "remote",
+      models: [
+        {
+          id: "anthropic/claude-sonnet-4.5",
+          name: "Claude Sonnet 4.5",
+          contextLength: 200000,
+          supportsVision: true,
+        },
+      ],
+    })
+    const out = collectModelOptions(
+      { openrouter: { providerId: "openrouter", enabled: true } as never },
+      undefined
+    )
+    const row = out.find(
+      (o) => o.providerId === "openrouter" && o.modelId === "anthropic/claude-sonnet-4.5"
+    )
+    expect(row).toBeDefined()
+    // Catalog metadata enriches the row (name + context window).
+    expect(row?.modelName).toBe("Claude Sonnet 4.5")
+    expect(row?.contextLength).toBe(200000)
+    expect(row?.supportsVision).toBe(true)
   })
 
   it("populates the human-readable provider name + model name for built-ins", () => {

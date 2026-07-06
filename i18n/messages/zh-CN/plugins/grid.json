@@ -2,5 +2,7 @@
   "browseMarketplace": "浏览市场",
   "emptyAll": "尚未安装任何插件。",
   "emptyFiltered": "没有插件匹配当前筛选条件。",
-  "loading": "加载插件中…"
+  "loading": "加载插件中…",
+  "selectAll": "全选（{count}）",
+  "selectAllAria": "选择所有可见插件"
 }

@@ -11,7 +11,6 @@
  * Date.now (the snapshot's injected clock), no I/O.
  */
 
-import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import type {
   RoutingStrategySelector,
   RoutingTelemetrySnapshot,

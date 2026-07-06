@@ -152,6 +152,8 @@ describe("createLarkAdapter", () => {
     const { ctx } = makeCtx()
     await adapter.start(ctx)
     expect(adapter.health().state).toBe("running")
+    // A healthy adapter carries no reason code.
+    expect(adapter.health().reason).toBeUndefined()
     await adapter.stop()
   })
 
@@ -179,6 +181,8 @@ describe("createLarkAdapter", () => {
     await new Promise((r) => setTimeout(r, 20))
     // Skipped cleanly: health is 'down' and the Rust WS open command never ran.
     expect(adapter.health().state).toBe("down")
+    // The reason is surfaced to the UI so a "silent bot" is diagnosable.
+    expect(adapter.health().reason).toBe("credentials_missing")
     const openCalls = mockInvoke.mock.calls.filter(
       ([cmd]: [string]) => cmd === "connectors_lark_ws_open"
     )
@@ -209,6 +213,7 @@ describe("createLarkAdapter", () => {
       await expect(adapter.start(ctx)).resolves.toBeUndefined()
       await new Promise((r) => setTimeout(r, 20))
       expect(adapter.health().state).toBe("down")
+      expect(adapter.health().reason).toBe("credentials_unavailable")
       const openCalls = mockInvoke.mock.calls.filter(
         ([cmd]: [string]) => cmd === "connectors_lark_ws_open"
       )
@@ -373,13 +378,59 @@ describe("createLarkAdapter", () => {
     expect(httpCalls).toHaveLength(0)
   })
 
-  it("fetchHistory() returns an empty async iterable", async () => {
+  it("fetchHistory() calls /im/v1/messages and yields parsed messages", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "connectors_http_request") return undefined
+      const req = (args as { req: { url: string } }).req
+      if (req.url.includes("/im/v1/messages")) {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [
+                {
+                  message_id: "om_hist_001",
+                  chat_id: "oc_chat_001",
+                  chat_type: "group",
+                  message_type: "text",
+                  content: '{"text":"history from lark"}',
+                  create_time: "1714900000000",
+                  sender: { sender_id: { open_id: "ou_hist_001" } },
+                },
+              ],
+              has_more: false,
+            },
+          }),
+        }
+      }
+      return makeTatOkResp("t-history")
+    })
+
     const adapter = makeAdapter()
-    const events: unknown[] = []
-    for await (const evt of adapter.fetchHistory!("lark:lark-1:oc_chat_001", {})) {
+    const events: NormalizedInboundEvent[] = []
+    for await (const evt of adapter.fetchHistory!("lark:lark-1:oc_chat_001", {
+      after: "1714899900",
+      before: "1714900100",
+    })) {
       events.push(evt)
     }
-    expect(events).toHaveLength(0)
+    expect(events).toHaveLength(1)
+    expect(events[0].messageId).toBe("om_hist_001")
+    expect(events[0].plainText).toBe("history from lark")
+
+    const historyCall = mockInvoke.mock.calls.find(
+      ([cmd, args]: [string, { req?: { url?: string } }]) =>
+        cmd === "connectors_http_request" && args.req?.url?.includes("/im/v1/messages")
+    )
+    expect(historyCall).toBeDefined()
+    const url = new URL((historyCall![1] as { req: { url: string } }).req.url)
+    expect(url.searchParams.get("container_id_type")).toBe("chat")
+    expect(url.searchParams.get("container_id")).toBe("oc_chat_001")
+    expect(url.searchParams.get("page_size")).toBe("50")
+    expect(url.searchParams.get("start_time")).toBe("1714899900")
+    expect(url.searchParams.get("end_time")).toBe("1714900100")
   })
 
   it("refreshCredentials() resolves without error", async () => {

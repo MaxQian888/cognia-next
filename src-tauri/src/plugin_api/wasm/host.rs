@@ -52,13 +52,27 @@ pub struct WasmFsBlock {
 }
 
 /// In-memory record per loaded plugin. The `Component` is the compiled
-/// artifact (shared across activations); the `Store` is created fresh on
-/// each `activate` and dropped on `deactivate`.
+/// artifact (shared across activations); the live `Store` + `Instance` for an
+/// active plugin live separately in [`WasmPluginState::activated`].
 pub struct LoadedPlugin {
     pub manifest: WasmManifestSlice,
     pub plugin_path: PathBuf,
     pub component: Component,
     pub plugin_api_version: String,
+}
+
+/// The live, post-`init` instance for an activated plugin: the `Store` (holding
+/// all guest memory + host state that `init` set up) and its instantiated
+/// `bindings`. Retained across calls so guest state persists and re-entry skips
+/// re-instantiation. `HostState` is `Send`, so this can be shared across command
+/// threads behind an async `Mutex` (which also serialises same-plugin calls —
+/// wasmtime needs `&mut Store`, so concurrent calls into one instance are
+/// unsound). `call_timeout_ms` mirrors the store's per-call epoch budget so the
+/// deadline can be reset before each reused call.
+pub struct ActivatedPlugin {
+    pub store: wasmtime::Store<HostState>,
+    pub bindings: since_v0_1::CogniaPlugin,
+    pub call_timeout_ms: u64,
 }
 
 #[derive(Default)]
@@ -72,13 +86,19 @@ pub struct WasmPluginState {
     /// field) so the synthetic empty-component test fixtures — which cannot
     /// build a real `CogniaPluginPre` — stay valid.
     pub pres: Arc<RwLock<HashMap<String, Arc<since_v0_1::CogniaPluginPre<HostState>>>>>,
+    /// Live instances by plugin id (present only while activated). Each is
+    /// wrapped in an async `Mutex` so calls into the same instance serialise.
+    pub activated: Arc<RwLock<HashMap<String, Arc<tokio::sync::Mutex<ActivatedPlugin>>>>>,
 }
 
 /// The cognia API surface for WASM plugins. `load` stashes a typed
 /// pre-instantiation handle (`CogniaPluginPre`) per plugin in
 /// `WasmPluginState::pres`, so each call only builds a fresh permission-scoped
 /// `Store` and instantiates against the cached handle — the linker and
-/// import resolution are not rebuilt per call.
+/// import resolution are not rebuilt per call. `activate` additionally stashes
+/// the live post-`init` [`ActivatedPlugin`] (Store + Instance) in
+/// [`WasmPluginState::activated`] so re-entry from TS reuses the initialised
+/// instance instead of rebuilding it.
 pub struct WasmPluginHost;
 
 #[derive(Debug, Serialize)]
@@ -227,7 +247,15 @@ impl WasmPluginHost {
 
     pub fn unload(state: &WasmPluginState, plugin_id: &str) -> bool {
         state.pres.write().remove(plugin_id);
+        // Drop any live instance first so its Store (guest memory) is freed.
+        state.activated.write().remove(plugin_id);
         state.loaded.write().remove(plugin_id).is_some()
+    }
+
+    /// Drop the live instance for a plugin (if activated). Returns whether an
+    /// instance was present. The compiled component stays loaded.
+    pub fn deactivate(state: &WasmPluginState, plugin_id: &str) -> bool {
+        state.activated.write().remove(plugin_id).is_some()
     }
 }
 
@@ -347,6 +375,23 @@ mod tests {
     fn unload_returns_false_when_unknown() {
         let state = WasmPluginState::default();
         assert!(!WasmPluginHost::unload(&state, "ghost"));
+    }
+
+    #[test]
+    fn deactivate_returns_false_when_not_activated() {
+        let state = WasmPluginState::default();
+        assert!(!WasmPluginHost::deactivate(&state, "ghost"));
+    }
+
+    #[test]
+    fn unload_clears_the_activated_map() {
+        // unload drops from both the loaded and the activated maps. With nothing
+        // registered it returns false and leaves the activated map empty (the
+        // live-instance drop path is exercised end-to-end via the example
+        // plugin in the plugin E2E suite).
+        let state = WasmPluginState::default();
+        assert!(!WasmPluginHost::unload(&state, "ghost"));
+        assert!(state.activated.read().is_empty());
     }
 
     #[tokio::test]

@@ -27,6 +27,8 @@ import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { AppSettings, StoredMessage } from "@/lib/claude/types"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
+import { isCapabilityId } from "@/lib/platform/capabilities"
+import { recordDeviceCapabilities } from "@/lib/db/paired-devices"
 import {
   createWorkflow,
   deleteWorkflow,
@@ -36,7 +38,6 @@ import {
   type WorkflowPatch,
 } from "@/lib/db/workflows"
 import { createWorkflowSource } from "@/lib/scheduler/sources/workflow-source"
-import { requestCancelRun } from "@/lib/workflow/runtime/run-cancel-registry"
 import { createTwin, deleteTwin, type TwinInput } from "@/lib/db/twins"
 import {
   createTwinSource,
@@ -84,6 +85,12 @@ import type {
   ImportOptions,
   ImportMergeStrategy,
 } from "@/lib/data/types"
+import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import type {
+  AcpPermissionMode,
+  ExternalAgentProtocol,
+  UpdateExternalAgentInput,
+} from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -187,6 +194,14 @@ export async function dispatchCommand(
       return connectorRejectDraft(payload)
     case "workflow_trigger_manual":
       return workflowTriggerManual(payload)
+    case "workflow_approval_list":
+      return workflowApprovalList()
+    case "workflow_approval_respond":
+      return workflowApprovalRespond(payload)
+    case "workflow_step_result":
+      return workflowStepResult(payload)
+    case "device_capabilities_report":
+      return deviceCapabilitiesReport(payload)
     case "twin_ingest_source":
       return twinIngestSource(payload)
     // Remote Session Control — attach / detach a remote watcher to a host
@@ -256,6 +271,16 @@ export async function dispatchCommand(
       return goalUpdate(payload)
     case "goal_status":
       return goalStatus(payload)
+    // External agents (ADR-0056, Wave 4). The desktop's external-agent config
+    // lives in the `cognia-external-agents` Zustand/localStorage store (NOT a
+    // Dexie table, so no sync mirror) — these arms project + mutate it for the
+    // phone's `/me/external-agents` page.
+    //   - external_agent_list   → read-only projection (mirrors twin_profile_get)
+    //   - external_agent_update → enable/disable + permission-mode edit
+    case "external_agent_list":
+      return externalAgentList()
+    case "external_agent_update":
+      return externalAgentUpdate(payload)
     // Settings — per-conversation overrides (pin/archive/title).
     case "conversation_overrides_update":
       return conversationOverridesUpdate(payload)
@@ -629,12 +654,86 @@ async function connectorRejectDraft(payload: Record<string, unknown>): Promise<n
 async function workflowTriggerManual(payload: Record<string, unknown>): Promise<null> {
   const workflowId = payload.workflowId as string | undefined
   if (!workflowId) throw new Error("workflow_trigger_manual.workflowId is required")
-  await dispatchTrigger({
-    workflowId,
-    kind: "trigger.manual",
-    payload: payload.input ?? null,
-    originAt: Date.now(),
+  // `callerDeviceId` is injected by the Rust RPC layer from the verified
+  // device JWT (ADR-0060) — never trusted from the raw client payload.
+  const deviceId = payload.callerDeviceId as string | undefined
+  await dispatchTrigger(
+    {
+      workflowId,
+      kind: "trigger.manual",
+      payload: payload.input ?? null,
+      originAt: Date.now(),
+    },
+    { triggeredBy: { source: "api", ...(deviceId ? { deviceId } : {}) } }
+  )
+  return null
+}
+
+/** Read-only projection of the pending workflow-approval registry (ADR-0061). */
+async function workflowApprovalList(): Promise<{ approvals: unknown[] }> {
+  const { listPendingApprovals } = await import("@/lib/workflow/runtime/approval-registry")
+  return { approvals: listPendingApprovals() }
+}
+
+/** Resolve a pending `action.approval.request` gate from a paired device.
+ *  Control-gated in Rust; the responder identity is the JWT-verified
+ *  `callerDeviceId` injected by the RPC layer (spoof-proof). */
+async function workflowApprovalRespond(
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; reason?: string }> {
+  const approvalIdArg = payload.approvalId as string | undefined
+  if (!approvalIdArg) throw new Error("workflow_approval_respond.approvalId is required")
+  const decision = payload.decision
+  if (decision !== "approved" && decision !== "rejected") {
+    throw new Error("workflow_approval_respond.decision must be 'approved' or 'rejected'")
+  }
+  const deviceId = payload.callerDeviceId as string | undefined
+  const { respondToApproval } = await import("@/lib/workflow/runtime/approval-registry")
+  const result = respondToApproval(approvalIdArg, {
+    decision,
+    respondedBy: deviceId ? `device:${deviceId}` : "companion",
   })
+  return result.ok ? { ok: true } : { ok: false, reason: result.reason }
+}
+
+/** Feed one chunk of a remote-step result into the broker (ADR-0061 P3).
+ *  The responder identity is the JWT-injected `callerDeviceId`; the broker
+ *  rejects answers from any device other than the request's target. */
+async function workflowStepResult(
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; complete?: boolean; reason?: string }> {
+  const deviceId = payload.callerDeviceId as string | undefined
+  if (!deviceId) throw new Error("workflow_step_result.callerDeviceId is required")
+  const requestId = payload.requestId as string | undefined
+  if (!requestId) throw new Error("workflow_step_result.requestId is required")
+  const { resolveRemoteStep } = await import("@/lib/workflow/runtime/remote-step-broker")
+  const outcome = resolveRemoteStep(deviceId, {
+    requestId,
+    seq: payload.seq as number,
+    total: payload.total as number,
+    chunk: payload.chunk as string,
+  })
+  return outcome.ok
+    ? { ok: true, complete: outcome.complete }
+    : { ok: false, reason: outcome.reason }
+}
+
+/** Hard cap on the persisted capability list — well above the core vocabulary
+ *  plus any sane number of `plugin:<id>` tags; bounds a hostile payload. */
+const MAX_REPORTED_CAPABILITIES = 64
+
+/** Persist a paired device's platform capability manifest (ADR-0060) onto its
+ *  `pairedDevices` row. `callerDeviceId` comes from the Rust RPC layer (JWT
+ *  identity, spoof-proof); the capability list is validated + capped here. */
+async function deviceCapabilitiesReport(payload: Record<string, unknown>): Promise<null> {
+  const deviceId = payload.callerDeviceId as string | undefined
+  if (!deviceId) throw new Error("device_capabilities_report.callerDeviceId is required")
+  const raw = payload.capabilities
+  if (!Array.isArray(raw)) {
+    throw new Error("device_capabilities_report.capabilities must be an array")
+  }
+  const capabilities = raw.filter(isCapabilityId).slice(0, MAX_REPORTED_CAPABILITIES)
+  await recordDeviceCapabilities(deviceId, capabilities)
   return null
 }
 
@@ -701,30 +800,15 @@ async function workflowRunList(payload: Record<string, unknown>): Promise<{ runs
   return { runs }
 }
 
-const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"])
-
 async function workflowCancelRun(
   payload: Record<string, unknown>
-): Promise<{ cancelled: boolean; live: boolean }> {
+): Promise<{ cancelled: boolean; live: boolean; mode: string }> {
   const runId = payload.runId as string | undefined
   if (!runId) throw new Error("workflow_cancel_run.runId is required")
-  // Abort a run executing in this runtime, if any.
-  const live = requestCancelRun(runId, "cancelled via Companion API")
-  // Soft-cancel: when the run is not live here (e.g. already finished, or owned
-  // by another process) mark a non-terminal row as cancelled so the UI reflects
-  // it. A live abort lets the orchestrator finalize the row itself.
-  let cancelled = live
-  if (!live) {
-    const row = await getDb().workflowRuns.get(runId)
-    if (row && !TERMINAL_RUN_STATUSES.has(row.status)) {
-      await getDb().workflowRuns.update(runId, {
-        status: "cancelled",
-        completedAt: Date.now(),
-      })
-      cancelled = true
-    }
-  }
-  return { cancelled, live }
+  // Shared cancel ladder (ADR 0061 P4): local abort → lease signal to the
+  // owning executor → soft-cancel with companion fan-out.
+  const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
+  return cancelWorkflowRun(runId, "cancelled via Companion API")
 }
 
 async function workflowScheduleSet(
@@ -944,6 +1028,115 @@ async function twinJobAction(
       break
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// External agents (ADR-0056, Wave 4)
+// ---------------------------------------------------------------------------
+
+/** Compact, wire-safe projection of one external agent for the phone list. */
+interface ExternalAgentSummary {
+  id: string
+  name: string
+  protocol: ExternalAgentProtocol
+  transport: string
+  enabled: boolean
+  defaultPermissionMode: AcpPermissionMode
+}
+
+/** Lazily reach the desktop Zustand store. Dynamic so the heavy
+ *  persist-backed store (and `localStorage`) is only touched on the desktop
+ *  dispatch path, never at module import time (keeps the headless/test paths
+ *  and the SSR bundle clean). */
+async function getExternalAgentStoreState() {
+  const { useExternalAgentStore } = await import("@/stores/agent/external-agent-store")
+  return useExternalAgentStore.getState()
+}
+
+/** Read-only projection of the desktop's configured external agents. Mirrors
+ *  the `twin_profile_get` read arm — invoked directly via `transport.call`,
+ *  not through the outbound queue. */
+async function externalAgentList(): Promise<{ agents: ExternalAgentSummary[] }> {
+  const store = await getExternalAgentStoreState()
+  const agents: ExternalAgentSummary[] = store.getAllAgents().map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    protocol: agent.protocol,
+    transport: agent.transport,
+    enabled: agent.enabled,
+    defaultPermissionMode: agent.defaultPermissionMode ?? "default",
+  }))
+  return { agents }
+}
+
+/**
+ * Enable/disable an external agent and/or change its default permission mode
+ * from the phone. The permission mode is clamped through
+ * {@link adaptPermissionMode} against the agent's own protocol, so the phone
+ * can never persist a mode the backend can't enforce (e.g. `dontAsk` on
+ * Codex) — the desktop store is the authority, so the clamp lives here.
+ */
+async function externalAgentUpdate(
+  payload: Record<string, unknown>
+): Promise<{ agent: ExternalAgentSummary | null }> {
+  const id = payload.id as string | undefined
+  if (!id) throw new Error("external_agent_update.id is required")
+  const patch = payload.patch as { enabled?: unknown; defaultPermissionMode?: unknown } | undefined
+  if (!patch || typeof patch !== "object") {
+    throw new Error("external_agent_update.patch is required")
+  }
+
+  const store = await getExternalAgentStoreState()
+  const agent = store.getAgent(id)
+  if (!agent) throw new Error(`external_agent_update: agent not found: ${id}`)
+
+  const updates: UpdateExternalAgentInput = {}
+  if (Object.prototype.hasOwnProperty.call(patch, "enabled")) {
+    if (typeof patch.enabled !== "boolean") {
+      throw new Error("external_agent_update.patch.enabled must be boolean")
+    }
+    updates.enabled = patch.enabled
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "defaultPermissionMode")) {
+    const requested = patch.defaultPermissionMode
+    if (!isAcpPermissionMode(requested)) {
+      throw new Error("external_agent_update.patch.defaultPermissionMode is invalid")
+    }
+    // Clamp toward restriction for the agent's protocol — never escalate past
+    // what the backend can enforce.
+    updates.defaultPermissionMode = adaptPermissionMode(requested, agent.protocol).mode
+  }
+  if (Object.keys(updates).length === 0) {
+    throw new Error("external_agent_update.patch has no editable fields")
+  }
+
+  store.updateAgent(id, updates)
+
+  const next = store.getAgent(id)
+  return {
+    agent: next
+      ? {
+          id: next.id,
+          name: next.name,
+          protocol: next.protocol,
+          transport: next.transport,
+          enabled: next.enabled,
+          defaultPermissionMode: next.defaultPermissionMode ?? "default",
+        }
+      : null,
+  }
+}
+
+const ACP_PERMISSION_MODES: readonly AcpPermissionMode[] = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "dontAsk",
+]
+
+function isAcpPermissionMode(value: unknown): value is AcpPermissionMode {
+  return typeof value === "string" && ACP_PERMISSION_MODES.includes(value as AcpPermissionMode)
 }
 
 // ---------------------------------------------------------------------------

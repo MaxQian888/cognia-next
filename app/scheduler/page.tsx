@@ -378,6 +378,48 @@ export default function SchedulerPage() {
     refreshSystem()
   }, [refresh, refreshSystem])
 
+  // Dispatch unified actions to the right adapter based on item.kind. The
+  // registry holds one source per kind; each source already knows how to
+  // pause/resume/run/delete its native rows. Memoized so the memoized sidebar
+  // rows keep referentially-stable handlers across page re-renders.
+  const unifiedActions = useMemo(() => {
+    const dispatch =
+      (action: "runNow" | "pause" | "resume" | "delete") => (item: UnifiedScheduledItem) => {
+        const source = getSchedulerSourceRegistry().getSource(item.kind)
+        if (!source) return
+        void source[action](item.sourceId)
+      }
+    return {
+      runNow: dispatch("runNow"),
+      pause: dispatch("pause"),
+      resume: dispatch("resume"),
+      delete: dispatch("delete"),
+    }
+  }, [])
+
+  const handleSelectUnifiedItem = useCallback(
+    (item: UnifiedScheduledItem) => {
+      // Render the unified detail view in-place. App-kind items route
+      // through the dedicated TaskDetailView via the orchestrator.
+      if (item.kind === "app") {
+        handleSelectTask(item.sourceId)
+        setSelectedUnifiedItem(null)
+      } else if (item.kind === "system") {
+        setInspectTaskId(item.sourceId)
+        setSelectedUnifiedItem(null)
+      } else {
+        selectTask(null)
+        setSelectedUnifiedItem(item)
+      }
+    },
+    [handleSelectTask, selectTask]
+  )
+
+  const handleToggleUnifiedSelection = useCallback(
+    (item: UnifiedScheduledItem) => toggleMultiSelection(item.unifiedId),
+    [toggleMultiSelection]
+  )
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -436,19 +478,6 @@ export default function SchedulerPage() {
     return <SchedulerSkeleton />
   }
 
-  // Dispatch unified actions to the right adapter based on item.kind. The
-  // registry holds one source per kind; each source already knows how to
-  // pause/resume/run/delete its native rows.
-  const dispatchUnified = (
-    action: "runNow" | "pause" | "resume" | "delete"
-  ): ((item: UnifiedScheduledItem) => void) => {
-    return (item: UnifiedScheduledItem) => {
-      const source = getSchedulerSourceRegistry().getSource(item.kind)
-      if (!source) return
-      void source[action](item.sourceId)
-    }
-  }
-
   const renderSidebar = (variant: "chrome" | "content") => {
     const SidebarComponent = variant === "chrome" ? SchedulerSidebar : SchedulerSidebarContent
     return (
@@ -468,30 +497,17 @@ export default function SchedulerPage() {
         onFilterChange={setActiveFilter}
         onSelectTask={handleSelectTask}
         onSelectSystemTask={setInspectTaskId}
-        onSelectUnifiedItem={(item) => {
-          // Render the unified detail view in-place. App-kind items route
-          // through the dedicated TaskDetailView via the orchestrator.
-          if (item.kind === "app") {
-            handleSelectTask(item.sourceId)
-            setSelectedUnifiedItem(null)
-          } else if (item.kind === "system") {
-            setInspectTaskId(item.sourceId)
-            setSelectedUnifiedItem(null)
-          } else {
-            selectTask(null)
-            setSelectedUnifiedItem(item)
-          }
-        }}
+        onSelectUnifiedItem={handleSelectUnifiedItem}
         onRunNow={handleRunNow}
         onPause={handlePause}
         onResume={handleResume}
         onDelete={setDeleteTaskId}
-        onUnifiedRunNow={dispatchUnified("runNow")}
-        onUnifiedPause={dispatchUnified("pause")}
-        onUnifiedResume={dispatchUnified("resume")}
-        onUnifiedDelete={dispatchUnified("delete")}
+        onUnifiedRunNow={unifiedActions.runNow}
+        onUnifiedPause={unifiedActions.pause}
+        onUnifiedResume={unifiedActions.resume}
+        onUnifiedDelete={unifiedActions.delete}
         selectedUnifiedIds={multiSelection}
-        onToggleUnifiedSelection={(item) => toggleMultiSelection(item.unifiedId)}
+        onToggleUnifiedSelection={handleToggleUnifiedSelection}
         onCreate={handleCreateClick}
         highlightedIndex={highlightedIndex}
       />
@@ -519,10 +535,10 @@ export default function SchedulerPage() {
             onRunNow={handleRunNow}
             onDelete={setDeleteTaskId}
             onEdit={() => setShowEditSheet(true)}
-            onUnifiedRunNow={dispatchUnified("runNow")}
-            onUnifiedPause={dispatchUnified("pause")}
-            onUnifiedResume={dispatchUnified("resume")}
-            onUnifiedDelete={dispatchUnified("delete")}
+            onUnifiedRunNow={unifiedActions.runNow}
+            onUnifiedPause={unifiedActions.pause}
+            onUnifiedResume={unifiedActions.resume}
+            onUnifiedDelete={unifiedActions.delete}
             onSelectRun={setSelectedRun}
           />
         }
@@ -590,10 +606,10 @@ export default function SchedulerPage() {
                 <SchedulerErrorBoundary panelName="detail">
                   <UnifiedTaskDetailView
                     item={selectedUnifiedItem}
-                    onRunNow={dispatchUnified("runNow")}
-                    onPause={dispatchUnified("pause")}
-                    onResume={dispatchUnified("resume")}
-                    onDelete={dispatchUnified("delete")}
+                    onRunNow={unifiedActions.runNow}
+                    onPause={unifiedActions.pause}
+                    onResume={unifiedActions.resume}
+                    onDelete={unifiedActions.delete}
                     onSelectRun={setSelectedRun}
                   />
                 </SchedulerErrorBoundary>

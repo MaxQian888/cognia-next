@@ -148,6 +148,29 @@ describe("useCanvasLayoutStore", () => {
     })
   })
 
+  describe("railViewMode", () => {
+    it("defaults to grouped and toggles to files (and back), persisting the choice", () => {
+      jest.useFakeTimers()
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      expect(result.current.railViewMode).toBe("grouped")
+
+      act(() => {
+        result.current.setRailViewMode("files")
+        // Nudge a persisted write so the snapshot flushes.
+        result.current.setSizes([20, 55, 25])
+        jest.advanceTimersByTime(CANVAS_LAYOUT_PERSIST_DEBOUNCE_MS + 5)
+      })
+      expect(result.current.railViewMode).toBe("files")
+      expect(readPersisted()?.state.railViewMode).toBe("files")
+
+      act(() => {
+        result.current.setRailViewMode("grouped")
+      })
+      expect(result.current.railViewMode).toBe("grouped")
+      jest.useRealTimers()
+    })
+  })
+
   describe("mobile sheet flags", () => {
     it("setMobileLeftOpen / setMobileRightOpen mutate runtime state", () => {
       const { result } = renderHook(() => useCanvasLayoutStore())

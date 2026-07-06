@@ -18,7 +18,9 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { revealInExplorer, openPath } from "@/lib/tauri/opener"
-import { downloadFile } from "@/lib/files/download"
+import { saveExport } from "@/lib/files/save-export"
+import { saveGeneratedDocument, type DocFormat } from "@/lib/files/document-writer"
+import { writeText as clipboardWriteText } from "@/lib/capacitor/clipboard"
 import { getArtifactExtension, canPreview } from "@/lib/artifacts"
 import { loggers } from "@/lib/logging"
 import {
@@ -39,8 +41,13 @@ type ArtifactPanelAction =
   | "close"
   | "copy"
   | "download"
+  | "openInNewTab"
   | "revealInExplorer"
   | "versionHistory"
+
+/** Artifact view modes. `split` (code + live preview side-by-side) is the wide
+ * docked-panel Codex experience; it is only offered for previewable types. */
+export type ArtifactViewMode = "code" | "preview" | "edit" | "review" | "split"
 
 export function useArtifactPanelState() {
   const t = useTranslations("artifacts")
@@ -93,7 +100,7 @@ export function useArtifactPanelState() {
   const canOpenEmbeddedDesigner = runtimeAdapter?.authoring.embeddedDesigner ?? false
 
   // Local state
-  const [viewMode, setViewMode] = useState<"code" | "preview" | "edit" | "review">("code")
+  const [viewMode, setViewMode] = useState<ArtifactViewMode>("code")
   const [copied, setCopied] = useState(false)
   const [designerOpen, setDesignerOpen] = useState(false)
   const [editContent, setEditContent] = useState("")
@@ -255,13 +262,19 @@ export function useArtifactPanelState() {
 
   const handleCopy = async () => {
     if (activeArtifact) {
-      await navigator.clipboard.writeText(activeArtifact.content)
+      // Native clipboard first (mobile WebView often leaves navigator.clipboard
+      // unavailable); fall back to the web API on Tauri/web where the native
+      // plugin reports "unsupported".
+      const native = await clipboardWriteText(activeArtifact.content)
+      if (native.kind !== "ok") {
+        await navigator.clipboard.writeText(activeArtifact.content)
+      }
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
   }
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (activeArtifact) {
       const preferredFormat = getPreferredArtifactExportFormat(activeArtifact)
       const extension =
@@ -280,9 +293,12 @@ export function useArtifactPanelState() {
               : "text/plain"
       const filename = `${activeArtifact.title}.${extension}`
       try {
-        downloadFile(filename, activeArtifact.content, mimeType)
-        if (isDesktop) {
-          setLastDownloadPath(filename)
+        // Cross-platform saver — the prior `<a download>` path silently no-ops
+        // inside a mobile WebView, so artifact exports vanished on Capacitor.
+        const outcome = await saveExport({ filename, data: activeArtifact.content, mimeType })
+        if (outcome.kind === "error") throw new Error(outcome.message)
+        if (outcome.kind === "saved" && isDesktop) {
+          setLastDownloadPath(outcome.location)
         }
         loggers.ui.info("artifacts.action.download", {
           artifactId: activeArtifact.id,
@@ -296,6 +312,51 @@ export function useArtifactPanelState() {
       }
     }
   }
+
+  // Generate + save the artifact's content as a Word (.docx) or PDF document.
+  // Treats the content as markdown; reuses the client-side document writer +
+  // cross-platform saver, so it works on mobile WebView (unlike <a download>).
+  const handleDownloadAs = async (format: DocFormat) => {
+    if (!activeArtifact) return
+    try {
+      const outcome = await saveGeneratedDocument({
+        title: activeArtifact.title,
+        markdown: activeArtifact.content,
+        format,
+      })
+      if (outcome.kind === "error") throw new Error(outcome.message)
+      if (outcome.kind === "saved" && isDesktop) setLastDownloadPath(outcome.location)
+      loggers.ui.info("artifacts.action.download-as", { artifactId: activeArtifact.id, format })
+    } catch (error) {
+      loggers.ui.error("artifacts.action.download-as-failed", error, {
+        artifactId: activeArtifact.id,
+      })
+      throw error
+    }
+  }
+
+  // Codex-style "open in new tab": pop a runnable html/svg artifact into a full
+  // browser tab via a Blob URL. Static-export safe (no api route). Revoked after
+  // a grace period so the opened tab has time to load.
+  const handleOpenInNewTab = useCallback(() => {
+    if (!activeArtifact) return
+    const mimeType = activeArtifact.type === "svg" ? "image/svg+xml" : "text/html"
+    try {
+      const blob = new Blob([activeArtifact.content], { type: mimeType })
+      const url = URL.createObjectURL(blob)
+      window.open(url, "_blank", "noopener,noreferrer")
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+      loggers.ui.info("artifacts.action.open-in-new-tab", {
+        artifactId: activeArtifact.id,
+        type: activeArtifact.type,
+      })
+    } catch (error) {
+      loggers.ui.error("artifacts.action.open-in-new-tab-failed", error, {
+        artifactId: activeArtifact.id,
+      })
+      throw error
+    }
+  }, [activeArtifact])
 
   const handleRevealInExplorer = async () => {
     if (!isDesktop || !lastDownloadPath) return
@@ -325,6 +386,9 @@ export function useArtifactPanelState() {
 
   const isPreviewable = activeArtifact ? canPreview(activeArtifact.type) : false
   const isDesignable = canOpenEmbeddedDesigner
+  // Only html/svg render directly in a bare browser tab (react needs the
+  // sandboxed bundler; other types aren't standalone documents).
+  const isOpenableInNewTab = activeArtifact?.type === "html" || activeArtifact?.type === "svg"
   const panelMode: "desktop" | "tablet" | "mobile" | "fullscreen" = isFullscreen
     ? "fullscreen"
     : isMobileViewport
@@ -352,6 +416,7 @@ export function useArtifactPanelState() {
   const overflowActions: ArtifactPanelAction[] = [
     "copy",
     "download",
+    ...(isOpenableInNewTab ? ["openInNewTab" as const] : []),
     ...(isDesktop && lastDownloadPath ? ["revealInExplorer" as const] : []),
     "versionHistory",
   ]
@@ -382,6 +447,7 @@ export function useArtifactPanelState() {
     // Derived
     isPreviewable,
     isDesignable,
+    isOpenableInNewTab,
     panelMode,
     panelWidth,
     primaryActions,
@@ -396,6 +462,8 @@ export function useArtifactPanelState() {
     toggleFullscreen,
     handleCopy,
     handleDownload,
+    handleDownloadAs,
+    handleOpenInNewTab,
     handleRevealInExplorer,
   }
 }

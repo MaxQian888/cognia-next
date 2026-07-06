@@ -103,6 +103,23 @@ pub async fn connectors_stop_server(
     Ok(())
 }
 
+/// Reap every live connector WS / Lark long-connection socket. Returns the
+/// total number closed.
+///
+/// A webview hard reload (Ctrl+R / Fast-Refresh full reload / crash) discards
+/// the renderer without running its JS cleanup, so the `adapter.stop()` that
+/// would call `connectors_ws_close` / `connectors_lark_ws_close` never fires.
+/// The Rust core process survives the reload, so those sockets — and Lark's
+/// self-reconnect loop — leak and keep delivering duplicate inbound events.
+/// The connector bootstrap calls this ONCE before opening any adapter so the
+/// previous load's leaked sockets are reaped first.
+#[tauri::command]
+pub async fn connectors_reset_all_ws() -> Result<u32, String> {
+    let generic = super::ws_client::close_all().await;
+    let lark = super::lark_ws::close_all();
+    Ok((generic + lark) as u32)
+}
+
 // ---------------------------------------------------------------------------
 // Task 21 — keyring commands
 // ---------------------------------------------------------------------------
@@ -216,8 +233,106 @@ pub async fn connectors_attachment_fetch(
     adapter_id: String,
     remote_ref: String,
     source_url: String,
+    headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<super::attachments::AttachmentRef, String> {
-    super::attachments::fetch_attachment(adapter_id, remote_ref, source_url).await
+    super::attachments::fetch_attachment(adapter_id, remote_ref, source_url, headers).await
+}
+
+/// Read a cached attachment's plaintext as base64 (None when uncached or
+/// larger than `max_bytes`). Renderer-side inlining (e.g. Matrix small-image
+/// vision path) uses this instead of raw filesystem access — the webview's fs
+/// scope does not cover the connector cache dir.
+#[tauri::command]
+pub async fn connectors_attachment_read(
+    adapter_id: String,
+    remote_ref: String,
+    max_bytes: u64,
+) -> Result<Option<String>, String> {
+    super::attachments::read_attachment_base64(&adapter_id, &remote_ref, max_bytes)
+}
+
+#[tauri::command]
+pub async fn connectors_media_upload(
+    req: super::types::ConnectorMediaUploadRequest,
+) -> Result<String, String> {
+    super::media_upload::upload_media(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_init(
+    req: super::matrix_crypto::MatrixCryptoInitRequest,
+) -> Result<(), String> {
+    super::matrix_crypto::matrix_crypto_init(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_outgoing_requests(
+    adapter_id: String,
+) -> Result<Vec<super::matrix_crypto::MatrixCryptoOutgoingRequest>, String> {
+    super::matrix_crypto::matrix_crypto_outgoing_requests(adapter_id).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_mark_request_sent(
+    req: super::matrix_crypto::MatrixCryptoMarkSentRequest,
+) -> Result<(), String> {
+    super::matrix_crypto::matrix_crypto_mark_request_sent(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_receive_sync_changes(
+    req: super::matrix_crypto::MatrixCryptoReceiveSyncRequest,
+) -> Result<(), String> {
+    super::matrix_crypto::matrix_crypto_receive_sync_changes(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_decrypt_event(
+    req: super::matrix_crypto::MatrixCryptoDecryptRequest,
+) -> Result<super::matrix_crypto::MatrixCryptoDecryptResponse, String> {
+    super::matrix_crypto::matrix_crypto_decrypt_event(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_encrypt_event(
+    req: super::matrix_crypto::MatrixCryptoEncryptRequest,
+) -> Result<super::matrix_crypto::MatrixCryptoEncryptResponse, String> {
+    super::matrix_crypto::matrix_crypto_encrypt_event(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_share_room_key(
+    req: super::matrix_crypto::MatrixCryptoShareRoomKeyRequest,
+) -> Result<Vec<super::matrix_crypto::MatrixCryptoOutgoingRequest>, String> {
+    super::matrix_crypto::matrix_crypto_share_room_key(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_update_tracked_users(
+    req: super::matrix_crypto::MatrixCryptoTrackUsersRequest,
+) -> Result<(), String> {
+    super::matrix_crypto::matrix_crypto_update_tracked_users(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_get_missing_sessions(
+    req: super::matrix_crypto::MatrixCryptoMissingSessionsRequest,
+) -> Result<Vec<super::matrix_crypto::MatrixCryptoOutgoingRequest>, String> {
+    super::matrix_crypto::matrix_crypto_get_missing_sessions(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_encrypt_attachment(
+    req: super::matrix_crypto::MatrixCryptoAttachmentEncryptRequest,
+) -> Result<super::matrix_crypto::MatrixCryptoAttachmentEncryptResponse, String> {
+    super::matrix_crypto::matrix_crypto_encrypt_attachment(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_decrypt_attachment(
+    req: super::matrix_crypto::MatrixCryptoAttachmentDecryptRequest,
+) -> Result<super::matrix_crypto::MatrixCryptoAttachmentDecryptResponse, String> {
+    super::matrix_crypto::matrix_crypto_decrypt_attachment(req).await
 }
 
 // ---------------------------------------------------------------------------
@@ -253,4 +368,57 @@ pub async fn connectors_lark_upload_image(
     image_type: Option<String>,
 ) -> Result<String, String> {
     super::lark_upload::upload_image(&access_token, &source_url, image_type.as_deref()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use wiremock::matchers::{body_bytes, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn connectors_reset_all_ws_command_runs_without_live_handles() {
+        super::super::ws_client::close_all().await;
+        super::super::lark_ws::close_all();
+
+        let _closed = connectors_reset_all_ws().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connectors_media_upload_posts_local_bytes_and_returns_content_uri() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/_matrix/media/v3/upload"))
+            .and(header("authorization", "Bearer tok"))
+            .and(header("content-type", "image/png"))
+            .and(body_bytes(vec![1u8, 2, 3]))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "content_uri": "mxc://matrix.org/up" })),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pic.png");
+        std::fs::write(&path, [1u8, 2, 3]).unwrap();
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer tok".to_string());
+
+        let content_uri =
+            connectors_media_upload(super::super::types::ConnectorMediaUploadRequest {
+                upload_url: format!("{}/_matrix/media/v3/upload", mock_server.uri()),
+                headers: Some(headers),
+                source_url: None,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                content_type: Some("image/png".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(content_uri, "mxc://matrix.org/up");
+        mock_server.verify().await;
+    }
 }

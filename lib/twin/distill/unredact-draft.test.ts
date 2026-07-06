@@ -68,6 +68,13 @@ describe("findPlaceholders", () => {
   it("returns [] for plain text", () => {
     expect(findPlaceholders("hello world")).toEqual([])
   })
+
+  it("finds JWT / PEM_KEY placeholders and 4+ digit counters", () => {
+    // Regression: a hand-copied alternation used to omit JWT/PEM_KEY and
+    // only match exactly three counter digits.
+    const ph = findPlaceholders("token <JWT_001>, key <PEM_KEY_001>, name <NAME_1234>")
+    expect(ph).toEqual(["<JWT_001>", "<PEM_KEY_001>", "<NAME_1234>"])
+  })
 })
 
 describe("loadTwinUnredactMap", () => {
@@ -125,6 +132,23 @@ describe("previewUnredact", () => {
     const draft = buildDraft("twin_p", "Plain prompt, no PII.")
     const preview = await previewUnredact(draft, "twin_p")
     expect(preview.placeholders).toEqual([])
+  })
+
+  it("offers JWT-bearing sources for restore end-to-end", async () => {
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+    await seedSourceWithMap("twin_j", "srcjwt", `Authorization uses ${jwt} for the demo.`)
+    const map = await loadTwinUnredactMap("twin_j")
+    const placeholder = Object.keys(map).find((k) => k.startsWith("<JWT_"))
+    expect(placeholder).toBeDefined()
+    const draft = buildDraft("twin_j", `Auth header: ${placeholder}`)
+    const preview = await previewUnredact(draft, "twin_j")
+    expect(preview.placeholders).toHaveLength(1)
+    expect(preview.placeholders[0]).toMatchObject({
+      placeholder,
+      original: jwt,
+      kind: "JWT",
+      keep: true,
+    })
   })
 })
 

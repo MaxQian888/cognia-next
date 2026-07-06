@@ -18,7 +18,15 @@ import {
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
 
-const STRATEGIES: RoutingStrategy[] = ["quality", "cost", "speed", "balanced", "adaptive"]
+const STRATEGIES: RoutingStrategy[] = [
+  "quality",
+  "cost",
+  "speed",
+  "balanced",
+  "adaptive",
+  "least-busy",
+  "difficulty",
+]
 
 export function RoutingStrategyPicker() {
   const t = useTranslations("providers.routingView")

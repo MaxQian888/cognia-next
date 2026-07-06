@@ -31,14 +31,16 @@
       "description": "Show the pet floating on your desktop, outside the app window.",
       "label": "Desktop pet"
     },
+    "hotkeyLink": "Configure a global hotkey to show/hide the desktop pet",
     "size": {
       "label": "Desktop pet size ({size}px)"
     },
     "title": "Desktop pet",
     "wander": {
       "climbWindows": {
-        "description": "Let the pet climb onto and perch on the top edges of your open windows. Throw it onto a window to sit it there. Experimental; Windows only.",
-        "label": "Climb onto windows"
+        "description": "Let the pet climb onto and perch on the top edges of your open windows. Throw it onto a window to sit it there. Experimental; Windows and macOS only.",
+        "label": "Climb onto windows",
+        "unsupportedPlatform": "Not available on Linux — there's no stable way to read other apps' window positions."
       },
       "description": "Let the desktop pet stroll along the bottom of your screen on its own.",
       "enabled": {
@@ -233,5 +235,19 @@
       "label": "Volume ({value}%)"
     }
   },
-  "title": "Pet"
+  "title": "Pet",
+  "twinAwareness": {
+    "description": "Let the pet's mood react to a Twin's background activity — job counts and timestamps only, never the Twin's actual content. Off by default.",
+    "enabled": {
+      "description": "The pet looks busy while the watched Twin has work queued, and celebrates when it finishes learning something new.",
+      "label": "React to Twin activity"
+    },
+    "privacyNote": "Only reads job status and timestamps from the watched Twin — never its sources, chunks, or distilled profile.",
+    "title": "Twin awareness",
+    "twinSelect": {
+      "empty": "You don't have any Twins yet.",
+      "label": "Watched Twin",
+      "placeholder": "Choose a Twin…"
+    }
+  }
 }

@@ -18,6 +18,15 @@ function rectsEqual(a: ElementRect | null, b: ElementRect): boolean {
   return !!a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 }
 
+export interface UseElementRectOptions {
+  /**
+   * When false, rect changes are delivered only via `onChange` and the hook
+   * always returns null — no React state, so a scroll/resize burst does not
+   * re-render the consuming component. Defaults to true.
+   */
+  trackState?: boolean
+}
+
 /**
  * Track an element's viewport rect (logical CSS px) across resizes, scrolls,
  * and window changes — the basis for positioning the native embedded webview
@@ -27,14 +36,18 @@ function rectsEqual(a: ElementRect | null, b: ElementRect): boolean {
  */
 export function useElementRect(
   ref: RefObject<HTMLElement | null>,
-  onChange?: (rect: ElementRect) => void
+  onChange?: (rect: ElementRect) => void,
+  options: UseElementRectOptions = {}
 ): ElementRect | null {
+  const trackState = options.trackState !== false
   const [rect, setRect] = useState<ElementRect | null>(null)
   const rectRef = useRef<ElementRect | null>(null)
   const onChangeRef = useRef(onChange)
+  const trackStateRef = useRef(trackState)
   useEffect(() => {
     onChangeRef.current = onChange
-  }, [onChange])
+    trackStateRef.current = trackState
+  }, [onChange, trackState])
 
   const measure = useCallback(() => {
     const el = ref.current
@@ -42,7 +55,7 @@ export function useElementRect(
     const next = readRect(el)
     if (rectsEqual(rectRef.current, next)) return
     rectRef.current = next
-    setRect(next)
+    if (trackStateRef.current) setRect(next)
     onChangeRef.current?.(next)
   }, [ref])
 

@@ -4,10 +4,11 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { FilterIcon, LayoutGridIcon, ListIcon, PlusIcon } from "lucide-react"
+import { FilterIcon, LayoutGridIcon, ListIcon, PlusIcon, ServerIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -45,11 +46,14 @@ export function McpMyServersTab() {
   const statusFilter = useMcpPanelStore((s) => s.statusFilter)
   const selection = useMcpPanelStore((s) => s.selection)
   const toggleSelection = useMcpPanelStore((s) => s.toggleSelection)
+  const selectAll = useMcpPanelStore((s) => s.selectAll)
+  const clearSelection = useMcpPanelStore((s) => s.clearSelection)
   const openCreate = useMcpPanelStore((s) => s.openCreate)
   const openEdit = useMcpPanelStore((s) => s.openEdit)
   const setDeleteTarget = useMcpPanelStore((s) => s.setDeleteTarget)
   const resetFilters = useMcpPanelStore((s) => s.resetFilters)
   const setFilterSheetOpen = useMcpPanelStore((s) => s.setFilterSheetOpen)
+  const setActiveTab = useMcpPanelStore((s) => s.setActiveTab)
 
   // Active non-default filter axes — search is intentionally excluded (it has
   // its own input in the panel header; the badge reflects only the sheet's
@@ -84,6 +88,16 @@ export function McpMyServersTab() {
 
   const filtersActive =
     search.trim().length > 0 || transportFilter !== "all" || statusFilter !== "all"
+
+  // "Select all" operates on the *visible* (filtered) subset, matching the
+  // sibling plugin/skill panels. `selectAll` replaces the selection set, so
+  // toggling off clears it entirely.
+  const allVisibleSelected =
+    visibleServers.length > 0 && visibleServers.every((s) => selection.has(s.id))
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) clearSelection()
+    else selectAll(visibleServers.map((s) => s.id))
+  }
 
   const handleToggle = async (server: McpServer, enabled: boolean) => {
     try {
@@ -153,9 +167,20 @@ export function McpMyServersTab() {
       </div>
 
       {servers.length === 0 ? (
-        <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-          {tList("empty")}
-        </p>
+        <div className="flex flex-col items-center gap-3 rounded-md border border-dashed p-8 text-center">
+          <ServerIcon className="size-8 text-muted-foreground/40" />
+          <p className="max-w-sm text-xs text-muted-foreground">{tList("empty")}</p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button size="sm" onClick={() => void blankServerSeed().then(openCreate)}>
+              <PlusIcon className="size-3.5 sm:mr-1.5" />
+              {t("addServer")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setActiveTab("presets")}>
+              <LayoutGridIcon className="size-3.5 sm:mr-1.5" />
+              {tList("emptyBrowsePresets")}
+            </Button>
+          </div>
+        </div>
       ) : visibleServers.length === 0 && filtersActive ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
           {tList("noMatch")}{" "}
@@ -164,19 +189,37 @@ export function McpMyServersTab() {
           </button>
         </p>
       ) : (
-        <McpServerList
-          servers={visibleServers}
-          view={view}
-          groupBy={groupBy}
-          selection={selection}
-          isFavorite={isFavorite}
-          onToggleSelect={toggleSelection}
-          onToggleFavorite={(id) => void toggleFavorite(id)}
-          onToggle={handleToggle}
-          onEdit={openEdit}
-          onClone={(server) => openCreate(cloneServerDraft(server))}
-          onDelete={(server) => setDeleteTarget({ serverId: server.id, name: server.name })}
-        />
+        <>
+          <div className="flex items-center gap-2 px-0.5">
+            <Checkbox
+              checked={allVisibleSelected}
+              onCheckedChange={toggleSelectAll}
+              aria-label={tList("selectAllAria")}
+            />
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {allVisibleSelected
+                ? tList("clearSelection")
+                : tList("selectAll", { count: visibleServers.length })}
+            </button>
+          </div>
+          <McpServerList
+            servers={visibleServers}
+            view={view}
+            groupBy={groupBy}
+            selection={selection}
+            isFavorite={isFavorite}
+            onToggleSelect={toggleSelection}
+            onToggleFavorite={(id) => void toggleFavorite(id)}
+            onToggle={handleToggle}
+            onEdit={openEdit}
+            onClone={(server) => openCreate(cloneServerDraft(server))}
+            onDelete={(server) => setDeleteTarget({ serverId: server.id, name: server.name })}
+          />
+        </>
       )}
 
       <McpBatchActionsBar servers={servers} />

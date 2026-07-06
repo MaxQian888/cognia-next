@@ -150,25 +150,12 @@ pub async fn run_user_prompt_submit(
     run_event(&settings.merged, HookEvent::UserPromptSubmit, "", &payload).await
 }
 
-/// Convenience wrapper for the tool-scoped PreToolUse event.
-pub async fn run_pre_tool_use(
-    settings: &EffectiveSettings,
-    session_id: &str,
-    cwd: Option<&str>,
-    tool_name: &str,
-    tool_input: &Value,
-) -> HookDecision {
-    let payload = HookEventPayload {
-        hook_event_name: "PreToolUse".to_string(),
-        session_id: session_id.to_string(),
-        cwd: cwd.map(String::from),
-        fields: json!({
-          "tool_name": tool_name,
-          "tool_input": tool_input,
-        }),
-    };
-    run_event(&settings.merged, HookEvent::PreToolUse, tool_name, &payload).await
-}
+// PreToolUse execution moved into the sidecar (`dispatch/agent-hooks.mjs`) as an
+// SDK-native hook, so it can block BEFORE `canUseTool` and rewrite `updatedInput`
+// in-process. The former `run_pre_tool_use` HOST-side runner was retired with
+// that cutover (ADR-0040 convergence follow-up); `run_event` + the tool-scoped
+// wrapper below still serve the observational tool events (PermissionRequest /
+// PermissionDenied).
 
 /// The PascalCase wire name of a `HookEvent` (the key used in settings.json
 /// and the `hook_event_name` payload field). Derived from the serde rename so

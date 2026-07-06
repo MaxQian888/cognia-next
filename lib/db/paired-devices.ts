@@ -151,6 +151,25 @@ export async function touchPairedDevice(
 }
 
 /**
+ * Persist the platform capability manifest a device reported via the
+ * `device_capabilities_report` RPC (ADR-0060). Overwrites the previous
+ * manifest wholesale — the report is a full snapshot, not a delta.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function recordDeviceCapabilities(
+  deviceId: string,
+  capabilities: string[],
+  nowMs: number = Date.now()
+): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    capabilities,
+    capabilitiesReportedAt: nowMs,
+  })
+  return updated > 0
+}
+
+/**
  * Return all paired devices, newest-first by `lastSeenAt`. Includes revoked
  * rows so the settings UI can show "Revoked 3d ago" tombstones.
  */

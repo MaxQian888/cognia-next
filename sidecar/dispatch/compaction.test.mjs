@@ -11,8 +11,10 @@ import {
   applyCompactionIncremental,
   applyCompactionRegenerated,
   isSummaryMessage,
+  isOpticalMessage,
   summaryVersion,
   makeSummaryMessage,
+  makeOpticalMessage,
 } from "./compaction.mjs"
 
 test("AUTO_COMPACT_FRACTION mirrors the renderer constant", () => {
@@ -42,6 +44,40 @@ test("shouldCompact fires only at/above the threshold", () => {
   // No signal yet (0 / null) never compacts.
   assert.equal(shouldCompact({ lastInputTokens: 0, modelId: "gpt-4o" }), false)
   assert.equal(shouldCompact({ lastInputTokens: null, modelId: "gpt-4o" }), false)
+})
+
+test("shouldCompact prefers an authoritative contextWindow over the regex table", () => {
+  // deepseek-v4 is really 1M, but the regex table floors `deepseek*` at 128k.
+  // Without the override it would compact at ~107k; with the real 1M window the
+  // same prompt is only ~11% full and must NOT trigger.
+  assert.equal(
+    shouldCompact({ lastInputTokens: 110_000, modelId: "deepseek-v4-pro" }),
+    true,
+    "regex-table fallback floors deepseek at 128k → fires early"
+  )
+  assert.equal(
+    shouldCompact({
+      lastInputTokens: 110_000,
+      modelId: "deepseek-v4-pro",
+      contextWindow: 1_000_000,
+    }),
+    false,
+    "authoritative 1M window → 110k is far below threshold"
+  )
+  // It still fires once the prompt crosses the 1M threshold (≈835k).
+  assert.equal(
+    shouldCompact({
+      lastInputTokens: 900_000,
+      modelId: "deepseek-v4-pro",
+      contextWindow: 1_000_000,
+    }),
+    true
+  )
+  // A non-positive / non-numeric override is ignored (falls back to the table).
+  assert.equal(
+    shouldCompact({ lastInputTokens: 110_000, modelId: "gpt-4o", contextWindow: 0 }),
+    true
+  )
 })
 
 test("shouldCompact honours a custom fraction (settings override)", () => {
@@ -120,6 +156,35 @@ test("planCompaction protects leading system + frozen summaries from re-summariz
   assert.deepEqual(
     plan.tail.map((m) => m.content),
     ["u-recent", "a-recent"]
+  )
+})
+
+test("optical archives are recognized and protected as frozen artifacts", () => {
+  const imageParts = [
+    { type: "image", image: "data:image/png;base64,AAAA", mediaType: "image/png" },
+  ]
+  const archive = makeOpticalMessage(imageParts, { messageCount: 4, frameCount: 1 }, 2)
+  assert.ok(isSummaryMessage(archive), "array-content optical archive is a frozen artifact")
+  assert.ok(isOpticalMessage(archive), "and detectable as optical (image-bearing)")
+  assert.equal(summaryVersion(archive), 2)
+  assert.equal(isOpticalMessage(makeSummaryMessage("text only", 1)), false)
+
+  // A prior optical archive right after the system head is carried forward in
+  // `frozen`, never fed back into `middle` (where its image would yield no text).
+  const conversation = [
+    { role: "system", content: "sys" },
+    archive,
+    { role: "user", content: "u-new" },
+    { role: "assistant", content: "a-new" },
+    { role: "user", content: "u-recent" },
+    { role: "assistant", content: "a-recent" },
+  ]
+  const plan = planCompaction({ conversation, keepRecentMessages: 2 })
+  assert.equal(plan.frozen.length, 1)
+  assert.ok(isOpticalMessage(plan.frozen[0]))
+  assert.deepEqual(
+    plan.middle.map((m) => m.content),
+    ["u-new", "a-new"]
   )
 })
 

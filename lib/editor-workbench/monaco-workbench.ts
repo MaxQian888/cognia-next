@@ -239,12 +239,22 @@ export function mountMonacoWorkbench(
     editor.setModel(model)
   }
 
-  // Step 2 — existing light registry binding (snippets / outline).
+  // Step 2 — light registry binding. Threads the surface discriminator + live
+  // editor + selection/cursor so the plugin Canvas API (`canvas-api.ts`) can
+  // read the real editor instead of only the store snapshot.
+  const readCursor = () => {
+    const p = editor.getPosition()
+    return p ? { line: p.lineNumber, column: p.column } : undefined
+  }
   const lightBinding: MonacoContextBinding = bindMonacoEditorContext({
     editorId: editor.getId(),
+    contextId: spec.surface,
+    editor,
     documentId: spec.documentId,
     language: spec.language,
     getValue: () => editor.getModel()?.getValue() ?? "",
+    selection: editor.getSelection(),
+    cursor: readCursor(),
   })
 
   // Step 3 — vscode-shim bridge notification.
@@ -263,6 +273,7 @@ export function mountMonacoWorkbench(
   })
   const selectionDisposable = editor.onDidChangeCursorSelection(() => {
     notifySelectionChanged(editor.getId())
+    lightBinding.update({ selection: editor.getSelection(), cursor: readCursor() })
   })
 
   let disposed = false

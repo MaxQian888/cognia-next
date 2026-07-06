@@ -15,7 +15,7 @@ import { setPluginConfig } from "@/lib/db/plugins"
 import { validatePluginConfig } from "@/lib/plugin/core/validation"
 import { seedPluginConfigDefaults } from "@/lib/plugin/core/config-defaults"
 import { loggers } from "../core/logger"
-import type { PluginConfigAPI } from "@/types/plugin/plugin-extended"
+import type { PluginConfigAPI } from "@/types/plugin/plugin"
 
 /** Minimal manager surface the config API depends on (avoids a type cycle). */
 interface ConfigManager {

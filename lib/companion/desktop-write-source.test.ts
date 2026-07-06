@@ -50,6 +50,24 @@ jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   },
 }))
 
+// Stub the external-agent Zustand store so the external_agent_* arms exercise
+// the projection + clamping wiring without loading the real persist store.
+const mockExternalAgents: Record<string, Record<string, unknown>> = {}
+const mockUpdateAgent = jest.fn((id: string, updates: Record<string, unknown>) => {
+  if (mockExternalAgents[id]) {
+    mockExternalAgents[id] = { ...mockExternalAgents[id], ...updates }
+  }
+})
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: {
+    getState: () => ({
+      getAllAgents: () => Object.values(mockExternalAgents),
+      getAgent: (id: string) => mockExternalAgents[id],
+      updateAgent: mockUpdateAgent,
+    }),
+  },
+}))
+
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -164,7 +182,7 @@ describe("dispatchCommand: connector_reject_draft", () => {
 })
 
 describe("dispatchCommand: workflow_trigger_manual", () => {
-  it("invokes the trigger bridge with kind=trigger.manual", async () => {
+  it("invokes the trigger bridge with kind=trigger.manual and an api origin", async () => {
     await dispatchCommand("workflow_trigger_manual", { workflowId: "wf1" })
     expect(dispatchTrigger).toHaveBeenCalledTimes(1)
     expect(dispatchTrigger).toHaveBeenCalledWith(
@@ -172,8 +190,19 @@ describe("dispatchCommand: workflow_trigger_manual", () => {
         workflowId: "wf1",
         kind: "trigger.manual",
         originAt: expect.any(Number),
-      })
+      }),
+      { triggeredBy: { source: "api" } }
     )
+  })
+
+  it("threads the Rust-injected callerDeviceId into triggeredBy (ADR-0060)", async () => {
+    await dispatchCommand("workflow_trigger_manual", {
+      workflowId: "wf1",
+      callerDeviceId: "dev-42",
+    })
+    expect(dispatchTrigger).toHaveBeenCalledWith(expect.anything(), {
+      triggeredBy: { source: "api", deviceId: "dev-42" },
+    })
   })
 
   it("forwards an optional input payload", async () => {
@@ -184,7 +213,8 @@ describe("dispatchCommand: workflow_trigger_manual", () => {
     expect(dispatchTrigger).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: { reason: "mobile" },
-      })
+      }),
+      expect.anything()
     )
   })
 
@@ -199,6 +229,177 @@ describe("dispatchCommand: workflow_trigger_manual", () => {
     await expect(dispatchCommand("workflow_trigger_manual", { workflowId: "wf1" })).rejects.toThrow(
       /orchestrator boom/
     )
+  })
+})
+
+describe("dispatchCommand: workflow approvals", () => {
+  afterEach(async () => {
+    const { __resetApprovalRegistryForTesting } =
+      await import("@/lib/workflow/runtime/approval-registry")
+    __resetApprovalRegistryForTesting()
+  })
+
+  it("lists pending approvals oldest first", async () => {
+    const { registerPendingApproval } = await import("@/lib/workflow/runtime/approval-registry")
+    registerPendingApproval({
+      approvalId: "apr_1",
+      runId: "run_1",
+      workflowId: "wf_1",
+      stepId: "n_gate",
+      title: "Ship?",
+      requestedAt: 5,
+    })
+    const result = (await dispatchCommand("workflow_approval_list", {})) as {
+      approvals: Array<{ approvalId: string }>
+    }
+    expect(result.approvals.map((a) => a.approvalId)).toEqual(["apr_1"])
+  })
+
+  it("resolves a pending approval with the caller device identity", async () => {
+    const { registerPendingApproval, approvalWakeKey } =
+      await import("@/lib/workflow/runtime/approval-registry")
+    const { subscribeWake } = await import("@/lib/workflow/runtime/wake-bus")
+    registerPendingApproval({
+      approvalId: "apr_2",
+      runId: "run_2",
+      workflowId: "wf_2",
+      stepId: "n_gate",
+      title: "Ship?",
+      requestedAt: 5,
+    })
+    const wait = subscribeWake(approvalWakeKey("run_2", "n_gate"))
+    const result = await dispatchCommand("workflow_approval_respond", {
+      approvalId: "apr_2",
+      decision: "approved",
+      callerDeviceId: "dev-9",
+    })
+    expect(result).toEqual({ ok: true })
+    await expect(wait).resolves.toMatchObject({
+      data: { decision: "approved", respondedBy: "device:dev-9" },
+    })
+  })
+
+  it("reports not-found for unknown approvals", async () => {
+    const result = await dispatchCommand("workflow_approval_respond", {
+      approvalId: "apr_gone",
+      decision: "rejected",
+    })
+    expect(result).toEqual({ ok: false, reason: "not-found" })
+  })
+
+  it("rejects malformed decisions", async () => {
+    await expect(
+      dispatchCommand("workflow_approval_respond", { approvalId: "apr_x", decision: "maybe" })
+    ).rejects.toThrow(/decision must be/)
+  })
+})
+
+describe("dispatchCommand: workflow_step_result", () => {
+  afterEach(async () => {
+    const { __resetRemoteStepBrokerForTesting } =
+      await import("@/lib/workflow/runtime/remote-step-broker")
+    __resetRemoteStepBrokerForTesting()
+  })
+
+  it("feeds chunks into the broker and resolves the pending dispatch", async () => {
+    const { dispatchRemoteStep, chunkRemoteStepResult } =
+      await import("@/lib/workflow/runtime/remote-step-broker")
+    let requestId = ""
+    const emit = jest.fn(async (_event: string, payload: unknown) => {
+      const p = payload as { requestId?: string }
+      if (p.requestId) requestId = p.requestId
+    })
+    const promise = dispatchRemoteStep(
+      {
+        targetDeviceId: "dev-5",
+        kind: "action.mobile.location",
+        params: {},
+        runId: "run_s",
+        stepId: "n_s",
+        workflowId: "wf_s",
+        timeoutMs: 5_000,
+      },
+      { emit, isTauriFn: () => true }
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    const [chunk] = chunkRemoteStepResult(requestId, { ok: true, output: { latitude: 1 } })
+    const outcome = await dispatchCommand("workflow_step_result", {
+      ...chunk,
+      callerDeviceId: "dev-5",
+    })
+    expect(outcome).toEqual({ ok: true, complete: true })
+    await expect(promise).resolves.toEqual({ latitude: 1 })
+  })
+
+  it("rejects chunks from a non-target device and requires identity", async () => {
+    const outcome = await dispatchCommand("workflow_step_result", {
+      requestId: "rst_ghost",
+      seq: 0,
+      total: 1,
+      chunk: "{}",
+      callerDeviceId: "dev-x",
+    })
+    expect(outcome).toEqual({ ok: false, reason: "not-found" })
+    await expect(
+      dispatchCommand("workflow_step_result", { requestId: "rst_x", seq: 0, total: 1, chunk: "{}" })
+    ).rejects.toThrow(/callerDeviceId is required/)
+  })
+})
+
+describe("dispatchCommand: device_capabilities_report", () => {
+  const seedDevice = async (deviceId: string) => {
+    await getDb().pairedDevices.put({
+      deviceId,
+      label: "Test phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "1.0.0",
+      pairedAt: 1,
+      lastSeenAt: 1,
+    })
+  }
+
+  beforeEach(async () => {
+    await getDb()
+      .pairedDevices.clear()
+      .catch(() => undefined)
+  })
+
+  it("persists a validated capability manifest onto the caller's row", async () => {
+    await seedDevice("dev-cap")
+    const result = await dispatchCommand("device_capabilities_report", {
+      callerDeviceId: "dev-cap",
+      capabilities: ["camera", "geolocation", "not-a-real-cap", 42],
+    })
+    expect(result).toBeNull()
+    const row = await getDb().pairedDevices.get("dev-cap")
+    expect(row?.capabilities).toEqual(["camera", "geolocation"])
+    expect(row?.capabilitiesReportedAt).toEqual(expect.any(Number))
+  })
+
+  it("accepts plugin-scoped capability ids", async () => {
+    await seedDevice("dev-plug")
+    await dispatchCommand("device_capabilities_report", {
+      callerDeviceId: "dev-plug",
+      capabilities: ["plugin:demo"],
+    })
+    const row = await getDb().pairedDevices.get("dev-plug")
+    expect(row?.capabilities).toEqual(["plugin:demo"])
+  })
+
+  it("rejects without the Rust-injected callerDeviceId", async () => {
+    await expect(
+      dispatchCommand("device_capabilities_report", { capabilities: ["camera"] })
+    ).rejects.toThrow(/callerDeviceId is required/)
+  })
+
+  it("rejects a non-array capabilities payload", async () => {
+    await expect(
+      dispatchCommand("device_capabilities_report", {
+        callerDeviceId: "dev-cap",
+        capabilities: "camera",
+      })
+    ).rejects.toThrow(/must be an array/)
   })
 })
 
@@ -354,6 +555,90 @@ describe("dispatchCommand: goal_pause / goal_resume / goal_stop", () => {
   it("rejects when goalId is missing", async () => {
     await expect(dispatchCommand("goal_pause", {})).rejects.toThrow(/goal_pause.goalId is required/)
     await expect(dispatchCommand("goal_stop", {})).rejects.toThrow(/goal_stop.goalId is required/)
+  })
+})
+
+describe("dispatchCommand: external_agent_list / external_agent_update", () => {
+  beforeEach(() => {
+    for (const k of Object.keys(mockExternalAgents)) delete mockExternalAgents[k]
+    mockExternalAgents.a1 = {
+      id: "a1",
+      name: "Claude Code",
+      protocol: "acp",
+      transport: "stdio",
+      enabled: true,
+      defaultPermissionMode: "default",
+    }
+    mockExternalAgents.a2 = {
+      id: "a2",
+      name: "Codex",
+      protocol: "codex-app-server",
+      transport: "stdio",
+      enabled: false,
+      defaultPermissionMode: "plan",
+    }
+  })
+
+  it("external_agent_list projects a compact summary of every agent", async () => {
+    const res = (await dispatchCommand("external_agent_list", {})) as {
+      agents: Array<{ id: string; defaultPermissionMode: string }>
+    }
+    expect(res.agents).toHaveLength(2)
+    expect(res.agents.map((a) => a.id).sort()).toEqual(["a1", "a2"])
+    // Falls back to "default" when unset.
+    const noMode = { id: "a3", name: "x", protocol: "acp", transport: "stdio", enabled: true }
+    mockExternalAgents.a3 = noMode
+    const res2 = (await dispatchCommand("external_agent_list", {})) as {
+      agents: Array<{ id: string; defaultPermissionMode: string }>
+    }
+    expect(res2.agents.find((a) => a.id === "a3")?.defaultPermissionMode).toBe("default")
+  })
+
+  it("external_agent_update toggles enabled", async () => {
+    await dispatchCommand("external_agent_update", { id: "a1", patch: { enabled: false } })
+    expect(mockUpdateAgent).toHaveBeenCalledWith("a1", { enabled: false })
+    expect(mockExternalAgents.a1.enabled).toBe(false)
+  })
+
+  it("external_agent_update clamps an unsupported permission mode per protocol", async () => {
+    // Codex (codex-app-server) cannot enforce `dontAsk` → clamps to a supported
+    // mode (never `dontAsk`).
+    await dispatchCommand("external_agent_update", {
+      id: "a2",
+      patch: { defaultPermissionMode: "dontAsk" },
+    })
+    const applied = mockUpdateAgent.mock.calls.at(-1)?.[1] as { defaultPermissionMode: string }
+    expect(applied.defaultPermissionMode).not.toBe("dontAsk")
+  })
+
+  it("external_agent_update passes a supported mode through unchanged", async () => {
+    await dispatchCommand("external_agent_update", {
+      id: "a1",
+      patch: { defaultPermissionMode: "acceptEdits" },
+    })
+    expect(mockUpdateAgent).toHaveBeenCalledWith("a1", { defaultPermissionMode: "acceptEdits" })
+  })
+
+  it("rejects a missing id, missing patch, invalid mode, or empty patch", async () => {
+    await expect(dispatchCommand("external_agent_update", {})).rejects.toThrow(/id is required/)
+    await expect(dispatchCommand("external_agent_update", { id: "a1" })).rejects.toThrow(
+      /patch is required/
+    )
+    await expect(
+      dispatchCommand("external_agent_update", { id: "missing", patch: { enabled: true } })
+    ).rejects.toThrow(/agent not found/)
+    await expect(
+      dispatchCommand("external_agent_update", { id: "a1", patch: { enabled: "yes" } })
+    ).rejects.toThrow(/enabled must be boolean/)
+    await expect(
+      dispatchCommand("external_agent_update", {
+        id: "a1",
+        patch: { defaultPermissionMode: "nope" },
+      })
+    ).rejects.toThrow(/defaultPermissionMode is invalid/)
+    await expect(dispatchCommand("external_agent_update", { id: "a1", patch: {} })).rejects.toThrow(
+      /no editable fields/
+    )
   })
 })
 

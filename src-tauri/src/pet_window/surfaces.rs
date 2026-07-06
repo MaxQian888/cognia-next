@@ -171,10 +171,257 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+mod platform {
+    //! `CGWindowListCopyWindowInfo`-based enumeration. Reuses the automation
+    //! backend's existing `core-graphics`/`core-foundation` dependencies
+    //! (`Cargo.toml`, macOS target deps) — no new crates. Self-exclusion is by
+    //! owner PID (`kCGWindowOwnerPID` vs `std::process::id()`), which catches
+    //! every window of this process (main/pet/popup) at once — simpler and
+    //! more robust than Windows' per-label HWND list, and needs no AppKit/
+    //! `NSWindow` interop (`self_hwnds` below stays empty on this platform;
+    //! see the non-Windows branch).
+
+    use super::WindowCandidate;
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::{CFString, CFStringRef};
+    use core_graphics::geometry::CGRect;
+    use core_graphics::window::{
+        create_description_from_array, create_window_list, kCGNullWindowID, kCGWindowBounds,
+        kCGWindowLayer, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
+        kCGWindowName, kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
+    };
+
+    fn cf_key(raw: CFStringRef) -> CFString {
+        // SAFETY: the `kCGWindow*` statics are process-lifetime CFStrings
+        // owned by the CoreGraphics framework; `wrap_under_get_rule` retains
+        // rather than takes ownership, matching how the crate's own
+        // `copy_window_info` wraps framework-owned values.
+        unsafe { CFString::wrap_under_get_rule(raw) }
+    }
+
+    fn dict_i64(dict: &CFDictionary<CFString, CFType>, key: CFStringRef) -> Option<i64> {
+        dict.find(&cf_key(key))?.downcast::<CFNumber>()?.to_i64()
+    }
+
+    fn dict_string(dict: &CFDictionary<CFString, CFType>, key: CFStringRef) -> String {
+        dict.find(&cf_key(key))
+            .and_then(|v| v.downcast::<CFString>())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    }
+
+    /// `kCGWindowBounds`'s value is itself a dictionary in the standard
+    /// `CGRectMakeWithDictionaryRepresentation` format (documented X/Y/Width/
+    /// Height keys) — `CGRect::from_dict_representation` (from the
+    /// `core-graphics-types` crate `core-graphics` re-exports) decodes it
+    /// directly, no manual FFI binding needed.
+    fn dict_rect(dict: &CFDictionary<CFString, CFType>, key: CFStringRef) -> Option<CGRect> {
+        let bounds = dict.find(&cf_key(key))?.downcast::<CFDictionary>()?;
+        CGRect::from_dict_representation(&bounds)
+    }
+
+    /// Map one window's description dictionary into a `WindowCandidate`, or
+    /// `None` if it belongs to this process (never a perch target) or its
+    /// bounds can't be decoded. Pure aside from the CG/CF calls the fields
+    /// themselves require — no live window query — so it's unit-testable
+    /// with synthetic dictionaries.
+    fn candidate_from_dict(
+        dict: &CFDictionary<CFString, CFType>,
+        own_pid: i64,
+    ) -> Option<WindowCandidate> {
+        if dict_i64(dict, kCGWindowOwnerPID) == Some(own_pid) {
+            return None;
+        }
+        let rect = dict_rect(dict, kCGWindowBounds)?;
+        let layer = dict_i64(dict, kCGWindowLayer).unwrap_or(0);
+        let window_id = dict_i64(dict, kCGWindowNumber).unwrap_or(0);
+        let name = dict_string(dict, kCGWindowName);
+        let title = if !name.is_empty() {
+            name
+        } else {
+            dict_string(dict, kCGWindowOwnerName)
+        };
+        Some(WindowCandidate {
+            left: rect.origin.x as i32,
+            top: rect.origin.y as i32,
+            right: (rect.origin.x + rect.size.width) as i32,
+            bottom: (rect.origin.y + rect.size.height) as i32,
+            // Implied by `kCGWindowListOptionOnScreenOnly` — minimized/hidden
+            // windows aren't returned at all, so there's no separate signal
+            // to read (unlike Windows' `IsIconic`/`IsWindowVisible`).
+            visible: true,
+            minimized: false,
+            // No DWM-style cloaking concept on macOS; `kCGWindowLayer != 0`
+            // (menu bar / dock / Spotlight / other system chrome) covers the
+            // same "don't perch here" cases Windows' tool-window check does.
+            cloaked: false,
+            tool_window: layer != 0,
+            title,
+            hwnd_id: window_id as u64,
+        })
+    }
+
+    pub fn enumerate() -> Vec<WindowCandidate> {
+        let own_pid = std::process::id() as i64;
+        let Some(ids) = create_window_list(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID,
+        ) else {
+            return Vec::new();
+        };
+        let Some(dicts) = create_description_from_array(ids) else {
+            return Vec::new();
+        };
+        dicts
+            .iter()
+            .filter_map(|d| candidate_from_dict(&d, own_pid))
+            .collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Builds the standard `CGRectMakeWithDictionaryRepresentation` dict
+        /// shape (documented X/Y/Width/Height keys) so `dict_rect` round-trips
+        /// through the real native decoder.
+        fn bounds_dict(x: f64, y: f64, w: f64, h: f64) -> CFDictionary<CFString, CFType> {
+            CFDictionary::from_CFType_pairs(&[
+                (
+                    CFString::from_static_string("X"),
+                    CFNumber::from(x).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("Y"),
+                    CFNumber::from(y).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("Width"),
+                    CFNumber::from(w).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("Height"),
+                    CFNumber::from(h).as_CFType(),
+                ),
+            ])
+        }
+
+        fn window_dict(
+            pid: i64,
+            layer: i64,
+            window_id: i64,
+            name: &str,
+            owner: &str,
+            bounds: CFDictionary<CFString, CFType>,
+        ) -> CFDictionary<CFString, CFType> {
+            CFDictionary::from_CFType_pairs(&[
+                (
+                    CFString::from_static_string("kCGWindowOwnerPID"),
+                    CFNumber::from(pid).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("kCGWindowLayer"),
+                    CFNumber::from(layer).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("kCGWindowNumber"),
+                    CFNumber::from(window_id).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("kCGWindowName"),
+                    CFString::from(name).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("kCGWindowOwnerName"),
+                    CFString::from(owner).as_CFType(),
+                ),
+                (
+                    CFString::from_static_string("kCGWindowBounds"),
+                    bounds.as_CFType(),
+                ),
+            ])
+        }
+
+        // These fixtures key by literal string ("kCGWindowBounds" etc.) —
+        // Apple's own `CGWindowListCopyWindowInfo` output confirms the
+        // `kCGWindow*` CFString constants' runtime values are exactly their
+        // symbol names (e.g. a real dump shows `kCGWindowOwnerPID = 507;`),
+        // so these match what `candidate_from_dict` looks up via the actual
+        // native constants.
+
+        #[test]
+        fn maps_a_normal_window_including_bounds_and_title_fallback() {
+            let dict = window_dict(
+                999,
+                0,
+                42,
+                "",
+                "Finder",
+                bounds_dict(10.0, 20.0, 300.0, 400.0),
+            );
+            let candidate = candidate_from_dict(&dict, 1).expect("should map");
+            assert_eq!(candidate.left, 10);
+            assert_eq!(candidate.top, 20);
+            assert_eq!(candidate.right, 310);
+            assert_eq!(candidate.bottom, 420);
+            assert_eq!(candidate.hwnd_id, 42);
+            assert_eq!(candidate.title, "Finder"); // empty kCGWindowName → owner name
+            assert!(!candidate.tool_window);
+        }
+
+        #[test]
+        fn prefers_the_window_name_over_the_owner_name() {
+            let dict = window_dict(
+                999,
+                0,
+                1,
+                "Untitled Document",
+                "TextEdit",
+                bounds_dict(0.0, 0.0, 200.0, 200.0),
+            );
+            let candidate = candidate_from_dict(&dict, 1).expect("should map");
+            assert_eq!(candidate.title, "Untitled Document");
+        }
+
+        #[test]
+        fn excludes_windows_owned_by_this_process() {
+            let dict = window_dict(
+                1234,
+                0,
+                1,
+                "Cognia",
+                "Cognia",
+                bounds_dict(0.0, 0.0, 200.0, 200.0),
+            );
+            assert!(candidate_from_dict(&dict, 1234).is_none());
+        }
+
+        #[test]
+        fn nonzero_layer_marks_the_window_as_tool_window_equivalent() {
+            let dict = window_dict(
+                999,
+                25, // e.g. the menu bar / Spotlight layer
+                1,
+                "",
+                "SystemUIServer",
+                bounds_dict(0.0, 0.0, 1920.0, 24.0),
+            );
+            let candidate = candidate_from_dict(&dict, 1).expect("should map");
+            assert!(candidate.tool_window);
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod platform {
     use super::WindowCandidate;
-    /// No window enumeration off Windows — the pet keeps its floor-wander.
+    /// No window enumeration on this platform — Wayland has no stable
+    /// cross-app window-geometry API (a deliberate security boundary), and
+    /// X11-only support was judged not worth the maintenance surface for a
+    /// shrinking minority of Linux sessions. The pet keeps its floor-wander.
     pub fn enumerate() -> Vec<WindowCandidate> {
         Vec::new()
     }

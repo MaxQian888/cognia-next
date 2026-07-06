@@ -26,6 +26,12 @@ export interface BrowserRunDepsArgs {
   session?: ChatSession | null
   /** Override the judge model (cross-model). Defaults to the resolver's choice. */
   judgeModel?: string
+  /**
+   * Skip the LLM judge entirely — run the deterministic tier only, even if a
+   * judge client would otherwise resolve. Surfaces the settings "deterministic
+   * only" toggle down to the scorer wiring.
+   */
+  forceDeterministic?: boolean
 }
 
 export interface BrowserRunDepsResult {
@@ -80,12 +86,14 @@ export interface ConfiguredRunDepsResult {
  * (+ optional cross-model judge) scorer set.
  */
 export function buildConfiguredRunDeps(args: BrowserRunDepsArgs): ConfiguredRunDepsResult {
-  const client = buildRendererLlmClient({
-    session: args.session ?? null,
-    appSettings: args.appSettings,
-    featureId: "eval-judge",
-    ...(args.judgeModel ? { modelOverride: args.judgeModel } : {}),
-  })
+  const client = args.forceDeterministic
+    ? null
+    : buildRendererLlmClient({
+        session: args.session ?? null,
+        appSettings: args.appSettings,
+        featureId: "eval-judge",
+        ...(args.judgeModel ? { modelOverride: args.judgeModel } : {}),
+      })
   const allScorers = client
     ? [...deterministicScorers(), ...llmScorers({ client })]
     : deterministicScorers()

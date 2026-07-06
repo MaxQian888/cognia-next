@@ -34,6 +34,7 @@ import { CommentPanel } from "./comment-panel"
 import { CollaborationPanel } from "./collaboration-panel"
 import { CodeExecutionPanel } from "./code-execution-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
+import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 /**
@@ -422,6 +423,9 @@ function CommentsHost({ documentId }: { documentId: string }) {
  */
 function CollaborationHost({ documentId }: { documentId: string }) {
   const t = useTranslations("canvas.panels")
+  // Feature-flag gate: `canvas.collaboration.v1` (env / localStorage override).
+  // When disabled, the panel shows the hint but no "open collaboration" entry.
+  const collaborationEnabled = useCanvasFeatureFlag("canvas.collaboration.v1")
   const documents = useArtifactStore((s) => s.canvasDocuments)
   const doc = documents[documentId]
   return (
@@ -432,18 +436,20 @@ function CollaborationHost({ documentId }: { documentId: string }) {
         </EmptyMedia>
         <EmptyDescription className="text-xs">{t("collabHint")}</EmptyDescription>
       </EmptyHeader>
-      <EmptyContent>
-        <CollaborationPanel
-          documentId={documentId}
-          documentContent={doc?.content ?? ""}
-          trigger={
-            <Button size="sm" variant="outline" className="text-xs">
-              <Users className="mr-2 size-3.5" />
-              {t("openCollab", { default: "Open collaboration" })}
-            </Button>
-          }
-        />
-      </EmptyContent>
+      {collaborationEnabled && (
+        <EmptyContent>
+          <CollaborationPanel
+            documentId={documentId}
+            documentContent={doc?.content ?? ""}
+            trigger={
+              <Button size="sm" variant="outline" className="text-xs">
+                <Users className="mr-2 size-3.5" />
+                {t("openCollab", { default: "Open collaboration" })}
+              </Button>
+            }
+          />
+        </EmptyContent>
+      )}
     </Empty>
   )
 }

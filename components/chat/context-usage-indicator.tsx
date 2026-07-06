@@ -41,6 +41,7 @@ import type { SdkContextUsage } from "@/lib/claude/types"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
+import { ContextSourceBreakdown } from "@/components/chat/context-source-breakdown"
 import type { UsageDisplayMode } from "@/types/appearance"
 import {
   AUTO_COMPACT_FRACTION,
@@ -204,7 +205,11 @@ export function ContextUsageIndicator({
                   }
                 />
               </div>
-              {sdkUsage ? <SdkBreakdown usage={sdkUsage} mode={mode} /> : null}
+              {sdkUsage ? (
+                <SdkBreakdown usage={sdkUsage} mode={mode} />
+              ) : (
+                <ContextSourceBreakdown messages={messages as UIMessage[]} mode={mode} />
+              )}
               <CompactNowButton sessionId={activeSessionId} usedTokens={win.used} />
             </div>
           </ContextContentBody>

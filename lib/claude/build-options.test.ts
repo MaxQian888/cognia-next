@@ -38,6 +38,19 @@ jest.mock("@/stores/agent/custom-mode-store", () => ({
   useCustomModeStore: { getState: jest.fn() },
 }))
 
+// Dynamically imported only on the API-key-rotation persist path (ADR-0043
+// Phase 3) — mocked so that path never touches Dexie/Zustand in this file.
+const mockSetProviderConfig = jest.fn().mockResolvedValue(undefined)
+const mockUpdateCustomProvider = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({
+      setProviderConfig: (...args: unknown[]) => mockSetProviderConfig(...args),
+      updateCustomProvider: (...args: unknown[]) => mockUpdateCustomProvider(...args),
+    }),
+  },
+}))
+
 jest.mock("@/lib/agent", () => ({
   buildAgentModeSessionUpdate: jest.fn(),
 }))
@@ -73,6 +86,13 @@ jest.mock("@/lib/subscription/codex/chat-bridge", () => ({
 
 jest.mock("@/lib/twin/runtime", () => ({
   applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
+}))
+
+// Project-scoped RAG (workspace knowledge base) — dynamically imported by
+// resolveSendOptions. Mock so we can drive the injected section deterministically.
+const mApplyProjectKnowledge = jest.fn()
+jest.mock("@/lib/project-knowledge/runtime/apply-project-context", () => ({
+  applyProjectKnowledgeContext: (...args: unknown[]) => mApplyProjectKnowledge(...args),
 }))
 
 // skills-bridge is dynamically imported by resolveSendOptions when a character
@@ -114,6 +134,7 @@ import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
 import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@/lib/logging"
+import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provider-routing"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
@@ -123,7 +144,13 @@ import {
   __getActiveSpanForTesting,
   __resetAgentTraceEmitterForTesting,
 } from "@cognia/agent-trace/emitter"
-import { listTeamMembers, resolveMemberConfig, resolveSendOptions } from "./build-options"
+import {
+  _resetImPromptMemosForTest,
+  listTeamMembers,
+  resolveMemberConfig,
+  resolveSendOptions,
+} from "./build-options"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
 import type { Project } from "@/types"
 
@@ -385,6 +412,182 @@ describe("resolveSendOptions — Anthropic native fallbackModel activation", () 
   })
 })
 
+describe("resolveSendOptions — opt-in Auto routing", () => {
+  const routingConfig = {
+    strategy: "quality",
+    allowPerRequestOverride: true,
+    providerConstraints: [],
+    requestTimeoutMs: 30000,
+    maxFallbackAttempts: 3,
+  }
+  const mapping = (alias: string, modelId: string) => ({
+    id: `m-${alias}`,
+    alias,
+    providers: [{ providerId: "anthropic", modelId }],
+    distribution: "priority",
+    enabled: true,
+    isDefault: false,
+    createdAt: 0,
+    updatedAt: 0,
+  })
+  const tierMappings = [
+    mapping("fast", "claude-haiku-4-5-20251001"),
+    mapping("balanced", "claude-sonnet-4-6"),
+    mapping("powerful", "claude-opus-4-8"),
+  ]
+  // Guarantees scoreDifficulty >= the powerful threshold (fenced code +
+  // reasoning keywords + length + many sentences all saturate).
+  const HARD_PROMPT =
+    "Please implement and optimize this algorithm step-by-step. Analyze the architecture. Prove correctness. Debug the derivative. ```ts\nfor (;;) {}\n```. " +
+    "Refactor the recursive proof into a multi-step analysis of the optimization theorem. ".repeat(
+      30
+    )
+  const settings = (autoRouting?: unknown): AppSettings =>
+    ({
+      defaultProvider: "anthropic",
+      defaultModel: "claude-sonnet-4-6",
+      providerSettings: {},
+      routingConfig,
+      modelMappings: tierMappings,
+      ...(autoRouting ? { autoRouting } : {}),
+    }) as unknown as AppSettings
+
+  it("is a no-op when disabled (concrete model is untouched)", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings(),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("routes a hard prompt to the powerful tier and stamps the decision", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.autoRouting?.tier).toBe("powerful")
+    expect(opts.autoRouting?.score).toBeGreaterThanOrEqual(0.67)
+    // The alias engine then resolved the tier to its concrete model.
+    expect(opts.model).toBe("claude-opus-4-8")
+    expect(opts.aliasResolution?.alias).toBe("powerful")
+  })
+
+  it("routes an easy prompt to the fast tier", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: "hi" },
+    })
+    expect(opts.autoRouting?.tier).toBe("fast")
+    expect(opts.model).toBe("claude-haiku-4-5-20251001")
+  })
+
+  it("never re-routes an explicitly-typed alias", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "auto-alias", providerId: "anthropic", model: "fast" }),
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    // Typed "fast" wins; auto never fires.
+    expect(opts.autoRouting).toBeUndefined()
+    expect(opts.aliasResolution?.alias).toBe("fast")
+  })
+
+  it("is a no-op when the prompt text is empty", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: "" },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("falls back to the concrete model when an auto tier has no eligible deployment", async () => {
+    // Force the alias engine to report zero candidates for the auto-picked tier.
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "selectProvider")
+      .mockImplementation(() => {
+        throw new RoutingNoCandidatesError("powerful")
+      })
+    try {
+      const opts = await resolveSendOptions({
+        appSettings: settings({
+          enabled: true,
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+        }),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      // Auto rewrote the model to a tier, resolution threw → we revert to the
+      // concrete default model instead of hard-failing the send.
+      expect(opts.model).toBe("claude-sonnet-4-6")
+      expect(opts.autoRouting).toBeUndefined()
+      expect(opts.aliasResolution).toBeUndefined()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("rethrows for an explicitly-typed alias with no eligible deployment", async () => {
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "selectProvider")
+      .mockImplementation(() => {
+        throw new RoutingNoCandidatesError("fast")
+      })
+    try {
+      await expect(
+        resolveSendOptions({
+          character: makeChar({ id: "typed", providerId: "anthropic", model: "fast" }),
+          appSettings: settings({
+            enabled: true,
+            thresholds: { balanced: 0.34, powerful: 0.67 },
+            candidateAliases: ["fast", "balanced", "powerful"],
+          }),
+          routingContextHint: { promptText: HARD_PROMPT },
+        })
+      ).rejects.toBeInstanceOf(RoutingNoCandidatesError)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("is a no-op when no candidate alias is enabled in modelMappings", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        defaultProvider: "anthropic",
+        defaultModel: "claude-sonnet-4-6",
+        providerSettings: {},
+        routingConfig,
+        modelMappings: [mapping("reasoning", "claude-opus-4-8")],
+        autoRouting: {
+          enabled: true,
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+        },
+      } as unknown as AppSettings,
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+})
+
 describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)", () => {
   it("forwards the resolved protocol + modelParams for a configured built-in provider", async () => {
     const opts = await resolveSendOptions({
@@ -405,6 +608,28 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
     expect(opts.modelParams).toEqual(
       expect.objectContaining({ temperature: 0.5, maxOutputTokens: 1024 })
     )
+  })
+
+  it("fills the OpenRouter catalog base URL for a key-only built-in entry (no api.openai.com leak)", async () => {
+    // Repro of the reported bug: an OpenRouter key with no stored base URL must
+    // resolve to openrouter.ai, NOT default the openai client to api.openai.com.
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "c1",
+        providerId: "openrouter",
+        model: "poolside/laguna-m.1:free",
+      }),
+      appSettings: {
+        defaultProvider: "openrouter",
+        providerSettings: {
+          openrouter: { apiKey: "sk-or-v1-xxx" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("openrouter")
+    expect(opts.providerCredentials?.apiKey).toBe("sk-or-v1-xxx")
+    expect(opts.providerCredentials?.protocol).toBe("openai")
+    expect(opts.providerCredentials?.baseURL).toBe("https://openrouter.ai/api/v1")
   })
 
   it("rides the declarative spec along for a plugin-contributed protocol (M2)", async () => {
@@ -447,6 +672,129 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
   })
 })
 
+describe("resolveSendOptions — multi-API-key rotation (ADR-0043 Phase 3)", () => {
+  // Deterministic microtask flush for the fire-and-forget persist call,
+  // which the code intentionally does not await before returning `opts`.
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+
+  it("overrides the single-key credential with the round-robin-selected pool key", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0", "sk-pool-1"],
+            apiKeyRotationEnabled: true,
+            apiKeyRotationStrategy: "round-robin",
+            currentKeyIndex: 0,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    // currentKeyIndex 0 -> round-robin advances to pool[1], NOT the plain apiKey.
+    expect(opts.providerCredentials?.apiKey).toBe("sk-pool-1")
+  })
+
+  it("persists the rotation advance onto the built-in provider row", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0", "sk-pool-1"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    await flush()
+    expect(mockSetProviderConfig).toHaveBeenCalledWith(
+      "openai",
+      expect.objectContaining({
+        currentKeyIndex: 0,
+        apiKeyUsageStats: expect.objectContaining({
+          "sk-pool-0": expect.objectContaining({ usageCount: 1 }),
+        }),
+      })
+    )
+    expect(mockUpdateCustomProvider).not.toHaveBeenCalled()
+  })
+
+  it("persists the rotation advance onto the custom provider row instead", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "acme", model: "acme-chat" }),
+      appSettings: {
+        defaultProvider: "acme",
+        providerSettings: {},
+        customProviders: [
+          {
+            id: "acme",
+            isCustom: true,
+            protocol: "openai",
+            baseURL: "https://llm.acme.dev",
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        ],
+      } as unknown as AppSettings,
+    })
+    await flush()
+    expect(mockUpdateCustomProvider).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({ currentKeyIndex: 0 })
+    )
+    expect(mockSetProviderConfig).not.toHaveBeenCalled()
+  })
+
+  it("leaves the plain apiKey untouched when rotation is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: { apiKey: "sk-solo", apiKeys: ["sk-pool-0", "sk-pool-1"] },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials?.apiKey).toBe("sk-solo")
+    await flush()
+    expect(mockSetProviderConfig).not.toHaveBeenCalled()
+  })
+
+  it("does not block the turn when the persist call rejects", async () => {
+    mockSetProviderConfig.mockRejectedValueOnce(new Error("dexie unavailable"))
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials?.apiKey).toBe("sk-pool-0")
+    await flush()
+    expect(warnSpy).toHaveBeenCalledWith(
+      "api key rotation advance persist failed",
+      expect.any(Error)
+    )
+    warnSpy.mockRestore()
+  })
+})
+
 describe("resolveSendOptions — compaction config", () => {
   it("threads the resolved compaction config and strips draft fields", async () => {
     const opts = await resolveSendOptions({
@@ -481,6 +829,128 @@ describe("resolveSendOptions — compaction config", () => {
     expect(opts.compaction?.summary?.credentials?.apiKey).toBe("sk-summary")
   })
 
+  it("does not emit an unauthenticated summary credential for a keyless CLOUD provider", async () => {
+    // deepseek is a cloud built-in (apiKeyRequired) whose base URL auto-fills
+    // from the catalog. With no key configured, the summary must fall back to
+    // the main model instead of firing an unauthenticated request that 401s at
+    // compaction time.
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { deepseek: { enabled: true } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "deepseek", model: "deepseek-chat" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary).toBeUndefined()
+  })
+
+  it("allows a keyless LOCAL summary provider (Ollama) to resolve with just a base URL", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { ollama: { enabled: true } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "ollama", model: "llama3" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary?.model).toBe("llama3")
+    expect(opts.compaction?.summary?.credentials?.baseURL).toBeTruthy()
+    expect(opts.compaction?.summary?.credentials?.apiKey).toBeUndefined()
+  })
+
+  it("resolves a Codex summary provider from the subscription vault when settings have no key", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.2-codex" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.compaction?.summary).toEqual({
+      model: "gpt-5.2-codex",
+      protocol: "openai",
+      credentials: {
+        apiKey: "chatgpt-bearer",
+        baseURL: "https://chatgpt.com/backend-api/codex",
+        headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+      },
+    })
+  })
+
+  it("backfills Codex summary provider headers from the vault when settings provide the key", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {
+          codex: {
+            apiKey: "chatgpt-bearer",
+            baseURL: "https://chatgpt.com/backend-api/codex",
+          },
+        },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.2-codex" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.compaction?.summary?.credentials).toEqual({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+  })
+
+  it("resolves an OpenCode summary provider from the subscription vault when settings have no key", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue({
+      apiKey: "sk-go-vault",
+      baseURL: "https://opencode.ai/zen/go/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "opencode-go", model: "kimi-k2.6" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(opts.compaction?.summary).toEqual({
+      model: "kimi-k2.6",
+      protocol: "openai",
+      credentials: {
+        apiKey: "sk-go-vault",
+        baseURL: "https://opencode.ai/zen/go/v1",
+      },
+    })
+  })
+
   it("reuses the turn provider when only a summary model is configured", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o" }),
@@ -503,6 +973,57 @@ describe("resolveSendOptions — compaction config", () => {
       } as unknown as AppSettings,
     })
     expect(opts.compaction?.summary).toBeUndefined()
+  })
+
+  it("pins the catalog window so the sidecar trigger ignores its 128k deepseek floor", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "deepseek", model: "deepseek-v4-pro" }),
+      appSettings: {
+        defaultProvider: "deepseek",
+        providerSettings: { deepseek: { apiKey: "sk-ds" } },
+        compaction: { enabled: true },
+      } as unknown as AppSettings,
+    })
+    // deepseek-v4-pro is 1M in the provider catalog — NOT the regex table's
+    // 128k floor that would auto-compact at ~107k.
+    expect(opts.compaction?.contextWindow).toBe(1_048_576)
+  })
+
+  it("omits contextWindow when compaction is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "deepseek", model: "deepseek-v4-pro" }),
+      appSettings: {
+        defaultProvider: "deepseek",
+        providerSettings: { deepseek: { apiKey: "sk-ds" } },
+        compaction: { enabled: false },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.contextWindow).toBeUndefined()
+  })
+
+  it("appends the post-compaction recovery snippet only when ctx.postCompaction is set", async () => {
+    const base = {
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: true } } as unknown as AppSettings,
+    }
+    const without = await resolveSendOptions(base)
+    expect(without.appendSystemPrompt ?? "").not.toContain("Post-compaction recovery")
+
+    const withRecovery = await resolveSendOptions({
+      ...base,
+      postCompaction: { phaseNumber: 1, durableInstructions: "Keep the kanban in sync" },
+    })
+    expect(withRecovery.appendSystemPrompt).toContain("Post-compaction recovery")
+    expect(withRecovery.appendSystemPrompt).toContain("Keep the kanban in sync")
+  })
+
+  it("does not append recovery when compaction is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: false } } as unknown as AppSettings,
+      postCompaction: { phaseNumber: 1 },
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("Post-compaction recovery")
   })
 })
 
@@ -778,6 +1299,81 @@ describe("resolveSendOptions — direct-chat subagents (opts.agents)", () => {
       ).toBe(true)
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-2")
+    }
+  })
+
+  it("force-offers dispatch_agent in plan mode even when nesting is off", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { permissionMode: "plan" } as never,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    // Plan mode dispatches read-only Explore/Plan subagents (Claude Code parity),
+    // so the tool must be offered even without the nesting opt-in.
+    expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 0 })
+    expect(lastCall?.dispatchAgent.available.some((a: { id: string }) => a.id === "Explore")).toBe(
+      true
+    )
+    expect(lastCall?.dispatchAgent.available.some((a: { id: string }) => a.id === "Plan")).toBe(
+      true
+    )
+  })
+
+  it("does not offer dispatch_agent in default mode without nesting", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("withholds dispatch_agent from a dispatched leaf child in plan mode (no re-nesting)", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    // A dispatched Explore/Plan child (isDispatchedSubagent, no dispatchContext —
+    // its def never set allowNesting) must NOT hit the plan-mode force-offer:
+    // it is a leaf, not a top-level chat (CLI leaf parity).
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { permissionMode: "plan" } as never,
+      isDispatchedSubagent: true,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("withholds dispatch_agent from a dispatched leaf child even when nesting is enabled", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { subagentNesting: { enabled: true, maxDepth: 2 } } as never,
+      isDispatchedSubagent: true,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("still offers dispatch_agent to a dispatched child that carries a dispatchContext", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-nest-3",
+      name: "Nesting Child",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      // allowNesting defs DO get a dispatchContext — the flag must not demote them.
+      await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        dispatchContext: { depth: 1, maxDepth: 3, parentChain: [] },
+        isDispatchedSubagent: true,
+      })
+      const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+      expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 1, maxDepth: 3 })
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-3")
     }
   })
 })
@@ -1777,15 +2373,17 @@ describe("resolveSendOptions — plan mode prompt", () => {
       session: makeSession({ id: "s1", permissionMode: "plan" }),
     })
     expect(opts.permissionMode).toBe("plan")
-    expect(opts.appendSystemPrompt).toContain("You are in plan mode")
+    expect(opts.appendSystemPrompt).toContain("Plan mode (READ-ONLY")
     expect(opts.appendSystemPrompt).toContain("ExitPlanMode")
+    // Guides the Claude-Code-style research flow via read-only subagents.
+    expect(opts.appendSystemPrompt).toContain("Explore")
   })
 
   it("omits the plan-mode reminder outside plan mode", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", permissionMode: "acceptEdits" }),
     })
-    expect(opts.appendSystemPrompt ?? "").not.toContain("You are in plan mode")
+    expect(opts.appendSystemPrompt ?? "").not.toContain("Plan mode (READ-ONLY")
   })
 })
 
@@ -1956,12 +2554,33 @@ describe("resolveSendOptions — reasoning effort (thinking level)", () => {
     expect(opts.effort).toBeUndefined()
   })
 
+  it("flags droppedCapabilityWarning when effort is dropped for an unsupported model", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "high", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.droppedCapabilityWarning).toEqual({
+      capability: "effort",
+      model: "claude-haiku-4-5",
+      provider: "anthropic",
+    })
+  })
+
   it("keeps effort when the resolved model supports it (Opus 4.6)", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", effort: "high", model: "claude-opus-4-6" }),
       appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
     })
     expect(opts.effort).toBe("high")
+    expect(opts.droppedCapabilityWarning).toBeUndefined()
+  })
+
+  it("does not flag a warning when no effort was requested", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.droppedCapabilityWarning).toBeUndefined()
   })
 })
 
@@ -2417,6 +3036,71 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
   })
 })
 
+describe("resolveSendOptions — ADR-0028 lite workspace confinement", () => {
+  it("defaults ON: stamps confinement.roots from cwd + additionalDirectories", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }, { path: "/ws/extra" }]),
+    })
+    expect(opts.confinement?.enabled).toBe(true)
+    expect(opts.confinement?.roots?.sort()).toEqual(["/ws", "/ws/extra"].sort())
+  })
+
+  it("does NOT confine when the heavy OS sandbox is enabled (mutually exclusive)", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", sandboxEnabled: true }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("session.workspaceConfinementEnabled = false opts the session out", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workspaceConfinementEnabled: false }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("character override beats the app default", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", workspaceConfinementEnabled: false }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+      appSettings: { id: "singleton", workspaceConfinementEnabled: true } as AppSettings,
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("carries no policy for a rootless session (no active project)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — alwaysAllowTools passthrough", () => {
+  it("copies (sorted) appSettings.alwaysAllowTools onto SendOptions", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: {
+        id: "singleton",
+        alwaysAllowTools: ["Write", "Bash", "Read"],
+      } as AppSettings,
+    })
+    expect(opts.alwaysAllowTools).toEqual(["Bash", "Read", "Write"])
+  })
+
+  it("omits the field when the list is empty", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton", alwaysAllowTools: [] as string[] } as AppSettings,
+    })
+    expect(opts.alwaysAllowTools).toBeUndefined()
+  })
+})
+
 describe("resolveSendOptions — ADR-0028 per-`query()` env injection", () => {
   it("merges account env + proxy env into opts.env when accountId resolves", async () => {
     mGetCharacter.mockResolvedValue(makeChar({ id: "c1", providerId: "anthropic" }))
@@ -2812,6 +3496,16 @@ describe("desktop-independent DI seams (standalone CLI)", () => {
       expect(opts.permissionMode).toBe("plan")
     })
 
+    it("a dontAsk parent ceiling clamps the child's mode (dontAsk is a valid SendOptions mode)", async () => {
+      // Regression: the final clamp used to guard `!== "dontAsk"` out as
+      // "type-unsafe", silently dropping a dontAsk parent's ceiling.
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", permissionMode: "acceptEdits" }),
+        permissionCeiling: { permissionMode: "dontAsk" },
+      })
+      expect(opts.permissionMode).toBe("dontAsk")
+    })
+
     it("a restricted parent caps a child that declared NO allow-list (no widening to all)", async () => {
       const opts = await resolveSendOptions({
         character: makeChar({ id: "c1" }), // no allowedTools ⇒ "all"
@@ -2961,6 +3655,29 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
 })
 
 describe("anthropic-managed (container) skills", () => {
+  it("appends twin_knowledge_search when the dispatching teammate is twin-bound", async () => {
+    // A twin-bound teammate is a sufficient signal — teamHasKnowledgeTwins
+    // short-circuits on character.twinId without needing a dispatch context.
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1", twinId: "twX" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("twin_knowledge_search")
+  })
+
+  it("omits twin_knowledge_search when the team exposes no knowledge twins", async () => {
+    // No character twinId and no resolvable team dispatch context → false leg.
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("team_send_message")
+    expect(toolNames(opts)).not.toContain("twin_knowledge_search")
+  })
   it("warns and does NOT set containerSkillIds — the SDK cannot attach uploaded skill_ids", async () => {
     const char = makeChar({ id: "c1", pluginSkillIds: ["plg-managed"] })
     mResolveSkillsForCharacter.mockResolvedValue([
@@ -3031,6 +3748,39 @@ describe("includePartialMessages (token-level streaming gate)", () => {
       character: makeChar({ id: "c1" }),
       preloadedEnv: null,
       preloadedMcpServers: [],
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("enables on an interactive CLI send (interactive flag set despite preloadedEnv/Mcp)", async () => {
+    // The CLI TUI injects preloadedEnv/preloadedMcpServers but IS a live turn —
+    // it must get partials so the deltas keep feeding the idle watchdog through
+    // a long single generation (large file write).
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+      interactive: true,
+    })
+    expect(opts.includePartialMessages).toBe(true)
+  })
+
+  it("interactive flag still defers to streamPartialMessages = false", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+      interactive: true,
+      appSettings: { streamPartialMessages: false } as AppSettings,
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("interactive flag does NOT override a connector send (conversationKey still wins)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      conversationKey: "telegram:123",
+      interactive: true,
     })
     expect(opts.includePartialMessages).toBeUndefined()
   })
@@ -3155,11 +3905,133 @@ describe("resolveSendOptions — forwardSubagentText (SDK-subagent bridge)", () 
     expect(wf.forwardSubagentText).toBe(true)
   })
 
-  it("leaves forwardSubagentText off for a direct chat session", async () => {
+  it("enables forwardSubagentText for a direct chat session (gap8 — detailed-gated render)", async () => {
     const direct = await resolveSendOptions({
       session: makeSession({ id: "s-direct", kind: "direct" }),
       character: makeChar({ id: "c1" }),
     })
-    expect(direct.forwardSubagentText).toBeUndefined()
+    expect(direct.forwardSubagentText).toBe(true)
+  })
+})
+
+describe("resolveSendOptions — IM prompt-fragment memos", () => {
+  const imAdapterRow = {
+    id: "tg-cap",
+    updatedAt: 999,
+    lastKnownCapabilities: { button: "native" },
+  } as unknown as AdapterInstanceRow
+
+  const capSession = () =>
+    makeSession({
+      id: "s-cap",
+      platformBinding: {
+        adapterId: "tg-cap",
+        platform: "telegram",
+        conversationKey: "c-cap",
+        conversationRef: { platform: "telegram", adapterId: "tg-cap", chatId: 7 },
+      },
+    })
+
+  it("builds then reuses the capability prompt across turns (memo miss + hit)", async () => {
+    _resetImPromptMemosForTest()
+    // First turn → cache miss → builds the prompt from the threaded adapter row.
+    const first = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    expect(first.appendSystemPrompt).toContain("delivered via telegram")
+    // Second turn (same id+updatedAt+platform) → cache hit → identical prompt.
+    const second = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    expect(second.appendSystemPrompt).toBe(first.appendSystemPrompt)
+  })
+
+  it("reuses the built-in skills manifest across turns for the same IM channel", async () => {
+    _resetImPromptMemosForTest()
+    const first = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    const second = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    // The lark.* tool allowlist is identical across turns (manifest memo hit).
+    expect(second.allowedTools).toEqual(first.allowedTools)
+  })
+})
+
+describe("resolveSendOptions — project knowledge base (project-scoped RAG)", () => {
+  function projectWithKb(overrides: Partial<Project> = {}): Project {
+    return {
+      id: "ws1",
+      name: "WS",
+      roots: [],
+      knowledgeBase: [
+        {
+          id: "f1",
+          name: "guide.md",
+          type: "text",
+          content: "x",
+          size: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+      ...overrides,
+    } as Project
+  }
+
+  const deps = { store: {}, embedding: {} } as never
+
+  it("appends a project-knowledge section after the base prompt (does not replace it)", async () => {
+    mApplyProjectKnowledge.mockResolvedValue({
+      systemPromptSection: "## Project knowledge base\nchunk text",
+      retrievedChunks: [{ fileId: "f1", fileName: "guide.md", content: "chunk text", score: 0.9 }],
+      degraded: false,
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb(),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(opts.systemPrompt).toContain("base prompt")
+    expect(opts.systemPrompt).toContain("## Project knowledge base")
+    expect(opts.systemPrompt!.indexOf("base prompt")).toBeLessThan(
+      opts.systemPrompt!.indexOf("## Project knowledge base")
+    )
+    expect(opts.projectKnowledgeContext?.retrievedChunks).toHaveLength(1)
+    expect(opts.projectKnowledgeContext?.degraded).toBe(false)
+  })
+
+  it("skips when the workspace has no knowledge files", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb({ knowledgeBase: [] }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+    expect(opts.systemPrompt).not.toContain("## Project knowledge base")
+  })
+
+  it("skips when project RAG is disabled for the workspace", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb({ knowledgeSettings: { enableProjectRag: false } }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+  })
+
+  it("skips when no project-knowledge deps are supplied", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb(),
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
   })
 })

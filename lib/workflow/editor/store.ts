@@ -41,6 +41,7 @@ import {
   validateNodeParams,
   type NodeValidationResult,
 } from "@/lib/workflow/nodes/validate-params"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import {
   cloneNodesAndEdges,
   rehydrateFromEnvelope,
@@ -123,6 +124,22 @@ export interface EditorState extends EditorStateSnapshot {
    * read per-node decorations with O(1) fine-grained subscriptions. (A4)
    */
   lastRunByStepId: Record<string, LastRunSummary>
+  /**
+   * Node ids the copilot composer currently references — attached via the
+   * `@` node/edge picker chips or the "reference selection" toolbar action.
+   * Drives a persistent highlight ring so the user can see which nodes are
+   * bound to the next AI turn. Ephemeral; not tracked in the undo history.
+   */
+  referencedNodeIds: Record<string, true>
+  setReferencedNodes: (ids: string[]) => void
+  /**
+   * Node ids under a transient highlight — the copilot `@`-picker's active
+   * row and the proposal card's hover. Cleared when the popover closes / the
+   * hover ends. Unioned with {@link referencedNodeIds} by `useNodeDecoration`.
+   * Ephemeral; not tracked in the undo history.
+   */
+  highlightedNodeIds: Record<string, true>
+  setHighlightedNodes: (ids: string[]) => void
 
   // ── editor preferences (ephemeral; not undoable) ──────────────────────────
   /**
@@ -191,6 +208,15 @@ export interface EditorState extends EditorStateSnapshot {
     candidate: ConnectionCandidate | null
   ) => void
   endConnection: () => void
+  /**
+   * Mobile-only switch: when true, the shared node renderer arms tap-to-connect
+   * from a source handle on click (touch can't reliably drag a 12px handle).
+   * Desktop never sets it, so the handle-tap path is a no-op there and the
+   * native drag-to-connect interaction is untouched. Set by the mobile editor
+   * when entering edit mode; cleared on read mode / unmount.
+   */
+  touchConnect: boolean
+  setTouchConnect: (v: boolean) => void
   /**
    * Pending "create node from a dragged handle" (C2). Set when a connection is
    * released on the empty pane: the canvas opens the palette, and on pick
@@ -277,6 +303,16 @@ export interface EditorState extends EditorStateSnapshot {
   requestedProblemsPanel: boolean
   requestProblemsPanel: () => void
   clearRequestedProblemsPanel: () => void
+  /**
+   * Signal → right sidebar to reveal the Inspector tab. Set by explicit
+   * configure gestures (node double-click, context-menu "Configure") so the
+   * form surfaces even when the user pinned another tab. The sidebar consumes
+   * and clears it, and drops any pinned tab so subsequent selections resume
+   * auto-switching.
+   */
+  requestedInspectorPanel: boolean
+  requestInspectorPanel: () => void
+  clearRequestedInspectorPanel: () => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -477,6 +513,10 @@ export function defaultLabelFor(kind: WorkflowNodeKind): string {
   return labelByKind[kind] ?? kind
 }
 
+function defaultParamsFor(kind: WorkflowNodeKind): Record<string, unknown> {
+  return { ...(nodeCatalogEntry(kind).defaultParams ?? {}) }
+}
+
 /**
  * Cheap equality test for `NodeValidationResult` so `revalidateNode` can
  * skip a no-op `set()` and avoid re-triggering subscribers (which would
@@ -540,6 +580,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         validationByStepId: {},
         diagnostics: EMPTY_DIAGNOSTICS,
         lastRunByStepId: {},
+        referencedNodeIds: {},
+        highlightedNodeIds: {},
         performanceTier: "auto",
         isDraggingAny: false,
         snapToGrid: true,
@@ -550,11 +592,13 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         palettePrefillPosition: null,
         spotlightedNodeId: null,
         connectionState: null,
+        touchConnect: false,
         pendingConnectFrom: null,
         requestedContextMenu: null,
         requestedRunFromStepId: null,
         requestedRunSingleStepId: null,
         requestedProblemsPanel: false,
+        requestedInspectorPanel: false,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
         setIsDraggingAny: (isDraggingAny) => set({ isDraggingAny }),
@@ -613,6 +657,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           })
         },
         endConnection: () => set({ connectionState: null }),
+        setTouchConnect: (v) => set({ touchConnect: v }),
         setPendingConnectFrom: (v) => set({ pendingConnectFrom: v }),
         requestContextMenu: (target, screenAnchor) =>
           set({ requestedContextMenu: { target, screenAnchor } }),
@@ -623,6 +668,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedRunSingleStep: () => set({ requestedRunSingleStepId: null }),
         requestProblemsPanel: () => set({ requestedProblemsPanel: true }),
         clearRequestedProblemsPanel: () => set({ requestedProblemsPanel: false }),
+        requestInspectorPanel: () => set({ requestedInspectorPanel: true }),
+        clearRequestedInspectorPanel: () => set({ requestedInspectorPanel: false }),
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
@@ -663,7 +710,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             position,
             data: {
               label: overrides?.label ?? defaultLabelFor(kind),
-              params: overrides?.params ?? {},
+              params: overrides?.params ?? defaultParamsFor(kind),
               notes: overrides?.notes,
               credentialRefs: overrides?.credentialRefs,
               disabled: overrides?.disabled,
@@ -692,7 +739,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             position,
             data: {
               label: overrides?.label ?? defaultLabelFor(kind),
-              params: overrides?.params ?? {},
+              params: overrides?.params ?? defaultParamsFor(kind),
               notes: overrides?.notes,
               credentialRefs: overrides?.credentialRefs,
               disabled: overrides?.disabled,
@@ -753,7 +800,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             position,
             data: {
               label: defaultLabelFor(kind),
-              params: {},
+              params: defaultParamsFor(kind),
               kind,
               typeVersion: defaultTypeVersionFor(kind),
             },
@@ -818,7 +865,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           const seenIn = new Set<string>()
           const inboundEdges: RFWorkflowEdge[] = []
           for (const r of rewires.inbound) {
-            const key = `${r.source} ${r.sourceHandle ?? ""}`
+            const key = `${r.source}\u0000${r.sourceHandle ?? ""}`
             if (seenIn.has(key)) continue
             seenIn.add(key)
             inboundEdges.push({
@@ -832,7 +879,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           const seenOut = new Set<string>()
           const outboundEdges: RFWorkflowEdge[] = []
           for (const r of rewires.outbound) {
-            const key = `${r.target} ${r.targetHandle ?? ""}`
+            const key = `${r.target}\u0000${r.targetHandle ?? ""}`
             if (seenOut.has(key)) continue
             seenOut.add(key)
             outboundEdges.push({
@@ -1344,6 +1391,20 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         setRunStatusBatch: (entries) =>
           set({ runStatusByStepId: { ...get().runStatusByStepId, ...entries } }),
         clearRunStatus: () => set({ runStatusByStepId: {} }),
+        setReferencedNodes: (ids) => {
+          const cur = get().referencedNodeIds
+          if (Object.keys(cur).length === ids.length && ids.every((id) => cur[id])) return
+          const next: Record<string, true> = {}
+          for (const id of ids) next[id] = true
+          set({ referencedNodeIds: next })
+        },
+        setHighlightedNodes: (ids) => {
+          const cur = get().highlightedNodeIds
+          if (Object.keys(cur).length === ids.length && ids.every((id) => cur[id])) return
+          const next: Record<string, true> = {}
+          for (const id of ids) next[id] = true
+          set({ highlightedNodeIds: next })
+        },
 
         setValidation: (stepId, result) => {
           const next = { ...get().validationByStepId }

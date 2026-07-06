@@ -13,6 +13,7 @@ import { CompassIcon } from "lucide-react"
 
 import { DiscoverItemCard } from "@/components/discover/discover-item-card"
 import { EmptyState } from "@/components/mobile/empty-state"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 import {
@@ -66,13 +67,24 @@ export function DiscoverGrid({
   const { isFavorite, toggleFavorite } = useDiscoverFavorites()
 
   if (loading) {
+    // Shimmer placeholders shaped like the active view (parity with the mobile
+    // ListSkeleton) so the pane doesn't jump from a centred spinner to a grid.
     return (
       <div
         aria-busy="true"
-        className={cn("flex flex-1 items-center justify-center p-6", className)}
+        aria-label={t("grid.loading")}
+        className={cn("overflow-y-auto p-4", DISCOVER_VIEW_CONTAINER[view], className)}
         data-testid="discover-grid-loading"
       >
-        <span className="text-sm text-muted-foreground">{t("grid.loading")}</span>
+        {Array.from({ length: view === "compact" ? 8 : 6 }).map((_, i) => (
+          <Skeleton
+            key={i}
+            className={cn(
+              "w-full rounded-md",
+              view === "grid" ? "h-28" : view === "compact" ? "h-10" : "h-16"
+            )}
+          />
+        ))}
       </div>
     )
   }

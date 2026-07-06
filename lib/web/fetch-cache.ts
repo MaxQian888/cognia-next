@@ -20,6 +20,8 @@ export interface FetchCacheKeyInput {
   maxBytes?: number
   /** Query-focused extraction prompt — a different prompt yields a different summary. */
   prompt?: string
+  /** Read window start — a different offset returns a different page segment. */
+  offset?: number
 }
 
 /** Stable cache key for a fetch request. */
@@ -30,6 +32,7 @@ export function fetchCacheKey(input: FetchCacheKeyInput): string {
     input.format ?? "auto",
     input.maxBytes != null ? String(input.maxBytes) : "",
     input.prompt?.trim() ?? "",
+    input.offset != null ? String(input.offset) : "",
   ].join("|")
 }
 

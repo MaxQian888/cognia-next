@@ -17,7 +17,7 @@ import type {
   CreateArtifactOptions,
   ArtifactFilter,
   ArtifactRenderer,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type { Artifact } from "@/types/artifact"
 import { createPluginSystemLogger } from "../core/logger"
 import {

@@ -34,12 +34,17 @@ import { syncAdapterInstances } from "./handlers/adapter-instances"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
+import { syncGoals } from "./handlers/goals"
+import { syncMcpServers } from "./handlers/mcp-servers"
+import { syncMemories } from "./handlers/memory"
 import { syncMessages } from "./handlers/messages"
 import { syncPlugins } from "./handlers/plugins"
 import { syncSessions } from "./handlers/sessions"
 import { syncSkills } from "./handlers/skills"
+import { syncTerminalHistory } from "./handlers/terminal-history"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
+import { syncWorkflowRuns } from "./handlers/workflow-runs"
 import type { SyncCursor, SyncOutcome, SyncableTable } from "./types"
 
 export type SyncFn = (transport: Transport, cursor: SyncCursor) => Promise<SyncOutcome>
@@ -67,6 +72,23 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // never pulls it and the mobile inbox renders every conversation as
   // unread + unpinned.
   { table: "conversationOverrides", run: syncConversationOverrides },
+  // Companion read-mostly views (Goals console + long-term memory). Mobile
+  // mirrors these so the phone can show goal progress / recalled memories
+  // from Dexie offline; both are authored on the desktop.
+  { table: "goals", run: syncGoals },
+  { table: "memories", run: syncMemories },
+  // Workflow run history — mirrors execution state so the mobile library
+  // badges, runs feed, and active-runs card reflect runs (incl. phone-
+  // triggered ones). Definitions sync via `workflows` above; this is runs.
+  { table: "workflowRuns", run: syncWorkflowRuns },
+  // ADR-0056 (Wave 4) — configured MCP servers. Read-only mirror so the
+  // mobile `/me/mcp` page can list the desktop's servers (the phone has no
+  // MCP push RPC and the standalone engine runs no MCP).
+  { table: "mcpServers", run: syncMcpServers },
+  // ADR-0039 (phase 2) — durable terminal command history. One-way read-only
+  // mirror (desktop → phone) powering the mobile `/me/command-history` browse
+  // /search viewer; the phone has no shell, so it never writes back.
+  { table: "terminalHistory", run: syncTerminalHistory },
 ]
 
 /**

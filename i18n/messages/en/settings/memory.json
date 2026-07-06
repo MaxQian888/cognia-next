@@ -31,6 +31,11 @@
     "label": "Hybrid retrieval"
   },
   "manage": "Manage memories",
+  "queryExpansion": {
+    "description": "Widen the keyword leg with synonym expansion when recalling memories.",
+    "heading": "Query expansion",
+    "label": "Query expansion"
+  },
   "scope": {
     "character": "Per character",
     "description": "Where new memories are stored. Global is shared across all characters.",

@@ -132,3 +132,65 @@ test("preserveSystemMessages keeps interleaved system messages out of the summar
   assert.ok(plan.keep.some((m) => m.content === "mid-system"))
   assert.ok(!plan.middle.some((m) => m.content === "mid-system"))
 })
+
+test("drain-line prefers the caller's authoritative contextWindow", () => {
+  const mk = (i) => ({ role: i % 2 ? "assistant" : "user", content: "m".repeat(4000) })
+  const conversation = Array.from({ length: 20 }, (_, i) => mk(i))
+  // With a huge window the budget is never exceeded → tail stays full-length.
+  const wide = planStrategy({
+    strategy: "summary",
+    conversation,
+    keepRecent: 8,
+    retainedFraction: 0.5,
+    contextWindow: 10_000_000,
+    modelId: "totally-unknown-model",
+  })
+  // Without it, the unknown model falls back to the 128k regex default and the
+  // same fraction still fits here — so instead prove the small-window case
+  // drains: an explicit tiny window must evict tail messages into the middle.
+  const tight = planStrategy({
+    strategy: "summary",
+    conversation,
+    keepRecent: 8,
+    retainedFraction: 0.5,
+    contextWindow: 4_000,
+    modelId: "totally-unknown-model",
+  })
+  assert.equal(wide.tail.length, 8)
+  assert.ok(tight.tail.length < 8)
+  assert.ok(tight.tail.length >= MIN_TAIL)
+})
+
+test("hybrid engages the drain-line by default (distinct from summary)", () => {
+  const mk = (i) => ({ role: i % 2 ? "assistant" : "user", content: "m".repeat(400_000) })
+  const conversation = Array.from({ length: 20 }, (_, i) => mk(i))
+  const summary = planStrategy({
+    strategy: "summary",
+    conversation,
+    keepRecent: 8,
+    contextWindow: 128_000,
+  })
+  const hybrid = planStrategy({
+    strategy: "hybrid",
+    conversation,
+    keepRecent: 8,
+    contextWindow: 128_000,
+  })
+  // summary (no retainedFraction) keeps the full tail; hybrid drains to MIN_TAIL.
+  assert.equal(summary.tail.length, 8)
+  assert.equal(hybrid.tail.length, MIN_TAIL)
+})
+
+test("optical produces an optical plan carrying the middle (fallback-compatible)", () => {
+  const conversation = convo(10)
+  const plan = planStrategy({ strategy: "optical", conversation, keepRecent: 2 })
+  assert.equal(plan.kind, "optical")
+  // Same shape as "single" so the orchestrator can summarize this middle as text
+  // if the optical render or round-trip check fails.
+  assert.equal(plan.middle.length, 8)
+  assert.equal(plan.tail.length, 2)
+  assert.deepEqual(
+    plan.systemHead.map((m) => m.content),
+    ["sys"]
+  )
+})

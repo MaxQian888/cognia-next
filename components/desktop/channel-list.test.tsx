@@ -26,7 +26,12 @@ jest.mock("@/lib/logging", () => {
     trace: jest.fn(),
     child: () => makeLogger(),
   })
-  return { loggers: new Proxy({}, { get: () => makeLogger() }) }
+  return {
+    loggers: new Proxy({}, { get: () => makeLogger() }),
+    // The plugin-view import chain reaches lib/execution/broker, which calls
+    // createLogger() at module load; provide it so the suite can import.
+    createLogger: () => makeLogger(),
+  }
 })
 
 const callQueue: Array<unknown> = []
@@ -37,8 +42,33 @@ jest.mock("@/hooks/data", () => ({
 
 let selectedGuild: SelectedGuild = { kind: "dm" }
 jest.mock("@/stores/ui", () => ({
-  useUIStore: <T,>(selector: (s: { selectedGuild: SelectedGuild }) => T): T =>
-    selector({ selectedGuild }),
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
+    selector({
+      selectedGuild,
+      channelListView: "active",
+      setChannelListView: () => {},
+      collapsedFolderIds: [],
+      setCollapsedFolders: () => {},
+      sidebarWidth: 256,
+      setSidebarWidth: () => {},
+    }),
+  SIDEBAR_WIDTH_DEFAULT: 256,
+  SIDEBAR_WIDTH_MIN: 220,
+  SIDEBAR_WIDTH_MAX: 420,
+}))
+
+// Behavior settings default to today's behavior (comfortable, date grouping on,
+// unread badges on, title-only search) so existing assertions hold. Individual
+// tests can override `conversationSidebar` to exercise the settings-driven paths.
+let conversationSidebar: Record<string, unknown> | null = null
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
+    selector({ settings: conversationSidebar ? { conversationSidebar } : null }),
+}))
+
+const searchSessionsByContent = jest.fn()
+jest.mock("@/lib/db/messages", () => ({
+  searchSessionsByContent: (...args: unknown[]) => searchSessionsByContent(...args),
 }))
 
 let isNarrow = false
@@ -97,6 +127,9 @@ beforeEach(() => {
   callQueue.length = 0
   selectedGuild = { kind: "dm" }
   isNarrow = false
+  conversationSidebar = null
+  searchSessionsByContent.mockReset()
+  searchSessionsByContent.mockResolvedValue({ ids: new Set<string>(), truncated: false })
 })
 
 test("DM guild renders only direct sessions, grouped into date buckets", () => {
@@ -641,6 +674,96 @@ test("folder header menu deletes the folder after confirmation", async () => {
   if (!confirm) throw new Error("expected destructive confirm button")
   await user.click(confirm)
   expect(onDeleteFolder).toHaveBeenCalledWith("f1")
+})
+
+describe("interaction upgrades", () => {
+  const dmA = baseSession("s-a", { title: "Alpha", updatedAt: 30 })
+  const dmB = baseSession("s-b", { title: "Bravo", updatedAt: 20 })
+
+  test("renders a keyboard-accessible resize separator with width bounds", () => {
+    callQueue.push(characters, [], undefined)
+    render(
+      <ChannelList
+        sessions={[dmA]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const handle = screen.getByRole("separator", { name: "resizeHandle" })
+    expect(handle).toHaveAttribute("aria-valuenow", "256")
+    expect(handle).toHaveAttribute("aria-valuemin", "220")
+    expect(handle).toHaveAttribute("aria-valuemax", "420")
+  })
+
+  test("arrow-down focuses a row and Enter opens it", async () => {
+    callQueue.push(characters, [], undefined)
+    const onSelect = jest.fn()
+    const user = userEvent.setup()
+    const { container } = render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={onSelect}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    list.focus()
+    await user.keyboard("{ArrowDown}")
+    expect(container.querySelector("li[data-focused]")).toBeInTheDocument()
+    await user.keyboard("{Enter}")
+    expect(onSelect).toHaveBeenCalledWith("s-a")
+  })
+
+  test("the slash key focuses the search box", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    const { container } = render(
+      <ChannelList
+        sessions={[dmA]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    list.focus()
+    await user.keyboard("/")
+    expect(screen.getByLabelText("searchAria")).toHaveFocus()
+  })
+
+  test("content-scope search surfaces sessions matched only by message body", async () => {
+    conversationSidebar = { searchScope: "titleAndContent" }
+    searchSessionsByContent.mockResolvedValue({ ids: new Set(["s-b"]), truncated: false })
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // "zzz" matches no title; only the content-search set contains s-b (Bravo).
+    await user.type(screen.getByLabelText("searchAria"), "zzz")
+    await waitFor(() => expect(searchSessionsByContent).toHaveBeenCalled())
+    expect(await screen.findByText("Bravo")).toBeInTheDocument()
+    expect(screen.queryByText("Alpha")).toBeNull()
+  })
 })
 
 test("Canvas guild renders nothing (canvas has its own rail)", () => {

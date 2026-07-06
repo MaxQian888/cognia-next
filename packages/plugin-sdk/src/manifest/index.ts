@@ -105,6 +105,11 @@ export type { PluginMessageRendererDef } from "@/types/plugin/plugin-message-ren
 export type { PluginModalMountDef } from "@/types/plugin/plugin-modal"
 export type { PluginNativeAnthropicToolDef } from "@/types/plugin/plugin-native-tool"
 export type { PluginOcrProviderDef } from "@/types/plugin/plugin-ocr"
+export type {
+  PluginPetAchievementCondition,
+  PluginPetAchievementDef,
+  PluginPetItemDef,
+} from "@/types/plugin/plugin-pet"
 export type { PluginProtocolAdapterDef } from "@/types/plugin/plugin-protocol-adapter"
 export type { PluginRoutingStrategyDef } from "@/types/plugin/plugin-routing-strategy"
 export type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"

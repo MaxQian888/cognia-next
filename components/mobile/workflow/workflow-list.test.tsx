@@ -20,7 +20,7 @@ jest.mock("next/link", () => {
 
 // Ordered queue: each useLiveQuery call shifts the next value. Render order is
 // childFolders → folderPath → folderWorkflows → recentlyFailed → runCounts →
-// activeRuns.
+// activeRuns → pendingTriggers.
 const liveQueries: Array<unknown> = []
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: (factory: () => unknown) => {
@@ -42,6 +42,9 @@ jest.mock("@/lib/db/workflow-folders", () => ({
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     workflowRuns: {
+      where: () => ({ equals: () => ({ toArray: () => Promise.resolve([]) }) }),
+    },
+    mobileOutboundQueue: {
       where: () => ({ equals: () => ({ toArray: () => Promise.resolve([]) }) }),
     },
   }),
@@ -132,8 +135,17 @@ function pushQueries({
   path = [] as unknown,
   workflows = [] as unknown,
   runs = [] as unknown,
+  triggers = [] as unknown,
 } = {}) {
-  liveQueries.push(folders, path, workflows, new Set<string>(), new Map<string, number>(), runs)
+  liveQueries.push(
+    folders,
+    path,
+    workflows,
+    new Set<string>(),
+    new Map<string, number>(),
+    runs,
+    triggers
+  )
 }
 
 beforeEach(() => {
@@ -172,6 +184,26 @@ describe("<WorkflowList />", () => {
     pushQueries({ workflows: [wf("a", "Alpha")], runs: [{ workflowId: "a" }] })
     render(<WorkflowList />)
     expect(screen.getByTestId("workflow-active-a")).toBeInTheDocument()
+  })
+
+  it("shows the Sending badge for a workflow with a queued trigger", () => {
+    pushQueries({
+      workflows: [wf("a", "Alpha")],
+      triggers: [{ status: "sending", payload: { workflowId: "a" } }],
+    })
+    render(<WorkflowList />)
+    expect(screen.getByTestId("workflow-sending-a")).toBeInTheDocument()
+  })
+
+  it("prefers the Active badge over Sending when a run is already live", () => {
+    pushQueries({
+      workflows: [wf("a", "Alpha")],
+      runs: [{ workflowId: "a" }],
+      triggers: [{ status: "pending", payload: { workflowId: "a" } }],
+    })
+    render(<WorkflowList />)
+    expect(screen.getByTestId("workflow-active-a")).toBeInTheDocument()
+    expect(screen.queryByTestId("workflow-sending-a")).not.toBeInTheDocument()
   })
 
   it("renders child folders and enters one on tap", () => {

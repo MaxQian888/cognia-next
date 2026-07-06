@@ -62,7 +62,14 @@ describe("screenshot (built-in)", () => {
   it("registers extract_screenshot_ocr and OCRs the captured image", async () => {
     extractMock.mockReset().mockResolvedValue({
       providerId: "tesseract-wasm",
-      pages: [],
+      pages: [
+        {
+          pageNumber: 1,
+          markdown: "**HI**",
+          text: "HI",
+          blocks: [{ text: "HI", bbox: { x: 1, y: 2, width: 3, height: 4 }, confidence: 0.9 }],
+        },
+      ],
       combinedMarkdown: "**HI**",
       combinedText: "HI",
       languages: ["en"],
@@ -82,9 +89,13 @@ describe("screenshot (built-in)", () => {
     const result = (await tools.extract_screenshot_ocr({ languages: ["en"] })) as {
       ok: boolean
       text?: string
+      blocks?: Array<{ text: string; bbox?: { x: number } }>
     }
     expect(result.ok).toBe(true)
     expect(result.text).toBe("HI")
+    expect(result.blocks).toEqual([
+      { text: "HI", bbox: { x: 1, y: 2, width: 3, height: 4 }, confidence: 0.9 },
+    ])
     expect(extractMock).toHaveBeenCalledTimes(1)
   })
 

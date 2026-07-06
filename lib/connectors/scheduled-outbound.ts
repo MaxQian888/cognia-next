@@ -16,8 +16,10 @@
  *              segments so adapters can route them through the per-platform
  *              A2UI mappers.
  *
- * Call `installScheduledOutboundHandlers()` once at app startup (after the bus
- * and runner are initialised).
+ * Call `installScheduledOutboundHandlers()` once at app startup — done
+ * synchronously in `ConnectorBusProvider`'s boot effect, before the async
+ * adapter/runner boot, so the executors are registered before any due
+ * `connection:*` scheduler task can fire.
  */
 
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
@@ -28,6 +30,8 @@ import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions, type InboxSendPolicy } from "@/lib/claude/build-options"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
+import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import { parseConversationKey } from "@/types/connectors/event"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { safeSendPrompt, PiiGateBlocked } from "@/lib/connectors/ai-loop/safe-send-prompt"
@@ -229,7 +233,9 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   ])
 
   const inboxPolicy: InboxSendPolicy = {
-    quietHours: adapterRow?.quietHours,
+    // Per-conversation override wins over the adapter-level default — same
+    // precedence as the delivery-time check in outbound-runner.ts.
+    quietHours: overrideRow?.quietHours ?? adapterRow?.quietHours,
     muted: adapterRow?.muted,
     forcedMode: overrideRow?.mode,
   }
@@ -240,6 +246,12 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   // the character is not twin-bound.
   const twinHandshake = character?.twinId && prompt.trim() ? await tryBuildTwinDeps() : undefined
 
+  // Long-term memory recall parity (see runtime.ts): ground the scheduled
+  // digest reply in the operator's memory store. No-ops when memory is off.
+  const memoryHandshake = prompt.trim()
+    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory))
+    : undefined
+
   const sendOptions = await resolveSendOptions({
     session,
     character,
@@ -249,6 +261,8 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     inboxPolicy,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? prompt : undefined,
+    memoryDeps: memoryHandshake,
+    memoryUserMessage: memoryHandshake ? prompt : undefined,
   })
 
   // ── Step 3: suppression gate (quiet hours / muted / forced manual) ───

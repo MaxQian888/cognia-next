@@ -1,5 +1,5 @@
 /**
- * Slack OAuth handler — completes the Phase 1 stub (ADR-0009 D1).
+ * Slack OAuth handler — completes the Slack OAuth code exchange path.
  *
  * The deep-link router (cognia://connector/oauth/slack?code=...&state=...)
  * invokes `handleSlackOAuth(code, {state})` after validating state. This

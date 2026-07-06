@@ -31,10 +31,21 @@ import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
  * The doom-loop guard still forces a prompt on a runaway identical repeat.
  * Names are the gate's namespaced form (`mcp__cognia-tools__<name>`).
  */
+/**
+ * The read-only built-in tool surface (namespaced), DERIVED from the shared risk
+ * model: every tool the catalogue marks `requiresApproval: false` — reads, greps,
+ * globs, `git status|log|diff`, LSP/codegraph queries, process & env listing, etc.
+ * Shared by two consumers so they never drift: the auto-approve gate
+ * ({@link CLI_AUTO_APPROVED_TOOLS}) and the built-in read-only subagents
+ * (`Explore` / `Plan`), which pass this as their `allowedTools` whitelist so they
+ * physically cannot edit, spawn processes, or mutate the tree.
+ */
+export const READ_ONLY_BUILTIN_TOOLS: readonly string[] = listBuiltinTools()
+  .filter((t) => !t.requiresApproval)
+  .map((t) => namespaced(t.name))
+
 export const CLI_AUTO_APPROVED_TOOLS: readonly string[] = [
-  ...listBuiltinTools()
-    .filter((t) => !t.requiresApproval)
-    .map((t) => namespaced(t.name)),
+  ...READ_ONLY_BUILTIN_TOOLS,
   // The plan-ready signal tools never hit the generic approval prompt — the
   // plan-approval overlay drives that decision. `exit_plan_mode` is the
   // cross-provider cognia builtin (not in the metadata, so add it explicitly);

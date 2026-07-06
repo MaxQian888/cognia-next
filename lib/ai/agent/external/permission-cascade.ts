@@ -1,4 +1,6 @@
 import type { AcpCapabilities, AcpPermissionMode } from "@/types/agent/external-agent"
+import type { SandboxResourcePolicy } from "@/lib/claude/types"
+import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 
 /**
  * A minimal, protocol-agnostic description of the permission surface an
@@ -21,12 +23,26 @@ export interface ExternalSessionPermissionSpec {
   disallowedTools?: string[]
   /** MCP servers the session may reach. The parent's set is the ceiling. */
   mcpServers?: Array<{ name: string; [key: string]: unknown }>
+  /**
+   * OS-sandbox resource/network ceiling (ADR-0028). Cascades monotonically via
+   * {@link clampSandboxPolicy}: a child may only narrow writable roots, tighten
+   * the network reach, and lower the CPU/memory caps — never widen them.
+   */
+  sandboxPolicy?: SandboxResourcePolicy
 }
 
 /**
  * Permissiveness ranking, ascending. `plan` (read-only) is the most
  * restrictive; `bypassPermissions` (skip all checks) the most permissive.
  * The effective mode is the *minimum* rank of parent and child.
+ *
+ * This ranks the **restrictiveness-of-execution** axis (what tools can run):
+ * `dontAsk` denies everything un-preapproved, so it sits BELOW `default` here.
+ * That is deliberately DIFFERENT from
+ * `lib/settings/permission-mode-escalation.ts:PERMISSION_MODE_RANK`, which ranks
+ * the orthogonal **autonomy** axis (there `dontAsk` runs pre-approved tools
+ * without asking, so it sits ABOVE `default`). The two tables are not drift —
+ * they measure different things and must not be merged.
  */
 export const MODE_RANK: Record<AcpPermissionMode, number> = {
   plan: 0,
@@ -113,6 +129,9 @@ export function deriveExternalSessionPermission(
 
   const mcpServers = intersectServers(parent.mcpServers, child.mcpServers)
   if (mcpServers) result.mcpServers = mcpServers
+
+  const sandboxPolicy = clampSandboxPolicy(parent.sandboxPolicy, child.sandboxPolicy)
+  if (sandboxPolicy) result.sandboxPolicy = sandboxPolicy
 
   return result
 }

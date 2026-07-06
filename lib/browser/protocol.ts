@@ -119,6 +119,30 @@ export interface SnapshotNode {
   rect: ElementRect
   value: string | null
   state: { disabled: boolean; checked: boolean | null; expanded: boolean | null }
+  /**
+   * True when the node lives inside a (same-origin) iframe. Its `rect` is then
+   * frame-relative — act on it by `ref`, not by coordinate.
+   */
+  frame?: boolean
+}
+
+/** Options for `browser_snapshot`. */
+export interface SnapshotOptions {
+  /** Also surface salient non-interactive text (headings, list items, …). */
+  includeText?: boolean
+}
+
+/** Result of `browser_evaluate` — the page helper's value/error envelope. */
+export interface EvaluateResult {
+  ok: boolean
+  value?: unknown
+  error?: string
+}
+
+/** In-flight + completed request counters from the embedded page. */
+export interface NetworkState {
+  pending: number
+  completed: number
 }
 
 /** A full accessibility-tree snapshot the model acts against by `ref`. */

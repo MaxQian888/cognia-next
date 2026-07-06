@@ -128,6 +128,17 @@ describe("startMainPetBridge", () => {
     expect(emit).toHaveBeenCalledWith({ source: "user", kind: "petted", meta: undefined })
   })
 
+  it("replays the care interactions (sleep/clean/treat) as user pet events", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const emit = jest.fn()
+    startMainPetBridge({ channel, store: store as never, emit })
+    for (const kind of ["slept", "cleaned", "treated"] as const) {
+      channel.deliver({ v: 1, t: "interaction", kind })
+      expect(emit).toHaveBeenCalledWith({ source: "user", kind, meta: undefined })
+    }
+  })
+
   it("forwards typed talk text as event meta", () => {
     const channel = new FakeChannel()
     const store = makeStore()
@@ -207,6 +218,47 @@ describe("startMainPetBridge", () => {
   })
 })
 
+describe("open-console routing", () => {
+  it("main side forwards a valid open-console message to onOpenConsole", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const onOpenConsole = jest.fn()
+    startMainPetBridge({ channel, store: store as never, emit: jest.fn(), onOpenConsole })
+    channel.deliver({ v: 1, t: "open-console", tab: "shop" })
+    expect(onOpenConsole).toHaveBeenCalledWith("shop")
+    // Malformed tab is dropped by the decoder, handler absence is tolerated.
+    channel.deliver({ v: 1, t: "open-console", tab: "nope" })
+    expect(onOpenConsole).toHaveBeenCalledTimes(1)
+  })
+
+  it("main side without onOpenConsole ignores the message", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    startMainPetBridge({ channel, store: store as never, emit: jest.fn() })
+    expect(() => channel.deliver({ v: 1, t: "open-console", tab: "dex" })).not.toThrow()
+  })
+
+  it("overlay sendOpenConsole posts the message", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const { sendOpenConsole } = startOverlayPetBridge({ channel, store: store as never })
+    sendOpenConsole("achievements")
+    expect(channel.msgs()).toContainEqual({ v: 1, t: "open-console", tab: "achievements" })
+  })
+
+  it("overlay sendOpenConsole is inert without BroadcastChannel", () => {
+    const real = (globalThis as Record<string, unknown>).BroadcastChannel
+    delete (globalThis as Record<string, unknown>).BroadcastChannel
+    try {
+      const store = makeStore()
+      const { sendOpenConsole } = startOverlayPetBridge({ store: store as never })
+      expect(() => sendOpenConsole("shop")).not.toThrow()
+    } finally {
+      if (real !== undefined) (globalThis as Record<string, unknown>).BroadcastChannel = real
+    }
+  })
+})
+
 describe("startOverlayPetBridge", () => {
   it("posts request-state on start", () => {
     const channel = new FakeChannel()
@@ -265,6 +317,8 @@ describe("startOverlayPetBridge", () => {
     const { sendInteraction } = startOverlayPetBridge({ channel, store: store as never })
     sendInteraction("talked")
     expect(channel.msgs()).toContainEqual({ v: 1, t: "interaction", kind: "talked" })
+    sendInteraction("treated")
+    expect(channel.msgs()).toContainEqual({ v: 1, t: "interaction", kind: "treated" })
   })
 
   it("sendInteraction carries trimmed talk text and caps it at 500 chars", () => {

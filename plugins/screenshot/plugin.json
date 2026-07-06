@@ -23,6 +23,10 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "No getDisplayMedia / screen capture in the mobile WebView."
     }
   }
 }

@@ -11,7 +11,8 @@
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import type { AgentTeamConfig } from "@/types/agent/agent-team"
+import type { AgentTeamConfig, TeamDispatchDecision } from "@/types/agent/agent-team"
+import { chooseExecutor } from "./dispatch-executor"
 import type { AutoOrchestrationProposal } from "./types"
 
 export interface MaterializeResult {
@@ -21,6 +22,8 @@ export interface MaterializeResult {
   teammateIds: string[]
   /** Store task ids, indexed parallel to `proposal.tasks`. */
   taskIds: string[]
+  /** The executor decision stamped onto the team (computed if absent). */
+  decision: TeamDispatchDecision
 }
 
 export interface MaterializeOptions {
@@ -70,6 +73,7 @@ export function materializeProposal(
           ...leadTeammate.config,
           ...(lead.specialization ? { specialization: lead.specialization } : {}),
           ...(lead.capabilities ? { capabilities: lead.capabilities } : {}),
+          ...(lead.twinId ? { twinId: lead.twinId } : {}),
         },
       })
     }
@@ -84,6 +88,7 @@ export function materializeProposal(
       config: {
         ...(m.specialization ? { specialization: m.specialization } : {}),
         ...(m.capabilities ? { capabilities: m.capabilities } : {}),
+        ...(m.twinId ? { twinId: m.twinId } : {}),
       },
     })
     teammateIds.push(teammate.id)
@@ -108,11 +113,16 @@ export function materializeProposal(
     taskIds.push(task.id)
   })
 
-  // Stamp the routing assessment so routing-driven pattern selection can read it.
+  // Stamp the routing assessment so routing-driven pattern selection can read
+  // it, plus the executor decision for UI/audit provenance. Proposals from
+  // before the executor field existed compute it here so the stamp is never
+  // missing on newly-materialized teams.
+  const decision = proposal.executor ?? chooseExecutor(proposal.assessment)
   store.updateTeam(team.id, {
     routingAssessment: proposal.assessment,
     selectedExecutionPattern: proposal.assessment.recommendedPattern,
+    dispatchDecision: decision,
   })
 
-  return { teamId: team.id, leadId: team.leadId, teammateIds, taskIds }
+  return { teamId: team.id, leadId: team.leadId, teammateIds, taskIds, decision }
 }

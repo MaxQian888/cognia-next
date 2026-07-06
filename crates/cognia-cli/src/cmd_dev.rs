@@ -24,8 +24,9 @@ use anyhow::{bail, Context, Result};
 use chrono::Local;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use notify::{EventKind, RecursiveMode, Watcher};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -44,15 +45,54 @@ const QUIT_SECOND_PRESS: u8 = 2;
 
 /// `cognia plugin dev` — runs the watch/rebuild loop until two Ctrl+C
 /// presses (or stdin EOF).
-pub fn run(path: PathBuf, reload_url: Option<String>, ui: &mut RuntimeUi) -> Result<()> {
-    let crate_root = path
-        .canonicalize()
-        .with_context(|| format!("resolve {}", path.display()))?;
-    if !crate_root.join("plugin.json").exists() {
-        bail!("plugin.json not found under {}", crate_root.display());
+pub fn run(
+    path: PathBuf,
+    reload_url: Option<String>,
+    once: bool,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
+    if ui.flags.json && !once {
+        return emit_json_input_failure(
+            &path,
+            once,
+            "`cognia plugin dev --json` requires `--once` so stdout stays parseable".to_string(),
+        );
     }
 
+    let crate_root = match path.canonicalize() {
+        Ok(root) => root,
+        Err(err) if ui.flags.json => {
+            return emit_json_input_failure(
+                &path,
+                once,
+                format!("resolve {}: {err}", path.display()),
+            );
+        }
+        Err(err) => return Err(err).with_context(|| format!("resolve {}", path.display())),
+    };
+    if !crate_root.join("plugin.json").exists() {
+        if ui.flags.json {
+            return emit_json_input_failure(
+                &crate_root,
+                once,
+                format!("plugin.json not found under {}", crate_root.display()),
+            );
+        }
+        bail!("plugin.json not found under {}", crate_root.display());
+    }
+    let (manifest, _) = match read_plugin_manifest(&crate_root) {
+        Ok(manifest) => manifest,
+        Err(err) if ui.flags.json => {
+            return emit_json_input_failure(&crate_root, once, err.to_string());
+        }
+        Err(err) => return Err(err),
+    };
+
     let reload_endpoint = resolve_reload_endpoint(reload_url.as_deref());
+
+    if once {
+        return run_once(&crate_root, reload_endpoint.as_ref(), ui);
+    }
 
     // Install the Ctrl+C handler exactly once per process. Tests skip
     // this entirely; production runs install before the watcher to make
@@ -68,19 +108,15 @@ pub fn run(path: PathBuf, reload_url: Option<String>, ui: &mut RuntimeUi) -> Res
         let _ = tx.send(res);
     })
     .context("create filesystem watcher")?;
-    for sub in ["src", "wit", "dist"] {
-        let p = crate_root.join(sub);
+    for p in watch_paths_for(&crate_root, &manifest) {
         if p.exists() {
+            let mode = if p.is_dir() {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
             watcher
-                .watch(&p, RecursiveMode::Recursive)
-                .with_context(|| format!("watch {}", p.display()))?;
-        }
-    }
-    for f in ["Cargo.toml", "package.json", "plugin.json"] {
-        let p = crate_root.join(f);
-        if p.exists() {
-            watcher
-                .watch(&p, RecursiveMode::NonRecursive)
+                .watch(&p, mode)
                 .with_context(|| format!("watch {}", p.display()))?;
         }
     }
@@ -151,6 +187,117 @@ pub fn run(path: PathBuf, reload_url: Option<String>, ui: &mut RuntimeUi) -> Res
     Ok(())
 }
 
+fn run_once(
+    crate_root: &Path,
+    reload_endpoint: Option<&EndpointFile>,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
+    let outcome = match build_once(crate_root, ui) {
+        Ok(outcome) => outcome,
+        Err(err) if ui.flags.json => {
+            let error = dev_build_error_message(&err);
+            let payload = DevBuildFailureJsonPayload {
+                schema_version: 1,
+                ok: false,
+                action: "dev",
+                mode: "once",
+                stage: "build",
+                path: crate_root.display().to_string(),
+                error,
+            };
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+            return Err(crate::JsonFailureExit.into());
+        }
+        Err(err) => return Err(err),
+    };
+    let reload = match reload_bundle(crate_root, reload_endpoint, &outcome.bundle_path) {
+        Ok(reload) => reload,
+        Err(err) if ui.flags.json => {
+            let payload = DevOnceFailureJsonPayload {
+                schema_version: 1,
+                ok: false,
+                action: "dev",
+                mode: "once",
+                stage: "reload",
+                plugin_id: outcome.plugin_id,
+                version: outcome.version,
+                plugin_type: outcome.plugin_type,
+                bundle: outcome.bundle_path.display().to_string(),
+                reload: DevReloadJsonPayload {
+                    attempted: true,
+                    ok: Some(false),
+                    endpoint: reload_endpoint.map(|endpoint| endpoint.base_url.clone()),
+                    skipped_reason: None,
+                },
+                error: err.to_string(),
+            };
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+            return Err(crate::JsonFailureExit.into());
+        }
+        Err(err) => return Err(err),
+    };
+
+    if ui.flags.json {
+        let payload = DevOnceJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "dev",
+            mode: "once",
+            plugin_id: outcome.plugin_id,
+            version: outcome.version,
+            plugin_type: outcome.plugin_type,
+            bundle: outcome.bundle_path.display().to_string(),
+            reload,
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else if !ui.flags.quiet {
+        println!(
+            "{}Built {} v{} → {}",
+            style::success_prefix(),
+            style::bold(&outcome.plugin_id),
+            style::bold(&outcome.version),
+            style::dim(outcome.bundle_path.display().to_string())
+        );
+        match reload {
+            DevReloadJsonPayload {
+                attempted: true,
+                ok: Some(true),
+                ..
+            } => println!(
+                "{}Reloaded {}",
+                style::success_prefix(),
+                style::bold(&outcome.plugin_id)
+            ),
+            DevReloadJsonPayload {
+                attempted: false,
+                skipped_reason: Some(reason),
+                ..
+            } => println!("{}reload skipped: {reason}", style::warn_prefix()),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn build_once(crate_root: &Path, ui: &mut RuntimeUi) -> Result<crate::cmd_build::BuildOutcome> {
+    let prior_quiet = ui.flags.quiet;
+    let prior_json = ui.flags.json;
+    ui.flags.quiet = true;
+    let result = crate::cmd_build::build_quiet(crate_root.to_path_buf(), None, false, ui);
+    ui.flags.quiet = prior_quiet;
+    ui.flags.json = prior_json;
+    result
+}
+
+fn dev_build_error_message(err: &anyhow::Error) -> String {
+    if let Some(lint) = err.downcast_ref::<crate::cmd_lint::LintError>() {
+        // LintError's Display already reads "manifest lint failed: …" — surface
+        // it verbatim (don't double the prefix); other build errors surface as-is.
+        return lint.to_string();
+    }
+    err.to_string()
+}
+
 fn should_rebuild(event: &notify::Event) -> bool {
     matches!(
         event.kind,
@@ -158,37 +305,200 @@ fn should_rebuild(event: &notify::Event) -> bool {
     )
 }
 
+fn watch_paths_for(crate_root: &Path, manifest: &serde_json::Value) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for rel in [
+        "src",
+        "wit",
+        "dist",
+        "Cargo.toml",
+        "package.json",
+        "plugin.json",
+    ] {
+        push_watch_path(&mut paths, crate_root.join(rel));
+    }
+    for field in ["main", "pythonMain", "vscodeMain", "styles"] {
+        if let Some(rel_path) = manifest.get(field).and_then(|value| value.as_str()) {
+            push_manifest_watch_path(&mut paths, crate_root, rel_path);
+        }
+    }
+    if let Some(items) = manifest
+        .get("bundle_include")
+        .and_then(|value| value.as_array())
+    {
+        for item in items.iter().filter_map(|value| value.as_str()) {
+            push_manifest_watch_path(&mut paths, crate_root, item);
+        }
+    }
+    paths
+}
+
+fn push_manifest_watch_path(paths: &mut Vec<PathBuf>, crate_root: &Path, rel_path: &str) {
+    let path = Path::new(rel_path);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return;
+    }
+    let watch_path = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => crate_root.join(parent),
+        _ => crate_root.join(path),
+    };
+    push_watch_path(paths, watch_path);
+}
+
+fn push_watch_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
 fn rebuild_and_reload(
     crate_root: &std::path::Path,
     reload_endpoint: Option<&EndpointFile>,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
-    crate::cmd_build::run(crate_root.to_path_buf(), None, false, ui)?;
+    let outcome = crate::cmd_build::build(crate_root.to_path_buf(), None, false, ui)?;
 
+    reload_bundle(crate_root, reload_endpoint, &outcome.bundle_path)?;
+    Ok(())
+}
+
+fn reload_bundle(
+    crate_root: &Path,
+    reload_endpoint: Option<&EndpointFile>,
+    bundle: &Path,
+) -> Result<DevReloadJsonPayload> {
     let Some(endpoint) = reload_endpoint else {
-        return Ok(());
+        return Ok(DevReloadJsonPayload::skipped("no-endpoint"));
     };
-
     let (manifest, _) = read_plugin_manifest(crate_root)?;
     let id = manifest.get("id").and_then(|v| v.as_str()).unwrap_or("");
-    let version = manifest
-        .get("version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let bundle = crate_root
-        .join("target")
-        .join("cognia")
-        .join(format!("{id}-{version}.zip"));
     if !bundle.exists() {
-        return Ok(());
+        return Ok(DevReloadJsonPayload::skipped("bundle-missing"));
     }
-    let _: serde_json::Value = post_json(
+    let response: DevReloadResponse = post_json(
         endpoint,
         "/api/v1/dev/plugins/reload",
         &json!({ "bundle_path": bundle.to_string_lossy(), "plugin_id": id }),
     )
     .context("reload endpoint POST failed")?;
-    Ok(())
+    if !response.ok {
+        bail!(
+            "{}",
+            response
+                .error
+                .unwrap_or_else(|| "reload rejected by cognia".to_string())
+        );
+    }
+    Ok(DevReloadJsonPayload {
+        attempted: true,
+        ok: Some(true),
+        endpoint: Some(endpoint.base_url.clone()),
+        skipped_reason: None,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct DevOnceJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    mode: &'static str,
+    #[serde(rename = "pluginId")]
+    plugin_id: String,
+    version: String,
+    #[serde(rename = "pluginType")]
+    plugin_type: String,
+    bundle: String,
+    reload: DevReloadJsonPayload,
+}
+
+#[derive(Debug, Serialize)]
+struct DevOnceFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    mode: &'static str,
+    stage: &'static str,
+    #[serde(rename = "pluginId")]
+    plugin_id: String,
+    version: String,
+    #[serde(rename = "pluginType")]
+    plugin_type: String,
+    bundle: String,
+    reload: DevReloadJsonPayload,
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DevBuildFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    mode: &'static str,
+    stage: &'static str,
+    path: String,
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DevReloadJsonPayload {
+    attempted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ok: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    endpoint: Option<String>,
+    #[serde(rename = "skippedReason", skip_serializing_if = "Option::is_none")]
+    skipped_reason: Option<&'static str>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DevReloadResponse {
+    ok: bool,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DevFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    mode: &'static str,
+    path: String,
+    error: String,
+}
+
+fn emit_json_input_failure(path: &Path, once: bool, error: String) -> Result<()> {
+    let payload = DevFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "dev",
+        stage: "input",
+        mode: if once { "once" } else { "watch" },
+        path: path.display().to_string(),
+        error,
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
+}
+
+impl DevReloadJsonPayload {
+    fn skipped(reason: &'static str) -> Self {
+        Self {
+            attempted: false,
+            ok: None,
+            endpoint: None,
+            skipped_reason: Some(reason),
+        }
+    }
 }
 
 /// Resolve the reload endpoint. If `--reload-url` is supplied we try to
@@ -257,6 +567,7 @@ enum PanelInner {
     },
     Plain {
         rebuilds: std::cell::Cell<u64>,
+        quiet: bool,
     },
 }
 
@@ -266,7 +577,15 @@ impl StatusPanel {
             Some(ep) if !ep.base_url.is_empty() => ep.base_url.clone(),
             _ => "<none — rebuild only>".to_string(),
         };
-        if !ui.is_tty || ui.flags.quiet {
+        if ui.flags.quiet {
+            return Self {
+                inner: PanelInner::Plain {
+                    rebuilds: std::cell::Cell::new(0),
+                    quiet: true,
+                },
+            };
+        }
+        if !ui.is_tty {
             println!(
                 "Watching {} for changes…",
                 style::bold(crate_root.display().to_string())
@@ -275,6 +594,7 @@ impl StatusPanel {
             return Self {
                 inner: PanelInner::Plain {
                     rebuilds: std::cell::Cell::new(0),
+                    quiet: false,
                 },
             };
         }
@@ -363,7 +683,10 @@ impl StatusPanel {
                 ));
                 rebuilds_pb.set_message(format!("  {} {}", style::dim("Rebuilds   "), n));
             }
-            PanelInner::Plain { rebuilds } => {
+            PanelInner::Plain {
+                rebuilds,
+                quiet: false,
+            } => {
                 let n = rebuilds.get() + 1;
                 rebuilds.set(n);
                 println!(
@@ -373,6 +696,9 @@ impl StatusPanel {
                         Err(_) => "FAILED",
                     }
                 );
+            }
+            PanelInner::Plain { rebuilds, .. } => {
+                rebuilds.set(rebuilds.get() + 1);
             }
         }
     }
@@ -384,9 +710,10 @@ impl StatusPanel {
             PanelInner::Sticky { mp, .. } => {
                 let _ = mp.println(msg);
             }
-            PanelInner::Plain { .. } => {
+            PanelInner::Plain { quiet: false, .. } => {
                 println!("{msg}");
             }
+            PanelInner::Plain { .. } => {}
         }
     }
 
@@ -428,6 +755,8 @@ mod tests {
 
     #[test]
     fn resolve_reload_endpoint_combines_override_with_token() {
+        let _guard = crate::test_env::lock();
+        let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         use std::io::Write;
         write!(
@@ -437,7 +766,7 @@ mod tests {
         .unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
         let ep = resolve_reload_endpoint(Some("http://localhost:1234"));
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let ep = ep.expect("endpoint should resolve");
         assert_eq!(ep.base_url, "http://localhost:1234");
         assert_eq!(ep.dev_token, "realtoken");
@@ -445,17 +774,21 @@ mod tests {
 
     #[test]
     fn resolve_reload_endpoint_returns_none_when_neither_source() {
+        let _guard = crate::test_env::lock();
+        let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
         let ep = resolve_reload_endpoint(None);
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         assert!(ep.is_none());
     }
 
     #[test]
     fn resolve_reload_endpoint_uses_override_with_empty_token() {
+        let _guard = crate::test_env::lock();
+        let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
         let ep = resolve_reload_endpoint(Some("http://localhost:4321"));
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let ep = ep.expect("override alone should resolve");
         assert_eq!(ep.base_url, "http://localhost:4321");
         assert_eq!(ep.dev_token, "");
@@ -492,7 +825,7 @@ mod tests {
         let panel = StatusPanel::new(&ui, std::path::Path::new("."), None);
         panel.record_build(&Ok(()), Duration::from_millis(100));
         panel.record_build(&Err(anyhow::anyhow!("boom")), Duration::from_millis(200));
-        if let PanelInner::Plain { rebuilds } = &panel.inner {
+        if let PanelInner::Plain { rebuilds, .. } = &panel.inner {
             assert_eq!(rebuilds.get(), 2);
         } else {
             panic!("expected Plain inner");
@@ -515,5 +848,142 @@ mod tests {
             panic!("expected Sticky inner");
         }
         panel.finish();
+    }
+
+    #[test]
+    fn dev_once_json_payload_is_schema_versioned() {
+        let payload = DevOnceJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "dev",
+            mode: "once",
+            plugin_id: "demo".into(),
+            version: "0.1.0".into(),
+            plugin_type: "python".into(),
+            bundle: "target/cognia/demo-0.1.0.zip".into(),
+            reload: DevReloadJsonPayload::skipped("no-endpoint"),
+        };
+
+        let json = serde_json::to_value(payload).unwrap();
+
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["action"], "dev");
+        assert_eq!(json["mode"], "once");
+        assert_eq!(json["pluginId"], "demo");
+        assert_eq!(json["reload"]["attempted"], false);
+        assert_eq!(json["reload"]["skippedReason"], "no-endpoint");
+    }
+
+    #[test]
+    fn dev_once_failure_json_payload_is_schema_versioned() {
+        let payload = DevOnceFailureJsonPayload {
+            schema_version: 1,
+            ok: false,
+            action: "dev",
+            mode: "once",
+            stage: "reload",
+            plugin_id: "demo".into(),
+            version: "0.1.0".into(),
+            plugin_type: "python".into(),
+            bundle: "target/cognia/demo-0.1.0.zip".into(),
+            reload: DevReloadJsonPayload {
+                attempted: true,
+                ok: Some(false),
+                endpoint: Some("http://127.0.0.1:7891".into()),
+                skipped_reason: None,
+            },
+            error: "reload target not installed".into(),
+        };
+
+        let json = serde_json::to_value(payload).unwrap();
+
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["action"], "dev");
+        assert_eq!(json["stage"], "reload");
+        assert_eq!(json["pluginId"], "demo");
+        assert_eq!(json["reload"]["attempted"], true);
+        assert_eq!(json["reload"]["ok"], false);
+        assert_eq!(json["error"], "reload target not installed");
+    }
+
+    #[test]
+    fn dev_build_error_message_labels_lint_errors() {
+        let report = crate::cmd_lint::LintReport {
+            schema_version: 1,
+            ok: false,
+            action: "lint",
+            valid: false,
+            manifest_path: PathBuf::from("plugin.json"),
+            diagnostics: Vec::new(),
+        };
+        let err: anyhow::Error = crate::cmd_lint::LintError { report }.into();
+
+        assert!(dev_build_error_message(&err).contains("manifest lint failed"));
+    }
+
+    #[test]
+    fn watch_paths_include_python_entry_file() {
+        let root = std::path::Path::new("plugin");
+        let manifest = serde_json::json!({
+            "type": "python",
+            "pythonMain": "main.py"
+        });
+
+        let paths = watch_paths_for(root, &manifest);
+
+        assert!(paths.iter().any(|path| path == &root.join("main.py")));
+    }
+
+    #[test]
+    fn watch_paths_include_hybrid_declared_entries() {
+        let root = std::path::Path::new("plugin");
+        let manifest = serde_json::json!({
+            "type": "hybrid",
+            "main": "frontend/index.js",
+            "pythonMain": "backend/main.py",
+            "styles": "styles.css"
+        });
+
+        let paths = watch_paths_for(root, &manifest);
+
+        assert!(paths.iter().any(|path| path == &root.join("frontend")));
+        assert!(paths.iter().any(|path| path == &root.join("backend")));
+        assert!(paths.iter().any(|path| path == &root.join("styles.css")));
+    }
+
+    #[test]
+    fn watch_paths_include_vscode_extension_entry_directory() {
+        let root = std::path::Path::new("plugin");
+        let manifest = serde_json::json!({
+            "type": "vscode-extension",
+            "vscodeMain": "extension/out/extension.js",
+            "styles": "styles.css"
+        });
+
+        let paths = watch_paths_for(root, &manifest);
+
+        assert!(paths
+            .iter()
+            .any(|path| path == &root.join("extension").join("out")));
+        assert!(paths.iter().any(|path| path == &root.join("styles.css")));
+    }
+
+    #[test]
+    fn watch_paths_ignore_absolute_and_parent_dir_manifest_paths() {
+        let root = std::path::Path::new("plugin");
+        let manifest = serde_json::json!({
+            "main": "../outside.js",
+            "pythonMain": "/tmp/outside.py",
+            "bundle_include": ["assets/icon.svg", "../secret.txt"]
+        });
+
+        let paths = watch_paths_for(root, &manifest);
+
+        assert!(!paths.iter().any(|path| path.ends_with("outside.js")));
+        assert!(!paths.iter().any(|path| path.ends_with("outside.py")));
+        assert!(!paths.iter().any(|path| path.ends_with("secret.txt")));
+        assert!(paths.iter().any(|path| path == &root.join("assets")));
     }
 }

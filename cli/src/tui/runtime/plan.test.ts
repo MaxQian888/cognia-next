@@ -5,6 +5,7 @@ import {
   PLAN_APPROVAL_CHOICES,
   PLAN_APPROVED_PROMPT,
   PLAN_BUILD_MODE,
+  PLAN_EXECUTE_PROMPT,
   isExitPlanTool,
   looksLikePlan,
   looksLikeQuestion,
@@ -14,6 +15,7 @@ import {
   planDiffText,
   planFileName,
   planIdFromFile,
+  planStats,
   planTitle,
 } from "./plan"
 
@@ -104,6 +106,21 @@ describe("looksLikeQuestion", () => {
   })
 })
 
+describe("planStats", () => {
+  it("counts list and numbered items as steps and non-blank lines", () => {
+    const raw = "# Plan\n\n- step one\n- step two\n1. step three\n\nsome prose"
+    expect(planStats(raw)).toEqual({ steps: 3, lines: 5 })
+  })
+
+  it("reports zero steps for unstructured prose", () => {
+    expect(planStats("just a paragraph\nof prose")).toEqual({ steps: 0, lines: 2 })
+  })
+
+  it("handles an empty body", () => {
+    expect(planStats("")).toEqual({ steps: 0, lines: 0 })
+  })
+})
+
 describe("planTitle", () => {
   it("uses the first heading text, stripped of markers", () => {
     expect(planTitle("## Refactor the parser\n\nbody")).toBe("Refactor the parser")
@@ -156,10 +173,12 @@ describe("constants", () => {
     expect(PLAN_BUILD_MODE).toBe("acceptEdits")
   })
 
-  it("offers two approve gears plus keep", () => {
+  it("offers in-context, fresh-session, and edit approve options plus keep", () => {
     expect(PLAN_APPROVAL_CHOICES.map((c) => c.id)).toEqual([
       "approve-auto",
       "approve-confirm",
+      "approve-new-session",
+      "edit-then-approve",
       "keep",
     ])
   })
@@ -221,5 +240,27 @@ describe("planDecisionMode", () => {
 
   it("returns null for keep planning (no mode switch)", () => {
     expect(planDecisionMode("keep")).toBeNull()
+  })
+
+  it("returns null for the specially-handled fresh-session and edit decisions", () => {
+    // These are handled by the App (session reset / editor), not a plain mode switch.
+    expect(planDecisionMode("approve-new-session")).toBeNull()
+    expect(planDecisionMode("edit-then-approve")).toBeNull()
+  })
+})
+
+describe("PLAN_EXECUTE_PROMPT", () => {
+  const PLAN = "# Add retry to the fetch client\n\n1. Wrap fetch\n2. Add backoff"
+
+  it("embeds the full plan for a context-less fresh session", () => {
+    const out = PLAN_EXECUTE_PROMPT(PLAN)
+    expect(out).toContain(PLAN)
+    expect(out).toMatch(/fresh session/i)
+  })
+
+  it("leads with the plan title so the sessions list auto-names the run", () => {
+    const out = PLAN_EXECUTE_PROMPT(PLAN)
+    // The first line carries the plan title (drives listSessions' titleFrom).
+    expect(out.split("\n")[0]).toContain(planTitle(PLAN))
   })
 })

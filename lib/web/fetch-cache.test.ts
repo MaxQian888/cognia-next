@@ -4,16 +4,17 @@ afterEach(() => resetFetchCache())
 
 describe("fetchCacheKey", () => {
   it("is stable for the same inputs and defaults method/format", () => {
-    expect(fetchCacheKey({ url: "https://a.test" })).toBe("GET|https://a.test|auto||")
-    expect(fetchCacheKey({ url: " https://a.test " })).toBe("GET|https://a.test|auto||")
+    expect(fetchCacheKey({ url: "https://a.test" })).toBe("GET|https://a.test|auto|||")
+    expect(fetchCacheKey({ url: " https://a.test " })).toBe("GET|https://a.test|auto|||")
   })
 
-  it("varies by method, format, cap and prompt", () => {
+  it("varies by method, format, cap, prompt and offset", () => {
     const base = fetchCacheKey({ url: "u" })
     expect(fetchCacheKey({ url: "u", method: "post" })).not.toBe(base)
     expect(fetchCacheKey({ url: "u", format: "raw" })).not.toBe(base)
     expect(fetchCacheKey({ url: "u", maxBytes: 100 })).not.toBe(base)
     expect(fetchCacheKey({ url: "u", prompt: "q" })).not.toBe(base)
+    expect(fetchCacheKey({ url: "u", offset: 40 })).not.toBe(base)
   })
 })
 

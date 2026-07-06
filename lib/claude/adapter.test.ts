@@ -43,10 +43,61 @@ describe("applySdkEvent — assistant", () => {
     expect((messages[0].parts[1] as { type: string }).type).toBe("reasoning")
   })
 
+  it("preserves provider metadata on text and thinking parts", () => {
+    const evt = asAssistant({
+      id: "asst-provider-meta",
+      content: [
+        {
+          type: "text",
+          text: "hi there",
+          providerMetadata: { provider: { traceId: "trace-text" } },
+        },
+        {
+          type: "thinking",
+          thinking: "let me think",
+          providerMetadata: { provider: { traceId: "trace-reasoning" } },
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    expect(messages[0].parts[0]).toMatchObject({
+      type: "text",
+      text: "hi there",
+      providerMetadata: { provider: { traceId: "trace-text" } },
+    })
+    expect(messages[0].parts[1]).toMatchObject({
+      type: "reasoning",
+      text: "let me think",
+      providerMetadata: { provider: { traceId: "trace-reasoning" } },
+    })
+  })
+
+  it("preserves assistant message metadata on the UI message", () => {
+    const evt = asAssistant({
+      id: "asst-message-meta",
+      metadata: { phase: "finish", traceId: "trace-message" },
+      content: [{ type: "text", text: "hi there" }],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    expect(messages[0].metadata).toEqual({ phase: "finish", traceId: "trace-message" })
+  })
+
   it("represents tool_use blocks with `tool-{name}` parts", () => {
     const evt = asAssistant({
       id: "asst-2",
-      content: [{ type: "tool_use", id: "t1", name: "Read", input: { path: "/x" } }],
+      content: [
+        {
+          type: "tool_use",
+          id: "t1",
+          name: "Read",
+          input: { path: "/x" },
+          providerExecuted: false,
+          providerMetadata: { provider: { traceId: "trace-tool" } },
+          toolMetadata: { display: "Read file" },
+          dynamic: false,
+          title: "Read file",
+        },
+      ],
     } as unknown as BetaMessage)
     const { messages } = applySdkEvent([], evt)
     const part = messages[0].parts[0] as {
@@ -54,11 +105,65 @@ describe("applySdkEvent — assistant", () => {
       toolCallId: string
       input: unknown
       state: string
+      providerExecuted?: boolean
+      providerMetadata?: Record<string, Record<string, unknown>>
+      toolMetadata?: Record<string, unknown>
+      dynamic?: boolean
+      title?: string
     }
     expect(part.type).toBe("tool-Read")
     expect(part.toolCallId).toBe("t1")
     expect(part.state).toBe("input-available")
     expect(part.input).toEqual({ path: "/x" })
+    expect(part.providerExecuted).toBe(false)
+    expect(part.providerMetadata?.provider.traceId).toBe("trace-tool")
+    expect(part.toolMetadata).toEqual({ display: "Read file" })
+    expect(part.dynamic).toBe(false)
+    expect(part.title).toBe("Read file")
+  })
+
+  it("preserves a streamed tool_use state when the mapper marks input as streaming", () => {
+    const evt = asAssistant({
+      id: "asst-stream-tool",
+      content: [
+        {
+          type: "tool_use",
+          id: "t-stream",
+          name: "Write",
+          input: { path: "draft.txt" },
+          state: "input-streaming",
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as { state: string; input?: unknown }
+    expect(part.state).toBe("input-streaming")
+    expect(part.input).toEqual({ path: "draft.txt" })
+  })
+
+  it("preserves approval-requested tool_use state and approval metadata", () => {
+    const evt = asAssistant({
+      id: "asst-approval-tool",
+      content: [
+        {
+          type: "tool_use",
+          id: "t-approval",
+          name: "Write",
+          input: { path: "secret.txt" },
+          state: "approval-requested",
+          approval: { id: "approval-1", signature: "sig-1" },
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as {
+      state: string
+      input?: unknown
+      approval?: { id: string; signature?: string }
+    }
+    expect(part.state).toBe("approval-requested")
+    expect(part.input).toEqual({ path: "secret.txt" })
+    expect(part.approval).toEqual({ id: "approval-1", signature: "sig-1" })
   })
 
   it("converts artifact_create tool_use into an ArtifactPart", () => {
@@ -89,6 +194,56 @@ describe("applySdkEvent — assistant", () => {
     expect(part.artifactId).toBe("art-1")
     expect(part.title).toBe("demo.md")
     expect(part.kind).toBe("document")
+  })
+
+  it("converts assistant file blocks into UI file parts", () => {
+    const evt = asAssistant({
+      id: "asst-file-1",
+      content: [
+        {
+          type: "file",
+          source: { type: "base64", media_type: "image/png", data: "QUJD" },
+          filename: "chart.png",
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as {
+      type: string
+      url: string
+      mediaType: string
+      filename?: string
+    }
+    expect(part).toEqual({
+      type: "file",
+      url: "data:image/png;base64,QUJD",
+      mediaType: "image/png",
+      filename: "chart.png",
+    })
+  })
+
+  it("converts assistant url file blocks into UI file parts", () => {
+    const evt = asAssistant({
+      id: "asst-url-file-1",
+      content: [
+        {
+          type: "file",
+          url: "https://files.example/chart.png",
+          media_type: "image/png",
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as {
+      type: string
+      url: string
+      mediaType: string
+    }
+    expect(part).toEqual({
+      type: "file",
+      url: "https://files.example/chart.png",
+      mediaType: "image/png",
+    })
   })
 
   it("falls back to evt.uuid when message.id is missing", () => {
@@ -455,6 +610,104 @@ describe("applySdkEvent — user (tool results)", () => {
     )
     const part = result.messages[0].parts[0] as { output?: string }
     expect(part.output).toBe('{"foo":"bar"}')
+  })
+
+  it("preserves structured mcpContent when the result carries a non-text block (gap3)", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__some-server__capture",
+          toolCallId: "t-mcp",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-mcp",
+          content: [
+            { type: "text", text: "here is the screenshot" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as {
+      output?: string
+      mcpContent?: Array<{ type: string }>
+    }
+    // flattened string still present for back-compat
+    expect(part.output).toContain("here is the screenshot")
+    // structured blocks preserved verbatim
+    expect(part.mcpContent).toHaveLength(2)
+    expect(part.mcpContent?.[1]?.type).toBe("image")
+  })
+
+  it("does NOT attach mcpContent for a pure-text array result (no behavior change)", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Read",
+          toolCallId: "t-txt",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-txt",
+          content: [
+            { type: "text", text: "alpha" },
+            { type: "text", text: "beta" },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { mcpContent?: unknown }
+    expect(part.mcpContent).toBeUndefined()
+  })
+
+  it("does NOT attach mcpContent for an error result", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__x__y",
+          toolCallId: "t-err",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-err",
+          content: [{ type: "image", source: { data: "AAAA" } }],
+          is_error: true,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { mcpContent?: unknown; state: string }
+    expect(part.state).toBe("output-error")
+    expect(part.mcpContent).toBeUndefined()
   })
 
   it("returns the original list unchanged when the tool_use_id matches nothing", () => {
@@ -982,6 +1235,54 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
     expect(b).toHaveLength(1)
   })
 
+  it("message_start attaches live input/cache usage for a mid-turn ctx% refresh", () => {
+    const { messages } = applySdkEvent(
+      [],
+      streamEvt({
+        type: "message_start",
+        message: {
+          id: "asst-usage",
+          usage: {
+            input_tokens: 1200,
+            cache_read_input_tokens: 300,
+            cache_creation_input_tokens: 50,
+          },
+        },
+      })
+    )
+    const usage = (messages[0] as { metadata?: { usage?: Record<string, number> } }).metadata?.usage
+    expect(usage).toMatchObject({
+      inputTokens: 1200,
+      cacheReadInputTokens: 300,
+      cacheCreationInputTokens: 50,
+    })
+  })
+
+  it("message_delta merges the running output_tokens without dropping prior input", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({
+        type: "message_start",
+        message: { id: "m", usage: { input_tokens: 1000 } },
+      })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "message_delta", usage: { output_tokens: 42 } })
+    ).messages
+    const usage = (msgs[0] as { metadata?: { usage?: Record<string, number> } }).metadata?.usage
+    // input from message_start is preserved; output added by message_delta.
+    expect(usage).toMatchObject({ inputTokens: 1000, outputTokens: 42 })
+  })
+
+  it("a usage-less message_start (ai-sdk path) attaches no metadata", () => {
+    const { messages } = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "ai-sdk" } })
+    )
+    expect((messages[0] as { metadata?: unknown }).metadata).toBeUndefined()
+  })
+
   it("text_delta accumulates into a single streaming text part", () => {
     let msgs = applySdkEvent(
       [],
@@ -1019,6 +1320,20 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
     expect(types).toEqual(["reasoning", "text"])
   })
 
+  it("step_start stream events append a step-start part to the active assistant", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m-step" } })
+    ).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "step_start" })).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "next" } })
+    ).messages
+
+    expect(msgs[0].parts.map((p) => (p as { type: string }).type)).toEqual(["step-start", "text"])
+  })
+
   it("the final full assistant message replaces the streamed preview (same id)", () => {
     let msgs = applySdkEvent(
       [],
@@ -1040,6 +1355,32 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
     const part = final[0].parts[0] as { type: string; text: string; state: string }
     expect(part.text).toBe("final answer")
     expect(part.state).toBe("done")
+  })
+
+  it("preserves streamed step-start parts when the final assistant replaces the preview", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "asst-step-final" } })
+    ).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "step_start" })).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "preview" },
+      })
+    ).messages
+
+    const final = applySdkEvent(
+      msgs,
+      asAssistant({
+        id: "asst-step-final",
+        content: [{ type: "text", text: "final answer" }],
+      } as unknown as BetaMessage)
+    ).messages
+
+    expect(final[0].parts.map((p) => (p as { type: string }).type)).toEqual(["step-start", "text"])
+    expect((final[0].parts[1] as { text: string }).text).toBe("final answer")
   })
 
   it("does not merge a new turn's deltas into a prior turn's assistant message", () => {

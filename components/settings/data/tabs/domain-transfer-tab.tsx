@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { ChatImportDialog } from "@/components/data/import/chat-import-dialog"
 import { DomainImportDialog } from "@/components/data/import/domain-import-dialog"
+import { SessionImportDialog } from "@/components/session-import/session-import-dialog"
 import {
   buildDomainExport,
   defaultDomainFileName,
@@ -21,7 +22,14 @@ import {
 } from "@/lib/data/domain"
 import { isTauri } from "@/lib/tauri"
 import { toast } from "sonner"
-import { GlobeIcon, MessageSquareIcon, SparklesIcon, DownloadIcon, UploadIcon } from "lucide-react"
+import {
+  GlobeIcon,
+  MessageSquareIcon,
+  SparklesIcon,
+  DownloadIcon,
+  UploadIcon,
+  TerminalIcon,
+} from "lucide-react"
 
 const PLATFORMS: Array<{
   id: "chatgpt" | "claude" | "gemini"
@@ -36,6 +44,7 @@ export function DomainTransferTab() {
   return (
     <div className="space-y-6">
       <ExternalImportsCard />
+      <AgentSessionsCard />
       <PerDomainCard />
     </div>
   )
@@ -68,6 +77,26 @@ function ExternalImportsCard() {
           />
         ))}
       </div>
+    </Card>
+  )
+}
+
+function AgentSessionsCard() {
+  const t = useTranslations("sessionImport")
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="space-y-1">
+        <Label className="text-sm">{t("cardTitle")}</Label>
+        <p className="text-xs text-muted-foreground">{t("cardBody")}</p>
+      </div>
+      <SessionImportDialog
+        trigger={
+          <Button variant="outline" size="sm" className="h-8 text-xs">
+            <TerminalIcon className="mr-1 size-3.5" />
+            {t("title")}
+          </Button>
+        }
+      />
     </Card>
   )
 }

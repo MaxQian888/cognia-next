@@ -1,4 +1,4 @@
-import { applyFilters, isFilterEmpty } from "./filters"
+import { applyFilters, isFilterEmpty, isValueSelected, toggleFilterValue } from "./filters"
 import { makeSpan } from "./fixtures"
 
 describe("filters", () => {
@@ -70,6 +70,27 @@ describe("filters", () => {
       // unknown-model span exists; filtering by a concrete model drops it
       const out = applyFilters(spans, { model: ["opus"] })
       expect(out.every((s) => s.responseModel === "opus")).toBe(true)
+    })
+  })
+
+  describe("toggleFilterValue", () => {
+    it("adds a value to an empty dimension", () => {
+      expect(toggleFilterValue({}, "model", "opus")).toEqual({ model: ["opus"] })
+    })
+    it("removes a value, dropping the now-empty dimension", () => {
+      expect(toggleFilterValue({ model: ["opus"] }, "model", "opus")).toEqual({})
+    })
+    it("appends without disturbing other dimensions", () => {
+      const out = toggleFilterValue({ surface: ["chat"], model: ["opus"] }, "model", "sonnet")
+      expect(out).toEqual({ surface: ["chat"], model: ["opus", "sonnet"] })
+    })
+  })
+
+  describe("isValueSelected", () => {
+    it("is true only when the value is present under the dimension", () => {
+      expect(isValueSelected({ model: ["opus"] }, "model", "opus")).toBe(true)
+      expect(isValueSelected({ model: ["opus"] }, "model", "sonnet")).toBe(false)
+      expect(isValueSelected({}, "model", "opus")).toBe(false)
     })
   })
 })

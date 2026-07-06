@@ -12,6 +12,8 @@ import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 import { nextToolTimestamps } from "@/lib/claude/run-record"
+import { useSyncExternalStore } from "react"
+import { getExecutionBroker, DEFAULT_AI_TURN_LIMIT } from "@/lib/execution/broker"
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
@@ -48,6 +50,18 @@ export interface LastSendCacheEntry {
    * routes through its dedicated chain.
    */
   specialAttempts?: Partial<Record<"contextWindowExceeded" | "contentPolicy", number>>
+}
+
+/**
+ * A workflow graph element staged as a reference chip for the next copilot
+ * turn. Denormalized (label + kind stored) so the chip renders without the
+ * live editor store, and expanded to `@node:<id>` / `@edge:<id>` at send time.
+ */
+export interface WorkflowElementRef {
+  type: "node" | "edge"
+  id: string
+  label: string
+  kind: string
 }
 
 export interface FileReference {
@@ -147,10 +161,14 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
   }
 }
 
-/** Maximum number of sessions allowed to stream concurrently. Over-cap sends
- * are blocked (never silently queued / dropped) — the composer disables send
- * and surfaces an inline notice; `send()` defends as a backstop. */
-export const MAX_CONCURRENT_STREAMS = 3
+/**
+ * Renderer-facing display of the concurrent-stream ceiling. The AUTHORITATIVE
+ * cap now lives in the unified {@link getExecutionBroker} (`ai-turn` limit),
+ * which also counts headless legs — see `selectIsAtStreamCap` /
+ * `useIsAtStreamCap` below. Re-exported from the broker default so any consumer
+ * referencing the constant reflects the unified ceiling.
+ */
+export const MAX_CONCURRENT_STREAMS = DEFAULT_AI_TURN_LIMIT
 
 /** Top-level fields the active session's slice is mirrored onto. */
 type ProjectedField =
@@ -280,6 +298,12 @@ interface ChatState {
   /** Files / folders the user has @-mentioned in the current draft. */
   referencedPaths: FileReference[]
   /**
+   * Workflow graph elements referenced for the next copilot turn (via the `@`
+   * node/edge picker or the "reference selection" action). Cleared on send
+   * (by the workflow chat tab) and on focus change. Empty in non-workflow chats.
+   */
+  referencedWorkflowElements: WorkflowElementRef[]
+  /**
    * Artifact snippets the user selected + commented on, staged as context chips
    * for the next send. Cleared on send (like attachments) and on focus change.
    */
@@ -394,6 +418,10 @@ interface ChatState {
   addReferencedPath: (ref: FileReference) => void
   removeReferencedPath: (absolute: string) => void
   clearReferencedPaths: () => void
+  /** Stage a workflow element as a reference chip for the next copilot turn. */
+  addReferencedWorkflowElement: (ref: WorkflowElementRef) => void
+  removeReferencedWorkflowElement: (type: "node" | "edge", id: string) => void
+  clearReferencedWorkflowElements: () => void
   /** Stage an artifact selection as a context chip for the next send. */
   addArtifactSelection: (selection: ArtifactSelectionRef) => void
   /** Remove a staged artifact selection (by index, since snapshots can repeat). */
@@ -431,6 +459,7 @@ export const useChatStore = create<ChatState>((set) => ({
   pendingApprovals: [],
   permissionMode: null,
   referencedPaths: [],
+  referencedWorkflowElements: [],
   artifactSelections: [],
   pendingCommandOverrides: null,
   bookmarkedIds: [],
@@ -452,6 +481,7 @@ export const useChatStore = create<ChatState>((set) => ({
       const uiReset: Partial<ChatState> = {
         permissionMode: null,
         referencedPaths: [],
+        referencedWorkflowElements: [],
         artifactSelections: [],
         pendingCommandOverrides: null,
         bookmarkedIds: [],
@@ -653,6 +683,22 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
   setPendingCommandOverrides: (overrides) => set({ pendingCommandOverrides: overrides }),
   clearReferencedPaths: () => set({ referencedPaths: [] }),
+  addReferencedWorkflowElement: (ref) =>
+    set((s) =>
+      s.referencedWorkflowElements.some((r) => r.type === ref.type && r.id === ref.id)
+        ? s
+        : { referencedWorkflowElements: [...s.referencedWorkflowElements, ref] }
+    ),
+  removeReferencedWorkflowElement: (type, id) =>
+    set((s) => ({
+      referencedWorkflowElements: s.referencedWorkflowElements.filter(
+        (r) => !(r.type === type && r.id === id)
+      ),
+    })),
+  clearReferencedWorkflowElements: () =>
+    set((s) =>
+      s.referencedWorkflowElements.length === 0 ? s : { referencedWorkflowElements: [] }
+    ),
   toggleBookmark: (messageId) =>
     set((s) => {
       const exists = s.bookmarkedIds.includes(messageId)
@@ -732,6 +778,7 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingApprovals: [],
       permissionMode: null,
       referencedPaths: [],
+      referencedWorkflowElements: [],
       artifactSelections: [],
       pendingCommandOverrides: null,
       bookmarkedIds: [],
@@ -764,17 +811,19 @@ export function selectStreamingCount(state: {
 }
 
 /**
- * True when starting a *new* stream on `sessionId` would exceed
- * `MAX_CONCURRENT_STREAMS`. A session that is already streaming is never
- * blocked from continuing (it is excluded from the count comparison).
+ * True when starting a *new* turn on `sessionId` would exceed the unified
+ * execution ceiling. Delegates to the {@link getExecutionBroker} so the cap
+ * reflects GLOBAL occupancy — every headless leg (scheduler / connector /
+ * workflow / team) included — not just this renderer's streaming panels. A
+ * session that already has an active leg is a continuation and never blocked
+ * (the broker exempts it). The `state` arg is retained for call-site
+ * compatibility but is no longer read.
  */
 export function selectIsAtStreamCap(
-  state: { sessions: Record<string, SessionChatSlice> },
+  _state: { sessions: Record<string, SessionChatSlice> },
   sessionId: string
 ): boolean {
-  const streaming = selectStreamingSessionIds(state)
-  if (streaming.includes(sessionId)) return false
-  return streaming.length >= MAX_CONCURRENT_STREAMS
+  return getExecutionBroker().isAtCapacity("ai-turn", sessionId)
 }
 
 const EMPTY_MESSAGES: UIMessage[] = []
@@ -810,9 +859,18 @@ export function useSessionMessagesLoadError(sessionId: string | null): string | 
     sessionId ? (s.sessions[sessionId]?.messagesLoadError ?? null) : null
   )
 }
-/** Reactive cap check for a pane's composer (disable send + show notice). */
+/**
+ * Reactive cap check for a pane's composer (disable send + show notice).
+ * Subscribes to the unified {@link getExecutionBroker} so the composer reacts to
+ * global occupancy changes (incl. headless legs), not just this store's slices.
+ */
 export function useIsAtStreamCap(sessionId: string | null): boolean {
-  return useChatStore((s) => (sessionId ? selectIsAtStreamCap(s, sessionId) : false))
+  const broker = getExecutionBroker()
+  return useSyncExternalStore(
+    broker.subscribe,
+    () => (sessionId ? broker.isAtCapacity("ai-turn", sessionId) : false),
+    () => false
+  )
 }
 
 const EMPTY_STEER: SteerEntry[] = []

@@ -5,9 +5,9 @@
 
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { motion, useReducedMotion } from "motion/react"
+import { useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
 import { MinusIcon, PawPrintIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -17,13 +17,17 @@ import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
 import { usePetBubbles } from "@/hooks/pet/use-pet-bubbles"
 import { usePetSpeak } from "@/hooks/pet/use-pet-speak"
 import { usePetProactive } from "@/hooks/pet/use-pet-proactive"
+import { usePetInsight } from "@/hooks/pet/use-pet-insight"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
+import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
+import { usePetWidgetThrow } from "@/hooks/pet/use-pet-widget-throw"
 import { usePetStore } from "@/stores/pet/pet-store"
-import { useSettingsStore } from "@/stores/settings"
-import { closePetWindow, isPetWindowOpen, openPetWindow } from "@/lib/tauri/pet-window"
-import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
-import { DEFAULT_PET_DESKTOP_OVERLAY, type PetAnchor, type PetSettings } from "@/types/pet"
+import { isPetWindowOpen } from "@/lib/tauri/pet-window"
+import { MIN_THROW_SPEED } from "@/lib/pet/overlay-geometry"
+import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
+import { toggleDesktopPetWindow } from "@/lib/pet/commands"
+import type { PetAnchor, PetSettings } from "@/types/pet"
 import { withCareCondition } from "@/lib/pet/state/reducer"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
@@ -58,14 +62,22 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   const reduced =
     settings.motion === "reduced" || (settings.motion === "auto" && Boolean(osReduced))
 
-  const { profile, view, feed, play, petStroke, talk } = usePet(activeCharacterId)
+  const { profile, view, feed, play, petStroke, talk, sleep, clean, treat } =
+    usePet(activeCharacterId)
   const { state, oneShot } = usePetAnimationState(reduced)
-  usePetBubbles(settings.enabled && !settings.mutedBubbles)
+  usePetBubbles(settings.enabled && !settings.mutedBubbles, view?.effectiveStats.snark ?? 0)
   // Owns every `talked` bubble (LLM side channel + template fallback). Main
   // window only — overlay talk replays here through the cross-window bridge.
-  usePetSpeak({ profile, view, enabled: settings.enabled && !settings.mutedBubbles })
+  usePetSpeak({
+    profile,
+    view,
+    enabled: settings.enabled && !settings.mutedBubbles,
+    activeCharacterId,
+  })
   // Proactive speech (opt-in): event comments / idle chatter / time greetings.
   usePetProactive({ profile, view, enabled: settings.enabled && !settings.mutedBubbles })
+  // Attention Radar teaser: nudge when a fresh info-diet report lands.
+  usePetInsight(settings.enabled && !settings.mutedBubbles)
 
   // Resolve which skin actually renders — live2d only when picked, the Cubism
   // runtime is ready, and an active model exists; otherwise the SVG mascot.
@@ -83,34 +95,65 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   // window is hidden/minimized — the pet still renders its resting frame.
   const docHidden = useDocumentHidden()
 
+  // Drag/throw physics — the browser counterpart to the Tauri overlay's OS-
+  // window throw (`use-pet-locomotion`'s beginThrow), so a flick feels the
+  // same on both surfaces. `anchorRef` targets the outer, never-transformed
+  // container below; only the handle button itself is offset, so its rect
+  // stays a stable reference for the on-screen bounds.
+  const anchorRef = useRef<HTMLDivElement | null>(null)
+  const dragStartOffsetRef = useRef({ x: 0, y: 0 })
+  const throwPhysics = usePetWidgetThrow({
+    anchorRef,
+    petSize: settings.size,
+    initialOffset: usePetStore.getState().position,
+    onSettle: (x, y) => usePetStore.getState().setPosition({ x, y }),
+  })
+  const dragGesture = usePetDragGesture({
+    onDragStart: () => {
+      dragStartOffsetRef.current = throwPhysics.offset
+    },
+    onDragMove: (dx, dy) => {
+      const base = dragStartOffsetRef.current
+      throwPhysics.setOffsetImmediate(base.x + dx, base.y + dy)
+    },
+    onRelease: ({ wasDrag, dx, dy, vx, vy, event }) => {
+      if (wasDrag) {
+        const base = dragStartOffsetRef.current
+        const x = base.x + dx
+        const y = base.y + dy
+        throwPhysics.setOffsetImmediate(x, y)
+        if (!reduced && Math.hypot(vx, vy) >= MIN_THROW_SPEED) {
+          // A flick → ballistic fall; the landing persists the position.
+          throwPhysics.beginThrow(vx, vy)
+        } else {
+          usePetStore.getState().setPosition({ x, y })
+        }
+        return
+      }
+      // A non-drag tap resolves the touched body zone → a zone-specific local
+      // flourish (mirrors the overlay's hit-zones) and opens the panel, but
+      // grants no XP — that stays on the panel's explicit "Pet" button.
+      const rect = (event.currentTarget as Element).getBoundingClientRect()
+      const localX = event.clientX - rect.left
+      const localY = event.clientY - rect.top
+      const zone = resolveHitZone(localX, localY, rect.width || settings.size, "right")
+      usePetStore.getState().enqueueOneShot(reactionForZone(zone))
+      setOpen((o) => !o)
+    },
+  })
+
   // Quick-menu wiring. Navigation reuses the app router (settings live at
   // `/settings?section=pet`, the pet console at `/pet`). Desktop-pet toggling is
   // gated on Tauri; we refresh the live open-state every time the menu opens so
-  // the toggle label is correct, then flip both the OS window and the persisted
-  // `desktopPet.enabled` flag.
+  // the toggle label is correct. The toggle itself (flip the OS window + persist
+  // `desktopPet.enabled`) is shared with the `pet.toggle-window` command so a
+  // global hotkey does exactly the same thing this menu item does.
   const router = useRouter()
-  const save = useSettingsStore((s) => s.save)
   const showDesktopPetItems = isTauri()
   const [desktopPetOpen, setDesktopPetOpen] = useState(false)
 
   const handleToggleDesktopPet = () => {
-    void (async () => {
-      const desktop = settings.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
-      if (desktopPetOpen) {
-        await closePetWindow()
-        await save({ petSettings: { ...settings, desktopPet: { ...desktop, enabled: false } } })
-        setDesktopPetOpen(false)
-        return
-      }
-      await openPetWindow({
-        ...overlayWindowSize(desktop.size),
-        x: desktop.position?.x,
-        y: desktop.position?.y,
-        clickThrough: desktop.clickThrough,
-      })
-      await save({ petSettings: { ...settings, desktopPet: { ...desktop, enabled: true } } })
-      setDesktopPetOpen(true)
-    })()
+    void toggleDesktopPetWindow().then(setDesktopPetOpen)
   }
 
   const handleMenuOpenChange = (next: boolean) => {
@@ -140,6 +183,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
 
   return (
     <div
+      ref={anchorRef}
       className={cn(
         "fixed z-50 flex flex-col gap-2",
         ANCHOR_POSITION[settings.anchor],
@@ -156,7 +200,11 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
             onPlay={play}
             onPet={petStroke}
             onTalk={talk}
+            onSleep={sleep}
+            onClean={clean}
+            onTreat={treat}
             skinId={effectiveSkin}
+            onOpenConsole={(tab) => router.push(`/pet?tab=${tab}`)}
           />
         </div>
       )}
@@ -177,14 +225,24 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
           showDesktopPetItems={showDesktopPetItems}
           onOpenChange={handleMenuOpenChange}
         >
-          <motion.button
+          <button
             type="button"
             data-testid="pet-handle"
-            drag
-            dragMomentum={!reduced}
-            onClick={() => setOpen((o) => !o)}
+            onPointerDown={dragGesture.onPointerDown}
+            onPointerMove={dragGesture.onPointerMove}
+            onPointerUp={dragGesture.onPointerUp}
+            onPointerCancel={dragGesture.onPointerCancel}
+            onClick={(e) => {
+              // A real pointer click is already handled by the tap branch of
+              // onRelease above; only a keyboard activation (Enter/Space),
+              // which the spec reports with detail===0, reaches here.
+              if (e.detail === 0) setOpen((o) => !o)
+            }}
             aria-label={t("widget.toggle")}
-            className="cursor-grab active:cursor-grabbing"
+            className="cursor-grab touch-none active:cursor-grabbing"
+            style={{
+              transform: `translate3d(${throwPhysics.offset.x}px, ${throwPhysics.offset.y}px, 0)`,
+            }}
           >
             <PetRenderer
               bones={view.effectiveBones}
@@ -193,13 +251,14 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
               // reads as `unwell` from elapsed time without waiting for the next
               // heartbeat/event to settle the store visual state.
               state={withCareCondition(state, view.condition)}
+              flavor={profile.evolutionFlavor}
               oneShot={oneShot}
               reducedMotion={reduced}
               size={settings.size}
               skinId={effectiveSkin}
               paused={docHidden}
             />
-          </motion.button>
+          </button>
         </PetQuickMenu>
         <button
           type="button"

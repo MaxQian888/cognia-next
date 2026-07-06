@@ -252,6 +252,29 @@ describe("WorkflowNodeComponent", () => {
     expect(card.className).not.toContain("animate-pulse-ring")
   })
 
+  it("rings the node when it is copilot-referenced (referencedNodeIds)", () => {
+    const { store } = withStore()
+    store.getState().setReferencedNodes(["n_a"])
+    renderNode({ store })
+    const card = screen.getByTestId("wf-node-ai.prompt")
+    expect(card).toHaveAttribute("data-referenced", "true")
+    expect(card.className).toContain("ring-violet-400")
+  })
+
+  it("rings the node when it is transiently highlighted (highlightedNodeIds)", () => {
+    const { store } = withStore()
+    store.getState().setHighlightedNodes(["n_a"])
+    renderNode({ store })
+    expect(screen.getByTestId("wf-node-ai.prompt")).toHaveAttribute("data-referenced", "true")
+  })
+
+  it("does not ring an unreferenced node", () => {
+    const { store } = withStore()
+    store.getState().setReferencedNodes(["n_other"])
+    renderNode({ store })
+    expect(screen.getByTestId("wf-node-ai.prompt")).not.toHaveAttribute("data-referenced")
+  })
+
   it("toolbar Delete invokes store.removeNodes for the active id", () => {
     const { store } = withStore()
     store.getState().addNode("ai.prompt", { x: 0, y: 0 })
@@ -392,6 +415,49 @@ describe("WorkflowNodeComponent", () => {
     const { store } = withStore()
     renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 1 })
     expect(screen.queryByTestId("wf-node-handle-out-n_b-true")).toBeNull()
+  })
+
+  // ── mobile tap-to-connect (handle-tap entry, gated on store.touchConnect) ──
+  describe("mobile handle-tap to connect", () => {
+    it("does nothing on a source-handle tap when touchConnect is off (desktop)", () => {
+      const { store } = withStore()
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-source-n_a"))
+      expect(store.getState().connectionState).toBeNull()
+    })
+
+    it("arms a connection from the tapped source handle when touchConnect is on", () => {
+      const { store } = withStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-source-n_a"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_a",
+        sourceHandle: null,
+      })
+    })
+
+    it("carries the specific decision handle id (branch true output)", () => {
+      const { store } = withStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 2 })
+      fireEvent.click(screen.getByTestId("wf-node-handle-out-n_b-true"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_b",
+        sourceHandle: "true",
+      })
+    })
+
+    it("arms the error path from the error handle (branch policy)", () => {
+      const store = branchStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-error-n_a"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_a",
+        sourceHandle: "error",
+      })
+    })
   })
 
   describe("diagnostics badge (A4)", () => {

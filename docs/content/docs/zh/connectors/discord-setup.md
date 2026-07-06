@@ -32,7 +32,7 @@ description: "创建 Discord 应用，获取机器人令牌与公钥，邀请机
 1. 在你的应用中，前往 **General Information**。
 2. 复制 **Public Key**（64 个字符的十六进制字符串）。
 
-它用于在 Discord 将交互负载发送到 webhook 端点时进行 Ed25519 签名验证。第 1 阶段（Phase 1）使用 Gateway（WebSocket）模式，因此目前它是 **可选** 的 —— 但为将来迁移到 webhook 而保存它是一个良好的做法。
+它是为 Discord 将交互负载发送到 webhook 端点时的 Ed25519 签名验证预留的。第 1 阶段（Phase 1）只使用 Gateway（WebSocket）模式，因此 cognia-next 目前**不会持久化**该公钥，也不会暴露 Interactions endpoint URL。请把该值保留在 Discord Developer Portal 中，等待未来 webhook 迁移。
 
 ---
 
@@ -79,7 +79,7 @@ cognia-next 默认使用 intent 位掩码 **33281**：
 3. 在 **Discord Configuration** 对话框中：
    - 为该机器人输入一个 **显示名称**（例如 "My Server Bot"）。
    - 粘贴你在第 2 步复制的 **Bot Token**。
-   - 可选地粘贴第 3 步中的 **Public Key**。
+   - 除非你正在为未来的 Interactions webhook 迁移做准备，否则保持 **Public Key** 字段为空；当前 Gateway 模式不会保存或使用它。
    - 点击 **Test** 验证该令牌能否成功连接到 Discord。
 4. 点击 **Create**。
 
@@ -104,4 +104,4 @@ cognia-next 将使用 WebSocket 模式连接到 Discord Gateway，无需公网 U
 - **速率限制**：Discord 对机器人按每个频道每秒 50 条消息进行速率限制。cognia-next 的出站执行器会遵循可重试的错误（HTTP 429）。
 - **大型服务器**：对于加入 100 个以上服务器的机器人，你必须通过 Developer Portal 申请 **Gateway Privileged Intents**。
 - **分片（Sharding）**：第 1 阶段不支持，仅支持单分片运行。
-- **语音消息**：第 1 阶段不支持，计划在第 2 阶段（Phase 2）实现。
+- **语音消息**：当 voice segment 已经带有公网音频 URL 时可用；cognia-next 会发送一条带 Discord voice flag、引用该 URL 的消息。原生 multipart 上传仍需等待 Tauri upload bridge。

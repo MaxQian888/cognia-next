@@ -32,6 +32,16 @@ jest.mock("./bm25-index", () => {
   const actual = jest.requireActual("./bm25-index")
   return { ...actual, keywordSearch: jest.fn(actual.keywordSearch) }
 })
+// Stub only the LLM query-expansion legs; `expandWithSynonyms` (used by the
+// heuristic keyword expansion) stays real via `...actual`.
+jest.mock("@cognia/rag/query-expansion", () => {
+  const actual = jest.requireActual("@cognia/rag/query-expansion")
+  return {
+    ...actual,
+    generateHypotheticalAnswer: jest.fn(async () => "a hypothetical answer passage"),
+    generateStepBackQuery: jest.fn(async () => "a broader step-back query"),
+  }
+})
 
 import { applyTwinContext, __flushStyleBackfills } from "./apply-twin-context"
 import type { ApplyTwinContextDeps } from "./apply-twin-context"
@@ -39,8 +49,15 @@ import { getPluginEventHooks } from "@/lib/plugin"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"
-import { ensureTwinProfile, appendStyleSamples, getTwinProfile } from "@/lib/db/twin-profile"
+import {
+  ensureTwinProfile,
+  appendStyleSamples,
+  appendPlaybooks,
+  getTwinProfile,
+} from "@/lib/db/twin-profile"
 import { __resetTwinBm25Cache, keywordSearch } from "./bm25-index"
+import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
+import { generateHypotheticalAnswer } from "@cognia/rag/query-expansion"
 import type { Character } from "@/lib/claude/types"
 import type { IVectorStore, VectorSearchResult, SearchOptions } from "@cognia/vector/store"
 
@@ -144,6 +161,46 @@ describe("applyTwinContext", () => {
     expect(result.applied?.systemPrompt).toContain("BASE_SYSTEM_PROMPT")
     expect(result.applied?.systemPrompt).toContain("You are Twin Alice.")
     expect(result.applied?.metadata.retrievedChunkIds).toEqual([])
+  })
+
+  it("injects the profile's distilled playbooks into the stable prompt", async () => {
+    mockEmbedding()
+    await ensureTwinProfile("twin_alice")
+    await appendPlaybooks("twin_alice", [
+      {
+        id: "pb_1",
+        title: "Escalation",
+        trigger: "a deploy fails",
+        steps: [
+          { order: 1, action: "roll back" },
+          { order: 2, action: "page on-call" },
+        ],
+        examples: [],
+        confidence: 0.9,
+      },
+      {
+        id: "pb_2",
+        title: "Promoted",
+        trigger: "already a skill",
+        steps: [{ order: 1, action: "noop" }],
+        examples: [],
+        confidence: 0.95,
+        promotedToSkillId: "skill_x",
+      },
+    ])
+
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "hi",
+      deps: { ...baseDeps, store: makeFakeStore() },
+    })
+
+    expect(result.applied?.systemPrompt).toContain("## How you typically handle situations")
+    expect(result.applied?.systemPrompt).toContain("When a deploy fails: roll back → page on-call")
+    // Promoted playbooks are filtered out — they already live as Skills.
+    expect(result.applied?.systemPrompt).not.toContain("already a skill")
+    // Playbooks ride the cached prefix, not the per-turn dynamic segment.
+    expect(result.applied?.cacheSegments.stable).toContain("## How you typically handle situations")
   })
 
   it("injects retrieved chunks + their source titles into the prompt", async () => {
@@ -592,5 +649,157 @@ describe("applyTwinContext", () => {
       deps: { ...baseDeps, store },
     })
     expect(dispatchSpy).toHaveBeenCalledWith("twin:twin_alice", expect.any(Array))
+  })
+})
+
+describe("applyTwinContext — flagship stages (Part 2)", () => {
+  async function seedChunk(opts: {
+    content: string
+    vectorDocId: string
+    title?: string
+    fingerprint?: string
+  }) {
+    const source = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/notes.md",
+      title: opts.title ?? "Onboarding notes",
+      bytes: 100,
+      fingerprint: opts.fingerprint ?? `f-${opts.vectorDocId}`,
+      redacted: false,
+    })
+    const [chunk] = await bulkCreateTwinChunks([
+      {
+        twinId: "twin_alice",
+        sourceId: source.id,
+        content: opts.content,
+        contentRedacted: opts.content,
+        charStart: 0,
+        charEnd: opts.content.length,
+        vectorBackend: "qdrant",
+        vectorCollection: "cognia_twin_twin_alice",
+        vectorDocId: opts.vectorDocId,
+        strategy: "paragraph",
+        tokenCount: 5,
+        metadata: {},
+      },
+    ])
+    return { source, chunk }
+  }
+
+  it("attaches formatted citations when enableCitations is on", async () => {
+    const { chunk } = await seedChunk({
+      content: "Welcome to the team and your first day",
+      vectorDocId: "vec_cite",
+      title: "Onboarding notes",
+    })
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "Welcome", score: 0.91 }],
+    })
+    const result = await applyTwinContext({
+      character: makeCharacter({ twinSettings: { enableCitations: true } }),
+      userMessage: "what should I do on day one?",
+      deps: { ...baseDeps, store },
+    })
+    expect(result.citations?.length).toBeGreaterThan(0)
+    expect(result.citations?.[0].source).toBe("Onboarding notes")
+  })
+
+  it("omits citations when enableCitations is off (default)", async () => {
+    const { chunk } = await seedChunk({ content: "Welcome to the team", vectorDocId: "vec_nocite" })
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "Welcome", score: 0.9 }],
+    })
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "day one",
+      deps: { ...baseDeps, store },
+    })
+    expect(result.citations).toBeUndefined()
+  })
+
+  it("drops an irrelevant chunk under corrective filtering, keeps the relevant one", async () => {
+    const rel = await seedChunk({
+      content: "how to triage incidents runbook escalation steps",
+      vectorDocId: "vec_rel",
+      title: "Incident runbook",
+      fingerprint: "f-rel",
+    })
+    const irrel = await seedChunk({
+      content: "a cooking recipe for weekend dinner with friends",
+      vectorDocId: "vec_irrel",
+      title: "Recipes",
+      fingerprint: "f-irrel",
+    })
+    const store = makeFakeStore({
+      onSearch: () => [
+        { id: rel.chunk.vectorDocId, content: "x", score: 0.9 },
+        { id: irrel.chunk.vectorDocId, content: "y", score: 0.85 },
+      ],
+    })
+    const result = await applyTwinContext({
+      character: makeCharacter({
+        twinSettings: { enableCorrectiveFilter: true, correctiveMinKeep: 1 },
+      }),
+      userMessage: "triage incidents runbook",
+      deps: { ...baseDeps, store },
+    })
+    const ids = result.retrievedChunks.map((rc) => rc.chunk.vectorDocId)
+    expect(ids).toContain("vec_rel")
+    expect(ids).not.toContain("vec_irrel")
+  })
+
+  it("expands the BM25 keyword query when enableQueryExpansion + hybrid", async () => {
+    const { chunk } = await seedChunk({ content: "delete the record", vectorDocId: "vec_kw" })
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "x", score: 0.8 }],
+    })
+    const kwMock = keywordSearch as jest.Mock
+    kwMock.mockClear()
+    const userMessage = "remove the record"
+    await applyTwinContext({
+      character: makeCharacter({
+        twinSettings: { enableHybrid: true, enableQueryExpansion: true },
+      }),
+      userMessage,
+      deps: { ...baseDeps, store },
+    })
+    expect(kwMock).toHaveBeenCalledWith(
+      "twin_alice",
+      buildExpandedKeywordQuery(userMessage),
+      expect.any(Number)
+    )
+  })
+
+  it("runs the LLM expansion leg (second vector search) on a PII-clean query", async () => {
+    const { chunk } = await seedChunk({ content: "welcome content", vectorDocId: "vec_llm" })
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "x", score: 0.8 }],
+    })
+    const searchSpy = store.searchByEmbedding as jest.Mock
+    const result = await applyTwinContext({
+      character: makeCharacter({ twinSettings: { enableQueryExpansion: true } }),
+      userMessage: "how do I onboard a new hire",
+      deps: { ...baseDeps, store, expansion: { model: {} as never, strategy: "hyde" } },
+    })
+    expect(generateHypotheticalAnswer).toHaveBeenCalled()
+    expect(searchSpy.mock.calls.length).toBe(2)
+    expect(result.degraded).toBe(false)
+  })
+
+  it("skips the LLM expansion leg when the message carries PII", async () => {
+    const { chunk } = await seedChunk({ content: "welcome content", vectorDocId: "vec_pii" })
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "x", score: 0.8 }],
+    })
+    const searchSpy = store.searchByEmbedding as jest.Mock
+    const result = await applyTwinContext({
+      character: makeCharacter({ twinSettings: { enableQueryExpansion: true } }),
+      userMessage: "please email me at jane.doe@example.com about it",
+      deps: { ...baseDeps, store, expansion: { model: {} as never, strategy: "hyde" } },
+    })
+    expect(searchSpy.mock.calls.length).toBe(1)
+    expect(result.degradedReason).toBe("expansion-pii-skip")
   })
 })

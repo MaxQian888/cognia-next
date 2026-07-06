@@ -20,6 +20,8 @@ export const XP_AWARD: Partial<Record<PetEventKind, number>> = {
   workflowRun: 4,
   inboundMessage: 1,
   scheduledRun: 2,
+  twinBusy: 0, // purely ambient — no XP economy impact this wave
+  twinMilestone: 0,
   // interactions
   fed: 3,
   played: 4,

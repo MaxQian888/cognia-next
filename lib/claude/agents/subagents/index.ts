@@ -16,12 +16,16 @@ export { workflowDesignerAgent } from "./workflow-designer"
 export { workflowDebuggerAgent } from "./workflow-debugger"
 export { workflowRefactorerAgent } from "./workflow-refactorer"
 export { workflowDocWriterAgent } from "./workflow-doc-writer"
+export { exploreAgent } from "./explore"
+export { planAgent } from "./plan"
 export type { AgentDefinition } from "./types"
 
 import { workflowDesignerAgent } from "./workflow-designer"
 import { workflowDebuggerAgent } from "./workflow-debugger"
 import { workflowRefactorerAgent } from "./workflow-refactorer"
 import { workflowDocWriterAgent } from "./workflow-doc-writer"
+import { exploreAgent } from "./explore"
+import { planAgent } from "./plan"
 import type { AgentDefinition } from "./types"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
@@ -98,6 +102,10 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
   if (tpl.config.tools) def.tools = tpl.config.tools
   if (tpl.config.model) def.model = tpl.config.model
   if (tpl.config.maxSteps !== undefined) def.maxTurns = tpl.config.maxSteps
+  // External-CLI backing (A2): route this subagent to an external agent when the
+  // template names a preset, so the dispatching model runs it on Claude Code /
+  // Codex / … instead of the built-in executor.
+  if (tpl.config.externalPresetId) def.externalPresetId = tpl.config.externalPresetId
   return { id: `template:${slugifySubagentName(tpl.name)}`, def }
 }
 
@@ -161,6 +169,8 @@ const BUILT_IN_DISPATCH_LABELS: Record<string, string> = {
   "workflow-debugger": "Workflow Debugger",
   "workflow-refactorer": "Workflow Refactorer",
   "workflow-doc-writer": "Workflow Doc Writer",
+  Explore: "Explore",
+  Plan: "Plan",
 }
 
 /**
@@ -177,6 +187,8 @@ function builtInDispatchableSubagents(): Array<{ id: string; def: PluginSubagent
     ["workflow-debugger", workflowDebuggerAgent],
     ["workflow-refactorer", workflowRefactorerAgent],
     ["workflow-doc-writer", workflowDocWriterAgent],
+    ["Explore", exploreAgent],
+    ["Plan", planAgent],
   ]
   return builtins.map(([id, a]) => ({
     id,

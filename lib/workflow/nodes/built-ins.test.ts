@@ -220,6 +220,118 @@ describe("data.transform", () => {
   })
 })
 
+describe("data.aggregate", () => {
+  const agg = (params: Record<string, unknown>, upstream: Record<string, unknown>) =>
+    exec("data.aggregate", makeCtx("data.aggregate", params, upstream))
+
+  it("collects an array input into a list", async () => {
+    const r = await agg({ operation: "collect" }, { up: [1, 2, 3] })
+    expect(r.output).toEqual([1, 2, 3])
+  })
+
+  it("aggregates multiple upstreams (fan-in) as the set", async () => {
+    const r = await agg({ operation: "collect" }, { a: 1, b: 2, c: 3 })
+    expect(r.output).toEqual([1, 2, 3])
+  })
+
+  it("concats nested arrays one level", async () => {
+    const r = await agg({ operation: "concat" }, { up: [[1, 2], 3, [4]] })
+    expect(r.output).toEqual([1, 2, 3, 4])
+  })
+
+  it("merges objects (later wins)", async () => {
+    const r = await agg({ operation: "merge-objects" }, { up: [{ a: 1 }, { b: 2 }, { a: 9 }] })
+    expect(r.output).toEqual({ a: 9, b: 2 })
+  })
+
+  it("groups by a key expression", async () => {
+    const r = await agg(
+      { operation: "group-by", keyExpression: "{{ $node['$item'].cat }}" },
+      {
+        up: [
+          { cat: "x", v: 1 },
+          { cat: "y", v: 2 },
+          { cat: "x", v: 3 },
+        ],
+      }
+    )
+    expect(r.output).toEqual({
+      x: [
+        { cat: "x", v: 1 },
+        { cat: "x", v: 3 },
+      ],
+      y: [{ cat: "y", v: 2 }],
+    })
+  })
+
+  it("dedupes by value", async () => {
+    const r = await agg({ operation: "dedupe" }, { up: [{ a: 1 }, { a: 1 }, { a: 2 }] })
+    expect(r.output).toEqual([{ a: 1 }, { a: 2 }])
+  })
+
+  it("dedupes by a key expression", async () => {
+    const r = await agg(
+      { operation: "dedupe", keyExpression: "{{ $node['$item'].id }}" },
+      {
+        up: [
+          { id: 1, n: "a" },
+          { id: 1, n: "b" },
+          { id: 2, n: "c" },
+        ],
+      }
+    )
+    expect(r.output).toEqual([
+      { id: 1, n: "a" },
+      { id: 2, n: "c" },
+    ])
+  })
+
+  it("computes numeric aggregates", async () => {
+    const field = "{{ $node['$item'].n }}"
+    const input = { up: [{ n: 2 }, { n: 4 }, { n: 6 }] }
+    expect(
+      (await agg({ operation: "numeric", numericOp: "sum", numericField: field }, input)).output
+    ).toBe(12)
+    expect(
+      (await agg({ operation: "numeric", numericOp: "avg", numericField: field }, input)).output
+    ).toBe(4)
+    expect(
+      (await agg({ operation: "numeric", numericOp: "min", numericField: field }, input)).output
+    ).toBe(2)
+    expect(
+      (await agg({ operation: "numeric", numericOp: "max", numericField: field }, input)).output
+    ).toBe(6)
+    expect((await agg({ operation: "numeric", numericOp: "count" }, input)).output).toBe(3)
+  })
+
+  it("returns null for avg/min/max over an empty list (not NaN)", async () => {
+    const r = await agg({ operation: "numeric", numericOp: "avg" }, {})
+    expect(r.output).toBeNull()
+  })
+
+  it("runs a custom JS reducer with acc/item/index in scope", async () => {
+    const r = await agg(
+      { operation: "custom", reducerExpression: "acc + item.n", initialValue: 0 },
+      { up: [{ n: 2 }, { n: 5 }, { n: 8 }] }
+    )
+    expect(r.output).toBe(15)
+  })
+
+  it("fails (non-retryable) when the custom reducer throws", async () => {
+    await expect(
+      agg(
+        { operation: "custom", reducerExpression: "item.boom.bang", initialValue: 0 },
+        { up: [{ n: 1 }] }
+      )
+    ).rejects.toThrow(/custom reducer failed/)
+  })
+
+  it("wraps a single scalar upstream into a one-element list", async () => {
+    const r = await agg({ operation: "numeric", numericOp: "sum" }, { up: 7 })
+    expect(r.output).toBe(7)
+  })
+})
+
 describe("data.template", () => {
   it("returns the rendered template (already expanded by step executor)", async () => {
     const r = await exec("data.template", makeCtx("data.template", { template: "Hello, world" }))
@@ -298,6 +410,26 @@ describe("flow.join", () => {
     expect(out.joinPolicy).toBe("any")
     expect(out.gathered).toEqual({ a: 1, b: 2 })
     expect(out.upstreamCount).toBe(2)
+  })
+
+  it("reduces gathered outputs in one step when aggregate is set", async () => {
+    const r = await exec(
+      "flow.join",
+      makeCtx(
+        "flow.join",
+        { joinPolicy: "all", aggregate: { operation: "concat" } },
+        { a: [1, 2], b: [3] }
+      )
+    )
+    const out = r.output as { aggregated: unknown; gathered: unknown }
+    expect(out.aggregated).toEqual([1, 2, 3])
+    // The raw gather envelope is preserved alongside the reduced value.
+    expect(out.gathered).toEqual({ a: [1, 2], b: [3] })
+  })
+
+  it("omits 'aggregated' when no aggregate operation is configured", async () => {
+    const r = await exec("flow.join", makeCtx("flow.join", { joinPolicy: "all" }, { a: 1 }))
+    expect(r.output).not.toHaveProperty("aggregated")
   })
 })
 
@@ -1662,6 +1794,87 @@ describe("flow.subworkflow", () => {
     await expect(
       exec("flow.subworkflow", makeCtx("flow.subworkflow", { workflowId: "wf_does_not_exist" }))
     ).rejects.toMatchObject({ retryable: false })
+  })
+
+  it("validates input against the target's declared interface (D5)", async () => {
+    const { createWorkflow, updateWorkflow } = await import("@/lib/db/workflows")
+    const sub = await createWorkflow({
+      name: "TypedSub",
+      nodes: [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+      ],
+      edges: [],
+    })
+    await updateWorkflow(sub.id, {
+      interface: {
+        inputSchema: {
+          type: "object",
+          properties: { topic: { type: "string" } },
+          required: ["topic"],
+        },
+      },
+    })
+    // Missing required `topic` → rejected before the run starts.
+    await expect(
+      exec("flow.subworkflow", makeCtx("flow.subworkflow", { workflowId: sub.id, input: {} }))
+    ).rejects.toThrow(/input violates the target's schema/)
+    // Conforming input runs.
+    const ok = await exec(
+      "flow.subworkflow",
+      makeCtx("flow.subworkflow", { workflowId: sub.id, input: { topic: "ai" } })
+    )
+    expect((ok.output as { status: string }).status).toBe("succeeded")
+  })
+})
+
+describe("io.output", () => {
+  const outSchema = {
+    type: "object",
+    properties: { answer: { type: "string" } },
+    required: ["answer"],
+  }
+
+  it("returns the first upstream when no value is set", async () => {
+    const r = await exec("io.output", makeCtx("io.output", {}, { up: { answer: "hi" } }))
+    expect(r.output).toEqual({ value: { answer: "hi" } })
+  })
+
+  it("prefers an explicit value param over upstream", async () => {
+    const r = await exec(
+      "io.output",
+      makeCtx("io.output", { value: { answer: "explicit" } }, { up: { answer: "upstream" } })
+    )
+    expect((r.output as { value: unknown }).value).toEqual({ answer: "explicit" })
+  })
+
+  it("validates the value against the output schema", async () => {
+    const r = await exec(
+      "io.output",
+      makeCtx("io.output", { value: { answer: "ok" }, outputSchema: outSchema }, {})
+    )
+    expect(r.output).toEqual({ value: { answer: "ok" }, schemaValid: true })
+  })
+
+  it("throws (non-retryable) on a schema violation in fail mode", async () => {
+    await expect(
+      exec("io.output", makeCtx("io.output", { value: {}, outputSchema: outSchema }, {}))
+    ).rejects.toMatchObject({ retryable: false })
+  })
+
+  it("passes through with schemaValid:false in soft mode", async () => {
+    const r = await exec(
+      "io.output",
+      makeCtx("io.output", { value: {}, outputSchema: outSchema, onSchemaViolation: "soft" }, {})
+    )
+    const out = r.output as { schemaValid: boolean; schemaErrors: string[] }
+    expect(out.schemaValid).toBe(false)
+    expect(out.schemaErrors.join("\n")).toMatch(/answer/)
   })
 })
 

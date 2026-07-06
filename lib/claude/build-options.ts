@@ -39,10 +39,15 @@ import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/su
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
+import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
 import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
-import { resolveCompaction, resolveCompactInstructions } from "@/lib/claude/compact-instructions"
+import {
+  buildPostCompactionRecovery,
+  resolveCompaction,
+  resolveCompactInstructions,
+} from "@/lib/claude/compact-instructions"
 import { getCompactionStrategy } from "@/lib/plugin/registries/compaction-strategy-registry"
 import { loggers } from "@/lib/logging"
 import { startRootTrace } from "@/lib/agent-trace/trace-context"
@@ -60,6 +65,7 @@ import type {
 import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
+import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
@@ -72,17 +78,28 @@ import {
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@cognia/provider-core/providers/inference-params"
+import { selectApiKey, recordKeyUse } from "@cognia/provider-core/providers/api-key-rotation"
+import { isLocalProvider } from "@cognia/provider-core/providers/local-providers"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
-import { isCodexChatProviderId, isOpencodeChatProviderId } from "@/types/subscription"
+import {
+  CODEX_CHATGPT_BASE_URL,
+  isCodexChatProviderId,
+  isOpencodeChatProviderId,
+} from "@/types/subscription"
 import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
+import { getModelConfig } from "@cognia/provider-types/provider"
+import { getModelContextWindow } from "@/lib/claude/usage"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
+  RoutingNoCandidatesError,
   createMappingRegistry,
+  scoreDifficulty,
   type RoutingEngineDeps,
 } from "@cognia/provider-routing"
+import { pickAutoAlias } from "@/lib/routing/auto-tier"
 import {
   applyCircuitBreakerSettings,
   buildRoutingEngineDeps,
@@ -90,6 +107,7 @@ import {
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { PLAN_MODE_PROMPT } from "./plan-mode-prompt"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
@@ -101,14 +119,152 @@ export const BRIEF_OUTPUT_SNIPPET =
 
 /**
  * Snippet appended to `appendSystemPrompt` when the session is in plan mode
- * (`permissionMode === "plan"`). Reinforces the two behaviours the plan-mode
- * UX depends on: clarifying questions stay plain text (so they don't trip the
- * approval flow), and the final plan is submitted via the exit-plan tool (the
- * structured signal the surface listens for). Kept short so it doesn't fight
- * the Anthropic SDK's own plan-mode prompt. Exported for reuse/testing.
+ * (`permissionMode === "plan"`). Re-exported from the shared single source
+ * (`plan-mode-prompt.ts`) that the CLI's `PLAN_MODE_PROMPT_SECTION` also
+ * re-exports — the two surfaces must not drift. The export name is kept for
+ * the ACP route and tests.
  */
-export const PLAN_MODE_SNIPPET =
-  "You are in plan mode: research and propose an approach, but do NOT make any edits or run side-effecting tools yet. If you need clarification, ask the user directly in plain text — do not call the plan-submission tool for a question. When your plan is complete and ready for approval, call the ExitPlanMode tool (or exit_plan_mode if available) with the full plan as markdown; do not just print the plan as text."
+export const PLAN_MODE_SNIPPET = PLAN_MODE_PROMPT
+
+type SummaryCredentials = NonNullable<
+  NonNullable<NonNullable<SendOptions["compaction"]>["summary"]>["credentials"]
+>
+
+interface SummaryProviderResolution {
+  model?: string
+  protocol: string
+  credentials: SummaryCredentials
+  protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
+}
+
+function buildProtocolAdapterSpec(
+  protocol: string
+): Promise<SendOptions["protocolAdapterSpec"] | undefined> {
+  return (async () => {
+    const { getProtocolAdapter } =
+      await import("@cognia/provider-core/providers/protocol-adapter-registry")
+    const adapterDef = getProtocolAdapter(protocol)
+    if (!adapterDef) return undefined
+    if (adapterDef.spec.kind === "code") {
+      const sep = protocol.indexOf(":")
+      return {
+        kind: "code",
+        pluginId: sep > 0 ? protocol.slice(0, sep) : protocol,
+        adapterId: protocol,
+      }
+    }
+    return adapterDef.spec
+  })()
+}
+
+async function resolveSubscriptionBackedSummaryCredentials(
+  providerId: string,
+  resolved?: { apiKey?: string; baseURL?: string }
+): Promise<SummaryCredentials | null> {
+  if (isOpencodeChatProviderId(providerId) && !resolved?.apiKey) {
+    const vaultCred = await resolveOpencodeVaultCredential(providerId)
+    if (!vaultCred) return null
+    return {
+      apiKey: vaultCred.apiKey,
+      baseURL: resolved?.baseURL ?? vaultCred.baseURL,
+    }
+  }
+
+  if (isCodexChatProviderId(providerId)) {
+    const vaultCred = await resolveCodexVaultCredential(providerId)
+    if (!vaultCred) return null
+    if (!resolved?.apiKey) {
+      return {
+        apiKey: vaultCred.apiKey,
+        baseURL: vaultCred.baseURL,
+        ...(vaultCred.headers ? { headers: vaultCred.headers } : {}),
+      }
+    }
+    const configuredBase = resolved.baseURL?.replace(/\/+$/, "")
+    const vaultBase = vaultCred.baseURL.replace(/\/+$/, "")
+    const chatGptBase = CODEX_CHATGPT_BASE_URL.replace(/\/+$/, "")
+    const configuredUsesChatGptBackend =
+      configuredBase === chatGptBase || configuredBase === vaultBase
+    return {
+      apiKey: resolved.apiKey,
+      baseURL: resolved.baseURL,
+      ...(configuredUsesChatGptBackend && vaultCred.headers ? { headers: vaultCred.headers } : {}),
+    }
+  }
+
+  return null
+}
+
+async function resolveSummaryProviderForCompaction(args: {
+  providerId: string
+  summaryModel?: string
+  appSettings: AppSettings
+}): Promise<SummaryProviderResolution | null> {
+  const snapshot = createProviderSettingsSnapshot({
+    defaultProvider: args.appSettings.defaultProvider,
+    providerSettings: args.appSettings.providerSettings as
+      | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
+      | undefined,
+    customProviders: args.appSettings.customProviders as
+      | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
+      | undefined,
+  })
+  const r = resolveFeatureProvider(
+    {
+      featureId: "chat-compaction-summary",
+      routeProfile: "general-text",
+      selectionMode: "explicit-provider",
+      providerId: args.providerId,
+      fallbackMode: "none",
+    },
+    snapshot
+  )
+
+  if (r.kind === "resolved") {
+    const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId, {
+      apiKey: r.apiKey,
+      baseURL: r.baseURL,
+    })
+    const credentials: SummaryCredentials = vaultCredentials ?? {
+      apiKey: r.apiKey,
+      baseURL: r.baseURL,
+    }
+    // A summary credential with no API key is only legitimate for a genuinely
+    // keyless provider: a local inference engine (Ollama / LM Studio / …) or a
+    // user-configured custom provider (self-hosted, base URL typed by hand). For
+    // a cloud built-in (OpenRouter / DeepSeek / Groq / …) whose base URL was
+    // merely auto-filled from the catalog, a missing key means the provider is
+    // not fully configured — fall back to the main (authenticated) model instead
+    // of firing an unauthenticated request that 401s at compaction time.
+    const keylessAllowed = isLocalProvider(args.providerId) || r.isCustomProvider
+    if (!credentials.apiKey && !keylessAllowed) return null
+    if (!credentials.apiKey && !credentials.baseURL) return null
+    if (r.apiFlavor) credentials.apiFlavor = r.apiFlavor
+    const protocolAdapterSpec = await buildProtocolAdapterSpec(r.protocol)
+    return {
+      model: args.summaryModel ?? r.model,
+      protocol: r.protocol,
+      credentials,
+      ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
+    }
+  }
+
+  if (r.nextAction === "enable_provider") return null
+
+  if (isOpencodeChatProviderId(args.providerId) || isCodexChatProviderId(args.providerId)) {
+    const credentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId)
+    if (!credentials) return null
+    const protocolAdapterSpec = await buildProtocolAdapterSpec("openai")
+    return {
+      model: args.summaryModel ?? getBuiltInProviderDefaultModel(args.providerId),
+      protocol: "openai",
+      credentials,
+      ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
+    }
+  }
+
+  return null
+}
 
 /**
  * Build the workflow-editor system-prompt snapshot block.
@@ -264,6 +420,23 @@ export interface BuildOptionsContext {
    */
   memoryUserMessage?: string
   /**
+   * Optional project-scoped RAG dependencies (workspace knowledge base). When
+   * supplied AND `projectKnowledgeUserMessage` is set AND the active workspace
+   * (`activeProject`) has knowledge files AND project RAG is enabled,
+   * `resolveSendOptions` invokes `applyProjectKnowledgeContext` and APPENDS a
+   * "Project knowledge base" section — coexisting with, never replacing, the Twin
+   * / Memory sections. Reuses the twin deps shape (built by
+   * `tryBuildProjectKnowledgeDeps`, which shares the twin vector store). Undefined
+   * → project knowledge injection skipped.
+   */
+  projectKnowledgeDeps?: TwinRuntimeDepsForBuild
+  /**
+   * The user's current message text for project-knowledge retrieval. Usually the
+   * same value as `twinUserMessage`; kept separate so a caller can drive one
+   * without the other. Ignored when `projectKnowledgeDeps` is missing.
+   */
+  projectKnowledgeUserMessage?: string
+  /**
    * Per-message ephemeral skill ids unioned with the active character's
    * `skillIds`. The composer's SkillPicker drives this; the chat send hook
    * is expected to clear the store slice after dispatch. Disabled skills
@@ -334,6 +507,17 @@ export interface BuildOptionsContext {
    */
   inboxPolicy?: InboxSendPolicy | null
   /**
+   * Pre-fetched connector rows threaded from the connector runtime so the
+   * resolver skips re-reading the same immutable rows from Dexie within one
+   * inbound ai-run. `imOverrideRow` feeds the per-channel provider/model
+   * override + computer-use gate; `imAdapterRow` feeds the A2UI capability
+   * matrix. `undefined` (the default, and what direct chat / other callers
+   * pass) keeps the resolver's own dynamic-import Dexie read; `null` means
+   * "looked up, none found" and also skips the read.
+   */
+  imOverrideRow?: ConversationOverrideRow | null
+  imAdapterRow?: AdapterInstanceRow | null
+  /**
    * Pre-resolved MCP server list, injected by desktop-independent callers
    * (the standalone agent CLI) that cannot reach Dexie. When provided —
    * including an empty array — the resolver uses it verbatim instead of
@@ -350,6 +534,19 @@ export interface BuildOptionsContext {
    */
   preloadedEnv?: Record<string, string> | null
   /**
+   * Marks a LIVE, user-facing turn that must receive token-level partial
+   * messages even though it injects `preloadedEnv` / `preloadedMcpServers`
+   * (the standalone agent CLI's interactive TUI). Without it those preloaded
+   * fields make `isInteractiveSend` false, so the native Anthropic SDK never
+   * streams `stream_event` deltas — and a long single generation (e.g. writing
+   * a large file) emits no events for >60s, starving the run-and-capture idle
+   * watchdog into a spurious "stream idle for 60000ms" interrupt. Headless /
+   * request-response callers (mobile companion API) leave this undefined so
+   * they keep consuming only the final result. Connector / nested-dispatch are
+   * still excluded independently via `conversationKey` / `dispatchContext`.
+   */
+  interactive?: boolean
+  /**
    * Nested-dispatch context (depth-N subagents). Present ONLY when this build is
    * for a dispatched subagent run (set by `agent-executor`). When present, the
    * resolver (a) suppresses the SDK-native `opts.agents` injection so the child
@@ -357,6 +554,14 @@ export interface BuildOptionsContext {
    * (b) exposes the `dispatch_agent` host tool only while `depth < maxDepth`.
    */
   dispatchContext?: import("@/lib/claude/agents/dispatch-context-registry").DispatchContext
+  /**
+   * True when this run is a dispatched subagent (set by `dispatchSubagent` →
+   * `executeAgent`). A dispatched run WITHOUT a `dispatchContext` is a leaf
+   * (its def never opted into nesting): `resolveDispatchAgentGate` withholds
+   * `dispatch_agent` from it — including the plan-mode force-offer — instead
+   * of treating it as top-level chat (CLI leaf parity).
+   */
+  isDispatchedSubagent?: boolean
   /**
    * Parent permission ceiling for a dispatched child run. When present,
    * `resolveSendOptions` intersects `allowedTools`, unions `disallowedTools`,
@@ -389,6 +594,21 @@ export interface BuildOptionsContext {
    * leaks. The minted ids land on `SendOptions.{traceId,spanId}`.
    */
   emitTrace?: boolean
+  /**
+   * One-shot post-compaction recovery (ADR — compaction). Set by a send hook for
+   * exactly the FIRST turn after a compaction boundary appeared in the transcript
+   * (the hook derives this from `deriveContextPhases` and de-dupes per boundary).
+   * When present AND compaction is enabled, the resolver appends
+   * `buildPostCompactionRecovery(...)` to `appendSystemPrompt` so the model
+   * re-orients on the authoritative summary and carries durable operational
+   * instructions across the boundary. Absent on every other turn.
+   */
+  postCompaction?: {
+    /** Phase number the recovery turn opens (for diagnostics / labels). */
+    phaseNumber: number
+    /** Durable operational instructions to re-assert (e.g. team coordination). */
+    durableInstructions?: string
+  }
 }
 
 /**
@@ -447,7 +667,19 @@ export interface TwinRuntimeDepsForBuild {
       query: string,
       candidate: { id: string; content: string; score: number; sourceTitle?: string }
     ) => number | Promise<number>
+    /** Whole-pool scorer (LLM reranker). See `lib/twin/runtime/reranker.ts`. */
+    batchScorer?: (
+      query: string,
+      candidates: readonly { id: string; content: string; score: number; sourceTitle?: string }[]
+    ) => number[] | Promise<number[]>
   }
+  /**
+   * Optional LLM query-expansion (HyDE / step-back). Structural mirror of
+   * `apply-twin-context:ApplyTwinContextDeps.expansion`; the ai-sdk model handle
+   * is typed as `unknown` here so build-options stays decoupled from the twin
+   * module (the `applyTwinContext` cast bridges it).
+   */
+  expansion?: { model: unknown; strategy: "hyde" | "stepback" }
 }
 
 /**
@@ -532,8 +764,17 @@ async function listDispatchAgentAvailable(): Promise<Array<{ id: string; descrip
  * Decide whether — and at what depth — the `dispatch_agent` host tool is offered
  * on this build. Returns `undefined` (tool withheld) when nesting is off, there
  * are no dispatchable subagents, or the session isn't a nesting surface.
+ *
+ * `permissionMode` is the already-resolved mode: in `plan` mode the tool is
+ * force-offered (Claude Code parity — plan mode dispatches read-only Explore/Plan
+ * subagents to research before proposing), even when the user hasn't turned on
+ * subagent nesting, because the dispatched child inherits the read-only `plan`
+ * ceiling and cannot make edits.
  */
-async function resolveDispatchAgentGate(ctx: BuildOptionsContext): Promise<
+async function resolveDispatchAgentGate(
+  ctx: BuildOptionsContext,
+  permissionMode?: string
+): Promise<
   | {
       enabled: boolean
       depth: number
@@ -555,19 +796,90 @@ async function resolveDispatchAgentGate(ctx: BuildOptionsContext): Promise<
       available,
     }
   }
-  // Top-level direct chat with nesting enabled (not workflow-editor / team,
-  // which keep their SDK-native subagent surface).
+  // A dispatched child WITHOUT a dispatchContext is a leaf (its def never set
+  // `allowNesting`): never offer dispatch_agent — including the plan-mode
+  // force-offer below, which is a top-level-only affordance. Otherwise a
+  // plan-mode Explore/Plan child would be re-offered dispatch and could nest
+  // unboundedly (the CLI enforces leaf children; this is the GUI parity).
+  if (ctx.isDispatchedSubagent) return undefined
+  // Top-level direct chat: offered when the user enabled nesting OR the session
+  // is in plan mode (read-only research dispatch). Never on the workflow-editor /
+  // team surfaces, which keep their SDK-native subagent surface.
   const nesting = appSettings?.subagentNesting
-  if (
-    nesting?.enabled === true &&
-    session?.kind !== "workflow-editor" &&
-    session?.kind !== "team"
-  ) {
+  const isNestingSurface = session?.kind !== "workflow-editor" && session?.kind !== "team"
+  const planMode = permissionMode === "plan"
+  if (isNestingSurface && (nesting?.enabled === true || planMode)) {
     const available = await listDispatchAgentAvailable()
     if (available.length === 0) return undefined
-    return { enabled: true, depth: 0, maxDepth: nesting.maxDepth ?? 2, available }
+    return { enabled: true, depth: 0, maxDepth: nesting?.maxDepth ?? 2, available }
   }
   return undefined
+}
+
+/**
+ * Tiny bounded-LRU set used by the IM prompt-fragment memos below. Evicts the
+ * oldest key once `cap` is reached. Private to the resolver.
+ */
+function lruSet<V>(cache: Map<string, V>, key: string, value: V, cap: number): void {
+  if (cache.size >= cap && !cache.has(key)) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
+  }
+  cache.set(key, value)
+}
+
+// Memo for the per-channel A2UI capability prompt. Its inputs
+// (`lastKnownCapabilities` + `lastKnownSkillCapabilities`) change only when the
+// adapter row is rewritten, which always bumps `updatedAt`
+// (adapter-instances.ts:88) — so `${id}:${updatedAt}:${platform}` invalidates
+// exactly on a capability change while reusing the assembled string across a
+// conversation's turns. Bounded so many adapters can't grow it without limit.
+const CAPABILITY_PROMPT_CACHE_CAP = 32
+const capabilityPromptCache = new Map<string, string>()
+
+// Memo for the built-in skills manifest. Its output is a pure function of
+// (platform, channel capabilities [static per platform], registry [static],
+// override allowlist/access tier). The override row bumps `updatedAt` when its
+// `allowedBuiltInSkillIds` change, so the key captures every input. Manifest
+// entries carry NO per-conversation data (manifest.ts:88), so sharing the result
+// across conversations on the same platform/override is safe.
+const BUILTIN_SKILLS_MANIFEST_CACHE_CAP = 32
+const builtInSkillsManifestCache = new Map<
+  string,
+  Awaited<ReturnType<typeof import("@/lib/skills/built-in/manifest").buildBuiltInSkillManifest>>
+>()
+
+/** Test-only — clear the IM prompt-fragment memos between cases. */
+export function _resetImPromptMemosForTest(): void {
+  capabilityPromptCache.clear()
+  builtInSkillsManifestCache.clear()
+}
+
+/**
+ * Whether the team behind this dispatch session exposes any Employee Digital
+ * Twin knowledge source (a member's bound `twinId` or a team-level
+ * `knowledgeTwinIds`). Gates the `twin_knowledge_search` collaboration tool so
+ * it is never offered as a dead capability. Best-effort — a twin-bound current
+ * teammate is a sufficient signal even if the store lookup fails.
+ */
+async function teamHasKnowledgeTwins(
+  sessionId: string,
+  currentTwinId: string | undefined
+): Promise<boolean> {
+  if (currentTwinId) return true
+  try {
+    const { getTeamDispatchContext } = await import("@/lib/claude/agents/dispatch-context-registry")
+    const teamId = getTeamDispatchContext(sessionId)?.teamId
+    if (!teamId) return false
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const state = useAgentTeamStore.getState()
+    if ((state.teams[teamId]?.config.knowledgeTwinIds?.length ?? 0) > 0) return true
+    return Object.values(state.teammates).some(
+      (t) => t.teamId === teamId && Boolean(t.config?.twinId)
+    )
+  } catch {
+    return false
+  }
 }
 
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
@@ -642,7 +954,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let imOverrideRow:
     | Awaited<ReturnType<typeof import("@/lib/db/conversation-overrides").readForResolution>>
     | undefined
-  if (session?.platformBinding?.adapterId && session.platformBinding.conversationKey) {
+  if (ctx.imOverrideRow !== undefined) {
+    // The connector runtime already fetched this row (bus Step 3) and threaded
+    // it through — reuse it instead of a second Dexie read. `null` ⇒ no override.
+    imOverrideRow = ctx.imOverrideRow ?? undefined
+  } else if (session?.platformBinding?.adapterId && session.platformBinding.conversationKey) {
     try {
       const { readForResolution } = await import("@/lib/db/conversation-overrides")
       imOverrideRow = await readForResolution(session.platformBinding.conversationKey)
@@ -676,6 +992,50 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appSettings?.defaultProvider ??
     "anthropic"
 
+  // Rough text of the outgoing prompt (CJK-aware sizing happens later). Only the
+  // text the caller handed us — history/system additions are not counted, which
+  // keeps auto-routing + the token estimate conservative-but-cheap.
+  const promptText = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage
+
+  // When auto routing rewrites `model` to a tier alias below, these hold the
+  // concrete model/provider it replaced so alias resolution can fall back to
+  // them instead of hard-failing the send when the tier has no live deployment.
+  let autoTierOriginalModel: string | undefined
+  let autoTierOriginalProvider: string | undefined
+
+  // --- Auto routing (opt-in tier selection) ---------------------------------
+  // Before alias resolution: when auto routing is on and `model` is a concrete
+  // id (NOT already an alias), score the prompt's difficulty and rewrite the
+  // model to a tier alias (fast/balanced/powerful) so the alias block below
+  // resolves it through the full engine (filters/strategy/fallback + stamping).
+  // Strict no-op unless enabled AND a matching alias is enabled in
+  // `modelMappings` — see `lib/routing/auto-tier.ts:pickAutoAlias`.
+  if (
+    model &&
+    promptText &&
+    promptText.length > 0 &&
+    appSettings?.autoRouting?.enabled &&
+    appSettings.modelMappings &&
+    appSettings.modelMappings.length > 0
+  ) {
+    const enabledAliases = new Set(
+      appSettings.modelMappings.filter((m) => m.enabled !== false).map((m) => m.alias.toLowerCase())
+    )
+    // An explicitly-typed alias always wins over auto — never re-route it.
+    if (!enabledAliases.has(model.toLowerCase())) {
+      const score = scoreDifficulty(promptText)
+      const tier = pickAutoAlias(score, appSettings.autoRouting, enabledAliases)
+      if (tier) {
+        // Preserve the concrete model/provider so we can fall back to it if the
+        // tier alias resolves to zero eligible deployments (see below).
+        autoTierOriginalModel = model
+        autoTierOriginalProvider = providerId
+        opts.autoRouting = { score, tier }
+        model = tier
+      }
+    }
+  }
+
   // --- Alias resolution (P4) ------------------------------------------------
   // When `model` matches a registered alias (e.g., "fast", "coding"), run
   // it through the routing engine to pick a concrete provider:model from
@@ -695,22 +1055,37 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // pricing, and the context-window resolver all live in
     // `lib/ai/routing/build-preview-engine.ts`.
     const deps: RoutingEngineDeps = buildRoutingEngineDeps(appSettings)
-    // Rough token estimate of the outgoing prompt (CJK-aware). Only the text
-    // the caller handed us — history/system additions are not counted, which
-    // keeps the check conservative-but-cheap (O(prompt length), no awaits).
-    const promptText = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage
+    // Rough token estimate of the outgoing prompt (CJK-aware). Uses the hoisted
+    // `promptText` (also feeds auto-routing above). History/system additions are
+    // not counted, keeping the check conservative-but-cheap (no awaits).
     const estimatedInputTokens =
       promptText && promptText.length > 0 ? estimateCJKTokenCount(promptText) : undefined
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
     // May throw RoutingNoCandidatesError (alias matched, every deployment
-    // filtered out) — callers surface it as the send error; passing the alias
-    // through as a model id would fail downstream with a worse message.
-    const result = engine.selectProvider({
-      model,
-      estimatedInputTokens,
-      promptText,
-      sessionId: session?.id,
-    })
+    // filtered out). For an EXPLICITLY-typed alias we surface it as the send
+    // error (passing the alias through as a model id would fail downstream with
+    // a worse message). But for an AUTO-selected tier alias, the user picked a
+    // concrete model — auto routing is a best-effort optimization, so fall back
+    // to that concrete model instead of hard-failing a send that would succeed.
+    let result: ReturnType<typeof engine.selectProvider> | null
+    try {
+      result = engine.selectProvider({
+        model,
+        estimatedInputTokens,
+        promptText,
+        sessionId: session?.id,
+      })
+    } catch (err) {
+      if (err instanceof RoutingNoCandidatesError && autoTierOriginalModel) {
+        // Revert the auto-tier rewrite and continue with the concrete model.
+        model = autoTierOriginalModel
+        providerId = autoTierOriginalProvider ?? providerId
+        delete opts.autoRouting
+        result = null
+      } else {
+        throw err
+      }
+    }
     if (result?.fromAlias && result.alias) {
       model = result.modelId
       providerId = result.providerId
@@ -783,6 +1158,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           // (xai / togetherai / fireworks). The Anthropic path selects by id,
           // so forwarding "anthropic" is inert there.
           protocol: resolution.protocol,
+          // Explicit OpenAI endpoint family (responses/chat/auto). Lets the user
+          // opt a gateway / Azure / custom URL into the Responses API; the
+          // sidecar's decideOpenAiEndpointFlavor honors it.
+          ...(resolution.apiFlavor ? { apiFlavor: resolution.apiFlavor } : {}),
         }
         // Plugin-contributed protocol: ride the execution spec along. A
         // declarative variant spec is forwarded verbatim (the sidecar serves
@@ -822,6 +1201,33 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           appSettings?.customProviders?.find((p) => p.id === providerId)
         const modelParams = buildModelInferenceParams(providerCfg)
         if (modelParams) opts.modelParams = modelParams
+        // Multi-API-key rotation (ADR-0043 Phase 3): when the provider has a
+        // key pool with rotation enabled, override the single-key credential
+        // with the next key in rotation and persist the advance
+        // (currentKeyIndex + per-key usage stats) fire-and-forget — a
+        // persist failure must never block the turn.
+        if (providerCfg?.apiKeyRotationEnabled) {
+          const selection = selectApiKey(providerCfg)
+          if (selection.apiKey) {
+            opts.providerCredentials.apiKey = selection.apiKey
+          }
+          const persisted = recordKeyUse(providerCfg, selection)
+          if (persisted) {
+            void (async () => {
+              try {
+                const { useSettingsStore } = await import("@/stores/settings")
+                const store = useSettingsStore.getState()
+                if (resolution.isCustomProvider) {
+                  await store.updateCustomProvider(providerId, persisted)
+                } else {
+                  await store.setProviderConfig(providerId, persisted)
+                }
+              } catch (err) {
+                console.warn("api key rotation advance persist failed", err)
+              }
+            })()
+          }
+        }
         // OpenCode managed plans: a provider entry with a base URL but no key
         // resolves above — backfill the key from the subscription vault so a
         // pasted Zen/Go key is usable without re-typing it in Settings.
@@ -909,7 +1315,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // automatic caching, Anthropic cache_control) keep hitting. When the flag
   // is off this array stays empty and assembly is byte-identical to the
   // legacy path.
-  const cacheOptimizationEnabled = appSettings?.cacheOptimizationEnabled === true
+  const cacheOptimizationEnabled = appSettings?.cacheOptimizationEnabled !== false
   const dynamicTailSections: string[] = []
   // Forward the flag so the sidecar's ai-sdk dispatcher can place an
   // explicit anthropic cacheControl breakpoint on the stable segment.
@@ -959,6 +1365,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             tone: s.tone,
           })),
           degraded: result.degraded,
+          ...(result.citations ? { citations: result.citations } : {}),
         }
       }
       // Record the call in the M6 inject-log ring buffer so the Settings
@@ -1002,6 +1409,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           topK: memoryConfig.retrievalTopK,
           relevanceFloor: memoryConfig.relevanceFloor,
           twinChunkTexts,
+          enableQueryExpansion: memoryConfig.enableQueryExpansion,
+          recencyHalfLifeDays: memoryConfig.decayHalfLifeDays,
+          // Reuse the turn's query embedding (memory's vector backend shares the
+          // twin embedding model via resolveMemoryBackend) — no re-embed.
+          precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
           deps: ctx.memoryDeps,
         })
         if (result.systemPromptSection) {
@@ -1027,6 +1439,58 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         }
       } catch {
         // Memory runtime failure is non-fatal — keep the prompt as-is.
+      }
+    }
+  }
+
+  // --- Project knowledge base injection (project-scoped RAG) ---------------
+  // When `projectKnowledgeDeps` + `projectKnowledgeUserMessage` are supplied and
+  // the active workspace has knowledge files (and project RAG is enabled),
+  // retrieve the most relevant chunks and APPEND a "Project knowledge base"
+  // section. Coexists with the Twin (persona) + Memory (user facts) sections —
+  // it never replaces `baseSystem`. The runtime never throws; failures degrade
+  // silently. Query-dependent, so it rides the dynamic tail under cache
+  // optimization (like memory) to stay out of the cacheable prefix.
+  let projectKnowledgeSection = ""
+  if (
+    ctx.projectKnowledgeDeps &&
+    ctx.projectKnowledgeUserMessage &&
+    ctx.projectKnowledgeUserMessage.trim() &&
+    ctx.activeProject &&
+    (ctx.activeProject.knowledgeBase?.length ?? 0) > 0
+  ) {
+    const knowledgeSettings = resolveProjectKnowledgeSettings(ctx.activeProject.knowledgeSettings)
+    if (knowledgeSettings.enableProjectRag) {
+      try {
+        const { applyProjectKnowledgeContext } =
+          await import("@/lib/project-knowledge/runtime/apply-project-context")
+        const fileNames: Record<string, string> = {}
+        for (const f of ctx.activeProject.knowledgeBase ?? []) fileNames[f.id] = f.name
+        const result = await applyProjectKnowledgeContext({
+          projectId: ctx.activeProject.id,
+          userMessage: ctx.projectKnowledgeUserMessage,
+          topK: knowledgeSettings.ragTopK,
+          precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
+          fileNames,
+          deps: ctx.projectKnowledgeDeps as Parameters<
+            typeof applyProjectKnowledgeContext
+          >[0]["deps"],
+        })
+        if (result.systemPromptSection) {
+          if (cacheOptimizationEnabled) {
+            dynamicTailSections.push(result.systemPromptSection)
+          } else {
+            projectKnowledgeSection = result.systemPromptSection
+          }
+        }
+        if (result.retrievedChunks.length > 0 || result.degraded) {
+          opts.projectKnowledgeContext = {
+            retrievedChunks: result.retrievedChunks,
+            degraded: result.degraded,
+          }
+        }
+      } catch {
+        // Project-knowledge runtime failure is non-fatal — keep the prompt as-is.
       }
     }
   }
@@ -1164,6 +1628,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     personaSection,
     instructionSection,
     memorySection,
+    projectKnowledgeSection,
     modeSection,
     skillSection,
     pluginSkillSection,
@@ -1237,6 +1702,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.permissionRuleset = deterministicRulesetSort(mergedRuleset)
   }
 
+  // Session-global "Allow always" list — honored directly in the sidecar gates
+  // so an always-allowed tool skips the redundant `permission_request`
+  // round-trip (previously only the renderer's `allowListRef` short-circuited).
+  // Sorted for prompt-cache stability.
+  if (appSettings?.alwaysAllowTools && appSettings.alwaysAllowTools.length > 0) {
+    opts.alwaysAllowTools = [...appSettings.alwaysAllowTools].sort()
+  }
+
   // --- Tool whitelist/blacklist --------------------------------------------
   // Member override REPLACES the character's allowedTools (does not union).
   // Skills still contribute their tools so an override doesn't accidentally
@@ -1270,21 +1743,39 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let connectorCapabilityPrompt: string | null = null
   if (session?.platformBinding?.adapterId) {
     try {
-      const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
-      const adapterRow = await getAdapterInstance(session.platformBinding.adapterId)
+      // Reuse the adapter row threaded from the connector runtime (bus Step 2)
+      // when present; otherwise fall back to a Dexie read (desktop / other
+      // callers don't pass it).
+      let adapterRow = ctx.imAdapterRow
+      if (adapterRow === undefined) {
+        const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+        adapterRow = await getAdapterInstance(session.platformBinding.adapterId)
+      }
       const matrix = adapterRow?.lastKnownCapabilities
-      if (matrix && Object.keys(matrix).length > 0) {
-        const { buildCapabilityPromptSection } =
-          await import("@/lib/connectors/a2ui-bridge/capability-evaluator")
-        // ADR-0026 — also pass the cached built-in skill capabilities so
-        // the prompt declares which lark.* (and future) skill families
-        // this channel can serve. Intersected against the per-channel
-        // allowlist below.
-        connectorCapabilityPrompt = buildCapabilityPromptSection(
-          session.platformBinding.platform,
-          matrix,
-          adapterRow?.lastKnownSkillCapabilities
-        )
+      if (adapterRow && matrix && Object.keys(matrix).length > 0) {
+        const capCacheKey = `${adapterRow.id}:${adapterRow.updatedAt}:${session.platformBinding.platform}`
+        const cachedPrompt = capabilityPromptCache.get(capCacheKey)
+        if (cachedPrompt !== undefined) {
+          connectorCapabilityPrompt = cachedPrompt
+        } else {
+          const { buildCapabilityPromptSection } =
+            await import("@/lib/connectors/a2ui-bridge/capability-evaluator")
+          // ADR-0026 — also pass the cached built-in skill capabilities so
+          // the prompt declares which lark.* (and future) skill families
+          // this channel can serve. Intersected against the per-channel
+          // allowlist below.
+          connectorCapabilityPrompt = buildCapabilityPromptSection(
+            session.platformBinding.platform,
+            matrix,
+            adapterRow.lastKnownSkillCapabilities
+          )
+          lruSet(
+            capabilityPromptCache,
+            capCacheKey,
+            connectorCapabilityPrompt,
+            CAPABILITY_PROMPT_CACHE_CAP
+          )
+        }
       }
     } catch {
       // Best-effort — missing adapter row / capability matrix shouldn't
@@ -1316,33 +1807,51 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   > = []
   if (builtInSkillsRequested) {
     try {
-      // Side-effect import so every family's registerBuiltInSkill() runs
-      // before the manifest builder walks the registry.
-      await import("@/lib/skills/built-in")
-      const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
-      // Resolve the bound channel's declared capabilities so the manifest's
-      // `requires` filter can hide skills the channel can't serve (e.g. a
-      // skill needing `rich-card.lark` for its HITL confirm card). Static
-      // per-platform — no live adapter build needed. Desktop (no binding)
-      // leaves this undefined; the filter no-ops there.
-      let channelCapabilities:
-        | readonly import("@/types/connectors/capability").Capability[]
-        | undefined
-      if (session?.platformBinding?.adapterId) {
-        const { getPlatformCapabilities } = await import("@/lib/connectors/platform-capabilities")
-        channelCapabilities = getPlatformCapabilities(session.platformBinding.platform)
+      // Memo key: every input that shapes the manifest. Platform + isImSession
+      // gate the platform/access/requires filters; the override's `updatedAt`
+      // bumps whenever its `allowedBuiltInSkillIds` change. Channel capabilities
+      // + registry are static, so they need no key component.
+      const skillsCacheKey = `${session?.platformBinding?.platform ?? "none"}:${Boolean(
+        session?.platformBinding?.adapterId
+      )}:${imOverrideRow?.id ?? "none"}:${imOverrideRow?.updatedAt ?? 0}`
+      const cachedManifest = builtInSkillsManifestCache.get(skillsCacheKey)
+      if (cachedManifest !== undefined) {
+        builtInSkillsManifest = cachedManifest
+      } else {
+        // Side-effect import so every family's registerBuiltInSkill() runs
+        // before the manifest builder walks the registry.
+        await import("@/lib/skills/built-in")
+        const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
+        // Resolve the bound channel's declared capabilities so the manifest's
+        // `requires` filter can hide skills the channel can't serve (e.g. a
+        // skill needing `rich-card.lark` for its HITL confirm card). Static
+        // per-platform — no live adapter build needed. Desktop (no binding)
+        // leaves this undefined; the filter no-ops there.
+        let channelCapabilities:
+          | readonly import("@/types/connectors/capability").Capability[]
+          | undefined
+        if (session?.platformBinding?.adapterId) {
+          const { getPlatformCapabilities } = await import("@/lib/connectors/platform-capabilities")
+          channelCapabilities = getPlatformCapabilities(session.platformBinding.platform)
+        }
+        builtInSkillsManifest = buildBuiltInSkillManifest({
+          imBinding: session?.platformBinding?.adapterId
+            ? {
+                adapterId: session.platformBinding.adapterId,
+                platform: session.platformBinding.platform,
+                conversationKey: session.platformBinding.conversationKey ?? "",
+              }
+            : undefined,
+          imOverrideRow: imOverrideRow ?? undefined,
+          channelCapabilities,
+        })
+        lruSet(
+          builtInSkillsManifestCache,
+          skillsCacheKey,
+          builtInSkillsManifest,
+          BUILTIN_SKILLS_MANIFEST_CACHE_CAP
+        )
       }
-      builtInSkillsManifest = buildBuiltInSkillManifest({
-        imBinding: session?.platformBinding?.adapterId
-          ? {
-              adapterId: session.platformBinding.adapterId,
-              platform: session.platformBinding.platform,
-              conversationKey: session.platformBinding.conversationKey ?? "",
-            }
-          : undefined,
-        imOverrideRow: imOverrideRow ?? undefined,
-        channelCapabilities,
-      })
       for (const entry of builtInSkillsManifest) {
         allowed.add(entry.name)
       }
@@ -1588,7 +2097,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // top-level direct chat and the user enabled nesting. Withheld otherwise
       // (default off → zero change). The cap-reached withholding is the depth-N
       // generalization of Claude Code dropping the Agent tool from subagents.
-      const dispatchAgentGate = await resolveDispatchAgentGate(ctx)
+      const dispatchAgentGate = await resolveDispatchAgentGate(ctx, opts.permissionMode)
       let manifest = buildPluginToolsManifest({
         exposeDockToAgents,
         ...(dispatchAgentGate ? { dispatchAgent: dispatchAgentGate } : {}),
@@ -1757,8 +2266,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // delegate during its turn (the cognia analogue of Claude Code SendMessage).
   if (session?.kind === "team" && appSettings?.selfInvokeTools?.teamCollaboration === true) {
     try {
-      const { buildTeamCollabManifestEntries } = await import("@/lib/claude/team-builtin-tools")
-      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildTeamCollabManifestEntries()]
+      const { buildTeamCollabManifestEntries, TEAM_MESSAGING_PROTOCOL } =
+        await import("@/lib/claude/team-builtin-tools")
+      // Only offer `twin_knowledge_search` when the team actually has a knowledge
+      // source (a member's bound twin, or a team-level knowledgeTwinId) — never a
+      // dead capability. Resolved from the per-session team-dispatch context.
+      const includeTwinKnowledgeSearch = await teamHasKnowledgeTwins(session.id, character?.twinId)
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...buildTeamCollabManifestEntries({ includeTwinKnowledgeSearch }),
+      ]
+      const existingTeamPrompt = opts.appendSystemPrompt?.trim() ?? ""
+      opts.appendSystemPrompt = existingTeamPrompt
+        ? `${existingTeamPrompt}\n\n${TEAM_MESSAGING_PROTOCOL}`
+        : TEAM_MESSAGING_PROTOCOL
     } catch (err) {
       loggers.app.warn("failed to append team-collaboration built-in tools", {
         error: String(err),
@@ -1923,6 +2444,33 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     setActiveSandboxConfine(session?.id, null)
   }
 
+  // --- Workspace confinement (ADR-0028 "lite") ------------------------------
+  // The always-on, cross-platform middle layer: when the heavy OS sandbox is
+  // NOT active, confine the sidecar built-in file/bash tools to the active
+  // workspace roots. Out-of-root mutator calls escalate to approval; credential
+  // paths hard-deny (enforced in the sidecar canUseTool gates via
+  // `sendOptions.confinement`). Mutually exclusive with `sandboxEnabled` — that
+  // path already swaps in the `sandbox_*` tools and enforces at the OS level, so
+  // stacking both would double-confine. Rootless sessions (no active project)
+  // carry no policy and behave exactly as before.
+  const confinementEnabled =
+    !sandboxEnabled &&
+    Boolean(ctx.activeProject) &&
+    (session?.workspaceConfinementEnabled ??
+      character?.workspaceConfinementEnabled ??
+      appSettings?.workspaceConfinementEnabled ??
+      true)
+  if (confinementEnabled) {
+    const roots = new Set<string>()
+    if (opts.cwd) roots.add(opts.cwd)
+    for (const dir of opts.additionalDirectories ?? []) {
+      if (dir) roots.add(dir)
+    }
+    if (roots.size > 0) {
+      opts.confinement = { enabled: true, roots: [...roots] }
+    }
+  }
+
   // --- IM-session core-tool safeguard ---------------------------------------
   // G6 parity for the coreFiles suite: an inbound Telegram/Slack/Discord/Lark
   // message must not mutate the host filesystem or run shell commands. The
@@ -2070,47 +2618,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (resolved.enabled && appSettings) {
       try {
         if (summaryProvider && summaryProvider !== providerId) {
-          const snapshot = createProviderSettingsSnapshot({
-            defaultProvider: appSettings.defaultProvider,
-            providerSettings: appSettings.providerSettings as
-              | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
-              | undefined,
-            customProviders: appSettings.customProviders as
-              | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
-              | undefined,
+          const summary = await resolveSummaryProviderForCompaction({
+            providerId: summaryProvider,
+            summaryModel,
+            appSettings,
           })
-          const r = resolveFeatureProvider(
-            {
-              featureId: "chat-compaction-summary",
-              routeProfile: "general-text",
-              selectionMode: "explicit-provider",
-              providerId: summaryProvider,
-              fallbackMode: "none",
-            },
-            snapshot
-          )
-          if (r.kind === "resolved" && r.apiKey) {
-            let protocolAdapterSpec: SendOptions["protocolAdapterSpec"] | undefined
-            const { getProtocolAdapter } =
-              await import("@cognia/provider-core/providers/protocol-adapter-registry")
-            const adapterDef = getProtocolAdapter(r.protocol)
-            if (adapterDef) {
-              if (adapterDef.spec.kind === "code") {
-                const sep = r.protocol.indexOf(":")
-                protocolAdapterSpec = {
-                  kind: "code",
-                  pluginId: sep > 0 ? r.protocol.slice(0, sep) : r.protocol,
-                  adapterId: r.protocol,
-                }
-              } else {
-                protocolAdapterSpec = adapterDef.spec
-              }
-            }
+          if (summary) {
             resolved.summary = {
-              model: summaryModel ?? r.model,
-              protocol: r.protocol,
-              credentials: { apiKey: r.apiKey, baseURL: r.baseURL },
-              ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
+              model: summary.model,
+              protocol: summary.protocol,
+              credentials: summary.credentials,
+              ...(summary.protocolAdapterSpec
+                ? { protocolAdapterSpec: summary.protocolAdapterSpec }
+                : {}),
             }
           }
         } else if (summaryModel) {
@@ -2121,12 +2641,37 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
     }
 
+    // Pin the AUTHORITATIVE window so the sidecar's generic compaction trigger
+    // stops re-deriving it from its conservative regex table (which floors every
+    // `deepseek*` id at 128k — auto-compacting a real 1M deepseek-v4 at ~107k).
+    // Catalog `contextLength` first (covers deepseek-v4 = 1M), regex table as the
+    // floor for ids the catalog doesn't carry.
+    if (resolved.enabled && opts.model) {
+      const catalogWindow = getModelConfig(providerId, opts.model)?.contextLength
+      const window =
+        typeof catalogWindow === "number" && catalogWindow > 0
+          ? catalogWindow
+          : getModelContextWindow(opts.model)
+      if (window > 0) resolved.contextWindow = window
+    }
+
     opts.compaction = resolved
 
     if (resolved.enabled) {
       const snippet = resolveCompactInstructions(resolved.focus)
       const existing = opts.appendSystemPrompt?.trim() ?? ""
       opts.appendSystemPrompt = existing ? `${existing}\n\n${snippet}` : snippet
+
+      // One-shot post-compaction recovery: re-inject durable instructions on the
+      // FIRST turn after a boundary so the model treats the new summary as
+      // authoritative and keeps operational directives in force.
+      if (ctx.postCompaction) {
+        const recovery = buildPostCompactionRecovery({
+          durableInstructions: ctx.postCompaction.durableInstructions,
+        })
+        const base = opts.appendSystemPrompt?.trim() ?? ""
+        opts.appendSystemPrompt = base ? `${base}\n\n${recovery}` : recovery
+      }
     }
   }
 
@@ -2253,22 +2798,38 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const effort = imOverrideRow?.reasoningOverride ?? session?.effort ?? appSettings?.defaultEffort
   if (effort && (!opts.model || modelSupportsEffort(opts.provider, opts.model))) {
     opts.effort = effort
+  } else if (effort && opts.model) {
+    // User asked for a reasoning level the resolved model can't honour, so it
+    // was dropped above (a capable→Haiku model switch is the common cause).
+    // Flag it so the chat hook can surface a once-per-model advisory toast —
+    // otherwise the setting vanishes with zero feedback.
+    opts.droppedCapabilityWarning = {
+      capability: "effort",
+      model: opts.model,
+      provider: opts.provider,
+    }
   }
 
   // --- Token-level streaming (includePartialMessages) ----------------------
   // Request the SDK's partial-message stream so the renderer can paint
   // assistant text token-by-token. Only on INTERACTIVE sends: connector
   // (`conversationKey`), nested-dispatch (`dispatchContext`), and headless /
-  // standalone-CLI (`preloadedEnv` / `preloadedMcpServers` provided) paths
+  // request-response (`preloadedEnv` / `preloadedMcpServers` provided) paths
   // consume only the final result, so partial events there are wasted IPC
   // volume. Gated by `AppSettings.streamPartialMessages` (default on). The SDK
   // simply omits partials when a thinking budget is active, so this is a no-op
   // (graceful whole-message fallback) in that case rather than a conflict.
+  //
+  // EXCEPTION: the standalone agent CLI's interactive TUI sets `ctx.interactive`
+  // — it injects `preloadedEnv`/`preloadedMcpServers` (it can't reach Dexie /
+  // Tauri) but IS a live turn. It must get partials so the deltas keep feeding
+  // the idle watchdog; otherwise a long single generation (large file write)
+  // streams nothing for >60s and trips the spurious "stream idle" interrupt.
   const isInteractiveSend =
     !ctx.conversationKey &&
     !ctx.dispatchContext &&
-    ctx.preloadedEnv === undefined &&
-    ctx.preloadedMcpServers === undefined
+    (ctx.interactive === true ||
+      (ctx.preloadedEnv === undefined && ctx.preloadedMcpServers === undefined))
   if (isInteractiveSend && (appSettings?.streamPartialMessages ?? true)) {
     opts.includePartialMessages = true
   }
@@ -2402,6 +2963,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // Task tool — previously subagents were dormant outside workflow-editor /
     // team sessions. Empty-guarded: an empty map would otherwise advertise a
     // no-op agent surface on every turn.
+    //
+    // gap8: forward subagent text/thinking frames so the inline card can show
+    // the child's narrated reasoning stream. The renderer only surfaces it in
+    // `detailed` display mode, so simplified/standard stay uncluttered. NOT set
+    // on the `dispatchContext` branch above — nested children run via the host
+    // `dispatch_agent` tool, not SDK-native Task, so no such frames fire there.
+    opts.forwardSubagentText = true
     try {
       const { resolveAllSubagents, workflowEditorSubagents } =
         await import("@/lib/claude/agents/subagents")
@@ -2561,11 +3129,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     else delete opts.allowedTools
     if (merged.disallowedTools) opts.disallowedTools = [...merged.disallowedTools].sort()
     else delete opts.disallowedTools
-    // `merged.permissionMode` is an `AcpPermissionMode`, which adds `"dontAsk"`
-    // on top of the four Claude SDK modes. Both the ceiling and the child derive
-    // from `opts.permissionMode` (the narrow Claude union), so `"dontAsk"` never
-    // reaches here in practice; guard it out so the assignment stays type-safe.
-    if (merged.permissionMode && merged.permissionMode !== "dontAsk") {
+    // Every `AcpPermissionMode` (incl. `dontAsk`) is a valid SendOptions mode:
+    // the AI-SDK gate enforces dontAsk (deny-without-prompt) and the Anthropic
+    // SDK enforces it natively, so a dontAsk parent ceiling must clamp the
+    // child's mode like any other.
+    if (merged.permissionMode) {
       opts.permissionMode = merged.permissionMode
     }
   }

@@ -20,7 +20,11 @@ import {
 import { detectPlatform } from "@/hooks/use-platform"
 import { getDb } from "@/lib/db/schema"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
+import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import {
@@ -193,6 +197,7 @@ export function useTeamChat() {
     // same query vector rather than each paying an individual embed call.
     let turnTwinDeps: TwinDepsForBuild | undefined
     let turnEmbedding: number[] | undefined
+    let turnMemoryDeps: ApplyMemoryContextDeps | undefined
     if (userText.trim()) {
       turnTwinDeps = await tryBuildTwinDeps()
       if (turnTwinDeps) {
@@ -203,6 +208,13 @@ export function useTeamChat() {
           turnEmbedding = undefined // resolver falls back to per-member embed
         }
       }
+      // Long-term memory recall parity with direct chat: build the read-runtime
+      // deps once per turn so every member injects the shared memory store (the
+      // team runtime previously read twin RAG but never recalled memory).
+      turnMemoryDeps = await tryBuildMemoryDeps(
+        resolveMemoryConfig(useSettingsStore.getState().settings?.memory),
+        turnTwinDeps
+      )
     }
 
     // 1. Persist the user turn first, tagging it as a "user" sender.
@@ -256,6 +268,7 @@ export function useTeamChat() {
           resolvers: resolvers.current,
           turnTwinDeps,
           turnEmbedding,
+          turnMemoryDeps,
           turnUserMessage: userText,
         })
       } else {
@@ -278,6 +291,7 @@ export function useTeamChat() {
           resolvers: resolvers.current,
           turnTwinDeps,
           turnEmbedding,
+          turnMemoryDeps,
           turnUserMessage: userText,
         })
       }
@@ -495,6 +509,8 @@ interface RunCommonArgs {
   turnTwinDeps?: TwinDepsForBuild
   /** Pre-computed query embedding for the user message; avoids N×embed cost. */
   turnEmbedding?: number[]
+  /** Pre-built long-term-memory read deps shared across all members this turn. */
+  turnMemoryDeps?: ApplyMemoryContextDeps
   /** Plain-text user message forwarded to resolveSendOptions for twin RAG. */
   turnUserMessage?: string
 }
@@ -517,6 +533,7 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
     resolvers,
     turnTwinDeps,
     turnEmbedding,
+    turnMemoryDeps,
     turnUserMessage,
   } = args
 
@@ -546,6 +563,7 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
         resolvers,
         turnTwinDeps,
         turnEmbedding,
+        turnMemoryDeps,
         turnUserMessage,
       })
       useUIStore.getState().setMemberStatus(sessionId, character.id, "idle")
@@ -571,6 +589,7 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
     resolvers,
     turnTwinDeps,
     turnEmbedding,
+    turnMemoryDeps,
     turnUserMessage,
   } = args
 
@@ -633,6 +652,7 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
         resolvers,
         turnTwinDeps,
         turnEmbedding,
+        turnMemoryDeps,
         turnUserMessage,
       })
 
@@ -676,6 +696,7 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
           resolvers,
           turnTwinDeps,
           turnEmbedding,
+          turnMemoryDeps,
           turnUserMessage,
         })
         useUIStore.getState().setMemberStatus(sessionId, target.id, "idle")
@@ -729,6 +750,8 @@ interface RunMemberArgs {
   turnTwinDeps?: TwinDepsForBuild
   /** Pre-computed query embedding for the user message; avoids N×embed cost. */
   turnEmbedding?: number[]
+  /** Pre-built long-term-memory read deps shared across all members this turn. */
+  turnMemoryDeps?: ApplyMemoryContextDeps
   /** Plain-text user message forwarded to resolveSendOptions for twin RAG. */
   turnUserMessage?: string
 }
@@ -748,16 +771,21 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     resolvers,
     turnTwinDeps,
     turnEmbedding,
+    turnMemoryDeps,
     turnUserMessage,
   } = args
 
   const referencedPaths = useChatStore
     .getState()
     .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir }))
-  // NOTE: long-term memory injection is wired for direct chat only. Team chat
-  // builds twin deps + the shared query embedding exactly once per turn; reusing
-  // that for memory recall (without a second `tryBuildTwinDeps`) needs a small
-  // deps-reuse refactor, deferred to keep the per-turn embed invariant intact.
+  // Long-term memory recall now runs for team members too: `send` builds the
+  // read deps once per turn (`turnMemoryDeps`) and threads them here so every
+  // member injects the shared memory store, matching direct chat.
+  // One-shot post-compaction recovery: when a compaction boundary just landed in
+  // the team transcript with no assistant turn after it, re-inject the recovery
+  // preamble so the member treats the new summary as authoritative and keeps
+  // team-coordination directives in force across the boundary. Stateless.
+  const teamRecoveryPhase = pendingRecoveryPhase(useChatStore.getState().messages)
   const baseOpts = await resolveSendOptions({
     session: session as never,
     character,
@@ -767,7 +795,10 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     twinDeps: turnTwinDeps,
     twinUserMessage: turnUserMessage,
     precomputedQueryEmbedding: turnEmbedding,
+    memoryDeps: turnMemoryDeps,
+    memoryUserMessage: turnMemoryDeps ? turnUserMessage : undefined,
     twinInjectSource: "team",
+    postCompaction: teamRecoveryPhase !== null ? { phaseNumber: teamRecoveryPhase } : undefined,
   })
   const transcript = await buildTranscript(sessionId, character.id, members, session.scratchpad)
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]

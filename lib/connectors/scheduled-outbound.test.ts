@@ -87,6 +87,13 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
   __esModule: true,
   tryBuildTwinDeps: () => tryBuildTwinDepsImpl(),
 }))
+// See runtime.test.ts: memory deps are mocked so the real builder (which calls
+// tryBuildTwinDeps) doesn't pollute the twin call-count assertions.
+let tryBuildMemoryDepsImpl: jest.Mock = jest.fn(async () => undefined)
+jest.mock("@/lib/memory/runtime/build-deps", () => ({
+  __esModule: true,
+  tryBuildMemoryDeps: (...a: unknown[]) => tryBuildMemoryDepsImpl(...a),
+}))
 jest.mock("@/lib/db/adapter-instances", () => ({
   getAdapterInstance: (id: string) => getAdapterImpl(id),
 }))
@@ -139,6 +146,7 @@ beforeEach(async () => {
   getCharacterImpl = jest.fn(async () => undefined)
   getSettingsImpl = jest.fn(async () => undefined)
   tryBuildTwinDepsImpl = jest.fn(async () => undefined)
+  tryBuildMemoryDepsImpl = jest.fn(async () => undefined)
   __setDigestSendPromptForTesting(null)
 })
 
@@ -322,6 +330,76 @@ describe("connection:scheduled:digest executor — full AI loop", () => {
     expect(audit.some((r) => r.kind === "inbound.deferred_quiet_hours")).toBe(true)
   })
 
+  it("prefers the per-conversation override's quietHours over the adapter default", async () => {
+    getAdapterImpl = jest.fn(async () => ({
+      quietHours: { from: "22:00", to: "06:00", tz: "UTC" },
+    }))
+    readOverrideImpl = jest.fn(async () => ({
+      quietHours: { from: "12:00", to: "13:00", tz: "UTC" },
+    }))
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "x",
+      })
+    )
+
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inboxPolicy: expect.objectContaining({
+          quietHours: { from: "12:00", to: "13:00", tz: "UTC" },
+        }),
+      })
+    )
+  })
+
+  it("falls back to the adapter's quietHours when there is no override", async () => {
+    getAdapterImpl = jest.fn(async () => ({
+      quietHours: { from: "22:00", to: "06:00", tz: "UTC" },
+    }))
+    readOverrideImpl = jest.fn(async () => undefined)
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "x",
+      })
+    )
+
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inboxPolicy: expect.objectContaining({
+          quietHours: { from: "22:00", to: "06:00", tz: "UTC" },
+        }),
+      })
+    )
+  })
+
   it("audits + fails when the PII gate blocks the prompt", async () => {
     __setDigestSendPromptForTesting(
       jest.fn(async () => {
@@ -408,6 +486,36 @@ describe("connection:scheduled:digest executor — full AI loop", () => {
     expect(tryBuildTwinDepsImpl).not.toHaveBeenCalled()
     expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
       expect.objectContaining({ twinDeps: undefined, twinUserMessage: undefined })
+    )
+  })
+
+  it("injects memory recall deps into resolveSendOptions (parity with direct chat)", async () => {
+    getCharacterImpl = jest.fn(async () => ({ id: "char_001", name: "Plain" }))
+    const memoryDeps = { loadCandidates: jest.fn(), loadProcedural: jest.fn(), touch: jest.fn() }
+    tryBuildMemoryDepsImpl = jest.fn(async () => memoryDeps)
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "summarise",
+      })
+    )
+
+    expect(tryBuildMemoryDepsImpl).toHaveBeenCalledTimes(1)
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({ memoryDeps, memoryUserMessage: "summarise" })
     )
   })
 })

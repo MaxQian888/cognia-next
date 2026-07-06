@@ -48,6 +48,9 @@ export function renderProposalDoc(proposal: AutoOrchestrationProposal): string {
     `- Specialization needed: ${assessment.factors.specializationNeeded ? "yes" : "no"} · Budget pressure: ${assessment.factors.budgetPressure}`
   )
   lines.push(`- Reason: ${assessment.reason}`, "")
+  if (proposal.executor) {
+    lines.push(`- Executor: **${proposal.executor.kind}** — ${proposal.executor.reason}`, "")
+  }
 
   // Roster.
   lines.push(`## Roster (${roster.length})`, "")

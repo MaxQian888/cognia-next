@@ -1,4 +1,10 @@
 {
+  "activeFilters": {
+    "clearFilter": "Clear filter",
+    "clearSort": "Clear sort",
+    "filterChip": "Filter: {value}",
+    "sortChip": "Sort: {value}"
+  },
   "builtInBadge": "Built-in",
   "card": {
     "twinDraftFallbackName": "{kind} draft",
@@ -154,6 +160,17 @@
     "specialist": "Specialist"
   },
   "pluginBadge": "Plugin",
+  "preferences": {
+    "description": "Set where Discover opens and how it looks by default.",
+    "landingAuto": "Auto (first visible)",
+    "landingHint": "The category Discover opens on when no link specifies one. Auto uses your first visible category.",
+    "landingLabel": "Default category",
+    "reset": "Reset",
+    "title": "Preferences",
+    "viewHint": "Fallback layout for categories that don't have their own view choice.",
+    "viewLabel": "Default view"
+  },
+  "resultCount": "{count, plural, =0 {No results} =1 {1 result} other {# results}}",
   "search": "Search discover…",
   "searchAria": "Search discover",
   "searchScope": "Search {category}…",

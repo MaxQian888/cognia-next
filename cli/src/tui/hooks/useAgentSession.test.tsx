@@ -5,7 +5,22 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
+import type { HookRunner } from "../runtime/hook-runner"
 import type { TuiAction } from "../state/types"
+
+/** A spyable no-op HookRunner so tests can assert lifecycle-event firing. */
+function spyHookRunner(): jest.Mocked<HookRunner> {
+  return {
+    onCapture: jest.fn(),
+    onStop: jest.fn(),
+    onPrompt: jest.fn(),
+    preToolUse: jest.fn(async (_toolName: string, _input: unknown) => ({ deny: false })),
+    onSessionStart: jest.fn(),
+    onSessionEnd: jest.fn(),
+    onPermissionRequest: jest.fn(),
+    onPermissionDenied: jest.fn(),
+  }
+}
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -16,10 +31,19 @@ const result = (): RunAndCaptureResult => ({
   a2uiSurfaceOrder: [],
 })
 
-function harness(opts: { isLive?: boolean } = {}) {
+function harness(
+  opts: {
+    isLive?: boolean
+    sessionId?: string
+    hooks?: HookRunner
+    /** Custom `session.send` — receives the gate responder so a test can simulate
+     * a mid-turn tool permission request. */
+    sendImpl?: (prompt: string, o: { gate: (req: unknown) => Promise<unknown> }) => Promise<unknown>
+  } = {}
+) {
   const actions: TuiAction[] = []
   const dispatch = (a: TuiAction) => actions.push(a)
-  const send = jest.fn(async () => result())
+  const send = jest.fn(opts.sendImpl ?? (async () => result()))
   const close = jest.fn(async () => {})
   const setPermissionMode = jest.fn(async () => {})
   const create: CreateSession = jest.fn(() => ({
@@ -47,14 +71,20 @@ function harness(opts: { isLive?: boolean } = {}) {
     store: { restore },
   }
   const createCheckpoints = jest.fn(() => capture as never)
+  // Inject an off-disk MCP-log file sink so the `mcp_log`/`log` capture branch
+  // never writes to the real `~/.cognia/logs/mcp.log` in tests.
+  const appendMcpLog = jest.fn()
   const { result: hook } = renderHook(() =>
     useAgentSession({
       config,
       dispatch,
+      ...(opts.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),
       createSession: create,
       subscribeSidecar,
       requestCompact,
       createCheckpoints,
+      appendMcpLog,
+      ...(opts.hooks ? { createHooks: () => opts.hooks as HookRunner } : {}),
     })
   )
   return {
@@ -67,6 +97,7 @@ function harness(opts: { isLive?: boolean } = {}) {
     requestCompact,
     capture,
     restore,
+    appendMcpLog,
     fireSidecar: (p: unknown) => sidecarHandler?.(p),
     api: () => hook.current,
   }
@@ -88,6 +119,27 @@ describe("useAgentSession", () => {
       "TURN_START",
       "TURN_COMMIT",
     ])
+  })
+
+  it("binds the lazily-created session to the app session id (so /export finds the transcript)", async () => {
+    // Without this binding the runner mints its OWN id and writes the transcript
+    // there, while /export reads under the app id → "no turns".
+    const h = harness({ sessionId: "app-session-1" })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.create).toHaveBeenCalledWith({
+      config: expect.anything(),
+      sessionId: "app-session-1",
+    })
+  })
+
+  it("omits sessionId when the app id is unknown (runner mints its own)", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.create).toHaveBeenCalledWith({ config: expect.anything() })
   })
 
   it("interactive turns disable the wall-clock cap (timeoutMs: 0)", async () => {
@@ -129,6 +181,155 @@ describe("useAgentSession", () => {
     expect(h.actions.some((a) => a.type === "SET_RATE_LIMITS")).toBe(false)
   })
 
+  it("captures an mcp_log event into MCP_LOG_APPEND and the file sink", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({
+        type: "mcp_log",
+        ts: 5,
+        level: "info",
+        source: "stderr",
+        server: "github",
+        message: "connected",
+      })
+    })
+    const appended = h.actions.find((a) => a.type === "MCP_LOG_APPEND")
+    expect(appended).toMatchObject({
+      entry: { level: "info", server: "github", message: "connected", source: "stderr" },
+    })
+    expect(h.appendMcpLog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "connected", server: "github" })
+    )
+  })
+
+  it("captures the generic sidecar log stream tagged source=sidecar", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({ type: "log", level: "warn", message: "hook slow" })
+    })
+    expect(h.actions.find((a) => a.type === "MCP_LOG_APPEND")).toMatchObject({
+      entry: { level: "warn", message: "hook slow", source: "sidecar" },
+    })
+  })
+
+  it("raises a throttled error toast on an mcp_log error (once per burst)", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({
+        type: "mcp_log",
+        level: "error",
+        source: "stderr",
+        server: "db",
+        message: "boom",
+      })
+      h.fireSidecar({
+        type: "mcp_log",
+        level: "error",
+        source: "stderr",
+        server: "db",
+        message: "again",
+      })
+    })
+    const toasts = h.actions.filter(
+      (a) => a.type === "TOAST_PUSH" && a.message === 'MCP server "db" error'
+    )
+    // Both lines are captured, but only ONE toast fires for the burst.
+    expect(h.actions.filter((a) => a.type === "MCP_LOG_APPEND")).toHaveLength(2)
+    expect(toasts).toHaveLength(1)
+  })
+
+  it("does not toast for a non-error mcp_log or a generic sidecar log", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({ type: "mcp_log", level: "warn", source: "stderr", message: "slow" })
+      h.fireSidecar({ type: "log", level: "error", message: "internal only" })
+    })
+    expect(h.actions.some((a) => a.type === "TOAST_PUSH")).toBe(false)
+  })
+
+  it("surfaces a sidecar_exited event as SIDECAR_STATUS + an error toast", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({ type: "sidecar_exited" })
+    })
+    expect(h.actions).toContainEqual({ type: "SIDECAR_STATUS", down: true })
+    const toast = h.actions.find((a) => a.type === "TOAST_PUSH")
+    expect(toast).toMatchObject({ severity: "error", message: "Agent backend stopped" })
+  })
+
+  it("fires SessionStart when the session is lazily created", async () => {
+    const hooks = spyHookRunner()
+    const h = harness({ hooks })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(hooks.onSessionStart).toHaveBeenCalledTimes(1)
+    // A second send reuses the session — no second SessionStart.
+    await act(async () => {
+      await h.api().send("again")
+    })
+    expect(hooks.onSessionStart).toHaveBeenCalledTimes(1)
+  })
+
+  it("fires SessionEnd on /clear (drop + reset)", async () => {
+    const hooks = spyHookRunner()
+    const h = harness({ hooks })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    await act(async () => {
+      await h.api().clear("new-session")
+    })
+    expect(hooks.onSessionEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it("fires PermissionRequest on a tool ask and PermissionDenied on deny", async () => {
+    const hooks = spyHookRunner()
+    const h = harness({
+      hooks,
+      sendImpl: async (_p, o) => {
+        // Simulate the model requesting a tool mid-turn (fire-and-forget; the
+        // gate promise resolves when the UI later calls resolvePermission).
+        void o.gate({ toolName: "Bash", input: { command: "ls" } })
+        return result()
+      },
+    })
+    await act(async () => {
+      await h.api().send("run ls")
+    })
+    expect(hooks.onPermissionRequest).toHaveBeenCalledWith("Bash", { command: "ls" })
+    act(() => h.api().resolvePermission({ decision: "deny", message: "nope" }))
+    expect(hooks.onPermissionDenied).toHaveBeenCalledWith("Bash", "nope")
+  })
+
+  it("raises a rate-limit toast when a meter crosses crit, de-duped per level", () => {
+    const h = harness()
+    const critHeaders = {
+      "anthropic-ratelimit-requests-limit": "100",
+      "anthropic-ratelimit-requests-remaining": "5", // 95% used → crit
+    }
+    act(() => h.fireSidecar({ type: "usage_headers", headers: critHeaders }))
+    const first = h.actions.filter((a) => a.type === "TOAST_PUSH")
+    expect(first).toHaveLength(1)
+    expect(first[0]).toMatchObject({
+      severity: "warn",
+      message: expect.stringMatching(/Approaching/),
+    })
+    // A second reading at the same crit level must NOT re-toast.
+    act(() => h.fireSidecar({ type: "usage_headers", headers: critHeaders }))
+    expect(h.actions.filter((a) => a.type === "TOAST_PUSH")).toHaveLength(1)
+    // Escalating to exceeded toasts again (a new, more severe level).
+    act(() =>
+      h.fireSidecar({
+        type: "usage_headers",
+        headers: { ...critHeaders, "anthropic-ratelimit-requests-remaining": "0" },
+      })
+    )
+    const all = h.actions.filter((a) => a.type === "TOAST_PUSH")
+    expect(all).toHaveLength(2)
+    expect(all[1]).toMatchObject({ severity: "error" })
+  })
+
   it("clear closes the session and dispatches RESET", async () => {
     const h = harness()
     await act(async () => {
@@ -139,6 +340,58 @@ describe("useAgentSession", () => {
     })
     expect(h.close).toHaveBeenCalled()
     expect(h.actions.at(-1)).toEqual({ type: "RESET", sessionId: "ses-2" })
+  })
+
+  it("clear mid-turn aborts the in-flight turn (clean interrupt, no stray error cell)", async () => {
+    // /clear bypasses the busy gate, so it can fire while a turn streams. Killing
+    // the sidecar from under a live capture must route through the abort path
+    // (TURN_ABORTED) not the error path (TURN_ERROR), and the RESET must wipe it.
+    const actions: TuiAction[] = []
+    const dispatch = (a: TuiAction) => actions.push(a)
+    let capturedSignal: AbortSignal | undefined
+    const send = jest.fn(
+      (_p: string, opts: { signal?: AbortSignal }) =>
+        new Promise<RunAndCaptureResult>((_resolve, reject) => {
+          capturedSignal = opts.signal
+          opts.signal?.addEventListener("abort", () => reject(new Error("aborted")))
+        })
+    )
+    const create = jest.fn(() => ({
+      sessionId: "s",
+      send,
+      close: jest.fn(async () => {}),
+      isLive: () => true,
+    })) as unknown as CreateSession
+    const capture = {
+      beginTurn: jest.fn(),
+      onToolCall: jest.fn(),
+      list: jest.fn(() => []),
+      store: { restore: jest.fn() },
+    }
+    const { result: hook } = renderHook(() =>
+      useAgentSession({
+        config,
+        dispatch,
+        createSession: create,
+        subscribeSidecar: () => () => undefined,
+        requestCompact: jest.fn(async () => undefined),
+        createCheckpoints: () => capture as never,
+      })
+    )
+    let turn: Promise<unknown>
+    await act(async () => {
+      turn = hook.current.send("hi") // hangs until aborted
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await hook.current.clear("ses-2")
+      await turn
+    })
+    expect(capturedSignal?.aborted).toBe(true)
+    const types = actions.map((a) => a.type)
+    expect(types).toContain("TURN_ABORTED")
+    expect(types).not.toContain("TURN_ERROR")
+    expect(actions.at(-1)).toEqual({ type: "RESET", sessionId: "ses-2" })
   })
 
   it("switchModel and switchThinking dispatch and drop the session", async () => {
@@ -154,6 +407,18 @@ describe("useAgentSession", () => {
       await h.api().switchThinking("high")
     })
     expect(h.actions).toContainEqual({ type: "SET_THINKING", level: "high" })
+    expect(h.close).toHaveBeenCalled()
+  })
+
+  it("changeCwd dispatches SET_CWD and drops the session so the next turn relocates", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    await act(async () => {
+      await h.api().changeCwd("/new/dir")
+    })
+    expect(h.actions).toContainEqual({ type: "SET_CWD", cwd: "/new/dir" })
     expect(h.close).toHaveBeenCalled()
   })
 
@@ -341,9 +606,10 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().send("crash")
     })
-    expect(h.actions.at(-1)).toEqual({
+    expect(h.actions.at(-1)).toMatchObject({
       type: "TURN_ERROR",
       message: "sidecar exited mid-run",
+      category: "sidecar",
     })
     // The stale session is dropped — close called, gate reset.
     expect(h.close).toHaveBeenCalled()
@@ -367,9 +633,10 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().send("stall")
     })
-    expect(h.actions.at(-1)).toEqual({
+    expect(h.actions.at(-1)).toMatchObject({
       type: "TURN_ERROR",
       message: "stream idle for 60000ms",
+      category: "timeout",
     })
     expect(h.close).not.toHaveBeenCalled() // session kept
     // The next message REUSES the same session (no respawn → still one create).

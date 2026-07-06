@@ -42,7 +42,7 @@ import {
   checkAllProvidersInstallation,
   type InstallCheckResult,
 } from "@cognia/provider-core/providers/local-provider-service"
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings"
 import { useLocalProvidersScan } from "@/hooks/provider/use-local-provider"
 import { LocalProviderCard } from "./local-provider-card"
 import { LocalProviderModelManager } from "./local-provider-model-manager"

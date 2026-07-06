@@ -4,8 +4,10 @@
 import {
   mcpAdd,
   mcpAuth,
+  mcpAuthStartupNotices,
   mcpList,
   mcpLogout,
+  mcpLogsPanel,
   mcpPanel,
   mcpPresets,
   mcpPrompts,
@@ -22,6 +24,7 @@ import {
   parseFlags,
   probeAuthProvider,
 } from "./mcp-controller"
+import { createMcpProbeCache, toCacheEntry } from "./mcp-cache"
 import { patchAuthEntry } from "../../mcp/oauth-store"
 import nodeFs from "node:fs"
 import os from "node:os"
@@ -106,6 +109,126 @@ describe("mcpList", () => {
     const { dispatch, actions } = recorder()
     await mcpList({ ...base, dispatch, load: () => [] })
     expect((actions[0] as { message: string }).message).toContain("No MCP servers")
+  })
+})
+
+describe("mcpLogsPanel", () => {
+  it("opens the mcpLogs overlay with a status summary from the probe cache", () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set("fs", toCacheEntry(ok({ tools: [{ name: "read" } as never] }), 0))
+    probeCache.set("gh", toCacheEntry(ok({ status: "failed", error: "x" }), 0))
+    mcpLogsPanel({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs"), server("gh"), server("off", false)],
+    })
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "mcpLogs" },
+    })
+    const summary = (actions[0] as { overlay: { statusSummary?: string } }).overlay.statusSummary
+    expect(summary).toContain("✓ fs")
+    expect(summary).toContain("✗ gh")
+    expect(summary).toContain("○ off") // disabled server
+  })
+
+  it("opens with no summary when no servers are configured", () => {
+    const { dispatch, actions } = recorder()
+    mcpLogsPanel({ ...base, dispatch, load: () => [] })
+    expect(actions[0]).toEqual({ type: "OVERLAY_OPEN", overlay: { kind: "mcpLogs" } })
+  })
+})
+
+describe("mcpAuthStartupNotices", () => {
+  const remote = (name: string, enabled = true): McpServer =>
+    ({ id: `mcp_${name}`, name, transport: "http", config: {}, enabled }) as McpServer
+
+  it("emits a NOTICE only for enabled remote servers that need auth", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpAuthStartupNotices({
+      ...base,
+      dispatch,
+      load: () => [
+        remote("gh"), // needs_auth → notice
+        remote("ok"), // connected → silent
+        remote("off", false), // disabled → never probed
+        server("fs"), // stdio → never probed
+      ],
+      probeServer: async (s) =>
+        s.name === "gh" ? ok({ status: "needs_auth" }) : ok({ status: "connected" }),
+    })
+    expect(actions).toHaveLength(1)
+    expect((actions[0] as { type: string; message: string }).type).toBe("NOTICE")
+    expect((actions[0] as { message: string }).message).toContain('"gh"')
+    expect((actions[0] as { message: string }).message).toContain("/mcp auth gh")
+  })
+
+  it("raises a warn toast when a probe throws/fails (not an auth notice)", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpAuthStartupNotices({
+      ...base,
+      dispatch,
+      load: () => [remote("flaky")],
+      probeServer: async () => {
+        throw new Error("boom")
+      },
+    })
+    expect(actions).toHaveLength(1)
+    expect(actions[0]).toMatchObject({
+      type: "TOAST_PUSH",
+      severity: "warn",
+      message: expect.stringContaining('"flaky" failed to load'),
+    })
+  })
+
+  it("does nothing when no remote servers are configured", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpAuthStartupNotices({ ...base, dispatch, load: () => [server("fs")] })
+    expect(actions).toHaveLength(0)
+  })
+
+  it("with a cache, warms EVERY enabled server (stdio included) and still notices auth", async () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    const probed: string[] = []
+    await mcpAuthStartupNotices({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs"), remote("gh"), server("git", false)],
+      probeServer: async (s) => {
+        probed.push(s.name)
+        return s.name === "gh"
+          ? ok({ status: "needs_auth" })
+          : ok({ status: "connected", tools: [{ name: "t" }] as never })
+      },
+    })
+    // stdio "fs" probed too (cache warm), disabled "git" skipped.
+    expect(probed.sort()).toEqual(["fs", "gh"])
+    expect(probeCache.get("fs")!.status).toBe("connected")
+    expect(probeCache.get("fs")!.toolCount).toBe(1)
+    expect(probeCache.get("gh")!.status).toBe("needs_auth")
+    // The auth notice still fires for the remote server.
+    expect(actions.some((a) => (a as { message?: string }).message?.includes("/mcp auth gh"))).toBe(
+      true
+    )
+  })
+
+  it("with a cache, records a failed status when a probe throws", async () => {
+    const { dispatch } = recorder()
+    const probeCache = createMcpProbeCache()
+    await mcpAuthStartupNotices({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs")],
+      probeServer: async () => {
+        throw new Error("down")
+      },
+    })
+    expect(probeCache.get("fs")!.status).toBe("failed")
   })
 })
 
@@ -691,12 +814,114 @@ describe("mcpPanel", () => {
     expect(actions[0]).toMatchObject({ type: "NOTICE" })
   })
 
+  it("patches a failed status (and caches it) when a probe throws", async () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    await mcpPanel({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs")],
+      probeServer: async () => {
+        throw new Error("boom")
+      },
+    })
+    const patch = actions.find((a) => a.type === "MCP_STATUS_PATCH") as Extract<
+      TuiAction,
+      { type: "MCP_STATUS_PATCH" }
+    >
+    expect(patch.patch.status).toBe("failed")
+    expect(probeCache.get("fs")!.status).toBe("failed")
+  })
+
   it("opens without probing when every server is disabled", async () => {
     const { dispatch, actions } = recorder()
     await mcpPanel({ ...base, dispatch, load: () => [server("a", false)] })
     const open = actions[0] as Extract<TuiAction, { type: "OVERLAY_OPEN" }>
     expect((open.overlay as { probing: boolean }).probing).toBe(false)
     expect(actions.filter((a) => a.type === "MCP_STATUS_PATCH")).toHaveLength(0)
+  })
+
+  it("renders from the cache without re-probing when the server is warm", async () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "fs",
+      toCacheEntry({ status: "connected", tools: [{ name: "t" }], resources: [], prompts: [] }, 0)
+    )
+    let probes = 0
+    await mcpPanel({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs")],
+      probeServer: async () => {
+        probes += 1
+        return ok()
+      },
+    })
+    expect(probes).toBe(0)
+    const open = actions[0] as Extract<TuiAction, { type: "OVERLAY_OPEN" }>
+    const overlay = open.overlay as Extract<typeof open.overlay, { kind: "mcp" }>
+    expect(overlay.probing).toBe(false)
+    const row = overlay.servers.find((s) => s.name === "fs")!
+    expect(row.status).toBe("connected")
+    expect(row.toolCount).toBe(1)
+    expect(actions.filter((a) => a.type === "MCP_STATUS_PATCH")).toHaveLength(0)
+  })
+
+  it("probes and populates the cache only for un-warmed servers", async () => {
+    const { dispatch } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "warm",
+      toCacheEntry({ status: "connected", tools: [], resources: [], prompts: [] }, 0)
+    )
+    const probed: string[] = []
+    await mcpPanel({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("warm"), server("cold")],
+      probeServer: async (s) => {
+        probed.push(s.name)
+        return ok({ status: "connected", tools: [{ name: "x" }] as never })
+      },
+    })
+    expect(probed).toEqual(["cold"])
+    expect(probeCache.get("cold")!.status).toBe("connected")
+    expect(probeCache.get("cold")!.toolCount).toBe(1)
+  })
+
+  it("re-probes a server cached as failed at boot instead of sticking", async () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "fs",
+      toCacheEntry(
+        { status: "failed", error: "transient", tools: [], resources: [], prompts: [] },
+        0
+      )
+    )
+    const probed: string[] = []
+    await mcpPanel({
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs")],
+      probeServer: async (s) => {
+        probed.push(s.name)
+        return ok({ status: "connected", tools: [{ name: "x" }] as never })
+      },
+    })
+    // A boot-time transient failure is re-probed on open (not stuck as failed).
+    expect(probed).toEqual(["fs"])
+    // The row shows `pending` while re-probing, not its stale failed badge.
+    const open = actions[0] as Extract<TuiAction, { type: "OVERLAY_OPEN" }>
+    const overlay = open.overlay as Extract<typeof open.overlay, { kind: "mcp" }>
+    expect(overlay.servers.find((s) => s.name === "fs")!.status).toBe("pending")
+    // The successful re-probe flips the cache to connected.
+    expect(probeCache.get("fs")!.status).toBe("connected")
   })
 })
 
@@ -722,6 +947,43 @@ describe("mcpReconnect", () => {
     const { dispatch, actions } = recorder()
     await mcpReconnect("ghost", { ...base, dispatch, load: () => [] })
     expect(actions[0]).toMatchObject({ type: "MCP_STATUS_PATCH", patch: { status: "failed" } })
+  })
+
+  it("caches the failed status when the probe throws", async () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    await mcpReconnect("fs", {
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs")],
+      probeServer: async () => {
+        throw new Error("down")
+      },
+    })
+    expect(probeCache.get("fs")!.status).toBe("failed")
+    const patches = actions.filter((a) => a.type === "MCP_STATUS_PATCH")
+    expect((patches[patches.length - 1] as { patch: { status: string } }).patch.status).toBe(
+      "failed"
+    )
+  })
+
+  it("refreshes the cache with the fresh probe result", async () => {
+    const { dispatch } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "fs",
+      toCacheEntry({ status: "failed", tools: [], resources: [], prompts: [] }, 0)
+    )
+    await mcpReconnect("fs", {
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs")],
+      probeServer: async () => ok({ status: "connected", tools: [{ name: "x" }] as never }),
+    })
+    expect(probeCache.get("fs")!.status).toBe("connected")
+    expect(probeCache.get("fs")!.toolCount).toBe(1)
   })
 })
 
@@ -767,6 +1029,23 @@ describe("mcpToggleServerInPanel", () => {
     const { dispatch } = recorder()
     expect(await mcpToggleServerInPanel("ghost", { ...base, dispatch, load: () => [] })).toBeNull()
   })
+
+  it("drops the cache entry when a server is disabled", async () => {
+    const { dispatch } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "fs",
+      toCacheEntry({ status: "connected", tools: [], resources: [], prompts: [] }, 0)
+    )
+    await mcpToggleServerInPanel("fs", {
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("fs", true)],
+      setServerDisabled: () => {},
+    })
+    expect(probeCache.has("fs")).toBe(false)
+  })
 })
 
 describe("openMcpToolsPanel", () => {
@@ -798,6 +1077,106 @@ describe("openMcpToolsPanel", () => {
       probe: async () => [],
     })
     expect(actions[0]).toMatchObject({ type: "NOTICE" })
+  })
+
+  it("notices when the server is not found", async () => {
+    const { dispatch, actions } = recorder()
+    await openMcpToolsPanel("ghost", { ...base, dispatch, load: () => [] })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
+    expect((actions[0] as { message: string }).message).toMatch(/not found/)
+  })
+
+  it("notices when the tool probe throws", async () => {
+    const { dispatch, actions } = recorder()
+    await openMcpToolsPanel("github", {
+      ...base,
+      dispatch,
+      load: () => [server("github")],
+      probe: async () => {
+        throw new Error("nope")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(/Could not list tools/)
+  })
+
+  it("reuses cached tools instead of re-probing", async () => {
+    const { dispatch, actions } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "github",
+      toCacheEntry(
+        {
+          status: "connected",
+          tools: [{ name: "create_issue" }, { name: "list_repos" }],
+          resources: [],
+          prompts: [],
+        },
+        0
+      )
+    )
+    let probes = 0
+    await openMcpToolsPanel("github", {
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("github")],
+      probe: async () => {
+        probes += 1
+        return []
+      },
+      readDisabledTools: () => new Set(),
+    })
+    expect(probes).toBe(0)
+    const open = actions.find((a) => a.type === "OVERLAY_OPEN") as Extract<
+      TuiAction,
+      { type: "OVERLAY_OPEN" }
+    >
+    const overlay = open.overlay as Extract<typeof open.overlay, { kind: "mcpTools" }>
+    expect(overlay.tools.map((t) => t.name)).toEqual(["create_issue", "list_repos"])
+  })
+
+  it("folds a fresh tool probe into the cache when the cache is cold", async () => {
+    const { dispatch } = recorder()
+    const probeCache = createMcpProbeCache()
+    await openMcpToolsPanel("github", {
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("github")],
+      probe: async () => [{ name: "create_issue" }] as never,
+      readDisabledTools: () => new Set(),
+    })
+    expect(probeCache.get("github")!.tools.map((t) => t.name)).toEqual(["create_issue"])
+    expect(probeCache.get("github")!.toolCount).toBe(1)
+  })
+
+  it("re-probes a previously-failed server and records it connected on success", async () => {
+    const { dispatch } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "github",
+      toCacheEntry({ status: "failed", error: "boom", tools: [], resources: [], prompts: [] }, 0)
+    )
+    let probes = 0
+    await openMcpToolsPanel("github", {
+      ...base,
+      dispatch,
+      probeCache,
+      load: () => [server("github")],
+      probe: async () => {
+        probes += 1
+        return [{ name: "create_issue" }] as never
+      },
+      readDisabledTools: () => new Set(),
+    })
+    // A cached `failed` entry does not hit the connected fast-path → re-probes.
+    expect(probes).toBe(1)
+    const entry = probeCache.get("github")!
+    // A successful probe records `connected` and clears the stale error, so the
+    // badge recovers and a later open hits the fast-path.
+    expect(entry.status).toBe("connected")
+    expect(entry.error).toBeUndefined()
+    expect(entry.toolCount).toBe(1)
   })
 })
 
@@ -843,5 +1222,22 @@ describe("mcpRemove", () => {
     await mcpRemove("plugin-srv", { ...base, dispatch, removeServer: () => false, load: () => [] })
     expect(actions[0]).toMatchObject({ type: "NOTICE" })
     expect((actions[0] as { message: string }).message).toMatch(/isn't in/)
+  })
+
+  it("clears the removed server's cache entry", async () => {
+    const { dispatch } = recorder()
+    const probeCache = createMcpProbeCache()
+    probeCache.set(
+      "fs",
+      toCacheEntry({ status: "connected", tools: [], resources: [], prompts: [] }, 0)
+    )
+    await mcpRemove("fs", {
+      ...base,
+      dispatch,
+      probeCache,
+      removeServer: () => true,
+      load: () => [],
+    })
+    expect(probeCache.has("fs")).toBe(false)
   })
 })

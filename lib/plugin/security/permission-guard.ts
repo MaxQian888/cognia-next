@@ -185,6 +185,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "ipc:expose": "Expose RPC methods that other plugins can invoke over IPC",
   "auth:provide": "Register a native auth/OAuth provider other plugins can use",
   "auth:consume": "Consume sessions from a registered auth provider",
+  "pet:read": "Read the desktop pet's public state and subscribe to its events",
+  "pet:interact": "Care for the desktop pet and grant budget-capped rewards",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [

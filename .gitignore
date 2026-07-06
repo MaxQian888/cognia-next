@@ -13,6 +13,8 @@ node_modules
 
 # testing
 /coverage
+# nested coverage output from workspace packages (e.g. packages/*/coverage)
+**/coverage/
 junit.xml
 *.test.js.snap
 *.test.ts.snap
@@ -66,6 +68,8 @@ next-env.d.ts
 # docs workspace
 /docs/.next/
 /docs/.source/
+# Fumadocs static export output (`pnpm docs:build` → Cloudflare Pages, ADR-0059).
+/docs/out/
 /docs/superpowers/
 
 # Claude Code user-local state (per-user, not committed)
@@ -130,6 +134,12 @@ rustc-ice-*.txt
 .citest-map.json
 .ci/
 .codegraph/
+# Per-project code-graph index DB (written by the sidecar code-graph subsystem).
+.cognia/codegraph.db
+.cognia/codegraph.db-*
+# Code-graph tree-sitter grammars are build artifacts copied from
+# tree-sitter-wasms by scripts/build/copy-codegraph-grammars.mjs.
+sidecar/builtin-tools/code/grammars/*.wasm
 batch-final-verify-*.png
 workflows-*.png
 dist
@@ -147,3 +157,6 @@ cli/dist/
 
 # Storybook static build output
 storybook-static/
+
+# Conversation/share export artifacts (produced by /export)
+cognia-export-*.md

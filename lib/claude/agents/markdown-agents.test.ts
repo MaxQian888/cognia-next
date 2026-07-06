@@ -18,6 +18,22 @@ describe("parseMarkdownAgent", () => {
     expect(r.def.prompt).toBe("You are a meticulous code reviewer. Find real bugs.")
   })
 
+  it("parses a `provider` override (cross-provider subagent)", () => {
+    const r = parseMarkdownAgent(
+      "rv",
+      `---\ndescription: x\nprovider: anthropic\nmodel: sonnet\n---\nbody`
+    )
+    if (!("def" in r)) throw new Error("expected def")
+    expect(r.def.provider).toBe("anthropic")
+    expect(r.def.model).toBe("sonnet")
+  })
+
+  it("omits provider when absent", () => {
+    const r = parseMarkdownAgent("rv", `---\ndescription: x\n---\nbody`)
+    if (!("def" in r)) throw new Error("expected def")
+    expect(r.def.provider).toBeUndefined()
+  })
+
   it("accepts a `tools` array and `disallowed-tools`", () => {
     const md = `---
 description: x

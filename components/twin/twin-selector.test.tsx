@@ -71,6 +71,23 @@ describe("TwinSelector", () => {
     expect(onSelect).toHaveBeenCalled()
   })
 
+  it("routes the new-twin item to onGuidedCreate when provided (skips the inline dialog)", async () => {
+    const onGuidedCreate = jest.fn()
+    render(
+      <TwinSelector
+        twins={[]}
+        activeTwinId={null}
+        onSelect={jest.fn()}
+        onGuidedCreate={onGuidedCreate}
+      />
+    )
+    await userEvent.click(screen.getByRole("button", { name: /No twin selected/i }))
+    await userEvent.click(await screen.findByTestId("twin-selector-new"))
+    expect(onGuidedCreate).toHaveBeenCalledTimes(1)
+    // The inline create dialog must not open when a guided handler is wired.
+    expect(screen.queryByTestId("twin-selector-name-input")).toBeNull()
+  })
+
   it("rejects empty names in the create dialog", async () => {
     render(<TwinSelector twins={[]} activeTwinId={null} onSelect={jest.fn()} />)
     await userEvent.click(screen.getByRole("button", { name: /No twin selected/i }))
@@ -176,7 +193,8 @@ describe("TwinSelector", () => {
     await waitFor(() => {
       expect(onAfterDelete).toHaveBeenCalledWith(
         "twin_kill",
-        expect.objectContaining({ sources: 0, chunks: 0 })
+        expect.objectContaining({ sources: 0, chunks: 0 }),
+        "Kill"
       )
     })
     // We deleted the active twin, so the selector should fall back to the

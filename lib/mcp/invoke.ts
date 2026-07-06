@@ -55,6 +55,12 @@ export interface InvokeMcpToolDeps {
   getServer?: (id: string) => Promise<McpServer | undefined>
   getPreset?: (id: string) => McpPresetLike | undefined | Promise<McpPresetLike | undefined>
   open?: typeof openMcpClient
+  /** Total connect attempts (default 2) — a cold server routinely fails its
+   * FIRST connect; one automatic retry rescues it. Tool-call errors are never
+   * retried (the tool may not be idempotent). */
+  connectAttempts?: number
+  /** Backoff before each connect retry (default 300ms). */
+  retryDelayMs?: number
 }
 
 /**
@@ -105,11 +111,28 @@ export async function invokeMcpTool(
     unknown
   >
 
-  const opened = await open(server, {
-    signal: input.signal,
-    authProvider: input.authProvider,
-    clientInfo: input.clientInfo,
-  })
+  // Connect with one automatic retry: first connections to cold servers
+  // (spawning stdio child, waking remote endpoint) routinely fail once. An
+  // aborted connect is NOT retried — the caller cancelled.
+  const attempts = Math.max(1, deps.connectAttempts ?? 2)
+  const retryDelayMs = deps.retryDelayMs ?? 300
+  let opened: Awaited<ReturnType<typeof openMcpClient>> | undefined
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0 && retryDelayMs > 0) {
+      await new Promise((r) => setTimeout(r, retryDelayMs))
+    }
+    try {
+      opened = await open(server, {
+        signal: input.signal,
+        authProvider: input.authProvider,
+        clientInfo: input.clientInfo,
+      })
+      break
+    } catch (err) {
+      if (input.signal?.aborted || attempt === attempts - 1) throw err
+    }
+  }
+  if (!opened) throw new Error(`MCP server ${serverId}: connect failed`)
   try {
     const result = await opened.client.callTool({ name: toolName, arguments: args })
     return {

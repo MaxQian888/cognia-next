@@ -77,6 +77,31 @@ export interface DispatchResult {
 export interface DispatchOptions {
   /** Override the image downscale long-edge (px). Defaults to {@link IMAGE_MAX_LONG_EDGE}. */
   imageMaxLongEdge?: number
+  /**
+   * OCR fallback for scanned / image-only PDFs whose text layer is empty or
+   * sparse. Receives the raw PDF bytes plus whatever text the normal extraction
+   * produced; returns OCR'd text to use instead, or `null` to keep the original
+   * (which is then rejected as `"empty"`). Defaults to the client-side
+   * `runAttachmentPdfOcr` (lazily imported so the OCR stack never enters the
+   * eager chat bundle). Injected by tests to avoid loading real pdfjs/tesseract.
+   */
+  pdfOcrFallback?: (bytes: Uint8Array, extractedText: string) => Promise<string | null>
+}
+
+/**
+ * Below this many non-whitespace chars a PDF's text layer is treated as scanned
+ * → trigger the OCR fallback. Mirrors {@link ATTACHMENT_OCR_MIN_TEXT_CHARS}; kept
+ * local so the heavy OCR stack stays lazily imported.
+ */
+export const PDF_OCR_TRIGGER_CHARS = 32
+
+/** Lazy default: only pulls in the OCR stack when a sparse PDF is actually hit. */
+async function defaultPdfOcrFallback(
+  bytes: Uint8Array,
+  extractedText: string
+): Promise<string | null> {
+  const { runAttachmentPdfOcr } = await import("./pdf-ocr-fallback")
+  return runAttachmentPdfOcr(bytes, extractedText)
 }
 
 /** Document types whose extracted text reads best inside a fenced code block. */
@@ -123,7 +148,8 @@ async function documentTextBlock(
   type: DocumentType,
   filename: string,
   bytes: Uint8Array,
-  id: string
+  id: string,
+  pdfOcrFallback: (bytes: Uint8Array, extractedText: string) => Promise<string | null>
 ): Promise<SendContentBlock | null> {
   // Binary formats need the raw ArrayBuffer; text formats decode to a string so
   // processDocumentAsync takes its sync fast-path.
@@ -133,9 +159,21 @@ async function documentTextBlock(
   const processed = await processDocumentAsync(id, filename, data, {
     extractEmbeddable: true,
   })
-  const text = (processed.embeddableContent || processed.content || "").trim()
+  let text = (processed.embeddableContent || processed.content || "").trim()
+
+  // Scanned / image-only PDFs yield an empty (or page-number-only) text layer.
+  // Re-run them through the client-side OCR fallback before giving up.
+  if (type === "pdf" && nonWhitespaceLength(text) < PDF_OCR_TRIGGER_CHARS) {
+    const ocrText = (await pdfOcrFallback(bytes, text))?.trim()
+    if (ocrText) text = ocrText
+  }
+
   if (!text) return null
   return { type: "text", text: formatDocumentText(type, filename, text) }
+}
+
+function nonWhitespaceLength(text: string): number {
+  return text.replace(/\s+/g, "").length
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -156,6 +194,7 @@ export async function buildAttachmentBlocks(
   options: DispatchOptions = {}
 ): Promise<DispatchResult> {
   const maxLongEdge = options.imageMaxLongEdge ?? IMAGE_MAX_LONG_EDGE
+  const pdfOcrFallback = options.pdfOcrFallback ?? defaultPdfOcrFallback
   const images: SendContentBlock[] = []
   const docs: SendContentBlock[] = []
   const rejected: AttachmentReject[] = []
@@ -184,7 +223,13 @@ export async function buildAttachmentBlocks(
     }
 
     try {
-      const block = await documentTextBlock(type, filename, decoded.bytes, `att-${index}`)
+      const block = await documentTextBlock(
+        type,
+        filename,
+        decoded.bytes,
+        `att-${index}`,
+        pdfOcrFallback
+      )
       if (block) {
         docs.push(block)
       } else {

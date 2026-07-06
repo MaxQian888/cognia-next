@@ -7,22 +7,21 @@
  *   - The network is offline, OR
  *   - The mobile outbound queue has pending rows (regardless of network).
  *
- * On non-mobile platforms it stays hidden (`usePlatform()` gate). The
- * banner self-refreshes every 15 s to pick up newly enqueued rows.
+ * On non-mobile platforms it stays hidden (`usePlatform()` gate). The queue
+ * count is read through a Dexie live query, so newly enqueued/drained rows
+ * update the banner reactively — no polling timer.
  */
 
-import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CloudOffIcon, LoaderIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
+import { useClientLiveQuery } from "@/hooks/data"
 import { useNetworkStatus } from "@/hooks/use-network-status"
 import { usePlatform } from "@/hooks/use-platform"
 import { getQueueSummary } from "@/lib/queue/outbound-queue"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
-
-const POLL_MS = 15_000
 
 export interface OfflineBannerProps {
   className?: string
@@ -32,32 +31,25 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   const t = useTranslations("mobile.offline")
   const platform = usePlatform()
   const { status, loading } = useNetworkStatus()
-  const [pending, setPending] = useState<number>(0)
-
-  useEffect(() => {
-    if (platform !== "mobile") return
-    let cancelled = false
-    const tick = async () => {
-      try {
-        const summary = await getQueueSummary()
-        if (!cancelled) setPending(summary.pending + summary.failed)
-      } catch {
-        // Best effort.
-      }
-    }
-    void tick()
-    const id = window.setInterval(() => void tick(), POLL_MS)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [platform])
+  // `getQueueSummary` reads the `mobileOutboundQueue` table, so wrapping it in
+  // a live query makes the banner react to enqueue/drain writes instead of
+  // re-counting on a fixed 15s interval. The banner only mounts inside the
+  // mobile shell, so this query never runs on web/desktop.
+  const pending = useClientLiveQuery<number>(
+    async () => {
+      const summary = await getQueueSummary()
+      return summary.pending + summary.failed
+    },
+    [],
+    0
+  )
 
   if (platform !== "mobile") return null
   if (loading) return null
 
   const offline = !status.connected
-  const showQueue = pending > 0
+  const pendingCount = pending ?? 0
+  const showQueue = pendingCount > 0
   const visible = offline || showQueue
 
   return (
@@ -65,9 +57,9 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
       {visible ? (
         <BannerBody
           offline={offline}
-          pending={pending}
+          pending={pendingCount}
           messageOffline={t("bannerOffline")}
-          messageQueue={t("queuePending", { count: pending })}
+          messageQueue={t("queuePending", { count: pendingCount })}
           className={className}
         />
       ) : null}

@@ -49,6 +49,14 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
     }
   })
 
+  it("/pet is an Action command with the subcommand hint", () => {
+    const pet = BUILTIN_SLASH_COMMANDS.find((c) => c.name === "pet")
+    expect(pet?.handler).toBeDefined()
+    expect(pet?.template).toBeUndefined()
+    expect(pet?.argumentHint).toContain("feed")
+    expect(pet?.argumentHint).toContain("treat")
+  })
+
   it("/init carries a non-empty template (no Action handler)", () => {
     const init = BUILTIN_SLASH_COMMANDS.find((c) => c.name === "init")
     expect(init?.handler).toBeUndefined()

@@ -3,7 +3,11 @@ import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { McpToolsPanel } from "./McpToolsPanel"
+import { absoluteTopLeft } from "../input/element-position"
 import type { McpPanelTool } from "../runtime/mcp-panel-model"
+
+jest.mock("../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+const mockPos = absoluteTopLeft as jest.Mock
 
 function key(input: string, k?: Record<string, boolean>) {
   act(() => __fireInput(input, k))
@@ -25,7 +29,18 @@ function wrap(props: Partial<React.ComponentProps<typeof McpToolsPanel>> = {}) {
 }
 
 describe("McpToolsPanel", () => {
-  beforeEach(() => __resetInk())
+  beforeEach(() => {
+    __resetInk()
+    mockPos.mockReturnValue(null)
+  })
+
+  it("toggles the clicked tool row (header is 2 rows)", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const { onToggle } = wrap()
+    // border(1)+title(1)+filter(1) → first item at SGR row 4 = create_issue.
+    key("[<0;5;4M")
+    expect(onToggle).toHaveBeenCalledWith("create_issue", false)
+  })
 
   it("lists the server's tools and the enabled count", () => {
     const text = wrap().container.textContent ?? ""

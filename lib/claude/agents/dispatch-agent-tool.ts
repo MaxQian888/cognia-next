@@ -117,9 +117,12 @@ export function buildDispatchAgentSchema(available: DispatchAgentAvailableSubage
 function buildDescription(available: DispatchAgentAvailableSubagent[]): string {
   const base =
     "Dispatch one or more registered subagents to work on a task and return their results. " +
-    "Use the single form `{subagentId, prompt}`, the parallel form `{dispatches:[...]}` to fan out, " +
-    'or `{collect:"<runId>"}` to await a backgrounded run. Subagents run in isolated context; ' +
-    "only their final output returns to you."
+    "To run several subagents CONCURRENTLY, put them all in ONE call's `dispatches` array " +
+    "(`{dispatches:[{subagentId, prompt}, ...]}`) — that single call fans them out in parallel and " +
+    "returns once all finish. Do NOT emit several separate dispatch_agent calls to parallelize: each " +
+    "call blocks until its subagent returns, so they run one after another. Use the single form " +
+    '`{subagentId, prompt}` for a lone subagent, or `{collect:"<runId>"}` to await a run started with ' +
+    "`background:true`. Subagents run in isolated context; only their final output returns to you."
   if (available.length === 0) return base
   const list = available.map((a) => `- ${a.id}: ${a.description}`).join("\n")
   return `${base}\n\nAvailable subagents:\n${list}`

@@ -33,6 +33,7 @@ import stagehandMcpManifest from "@/plugins/stagehand-mcp/plugin.json"
 import ripgrepToolsManifest from "@/plugins/ripgrep-tools/plugin.json"
 import skillRecorderManifest from "@/plugins/skill-recorder/plugin.json"
 import browserToolsManifest from "@/plugins/browser-tools/plugin.json"
+import petDailyQuestsManifest from "@/plugins/pet-daily-quests/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -44,6 +45,10 @@ import evalModule from "@/plugins/eval/src/index"
 import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
 import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
 import githubDeliveryModule from "@/plugins/github-delivery/src/index"
+// Namespace import: the connectors bridge looks up the adapter factory
+// (`createGithubAdapterForBridge`) by name in the module's exports, so the
+// loader must cache the full export namespace — not just `{ default }`.
+import * as githubDeliveryExports from "@/plugins/github-delivery/src/index"
 import workflowAiModule from "@/plugins/workflow-ai/src/index"
 import agentTeamExamplesModule from "@/plugins/agent-team-examples/src/index"
 import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
@@ -64,12 +69,21 @@ import stagehandMcpModule from "@/plugins/stagehand-mcp/src/index"
 import ripgrepToolsModule from "@/plugins/ripgrep-tools/src/index"
 import skillRecorderModule from "@/plugins/skill-recorder/src/index"
 import browserToolsModule from "@/plugins/browser-tools/src/index"
+import petDailyQuestsModule from "@/plugins/pet-daily-quests/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
   path: string
   compatibilityDiagnostics: ExtensionCompatibilityDiagnostic[]
   load?: () => Promise<PluginDefinition>
+  /**
+   * Full module export namespace, cached by the loader as the plugin's
+   * `moduleExports`. Set this only for built-ins whose manifest declares
+   * `connectors[]` (or any other bridge that resolves a factory by name from
+   * exports) — otherwise the loader falls back to `{ default: definition }`,
+   * which drops the named factory functions and the bridge skips them.
+   */
+  moduleExports?: Record<string, unknown>
 }
 
 function resolvePluginModule(mod: unknown): PluginDefinition {
@@ -157,6 +171,11 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://github-delivery",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(githubDeliveryModule),
+    // github-delivery declares a `connectors[]` factory; the loader must keep
+    // the named export (`createGithubAdapterForBridge`) so connectors-bridge
+    // can resolve it. Without this it caches only `{ default }` and the bridge
+    // logs "factory … not found in exports — skipping".
+    moduleExports: githubDeliveryExports as unknown as Record<string, unknown>,
   },
   {
     manifest: builtinManifest(workflowAiManifest, workflowAiModule),
@@ -317,6 +336,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-browser-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(browserToolsModule),
+  },
+  {
+    manifest: builtinManifest(petDailyQuestsManifest, petDailyQuestsModule),
+    path: "builtin://pet-daily-quests",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(petDailyQuestsModule),
   },
 ]
 

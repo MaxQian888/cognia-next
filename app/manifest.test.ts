@@ -10,8 +10,8 @@ describe("manifest()", () => {
   it("returns a complete MetadataRoute.Manifest with PWA-installable shape", () => {
     const m = manifest()
 
-    expect(m.name).toBe("cognia")
-    expect(m.short_name).toBe("cognia")
+    expect(m.name).toBe("Cognia")
+    expect(m.short_name).toBe("Cognia")
     expect(m.display).toBe("standalone")
     expect(m.start_url).toBe("/")
     expect(m.theme_color).toBeTruthy()

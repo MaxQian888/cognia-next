@@ -20,6 +20,8 @@ export type RoutingStrategy =
   | "speed" // Prioritize fast response times
   | "balanced" // Balance between quality, cost, and speed
   | "adaptive" // Learn from user feedback
+  | "least-busy" // Route to the deployment with the fewest in-flight turns
+  | "difficulty" // RouteLLM-lite: strong/weak model by scored prompt difficulty
 
 // Model tier for routing decisions
 export type ModelTier = "fast" | "balanced" | "powerful" | "reasoning"

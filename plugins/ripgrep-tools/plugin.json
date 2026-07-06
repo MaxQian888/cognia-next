@@ -76,6 +76,10 @@
     "browser": {
       "availability": "blocked",
       "reason": "CLI tools spawn host processes; desktop only."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "CLI tools spawn host processes — unavailable on mobile."
     }
   }
 }

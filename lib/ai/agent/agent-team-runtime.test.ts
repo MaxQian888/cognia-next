@@ -47,6 +47,21 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
 }))
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 
+// Stub the twin runtime so the per-run twin block is observable without the
+// vector store / Dexie. Returning no twinDeps keeps every non-twin test's
+// behavior identical to before this feature existed.
+jest.mock("./team/twin-context", () => ({
+  resolveTeamTwinRuntime: jest.fn(async () => ({ availableTwins: [] })),
+  applyTeammateTwinContext: jest.fn(async (i: { baseSystemPrompt: string }) => ({
+    systemPrompt: i.baseSystemPrompt,
+    applied: false,
+  })),
+  searchTwinKnowledge: jest.fn(async () => ({ hits: [], degraded: false })),
+  gatherTeamTwins: jest.fn(async () => []),
+}))
+import { resolveTeamTwinRuntime } from "./team/twin-context"
+const resolveTeamTwinRuntimeMock = resolveTeamTwinRuntime as jest.Mock
+
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import {
   runTeamLifecycle,
@@ -389,6 +404,26 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/runLeadPlanning/)
   })
+
+  it("headless origin fails fast BEFORE running lead planning (no token burn)", async () => {
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/headless \(origin=scheduler\)/)
+    // The whole point: planning must never have been invoked.
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("an IM triggeredFrom implies the headless policy without an explicit origin", async () => {
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/headless \(origin=im\)/)
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
 })
 
 describe("runTeamLifecycle — ultracode orchestration", () => {
@@ -456,5 +491,49 @@ describe("runTeamLifecycle — ultracode orchestration", () => {
     const result = await runTeamLifecycle("team-1", { ...deps, ultracodeOverride: "off" })
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/No tasks/)
+  })
+})
+
+describe("runTeamLifecycle — Employee Digital Twin runtime gating", () => {
+  beforeEach(() => {
+    resolveTeamTwinRuntimeMock.mockClear()
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+  })
+
+  it("builds twin deps (no recruit list) when a worker is twin-bound", async () => {
+    const twinWorker = worker("w1")
+    twinWorker.config = { twinId: "tw1" }
+    await runTeamLifecycle("team-1", buildDeps(baseTeam, [task("t1")], [lead, twinWorker]))
+    expect(resolveTeamTwinRuntimeMock).toHaveBeenCalledWith({
+      buildDeps: true,
+      listAvailable: false,
+    })
+  })
+
+  it("builds deps + lists recruitable twins when knowledgeTwinIds + adaptiveReplan are set", async () => {
+    const team = {
+      ...baseTeam,
+      config: {
+        ...baseTeam.config,
+        knowledgeTwinIds: ["tw1"],
+        adaptiveReplan: { enabled: true },
+      },
+    } as AgentTeam
+    await runTeamLifecycle("team-1", buildDeps(team, [task("t1")], [lead, worker("w1")]))
+    expect(resolveTeamTwinRuntimeMock).toHaveBeenCalledWith({
+      buildDeps: true,
+      listAvailable: true,
+    })
+  })
+
+  it("skips twin deps entirely for a plain team", async () => {
+    await runTeamLifecycle("team-1", buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]))
+    expect(resolveTeamTwinRuntimeMock).toHaveBeenCalledWith({
+      buildDeps: false,
+      listAvailable: false,
+    })
   })
 })

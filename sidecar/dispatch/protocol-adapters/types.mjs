@@ -21,6 +21,7 @@
  * @property {Record<string, unknown>} [modelParams]  AI SDK v6 call-option names.
  * @property {Record<string, unknown>} [tools]    Native AI SDK tools (declarative adapters ignore; documented v1 gap).
  * @property {number} [maxSteps]                  Agentic step cap when tools are present.
+ * @property {{effort?: string, maxThinkingTokens?: number}} [reasoning]  Reasoning controls.
  * @property {AdapterCredentials} [credentials]
  * @property {Function} [streamTextFn]            Injected `streamText` (tests).
  * @property {Function} [fetchFn]                 Injected `fetch` (tests; declarative adapters).

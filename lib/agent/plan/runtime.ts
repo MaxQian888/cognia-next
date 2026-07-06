@@ -195,6 +195,25 @@ class PlanRuntime {
     return updated
   }
 
+  /**
+   * "No, keep planning" (Claude Code parity): defer the approval decision
+   * WITHOUT destroying the plan. Only from `awaiting_approval` → back to
+   * `draft`; the approval dock's `awaiting_approval` gate hides it, the plan
+   * survives for refinement / a later re-submit, and the next `createPlan`
+   * (a fresh ExitPlanMode) cancels the lingering draft via the one-open-plan
+   * invariant. Contrast `rejectPlan`, which is the destructive discard.
+   */
+  async keepPlanning(planId: string, feedback?: string): Promise<AgentPlan | null> {
+    const current = await getPlan(planId)
+    if (!current) return null
+    if (current.status !== "awaiting_approval") return current
+    await updatePlan(planId, { status: "draft", generationId: crypto.randomUUID() })
+    await appendPlanEvent({ planId, kind: "deferred", payload: { kind: "deferred", feedback } })
+    const updated = (await getPlan(planId)) ?? null
+    void emitPlanStatus(updated)
+    return updated
+  }
+
   /** Reject a pending plan → `cancelled`, recording optional feedback. */
   async rejectPlan(planId: string, feedback?: string): Promise<AgentPlan | null> {
     const current = await getPlan(planId)

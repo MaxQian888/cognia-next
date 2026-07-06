@@ -7,7 +7,7 @@
 
 import "fake-indexeddb/auto"
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("motion/react", () => {
@@ -217,9 +217,72 @@ describe("TwinSourcesTab", () => {
     await screen.findByText("Doomed")
     const deleteBtn = screen.getByRole("button", { name: /^Delete$/i })
     await userEvent.click(deleteBtn)
+    // Deleting now requires confirming in an alert dialog.
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Delete$/i }))
     await waitFor(async () => {
       const remaining = await listTwinSourcesByTwin("twin_alice")
       expect(remaining).toEqual([])
     })
+  })
+
+  it("keeps the source when the delete confirmation is cancelled", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/keep2.md",
+      title: "Kept",
+      bytes: 10,
+      fingerprint: "fp_kept",
+      redacted: false,
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Kept")
+    await userEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Cancel$/i }))
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    })
+    expect(await listTwinSourcesByTwin("twin_alice")).toHaveLength(1)
+  })
+
+  it("filters sources by status via the filter chips", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/p.md",
+      title: "Pending doc",
+      bytes: 10,
+      fingerprint: "fp_p",
+      redacted: false,
+      status: "pending",
+    })
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/q.md",
+      title: "Parsed doc",
+      bytes: 10,
+      fingerprint: "fp_q",
+      redacted: false,
+      status: "parsed",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Pending doc")
+    await screen.findByText("Parsed doc")
+
+    await userEvent.click(await screen.findByTestId("twin-sources-filter-parsed"))
+    await waitFor(() => {
+      expect(screen.queryByText("Pending doc")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Parsed doc")).toBeInTheDocument()
+
+    // Clicking the active chip again resets back to "all".
+    await userEvent.click(screen.getByTestId("twin-sources-filter-parsed"))
+    await screen.findByText("Pending doc")
   })
 })

@@ -84,7 +84,12 @@ export function useDexieFirstQuery<T>(
       // fire synchronously during effect dispatch.
       setIsSyncing(true)
       try {
-        await runSyncDown()
+        // Sync only the table this consumer reads — passing `only` keeps a
+        // single-table screen (e.g. the channel list) from kicking a full
+        // 10-table pull on every mount. Targeted runs intentionally bypass
+        // the orchestrator's re-entrancy gate so they aren't blocked behind
+        // an in-flight background pull.
+        await runSyncDown({ only: [table] })
       } catch {
         // runSyncDown swallows handler failures internally and persists
         // them on the per-table state; nothing more to do here.

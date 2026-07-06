@@ -20,6 +20,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
+import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings } from "@cognia/provider-types/provider"
@@ -55,13 +56,22 @@ const QuickAddProviderDialog = dynamic(
   () => import("./quick-add-provider-dialog").then((m) => m.QuickAddProviderDialog),
   { ssr: false }
 )
+const LocalProviderSettings = dynamic(
+  () => import("./local-provider-settings").then((m) => m.LocalProviderSettings),
+  { ssr: false }
+)
 
-function deriveStatus(
+export function deriveStatus(
   apiKey: string | undefined,
   baseURL: string | undefined,
-  testOk: boolean | undefined
+  testOk: boolean | undefined,
+  // "limited" means the connection was verified but with caveats (e.g.
+  // couldn't be authoritatively confirmed in this runtime) — distinct from
+  // a plain pass so the sidebar badge doesn't overclaim "Connected".
+  outcome?: "verified" | "failed" | "limited" | "success" | "error" | null
 ): SidebarProvider["status"] {
   if (!apiKey && !baseURL) return "not-configured"
+  if (outcome === "limited") return "limited"
   if (testOk === false) return "error"
   if (testOk === true) return "connected"
   return "warning"
@@ -112,16 +122,18 @@ function _SidebarSkeleton() {
 
 /* ── Custom provider inline config ──────────────────────────────────────────── */
 
+// Custom-provider credentials live on the `customProviders` row itself
+// (written via `updateCustomProvider`), NOT in the `providerSettings` map —
+// read and write the same source or the controlled inputs reset on every
+// keystroke and edits get silently mangled.
 function CustomProviderInlineConfig({
   cp,
-  settings,
   onApiKeyChange,
   onBaseURLChange,
   onDefaultModelChange,
   onEditClick,
 }: {
   cp: CustomProviderSettings
-  settings: ReturnType<typeof useProviderSettings>["providerSettings"][string] | undefined
   onApiKeyChange: (key: string) => void
   onBaseURLChange: (url: string) => void
   onDefaultModelChange: (model: string) => void
@@ -141,7 +153,7 @@ function CustomProviderInlineConfig({
         <div className="relative">
           <Input
             type={showKey ? "text" : "password"}
-            value={settings?.apiKey ?? ""}
+            value={cp.apiKey ?? ""}
             onChange={(e) => onApiKeyChange(e.target.value)}
             placeholder={t("configTab.apiKeyPlaceholder") || "Enter your API key"}
             className="pr-10"
@@ -169,17 +181,18 @@ function CustomProviderInlineConfig({
         </Label>
         <Input
           type="text"
-          value={settings?.baseURL ?? ""}
+          value={cp.baseURL ?? ""}
           onChange={(e) => onBaseURLChange(e.target.value)}
           placeholder={cp.baseURL}
         />
+        <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
       </div>
 
       {/* Default model */}
       {cp.customModels && cp.customModels.length > 0 && (
         <div className="space-y-2">
           <Label className="text-sm font-medium">{t("defaultModel") || "Default Model"}</Label>
-          <Select value={settings?.defaultModel ?? ""} onValueChange={onDefaultModelChange}>
+          <Select value={cp.defaultModel ?? ""} onValueChange={onDefaultModelChange}>
             <SelectTrigger className="h-9 text-sm">
               <SelectValue placeholder={t("selectModel") || "Select model"} />
             </SelectTrigger>
@@ -214,6 +227,7 @@ export function ProviderSettings() {
   const t = useTranslations("providers")
   const s = useProviderSettings()
   const setProviderConfig = useSettingsStore((store) => store.setProviderConfig)
+  const defaultProvider = useSettingsStore((store) => store.settings?.defaultProvider)
 
   const [search, setSearch] = useState("")
   const [categoryFilter, setCategoryFilter] = useState("all")
@@ -246,7 +260,7 @@ export function ProviderSettings() {
           id,
           name: cfg.name,
           subtitle: settings?.defaultModel ?? cfg.defaultModel,
-          status: deriveStatus(settings?.apiKey, settings?.baseURL, test?.success),
+          status: deriveStatus(settings?.apiKey, settings?.baseURL, test?.success, test?.outcome),
           isCustom: false,
           modelCount: cfg.models.length,
         }
@@ -267,7 +281,7 @@ export function ProviderSettings() {
         id,
         name: cp.customName,
         subtitle: cp.defaultModel ?? cp.baseURL,
-        status: deriveStatus(cp.apiKey, cp.baseURL, testOk),
+        status: deriveStatus(cp.apiKey, cp.baseURL, testOk, testOutcome),
         isCustom: true,
         modelCount: cp.customModels?.length ?? 0,
       })
@@ -297,6 +311,11 @@ export function ProviderSettings() {
   const selectedBuiltIn = selectedId ? PROVIDERS[selectedId] : undefined
   const selectedCustom = selectedId ? s.customProviders[selectedId] : undefined
   const isCustom = !!selectedCustom
+  // Local inference engines (Ollama, LM Studio, llama.cpp, …) are keyless and
+  // get their own purpose-built dashboard (auto-detect + model manager +
+  // setup wizard) instead of the generic cloud-provider Config/Models/Cost
+  // tabs, which assume an API key and don't apply here.
+  const isLocalProvider = selectedBuiltIn?.category === "local"
 
   const selectedSettings = selectedId ? s.providerSettings[selectedId] : undefined
   const isEnabled = isCustom
@@ -353,6 +372,28 @@ export function ProviderSettings() {
     })
   }, [selectedBuiltIn, selectedId, selectedSettings, modelsDevRow])
 
+  // Default-model options for the Config tab. Static `PROVIDERS[id].models` is a
+  // hand-curated subset; aggregators that refresh their list at runtime
+  // (OpenRouter's synced live catalog, or any provider's per-account
+  // `discoveredModels`) carry far more. Fold those dynamic sources in — deduped
+  // by id, static first — so the Default Model dropdown actually lists the models
+  // a dynamic provider can serve instead of an empty/stale set.
+  const { row: openRouterCatalogRow } = useOpenRouterCatalog()
+  const configModelOptions = useMemo<Array<{ id: string; name: string }>>(() => {
+    if (!selectedBuiltIn || !selectedId) return []
+    const byId = new Map<string, string>()
+    for (const m of selectedBuiltIn.models) byId.set(m.id, m.name)
+    for (const m of selectedSettings?.discoveredModels ?? []) {
+      byId.set(m.id, m.name ?? m.id)
+    }
+    if (selectedId === "openrouter") {
+      for (const m of openRouterCatalogRow?.models ?? []) {
+        byId.set(m.id, m.name ?? m.id)
+      }
+    }
+    return Array.from(byId, ([id, name]) => ({ id, name }))
+  }, [selectedBuiltIn, selectedId, selectedSettings?.discoveredModels, openRouterCatalogRow])
+
   // Model refresh handler
   const handleTestConnection = useCallback(async () => {
     if (!selectedId) return
@@ -395,17 +436,23 @@ export function ProviderSettings() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <ProviderOnboardingBanner />
+      <ProviderOnboardingBanner
+        onScrollToProvider={(id) => {
+          // Clear any active search/category filter so the target row is
+          // guaranteed to be mounted for the banner's own `getElementById`
+          // scroll, and select it so the detail panel opens too.
+          setSearch("")
+          setCategoryFilter("all")
+          s.setSelectedProviderId(id)
+        }}
+      />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
         {/* ── Desktop sidebar ──────────────────────────────────────────── */}
         <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
           {sidebarProviders.length === 0 && search.trim() === "" ? (
             <div className="flex-1 p-4">
-              <ProviderEmptyState
-                onAddProvider={() => setShowQuickAdd(true)}
-                onImportSettings={() => undefined}
-              />
+              <ProviderEmptyState onAddProvider={() => setShowQuickAdd(true)} />
             </div>
           ) : (
             sidebar
@@ -453,6 +500,10 @@ export function ProviderSettings() {
                 </div>
               </div>
             </div>
+          ) : isLocalProvider ? (
+            <div className="flex-1 overflow-y-auto p-3">
+              <LocalProviderSettings />
+            </div>
           ) : (
             <ProviderDetailPanel
               provider={
@@ -472,6 +523,8 @@ export function ProviderSettings() {
               }
               isEnabled={isEnabled}
               isCustom={isCustom}
+              isDefault={selectedId === defaultProvider}
+              onSetDefault={() => void s.setDefaultProvider(selectedId)}
               connectionStatus={
                 isCustom
                   ? deriveStatus(
@@ -508,7 +561,6 @@ export function ProviderSettings() {
                 isCustom && selectedCustom ? (
                   <CustomProviderInlineConfig
                     cp={selectedCustom}
-                    settings={selectedSettings}
                     onApiKeyChange={(key) =>
                       void s.updateCustomProvider(selectedId, { apiKey: key })
                     }
@@ -530,14 +582,14 @@ export function ProviderSettings() {
                         defaultModel: selectedBuiltIn.defaultModel,
                       }
                     }
-                    providerModels={selectedBuiltIn.models.map((m) => ({
-                      id: m.id,
-                      name: m.name,
-                    }))}
+                    providerModels={configModelOptions}
                     providerDashboardUrl={selectedBuiltIn.dashboardUrl}
                     providerDocsUrl={selectedBuiltIn.docsUrl}
                     onApiKeyChange={(key) => void setProviderConfig(selectedId, { apiKey: key })}
                     onBaseURLChange={(url) => void setProviderConfig(selectedId, { baseURL: url })}
+                    onApiProtocolChange={(protocol) =>
+                      void setProviderConfig(selectedId, { apiProtocol: protocol })
+                    }
                     onDefaultModelChange={(model) =>
                       void setProviderConfig(selectedId, { defaultModel: model })
                     }
@@ -562,6 +614,29 @@ export function ProviderSettings() {
                         : null
                     }
                     isTesting={!!s.testingProviders[selectedId]}
+                    onAddApiKey={(key) => {
+                      const pool = selectedSettings?.apiKeys ?? []
+                      void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
+                    }}
+                    onRemoveApiKey={(index) => {
+                      const pool = selectedSettings?.apiKeys ?? []
+                      void setProviderConfig(selectedId, {
+                        apiKeys: pool.filter((_, i) => i !== index),
+                      })
+                    }}
+                    onReorderApiKeys={(from, to) => {
+                      const pool = [...(selectedSettings?.apiKeys ?? [])]
+                      const [moved] = pool.splice(from, 1)
+                      if (moved === undefined) return
+                      pool.splice(to, 0, moved)
+                      void setProviderConfig(selectedId, { apiKeys: pool })
+                    }}
+                    onToggleRotation={(enabled) =>
+                      void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
+                    }
+                    onRotationStrategyChange={(strategy) =>
+                      void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
+                    }
                   />
                 ) : (
                   <div className="text-sm text-muted-foreground">Unknown provider type.</div>
@@ -612,7 +687,7 @@ export function ProviderSettings() {
                     )}
                   </TabsContent>
                   <TabsContent value="routing">
-                    <RoutingTab providerId={selectedId} providerName={selectedName} />
+                    <RoutingTab />
                   </TabsContent>
                   <TabsContent value="health">
                     <HealthTab
@@ -641,7 +716,14 @@ export function ProviderSettings() {
 
       {/* ── Dialogs ────────────────────────────────────────────────────── */}
       {showQuickAdd && (
-        <QuickAddProviderDialog open={showQuickAdd} onOpenChange={setShowQuickAdd} />
+        <QuickAddProviderDialog
+          open={showQuickAdd}
+          onOpenChange={setShowQuickAdd}
+          onAddCustom={() => {
+            setEditingCustomId(null)
+            setCustomDialogOpen(true)
+          }}
+        />
       )}
       {customDialogOpen && (
         <CustomProviderDialog

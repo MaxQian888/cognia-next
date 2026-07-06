@@ -23,6 +23,7 @@ import {
   type PetBridgeInteractionKind,
   type PetBridgeMessage,
 } from "./cross-window-protocol"
+import type { PetConsoleTab } from "@/lib/pet/console-tabs"
 
 /** Minimal `BroadcastChannel` surface for DI in tests. */
 export interface BroadcastChannelLike {
@@ -49,6 +50,8 @@ export interface MainPetBridgeDeps {
   store?: PetStoreApi
   /** DI seam for the user-event replay (defaults to the real pet event bus). */
   emit?: typeof emitPetEvent
+  /** Popup asked to open the /pet console at a tab (main window routes). */
+  onOpenConsole?: (tab: PetConsoleTab) => void
 }
 
 /**
@@ -104,6 +107,8 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
       })
     } else if (msg.t === "request-state") {
       broadcastSnapshot()
+    } else if (msg.t === "open-console") {
+      deps.onOpenConsole?.(msg.tab)
     }
   }
 
@@ -129,6 +134,8 @@ export interface OverlayPetBridge {
   dispose: () => void
   /** Post an interaction to the main window; talk may carry typed text. */
   sendInteraction: (kind: PetBridgeInteractionKind, text?: string) => void
+  /** Ask the main window to open the /pet console at `tab`. */
+  sendOpenConsole: (tab: PetConsoleTab) => void
 }
 
 /**
@@ -139,7 +146,7 @@ export interface OverlayPetBridge {
 export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayPetBridge {
   const channel = createChannel(deps.channel)
   if (!channel) {
-    return { dispose: () => {}, sendInteraction: () => {} }
+    return { dispose: () => {}, sendInteraction: () => {}, sendOpenConsole: () => {} }
   }
   const store = deps.store ?? usePetStore
 
@@ -183,5 +190,6 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
         kind,
         ...(text && text.trim() ? { text: text.slice(0, 500) } : {}),
       }),
+    sendOpenConsole: (tab) => post(channel, { v: 1, t: "open-console", tab }),
   }
 }

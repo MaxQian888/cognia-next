@@ -1,0 +1,22 @@
+{
+  "backAria": "Back to settings",
+  "disabled": "Off",
+  "empty": "No external agents are configured on the paired desktop yet.",
+  "enabled": "On",
+  "enabledAria": "Enable {name}",
+  "intro": "Manage the external agents configured on your paired desktop. Toggle each one on or off and pick the permission mode the desktop runs it under.",
+  "loadFailed": "Could not load external agents: {message}",
+  "loading": "Loading external agents…",
+  "manageOnDesktop": "Adding, removing and editing external agents (command, endpoint, retries) is done on the desktop. Open Settings → External Agents there.",
+  "permissionAcceptEdits": "Accept edits",
+  "permissionBypass": "Bypass permissions",
+  "permissionDefault": "Default",
+  "permissionDontAsk": "Don't ask",
+  "permissionLabel": "Permission mode",
+  "permissionModeAria": "Permission mode for {name}",
+  "permissionPlan": "Plan",
+  "sectionTitle": "Configured agents",
+  "title": "External agents",
+  "toggleFailed": "Could not queue the change: {message}",
+  "updateQueued": "Change queued for the desktop."
+}

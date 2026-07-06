@@ -79,10 +79,16 @@ import {
   detectTrigger,
   spliceToken,
   type ComposerTrigger,
+  type MentionableWorkflowElement,
   type MentionMode,
 } from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
+import { useMarkdownChatAgents } from "@/hooks/chat/use-markdown-chat-agents"
+import { useMentionableSkills } from "@/hooks/chat/use-mentionable-skills"
+import { useMentionablePresets } from "@/hooks/chat/use-mentionable-presets"
+import { usePluginSlashCommands } from "@/hooks/chat/use-plugin-slash-commands"
+import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
 import { FolderPickerButton } from "./composer/folder-picker-button"
@@ -122,6 +128,7 @@ import { runSegments } from "@/lib/slash-commands/run-segments"
 import { useComposerCommandStore } from "@/stores/chat/composer-command-store"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
 import { ComposerGhostText } from "./composer/composer-ghost-text"
+import { MobileGhostAccept } from "./composer/mobile-ghost-accept"
 import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
@@ -146,11 +153,13 @@ import type { OcrResult } from "@/types/ocr"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { SkillChipRow } from "./composer/skill-chip-row"
 import { GoalStatusPill } from "@/components/goal/goal-status-pill"
+import { PlanModeBanner } from "@/components/chat/plan-mode-banner"
 import { LoopStatusPill } from "@/components/loop/loop-status-pill"
 import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
 import { ScreenshotButton } from "./composer/screenshot-button"
+import { CameraCaptureButton } from "./composer/camera-capture-button"
 import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
@@ -185,6 +194,24 @@ interface Props {
    * was a two-tap affair. Desktop callers leave this undefined.
    */
   mobileMentionMembers?: readonly Character[]
+  /**
+   * Workflow-editor copilot integration. When set, `@` (and `@node:` /
+   * `@edge:`) open a picker over the workflow's graph elements; picking one
+   * stages a reference chip. Its presence also flips `@` mode to `"workflow"`.
+   * Undefined for every non-workflow composer.
+   */
+  workflowMention?: ComposerWorkflowMention
+}
+
+/** Copilot ⇄ workflow-editor wiring passed down from the workflow chat tab. */
+export interface ComposerWorkflowMention {
+  /** The workflow's `@`-mentionable nodes + edges (from the editor store). */
+  elements: readonly MentionableWorkflowElement[]
+  /**
+   * Transiently highlight these node ids on the canvas — driven by the picker's
+   * active row. Called with `[]` when the highlight clears.
+   */
+  onHighlight?: (ids: string[]) => void
 }
 
 /**
@@ -251,6 +278,7 @@ interface InnerProps {
   mentionables?: readonly MentionTarget[]
   placeholder?: string
   mobileMentionMembers?: readonly Character[]
+  workflowMention?: ComposerWorkflowMention
 }
 
 function ComposerInner(props: InnerProps) {
@@ -258,6 +286,7 @@ function ComposerInner(props: InnerProps) {
   const tAttach = useTranslations("chat.composer.attachments")
   const tCommands = useTranslations("chat.composer.commands")
   const tMemory = useTranslations("chat.composer.memory")
+  const tSkill = useTranslations("chat.composer.skills")
   const platform = usePlatform()
   const isDesktop = platform === "tauri"
   // Capacitor native shell. Mobile gets a Claude-style vertical layout
@@ -372,10 +401,26 @@ function ComposerInner(props: InnerProps) {
   // (subagents + files), so every general-chat composer gets `@agent` without
   // each call site opting in; non-direct composers keep the file picker.
   const resolvedMentionMode: MentionMode =
-    props.mentionMode ?? (props.session?.kind === "direct" ? "combined" : "files")
-  // Reactive subagent list for the combined panel (no-op cost otherwise).
+    props.mentionMode ??
+    (props.workflowMention ? "workflow" : props.session?.kind === "direct" ? "combined" : "files")
+  const isCombinedMention = resolvedMentionMode === "combined"
+  // Reactive subagent list for the combined panel (no-op cost otherwise). The
+  // built-in/plugin/template subagents union with on-disk markdown agents
+  // (`.cognia/agents/*.md`) so both surface in the `@` "Agents" section.
   const mentionableSubagents = useMentionableSubagents()
-  const chatAgents = resolvedMentionMode === "combined" ? mentionableSubagents : undefined
+  const markdownAgents = useMarkdownChatAgents(cwd, isCombinedMention)
+  const chatAgents = useMemo(() => {
+    if (!isCombinedMention) return undefined
+    if (markdownAgents.length === 0) return mentionableSubagents
+    // Dedupe by id; the reactive (built-in/plugin/template) list wins so a
+    // markdown file can't shadow a registered subagent's display metadata.
+    const seen = new Set(mentionableSubagents.map((t) => t.id))
+    return [...mentionableSubagents, ...markdownAgents.filter((t) => !seen.has(t.id))]
+  }, [isCombinedMention, mentionableSubagents, markdownAgents])
+  // `@skill:` / `@preset:` namespaced mention sources (general chat only).
+  const chatSkills = useMentionableSkills(isCombinedMention)
+  const chatPresets = useMentionablePresets(isCombinedMention)
+  const applyPreset = useApplyPreset()
 
   // --- Per-cwd custom slash commands ------------------------------------
   useEffect(() => {
@@ -437,17 +482,28 @@ function ComposerInner(props: InnerProps) {
     })
   }, [permissionMode, props.session, updateSession])
 
+  // Plugin-contributed slash commands (registered in the unified registry but
+  // historically never surfaced in the chat `/` picker). Reactive: a plugin
+  // enabling/disabling adds/removes its commands live.
+  const pluginCommands = usePluginSlashCommands()
+
   const slashCommands = useMemo(
-    () => [...BUILTIN_SLASH_COMMANDS, ...customCommands].filter((c) => !c.hiddenFromPicker),
-    [customCommands]
+    () =>
+      [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].filter(
+        (c) => !c.hiddenFromPicker
+      ),
+    [customCommands, pluginCommands]
   )
 
   // Name → command map for submit-time multi-command dispatch. Built from the
   // UNFILTERED list (includes `hiddenFromPicker` commands) so a typed command
   // still resolves even when it's not shown in the picker.
   const commandMap = useMemo(
-    () => new Map([...BUILTIN_SLASH_COMMANDS, ...customCommands].map((c) => [c.name, c])),
-    [customCommands]
+    () =>
+      new Map(
+        [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].map((c) => [c.name, c])
+      ),
+    [customCommands, pluginCommands]
   )
 
   // Segment the live input for the submit-time command pipeline (`runSegments`)
@@ -527,6 +583,37 @@ function ComposerInner(props: InnerProps) {
     [trigger, controller.textInput, dismissPopover]
   )
 
+  // Delete the active trigger token outright (no replacement, no trailing
+  // space) — used by the `@skill:` / `@preset:` picks, which act on the
+  // session config rather than inserting text.
+  const removeTriggerToken = useCallback(() => {
+    if (!trigger) return
+    const cur = controller.textInput.value
+    const before = cur.slice(0, trigger.tokenStart)
+    const after = cur.slice(trigger.tokenEnd)
+    const next = before + after
+    controller.textInput.setInput(next)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.setSelectionRange(before.length, before.length)
+        ta.focus()
+      }
+    })
+    dismissPopover()
+  }, [trigger, controller.textInput, dismissPopover])
+
+  // The picker's active row → a transient canvas highlight. Depend on the
+  // (memoized) onHighlight fn, not the whole props object, so this callback
+  // stays stable and the popover's highlight effect doesn't re-fire per render.
+  const workflowOnHighlight = props.workflowMention?.onHighlight
+  const handleHighlightElement = useCallback(
+    (element: MentionableWorkflowElement | null) => {
+      workflowOnHighlight?.(element ? [element.id] : [])
+    },
+    [workflowOnHighlight]
+  )
+
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
@@ -582,6 +669,32 @@ function ComposerInner(props: InnerProps) {
         // Insert the unique, no-whitespace handle so the send-time resolver can
         // match it back to the agent id 1:1.
         insertReplacement(`@${item.target.handle}`)
+      } else if (item.kind === "skill") {
+        // Picking a skill ENABLES it for the session (renders as a chip); no
+        // text is inserted. Drop the `@skill:…` token cleanly and close.
+        useChatStore.getState().toggleEphemeralSkill(item.skill.id)
+        removeTriggerToken()
+        toast.success(tSkill("enabled", { name: item.skill.name }))
+      } else if (item.kind === "preset") {
+        // Picking a preset APPLIES it to the session (system prompt + model + …)
+        // and removes the `@preset:…` token; no text inserted. `applyPreset`
+        // toasts its own success / "start a chat first" guard.
+        removeTriggerToken()
+        await applyPreset(item.preset, props.session)
+      } else if (item.kind === "wfElement") {
+        // Picking a workflow element STAGES it as a reference chip (like a
+        // skill/preset pick): no text is inserted. It is expanded to
+        // `@node:<id>` / `@edge:<id>` and cited to the agent at send time. Drop
+        // the `@` / `@node:` token cleanly, clear any picker highlight, close.
+        const el = item.element
+        useChatStore.getState().addReferencedWorkflowElement({
+          type: el.type,
+          id: el.id,
+          label: el.label,
+          kind: el.kind,
+        })
+        removeTriggerToken()
+        props.workflowMention?.onHighlight?.([])
       }
     },
     [
@@ -589,11 +702,14 @@ function ComposerInner(props: InnerProps) {
       controller.textInput,
       addReferencedPath,
       insertReplacement,
+      removeTriggerToken,
+      applyPreset,
       props,
       dismissPopover,
       noteCommandUsed,
       tCommands,
       tMemory,
+      tSkill,
     ]
   )
 
@@ -763,6 +879,25 @@ function ComposerInner(props: InnerProps) {
     noteCommandUsed,
   ])
 
+  // Accept the inline ghost-text suggestion: write the completed value back
+  // into the textarea and park the caret at the end. Shared by the keyboard
+  // (Tab) path below and the mobile tap affordance (`MobileGhostAccept`), since
+  // touch devices have no Tab key. Returns false when there was nothing to
+  // accept so the Tab keystroke can fall through to its default behavior.
+  const acceptGhost = useCallback((): boolean => {
+    const next = ghost.accept()
+    if (next === null) return false
+    controller.textInput.setInput(next)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.setSelectionRange(next.length, next.length)
+        ta.focus()
+      }
+    })
+    return true
+  }, [ghost, controller.textInput])
+
   // --- Textarea key handling --------------------------------------------
   // Local handles so the key handler depends on the specific props it reads,
   // not the whole `props` object (react-hooks/exhaustive-deps).
@@ -864,17 +999,8 @@ function ComposerInner(props: InnerProps) {
       // to existing behavior when there is no ghost to act on.
       if (!trigger && ghost.ghost) {
         if (e.key === "Tab" && !e.shiftKey) {
-          const next = ghost.accept()
-          if (next !== null) {
+          if (acceptGhost()) {
             e.preventDefault()
-            controller.textInput.setInput(next)
-            requestAnimationFrame(() => {
-              const ta = textareaRef.current
-              if (ta) {
-                ta.setSelectionRange(next.length, next.length)
-                ta.focus()
-              }
-            })
             return
           }
         }
@@ -937,6 +1063,7 @@ function ComposerInner(props: InnerProps) {
       controller.textInput,
       overlaySegments,
       ghost,
+      acceptGhost,
       inputHistoryRecall,
       sendOnEnter,
       turnStatus,
@@ -1143,7 +1270,7 @@ function ComposerInner(props: InnerProps) {
     return () => {
       cancelled = true
     }
-  }, [sessionId, draftHydratedFor, controller.textInput])
+  }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput])
 
   useEffect(() => {
     if (!persistDrafts) return
@@ -1298,6 +1425,8 @@ function ComposerInner(props: InnerProps) {
       <GoalStatusPill sessionId={sessionId} />
       {/* /loop status + controls; self-hides when no open loop. */}
       <LoopStatusPill sessionId={sessionId} />
+      {/* Plan-mode state banner; self-hides outside plan mode. */}
+      <PlanModeBanner />
       <div
         className={cn(
           // Claude-style stack on every platform when the container is narrow:
@@ -1308,7 +1437,11 @@ function ComposerInner(props: InnerProps) {
           // flex-1 textarea (basis-0) then prevents any further wrapping.
           // Mobile (Capacitor) keeps the stack at every width.
           "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
-          "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
+          "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15",
+          // Plan mode: amber tint on the input surface (with the banner above)
+          // so the read-only state is unmistakable (Claude Code parity).
+          permissionMode === "plan" &&
+            "border-amber-500/50 focus-within:border-amber-500/70 focus-within:ring-amber-500/15"
         )}
         // Opt the input surface into the shared wallpaper-aware tonality system
         // (app/globals.css §5): when a background is active the hardcoded
@@ -1364,9 +1497,14 @@ function ComposerInner(props: InnerProps) {
 
           <FolderPickerButton disabled={props.disabled} />
 
-          {isDesktop && <ScreenshotButton disabled={props.disabled} />}
+          {isDesktop ? (
+            <ScreenshotButton disabled={props.disabled} />
+          ) : isMobile ? (
+            <CameraCaptureButton disabled={props.disabled} />
+          ) : null}
 
           <VoiceTranscriptionBridge disabled={props.disabled} />
+          <ComposerAppendBridge />
         </div>
 
         <div
@@ -1385,7 +1523,9 @@ function ComposerInner(props: InnerProps) {
             ref={ghostOverlayRef}
             value={controller.textInput.value}
             ghost={ghost.ghost}
-            acceptHint={t("ghostAcceptHint")}
+            // The "Tab" hint is meaningless on touch — mobile gets the tappable
+            // accept/dismiss control below instead.
+            acceptHint={isMobile ? undefined : t("ghostAcceptHint")}
           />
           <Textarea
             aria-label={t("ariaMessage")}
@@ -1420,6 +1560,11 @@ function ComposerInner(props: InnerProps) {
             value={controller.textInput.value}
           />
           <CharCounter />
+          <MobileGhostAccept
+            visible={isMobile && !!ghost.ghost}
+            onAccept={acceptGhost}
+            onDismiss={ghost.dismiss}
+          />
         </div>
 
         <div
@@ -1542,6 +1687,10 @@ function ComposerInner(props: InnerProps) {
         anchor={containerEl}
         mentionables={props.mentionables}
         chatAgents={chatAgents}
+        chatSkills={chatSkills}
+        chatPresets={chatPresets}
+        workflowElements={props.workflowMention?.elements}
+        onHighlightElement={props.workflowMention ? handleHighlightElement : undefined}
         recentCommands={recentCommands}
         pinnedCommands={pinnedCommands}
         onTogglePin={togglePinnedCommand}
@@ -1583,6 +1732,30 @@ function VoiceTranscriptionBridge({ disabled }: { disabled?: boolean }) {
   return <VoiceControls disabled={disabled} onTranscription={onTranscription} />
 }
 
+/** Window-event name a chat-message card dispatches to append text to the composer. */
+export const COMPOSER_APPEND_EVENT = "cognia:composer-append"
+
+/**
+ * Lets components outside the PromptInput controller context (e.g. the OCR
+ * result card in the message list, gap4) append text to the composer by
+ * dispatching `COMPOSER_APPEND_EVENT` on window with `{ detail: { text } }`.
+ */
+function ComposerAppendBridge() {
+  const controller = usePromptInputController()
+  useEffect(() => {
+    const onAppend = (e: Event) => {
+      const text = (e as CustomEvent<{ text?: string }>).detail?.text
+      if (!text || !text.trim()) return
+      const cur = controller.textInput.value
+      const sep = cur && !cur.endsWith(" ") ? " " : ""
+      controller.textInput.setInput(`${cur}${sep}${text}`)
+    }
+    window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
+    return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
+  }, [controller.textInput])
+  return null
+}
+
 // --- Outer component ------------------------------------------------------
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
@@ -1597,6 +1770,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     mentionables,
     placeholder,
     mobileMentionMembers,
+    workflowMention,
   },
   ref
 ) {
@@ -1953,6 +2127,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           mentionables={mentionables}
           placeholder={placeholder}
           mobileMentionMembers={mobileMentionMembers}
+          workflowMention={workflowMention}
         />
         <BottomToolbar session={session ?? null} />
         <HelperHints />

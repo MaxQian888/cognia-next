@@ -7,6 +7,9 @@ import React from "react"
 import { render as inkRender } from "ink"
 
 import { App } from "./components/App"
+import { AppErrorBoundary } from "./components/AppErrorBoundary"
+import { defaultCrashLogger } from "./crash-log"
+import { installProcessCrashGuards } from "./process-guards"
 import { loadHistory } from "./input/history-store"
 import { mintSessionId } from "../agent/run"
 import { resolveActiveModel } from "../config/active-model"
@@ -14,6 +17,7 @@ import { resolveHome } from "../config/load"
 import { isTrusted } from "../config/trusted-folders"
 import { resolveLayoutMode, readLayoutCapability } from "./layout-mode"
 import { enterAltScreen, exitAltScreen, applyMouseMode, resetMouse } from "./screen"
+import { resetTerminalTitle } from "./terminal-title"
 import { DEFAULT_MOUSE_MODE } from "../config/schema"
 import type { CreateSession } from "./hooks/useAgentSession"
 import type { ResolvedConfig } from "../config/schema"
@@ -33,6 +37,12 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // it once the folder has been confirmed (persisted in ~/.cognia).
   const home = resolveHome(process.env, os.homedir())
   const trusted = isTrusted(home, deps.config.cwd)
+  // Crash resilience: log render throws (via the error boundary below) and
+  // async faults (uncaughtException / unhandledRejection) to ~/.cognia/logs, and
+  // keep the TUI alive on a stray rejection instead of letting Node tear it down
+  // and smear the terminal. Guards are removed in the `finally` restore below.
+  const crashLogger = defaultCrashLogger(home)
+  const uninstallCrashGuards = installProcessCrashGuards(crashLogger)
   // Pin the displayed model to the one the agent will actually run with, so the
   // banner/footer/`/model` list are in sync from the very first frame — not just
   // after the user switches providers once (which is what used to set it).
@@ -40,10 +50,13 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // Seed the composer history from the persisted store so ↑ recalls lines from
   // earlier sessions (best-effort — a missing/corrupt file yields []).
   const initialHistory = loadHistory(home)
-  // Enable bracketed paste so a multi-line / huge paste arrives atomically
-  // (the composer reassembles it via `createPasteParser` and collapses it to a
-  // placeholder). Guarded for non-TTY (piped stdout in CI). Disabled on exit so
-  // we never leave the user's terminal in bracketed-paste mode.
+  // Enable bracketed paste so a multi-line / huge paste arrives atomically.
+  // Ink ≥7 parses the `ESC[200~ … ESC[201~` span natively and, with no
+  // `usePaste` hook mounted, forwards the whole body to `useInput` as a single
+  // insert (the composer then collapses a large one to a `[Pasted …]`
+  // placeholder). We enable the mode here because Ink only emits `ESC[?2004h`
+  // itself while a `usePaste` hook is active. Guarded for non-TTY (piped stdout
+  // in CI). Disabled on exit so we never leave the terminal in paste mode.
   enableBracketedPaste()
   // Enter the alternate screen buffer BEFORE the first paint when the effective
   // layout is fullscreen, so the opening frame draws on the cleared alt buffer
@@ -61,15 +74,17 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
     applyMouseMode(config.mouse ?? DEFAULT_MOUSE_MODE)
   }
   const instance = render(
-    <App
-      config={config}
-      sessionId={sessionId}
-      createSession={deps.createSession}
-      pushHandoff={deps.pushHandoff}
-      trusted={trusted}
-      initialHistory={initialHistory}
-      altScreenPreEntered={fullscreen}
-    />,
+    <AppErrorBoundary onCrash={(err, stack) => crashLogger("render", err, stack)}>
+      <App
+        config={config}
+        sessionId={sessionId}
+        createSession={deps.createSession}
+        pushHandoff={deps.pushHandoff}
+        trusted={trusted}
+        initialHistory={initialHistory}
+        altScreenPreEntered={fullscreen}
+      />
+    </AppErrorBoundary>,
     // The App owns Ctrl+C: a single press shows the "press again to exit" hint,
     // a double press exits. Ink's built-in `exitOnCtrlC` (default true) would
     // also fire on the first press, calling `disableRawMode()` + tearing down
@@ -81,7 +96,12 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   try {
     await instance.waitUntilExit()
   } finally {
+    uninstallCrashGuards()
     disableBracketedPaste()
+    // Restore the terminal's default title (no-op if disabled / non-TTY). The
+    // App's unmount cleanup already does this on a clean exit; this is the
+    // hard-signal safety net, mirroring the alt-screen/mouse restores below.
+    if (config.terminalTitle !== false) resetTerminalTitle()
     // Restore the normal screen buffer (no-op if we never entered or already
     // exited via the App's cleanup). Idempotent at the terminal level. Disable
     // mouse tracking too, so a hard exit never leaves the terminal spewing raw

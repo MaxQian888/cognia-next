@@ -42,21 +42,23 @@ interface ShareMeta {
   ownerToken?: string
 }
 
-const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
-const KV_MIN_TTL_SECONDS = 60
+// Exported for the constants-parity test against ../../share-constants.json
+// (kept in lockstep with the Rust axum server — see that file's _comment).
+export const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
+export const KV_MIN_TTL_SECONDS = 60
 /** Hard ceiling on share lifetime so every object eventually self-expires from
  * KV even when the creator omits a TTL — bounds storage growth on a shared
  * deployment. 30 days. Overridable via the `MAX_TTL_SECONDS` env var. */
-const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60
-const CODE_LENGTH = 12
-const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+export const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60
+export const CODE_LENGTH = 12
+export const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 const OWNER_TOKEN_BYTES = 32
 
 const CORS_HEADERS: Record<string, string> = {
   // The bearer secret — not cookies — is the gate, so a wildcard origin is safe.
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Owner-Token",
   "Access-Control-Max-Age": "86400",
 }
 
@@ -267,6 +269,10 @@ async function handleStats(request: Request, env: Env, code: string): Promise<Re
   // Ownership is checked against the share's own token, so a missing share is
   // a 404 regardless of credentials (no oracle for which codes exist).
   if (!meta) return json({ error: "not found" }, 404)
+  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+    await deleteShare(env, code)
+    return json({ error: "not found" }, 404)
+  }
   if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
   return json({
     viewCount: meta.viewCount,
@@ -281,6 +287,10 @@ async function handleDelete(request: Request, env: Env, code: string): Promise<R
   // Already gone (expired / burned / never existed) → idempotent success
   // without leaking existence or requiring a credential.
   if (!meta) return new Response(null, { status: 204, headers: CORS_HEADERS })
+  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+    await deleteShare(env, code)
+    return new Response(null, { status: 204, headers: CORS_HEADERS })
+  }
   if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
   await deleteShare(env, code)
   return new Response(null, { status: 204, headers: CORS_HEADERS })

@@ -23,6 +23,25 @@
     "subheading": "通过运行中的进程与配置文件发现 FlClash、Clash Verge Rev、Mihomo、v2rayN，并探测常见回环端口。",
     "webUnsupported": "自动检测仅支持 Tauri 桌面端。"
   },
+  "ipInfo": {
+    "disabled": "IP 查询已关闭。开启后将从 ipinfo.io 获取当前公网 IP 及归属地。",
+    "enableHint": "从公共接口 ipinfo.io 获取当前公网 IP 与地理位置。请求走当前代理，因此显示的是代理的出口 IP。",
+    "enableLabel": "显示当前 IP 与位置",
+    "error": "获取 IP 信息失败：{error}",
+    "fields": {
+      "city": "城市",
+      "country": "国家/地区",
+      "hostname": "主机名",
+      "ip": "IP 地址",
+      "loc": "经纬度",
+      "org": "网络 / ASN",
+      "postal": "邮编",
+      "region": "省/州",
+      "timezone": "时区"
+    },
+    "heading": "当前公网 IP",
+    "refresh": "刷新"
+  },
   "form": {
     "addBypass": "添加",
     "bypass": "绕过列表",
@@ -51,6 +70,7 @@
   "tabs": {
     "detection": "自动检测",
     "general": "通用",
+    "ipInfo": "IP",
     "test": "连通性测试"
   },
   "test": {

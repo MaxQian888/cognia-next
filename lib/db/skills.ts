@@ -46,6 +46,8 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
       | "syncOrigin"
       | "syncFingerprint"
       | "validationErrors"
+      | "kind"
+      | "workflowId"
     >
   > & {
     /**
@@ -81,6 +83,8 @@ export async function createSkill(draft: SkillDraft): Promise<Skill> {
     syncOrigin: draft.syncOrigin ?? "frontend",
     syncFingerprint: draft.syncFingerprint,
     validationErrors: draft.validationErrors,
+    kind: draft.kind,
+    workflowId: draft.workflowId,
     usageCount: 0,
     createdAt: now,
     updatedAt: now,

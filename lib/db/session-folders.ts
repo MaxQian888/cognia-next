@@ -20,7 +20,10 @@ function newFolderId() {
 
 /** Folders for one workspace, in manual `order` (defaults to the active project). */
 export async function listFolders(projectId?: string): Promise<SessionFolder[]> {
-  const pid = await resolveScopeProjectId(projectId)
+  // liveQuery zone-safety: same as `listScopedSessions` — with an explicit pid
+  // the Dexie read must start before any `await`, or the sidebar's liveQuery
+  // loses dependency tracking and folder create/rename/delete never re-emit.
+  const pid = projectId || (await resolveScopeProjectId())
   return getDb()
     .sessionFolders.where("[projectId+order]")
     .between([pid, Dexie.minKey], [pid, Dexie.maxKey])

@@ -1,4 +1,12 @@
 {
+  "autoLock": {
+    "description": "Lock the account after a period of inactivity, requiring re-authentication to continue.",
+    "help": "After this idle time, the account locks and must be unlocked again.",
+    "label": "Lock after inactivity",
+    "off": "Never",
+    "option": "{minutes} min",
+    "title": "Auto-lock"
+  },
   "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
   "rows": {
     "deletePairing": {

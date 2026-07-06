@@ -93,7 +93,7 @@ Three modes governed by a three-layer policy stack:
 
 | Mode     | Behaviour                                                                     |
 | -------- | ----------------------------------------------------------------------------- |
-| `auto`   | Bus calls `sendPrompt` (stubbed Phase 1); final AI text enqueued as outbound. |
+| `auto`   | Bus calls `sendPrompt` through `runConnectorDigestTurn`; final AI text is enqueued as outbound. |
 | `manual` | User types reply in the Composer; `enqueueOutbound` called directly.          |
 | `draft`  | AI generates a `ConnectorDraft`; user approves or rejects via the Inbox UI.   |
 
@@ -129,7 +129,7 @@ Adapters require the Tauri desktop runtime. In web mode:
 Two new `SchedulerEventType` entries:
 
 - `connection:outbound:send` — directly enqueues an outbound job (no AI).
-- `connection:scheduled:digest` — Phase 1 stub; will invoke `sendPrompt` in Phase 1+.
+- `connection:scheduled:digest` — invokes `runConnectorDigestTurn`, which drives `sendPrompt` and enqueues the assistant reply.
 
 Both are registered as `TaskExecutor` via `lib/connectors/scheduled-outbound.ts`.
 
@@ -142,10 +142,10 @@ Both are registered as `TaskExecutor` via `lib/connectors/scheduled-outbound.ts`
 | Database schema version         | v16                    | v18 (v16 added canvas, v17 external bridge, v18 connectors)           |
 | ADR number                      | 0008                   | 0009 (0008 taken by external bridge)                                  |
 | axum version                    | 0.7                    | 0.8 (latest stable at implementation time)                            |
-| AI run in auto mode             | Full `sendPrompt`      | Phase 1 stub — records audit + placeholder job; deferred to Task 40+  |
+| AI run in auto mode             | Full `sendPrompt`      | Implemented through `runConnectorDigestTurn`; output is enqueued as outbound |
 | `segmentsToPlainText` separator | Unspecified            | `" "` (single space join across text/markdown segments)               |
 | Tauri Rust HTTP proxy           | axum                   | cognia-next `connectors_http_request` Tauri command                   |
-| Phase 1 E2E scope               | Full auto/manual/draft | Auto+manual smoke only; draft mode deferred pending real `sendPrompt` |
+| Initial E2E scope               | Full auto/manual/draft | Initial auto+manual smoke; draft and real-AI paths were completed in later runtime gates |
 
 ---
 
@@ -158,16 +158,14 @@ Both are registered as `TaskExecutor` via `lib/connectors/scheduled-outbound.ts`
 - Plugin API enables community connectors without forking.
 - Web users get a clear degradation path rather than silent failures.
 
-**Negative / deferred**
+**Current closure status**
 
-- The `auto` mode AI loop is stubbed; full `sendPrompt` → reply → outbound integration is
-  Phase 1+ work (Task 40+). **Closed in v38** — see `runConnectorDigestTurn` in
-  `lib/connectors/scheduled-outbound.ts`.
-- Attachment caching (`connectorAttachments` table) is schema-only; the fetch pipeline is
-  Phase 2. **Closed in v38** — TS dispatcher in `lib/connectors/attachment-fetcher.ts`
-  (Rust implementation in `src-tauri/src/connectors/attachments.rs` was already complete).
-- OAuth flows for Slack/Lark are partially wired; production tokens require Tauri keyring
-  integration and a hosted redirect URL. Status remains partial; see ADR-0025 follow-up.
+- The `auto` mode AI loop and `connection:scheduled:digest` path now share
+  `runConnectorDigestTurn` in `lib/connectors/scheduled-outbound.ts`.
+- Attachment caching now has the TS dispatcher in `lib/connectors/attachment-fetcher.ts`
+  and the Rust cache/fetch implementation in `src-tauri/src/connectors/attachments.rs`.
+- Slack/Lark OAuth code exchange is wired through `lib/connectors/oauth-registry.ts`
+  and the platform-specific OAuth handlers; deployment still needs a valid redirect URL.
 
 ---
 

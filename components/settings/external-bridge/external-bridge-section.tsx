@@ -67,6 +67,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { WikiRebuildCard } from "./wiki-rebuild-card"
+import { WikiLintCard } from "./wiki-lint-card"
 
 /** Phase 1 disables user-repo scopes (M3 in plan). */
 const PHASE_1_DISABLED_SCOPES: BridgeScope[] = ["wiki:user-repo", "rag:user-repo"]
@@ -148,6 +149,7 @@ export function ExternalBridgeSection() {
       <ServerStatusCard settings={settings} onChange={persist} />
       <ScopeTogglesCard settings={settings} onChange={persist} />
       <WikiRebuildCard />
+      <WikiLintCard />
       <SetupInstructionsCard settings={settings} />
       <AuditLogCard rows={auditRows ?? []} />
     </div>

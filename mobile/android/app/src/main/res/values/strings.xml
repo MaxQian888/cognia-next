@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">cognia</string>
-    <string name="title_activity_main">cognia</string>
+    <string name="app_name">Cognia</string>
+    <string name="title_activity_main">Cognia</string>
     <string name="package_name">com.cognia.mobile</string>
     <string name="custom_url_scheme">com.cognia.mobile</string>
 </resources>

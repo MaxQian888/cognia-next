@@ -13,6 +13,7 @@ import { SessionNoticeMarker, isSessionNoticeMessage } from "./message-parts/ses
 import { HookNoticeMarker, isHookNoticeMessage } from "./message-parts/hook-notice-part"
 import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
+import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
@@ -123,6 +124,9 @@ export function MessageList({
     return idx
   }, [messages, status])
 
+  // TanStack Virtual's useVirtualizer returns non-memoizable functions; the
+  // React Compiler correctly skips it. Nothing to fix on our side.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: totalCount,
     getScrollElement: () => scrollParentRef.current,
@@ -203,7 +207,12 @@ export function MessageList({
     ) : isHookNoticeMessage(m) ? (
       <HookNoticeMarker message={m} />
     ) : isMobile ? (
-      <LongPress onLongPress={() => setActionMessage(m)}>
+      <LongPress
+        onLongPress={() => {
+          void selectionFeedback()
+          setActionMessage(m)
+        }}
+      >
         <MessageRenderer
           message={m}
           characterById={characterById}

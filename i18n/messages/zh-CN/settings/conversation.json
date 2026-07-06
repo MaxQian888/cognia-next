@@ -16,6 +16,40 @@
   },
   "model": "模型",
   "provider": "服务商",
+  "sidebar": {
+    "contentSearch": {
+      "description": "不仅匹配会话标题，也匹配消息正文内容（速度较慢）。",
+      "heading": "搜索消息内容",
+      "label": "在消息内容中搜索"
+    },
+    "density": {
+      "description": "收紧行间距以容纳更多会话。",
+      "heading": "紧凑行",
+      "label": "使用紧凑会话行"
+    },
+    "description": "调整聊天侧边栏列出和搜索会话的方式。",
+    "groupByDate": {
+      "description": "将会话分组为今天 / 昨天 / 更早等时间段。",
+      "heading": "按日期分组",
+      "label": "按日期分组会话"
+    },
+    "preview": {
+      "description": "在每个会话下方显示一行最新消息预览。",
+      "heading": "消息预览",
+      "label": "显示消息预览"
+    },
+    "resetWidth": {
+      "button": "重置宽度",
+      "description": "将可拖拽的侧边栏恢复到默认宽度。",
+      "heading": "侧边栏宽度"
+    },
+    "title": "会话侧边栏",
+    "unread": {
+      "description": "在有未读消息的会话上显示计数徽标。",
+      "heading": "未读徽标",
+      "label": "显示未读徽标"
+    }
+  },
   "streaming": {
     "description": "在助手生成回复时逐 token 实时显示。关闭后仅在回复完成时整条显示。",
     "heading": "逐字流式输出",

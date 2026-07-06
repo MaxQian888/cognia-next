@@ -38,6 +38,8 @@
 //! Read-only commands skip the cache entirely: they are cheap to re-run and
 //! their idempotency is structural (same args → same result).
 
+use std::collections::HashSet;
+
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -48,11 +50,7 @@ use serde_json::Value;
 
 use crate::{
     agents::commands as agent_commands,
-    api_key::ApiKeyState,
-    claude::{
-        commands as claude_commands, mcp_test,
-        sidecar::{kill_sidecar, SidecarState},
-    },
+    claude::{commands as claude_commands, mcp_test, sidecar::kill_sidecar},
     mcp_server::McpServerState,
     skills::{install, native as skills_native, registry},
 };
@@ -99,6 +97,20 @@ impl RpcError {
         (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(Self::new("service_unavailable", detail)),
+        )
+    }
+
+    /// ADR-0059 R5 — the command's body still requires the desktop Tauri
+    /// runtime and this process is a headless `cognia-server`. Distinct code
+    /// from `service_unavailable` so clients can tell "retry later" (server
+    /// booting) from "this feature does not exist on a headless install".
+    pub(super) fn headless_unsupported(name: &str) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(Self::new(
+                "headless_unsupported",
+                format!("RPC command '{name}' is not available on a headless server (requires the desktop app)"),
+            )),
         )
     }
 
@@ -198,6 +210,24 @@ const KNOWN_COMMANDS: &[&str] = &[
     "app_settings_update",
     // Wave 2 read-only projection routed through desktop_writes_bridge.
     "twin_profile_get",
+    // ADR-0056 Wave 4 — external-agent config (Zustand/localStorage on the
+    // desktop, not Dexie). `external_agent_list` is a read-only projection;
+    // `external_agent_update` (enable/disable + permission mode) round-trips
+    // through the mobile outbound queue. Both via desktop_writes_bridge.
+    "external_agent_list",
+    "external_agent_update",
+    // ADR-0059 R11 — headless external-agent execution plane. Service-scope
+    // only (SERVICE_ONLY_COMMANDS) + SpawnPolicy allowlist + audit trail;
+    // a device JWT can never reach these.
+    "spawn_external_agent",
+    "send_to_external_agent",
+    "kill_external_agent",
+    "get_external_agent_status",
+    // ADR-0059 R12 — service-scope management of the public `/connectors`
+    // webhook ingress registry on the headless front door.
+    "connectors_register",
+    "connectors_unregister",
+    "connectors_list_adapters",
     // Mobile outbound-queue RPCs — round-trip through desktop_writes_bridge.
     // Mirror `MOBILE_OUTBOUND_COMMANDS` in `lib/db/mobile-outbound-types.ts`.
     // Spec-parity test (`spec_parity.rs`) asserts these stay in lockstep
@@ -208,6 +238,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connector_reject_draft",
     "workflow_trigger_manual",
     "twin_ingest_source",
+    // ADR-0060 — a paired device reports its platform capability manifest
+    // (camera, geolocation, …) on connect; persisted onto its `pairedDevices`
+    // row by the TS dispatch arm. Direct `transport.call` from the mobile
+    // shell — deliberately NOT part of `MOBILE_OUTBOUND_COMMANDS` (no
+    // offline-queue semantics; a stale report is refreshed on next connect).
+    "device_capabilities_report",
     // Remote Session Control — attach/detach a remote watcher + steer host
     // goal loops. All round-trip through desktop_writes_bridge. Gated by the
     // remote-control capability (see CONTROL_COMMANDS).
@@ -276,6 +312,14 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fs_search_workspace",
     "fs_read_workspace_file",
     "fs_write_workspace_file",
+    // File-tree browser: list/stat (reads) + mkdir/delete/rename/copy (writes),
+    // all root-relative + path-traversal checked.
+    "fs_list_workspace_dir",
+    "fs_stat_workspace_file",
+    "fs_create_workspace_dir",
+    "fs_delete_workspace_entry",
+    "fs_rename_workspace_entry",
+    "fs_copy_workspace_entry",
     // ── Terminal ────────────────────────────────────────────────────────────
     // Live PTY stays on `/ws/v1/terminal`; these are request/response only.
     // `terminal_exec` is a one-shot command runner (capture stdout/stderr/exit).
@@ -304,6 +348,19 @@ const KNOWN_COMMANDS: &[&str] = &[
     "workflow_cancel_run",
     "workflow_schedule_pause",
     "workflow_schedule_resume",
+    // ── Workflow approval gate (ADR-0061 P2) ────────────────────────────────
+    // Pending `action.approval.request` entries live in the renderer's
+    // in-memory registry — round-trip through desktop_writes_bridge.
+    // `workflow_approval_respond` resolves a run's HITL gate, so it is
+    // control-gated; the caller device id is injected server-side.
+    "workflow_approval_list",
+    "workflow_approval_respond",
+    // ── Remote step execution (ADR-0061 P3) ─────────────────────────────────
+    // A paired device answers a desktop-issued `workflow://step-execute`
+    // request with a (chunked) result. Only meaningful for a pending request
+    // addressed to that device — the TS broker verifies the JWT-injected
+    // caller against the request's target, so no control gate is needed.
+    "workflow_step_result",
     // ── Twin source CRUD + job control (ADR-0003) ───────────────────────────
     "twin_delete",
     "twin_source_list",
@@ -368,6 +425,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "message_get_by_session",
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
+    // ADR-0056 Wave 4 — read-only external-agent list projection.
+    "external_agent_list",
+    // ADR-0059 R11 — read-only status probe on the headless exec backend.
+    "get_external_agent_status",
+    // ADR-0059 R12 — read-only projection of the webhook ingress registry.
+    "connectors_list_adapters",
     // Read-only remote-control capability probe (drives the mobile
     // computer-use consent sheet). Pure read of the process-global allow list.
     "companion_can_control",
@@ -389,14 +452,18 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "default_export_dir",
     "fs_search_workspace",
     "fs_read_workspace_file",
+    // File-tree browser reads — same (root, relPath) returns the same listing/stat.
+    "fs_list_workspace_dir",
+    "fs_stat_workspace_file",
     // Terminal session listings.
     "terminal_list_all",
     "terminal_list_for_project",
     // Plugin registry reads.
     "plugin_list",
     "plugin_runtime_snapshot",
-    // Workflow run listing.
+    // Workflow run listing + pending-approval projection.
     "workflow_run_list",
+    "workflow_approval_list",
     // Twin reads.
     "twin_source_list",
     "twin_job_status",
@@ -458,6 +525,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     "ensure_dir",
     "ensure_dir_confined",
     "fs_write_workspace_file",
+    // File-tree browser writes — mutate the workspace, so remote-control gated.
+    "fs_create_workspace_dir",
+    "fs_delete_workspace_entry",
+    "fs_rename_workspace_entry",
+    "fs_copy_workspace_entry",
     // Raw absolute-path *read* — has no sandbox/root confinement, so it can
     // read any file the desktop user can (`~/.ssh/id_rsa`, `~/.aws/credentials`,
     // keyring-backed stores, …). The write side above is gated; gating the read
@@ -476,9 +548,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     "plugin_backup_create",
     "plugin_backup_restore",
     "plugin_backup_delete",
-    // Workflow destructive ops.
+    // Workflow destructive ops + the HITL approval gate (approving a
+    // workflow decision steers execution — same elevation as goal_*).
     "workflow_delete",
     "workflow_cancel_run",
+    "workflow_approval_respond",
     // Twin destructive ops.
     "twin_delete",
     "twin_source_delete",
@@ -494,9 +568,72 @@ const CONTROL_COMMANDS: &[&str] = &[
     "backup_import",
 ];
 
+/// O(1) membership mirrors of the command allowlists above. The `&[&str]`
+/// arrays stay the source of truth (the spec-parity and source-scan tests
+/// iterate them), while these hashed sets are consulted on the per-request
+/// hot path — classifying a command no longer linear-scans ~200 entries up
+/// to three times per RPC.
+static KNOWN_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| KNOWN_COMMANDS.iter().copied().collect());
+static READ_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| READ_ONLY_COMMANDS.iter().copied().collect());
+static CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| CONTROL_COMMANDS.iter().copied().collect());
+
 /// True when `name` requires the remote-control capability.
 fn is_control_command(name: &str) -> bool {
-    CONTROL_COMMANDS.contains(&name)
+    CONTROL_COMMANDS_SET.contains(name)
+}
+
+/// Commands whose TS dispatch arm needs the authenticated caller's device id
+/// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
+/// exactly these names — see [`inject_caller_device_id`].
+const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
+    "workflow_trigger_manual",
+    "device_capabilities_report",
+    "workflow_approval_respond",
+    "workflow_step_result",
+];
+
+/// Inject (and overwrite) `callerDeviceId` into `args` for the commands in
+/// [`CALLER_DEVICE_ID_COMMANDS`]. Overwriting is the point: the value comes
+/// from the verified JWT, so a device can never claim another's identity by
+/// pre-filling the field. Non-object payloads pass through untouched (the TS
+/// arm rejects them anyway).
+fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Value {
+    if CALLER_DEVICE_ID_COMMANDS.contains(&name) {
+        if let Value::Object(map) = &mut args {
+            map.insert(
+                "callerDeviceId".to_string(),
+                Value::String(device_id.to_string()),
+            );
+        }
+    }
+    args
+}
+
+/// RCE-grade commands that ONLY the headless brain's service token may call
+/// (ADR-0059 W4/D6). A device JWT presenting one of these is rejected with
+/// 403. The external-agent arms are remote code execution by construction —
+/// every decision is also written to the audit log. R12 adds the
+/// `connectors_*` management arms.
+const SERVICE_ONLY_COMMANDS: &[&str] = &[
+    "spawn_external_agent",
+    "send_to_external_agent",
+    "kill_external_agent",
+    "get_external_agent_status",
+    // ADR-0059 R12 — the brain manages the public webhook ingress registry.
+    "connectors_register",
+    "connectors_unregister",
+    "connectors_list_adapters",
+];
+
+static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| SERVICE_ONLY_COMMANDS.iter().copied().collect());
+
+/// True when `name` may be invoked only with a `"service"`-scope JWT.
+fn is_service_only_command(name: &str) -> bool {
+    SERVICE_ONLY_COMMANDS_SET.contains(name)
 }
 
 /// Public read-only accessor for the remote-control command set. Used by
@@ -573,6 +710,77 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "ttsPitch",
     "ttsVolume",
     "ttsAutoPlay",
+    // ADR-0056 (mobile settings parity) — the remaining "portable" appearance
+    // keys that already sync desktop→phone (`CROSS_PLATFORM_SETTING_KEYS`) but
+    // were not yet writable back, so the embedded `<AppearanceSection/>` on
+    // `/me/appearance` silently 400'd on those tabs. All are non-credential
+    // presentation prefs.
+    "autoMode",
+    "density",
+    "radius",
+    "motion",
+    "typographyExt",
+    "a11y",
+    // ADR-0056 — agent-default preferences. Editable from the phone's
+    // `/me/agent` page only in PAIRED mode (the standalone engine has no agent
+    // loop). `permissionMode` escalations are additionally biometric-gated on
+    // the client (decision D4); the server still only checks allowlist
+    // membership here. None are credentials or transport config.
+    "permissionMode",
+    "defaultSystemPrompt",
+    "defaultMaxThinkingTokens",
+    "bareMode",
+    "debugMode",
+    "briefMode",
+    // ADR-0056 (Wave 2) — conversation completeness. `composerBehavior` and
+    // `streamPartialMessages` are phone-composer / render prefs; `compaction`
+    // is agent-execution config edited from `/me/agent` (paired). None are
+    // credentials or transport config.
+    "composerBehavior",
+    "streamPartialMessages",
+    "compaction",
+    // Conversation-list (sidebar) render prefs edited from `/me/conversation`
+    // — density / preview / grouping / unread badges / search scope. Pure UI
+    // presentation config, no credentials.
+    "conversationSidebar",
+    // ADR-0056 (Wave 3) — project instruction loading config (CLAUDE.md /
+    // AGENTS.md discovery on the paired desktop). Remote-edited from
+    // `/me/instructions`. The globalPath / extraPaths it carries are desktop
+    // filesystem paths, but the value is config, not a credential.
+    "instructions",
+    // ADR-0056 (Wave 3) — master toggle for built-in surface-skill auto-
+    // injection (flows into `resolveSendOptions`). Edited from `/me/agent`.
+    "surfaceSkillsEnabled",
+    // ADR-0056 — visual workflow editor performance tier. Edited from
+    // `/me/workflows-settings` (both modes). A per-device motion/computation
+    // knob, not a credential or transport field; it is intentionally NOT
+    // mirrored desktop→phone (kept device-local) but is writable up so a
+    // paired desktop's tier can be set from the phone.
+    "workflowEditorPerformanceTier",
+    // ADR-0056 (Wave 2) — per-provider TTS voice selection. The phone's
+    // `/me/speech` page writes the active provider's flat voice-id key
+    // (matching the desktop `provider-config.tsx` field names). All are
+    // non-credential preference strings; API keys are NOT here.
+    "systemVoice",
+    "openaiVoice",
+    "geminiVoice",
+    "edgeVoice",
+    "elevenlabsVoice",
+    "lmntVoice",
+    "humeVoice",
+    "cartesiaVoice",
+    "deepgramVoice",
+    "xiaomiVoice",
+    // ADR-0056 (Wave 2) — web-search completeness. Preferred provider +
+    // cloud→system fallback edited from `/me/web-search`. Provider API keys
+    // stay device-local (`searchProviders` is deliberately NOT allowlisted).
+    "defaultSearchProvider",
+    "searchFallbackEnabled",
+    // ADR-0056 (Wave 2) — Notification Center preferences (one JSON object).
+    // The phone's `/me/notifications` page edits channels / level gates / quiet
+    // hours / behaviour / per-source mute / retention. The OS push permission
+    // itself stays a native, device-local grant (not part of this value).
+    "notificationPreferences",
 ];
 
 /// Public read-only accessor for the mobile-side `app_settings_update`
@@ -641,7 +849,7 @@ pub async fn rpc_handler(
     // intentionally `None`). Keep `KNOWN_COMMANDS` in lockstep with the
     // `match name` arms in `dispatch()` below — drift will silently bypass
     // the 503 path for genuinely unknown commands.
-    if !KNOWN_COMMANDS.contains(&name.as_str()) {
+    if !KNOWN_COMMANDS_SET.contains(name.as_str()) {
         return Err(RpcError::unknown_command(&name));
     }
 
@@ -657,6 +865,16 @@ pub async fn rpc_handler(
         ));
     }
 
+    // Service-scope gate (ADR-0059 W4): RCE-grade commands are reachable only
+    // with the headless brain's `"service"` token, never a device JWT. No-op
+    // until R11/R12 populate SERVICE_ONLY_COMMANDS; the `signaling::dispatch`
+    // path gets the mirrored gate when the arms land (they thread the scope).
+    if is_service_only_command(&name) && ctx.scope != "service" {
+        return Err(RpcError::forbidden(
+            "this command requires the headless service token",
+        ));
+    }
+
     // Wave 3.3 — per-device rate limiter sits after the JWT verifier
     // middleware (so we can key on device_id) and before idempotency
     // lookup (cache hits don't burn a token).
@@ -666,7 +884,7 @@ pub async fn rpc_handler(
         return Err(RpcError::rate_limited(retry_after.as_secs()));
     }
 
-    let is_read_only = READ_ONLY_COMMANDS.contains(&name.as_str());
+    let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
 
     // Cache look-up (non-read-only commands only).
     if !is_read_only {
@@ -685,21 +903,27 @@ pub async fn rpc_handler(
         validate_app_settings_update(&args)?;
     }
 
-    // Obtain the AppHandle — required for commands that spawn the sidecar.
-    let app = state.app_handle.clone().ok_or_else(|| {
+    // Resolve the dispatch host (ADR-0059 R5): the desktop AppHandle, or the
+    // headless services registry installed by `cognia-server` at boot. Absent
+    // both (bare unit-test states) → 503, preserving the historical
+    // test-mode contract.
+    let host = super::dispatch_host::DispatchHost::from_state(&state).ok_or_else(|| {
         RpcError::service_unavailable("app_handle not available (test mode)".to_string())
     })?;
 
     // Dispatch.
-    let result = dispatch(
+    let dispatched = dispatch(
         &name,
         args,
         &state,
-        &app,
+        &host,
         &ctx.device_id,
         Some(&ctx.account_id),
+        Some(&ctx.scope),
     )
-    .await?;
+    .await;
+    super::metrics::record_rpc_call(dispatched.is_ok());
+    let result = dispatched?;
 
     // Cache the result (non-read-only + idempotency key present).
     if !is_read_only {
@@ -748,6 +972,22 @@ fn required<T: DeserializeOwned>(
         .map_err(|e| RpcError::malformed(format!("field '{field}': {e}")))
 }
 
+/// Extract a field that may arrive under either of two keys. The headless
+/// brain's acp-client sends the desktop Tauri arg shape (camelCase, which
+/// Tauri converts at the command boundary); the RPC arms parse snake_case -
+/// accept both so the two hosts share one client (ADR-0059 T-A10).
+fn required_aliased<T: DeserializeOwned>(
+    args: &Value,
+    primary: &str,
+    alias: &str,
+) -> Result<T, (StatusCode, Json<RpcError>)> {
+    let v = args.get(primary).or_else(|| args.get(alias)).ok_or_else(|| {
+        RpcError::malformed(format!("missing required field: {primary} (or {alias})"))
+    })?;
+    serde_json::from_value(v.clone())
+        .map_err(|e| RpcError::malformed(format!("field '{primary}': {e}")))
+}
+
 /// Extract an optional field from a JSON object.
 fn optional<T: DeserializeOwned>(
     args: &Value,
@@ -775,8 +1015,11 @@ fn to_json<T: serde::Serialize>(value: T) -> Result<Value, (StatusCode, Json<Rpc
 /// Dispatch an RPC call to the corresponding Tauri command body.
 ///
 /// Each arm deserialises the JSON `args`, obtains the necessary Tauri state
-/// from `app.state::<T>()`, calls the underlying function (not the IPC
-/// wrapper), and serialises the result back to [`Value`].
+/// via `host.tauri_app(name)?.state::<T>()` (a per-arm `503
+/// headless_unsupported` when this process is a headless `cognia-server` —
+/// see the availability table in [`super::dispatch_host`]), calls the
+/// underlying function (not the IPC wrapper), and serialises the result back
+/// to [`Value`].
 ///
 /// If a command's signature is incompatible with this pattern (e.g., it
 /// requires `tauri::Window`), it must be excluded from the V1 allowlist.
@@ -788,9 +1031,10 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    app: &tauri::AppHandle,
+    host: &super::dispatch_host::DispatchHost,
     device_id: &str,
     account_id: Option<&str>,
+    scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
 
@@ -804,33 +1048,49 @@ pub(super) async fn dispatch(
         ));
     }
 
+    // Service-scope gate, mirrored from `rpc_handler` so the WebRTC
+    // `signaling::dispatch` path (which is always device-scoped — it passes
+    // `scope: None`) can never reach the RCE-grade arms either.
+    if is_service_only_command(name) && scope != Some("service") {
+        return Err(RpcError::forbidden(
+            "this command requires the headless service token",
+        ));
+    }
+
     // Allowlist gate. The HTTP `rpc_handler` already rejects unknown names
     // before reaching here, but the WebRTC `signaling::dispatch` path calls
     // `dispatch` directly without that check — enforcing it here keeps the two
     // transports' command surfaces identical (no DataChannel superset) and
     // guarantees every reachable arm is a documented, allowlisted command.
-    if !KNOWN_COMMANDS.contains(&name) {
+    if !KNOWN_COMMANDS_SET.contains(name) {
         return Err(RpcError::unknown_command(name));
     }
 
     match name {
         // ── Chat session ─────────────────────────────────────────────────────
 
+        // The chat-session arms are host-generic (ADR-0059 R7): the sidecar
+        // state + host resolve from either the Tauri app or the headless
+        // services registry, so a cloud cognia-server executes chat turns.
         "claude_send" => {
             let session_id: String = required(&args, "session_id")?;
             let prompt: Value = required(&args, "prompt")?;
             let options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
-            let sidecar_state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_send(app.clone(), sidecar_state, session_id, prompt, options)
-                .await
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            claude_commands::claude_send_with_host(
+                host.sidecar_host(),
+                host.sidecar_state(),
+                session_id,
+                prompt,
+                options,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
         }
 
         "claude_interrupt" => {
             let session_id: String = required(&args, "session_id")?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_interrupt(state, session_id)
+            claude_commands::claude_interrupt_impl(&host.sidecar_state(), session_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -842,8 +1102,7 @@ pub(super) async fn dispatch(
                 .get("focus")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_compact(state, session_id, focus)
+            claude_commands::claude_compact_impl(&host.sidecar_state(), session_id, focus)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -855,9 +1114,8 @@ pub(super) async fn dispatch(
             let decision: String = required(&args, "decision")?;
             let message: Option<String> = optional(&args, "message")?;
             let updated_input: Option<Value> = optional(&args, "updated_input")?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_approve(
-                state,
+            claude_commands::claude_approve_impl(
+                &host.sidecar_state(),
                 session_id,
                 request_id,
                 decision,
@@ -871,16 +1129,14 @@ pub(super) async fn dispatch(
 
         "claude_close_session" => {
             let session_id: String = required(&args, "session_id")?;
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_close_session(state, session_id)
+            claude_commands::claude_close_session_impl(&host.sidecar_state(), session_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
 
         "claude_sidecar_status" => {
-            let state: tauri::State<'_, SidecarState> = app.state();
-            claude_commands::claude_sidecar_status(state)
+            claude_commands::claude_sidecar_status_impl(&host.sidecar_state())
                 .await
                 .map_err(RpcError::internal)
                 .and_then(|s| {
@@ -898,8 +1154,7 @@ pub(super) async fn dispatch(
 
         "claude_set_oauth_bearer" => {
             let token: Option<String> = optional(&args, "token")?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            state.set_oauth_bearer(token).await;
+            host.api_keys().set_oauth_bearer(token).await;
             Ok(Value::Null)
         }
 
@@ -907,34 +1162,29 @@ pub(super) async fn dispatch(
 
         "claude_set_api_key" => {
             let key: Option<String> = optional(&args, "key")?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            state.set(key).await;
+            host.api_keys().set(key).await;
             Ok(Value::Null)
         }
 
         "claude_set_provider_env" => {
             let api_key: Option<String> = optional(&args, "api_key")?;
             let base_url: Option<String> = optional(&args, "base_url")?;
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            state.set_provider(api_key, base_url).await;
+            host.api_keys().set_provider(api_key, base_url).await;
             Ok(Value::Null)
         }
 
         "claude_has_api_key" => {
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            let has = state.get().await.is_some();
+            let has = host.api_keys().get().await.is_some();
             Ok(Value::Bool(has))
         }
 
         "claude_has_oauth_bearer" => {
-            let state: tauri::State<'_, ApiKeyState> = app.state();
-            let has = state.get_oauth_bearer().await.is_some();
+            let has = host.api_keys().get_oauth_bearer().await.is_some();
             Ok(Value::Bool(has))
         }
 
         "claude_restart_sidecar" => {
-            let state: tauri::State<'_, SidecarState> = app.state();
-            kill_sidecar(state.inner().clone()).await;
+            kill_sidecar(host.sidecar_state()).await;
             Ok(Value::Null)
         }
 
@@ -1011,6 +1261,7 @@ pub(super) async fn dispatch(
         // ── MCP server ────────────────────────────────────────────────────────
 
         "mcp_server_status" => {
+            let app = host.tauri_app(name)?;
             let state: tauri::State<'_, McpServerState> = app.state();
             let status = state.status();
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
@@ -1089,9 +1340,14 @@ pub(super) async fn dispatch(
                 )));
             }
             let bridge = std::sync::Arc::clone(&state.sync_bridge);
+            // Connected brain first, desktop WebView second (ADR-0059 R4/R5);
+            // 503 while a headless server's brain is down — sync has no
+            // degraded-store path.
+            let transport = super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
             bridge
                 .pull(
-                    app,
+                    transport.as_ref(),
                     table,
                     since,
                     account_id.to_string(),
@@ -1177,6 +1433,9 @@ pub(super) async fn dispatch(
         | "connector_reject_draft"
         | "workflow_trigger_manual"
         | "twin_ingest_source"
+        // ADR-0060 — device capability report; TS arm persists onto the
+        // caller's `pairedDevices` row (caller id injected below).
+        | "device_capabilities_report"
         // Remote Session Control — attach/detach a remote watcher + steer
         // host goal loops. Same generic bridge; TS-side dispatch arms live in
         // `lib/companion/desktop-write-source.ts`. Gated by CONTROL_COMMANDS.
@@ -1196,6 +1455,12 @@ pub(super) async fn dispatch(
         | "workflow_cancel_run"
         | "workflow_schedule_pause"
         | "workflow_schedule_resume"
+        // ADR-0061 P2 — HITL approval gate; respond gets callerDeviceId
+        // injected below so the responder identity is spoof-proof.
+        | "workflow_approval_list"
+        | "workflow_approval_respond"
+        // ADR-0061 P3 — chunked result for a desktop-issued remote step.
+        | "workflow_step_result"
         | "twin_delete"
         | "twin_source_list"
         | "twin_source_update"
@@ -1213,17 +1478,199 @@ pub(super) async fn dispatch(
         | "goal_status"
         | "conversation_overrides_update"
         | "backup_export"
-        | "backup_import" => {
+        | "backup_import"
+        // ADR-0056 Wave 4 — external-agent list (read) + update (enable/disable
+        // + permission mode). TS-side dispatch arms in
+        // `lib/companion/desktop-write-source.ts`.
+        | "external_agent_list"
+        | "external_agent_update" => {
+            // ADR-0060: some TS dispatch arms must know the authenticated
+            // caller device. Injected server-side (overwriting any
+            // client-sent value) so a device can never spoof another's id.
+            let args = inject_caller_device_id(name, args, device_id);
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
+            let transport = super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(
-                    app,
+                    transport.as_ref(),
                     name,
                     args,
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
                 .map_err(RpcError::internal)
+        }
+
+        // ── Headless external-agent execution plane (ADR-0059 R11) ───────────
+        // Service-scope only (gated above + in rpc_handler); every decision
+        // is written to the audit log. The spawn request must clear the
+        // SpawnPolicy preset allowlist before it touches the exec backend.
+        "spawn_external_agent" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let config: crate::external_agent::process::ExternalAgentSpawnConfig =
+                required(&args, "config")?;
+            let summary = serde_json::json!({
+                "agent_id": config.id,
+                "command": config.command,
+                "args": config.args,
+            });
+            match services.spawn_policy.validate(config) {
+                Err(violation) => {
+                    let mut fields = summary;
+                    fields["reason"] = Value::String(violation.to_string());
+                    super::audit::record(
+                        "external_agent_spawn",
+                        device_id,
+                        scope.unwrap_or(""),
+                        "deny",
+                        fields,
+                    );
+                    Err(RpcError::forbidden(format!(
+                        "spawn denied by policy: {violation}"
+                    )))
+                }
+                Ok(validated) => {
+                    let mut fields = summary;
+                    fields["cwd"] = Value::String(
+                        validated.config.cwd.clone().unwrap_or_default(),
+                    );
+                    fields["dropped_env_keys"] =
+                        serde_json::to_value(&validated.dropped_env_keys)
+                            .unwrap_or(Value::Null);
+                    super::audit::record(
+                        "external_agent_spawn",
+                        device_id,
+                        scope.unwrap_or(""),
+                        "allow",
+                        fields,
+                    );
+                    let emitter: std::sync::Arc<
+                        dyn crate::external_agent::exec_backend::AgentEventEmitter,
+                    > = std::sync::Arc::new(
+                        crate::external_agent::exec_backend::BusAgentEmitter(
+                            std::sync::Arc::clone(&services.event_bus),
+                        ),
+                    );
+                    crate::external_agent::exec_backend::spawn_with_events(
+                        services.exec.as_ref(),
+                        emitter,
+                        validated.config,
+                    )
+                    .await
+                    .map(Value::String)
+                    .map_err(RpcError::internal)
+                }
+            }
+        }
+
+        "send_to_external_agent" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
+            let message: String = required(&args, "message")?;
+            super::audit::record(
+                "external_agent_send",
+                device_id,
+                scope.unwrap_or(""),
+                "allow",
+                serde_json::json!({ "agent_id": agent_id, "bytes": message.len() }),
+            );
+            services
+                .exec
+                .send(&agent_id, &message)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "kill_external_agent" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
+            super::audit::record(
+                "external_agent_kill",
+                device_id,
+                scope.unwrap_or(""),
+                "allow",
+                serde_json::json!({ "agent_id": agent_id }),
+            );
+            services
+                .exec
+                .kill(&agent_id)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "get_external_agent_status" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
+            match services.exec.status(&agent_id).await {
+                Some(status) => Ok(Value::String(format!("{status:?}"))),
+                None => Err(RpcError::internal(format!("Agent {agent_id} not found"))),
+            }
+        }
+
+        // ── Connector webhook ingress registry (ADR-0059 F4 / R12) ───────────
+        // The brain registers its adapters here so the public `/connectors`
+        // routes on the front door can verify + forward platform webhooks.
+        "connectors_register" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required(&args, "adapter_id")?;
+            let adapter_type: String = required(&args, "adapter_type")?;
+            services.connectors.inner.lock().registered_adapters.insert(
+                adapter_id.clone(),
+                crate::connectors::types::AdapterRegistration {
+                    adapter_id,
+                    adapter_type,
+                    webhook_path: None,
+                },
+            );
+            Ok(Value::Null)
+        }
+
+        "connectors_unregister" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required(&args, "adapter_id")?;
+            services
+                .connectors
+                .inner
+                .lock()
+                .registered_adapters
+                .remove(&adapter_id);
+            Ok(Value::Null)
+        }
+
+        "connectors_list_adapters" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapters: Vec<Value> = services
+                .connectors
+                .inner
+                .lock()
+                .registered_adapters
+                .values()
+                .map(|reg| {
+                    serde_json::json!({
+                        "adapter_id": reg.adapter_id,
+                        "adapter_type": reg.adapter_type,
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({ "adapters": adapters }))
         }
 
         // Remote Session Control — resolve a host computer-use HITL consent
@@ -1238,6 +1685,7 @@ pub(super) async fn dispatch(
                 serde_json::from_value(args).map_err(|e| {
                     RpcError::malformed(format!("automation_consent_respond args: {e}"))
                 })?;
+            let app = host.tauri_app(name)?;
             let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
                 app.state();
             crate::automation::commands::automation_consent_respond(automation_state, respond_args)
@@ -1266,9 +1714,12 @@ pub(super) async fn dispatch(
             // `dispatch` directly) stays guarded too.
             validate_app_settings_update(&args)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
+            let transport = super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(
-                    app,
+                    transport.as_ref(),
                     name,
                     args,
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
@@ -1570,19 +2021,23 @@ pub(super) async fn dispatch(
         // and remain the recommended, ungated client path for workspace files.
         "read_text_file" => {
             let path: String = required(&args, "path")?;
-            tokio::task::spawn_blocking(move || crate::files::read_text_file(path))
-                .await
-                .map_err(|e| RpcError::internal(e.to_string()))?
-                .map(Value::String)
+            tokio::task::spawn_blocking(move || {
+                crate::files::read_text_file_impl(path, crate::files::FsOrigin::Remote)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(Value::String)
                 .map_err(RpcError::internal)
         }
         "write_text_file" => {
             let path: String = required(&args, "path")?;
             let content: String = required(&args, "content")?;
-            tokio::task::spawn_blocking(move || crate::files::write_text_file(path, content))
-                .await
-                .map_err(|e| RpcError::internal(e.to_string()))?
-                .map(|_| Value::Null)
+            tokio::task::spawn_blocking(move || {
+                crate::files::write_text_file_impl(path, content, crate::files::FsOrigin::Remote)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
         "write_text_file_confined" => {
@@ -1599,10 +2054,12 @@ pub(super) async fn dispatch(
         }
         "ensure_dir" => {
             let path: String = required(&args, "path")?;
-            tokio::task::spawn_blocking(move || crate::files::ensure_dir(path))
-                .await
-                .map_err(|e| RpcError::internal(e.to_string()))?
-                .map(|_| Value::Null)
+            tokio::task::spawn_blocking(move || {
+                crate::files::ensure_dir_impl(path, crate::files::FsOrigin::Remote)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
         "ensure_dir_confined" => {
@@ -1659,11 +2116,86 @@ pub(super) async fn dispatch(
             .map(|_| Value::Null)
             .map_err(RpcError::internal)
         }
+        // File-tree browser: list children / stat one path (reads), and
+        // mkdir / delete / rename / copy (CONTROL-gated writes). All use the
+        // `root` + `relPath` sandbox shape of the read/write variants above.
+        "fs_list_workspace_dir" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: Option<String> = optional(&args, "relPath")?;
+            let include_ignored: Option<bool> = optional(&args, "includeIgnored")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_list_workspace_dir(root, rel_path, include_ignored)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "fs_stat_workspace_file" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: String = required(&args, "relPath")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_stat_workspace_file(root, rel_path)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "fs_create_workspace_dir" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: String = required(&args, "relPath")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_create_workspace_dir(root, rel_path)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "fs_delete_workspace_entry" => {
+            let root: String = required(&args, "root")?;
+            let rel_path: String = required(&args, "relPath")?;
+            let recursive: Option<bool> = optional(&args, "recursive")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_delete_workspace_entry(root, rel_path, recursive)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "fs_rename_workspace_entry" => {
+            let root: String = required(&args, "root")?;
+            let from_rel_path: String = required(&args, "fromRelPath")?;
+            let to_rel_path: String = required(&args, "toRelPath")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_rename_workspace_entry(root, from_rel_path, to_rel_path)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "fs_copy_workspace_entry" => {
+            let root: String = required(&args, "root")?;
+            let from_rel_path: String = required(&args, "fromRelPath")?;
+            let to_rel_path: String = required(&args, "toRelPath")?;
+            let recursive: Option<bool> = optional(&args, "recursive")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_copy_workspace_entry(root, from_rel_path, to_rel_path, recursive)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
 
         // ── Terminal ───────────────────────────────────────────────────────
         // Live PTY streaming stays on `/ws/v1/terminal`. These are
         // request/response only; `terminal_exec` is a one-shot command runner.
         "terminal_list_all" => {
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
             crate::terminal::commands::terminal_list_all(st)
                 .map_err(RpcError::internal)
@@ -1671,6 +2203,7 @@ pub(super) async fn dispatch(
         }
         "terminal_list_for_project" => {
             let project_id: String = required(&args, "projectId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
             crate::terminal::commands::terminal_list_for_project(st, project_id)
                 .map_err(RpcError::internal)
@@ -1678,6 +2211,7 @@ pub(super) async fn dispatch(
         }
         "terminal_kill" => {
             let id: String = required(&args, "id")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
             crate::terminal::commands::terminal_kill(st, id)
                 .map(|_| Value::Null)
@@ -1700,6 +2234,7 @@ pub(super) async fn dispatch(
         // snapshot; a remote install takes effect on the next renderer reload
         // (it does not hot-load into the running TS PluginManager).
         "plugin_list" => {
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_get_all(st)
                 .await
@@ -1708,6 +2243,7 @@ pub(super) async fn dispatch(
         }
         "plugin_runtime_snapshot" => {
             let plugin_id: String = required(&args, "pluginId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_runtime_snapshot(st, plugin_id)
                 .await
@@ -1722,6 +2258,7 @@ pub(super) async fn dispatch(
             let payload: crate::plugin_api::lifecycle::InstallPayload =
                 serde_json::from_value(payload_val)
                     .map_err(|e| RpcError::malformed(format!("plugin_install.payload: {e}")))?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_install(st, plugin_id, source, payload)
                 .await
@@ -1732,6 +2269,7 @@ pub(super) async fn dispatch(
             let repo: String = required(&args, "repo")?;
             let git_ref: Option<String> = optional(&args, "gitRef")?;
             let subdir: Option<String> = optional(&args, "subdir")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::github::installer::plugin_install_from_github(
                 st, repo, git_ref, subdir,
@@ -1742,6 +2280,7 @@ pub(super) async fn dispatch(
         }
         "plugin_uninstall" => {
             let plugin_id: String = required(&args, "pluginId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_uninstall(st, plugin_id)
                 .await
@@ -1751,6 +2290,7 @@ pub(super) async fn dispatch(
         "plugin_backup_create" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let label: Option<String> = optional(&args, "label")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_create(st, plugin_id, label)
                 .await
@@ -1760,6 +2300,7 @@ pub(super) async fn dispatch(
         "plugin_backup_restore" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_restore(st, plugin_id, backup_id)
                 .await
@@ -1769,6 +2310,7 @@ pub(super) async fn dispatch(
         "plugin_backup_delete" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
+            let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_delete(st, plugin_id, backup_id)
                 .await
@@ -2006,6 +2548,11 @@ mod tests {
 
     #[tokio::test]
     async fn command_requiring_app_handle_returns_503_in_test_mode() {
+        // `DispatchHost::from_state` consults the process-global headless
+        // services slot — hold the shared global-slot lock so a concurrent
+        // test's install doesn't turn this 503 into a headless dispatch.
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
         let state = test_state(); // app_handle is None
         let router = build_router(state);
         let jwt = device_jwt("dev1");
@@ -2013,6 +2560,425 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 503);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "service_unavailable");
+    }
+
+    // ── DispatchHost (ADR-0059 R5) ────────────────────────────────────────────
+
+    fn headless_host() -> super::super::dispatch_host::DispatchHost {
+        super::super::dispatch_host::DispatchHost::Headless(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        )
+    }
+
+    /// Data-plane arms work on a headless host: `session_list` served from
+    /// the degraded SQLite store, no AppHandle anywhere.
+    #[tokio::test]
+    async fn headless_dispatch_serves_the_data_plane_from_the_store() {
+        use crate::companion_api::store::AppStore;
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+        let store =
+            crate::companion_api::store::sqlite::SqliteAppStore::in_memory().expect("open");
+        crate::companion_api::data_plane::install_headless_store(Some(
+            store.clone() as Arc<dyn AppStore>
+        ));
+
+        let state = test_state();
+        let result = dispatch(
+            "session_list",
+            json!({ "limit": 10, "offset": 0 }),
+            &state,
+            &headless_host(),
+            "dev1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("session_list must work on a headless host");
+        assert_eq!(result["total"], 0);
+
+        crate::companion_api::data_plane::install_headless_store(None);
+    }
+
+    /// Desktop-only arms reply with the per-arm 503 `headless_unsupported`
+    /// naming the command — not a generic service_unavailable.
+    #[tokio::test]
+    async fn headless_dispatch_rejects_desktop_only_arms() {
+        let state = test_state();
+        let err = dispatch(
+            "mcp_server_status",
+            json!({}),
+            &state,
+            &headless_host(),
+            "dev1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("desktop-only arm must 503 on a headless host");
+        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.1 .0.code, "headless_unsupported");
+        assert!(err.1 .0.message.contains("mcp_server_status"));
+    }
+
+    /// The claude arms are host-generic after R7: `claude_sidecar_status` on
+    /// a headless host reports the registry's (not-yet-spawned) sidecar.
+    #[tokio::test]
+    async fn headless_claude_arms_reach_the_registry_sidecar() {
+        let state = test_state();
+        let host = headless_host();
+
+        let status = dispatch(
+            "claude_sidecar_status",
+            json!({}),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("claude_sidecar_status must work headless");
+        assert_eq!(status["ready"], false);
+
+        // Provider-env arms hit the registry's ApiKeyState.
+        dispatch(
+            "claude_set_api_key",
+            json!({ "key": "sk-headless" }),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("claude_set_api_key must work headless");
+        let has = dispatch(
+            "claude_has_api_key",
+            json!({}),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("claude_has_api_key must work headless");
+        assert_eq!(has, Value::Bool(true));
+
+        // Control messages against a not-running sidecar surface the plain
+        // "not running" error (proving the arm reached write_command).
+        let err = dispatch(
+            "claude_interrupt",
+            json!({ "session_id": "s1" }),
+            &state,
+            &host,
+            "dev1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("no sidecar running");
+        assert!(err.1 .0.message.contains("not running"));
+    }
+
+    // ── External-agent arms: scope + policy + audit (ADR-0059 R11) ──────────
+
+    /// A device JWT must never reach the RCE-grade arms — the HTTP handler
+    /// rejects with 403 before dispatch.
+    #[tokio::test]
+    async fn device_scope_cannot_reach_the_external_agent_arms() {
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("phone-1");
+        for name in [
+            "spawn_external_agent",
+            "send_to_external_agent",
+            "kill_external_agent",
+            "get_external_agent_status",
+        ] {
+            let resp = rpc_post(router.clone(), name, json!({}), &jwt, None).await;
+            assert_eq!(resp.status().as_u16(), 403, "{name} must be scope-gated");
+        }
+    }
+
+    /// The mirrored in-dispatch gate covers the WebRTC path (`scope: None`).
+    #[tokio::test]
+    async fn dispatch_without_service_scope_rejects_service_only_commands() {
+        let state = test_state();
+        let err = dispatch(
+            "spawn_external_agent",
+            json!({}),
+            &state,
+            &headless_host(),
+            "dev1",
+            Some(ACCOUNT_ID),
+            None, // the DataChannel path
+        )
+        .await
+        .expect_err("device-scoped channel must be rejected");
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    /// Policy deny → 403 naming the violation, with a `deny` audit line;
+    /// policy allow (smoke stub) → spawn succeeds with an `allow` audit line
+    /// and the frozen events on the bus.
+    #[tokio::test]
+    async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+        let state = test_state();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let audit_path = tmp.path().join("audit.log");
+        crate::companion_api::audit::install_at_for_testing(Some(audit_path.clone()));
+
+        // Headless services with a smoke-enabled policy + temp workspaces.
+        let services = {
+            use crate::claude::host::HeadlessSidecarHost;
+            let event_bus = crate::companion_api::event_bus::EventBus::new();
+            let api_keys = crate::api_key::ApiKeyState::new();
+            let sidecar_host = Arc::new(HeadlessSidecarHost::new(
+                std::path::PathBuf::from("missing.mjs"),
+                Arc::clone(&event_bus),
+                api_keys.clone(),
+            ));
+            crate::headless::HeadlessServices::new(
+                sidecar_host,
+                api_keys,
+                event_bus,
+                crate::external_agent::presets::SpawnPolicy::new(
+                    tmp.path().join("workspaces"),
+                    true,
+                ),
+            )
+        };
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        // Deny: bash is not allowlisted.
+        let err = dispatch(
+            "spawn_external_agent",
+            json!({ "config": { "id": "evil", "command": "bash", "args": ["-c", "id"] } }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("bash must be denied");
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert!(err.1 .0.message.contains("denied by policy"));
+
+        // Allow: the smoke stub via node.
+        let stub = tmp.path().join("stub-acp-agent.mjs");
+        std::fs::write(&stub, "setInterval(() => {}, 60_000);\n").unwrap();
+        let spawned = dispatch(
+            "spawn_external_agent",
+            json!({ "config": {
+                "id": "smoke-1",
+                "command": "node",
+                "args": [stub.display().to_string()],
+                "env": { "ANTHROPIC_API_KEY": "sk", "LD_PRELOAD": "/evil.so" },
+            } }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("smoke stub must be admitted");
+        assert_eq!(spawned, Value::String("smoke-1".into()));
+
+        // Status + kill round-trip through the exec backend.
+        let status = dispatch(
+            "get_external_agent_status",
+            json!({ "agent_id": "smoke-1" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("status");
+        assert_eq!(status, Value::String("Running".into()));
+        dispatch(
+            "kill_external_agent",
+            json!({ "agent_id": "smoke-1" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("kill");
+
+        // Audit trail: a deny line and an allow line (with the dropped
+        // LD_PRELOAD recorded), then the kill.
+        let audit = std::fs::read_to_string(&audit_path).expect("audit written");
+        let lines: Vec<Value> = audit
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("jsonl"))
+            .collect();
+        assert!(lines.iter().any(|l| l["decision"] == "deny"
+            && l["kind"] == "external_agent_spawn"
+            && l["command"] == "bash"));
+        assert!(lines.iter().any(|l| l["decision"] == "allow"
+            && l["kind"] == "external_agent_spawn"
+            && l["dropped_env_keys"][0] == "LD_PRELOAD"));
+        assert!(lines
+            .iter()
+            .any(|l| l["kind"] == "external_agent_kill" && l["scope"] == "service"));
+
+        crate::companion_api::audit::install_at_for_testing(None);
+    }
+
+    #[test]
+    fn service_only_commands_are_known_and_not_control_gated() {
+        for name in [
+            "spawn_external_agent",
+            "send_to_external_agent",
+            "kill_external_agent",
+            "get_external_agent_status",
+            "connectors_register",
+            "connectors_unregister",
+            "connectors_list_adapters",
+        ] {
+            assert!(is_service_only_command(name), "{name} must be service-only");
+            assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
+            assert!(
+                !CONTROL_COMMANDS.contains(&name),
+                "{name} is scope-gated, not device-control-gated"
+            );
+        }
+    }
+
+    // ── Connector ingress registry arms (ADR-0059 R12) ──────────────────────
+
+    #[tokio::test]
+    async fn connectors_registry_arms_round_trip() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        dispatch(
+            "connectors_register",
+            json!({ "adapter_id": "tg-1", "adapter_type": "telegram" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("register");
+
+        let listed = dispatch(
+            "connectors_list_adapters",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list");
+        assert_eq!(listed["adapters"][0]["adapter_id"], "tg-1");
+        assert_eq!(listed["adapters"][0]["adapter_type"], "telegram");
+        // The registration landed in the shared ConnectorsState the webhook
+        // router verifies against.
+        assert!(services
+            .connectors
+            .inner
+            .lock()
+            .registered_adapters
+            .contains_key("tg-1"));
+
+        dispatch(
+            "connectors_unregister",
+            json!({ "adapter_id": "tg-1" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("unregister");
+        let listed = dispatch(
+            "connectors_list_adapters",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list after unregister");
+        assert_eq!(listed["adapters"].as_array().unwrap().len(), 0);
+    }
+
+    /// `sync_pull` on a headless host routes through the connected brain's
+    /// socket transport end-to-end (RPC arm → event frame → respond →
+    /// resolved delta).
+    #[tokio::test]
+    async fn headless_sync_pull_routes_through_the_connected_brain() {
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        let mut rx = crate::companion_api::ws_bridge::test_support::install_socket_for_testing();
+        let state = test_state();
+
+        let dispatch_task = {
+            let state = Arc::clone(&state);
+            tokio::spawn(async move {
+                dispatch(
+                    "sync_pull",
+                    json!({ "table": "sessions", "since": 0 }),
+                    &state,
+                    &headless_host(),
+                    "dev1",
+                    Some(ACCOUNT_ID),
+                    Some("service"),
+                )
+                .await
+            })
+        };
+
+        // The fake brain: receive the emitted event frame off the socket queue.
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("event frame timeout")
+            .expect("socket queue closed");
+        let axum::extract::ws::Message::Text(text) = msg else {
+            panic!("expected text frame");
+        };
+        let frame: serde_json::Value = serde_json::from_str(text.as_str()).unwrap();
+        assert_eq!(frame["type"], "event");
+        assert_eq!(frame["event"], "companion://sync-pull-request");
+        assert_eq!(frame["payload"]["table"], "sessions");
+        let request_id = frame["payload"]["request_id"].as_str().unwrap().to_string();
+
+        // Respond exactly as ws_bridge::route_respond would.
+        state
+            .sync_bridge
+            .resolve(crate::companion_api::sync_bridge::SyncPullResponse {
+                request_id,
+                delta: Some(json!({ "rows": [] })),
+                error: None,
+            });
+
+        let result = dispatch_task
+            .await
+            .expect("join")
+            .expect("sync_pull must succeed via the brain");
+        assert_eq!(result, json!({ "rows": [] }));
+
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
     }
 
     // ── Malformed args → 400 ──────────────────────────────────────────────────
@@ -2552,6 +3518,83 @@ mod tests {
         assert!(KNOWN_COMMANDS.contains(&"session_list"));
     }
 
+    // ── ADR-0060 caller-device-id injection ──────────────────────────────────
+
+    #[test]
+    fn inject_caller_device_id_overwrites_spoofed_values() {
+        let args = json!({ "workflowId": "wf_1", "callerDeviceId": "spoofed" });
+        let out = inject_caller_device_id("workflow_trigger_manual", args, "dev-real");
+        assert_eq!(out["callerDeviceId"], json!("dev-real"));
+        assert_eq!(out["workflowId"], json!("wf_1"));
+    }
+
+    #[test]
+    fn inject_caller_device_id_only_touches_allowlisted_commands() {
+        let args = json!({ "id": "c_1" });
+        let out = inject_caller_device_id("character_upsert", args, "dev-real");
+        assert!(out.get("callerDeviceId").is_none());
+    }
+
+    #[test]
+    fn inject_caller_device_id_applies_to_capability_report() {
+        let out = inject_caller_device_id(
+            "device_capabilities_report",
+            json!({ "capabilities": ["camera"] }),
+            "dev-cap",
+        );
+        assert_eq!(out["callerDeviceId"], json!("dev-cap"));
+    }
+
+    #[test]
+    fn inject_caller_device_id_ignores_non_object_payloads() {
+        let out = inject_caller_device_id("workflow_trigger_manual", json!("nope"), "dev-real");
+        assert_eq!(out, json!("nope"));
+    }
+
+    #[test]
+    fn device_capabilities_report_is_known_and_mutating() {
+        assert!(KNOWN_COMMANDS.contains(&"device_capabilities_report"));
+        // Mutating (persists onto pairedDevices) → must keep idempotency.
+        assert!(!READ_ONLY_COMMANDS.contains(&"device_capabilities_report"));
+        // Baseline paired capability — not remote-control gated.
+        assert!(!CONTROL_COMMANDS.contains(&"device_capabilities_report"));
+    }
+
+    #[test]
+    fn workflow_step_result_is_known_mutating_and_identity_injected() {
+        assert!(KNOWN_COMMANDS.contains(&"workflow_step_result"));
+        assert!(!READ_ONLY_COMMANDS.contains(&"workflow_step_result"));
+        // The broker's target check replaces a control gate here.
+        assert!(!CONTROL_COMMANDS.contains(&"workflow_step_result"));
+        assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_step_result"));
+    }
+
+    #[test]
+    fn workflow_approval_commands_are_classified() {
+        assert!(KNOWN_COMMANDS.contains(&"workflow_approval_list"));
+        assert!(KNOWN_COMMANDS.contains(&"workflow_approval_respond"));
+        // Listing is a pure read; responding steers execution (control-gated,
+        // mutating, caller identity injected).
+        assert!(READ_ONLY_COMMANDS.contains(&"workflow_approval_list"));
+        assert!(!READ_ONLY_COMMANDS.contains(&"workflow_approval_respond"));
+        assert!(CONTROL_COMMANDS.contains(&"workflow_approval_respond"));
+        assert!(!CONTROL_COMMANDS.contains(&"workflow_approval_list"));
+        assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_approval_respond"));
+    }
+
+    #[test]
+    fn hashed_command_sets_mirror_their_arrays() {
+        // The hot-path O(1) sets are derived from the `&[&str]` arrays. Equal
+        // lengths prove the derivation is wired *and* that no array carries a
+        // duplicate command name (a dup would silently shrink the set).
+        assert_eq!(KNOWN_COMMANDS_SET.len(), KNOWN_COMMANDS.len());
+        assert_eq!(READ_ONLY_COMMANDS_SET.len(), READ_ONLY_COMMANDS.len());
+        assert_eq!(CONTROL_COMMANDS_SET.len(), CONTROL_COMMANDS.len());
+        for c in KNOWN_COMMANDS {
+            assert!(KNOWN_COMMANDS_SET.contains(c));
+        }
+    }
+
     // ── Wave 4.1 classification sentinels ────────────────────────────────────
     // One read + one destructive write per new domain, plus structural
     // integrity (every CONTROL/READ_ONLY entry is also a KNOWN command). These
@@ -2689,10 +3732,114 @@ mod tests {
             "customCss",
             "customCssEnabled",
             "importedVscodeThemes",
+            // ADR-0056 — portable appearance keys (sync down ⇄ write up).
+            "autoMode",
+            "density",
+            "radius",
+            "motion",
+            "typographyExt",
+            "a11y",
         ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "appearance key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_agent_default_keys() {
+        // ADR-0056 — the phone's `/me/agent` page (paired mode) writes these
+        // agent-default prefs through `app_settings_update`. They already sync
+        // desktop→phone; this closes the write-back gap. Missing any → 400.
+        for key in [
+            "permissionMode",
+            "defaultSystemPrompt",
+            "defaultMaxThinkingTokens",
+            "bareMode",
+            "debugMode",
+            "briefMode",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "agent-default key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_conversation_keys() {
+        // ADR-0056 (Wave 2) — the phone's conversation page + `/me/agent`
+        // compaction toggle write these. Missing any → 400 on save.
+        for key in [
+            "composerBehavior",
+            "streamPartialMessages",
+            "compaction",
+            "conversationSidebar",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "conversation key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+        // ADR-0056 (Wave 3) — instructions + surface-skills toggle.
+        for key in ["instructions", "surfaceSkillsEnabled"] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "Wave-3 key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+        // ADR-0056 — workflow editor performance tier, written from
+        // `/me/workflows-settings`. Missing → 400 on save.
+        assert!(
+            APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&"workflowEditorPerformanceTier"),
+            "workflowEditorPerformanceTier missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+        );
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_speech_voice_keys() {
+        // ADR-0056 (Wave 2) — the phone's `/me/speech` page writes the active
+        // provider's flat voice key. Missing any → 400 on save.
+        for key in [
+            "systemVoice",
+            "openaiVoice",
+            "geminiVoice",
+            "edgeVoice",
+            "elevenlabsVoice",
+            "lmntVoice",
+            "humeVoice",
+            "cartesiaVoice",
+            "deepgramVoice",
+            "xiaomiVoice",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "speech voice key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_web_search_and_notification_keys() {
+        // ADR-0056 (Wave 2) — `/me/web-search` preferred provider + fallback,
+        // and `/me/notifications` preference object. Provider API keys
+        // (`searchProviders`) must stay OUT (credentials). Missing any → 400.
+        for key in [
+            "defaultSearchProvider",
+            "searchFallbackEnabled",
+            "notificationPreferences",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "Wave-2 key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+        // Credential / non-portable search keys must NOT be writable.
+        for forbidden in ["searchProviders", "customSearchSources"] {
+            assert!(
+                !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&forbidden),
+                "credential key '{forbidden}' must NOT be in APP_SETTINGS_MOBILE_ALLOWED_KEYS"
             );
         }
     }

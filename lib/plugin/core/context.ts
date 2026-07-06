@@ -105,7 +105,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { useA2UIStore } from "@/stores/a2ui"
 import type { PluginManager } from "./manager"
-import type { PluginContextAPI } from "@/types/plugin/plugin-extended"
+import type { PluginContextAPI } from "@/types/plugin/plugin"
 import {
   createSessionAPI,
   createProjectAPI,
@@ -145,6 +145,7 @@ import { createShareAPI, type PluginShareAPI } from "../api/share-api"
 import { createBackupAPI, type PluginBackupAPI } from "../api/backup-api"
 import { createAutomationAPI, type PluginAutomationAPI } from "../api/automation-api"
 import { createCompanionAPI, type PluginCompanionAPI } from "../api/companion-api"
+import { createPetAPI, type PluginPetAPI } from "../api/pet-api"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
@@ -224,6 +225,8 @@ export type FullPluginContext = Omit<PluginContext, "storage"> &
     automation: PluginAutomationAPI
     /** Paired-device + remote-control + host goal-loop steering (gated `companion:*`). */
     companion: PluginCompanionAPI
+    /** Desktop pet nurture surface (capability "pet"; gated `pet:read`/`pet:interact`). */
+    pet: PluginPetAPI
   }
 
 // =============================================================================
@@ -242,6 +245,13 @@ export function createPluginContext(
     pluginPath: plugin.path,
     config: plugin.config,
     logger: createLogger(pluginId),
+    // Base context intentionally exposes the legacy `PluginStorage` surface,
+    // which satisfies the required `storage` field of the base `PluginContext`.
+    // This is NOT a duplicate/shadowed key: every runtime plugin is built via
+    // `createFullPluginContext` (see manager.ts), where `contextAPI.storage`
+    // (the extended `createStorageAPI`) overrides this through the
+    // `{ ...baseContext, ...contextAPI }` spread — so `ctx.storage` is the
+    // extended `PluginStorageAPI` at runtime.
     storage: createStorage(pluginId),
     events: createEventEmitter(pluginId),
     ui: createUIAPI(pluginId),
@@ -352,9 +362,9 @@ export function createFullPluginContext(
     getLocale: pluginI18n.getLocale,
     hasKey: pluginI18n.hasKey,
     // Wrap onLocaleChange to match PluginI18nAPI signature (Locale instead of string)
-    onLocaleChange: (handler: (locale: import("@/types/plugin/plugin-extended").Locale) => void) =>
+    onLocaleChange: (handler: (locale: import("@/types/plugin/plugin").Locale) => void) =>
       pluginI18n.onLocaleChange((locale: string) =>
-        handler(locale as import("@/types/plugin/plugin-extended").Locale)
+        handler(locale as import("@/types/plugin/plugin").Locale)
       ),
   }
 
@@ -387,6 +397,7 @@ export function createFullPluginContext(
     backup: createBackupAPI(pluginId),
     automation: createAutomationAPI(pluginId),
     companion: createCompanionAPI(pluginId),
+    pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
   }
 }
 
@@ -2353,7 +2364,7 @@ function getOrCreatePluginRegistry(pluginId: string) {
 // readable. Single source of truth lives in `lib/plugin/bridge/kind-prefix.ts`.
 const prefixKind = prefixPluginKind
 
-function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
+export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
   return {
     registerNode(def: PluginNodeDef): () => void {
       const prefixed = prefixKind(pluginId, def.kind)
@@ -2379,10 +2390,12 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         iconName: def.iconName,
         keywords: def.keywords ?? [],
         desktopOnly: def.desktopOnly,
+        requires: def.requires,
         pluginId,
         // Surfacing the JSON Schema lets the inspector render a SchemaForm
         // instead of falling back to a raw-JSON editor.
         paramsSchema: def.paramsSchema,
+        defaultParams: def.defaultParams,
       }
       addPluginCatalogEntry(catalogEntry)
       registry.nodes.add(prefixed)
@@ -2418,6 +2431,7 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         desktopOnly: def.desktopOnly,
         pluginId,
         paramsSchema: def.paramsSchema,
+        defaultParams: def.defaultParams,
       })
       registry.triggers.add(prefixed)
       registry.triggerVersions.set(prefixed, def.typeVersion)

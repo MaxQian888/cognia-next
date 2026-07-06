@@ -55,6 +55,19 @@ jest.mock("@/lib/logging", () => ({
       },
     },
   },
+  createLogger: () => ({
+    trace: jest.fn(),
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child() {
+      return this
+    },
+    withContext() {
+      return this
+    },
+  }),
 }))
 
 jest.mock("sonner", () => ({
@@ -202,8 +215,10 @@ jest.mock("@/components/desktop/channel-list", () => ({
 jest.mock("@/components/shell/member-list", () => ({
   MemberList: () => <div data-testid="member-list" />,
 }))
-jest.mock("@/components/artifacts/artifact-panel", () => ({
-  ArtifactPanel: () => <div data-testid="artifact-panel" />,
+jest.mock("@/components/artifacts/artifact-workspace-dock", () => ({
+  ArtifactWorkspaceDock: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="artifact-workspace-dock">{children}</div>
+  ),
 }))
 jest.mock("@/components/canvas", () => ({
   CanvasShell: () => <div data-testid="canvas-shell" />,

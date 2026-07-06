@@ -3,7 +3,7 @@
 import { create } from "zustand"
 import type { AppSettings, AppLanguage, AppTheme, BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
-import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
+import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
 import type {
   AutoModeSettings,
   BackgroundSettings,
@@ -36,6 +36,12 @@ export type {
   UserProviderSettings,
 }
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
+import {
+  resolveSkillPanelPrefs,
+  type PartialLastSkillView,
+  type PartialSkillPanelPrefs,
+  type SkillPanelPrefs,
+} from "@/lib/skills/preferences"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { restartSidecar, setApiKey, setProviderEnv } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
@@ -109,6 +115,8 @@ interface SettingsState {
   setBuiltinToolEnabled: (category: keyof BuiltinToolsConfig, enabled: boolean) => Promise<void>
   setWebToolsEnabled: (enabled: boolean) => Promise<void>
   setWebToolsNativeOnAnthropic: (nativeOnAnthropic: boolean) => Promise<void>
+  setWebToolsAllowPrivateHosts: (allowPrivateHosts: boolean) => Promise<void>
+  setWebToolsAlwaysDistill: (alwaysDistill: boolean) => Promise<void>
   setSkillToolEnabled: (enabled: boolean) => Promise<void>
   setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
   setTeamCollaborationToolEnabled: (enabled: boolean) => Promise<void>
@@ -161,6 +169,18 @@ interface SettingsState {
    * `<appData>/cognia/skills/<id>/` is always written and is not toggleable.
    */
   setSkillBundleMirrors: (patch: { claude?: boolean; codex?: boolean }) => Promise<void>
+
+  /**
+   * Merge a partial Skills-panel preferences patch over the current value and
+   * persist. Mirrors `setSkillBundleMirrors`: the resolver applies defaults at
+   * read time, so a patch need only carry the changed fields.
+   */
+  setSkillPanelPrefs: (patch: PartialSkillPanelPrefs) => Promise<void>
+  /**
+   * Persist the last Skills-panel view snapshot (tab + sort + non-query
+   * filters). Callers should only invoke this when `rememberLastView` is on.
+   */
+  setLastSkillView: (patch: PartialLastSkillView) => Promise<void>
 
   // ---- Web search actions (all persist via saveSettings) ----
   setSearchEnabled: (v: boolean) => Promise<void>
@@ -285,6 +305,7 @@ interface SettingsState {
     baseURL: string
     apiKey: string
     apiProtocol: import("@cognia/provider-types/provider").ApiProtocol
+    apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
     customModels: string[]
     defaultModel?: string
     enabled?: boolean
@@ -378,6 +399,47 @@ async function syncApiKeyToTauri(key: string | null | undefined) {
     await setApiKey(key && key.trim() ? key : null)
   } catch (err) {
     console.warn("setApiKey failed", err)
+  }
+}
+
+// `claude_set_provider_env` only mutates the sidecar's in-memory env state —
+// the running subprocess still has to be restarted for the Anthropic SDK to
+// pick up a new ANTHROPIC_API_KEY/ANTHROPIC_BASE_URL (it reads env once, at
+// spawn time). Editing the field in Settings fires `setProviderConfig` on
+// every keystroke, so restart immediately would kill in-flight turns —
+// coalesce rapid edits into a single restart after the user stops typing.
+const ANTHROPIC_ENV_RESTART_DEBOUNCE_MS = 800
+let anthropicEnvRestartTimer: ReturnType<typeof setTimeout> | null = null
+let lastAppliedAnthropicEnv: { apiKey: string | null; baseURL: string | null } | null = null
+
+function scheduleAnthropicSidecarRestart(apiKey: string | null, baseURL: string | null) {
+  if (
+    lastAppliedAnthropicEnv &&
+    lastAppliedAnthropicEnv.apiKey === apiKey &&
+    lastAppliedAnthropicEnv.baseURL === baseURL
+  ) {
+    return
+  }
+  lastAppliedAnthropicEnv = { apiKey, baseURL }
+  if (anthropicEnvRestartTimer) clearTimeout(anthropicEnvRestartTimer)
+  anthropicEnvRestartTimer = setTimeout(() => {
+    anthropicEnvRestartTimer = null
+    restartSidecar().catch((err) => console.warn("restartSidecar failed", err))
+  }, ANTHROPIC_ENV_RESTART_DEBOUNCE_MS)
+}
+
+/**
+ * Record an Anthropic env that was applied via an *immediate* restart (e.g. the
+ * provider switch in `setDefaultProvider`). Keeping `lastAppliedAnthropicEnv` in
+ * sync means a subsequent identical `setProviderConfig` edit is correctly
+ * deduped by `scheduleAnthropicSidecarRestart` instead of triggering a second,
+ * redundant debounced restart that could kill an in-flight turn.
+ */
+function markAnthropicEnvApplied(apiKey: string | null, baseURL: string | null) {
+  lastAppliedAnthropicEnv = { apiKey, baseURL }
+  if (anthropicEnvRestartTimer) {
+    clearTimeout(anthropicEnvRestartTimer)
+    anthropicEnvRestartTimer = null
   }
 }
 
@@ -503,6 +565,12 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
  * Exported as a pure helper so the sync layer can call it without
  * subscribing to the store (the sync layer runs from non-React contexts).
  */
+// Re-export the pure skill-panel-prefs resolver (and its types) so components
+// and the non-React sync/injection layers can import them from the settings
+// store alongside `resolveSkillBundleMirrors` — matching the existing pattern.
+export { resolveSkillPanelPrefs }
+export type { SkillPanelPrefs, PartialSkillPanelPrefs, PartialLastSkillView }
+
 export function resolveSkillBundleMirrors(settings: AppSettings | null | undefined): {
   claude: boolean
   codex: boolean
@@ -579,8 +647,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // store doesn't cycle through this file.
         if (s.networkProxy) {
           try {
-            const { applyProxyToRust } = await import("@/stores/network-proxy")
+            const { applyProxyToRust, maybeAutoDetectProxy } =
+              await import("@/stores/network-proxy")
             await applyProxyToRust(s.networkProxy)
+            // Fire-and-forget: when mode is `auto`, re-probe local proxies and
+            // adopt the current port without blocking boot.
+            void maybeAutoDetectProxy()
           } catch (err) {
             console.warn("networkProxy.applyToRust failed", err)
           }
@@ -652,6 +724,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
+    setWebToolsAllowPrivateHosts: async (allowPrivateHosts) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, ...current, allowPrivateHosts },
+      })
+      set({ settings: next })
+    },
+
+    setWebToolsAlwaysDistill: async (alwaysDistill) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, ...current, alwaysDistill },
+      })
+      set({ settings: next })
+    },
+
     setSkillToolEnabled: async (enabled) => {
       const current = get().settings?.selfInvokeTools
       const next = await saveSettings({ selfInvokeTools: { ...current, skill: enabled } })
@@ -701,6 +789,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         codex: patch.codex ?? cur.codex ?? true,
       }
       const next = await saveSettings({ skillBundleMirrors })
+      set({ settings: next })
+    },
+
+    setSkillPanelPrefs: async (patch) => {
+      // Merge over the raw stored partial (not the resolved value) so we only
+      // persist fields the user has actually touched.
+      const cur = get().settings?.skillPanelPrefs ?? {}
+      const skillPanelPrefs = { ...cur, ...patch }
+      const next = await saveSettings({ skillPanelPrefs })
+      set({ settings: next })
+    },
+
+    setLastSkillView: async (patch) => {
+      const cur = get().settings?.lastSkillView ?? {}
+      const lastSkillView = { ...cur, ...patch }
+      const next = await saveSettings({ lastSkillView })
       set({ settings: next })
     },
 
@@ -1111,19 +1215,40 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     },
 
     setDefaultProvider: async (providerId) => {
-      const next = await saveSettings({ defaultProvider: providerId })
+      const cur = get().settings
+      // Keep the (defaultModel, defaultProvider) pair coherent: a stale model
+      // from the previous provider would otherwise ride along and be sent to
+      // the new provider's base URL. Only rewritten when the current default
+      // model isn't servable by the new provider (see the resolver's contract).
+      const { resolveDefaultModelForProvider } = await import("@/lib/ai/model-options")
+      const syncedModel = resolveDefaultModelForProvider(
+        providerId,
+        cur?.defaultModel,
+        cur?.providerSettings,
+        cur?.customProviders
+      )
+      const next = await saveSettings({
+        defaultProvider: providerId,
+        ...(syncedModel !== undefined ? { defaultModel: syncedModel } : {}),
+      })
       set({ settings: next })
-      // Phase D wiring: push the newly-selected provider's credentials to
-      // the sidecar so the next chat send uses them. Sidecar does an atomic
-      // env restart via `claude_set_provider_env` (Rust). Skipped on web.
-      if (isTauri()) {
-        const cfg =
-          next.providerSettings?.[providerId] ??
-          next.customProviders?.find((p) => p.id === providerId)
+      // `ApiKeyState` (Rust) is an Anthropic-only env slot — only push to it,
+      // and only restart the sidecar, when switching TO the Anthropic
+      // provider. Every other provider is read fresh per-turn by the ai-sdk
+      // dispatch path (`providerCredentials`), so no push/restart is needed
+      // and pushing here would silently corrupt the Anthropic env slot.
+      if (isTauri() && providerId === "anthropic") {
+        const cfg = next.providerSettings?.[providerId]
+        const apiKey = cfg?.apiKey ?? null
+        const baseURL = cfg?.baseURL ?? null
         try {
-          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
+          await setProviderEnv(apiKey, baseURL)
+          await restartSidecar()
+          // We just restarted with this exact env — record it so a following
+          // identical config edit doesn't schedule a second debounced restart.
+          markAnthropicEnvApplied(apiKey, baseURL)
         } catch (err) {
-          console.warn("setProviderEnv failed", err)
+          console.warn("setProviderEnv/restartSidecar failed", err)
         }
       }
     },
@@ -1142,16 +1267,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const next = await saveSettings({ providerSettings: map })
       set({ settings: next })
       // If this is the active default provider AND the patch touched
-      // `apiKey` or `baseURL`, push the change to the sidecar so the next
-      // chat turn picks it up without requiring a default-provider switch.
+      // `apiKey` or `baseURL`, push the change to the sidecar and schedule a
+      // (debounced) restart so the next chat turn actually picks it up —
+      // `ApiKeyState` only holds Anthropic's env, so this only applies when
+      // the edited provider IS Anthropic (see `scheduleAnthropicSidecarRestart`).
       if (
         isTauri() &&
+        providerId === "anthropic" &&
         next.defaultProvider === providerId &&
         ("apiKey" in patch || "baseURL" in patch)
       ) {
         const cfg = map[providerId]
+        const apiKey = cfg?.apiKey ?? null
+        const baseURL = cfg?.baseURL ?? null
         try {
-          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
+          await setProviderEnv(apiKey, baseURL)
+          scheduleAnthropicSidecarRestart(apiKey, baseURL)
         } catch (err) {
           console.warn("setProviderEnv failed", err)
         }
@@ -1182,6 +1313,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         enabled: provider.enabled ?? true,
         apiKey: provider.apiKey,
         baseURL: provider.baseURL,
+        ...(provider.apiFlavor ? { apiFlavor: provider.apiFlavor } : {}),
         // CustomProviderSettings extension
         id,
         isCustom: true,

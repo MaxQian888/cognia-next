@@ -12,13 +12,14 @@
  * composer, so this line stays a steady identity readout.
  */
 import React from "react"
-import { Box, Text, useStdout } from "ink"
+import { Box, Text, useStdout, type DOMElement } from "ink"
 
 import {
   buildStatusBar,
   fitStatusSegments,
   readGitBranch,
   resolveSegments,
+  type StatusSegmentView,
 } from "../format/status-bar"
 import { useTheme } from "../theme/context"
 import type { RateLimitSnapshot } from "../format/rate-limits"
@@ -35,6 +36,8 @@ function FooterImpl({
   rateLimits,
   planTitle,
   columns,
+  rowRef,
+  segmentsRef,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
@@ -52,6 +55,11 @@ function FooterImpl({
   planTitle?: string
   /** Terminal width for priority truncation; defaults to the live stdout width. */
   columns?: number
+  /** Ref to the status-line Box so App can hit-test a click against its row. */
+  rowRef?: React.Ref<DOMElement>
+  /** Receives the exact fitted segments App needs to map a click column to a
+   * segment id (single source of truth — no recompute on the App side). */
+  segmentsRef?: React.MutableRefObject<StatusSegmentView[] | null>
 }) {
   const theme = useTheme()
   const { stdout } = useStdout()
@@ -80,9 +88,15 @@ function FooterImpl({
     () => fitStatusSegments(allSegments, cols),
     [allSegments, cols]
   )
+  // Cache the rendered segments so App's footer click hit-test maps a column to
+  // the EXACT segment shown. Written in an effect (not during render) so it never
+  // trips the refs-during-render rule.
+  React.useEffect(() => {
+    if (segmentsRef) segmentsRef.current = segments
+  }, [segmentsRef, segments])
 
   return (
-    <Box flexShrink={0}>
+    <Box flexShrink={0} ref={rowRef}>
       {segments.map((seg, i) => (
         <Text key={seg.id} color={seg.color} dimColor={seg.dim}>
           {i > 0 ? " · " : ""}

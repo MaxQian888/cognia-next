@@ -25,14 +25,14 @@ const entries: MarketplaceBrowseEntry[] = [
 ]
 
 function wrap(props: Partial<React.ComponentProps<typeof MarketplaceBrowser>> = {}) {
-  const onSelect = jest.fn()
+  const onAction = jest.fn()
   const onCancel = jest.fn()
   const result = render(
     <ThemeProvider palette={BUILTIN_THEMES.ansi}>
-      <MarketplaceBrowser entries={entries} onSelect={onSelect} onCancel={onCancel} {...props} />
+      <MarketplaceBrowser entries={entries} onAction={onAction} onCancel={onCancel} {...props} />
     </ThemeProvider>
   )
-  return { ...result, onSelect, onCancel }
+  return { ...result, onAction, onCancel }
 }
 
 describe("MarketplaceBrowser", () => {
@@ -66,15 +66,98 @@ describe("MarketplaceBrowser", () => {
     expect(text).not.toContain("Alpha")
   })
 
-  it("previews the highlighted entry on Enter", () => {
-    const { onSelect } = wrap()
+  it("installs the highlighted (not-installed) entry on Enter", () => {
+    const { onAction } = wrap()
     key("", { downArrow: true })
     key("", { return: true })
-    expect(onSelect).toHaveBeenCalledWith("b/y")
+    expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ installRef: "b/y" }), "install")
+  })
+
+  it("opens detail for an installed entry on Enter", () => {
+    const installed: MarketplaceBrowseEntry[] = [
+      { installRef: "a/x", name: "Alpha", installed: true, enabled: true, installedId: "alpha" },
+    ]
+    const onAction = jest.fn()
+    render(
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+        <MarketplaceBrowser entries={installed} onAction={onAction} onCancel={() => {}} />
+      </ThemeProvider>
+    )
+    key("", { return: true })
+    expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ installedId: "alpha" }), "show")
+  })
+
+  it("toggles enable/disable with Ctrl+E and uninstalls with Ctrl+X", () => {
+    const installed: MarketplaceBrowseEntry[] = [
+      { installRef: "a/x", name: "Alpha", installed: true, enabled: true, installedId: "alpha" },
+    ]
+    const onAction = jest.fn()
+    render(
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+        <MarketplaceBrowser entries={installed} onAction={onAction} onCancel={() => {}} />
+      </ThemeProvider>
+    )
+    key("e", { ctrl: true })
+    expect(onAction).toHaveBeenCalledWith(
+      expect.objectContaining({ installedId: "alpha" }),
+      "disable"
+    )
+    key("x", { ctrl: true })
+    expect(onAction).toHaveBeenCalledWith(
+      expect.objectContaining({ installedId: "alpha" }),
+      "uninstall"
+    )
+  })
+
+  it("updates with Ctrl+U only when the entry is updatable", () => {
+    const updatable: MarketplaceBrowseEntry[] = [
+      {
+        installRef: "a/x",
+        name: "Alpha",
+        installed: true,
+        enabled: true,
+        updatable: true,
+        installedId: "alpha",
+      },
+    ]
+    const onAction = jest.fn()
+    render(
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+        <MarketplaceBrowser entries={updatable} onAction={onAction} onCancel={() => {}} />
+      </ThemeProvider>
+    )
+    key("u", { ctrl: true })
+    expect(onAction).toHaveBeenCalledWith(
+      expect.objectContaining({ installedId: "alpha" }),
+      "update"
+    )
+  })
+
+  it("shows the installed badge in the row hint", () => {
+    const installed: MarketplaceBrowseEntry[] = [
+      { installRef: "a/x", name: "Alpha", installed: true, enabled: true, installedId: "alpha" },
+    ]
+    const { container } = render(
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+        <MarketplaceBrowser entries={installed} onAction={() => {}} onCancel={() => {}} />
+      </ThemeProvider>
+    )
+    expect(container.textContent ?? "").toContain("✓ installed")
   })
 
   it("cancels on Escape", () => {
     const { onCancel } = wrap()
+    key("", { escape: true })
+    expect(onCancel).toHaveBeenCalled()
+  })
+
+  it("clears the query on Escape before cancelling", () => {
+    const { container, onCancel } = wrap()
+    key("g")
+    expect(container.textContent ?? "").not.toContain("Alpha")
+    key("", { escape: true })
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(container.textContent ?? "").toContain("Alpha")
     key("", { escape: true })
     expect(onCancel).toHaveBeenCalled()
   })
@@ -86,13 +169,13 @@ describe("MarketplaceBrowser", () => {
   })
 
   it("moves the highlight up and down, clamped at the ends", () => {
-    const { onSelect } = wrap()
+    const { onAction } = wrap()
     key("", { downArrow: true })
     key("", { downArrow: true })
     key("", { upArrow: true })
     key("", { return: true })
     // down,down,up from row 0 → row 1 (Beta).
-    expect(onSelect).toHaveBeenCalledWith("b/y")
+    expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ installRef: "b/y" }), "install")
   })
 
   it("edits the query with Backspace", () => {
@@ -111,10 +194,9 @@ describe("MarketplaceBrowser", () => {
       installRef: `o/p${i}`,
       name: `Plug ${i}`,
     }))
-    const onSelect = jest.fn()
     const { container } = render(
       <ThemeProvider palette={BUILTIN_THEMES.ansi}>
-        <MarketplaceBrowser entries={many} onSelect={onSelect} onCancel={() => {}} maxRows={5} />
+        <MarketplaceBrowser entries={many} onAction={() => {}} onCancel={() => {}} maxRows={5} />
       </ThemeProvider>
     )
     for (let i = 0; i < 10; i++) key("", { downArrow: true })

@@ -1,7 +1,19 @@
 {
   "approval": {
     "approve": "Approve & run",
-    "feedbackPlaceholder": "Optional feedback for rejection or refinement…",
+    "approveAcceptEdits": "Yes, auto-accept edits",
+    "approveFullAuto": "Approve & run fully automated",
+    "approveReviewEach": "Yes, review each edit",
+    "discard": "Discard plan",
+    "edit": "Edit plan",
+    "editCancel": "Cancel",
+    "editSave": "Save changes",
+    "editStepsHint": "One step per line…",
+    "editStepsLabel": "Steps (one per line)",
+    "editTitleLabel": "Title",
+    "feedbackPlaceholder": "Optional feedback for keep-planning, discard, or refinement…",
+    "keepPlanning": "No, keep planning",
+    "moreActions": "More plan actions",
     "noSteps": "This plan has no steps.",
     "progressLabel": "Progress",
     "refineExpand": "Expand",
@@ -9,7 +21,7 @@
     "refineReorder": "Reorder",
     "refineRepair": "Repair",
     "refineSimplify": "Simplify",
-    "reject": "Reject",
+    "refineUnavailable": "Can't refine — no model is configured for background tasks.",
     "sourceLabel": "Source: {source}",
     "title": "Review plan"
   },
@@ -24,8 +36,11 @@
     "paused": "Paused"
   },
   "tracker": {
+    "cancel": "Cancel plan",
     "empty": "No plan is running.",
+    "pause": "Pause",
     "progress": "{completed} of {total} steps",
+    "resume": "Resume",
     "statusBlocked": "Blocked",
     "statusCompleted": "Completed",
     "statusFailed": "Failed",

@@ -43,8 +43,16 @@ export interface ProbeServerDeps {
   open?: (server: McpServer, opts: OpenMcpOptions) => Promise<OpenedMcp>
   /** Build an OAuth provider (loads stored tokens) for a remote server. */
   authProvider?: (server: McpServer) => unknown
-  /** Probe timeout in ms (default 12s). */
+  /** Per-attempt probe timeout in ms (default 12s). */
   timeoutMs?: number
+  /** Total connect attempts (default 2) — a cold stdio server (npx still
+   * installing) or a waking remote endpoint routinely fails its FIRST connect;
+   * one automatic retry turns those into a `connected` instead of a false
+   * `failed` badge. Auth failures are never retried (a retry can't mint a
+   * token) and neither are timeouts (the budget is already spent). */
+  attempts?: number
+  /** Backoff before each retry (default 300ms). */
+  retryDelayMs?: number
   /** Classify a connection error as an authorization failure. */
   isAuthError?: (err: unknown) => boolean
   /** Skip resource listing (status-only callers like `/mcp list`). */
@@ -86,34 +94,55 @@ export async function probeMcpServer(
   const open = deps.open ?? openMcpClient
   const isAuthError = deps.isAuthError ?? isUnauthorized
   const timeoutMs = deps.timeoutMs ?? 12_000
+  const maxAttempts = Math.max(1, deps.attempts ?? 2)
+  const retryDelayMs = deps.retryDelayMs ?? 300
   const authProvider = deps.authProvider?.(server)
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-  const controller = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let timedOut = false
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      timedOut = true
-      reject(new Error(`MCP probe timed out after ${timeoutMs}ms`))
-      controller.abort()
-    }, timeoutMs)
-  })
-
-  let opened: OpenedMcp
-  try {
-    opened = await Promise.race([
-      open(server, { signal: controller.signal, authProvider }),
-      timeout,
-    ])
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
-    if (!timedOut && isAuthError(err)) {
-      return { status: "needs_auth", ...empty, error: reason }
+  /** One connect attempt with its own timeout + abort. */
+  const connectOnce = async (): Promise<
+    { ok: true; opened: OpenedMcp } | { ok: false; error: string; timedOut: boolean; auth: boolean }
+  > => {
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let timedOut = false
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true
+        reject(new Error(`MCP probe timed out after ${timeoutMs}ms`))
+        controller.abort()
+      }, timeoutMs)
+    })
+    try {
+      const opened = await Promise.race([
+        open(server, { signal: controller.signal, authProvider }),
+        timeout,
+      ])
+      return { ok: true, opened }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: reason, timedOut, auth: !timedOut && isAuthError(err) }
+    } finally {
+      if (timer) clearTimeout(timer)
     }
-    return { status: "failed", ...empty, error: reason }
-  } finally {
-    if (timer) clearTimeout(timer)
   }
+
+  let opened: OpenedMcp | undefined
+  for (let attempt = 0; attempt < maxAttempts && !opened; attempt++) {
+    if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs)
+    const result = await connectOnce()
+    if (result.ok) {
+      opened = result.opened
+      break
+    }
+    // Auth failures can't be fixed by retrying; a timeout already burned the
+    // full per-attempt budget — report both immediately.
+    if (result.auth) return { status: "needs_auth", ...empty, error: result.error }
+    if (result.timedOut || attempt === maxAttempts - 1) {
+      return { status: "failed", ...empty, error: result.error }
+    }
+  }
+  if (!opened) return { status: "failed", ...empty, error: "unreachable" }
 
   try {
     const tools = await listSoft(async () =>

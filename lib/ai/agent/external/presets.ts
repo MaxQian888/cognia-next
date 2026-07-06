@@ -29,6 +29,11 @@ export type ExternalAgentPresetId =
   | "claude-code"
   | "gemini-cli"
   | "cursor-cli"
+  | "copilot-cli"
+  | "kiro"
+  | "qwen-code"
+  | "pi"
+  | "droid"
   | "opencode-server"
   | "opencode-remote"
   | "custom"
@@ -160,6 +165,11 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "claude-code": buildPresetConfig("claude-code"),
   "gemini-cli": buildPresetConfig("gemini-cli"),
   "cursor-cli": buildPresetConfig("cursor-cli"),
+  "copilot-cli": buildPresetConfig("copilot-cli"),
+  kiro: buildPresetConfig("kiro"),
+  "qwen-code": buildPresetConfig("qwen-code"),
+  pi: buildPresetConfig("pi"),
+  droid: buildPresetConfig("droid"),
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,
   custom: null,
@@ -259,6 +269,21 @@ export function listDynamicPresetEntries(): Array<{
 // ============================================================================
 // Preset Utilities
 // ============================================================================
+
+/**
+ * The builtin *executable* external-agent preset ids — every static preset
+ * except the `custom` sentinel (all shipping presets are directly executable).
+ * These are exactly the ids a teammate `runtime` or a subagent `externalPresetId`
+ * may name; plugin-contributed presets stay outside this closed set and are
+ * reached through the capability overlay instead. Derived from the record so it
+ * can never drift from `EXTERNAL_AGENT_PRESETS`.
+ */
+export const BUILTIN_EXECUTABLE_PRESET_IDS = (
+  Object.keys(EXTERNAL_AGENT_PRESETS) as ExternalAgentPresetId[]
+).filter(
+  (id): id is Exclude<ExternalAgentPresetId, "custom"> =>
+    id !== "custom" && EXTERNAL_AGENT_PRESETS[id] !== null
+)
 
 /**
  * Get all available preset IDs (excluding `custom`). The result merges the

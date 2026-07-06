@@ -177,6 +177,9 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
           : {}),
       },
       sourceVerification: s?.sourceVerificationSettings,
+      // SSRF guard opt-out + always-distill isolation, from Settings → Search.
+      allowPrivateHosts: s?.webTools?.allowPrivateHosts === true,
+      alwaysDistill: s?.webTools?.alwaysDistill === true,
     }
     // Reuse the search-result cache (shared with the search UI) unless the user
     // turned it off; apply their TTL / size config.
@@ -216,6 +219,36 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
       deps.cache = getFetchCache()
     } catch {
       // Cache is optional.
+    }
+    // CORS-free outbound fetch so web_fetch (plus the platform scrapers and the
+    // Jina fallback) can reach arbitrary hosts: native CapacitorHttp on mobile,
+    // the Rust `proxy_http_request` on desktop, plain fetch in the browser. The
+    // Jina fallback is only enabled where a CORS-free bridge exists.
+    try {
+      const { isCapacitor } = await import("@/lib/platform/detect")
+      const { isTauri } = await import("@/lib/native/utils")
+      if (isCapacitor()) {
+        const { pinnedFetch } = await import("@/lib/tauri/pinned-fetch")
+        deps.fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) =>
+          pinnedFetch(typeof input === "string" ? input : input.toString(), {
+            method: init?.method,
+            headers: init?.headers,
+            body: typeof init?.body === "string" ? init.body : undefined,
+          })) as typeof fetch
+        deps.jinaFallback = true
+      } else if (isTauri()) {
+        const { createProxyFetch } = await import("@/lib/network/proxy-fetch")
+        const base = createProxyFetch()
+        // Defense-in-depth: also ask the Rust backend to reject private hosts
+        // (mirrors the TS `web_fetch` guard) unless the user opted in.
+        const blockPrivateHosts = deps.allowPrivateHosts !== true
+        deps.fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) =>
+          base(input, { ...init, blockPrivateHosts })) as typeof fetch
+        deps.jinaFallback = true
+      }
+      // Browser: leave fetchImpl unset (global fetch, CORS-limited); Jina off.
+    } catch {
+      // No native fetch bridge — fall back to global fetch.
     }
     return deps
   } catch {

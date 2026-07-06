@@ -52,7 +52,12 @@ export interface PersistResult {
 }
 
 function newVectorDocId(twinId: string, sourceId: string, idx: number): string {
-  return `${twinId}__${sourceId}__${idx.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  // Deterministic: a re-ingest of the same source reuses the same ids so the
+  // remote upsert OVERWRITES the prior vectors instead of minting fresh random
+  // ids and orphaning the old ones. Random ids stranded vectors whenever a
+  // Dexie write failed after the remote upsert — the next run could no longer
+  // find them (cleanup keys off the now-missing Dexie rows) to delete them.
+  return `${twinId}__${sourceId}__${idx.toString(36)}`
 }
 
 /**

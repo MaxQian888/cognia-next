@@ -8,6 +8,7 @@ import { SettingsCard, SettingsDivider } from "../common/settings-section"
 import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
 import { CompactionSettings } from "./compaction-settings"
 import { ComposerBehaviorCard } from "./composer-behavior-card"
+import { ConversationSidebarCard } from "./conversation-sidebar-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -146,6 +147,8 @@ export function ConversationSection() {
           <ComposerAssistanceCard />
         </div>
       </SettingsCard>
+
+      <ConversationSidebarCard />
 
       <CompactionSettings />
 

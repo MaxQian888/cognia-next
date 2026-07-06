@@ -15,9 +15,38 @@
 
 import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
 
-export type TriggerKind = "slash" | "file" | "bash" | "memory" | "agent"
+export type TriggerKind =
+  | "slash"
+  | "file"
+  | "bash"
+  | "memory"
+  | "agent"
+  | "skill"
+  | "preset"
+  | "wfNode"
+  | "wfEdge"
 
-export type MentionMode = "files" | "agents" | "combined"
+export type MentionMode = "files" | "agents" | "combined" | "workflow"
+
+/**
+ * A workflow graph element the copilot `@` picker can reference. Produced by
+ * `useMentionableWorkflowElements` from the editor store and rendered by the
+ * composer popover. Lives here (a pure, chat-side module) so neither the
+ * composer nor the popover has to import from the workflow subsystem.
+ */
+export interface MentionableWorkflowElement {
+  type: "node" | "edge"
+  /** Graph-local id (`n_…` / `e_…`) inserted as `@node:<id>` / `@edge:<id>`. */
+  id: string
+  /** User-visible label (node label, or a derived edge label). */
+  label: string
+  /** Node kind (`ai.prompt`, …) or edge kind (`default` / `conditional` / …). */
+  kind: string
+  /** Optional secondary line — a containing-group breadcrumb or edge endpoints. */
+  sublabel?: string
+  /** Pre-lowercased haystack for fuzzy matching (id + label + kind + sublabel). */
+  searchText: string
+}
 
 export interface ComposerTrigger {
   kind: TriggerKind
@@ -50,6 +79,32 @@ const FILE_TRIGGER: TriggerKind = "file"
 const BASH_TRIGGER: TriggerKind = "bash"
 const MEMORY_TRIGGER: TriggerKind = "memory"
 const AGENT_TRIGGER: TriggerKind = "agent"
+const SKILL_TRIGGER: TriggerKind = "skill"
+const PRESET_TRIGGER: TriggerKind = "preset"
+const WFNODE_TRIGGER: TriggerKind = "wfNode"
+const WFEDGE_TRIGGER: TriggerKind = "wfEdge"
+
+// Namespaced `@` prefixes that flip the mention into a typed picker instead of
+// the file/agent panel. Mirrors the CLI's `@skill:` / `@agent:` mention
+// vocabulary (cli/src/tui/mention/detector.ts). The set is mode-dependent so
+// `@node:` only means a workflow node inside the workflow-editor composer.
+const CHAT_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
+  { prefix: "skill:", kind: SKILL_TRIGGER },
+  { prefix: "preset:", kind: PRESET_TRIGGER },
+]
+const WORKFLOW_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
+  { prefix: "node:", kind: WFNODE_TRIGGER },
+  { prefix: "edge:", kind: WFEDGE_TRIGGER },
+]
+
+function namespacePrefixesFor(
+  mode: MentionMode | undefined
+): ReadonlyArray<{ prefix: string; kind: TriggerKind }> {
+  if (mode === "workflow") return WORKFLOW_NAMESPACE_PREFIXES
+  // The team workspace (`agents`) reserves `@` for members — no typed prefixes.
+  if (mode === "agents") return []
+  return CHAT_NAMESPACE_PREFIXES
+}
 
 /**
  * Detect whether the caret in `value` is inside an autocomplete trigger token.
@@ -102,10 +157,17 @@ export function detectTrigger(
     }
   }
 
-  // `@file` / `@agent` trigger — search backwards from the caret for an `@`
-  // whose left neighbour is whitespace or the start of input. Stop at
-  // whitespace. The kind depends on the composer's `mentionMode`.
-  const atKind: TriggerKind = opts?.mentionMode === "agents" ? AGENT_TRIGGER : FILE_TRIGGER
+  // `@file` / `@agent` / `@node` trigger — search backwards from the caret for
+  // an `@` whose left neighbour is whitespace or the start of input. Stop at
+  // whitespace. The kind depends on the composer's `mentionMode`: the workflow
+  // composer makes a bare `@` mean "workflow node".
+  const atKind: TriggerKind =
+    opts?.mentionMode === "workflow"
+      ? WFNODE_TRIGGER
+      : opts?.mentionMode === "agents"
+        ? AGENT_TRIGGER
+        : FILE_TRIGGER
+  const namespacePrefixes = namespacePrefixesFor(opts?.mentionMode)
   for (let i = caret - 1; i >= 0; i--) {
     const ch = value[i]
     if (ch === "@") {
@@ -118,11 +180,25 @@ export function detectTrigger(
       // we still highlight the popover only when the caret is inside the
       // token range.
       if (caret > queryEnd) return null
+      const beforeCaret = value.slice(i + 1, caret)
+      // A typed namespace prefix (`@skill:` / `@preset:` in chat, `@node:` /
+      // `@edge:` in the workflow composer) flips the panel into a dedicated
+      // picker. The applicable set is chosen by mode above.
+      for (const { prefix, kind } of namespacePrefixes) {
+        if (beforeCaret.startsWith(prefix)) {
+          return {
+            kind,
+            tokenStart: i,
+            tokenEnd: queryEnd,
+            query: beforeCaret.slice(prefix.length),
+          }
+        }
+      }
       return {
         kind: atKind,
         tokenStart: i,
         tokenEnd: queryEnd,
-        query: value.slice(i + 1, caret),
+        query: beforeCaret,
       }
     }
     if (/\s/.test(ch)) break

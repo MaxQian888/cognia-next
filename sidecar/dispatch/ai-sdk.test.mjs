@@ -39,6 +39,17 @@ test("chargeLegSteps: a successful read uses the real count, clamped to the cap"
   assert.equal(chargeLegSteps({ legStepsRead: true, legStepsRun: 0, perLegCap: 16 }), 16)
 })
 
+test("resolveStepChunk: defaults to 16 and honours a valid override", () => {
+  const { resolveStepChunk } = __testing__
+  assert.equal(resolveStepChunk(undefined), 16, "default when unset")
+  assert.equal(resolveStepChunk(0), 16, "0 is invalid → default")
+  assert.equal(resolveStepChunk(-5), 16, "negative → default")
+  assert.equal(resolveStepChunk("32"), 16, "non-number → default")
+  assert.equal(resolveStepChunk(32), 32, "a larger chunk reduces leg re-sends")
+  assert.equal(resolveStepChunk(1), 1, "minimum of 1")
+  assert.equal(resolveStepChunk(8.9), 8, "floored to an integer")
+})
+
 test("resolveProtocol picks openai for openai/openrouter/groq/deepseek", () => {
   const { resolveProtocol } = __testing__
   assert.equal(resolveProtocol("openai", undefined), "openai")
@@ -213,6 +224,50 @@ test("session exposes pendingApprovals AND pendingPluginToolCalls (gate-first co
   })
   assert.ok(session.pendingApprovals instanceof Map)
   assert.ok(session.pendingPluginToolCalls instanceof Map)
+})
+
+test("refuses to dispatch an OpenRouter key with no base URL (credential-leak guard)", async () => {
+  const { events, emit } = captureEmit()
+  let streamCalled = false
+  dispatchAiSdk({
+    provider: "openrouter",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    // Key present, base URL dropped — the exact stale-build shape that would
+    // otherwise send sk-or-… to api.openai.com.
+    sendOptions: { model: "poolside/laguna-m.1:free", providerCredentials: { apiKey: "sk-or-v1" } },
+    emit,
+    log: () => {},
+    streamText: () => {
+      streamCalled = true
+      return makeFakeStream([])()
+    },
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.match(ended.error, /refused to avoid leaking the key to OpenAI/)
+  assert.equal(streamCalled, false, "must not reach the provider HTTP call")
+})
+
+test("dispatches an OpenRouter key normally once its base URL is present", async () => {
+  const { events, emit } = captureEmit()
+  let seenBaseURL
+  dispatchAiSdk({
+    provider: "openrouter",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "poolside/laguna-m.1:free",
+      providerCredentials: { apiKey: "sk-or-v1", baseURL: "https://openrouter.ai/api/v1" },
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([{ type: "finish", finishReason: "stop" }]),
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const ended = events.find((e) => e.type === "session_ended")
+  // No leak error — the guard let it through.
+  assert.ok(!ended.error || !/leaking the key/.test(ended.error))
 })
 
 test("v6 text-delta (field `text`) produces non-empty assistant text end-to-end", async () => {
@@ -434,6 +489,65 @@ test("maybeCompact: sliding-window strategy compacts WITHOUT an LLM summary call
   }
 })
 
+test("maybeCompact: optical strategy renders the middle to image frames and emits optical metadata", async () => {
+  const { events, emit } = captureEmit()
+  // Long ASCII so the archive is worthwhile vs. its text tokens.
+  const LONG =
+    "the assistant refactored the authentication module to use rotating refresh tokens and updated the co located unit tests across several files without regressions. ".repeat(
+      4
+    )
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: LONG },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: LONG,
+    sendOptions: {
+      // model id resolves to the anthropic vision family → cheap frame estimate.
+      model: "claude-test",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "optical",
+        // verify off → no vision round-trip call needed in the test harness.
+        optical: { size: 512, verify: false },
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  await waitForTurns(1)
+  session.pushUserMessage(LONG)
+  await waitForTurns(2)
+  session.pushUserMessage(LONG)
+  await waitForTurns(3)
+  session.closeInput()
+
+  const boundaries = events.filter(
+    (e) => e.type === "event" && e.event?.subtype === "compact_boundary"
+  )
+  assert.ok(boundaries.length >= 1, "optical strategy emits a boundary")
+  const optical = boundaries.find((b) => b.event.compact_metadata.optical)
+  assert.ok(optical, "a boundary carries optical metadata")
+  const meta = optical.event.compact_metadata
+  assert.equal(meta.strategy, "optical")
+  assert.ok(meta.optical.frameCount >= 1)
+  assert.equal(meta.optical.frames.length, meta.optical.frameCount)
+  assert.ok(meta.optical.frames[0].base64.length > 0, "rendered frame is carried on the event")
+  assert.ok(meta.optical.estImageTokens < meta.optical.estTextTokens, "cheaper than text")
+  // No text-summary call was made (no summarizer prompt message).
+  assert.ok(!calls.some((a) => a.messages?.[0]?.content === "SUMMARIZE"))
+})
+
 test("maybeCompact: captures a pre-compaction snapshot when undo is enabled", async () => {
   const { events, emit } = captureEmit()
   const { fn } = capturingStream(
@@ -540,13 +654,15 @@ test("tool_result_review round-trip rewrites the tool output the model sees", as
     },
     emit,
     log: () => {},
-    streamText: makeFakeStream([
-      { type: "tool-call", toolCallId: "c1", toolName: "web_fetch", args: { url: "x" } },
-      { type: "tool-result", toolCallId: "c1", output: "RAW SECRET" },
-      { type: "finish", finishReason: "stop" },
-    ]),
+    streamText: makeFakeStream([{ type: "finish", finishReason: "stop" }]),
   })
-  // Wait for the review request, then resolve it with a rewrite (the renderer's job).
+  // The review now runs at the tool EXECUTE layer: `buildAiSdkTools` /
+  // `buildAiSdkMcpTools` call `reviewToolOutput` before a tool's output reaches
+  // the model (the fullStream interception was removed — see ai-sdk.mjs). Drive
+  // that round-trip directly; the execute-layer application is covered by
+  // ai-sdk-tools.test.mjs.
+  const reviewed = session.reviewToolOutput("web_fetch", "c1", "RAW SECRET", false)
+  // Wait for the review request, then resolve it with a rewrite (renderer's job).
   await new Promise((resolve) => {
     const tick = () => {
       const review = events.find((e) => e.type === "tool_result_review")
@@ -558,21 +674,14 @@ test("tool_result_review round-trip rewrites the tool output the model sees", as
     }
     tick()
   })
-  await new Promise((resolve) => {
-    const tick = () => {
-      if (events.some((e) => e.type === "session_ended")) return resolve()
-      setTimeout(tick, 5)
-    }
-    tick()
-  })
+  // The renderer's rewrite is what the tool execute returns → what the model sees.
+  assert.equal(await reviewed, "CLEAN")
   const review = events.find((e) => e.type === "tool_result_review")
   assert.equal(review.toolName, "web_fetch")
   assert.equal(review.toolUseId, "c1")
   assert.equal(review.result, "RAW SECRET")
-  // The emitted tool_result (synthetic user message) carries the rewritten output.
-  const userMsg = events.find((e) => e.type === "event" && e.event.type === "user")
-  assert.ok(userMsg, "tool_result user message emitted")
-  assert.equal(userMsg.event.message.content[0].content, "CLEAN")
+  assert.equal(review.isError, false)
+  session.closeInput()
 })
 
 test("no tool_result_review is emitted when review is not enabled", async () => {
@@ -936,7 +1045,7 @@ test("cacheOptimizationEnabled without the anthropic protocol keeps the single c
     firstPrompt: "hi",
     sendOptions: {
       model: "deepseek-chat",
-      providerCredentials: { apiKey: "k" },
+      providerCredentials: { apiKey: "k", baseURL: "https://api.deepseek.com" },
       systemPrompt: "STABLE_PREFIX",
       appendSystemPrompt: "DYNAMIC_TAIL",
       cacheOptimizationEnabled: true,
@@ -1173,7 +1282,11 @@ test("dispatchAiSdk surfaces an in-stream error part (not a throw) as session_en
     firstPrompt: "hi",
     sendOptions: {
       model: "deepseek-v4-flash",
-      providerCredentials: { apiKey: "sk", protocol: "openai" },
+      providerCredentials: {
+        apiKey: "sk",
+        protocol: "openai",
+        baseURL: "https://api.deepseek.com",
+      },
     },
     emit,
     log: () => {},
@@ -1684,15 +1797,23 @@ test("interrupt() resolves all pending round-trips so a stuck session cleans up"
       reviewResolvedSentinel = v === undefined ? "__undefined__" : v
     },
   })
+  let protocolCancel = null
+  session.pendingProtocolExecs.set("pa-1", {
+    cancel: (reason) => {
+      protocolCancel = reason
+    },
+  })
   assert.equal(session.pendingApprovals.size, 1)
   assert.equal(session.pendingPluginToolCalls.size, 1)
   assert.equal(session.pendingToolResultReviews.size, 1)
+  assert.equal(session.pendingProtocolExecs.size, 1)
   await session.q.interrupt()
   // Every pending entry is resolved so the tool gate / plugin-tool / review
   // round-trip doesn't hang forever.
   assert.equal(session.pendingApprovals.size, 0)
   assert.equal(session.pendingPluginToolCalls.size, 0)
   assert.equal(session.pendingToolResultReviews.size, 0)
+  assert.equal(session.pendingProtocolExecs.size, 0)
   assert.ok(permissionResolved, "pending approval was resolved")
   assert.deepEqual(
     permissionResolved,
@@ -1712,6 +1833,7 @@ test("interrupt() resolves all pending round-trips so a stuck session cleans up"
     "plugin call errored so M2 unblocks"
   )
   assert.equal(reviewResolvedSentinel, "__undefined__", "review passes through unchanged")
+  assert.equal(protocolCancel, "interrupted", "protocol adapter exec was cancelled")
 })
 
 test("external mcpServers tools are merged into the turn (parity with the Anthropic path)", async () => {
@@ -1753,6 +1875,58 @@ test("external mcpServers tools are merged into the turn (parity with the Anthro
   session.closeInput()
   await new Promise((r) => setTimeout(r, 0))
   assert.equal(closed, true, "MCP connections closed on teardown")
+})
+
+test("system prefix + tools map stay byte-stable across turns (prompt-cache prefix)", async () => {
+  // Non-Anthropic providers (OpenAI automatic caching, DeepSeek disk caching,
+  // Gemini implicit caching) have NO explicit per-request cache breakpoint — a
+  // cache HIT depends entirely on a byte-identical leading prefix (system + tools)
+  // across turns. This regression guard fails if a future change rebuilds the
+  // tools map unsorted/per-leg or mutates the system head between turns.
+  const { events, emit } = captureEmit()
+  const calls = []
+  const stream = (args) => {
+    calls.push(args)
+    return makeFakeStream([
+      { type: "text-delta", id: "1", text: `reply-${calls.length}` },
+      { type: "finish", finishReason: "stop" },
+    ])()
+  }
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "turn one",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      systemPrompt: "You are a helpful assistant.",
+      builtinTools: { git: true },
+    },
+    emit,
+    log: () => {},
+    streamText: stream,
+  })
+  // Queue turn 2 up front; the loop runs turn 1 then turn 2 on the same session.
+  session.pushUserMessage("turn two")
+  await waitForEvent(
+    events,
+    (e) =>
+      e.type === "event" && e.event?.type === "assistant" && /reply-2/.test(JSON.stringify(e.event))
+  )
+  assert.ok(calls.length >= 2, "two turns streamed")
+
+  const systemHead = (args) => (args.messages ?? []).filter((m) => m.role === "system")
+  assert.ok(systemHead(calls[0]).length > 0, "system prompt present in the prefix")
+  assert.deepEqual(
+    systemHead(calls[1]),
+    systemHead(calls[0]),
+    "system prefix is byte-identical across turns (cache-stable)"
+  )
+  // Tools identity + order is stable turn-over-turn (built once, sorted).
+  const toolKeys = (args) => Object.keys(args.tools ?? {})
+  assert.ok(toolKeys(calls[0]).length > 0, "tools offered")
+  assert.deepEqual(toolKeys(calls[1]), toolKeys(calls[0]), "tools map stable across turns")
+  assert.deepEqual(toolKeys(calls[1]), [...toolKeys(calls[1])].sort(), "tools map sorted")
 })
 
 test("the synthesized dispatch_agent subagent tool is offered AND round-trips on the ai-sdk path", async () => {
@@ -2162,7 +2336,11 @@ test("an interrupted tool-call leg does not corrupt the next turn's request", as
     firstPrompt: "turn 1",
     sendOptions: {
       model: "deepseek-chat",
-      providerCredentials: { apiKey: "k", protocol: "openai" },
+      providerCredentials: {
+        apiKey: "k",
+        protocol: "openai",
+        baseURL: "https://api.deepseek.com",
+      },
     },
     emit,
     log: () => {},

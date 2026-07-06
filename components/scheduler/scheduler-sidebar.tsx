@@ -5,7 +5,7 @@
  * Displays app tasks, system tasks, search, filters, and footer stats.
  */
 
-import React, { useMemo, useState } from "react"
+import React, { useCallback, useMemo, useState } from "react"
 import { Calendar, Search, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 
@@ -132,26 +132,25 @@ export function SchedulerSidebarContent({
         ? "bg-red-500"
         : "bg-gray-400"
 
-  // Filter chips configuration
-  const filters = [
-    { key: "all", label: t("filter.all") || "All", count: tasks.length },
-    {
-      key: "active",
-      label: t("statuses.active") || "Active",
-      count: tasks.filter((task) => task.status === "active").length,
-    },
-    {
-      key: "paused",
-      label: t("statuses.paused") || "Paused",
-      count: tasks.filter((task) => task.status === "paused").length,
-    },
-    {
+  // Filter chips configuration — one pass over the task list per render of
+  // this memo instead of one filter() pass per chip.
+  const filters = useMemo(() => {
+    let active = 0
+    let paused = 0
+    let loop = 0
+    for (const task of tasks) {
+      if (task.status === "active") active++
+      else if (task.status === "paused") paused++
       // /loop interval tasks (tagged by lib/loop/interval.ts).
-      key: "loop",
-      label: t("filter.loop") || "Loop",
-      count: tasks.filter((task) => task.tags?.includes("loop")).length,
-    },
-  ]
+      if (task.tags?.includes("loop")) loop++
+    }
+    return [
+      { key: "all", label: t("filter.all") || "All", count: tasks.length },
+      { key: "active", label: t("statuses.active") || "Active", count: active },
+      { key: "paused", label: t("statuses.paused") || "Paused", count: paused },
+      { key: "loop", label: t("filter.loop") || "Loop", count: loop },
+    ]
+  }, [tasks, t])
 
   // Footer success rate
   const successRate =
@@ -185,6 +184,26 @@ export function SchedulerSidebarContent({
     !!unifiedItems && unifiedItems.length === 0 && tasks.length === 0 && systemTasks.length === 0
   const showFilteredEmpty =
     !!unifiedItems && unifiedItems.length > 0 && filteredUnified && filteredUnified.length === 0
+
+  // O(1) membership lookups instead of Array#includes per row.
+  const selectedUnifiedIdSet = useMemo(
+    () => new Set(selectedUnifiedIds ?? []),
+    [selectedUnifiedIds]
+  )
+
+  // Stable row-click dispatcher so `React.memo` on the row components holds.
+  const handleUnifiedItemClick = useCallback(
+    (clickedItem: UnifiedScheduledItem) => {
+      if (clickedItem.kind === "app") {
+        onSelectTask(clickedItem.sourceId)
+      } else if (clickedItem.kind === "system") {
+        onSelectSystemTask?.(clickedItem.sourceId)
+      } else {
+        onSelectUnifiedItem?.(clickedItem)
+      }
+    },
+    [onSelectTask, onSelectSystemTask, onSelectUnifiedItem]
+  )
 
   return (
     <>
@@ -292,17 +311,9 @@ export function SchedulerSidebarContent({
                             item={item}
                             isActive={item.kind === "app" && selectedTaskId === item.sourceId}
                             isHighlighted={item.kind === "app" && idx === highlightedIndex}
-                            isSelected={selectedUnifiedIds?.includes(item.unifiedId)}
+                            isSelected={selectedUnifiedIdSet.has(item.unifiedId)}
                             onToggleSelect={onToggleUnifiedSelection}
-                            onClick={(clickedItem) => {
-                              if (clickedItem.kind === "app") {
-                                onSelectTask(clickedItem.sourceId)
-                              } else if (clickedItem.kind === "system") {
-                                onSelectSystemTask?.(clickedItem.sourceId)
-                              } else {
-                                onSelectUnifiedItem?.(clickedItem)
-                              }
-                            }}
+                            onClick={handleUnifiedItemClick}
                             onRunNow={onUnifiedRunNow}
                             onPause={onUnifiedPause}
                             onResume={onUnifiedResume}

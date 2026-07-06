@@ -36,8 +36,8 @@ import { cn } from "@/lib/utils"
 
 const AGG_GLYPH: Record<AggregateStatus, { Icon: LucideIcon; className: string }> = {
   running: { Icon: ClockIcon, className: "animate-pulse text-muted-foreground" },
-  error: { Icon: XCircleIcon, className: "text-red-600" },
-  complete: { Icon: CheckCircleIcon, className: "text-green-600" },
+  error: { Icon: XCircleIcon, className: "text-red-600 dark:text-red-500" },
+  complete: { Icon: CheckCircleIcon, className: "text-green-600 dark:text-green-500" },
   pending: { Icon: CircleIcon, className: "text-muted-foreground" },
 }
 
@@ -130,7 +130,7 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
           type="button"
           onClick={() => setGroupOpen((v) => !v)}
           aria-expanded={groupOpen}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
           data-testid="tool-activity-group-toggle"
         >
           <ChevronDownIcon

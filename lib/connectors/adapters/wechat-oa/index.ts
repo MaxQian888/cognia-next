@@ -3,8 +3,9 @@
  *
  * Inbound: the Rust webhook handler (`wechat_oa_handler`) verifies + decrypts
  * the safe-mode callback and emits `{ xml }`; this adapter subscribes, parses,
- * and emits normalized events. The adapter registers its type with the Rust
- * connectors server on start so the webhook route resolves `wechat-oa`.
+ * and emits normalized events. The webhook route resolves `wechat-oa` because
+ * `ConnectorBusProvider` registers every inbound-server adapter with the Rust
+ * connectors server before starting its transport (see `bootAdapter`).
  *
  * Outbound: replies go through the 客服 message API (`custom/send`). WeChat's
  * 48-hour customer-service window means sends outside it are rejected by the
@@ -18,11 +19,7 @@ import type {
   PlatformAdapter,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
-import {
-  connectorsHttpRequest,
-  connectorsRegisterAdapter,
-  connectorsUnregisterAdapter,
-} from "@/lib/connectors/tauri/commands"
+import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { WECHAT_OA_A2UI_CAPABILITY, WECHAT_OA_CAPS } from "./capability"
 import { WECHAT_API_BASE } from "./auth"
@@ -65,17 +62,9 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     const signal = abortController.signal
     healthState = "running"
 
-    // Tell the Rust connectors server this adapter is a wechat-oa webhook so
-    // the GET echostr handshake + POST decrypt route resolve. Best-effort —
-    // in web mode (no Tauri) this throws and the adapter still constructs.
-    try {
-      await connectorsRegisterAdapter({ adapterId: opts.id, adapterType: "wechat-oa" })
-    } catch (err) {
-      ctx.logger.warn("wechat-oa: register adapter failed", {
-        reason: err instanceof Error ? err.message : String(err),
-      })
-    }
-
+    // Registration with the Rust connectors server (so the GET echostr
+    // handshake + POST decrypt route resolve to `wechat-oa`) is done centrally
+    // by `ConnectorBusProvider.bootAdapter` before this transport starts.
     const feed = startWechatOaWebhook({ adapterId: opts.id, signal })
     ;(async () => {
       try {
@@ -100,11 +89,8 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     abortController?.abort()
     abortController = null
     healthState = "down"
-    try {
-      await connectorsUnregisterAdapter(opts.id)
-    } catch {
-      // Best-effort.
-    }
+    // Unregistration from the Rust connectors server is done centrally by
+    // `ConnectorBusProvider`'s teardown (see `serverAdapterIds`).
   }
 
   function health(): AdapterHealth {

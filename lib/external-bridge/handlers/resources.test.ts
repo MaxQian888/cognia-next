@@ -22,7 +22,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
   return {

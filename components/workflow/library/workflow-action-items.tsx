@@ -13,6 +13,7 @@ import { useTranslations } from "next-intl"
 import {
   CopyIcon,
   FolderInputIcon,
+  HistoryIcon,
   LayoutTemplateIcon,
   PencilIcon,
   PinIcon,
@@ -40,6 +41,7 @@ export interface WorkflowActionItemsProps {
   workflow: WorkflowRow
   Item: MenuItemComponent
   Separator: ComponentType
+  onRun: () => void
   onRename: () => void
   onEditTags: () => void
   onDelete: () => void
@@ -49,6 +51,7 @@ export function WorkflowActionItems({
   workflow,
   Item,
   Separator,
+  onRun,
   onRename,
   onEditTags,
   onDelete,
@@ -80,6 +83,9 @@ export function WorkflowActionItems({
 
   return (
     <>
+      <Item onClick={onRun} data-testid={`workflow-action-run-${workflow.id}`}>
+        <PlayIcon className="size-4 mr-2" /> {t("run")}
+      </Item>
       <Item asChild data-testid={`workflow-action-edit-${workflow.id}`}>
         <Link href={`/workflows/editor?id=${encodeURIComponent(workflow.id)}`}>
           <PencilIcon className="size-4 mr-2" /> {t("edit")}
@@ -87,7 +93,7 @@ export function WorkflowActionItems({
       </Item>
       <Item asChild>
         <Link href={`/workflows/runs?id=${encodeURIComponent(workflow.id)}`}>
-          <PlayIcon className="size-4 mr-2" /> {t("viewRuns")}
+          <HistoryIcon className="size-4 mr-2" /> {t("viewRuns")}
         </Link>
       </Item>
       <Item onClick={handleDuplicate}>

@@ -15,6 +15,7 @@ import type { KeyFlags } from "./keymap"
 /** The actions a user may rebind. Order is the display order in the settings panel. */
 export const KEYBINDABLE_ACTIONS = [
   "inspect",
+  "agentsPanel",
   "verboseToggle",
   "collapseAll",
   "find",
@@ -37,6 +38,7 @@ export type KeybindableAction = (typeof KEYBINDABLE_ACTIONS)[number]
 /** Default key spec for each action — the historic, pre-customization bindings. */
 export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
   inspect: "ctrl+g",
+  agentsPanel: "ctrl+b",
   verboseToggle: "ctrl+o",
   collapseAll: "ctrl+t",
   find: "ctrl+f",
@@ -57,6 +59,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
 /** Human-readable labels for the settings-panel rows. */
 export const KEYBINDING_LABELS: Record<KeybindableAction, string> = {
   inspect: "Inspect tool output",
+  agentsPanel: "Open running-agents panel",
   verboseToggle: "Toggle detail mode",
   collapseAll: "Expand / collapse all",
   find: "Find in transcript",

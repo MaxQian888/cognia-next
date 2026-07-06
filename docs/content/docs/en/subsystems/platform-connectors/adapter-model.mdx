@@ -16,7 +16,7 @@ description: The PlatformAdapter contract that every IM connector implements —
   (`lib/connectors/adapter-registry.ts:42`) switches on `row.type` across 11 builders, each probing its
   self-id and wiring **lazy credential resolvers** (rotation-safe). A parallel **pure display registry**
   `CONNECTOR_METADATA` (`lib/connectors/adapter-metadata.ts:42`, 16 rows) feeds the Discover page — its
-  `status` is intentionally decoupled from runtime reality. OAuth completion lives in a 2-entry Map
+  `status` now mirrors native adapter availability while retaining planned rows for reserved kinds. OAuth completion lives in a 2-entry Map
   (`lib/connectors/oauth-registry.ts:27`), and dedup + self-detection is shared via `MentionAccumulator`
   (`lib/connectors/adapters/_shared/mention-extractor.ts:24`).
 </TLDR>
@@ -233,10 +233,10 @@ answers "build the adapter for this row", `CONNECTOR_METADATA` (`lib/connectors/
 `getConnectorMeta` (`:94`) / `listConnectorMetadata` (`:98`), and `findMetadataGaps` (`:108`) keeps the
 table aligned with `ALL_PLATFORM_KINDS`.
 
-The `status` here is **intentionally decoupled from runtime reality** — for example `wechat-personal`
-ships a real adapter under `adapters/wechat-personal/` but is tagged `"planned"` (`:71`) because the
-Discover badge ground-truth tracks the Phase-1 built-ins, not the full builder set. The Discover page
-consumes this registry; it never imports the factory.
+The `status` here is the operator-facing availability signal: in-tree adapters that can be configured and
+started from Settings are `stable` (including Matrix, WeCom, personal WeChat, QQ Official, WeChat OA, and
+DingTalk), plugin-owned inbox surfaces such as GitHub remain `beta`, and reserved platform kinds without a
+native factory remain `planned`. The Discover page consumes this registry; it never imports the factory.
 
 ## OAuth Registry
 

@@ -4,7 +4,7 @@
 
 import type { ReactNode } from "react"
 import type { PetBones } from "./bones"
-import type { PetStage } from "./profile"
+import type { PetEvolutionFlavor, PetStage } from "./profile"
 import type { PetOneShot, PetVisualState } from "./visual-state"
 
 /** Horizontal facing of the pet while it moves (or after its last walk). */
@@ -34,6 +34,8 @@ export interface PetSkinRenderProps {
   locomotion?: PetLocomotion
   /** Render a still frame (window hidden / widget minimized). */
   paused?: boolean
+  /** Care-quality evolution flavor (cosmetic accent). Absent = normal. */
+  flavor?: PetEvolutionFlavor
 }
 
 export interface PetSkin {

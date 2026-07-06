@@ -1,0 +1,19 @@
+{
+  "backAria": "Back to settings",
+  "intro": "Review the GitHub Delivery bot's default merge policy. Repos, credentials, audit log and usage live on the paired desktop.",
+  "manageOnDesktop": "GitHub Delivery is managed on the desktop. Connect repositories, set up App credentials, adjust policies and review the audit log there.",
+  "policy": {
+    "allowedAuthors": "Allowed authors",
+    "description": "The policy a repository inherits until you override it on the desktop.",
+    "maxDailyMerges": "Max merges per day",
+    "off": "Off",
+    "perDay": "{count} / day",
+    "protectedBranches": "Protected branches",
+    "required": "Required",
+    "requireGreenCi": "Require green CI",
+    "requireHumanApproval": "Require human approval",
+    "title": "Default policy"
+  },
+  "runtimeNote": "The delivery bot runs on the paired desktop. Audit decisions and rate-limit usage are visible there in real time.",
+  "title": "GitHub Delivery"
+}

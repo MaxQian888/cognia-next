@@ -11,7 +11,7 @@
 
 import "fake-indexeddb/auto"
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // Radix Select is tricky in jsdom because of pointer-event/scroll APIs.
@@ -119,6 +119,9 @@ import { createCharacter } from "@/lib/db/characters"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { createTwinDraft } from "@/lib/db/twin-drafts"
 
+// Dexie + RTL integration flows; give a cold IndexedDB open headroom over 5s.
+jest.setTimeout(20000)
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -135,23 +138,45 @@ beforeEach(async () => {
 })
 
 describe("TwinPanel", () => {
-  it("renders the empty state when no character binds a twin", async () => {
+  it("renders the empty state with a guided-create CTA when no twin exists", async () => {
     render(<TwinPanel />)
     await screen.findByText(/No digital twins yet/i)
+    expect(await screen.findByTestId("twin-empty-create")).toBeInTheDocument()
   })
 
-  it("hides the chooser when only one twin exists", async () => {
+  it("opens the guided wizard from the empty-state CTA", async () => {
+    render(<TwinPanel />)
+    await userEvent.click(await screen.findByTestId("twin-empty-create"))
+    await screen.findByTestId("twin-wizard")
+  })
+
+  it("keeps the creation wizard mounted (no reset to step 1) when the first twin is created", async () => {
+    // Regression: creating the first twin flips the live query empty→non-empty,
+    // swapping the empty-state branch for the main branch. When the wizard was
+    // rendered at a different tree position in each branch, React remounted it,
+    // resetting it to step 1 and orphaning the just-created twin.
+    render(<TwinPanel />)
+    await userEvent.click(await screen.findByTestId("twin-empty-create"))
+    await screen.findByTestId("twin-wizard")
+    await userEvent.type(screen.getByTestId("twin-wizard-name"), "First Twin")
+    await userEvent.click(screen.getByTestId("twin-wizard-next"))
+    // The wizard must ADVANCE to step 2 (sources), not remount back to step 1.
+    await screen.findByTestId("twin-wizard-sources-count")
+    expect(screen.queryByTestId("twin-wizard-name")).not.toBeInTheDocument()
+  })
+
+  it("backfills a registry row from a legacy character.twinId and shows it in the switcher", async () => {
     await createCharacter({
       name: "Alice",
       systemPrompt: "you are alice",
       twinId: "twin_alice",
     })
     render(<TwinPanel />)
-    await screen.findAllByText("Alice")
-    expect(screen.queryByLabelText("Active twin")).toBeNull()
+    // The mount-time backfill turns the legacy twinId into a named registry row.
+    await screen.findByRole("button", { name: /Active twin: Alice/i })
   })
 
-  it("shows the chooser when multiple twins exist and switches between them", async () => {
+  it("switches between twins via the selector dropdown", async () => {
     await createCharacter({
       name: "Alice",
       systemPrompt: "you are alice",
@@ -163,10 +188,10 @@ describe("TwinPanel", () => {
       twinId: "twin_bob",
     })
     render(<TwinPanel />)
-    const chooser = await screen.findByLabelText("Active twin")
-    expect((chooser as HTMLSelectElement).value).toBe("twin_alice")
-    await userEvent.selectOptions(chooser, "twin_bob")
-    expect((chooser as HTMLSelectElement).value).toBe("twin_bob")
+    const trigger = await screen.findByRole("button", { name: /Active twin:/i })
+    await userEvent.click(trigger)
+    await userEvent.click(await screen.findByTestId("twin-selector-item-twin_bob"))
+    await screen.findByRole("button", { name: /Active twin: Bob/i })
   })
 
   it("shows the source list and supports deleting a source", async () => {
@@ -190,6 +215,9 @@ describe("TwinPanel", () => {
     expect(screen.getAllByText(/Sources/i).length).toBeGreaterThan(0)
     const deleteBtn = screen.getByRole("button", { name: /delete/i })
     await userEvent.click(deleteBtn)
+    // Deleting now requires confirming in an alert dialog.
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Delete$/i }))
     await waitFor(() => {
       expect(screen.queryByText("Onboarding notes")).toBeNull()
     })

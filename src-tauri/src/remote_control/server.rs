@@ -16,22 +16,24 @@
 //! Graceful shutdown is driven by a `tokio::sync::watch` channel: dropping
 //! the sender triggers the `with_graceful_shutdown` future to resolve.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
-    extract::{ConnectInfo, Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{ConnectInfo, Path, Query, State},
+    http::{HeaderMap, Method, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use subtle::ConstantTimeEq;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::allowlist::ParsedAllowlist;
@@ -41,10 +43,17 @@ use super::types::{
     Capability, CommandEvent, CommandRequestBody, EmitEvent, EmitEventRequestBody,
     RemoteControlError, RunTaskEvent, TriggerTaskRequestBody,
 };
+use super::QueryRegistry;
 
 pub const RUN_TASK_EVENT: &str = "remote-control://run-task";
 pub const EMIT_EVENT_EVENT: &str = "remote-control://emit-event";
 pub const COMMAND_EVENT: &str = "remote-control://command";
+pub const QUERY_EVENT: &str = "remote-control://query";
+
+/// How long a GET read waits for the renderer's Dexie read before giving up.
+/// Dexie list reads are single-digit ms; 2s absorbs a busy renderer. A closed
+/// window costs one bounded stall (then 503), never a hang.
+const QUERY_TIMEOUT_MS: u64 = 2000;
 
 /// Generic command targets accepted by `POST /api/v1/commands/:target`. The
 /// renderer's dispatch registry owns the actual routing — this list only
@@ -53,11 +62,45 @@ const KNOWN_TARGETS: &[&str] = &[
     "scheduler.task.run",
     "scheduler.event",
     "workflow.run",
+    "workflow.cancel",
     "goal.create",
     "goal.continue",
+    "goal.pause",
+    "goal.resume",
+    "goal.stop",
     "team.dispatch",
+    "team.stop",
     "plan.run",
+    "chat.send",
+    "connector.send",
+    "terminal.exec",
+    "plugin.enable",
+    "plugin.disable",
 ];
+
+/// Targets that cause model-cost or off-device side effects. Dispatch requires
+/// `RemoteControlInboundConfig.allow_sensitive_targets = true` in addition to a
+/// `write` token. Mirrors `SENSITIVE_REMOTE_COMMAND_TARGETS` in
+/// `types/remote-control/index.ts`.
+const SENSITIVE_TARGETS: &[&str] = &[
+    "chat.send",
+    "connector.send",
+    "goal.create",
+    "terminal.exec",
+];
+
+fn is_sensitive_target(target: &str) -> bool {
+    SENSITIVE_TARGETS.contains(&target)
+}
+
+/// Accessor for the `KNOWN_TARGETS` allowlist. Used by the OpenAPI
+/// `spec_parity` test to assert the Rust allowlist and the
+/// `RemoteCommandTarget` enum in `docs/api/remote-control.openapi.yaml`
+/// stay in lockstep (both directions).
+#[allow(dead_code)] // referenced from `spec_parity::tests` only.
+pub fn known_targets() -> &'static [&'static str] {
+    KNOWN_TARGETS
+}
 
 const BODY_LIMIT_BYTES: usize = 8 * 1024;
 
@@ -76,12 +119,18 @@ struct AppState {
     on_request: Arc<dyn RequestObserver>,
     idempotency: Arc<IdempotencyCache>,
     capability: Capability,
+    allow_sensitive_targets: bool,
+    /// Per-target permission denylist (least-privilege ACL). A target here is
+    /// rejected with `403 target_disabled` even for a `write` token.
+    disabled_targets: Arc<Vec<String>>,
+    queries: Arc<QueryRegistry>,
 }
 
-/// Only the health route is allowed for a `read` token; everything else
-/// (the trigger routes) needs `write`.
-fn route_needs_write(route: &str) -> bool {
-    route != "/api/v1/health"
+/// Capability tiering: a `read` token may hit the health probe + any `GET` read
+/// endpoint; only mutating methods (`POST`) require a `write` token. Health is
+/// `GET` so it falls into the read tier naturally.
+fn route_needs_write(method: &Method) -> bool {
+    method != Method::GET
 }
 
 /// Hook fired on every successful (post-auth, post-allowlist, post-rate-limit)
@@ -101,6 +150,9 @@ pub async fn spawn_server(
     allowlist: Vec<String>,
     rate_limit_per_min: u32,
     capability: Capability,
+    allow_sensitive_targets: bool,
+    disabled_targets: Vec<String>,
+    queries: Arc<QueryRegistry>,
     on_request: Arc<dyn RequestObserver>,
 ) -> Result<ServerHandle, RemoteControlError> {
     let parsed_allowlist =
@@ -123,6 +175,9 @@ pub async fn spawn_server(
         on_request,
         idempotency: Arc::new(IdempotencyCache::new()),
         capability,
+        allow_sensitive_targets,
+        disabled_targets: Arc::new(disabled_targets),
+        queries,
     };
 
     let app = Router::new()
@@ -130,6 +185,22 @@ pub async fn spawn_server(
         .route("/api/v1/tasks/:id/run", post(run_task))
         .route("/api/v1/events", post(emit_event))
         .route("/api/v1/commands/:target", post(run_command))
+        // Read surface (GET). `read` capability is sufficient.
+        .route("/api/v1/targets", get(get_targets))
+        .route("/api/v1/tasks", get(get_tasks))
+        .route("/api/v1/workflows", get(get_workflows))
+        .route("/api/v1/workflows/:id/runs", get(get_workflow_runs))
+        .route("/api/v1/goals", get(get_goals))
+        .route("/api/v1/audit", get(get_audit))
+        .route("/api/v1/runs", get(get_runs))
+        .route("/api/v1/runs/:runId", get(get_run_status))
+        .route("/api/v1/teams", get(get_teams))
+        .route("/api/v1/teams/:id", get(get_team))
+        .route("/api/v1/plugins", get(get_plugins))
+        .route("/api/v1/connectors", get(get_connectors))
+        .route("/api/v1/backups", get(get_backups))
+        .route("/api/v1/ocr/cache", get(get_ocr_cache))
+        .route("/api/v1/sessions/:id/messages", get(get_session_messages))
         .layer(from_fn_with_state(state.clone(), middleware))
         .layer(axum::middleware::map_response(add_csp_header))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
@@ -220,6 +291,18 @@ async fn run_command(
     if !KNOWN_TARGETS.contains(&target.as_str()) {
         return error_body(StatusCode::NOT_FOUND, "unknown command target");
     }
+    // Per-target permission denylist (least-privilege ACL): a target the user
+    // explicitly disabled is rejected even for a `write` token. Checked before
+    // the sensitivity guardrail so a disabled target reports the more specific
+    // reason regardless of its sensitivity.
+    if state.disabled_targets.iter().any(|t| t == &target) {
+        return error_body(StatusCode::FORBIDDEN, "target_disabled");
+    }
+    // Sensitivity guardrail: model-cost / off-device targets need an explicit
+    // opt-in beyond the binary write capability.
+    if is_sensitive_target(&target) && !state.allow_sensitive_targets {
+        return error_body(StatusCode::FORBIDDEN, "sensitive_target_disabled");
+    }
     let body = payload.map(|Json(b)| b).unwrap_or_default();
     let idempotency_key = headers
         .get("idempotency-key")
@@ -268,6 +351,124 @@ fn accepted() -> Response {
     (StatusCode::ACCEPTED, Json(json!({ "accepted": true }))).into_response()
 }
 
+// ── Read surface (GET) ───────────────────────────────────────────────────────
+
+/// `GET /api/v1/targets` — the dispatchable command allowlist. Rust-native: the
+/// data already lives here, so no renderer round-trip is needed (answerable
+/// even with the window closed).
+async fn get_targets() -> impl IntoResponse {
+    Json(json!({ "targets": KNOWN_TARGETS, "sensitive": SENSITIVE_TARGETS }))
+}
+
+/// `GET /api/v1/tasks` — scheduler task catalog (renderer Dexie read).
+async fn get_tasks(State(state): State<AppState>) -> Response {
+    run_query(&state, "tasks", json!({})).await
+}
+
+/// `GET /api/v1/workflows/:id/runs` — run history for a workflow.
+async fn get_workflow_runs(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    run_query(&state, "workflow.runs", json!({ "workflowId": id })).await
+}
+
+/// `GET /api/v1/goals?sessionId=…` — goals for a background session.
+async fn get_goals(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let session_id = params.get("sessionId").cloned();
+    if session_id.as_deref().unwrap_or("").is_empty() {
+        return error_body(StatusCode::BAD_REQUEST, "sessionId required");
+    }
+    run_query(&state, "goals", json!({ "sessionId": session_id })).await
+}
+
+/// `GET /api/v1/audit` — recent inbound remote-control audit entries.
+async fn get_audit(State(state): State<AppState>) -> Response {
+    run_query(&state, "audit", json!({})).await
+}
+
+/// `GET /api/v1/runs/:runId` — outcome of a dispatched command run. Reads the
+/// run-status projection, falling back to the durable `workflowRuns` row for
+/// workflow targets (which share the same runId).
+async fn get_run_status(State(state): State<AppState>, Path(run_id): Path<String>) -> Response {
+    run_query(&state, "run.status", json!({ "runId": run_id })).await
+}
+
+/// `GET /api/v1/runs` — most-recent dispatched command runs + their status.
+async fn get_runs(State(state): State<AppState>) -> Response {
+    run_query(&state, "runs", json!({})).await
+}
+
+/// `GET /api/v1/workflows` — visual workflow definitions (id / name / size).
+async fn get_workflows(State(state): State<AppState>) -> Response {
+    run_query(&state, "workflows", json!({})).await
+}
+
+/// `GET /api/v1/teams` — agent-team roster + status.
+async fn get_teams(State(state): State<AppState>) -> Response {
+    run_query(&state, "teams", json!({})).await
+}
+
+/// `GET /api/v1/teams/:id` — a single agent team's detail.
+async fn get_team(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    run_query(&state, "team", json!({ "teamId": id })).await
+}
+
+/// `GET /api/v1/plugins` — installed plugin catalog + enabled state.
+async fn get_plugins(State(state): State<AppState>) -> Response {
+    run_query(&state, "plugins", json!({})).await
+}
+
+/// `GET /api/v1/connectors` — configured platform-connector adapter instances.
+async fn get_connectors(State(state): State<AppState>) -> Response {
+    run_query(&state, "connectors", json!({})).await
+}
+
+/// `GET /api/v1/backups` — recent backup history rows.
+async fn get_backups(State(state): State<AppState>) -> Response {
+    run_query(&state, "backups", json!({})).await
+}
+
+/// `GET /api/v1/ocr/cache` — OCR result-cache stats (row count + bytes).
+async fn get_ocr_cache(State(state): State<AppState>) -> Response {
+    run_query(&state, "ocr.cache", json!({})).await
+}
+
+/// `GET /api/v1/sessions/:id/messages` — per-session chat text (PII-gated row by
+/// row in the renderer; non-conformant rows are dropped, never partially sent).
+async fn get_session_messages(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    run_query(&state, "messages", json!({ "sessionId": id })).await
+}
+
+/// Round-trip a read to the renderer: register a oneshot, emit
+/// `remote-control://query`, await the renderer's `remote_control_query_response`
+/// for at most `QUERY_TIMEOUT_MS`. A closed/busy window → `503
+/// window_unavailable`. The registry entry is removed on every exit path so a
+/// timed-out read never leaks.
+async fn run_query(state: &AppState, kind: &str, params: Value) -> Response {
+    let request_id = format!("rcq_{}", uuid::Uuid::new_v4().simple());
+    let (tx, rx) = oneshot::channel::<Value>();
+    state.queries.lock().insert(request_id.clone(), tx);
+
+    let emitted = state.app_handle.emit(
+        QUERY_EVENT,
+        json!({ "requestId": request_id, "kind": kind, "params": params }),
+    );
+    if emitted.is_err() {
+        state.queries.lock().remove(&request_id);
+        return error_body(StatusCode::SERVICE_UNAVAILABLE, "window_unavailable");
+    }
+
+    match tokio::time::timeout(Duration::from_millis(QUERY_TIMEOUT_MS), rx).await {
+        Ok(Ok(value)) => (StatusCode::OK, Json(value)).into_response(),
+        // timeout or sender dropped (renderer never answered / window closed)
+        _ => {
+            state.queries.lock().remove(&request_id);
+            error_body(StatusCode::SERVICE_UNAVAILABLE, "window_unavailable")
+        }
+    }
+}
+
 fn error_body(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
@@ -307,6 +508,7 @@ async fn middleware(
     next: Next,
 ) -> Response {
     let route = request.uri().path().to_string();
+    let method = request.method().clone();
     let remote_ip = connect_info.ip();
 
     // 0. Host-header allowlist + cross-origin rejection (DNS-rebinding /
@@ -376,8 +578,9 @@ async fn middleware(
         return error_body(StatusCode::UNAUTHORIZED, "invalid token");
     }
 
-    // 2b. Capability gate — a `read` token may only hit the health route.
-    if route_needs_write(&route) && state.capability != Capability::Write {
+    // 2b. Capability gate — a `read` token may hit the health probe + every GET
+    // read endpoint; mutating methods (POST) require `write`.
+    if route_needs_write(&method) && state.capability != Capability::Write {
         state
             .on_request
             .on_call(&route, StatusCode::FORBIDDEN, remote_ip);
@@ -423,11 +626,12 @@ mod tests {
     }
 
     #[test]
-    fn capability_gate_only_exempts_health() {
-        assert!(!route_needs_write("/api/v1/health"));
-        assert!(route_needs_write("/api/v1/tasks/abc/run"));
-        assert!(route_needs_write("/api/v1/events"));
-        assert!(route_needs_write("/api/v1/commands/workflow.run"));
+    fn capability_gate_reads_are_get_writes_are_mutating() {
+        // GET (health + read surface) is read-tier; POST/DELETE need write.
+        assert!(!route_needs_write(&Method::GET));
+        assert!(route_needs_write(&Method::POST));
+        assert!(route_needs_write(&Method::DELETE));
+        assert!(route_needs_write(&Method::PUT));
     }
 
     #[test]
@@ -456,13 +660,54 @@ mod tests {
             "scheduler.task.run",
             "scheduler.event",
             "workflow.run",
+            "workflow.cancel",
             "goal.create",
             "goal.continue",
+            "goal.pause",
+            "goal.resume",
+            "goal.stop",
             "team.dispatch",
+            "team.stop",
             "plan.run",
+            "chat.send",
+            "connector.send",
+            "terminal.exec",
+            "plugin.enable",
+            "plugin.disable",
         ] {
             assert!(KNOWN_TARGETS.contains(&t), "missing target {t}");
         }
-        assert_eq!(KNOWN_TARGETS.len(), 7);
+        assert_eq!(KNOWN_TARGETS.len(), 17);
+    }
+
+    #[test]
+    fn sensitive_targets_are_a_subset_of_known_targets() {
+        // Every sensitive target must be dispatchable, else the gate guards a
+        // command that 404s anyway.
+        for t in SENSITIVE_TARGETS {
+            assert!(KNOWN_TARGETS.contains(t), "sensitive target {t} not in KNOWN_TARGETS");
+            assert!(is_sensitive_target(t));
+        }
+        // Side-effect-free targets must NOT be flagged sensitive.
+        assert!(!is_sensitive_target("workflow.run"));
+        assert!(!is_sensitive_target("goal.pause"));
+        assert!(!is_sensitive_target("plugin.enable"));
+        // terminal.exec runs an arbitrary shell command — it MUST be sensitive.
+        assert!(is_sensitive_target("terminal.exec"));
+        assert_eq!(SENSITIVE_TARGETS.len(), 4);
+    }
+
+    #[test]
+    fn disabled_targets_match_is_exact() {
+        // The denylist gate compares the concrete target string for equality;
+        // an empty list disables nothing and a listed target is denied.
+        let denied: Vec<String> = vec!["plugin.disable".into(), "terminal.exec".into()];
+        assert!(denied.iter().any(|t| t == "plugin.disable"));
+        assert!(denied.iter().any(|t| t == "terminal.exec"));
+        assert!(!denied.iter().any(|t| t == "workflow.run"));
+        // A prefix must NOT partially match — "plugin" is not "plugin.disable".
+        assert!(!denied.iter().any(|t| t == "plugin"));
+        let empty: Vec<String> = Vec::new();
+        assert!(!empty.iter().any(|t| t == "scheduler.task.run"));
     }
 }

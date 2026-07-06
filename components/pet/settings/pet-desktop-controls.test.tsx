@@ -9,6 +9,9 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   setPetClickThrough: (v: boolean) => setPetClickThrough(v),
 }))
 
+let mockIsLinux = false
+jest.mock("@/lib/tauri/os", () => ({ isLinuxPlatform: () => mockIsLinux }))
+
 import { PetDesktopControls } from "./pet-desktop-controls"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 
@@ -16,6 +19,7 @@ beforeEach(() => {
   openPetWindow.mockClear()
   destroyPetWindow.mockClear()
   setPetClickThrough.mockClear()
+  mockIsLinux = false
 })
 
 const withDesktop = (desktopPet: PetSettings["desktopPet"]): PetSettings => ({
@@ -24,6 +28,12 @@ const withDesktop = (desktopPet: PetSettings["desktopPet"]): PetSettings => ({
 })
 
 describe("PetDesktopControls", () => {
+  it("links to the shortcuts settings section to configure the toggle hotkey", () => {
+    render(<PetDesktopControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />)
+    const link = screen.getByRole("link", { name: /configure a global hotkey/i })
+    expect(link).toHaveAttribute("href", "/settings?section=desktop")
+  })
+
   it("enabling opens the overlay window and persists the flag", () => {
     const patch = jest.fn()
     render(<PetDesktopControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
@@ -127,5 +137,58 @@ describe("PetDesktopControls", () => {
         wander: expect.objectContaining({ climbWindows: true }),
       }),
     })
+  })
+
+  it("disables the climb-windows toggle on Linux with an explanatory hint", () => {
+    mockIsLinux = true
+    render(
+      <PetDesktopControls
+        pet={withDesktop({
+          enabled: true,
+          clickThrough: false,
+          size: 128,
+          position: null,
+          wander: {
+            enabled: true,
+            frequency: "normal",
+            range: "full",
+            onlyAfterInteraction: false,
+            climbWindows: true,
+          },
+        })}
+        patch={jest.fn()}
+      />
+    )
+    const toggle = document.getElementById("pet-wander-climb") as HTMLButtonElement
+    expect(toggle).toBeDisabled()
+    // Forced off in the UI regardless of the persisted value, since it can't
+    // actually run on this platform.
+    expect(toggle).toHaveAttribute("data-state", "unchecked")
+    expect(screen.getByText(/not available on linux/i)).toBeInTheDocument()
+  })
+
+  it("enables the climb-windows toggle on Windows/macOS", () => {
+    mockIsLinux = false
+    render(
+      <PetDesktopControls
+        pet={withDesktop({
+          enabled: true,
+          clickThrough: false,
+          size: 128,
+          position: null,
+          wander: {
+            enabled: true,
+            frequency: "normal",
+            range: "full",
+            onlyAfterInteraction: false,
+            climbWindows: false,
+          },
+        })}
+        patch={jest.fn()}
+      />
+    )
+    const toggle = document.getElementById("pet-wander-climb") as HTMLButtonElement
+    expect(toggle).not.toBeDisabled()
+    expect(screen.queryByText(/not available on linux/i)).toBeNull()
   })
 })

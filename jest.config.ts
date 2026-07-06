@@ -61,6 +61,11 @@ const config: Config = {
     "packages/vector/src/**/*.{ts,tsx}",
     "packages/document/src/**/*.{ts,tsx}",
     "packages/agent-trace/src/**/*.{ts,tsx}",
+    // primitives / time / latex / mermaid were lifted out of lib/* (coverage-collected).
+    "packages/primitives/src/**/*.{ts,tsx}",
+    "packages/time/src/**/*.{ts,tsx}",
+    "packages/latex/src/**/*.{ts,tsx}",
+    "packages/mermaid/src/**/*.{ts,tsx}",
     "packages/plugin-sdk/src/**/*.{ts,tsx}",
     "!packages/plugin-sdk/src/context/**/*.ts",
     "!packages/plugin-sdk/src/hooks/index.ts",
@@ -100,6 +105,7 @@ const config: Config = {
     "!lib/claude/subagent-importers/types.ts",
     "!lib/perf/backend/types.ts",
     "!lib/memory/external/types.ts",
+    "!lib/execution/types.ts",
     "!lib/pet/live2d/types.ts",
     "!lib/tts/providers/adapter.ts",
     "!components/editor/diagnostics/types.ts",
@@ -119,6 +125,9 @@ const config: Config = {
     // Storybook stories are dev-preview artifacts, not production source — they
     // would otherwise count as uncovered code and sink the ≥90% gate.
     "!**/*.stories.{js,jsx,ts,tsx}",
+    // Storybook-only test infra (store/DB seeding + fixture builders). Same
+    // dev-preview rationale as stories — never imported by production code.
+    "!lib/storybook/**",
     "!**/*.d.ts",
     "!**/node_modules/**",
     "!**/.next/**",
@@ -247,6 +256,32 @@ const config: Config = {
       lines: 75,
       statements: 75,
     },
+    // primitives / time / latex / mermaid were lifted out of lib/* (coverage-gated);
+    // hold each to the same regression floor lib/** carried.
+    "./packages/primitives/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    "./packages/time/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    "./packages/latex/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    "./packages/mermaid/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
     "./packages/plugin-sdk/src/**/*.{ts,tsx}": {
       branches: 50,
       functions: 60,
@@ -366,6 +401,10 @@ const config: Config = {
     "^@cognia/vector(.*)$": "<rootDir>/packages/vector/src$1",
     "^@cognia/document(.*)$": "<rootDir>/packages/document/src$1",
     "^@cognia/agent-trace(.*)$": "<rootDir>/packages/agent-trace/src$1",
+    "^@cognia/primitives(.*)$": "<rootDir>/packages/primitives/src$1",
+    "^@cognia/time(.*)$": "<rootDir>/packages/time/src$1",
+    "^@cognia/latex(.*)$": "<rootDir>/packages/latex/src$1",
+    "^@cognia/mermaid(.*)$": "<rootDir>/packages/mermaid/src$1",
     "^@cognia/plugin-sdk/define/(.*)$": "<rootDir>/packages/plugin-sdk/src/define/define-$1",
     "^@cognia/plugin-sdk(.*)$": "<rootDir>/packages/plugin-sdk/src$1",
 

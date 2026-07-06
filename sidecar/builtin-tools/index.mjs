@@ -19,13 +19,17 @@ import { processTools } from "./process/index.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"
+import { astGrepTools } from "./ast-grep/index.mjs"
+import { clonedepsTools } from "./clonedeps/index.mjs"
 import { createLspTools } from "./lsp.mjs"
+import { createCodeGraphTools } from "./code/tools.mjs"
 import { createCoreTools } from "./core/core-tools.mjs"
 import { createExitPlanTool } from "./exit-plan.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   wrapDefsWithReadOnlyTimeout,
 } from "./read-only-timeout.mjs"
+import { wrapDefsWithResultCap } from "./result-cap.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -45,6 +49,19 @@ const TOOLS_BY_CATEGORY = {
    * tool returns a clean structured error rather than crashing.
    */
   terminalRepl: terminalReplTools,
+  /**
+   * AST-aware structural code search/replace (`ast_grep_*`), backed by the
+   * `ast-grep` CLI. Static like the other categories here — no per-session
+   * resolver — but the binary is probed lazily (env / @ast-grep/cli / PATH);
+   * when unresolved the tools return a clean structured error.
+   */
+  astGrep: astGrepTools,
+  /**
+   * Dependency-source research (`clone_dep_source` / `list_cloned_deps`): clone
+   * a dependency's source repo into an ignored `.cognia/clonedeps/` workspace so
+   * the agent can read library internals. Static category; uses git + fs.
+   */
+  dependencyResearch: clonedepsTools,
 }
 
 /**
@@ -106,6 +123,7 @@ export const SERVER_VERSION = data.serverVersion
 export function collectCogniaToolDefs({
   enabled,
   lspResolver,
+  codeGraphResolver,
   readTracker,
   cwd,
   dispatchPath,
@@ -125,6 +143,11 @@ export function collectCogniaToolDefs({
   // dispatch layer supplies a session LSP resolver.
   if (enabled.lsp && lspResolver) {
     tools.push(...createLspTools(lspResolver))
+  }
+  // The `codeGraph` category is likewise resolver-bound: its tools wrap a
+  // per-session tree-sitter index service supplied by the dispatch layer.
+  if (enabled.codeGraph && codeGraphResolver) {
+    tools.push(...createCodeGraphTools(codeGraphResolver))
   }
   // The `coreFiles` suite (grep/glob/read/ls/edit/multi_edit/write/bash/
   // TodoWrite) is session-bound like lsp. It exists primarily for the ai-sdk
@@ -155,6 +178,7 @@ export function buildCogniaToolsServer({
   enabled,
   alwaysLoad,
   lspResolver,
+  codeGraphResolver,
   readTracker,
   cwd,
   dispatchPath,
@@ -162,11 +186,13 @@ export function buildCogniaToolsServer({
   model,
   provider,
   toolExecutionTimeoutMs,
+  maxToolResultTokens,
 }) {
   if (!enabled || typeof enabled !== "object") return null
   const tools = collectCogniaToolDefs({
     enabled,
     lspResolver,
+    codeGraphResolver,
     readTracker,
     cwd,
     dispatchPath,
@@ -186,10 +212,14 @@ export function buildCogniaToolsServer({
       ? toolExecutionTimeoutMs
       : DEFAULT_BUILTIN_TOOL_TIMEOUT_MS
   const guarded = wrapDefsWithReadOnlyTimeout(tools, net, READ_ONLY_TOOL_NAMES)
+  // Cap oversized tool-result TEXT bodies so a huge bash/grep/read output can't
+  // bloat the Anthropic context window (parity with the ai-sdk compaction cap).
+  // No-op unless the renderer resolved a `maxToolResultTokens` budget.
+  const capped = wrapDefsWithResultCap(guarded, maxToolResultTokens)
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
-    tools: guarded,
+    tools: capped,
     ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }

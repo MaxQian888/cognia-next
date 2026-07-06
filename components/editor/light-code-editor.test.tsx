@@ -78,6 +78,50 @@ describe("LightCodeEditor", () => {
     expect(host.querySelector(".cm-gutters")).not.toBeInTheDocument()
   })
 
+  it("toggles the line-number gutter live when the prop changes", async () => {
+    const { rerender } = render(
+      <LightCodeEditor value="x" onChange={() => {}} language="plaintext" lineNumbers />
+    )
+    const host = screen.getByTestId("light-code-editor")
+    await waitFor(() => expect(host.querySelector(".cm-gutters")).toBeInTheDocument())
+    // Previously line numbers were mount-time only; the compartment makes it live.
+    rerender(
+      <LightCodeEditor value="x" onChange={() => {}} language="plaintext" lineNumbers={false} />
+    )
+    await waitFor(() => expect(host.querySelector(".cm-gutters")).not.toBeInTheDocument())
+  })
+
+  it("mounts and live-reconfigures appearance/tab/wrap settings without remounting", async () => {
+    const { rerender } = render(
+      <LightCodeEditor
+        value="doc"
+        onChange={() => {}}
+        language="plaintext"
+        fontSize={16}
+        fontFamily="Fira Code"
+        lineHeight={2}
+        tabSize={4}
+        wordWrap={false}
+      />
+    )
+    const host = screen.getByTestId("light-code-editor")
+    await waitFor(() => expect(host.querySelector(".cm-content")).toHaveTextContent("doc"))
+    rerender(
+      <LightCodeEditor
+        value="doc"
+        onChange={() => {}}
+        language="plaintext"
+        fontSize={20}
+        fontFamily="JetBrains Mono"
+        lineHeight={1.4}
+        tabSize={2}
+        wordWrap
+      />
+    )
+    // Doc preserved → reconfigured via Compartments, not remounted.
+    await waitFor(() => expect(host.querySelector(".cm-content")).toHaveTextContent("doc"))
+  })
+
   it("syncs external value changes into the live view", async () => {
     const { rerender } = render(
       <LightCodeEditor value="first" onChange={() => {}} language="plaintext" />

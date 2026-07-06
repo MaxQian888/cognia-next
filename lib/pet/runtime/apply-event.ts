@@ -12,16 +12,26 @@ import type {
   PetStage,
   PetStatKey,
   PetStatProgress,
+  PetStreak,
 } from "@/types/pet"
-import { normalizeStatProgress } from "@/types/pet"
-import { applyDecay, applyInteraction, type PetInteractionKind } from "@/lib/pet/needs/decay"
+import { normalizeCoins, normalizeStatProgress, normalizeStreak } from "@/types/pet"
+import {
+  applyDecay,
+  applyInteraction,
+  applyNeedEffect,
+  type PetInteractionKind,
+} from "@/lib/pet/needs/decay"
+import { getPetItem } from "@/lib/pet/economy/item-catalog"
 import { levelForXp, stageForLevel } from "@/lib/pet/xp/leveling"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
+import { coinsForEvent } from "@/lib/pet/economy/coin-table"
+import { advanceStreak, coinMultiplier } from "@/lib/pet/economy/streak"
 import { statDeltaForEvent } from "@/lib/pet/stats/growth-table"
 import { applyStatGrowth, statsGrewKeys } from "@/lib/pet/stats/apply-growth"
 import { deriveCareState } from "@/lib/pet/care/condition"
+import { flavorForCareQuality } from "@/lib/pet/care/evolution-flavor"
 
-const INTERACTION_KINDS = new Set<string>([
+export const INTERACTION_KINDS: ReadonlySet<string> = new Set<string>([
   "fed",
   "played",
   "petted",
@@ -68,6 +78,8 @@ export interface ApplyEventResult {
   becameUnwell: boolean
   /** True on the unwell → well transition. */
   recovered: boolean
+  /** Coins minted by this event (already added into `profile.coins`). */
+  coinsEarned: number
 }
 
 export function applyPetEvent(
@@ -83,18 +95,41 @@ export function applyPetEvent(
   // fire from pure time passing (decay was previously only ever persisted by an
   // interaction). Decay is monotonic and timestamp-keyed, so re-settling on
   // frequent events is a no-op beyond advancing `lastTickAt`.
+  // An item consumption rides its interaction kind with `meta.itemId`; the
+  // item's differentiated restore replaces the base interaction effect (an
+  // unknown id falls back to the base table).
+  const item = typeof event.meta?.itemId === "string" ? getPetItem(event.meta.itemId) : undefined
   const needs = INTERACTION_KINDS.has(event.kind)
-    ? applyInteraction(profile.needs, event.kind as PetInteractionKind, now)
+    ? item?.needsEffect
+      ? applyNeedEffect(profile.needs, item.needsEffect, now)
+      : applyInteraction(profile.needs, event.kind as PetInteractionKind, now)
     : applyDecay(profile.needs, now)
+
+  // 1b) Care derives from the freshly-settled needs, BEFORE the stage step so
+  // an evolution can read the up-to-date careQuality for its flavor. Depends
+  // only on needs + prior care + time — independent of xp/stage/statProgress.
+  const { care, becameUnwell, recovered } = deriveCareState({ needs, prev: profile.care, now })
 
   // 2) XP + derived level/stage.
   const xp = profile.xp + xpForEvent(event.kind, event.xp)
   const level = levelForXp(xp)
-  // FUTURE: care.careQuality could bias evolution flavor / branch here.
   const stage: PetStage = profile.soul ? stageForLevel(level) : "egg"
 
-  // 2b) Stat growth (additive on top of the deterministic base bones stats) +
-  // care condition derived from the freshly-settled needs.
+  // 2a) Coins + streak. Only direct user interactions advance the streak;
+  // everything coin-bearing still mints (with the streak multiplier applied),
+  // and an explicit `meta.coins` (plugin rewards, pre-clamped) wins the table.
+  const prevStreak: PetStreak = normalizeStreak(profile.streak)
+  const streak =
+    INTERACTION_KINDS.has(event.kind) && event.source === "user"
+      ? advanceStreak(prevStreak, now)
+      : prevStreak
+  const explicitCoins = typeof event.meta?.coins === "number" ? event.meta.coins : undefined
+  const coinsEarned = Math.floor(
+    coinsForEvent(event.kind, explicitCoins) * coinMultiplier(streak.days)
+  )
+  const coins = normalizeCoins(profile.coins) + coinsEarned
+
+  // 2b) Stat growth (additive on top of the deterministic base bones stats).
   const delta = statDeltaForEvent(
     { kind: event.kind, source: event.source, now },
     { recentEventTs: opts?.recentEventTs, recoveredFromError: opts?.recoveredFromError }
@@ -102,7 +137,6 @@ export function applyPetEvent(
   const prevProgress = normalizeStatProgress(profile.statProgress)
   const statProgress = applyStatGrowth(prevProgress, delta)
   const grewStats = statsGrewKeys(prevProgress, statProgress)
-  const { care, becameUnwell, recovered } = deriveCareState({ needs, prev: profile.care, now })
 
   // 3) Flourishes.
   const oneShots: PetOneShot[] = []
@@ -114,8 +148,12 @@ export function applyPetEvent(
   if (leveledUpTo) oneShots.push("levelUp")
 
   let evolvedTo: PetStage | null = null
+  let evolutionFlavor = profile.evolutionFlavor
   if (stage !== profile.stage && profile.stage !== "egg") {
     evolvedTo = stage
+    // Stamp the care-quality flavor at the moment of evolution (cosmetic tier;
+    // bones stay deterministic).
+    evolutionFlavor = flavorForCareQuality(care.careQuality)
     oneShots.push("evolving")
   }
 
@@ -128,6 +166,9 @@ export function applyPetEvent(
       needs,
       statProgress,
       care,
+      coins,
+      streak,
+      ...(evolutionFlavor ? { evolutionFlavor } : {}),
       updatedAt: new Date(now).toISOString(),
     },
     oneShots,
@@ -138,5 +179,6 @@ export function applyPetEvent(
     care,
     becameUnwell,
     recovered,
+    coinsEarned,
   }
 }

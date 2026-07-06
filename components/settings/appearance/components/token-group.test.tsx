@@ -15,7 +15,7 @@ import {
   partitionInvariant,
   flattenedGroupTokens,
 } from "./token-group"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import type { ContrastAudit } from "@/lib/appearance/contrast-audit"
 import { THEME_COLOR_KEYS, DEFAULT_FALLBACKS } from "@/lib/appearance"
 

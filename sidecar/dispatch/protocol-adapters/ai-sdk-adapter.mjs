@@ -3,40 +3,18 @@
 // to the pre-seam `ai-sdk.mjs` inline code — `ai-sdk.test.mjs` is the canary
 // and must pass without edits.
 
-/**
- * Decide whether an openai-protocol base URL is genuine OpenAI (api.openai.com),
- * which serves the modern Responses API, versus an OpenAI-*compatible* gateway
- * (DeepSeek / OpenCode / Groq / OpenRouter / Ollama / LM Studio / …) that only
- * implements Chat Completions. A missing base URL means the default OpenAI
- * endpoint. Anything that doesn't parse, or whose host isn't *.openai.com, is
- * treated as a compatible gateway so we fail safe onto `/chat/completions`.
- */
-export function isGenuineOpenAiEndpoint(baseURL) {
-  if (!baseURL || typeof baseURL !== "string") return true
-  try {
-    const host = new URL(baseURL).host.toLowerCase()
-    return host === "api.openai.com" || host.endsWith(".openai.com")
-  } catch {
-    return false
-  }
-}
+// Endpoint-family knowledge (provider→protocol map + Responses-vs-Chat decision)
+// lives in the single-source-of-truth `provider-protocol.mjs`. Re-export the two
+// host helpers so existing importers (and the canary test) keep their public
+// surface; `decideOpenAiEndpointFlavor` is the one decision both the sidecar and
+// the renderer now share.
+import {
+  isGenuineOpenAiEndpoint,
+  isResponsesOnlyEndpoint,
+  decideOpenAiEndpointFlavor,
+} from "./provider-protocol.mjs"
 
-/**
- * The Codex ChatGPT-login backend (`chatgpt.com` / `chat.openai.com`) serves the
- * Responses API only — `/chat/completions` is removed there. Its host isn't
- * `*.openai.com`, so `isGenuineOpenAiEndpoint` would misroute it to Chat
- * Completions. Detect it explicitly so Codex subscription turns hit `/responses`.
- * Mirrors `RESPONSES_ONLY_PROVIDERS` in the renderer's provider-core client.
- */
-export function isResponsesOnlyEndpoint(baseURL) {
-  if (!baseURL || typeof baseURL !== "string") return false
-  try {
-    const host = new URL(baseURL).host.toLowerCase()
-    return host === "chatgpt.com" || host === "chat.openai.com"
-  } catch {
-    return false
-  }
-}
+export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
 
 // Fallback budget tiers when a reasoning "thinking level" (effort) is set but
 // no explicit token budget is. Used only for the budget-driven providers
@@ -167,13 +145,13 @@ async function withReasoningExtraction(model) {
  * for OpenAI when the user is on Anthropic, etc. Every model is wrapped with
  * `<think>`-tag reasoning extraction (see withReasoningExtraction).
  */
-export async function buildModel({ protocol, model, apiKey, baseURL, headers }) {
-  const base = await buildRawModel({ protocol, model, apiKey, baseURL, headers })
+export async function buildModel({ protocol, model, apiKey, baseURL, headers, apiFlavor }) {
+  const base = await buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFlavor })
   return withReasoningExtraction(base)
 }
 
 /** Construct the un-wrapped provider model. Split out so the wrap is uniform. */
-async function buildRawModel({ protocol, model, apiKey, baseURL, headers }) {
+async function buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFlavor }) {
   switch (protocol) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai")
@@ -182,14 +160,13 @@ async function buildRawModel({ protocol, model, apiKey, baseURL, headers }) {
       const client = createOpenAI({ apiKey, baseURL, headers })
       // Pick the endpoint family explicitly. As of @ai-sdk/openai v3 the bare
       // `client(model)` returns a Responses-API model that POSTs to `/responses`
-      // — an OpenAI-proprietary endpoint. Genuine OpenAI supports it (and it is
-      // the richer, built-in-tool-capable path), but the OpenAI-*compatible*
-      // gateways this protocol also serves (DeepSeek, OpenCode Zen/Go, Groq,
-      // OpenRouter, Ollama/LM Studio, …) only implement `/chat/completions`, so
-      // routing them to `/responses` 404s ("Not Found"). Use Responses only for
-      // a genuine *.openai.com endpoint; everyone else gets Chat Completions.
-      const useResponses = isGenuineOpenAiEndpoint(baseURL) || isResponsesOnlyEndpoint(baseURL)
-      return useResponses ? client.responses(model) : client.chat(model)
+      // — an OpenAI-proprietary endpoint. The OpenAI-*compatible* gateways this
+      // protocol also serves (DeepSeek, OpenCode, Groq, Ollama, …) only implement
+      // `/chat/completions`, so routing them to `/responses` 404s. The shared
+      // decision honors an explicit `apiFlavor` (so the user can opt a gateway /
+      // custom URL into Responses) and otherwise falls back to the host heuristic.
+      const flavor = decideOpenAiEndpointFlavor({ apiFlavor, baseURL })
+      return flavor === "responses" ? client.responses(model) : client.chat(model)
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic")
@@ -209,6 +186,31 @@ async function buildRawModel({ protocol, model, apiKey, baseURL, headers }) {
     case "cohere": {
       const { createCohere } = await import("@ai-sdk/cohere")
       const client = createCohere({ apiKey, baseURL })
+      return client(model)
+    }
+    case "azure": {
+      const { createAzure } = await import("@ai-sdk/azure")
+      // Azure Foundry serves the OpenAI surface behind a per-resource endpoint.
+      // The resolver carries that full endpoint as `baseURL`; `headers` is
+      // forwarded for parity with the openai path (usually undefined).
+      const client = createAzure({ apiKey, baseURL, headers })
+      // Azure exposes BOTH /chat/completions and the newer /responses. Default
+      // to chat (conservative for existing deployments); `apiFlavor: "responses"`
+      // opts a resource into the Responses API. Same shared decision as openai.
+      const flavor = decideOpenAiEndpointFlavor({ apiFlavor, baseURL, providerId: "azure" })
+      return flavor === "responses" ? client.responses(model) : client.chat(model)
+    }
+    case "bedrock": {
+      const { createAmazonBedrock } = await import("@ai-sdk/amazon-bedrock")
+      // Modern Bedrock authenticates with a direct API key (bearer,
+      // `AWS_BEARER_TOKEN_BEDROCK`), carried in `apiKey`. The region falls back
+      // to the `AWS_REGION` env the sidecar inherits; `baseURL` is an optional
+      // custom endpoint. Bedrock has its own wire protocol — no responses/chat
+      // split, so `apiFlavor` does not apply here.
+      const client = createAmazonBedrock({
+        ...(apiKey ? { apiKey } : {}),
+        ...(baseURL ? { baseURL } : {}),
+      })
       return client(model)
     }
     default:
@@ -231,6 +233,7 @@ export function makeAiSdkAdapter(protocol) {
         apiKey: creds.apiKey,
         baseURL: creds.baseURL,
         headers: creds.headers,
+        apiFlavor: creds.apiFlavor,
       })
       const streamTextFn = req.streamTextFn ?? (await import("ai")).streamText
       const streamArgs = {

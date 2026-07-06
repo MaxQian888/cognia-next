@@ -326,6 +326,44 @@ pub async fn desktop_get_focus(
     )
 }
 
+/// Subscribe to live UI events (v1: focus-changed). Read-only per the
+/// permission model (`subscribe_events` is an observing call); events reach
+/// the renderer on `automation:uia-event` via the sink wired in `lib.rs`.
+#[tauri::command]
+pub async fn desktop_subscribe_events(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    filter: EventFilter,
+    ctx: Option<CallContext>,
+) -> std::result::Result<SubscriptionId, String> {
+    let ctx = ctx.unwrap_or_default();
+    command_body!(
+        app,
+        state,
+        ctx,
+        "subscribe_events",
+        state.handle.subscribe_events(filter.clone()).await
+    )
+}
+
+/// Stop a live UI-event subscription (the paired watcher thread exits).
+#[tauri::command]
+pub async fn desktop_unsubscribe(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    sub: SubscriptionId,
+    ctx: Option<CallContext>,
+) -> std::result::Result<(), String> {
+    let ctx = ctx.unwrap_or_default();
+    command_body!(
+        app,
+        state,
+        ctx,
+        "unsubscribe",
+        state.handle.unsubscribe(sub.clone()).await
+    )
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadTreeArgs {
@@ -848,9 +886,35 @@ pub async fn automation_settings_set(
 ) -> std::result::Result<(), String> {
     // Persist before mutating the in-memory gate so a configured tier survives
     // a restart (ADR-0020). Best-effort: a disk failure is logged, not fatal.
+    // NOTE: `update` intentionally never touches the kill switch — a bulk save
+    // must not resume automation after an emergency stop. Toggling the master
+    // enable flag goes through `automation_set_enabled` instead.
     super::persist::save_settings(&settings);
     state.gate.update(|s| *s = settings);
     Ok(())
+}
+
+/// Explicit operator toggle of the master enable flag. Enabling releases an
+/// engaged emergency kill switch (the deliberate "resume" action); a bulk
+/// `automation_settings_set` never does. Persists the merged settings.
+#[tauri::command]
+pub async fn automation_set_enabled(
+    state: State<'_, AutomationState>,
+    enabled: bool,
+) -> std::result::Result<(), String> {
+    state.gate.set_enabled(enabled);
+    super::persist::save_settings(&state.gate.settings());
+    Ok(())
+}
+
+/// Whether the runtime emergency kill switch is currently engaged. Lets the
+/// Settings UI show the engaged state and route "enable" through the explicit
+/// resume path.
+#[tauri::command]
+pub async fn automation_kill_switch_engaged(
+    state: State<'_, AutomationState>,
+) -> std::result::Result<bool, String> {
+    Ok(state.gate.kill_switch_engaged())
 }
 
 #[tauri::command]
@@ -859,6 +923,10 @@ pub async fn automation_kill_switch(
     state: State<'_, AutomationState>,
 ) -> std::result::Result<(), String> {
     state.gate.engage_kill_switch();
+    // Persist `enabled == false` so a reload / any later bulk save reflects the
+    // stopped state instead of a stale on-disk `enabled: true` (defense in depth
+    // against the stale-save resume path).
+    super::persist::save_settings(&state.gate.settings());
     // The kill switch also clears any "Always allow this session" grants —
     // engaging the switch should drop ALL trust, not just freeze the engine.
     state.consent.clear_session_grants();

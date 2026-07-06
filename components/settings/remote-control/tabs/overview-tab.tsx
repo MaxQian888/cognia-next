@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl"
 import Link from "next/link"
 import {
   ActivityIcon,
+  BarChart3Icon,
   CheckCircle2Icon,
   ExternalLinkIcon,
   PowerIcon,
@@ -17,6 +18,12 @@ import { isTauri } from "@/lib/tauri"
 import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 
+/** Localized time for a recent-call ISO stamp; falls back to the raw value. */
+function formatCallTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString()
+}
+
 export function OverviewTab() {
   const t = useTranslations("settings.remoteControl.overview")
   const status = useRemoteControlStore((s) => s.status)
@@ -24,6 +31,12 @@ export function OverviewTab() {
   const desktop = isTauri()
 
   const endpoint = status.boundPort !== null ? `http://127.0.0.1:${status.boundPort}` : ""
+
+  // Derive a small traffic snapshot from the recent-calls ring buffer (last 20).
+  const windowSize = recentCalls.length
+  const successCount = recentCalls.filter((c) => c.status >= 200 && c.status < 300).length
+  const errorCount = windowSize - successCount
+  const successRate = windowSize > 0 ? Math.round((successCount / windowSize) * 100) : null
 
   const onEmitTest = async () => {
     try {
@@ -83,6 +96,48 @@ export function OverviewTab() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm font-medium">
+            <BarChart3Icon className="h-4 w-4" />
+            {t("metricsHeading")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {windowSize === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("metricNoData")}</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-md border bg-muted/30 p-3 text-center">
+                  <div className="text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {successCount}
+                  </div>
+                  <div className="text-xs text-muted-foreground">{t("metricSuccess")}</div>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3 text-center">
+                  <div
+                    className={`text-lg font-semibold tabular-nums ${
+                      errorCount > 0 ? "text-destructive" : ""
+                    }`}
+                  >
+                    {errorCount}
+                  </div>
+                  <div className="text-xs text-muted-foreground">{t("metricErrors")}</div>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3 text-center">
+                  <div className="text-lg font-semibold tabular-nums">{successRate}%</div>
+                  <div className="text-xs text-muted-foreground">{t("metricSuccessRate")}</div>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("metricWindowNote", { count: windowSize })}
+              </p>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm font-medium">
             <ActivityIcon className="h-4 w-4" />
             {t("recentCallsHeading")}
           </CardTitle>
@@ -107,7 +162,9 @@ export function OverviewTab() {
                   <span className="font-mono">{entry.status}</span>
                   <code className="flex-1 truncate text-muted-foreground">{entry.route}</code>
                   <span className="text-muted-foreground">{entry.remoteIp}</span>
-                  <span className="text-muted-foreground">{entry.at}</span>
+                  <span className="text-muted-foreground" title={entry.at}>
+                    {formatCallTime(entry.at)}
+                  </span>
                 </li>
               ))}
             </ul>

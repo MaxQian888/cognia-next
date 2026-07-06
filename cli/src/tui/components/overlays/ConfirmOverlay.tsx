@@ -10,6 +10,7 @@ import React from "react"
 import { Box, Text, useInput, useStdout } from "ink"
 
 import { MarkdownLine } from "../Markdown"
+import { parseMouseEvent } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
 import {
   clampScroll,
@@ -56,6 +57,13 @@ export function ConfirmOverlay({
   )
 
   useInput((input, key) => {
+    // Mouse (fullscreen `scroll` only): the wheel scrolls the preview; other
+    // mouse reports are swallowed so the SGR sequence isn't matched as a key.
+    const mouse = parseMouseEvent(input)
+    if (mouse) {
+      if (mouse.kind === "wheel") move(mouse.dir === "up" ? -1 : 1)
+      return
+    }
     if (key.return) return onConfirm()
     if (key.escape || input === "q") return onCancel()
     if (key.upArrow) return move(-1)

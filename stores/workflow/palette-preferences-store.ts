@@ -8,7 +8,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
-import { pushRecent, toggleInList } from "@/lib/utils/recency-list"
+import { pushRecent, toggleInList } from "@cognia/primitives"
 
 /** How many recently-used kinds to keep. */
 export const RECENT_LIMIT = 8

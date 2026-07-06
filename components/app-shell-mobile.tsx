@@ -25,7 +25,7 @@
  * continues to render unchanged.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
@@ -44,6 +44,7 @@ import {
 import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
+import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { MemberList } from "@/components/shell/member-list"
@@ -83,7 +84,8 @@ import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
 import { guildFromSession } from "@/lib/claude/guild"
 import { loggers } from "@/lib/logging"
-import type { Character, Team } from "@/lib/claude/types"
+import type { Character, SendContent, Team } from "@/lib/claude/types"
+import { impact, notify } from "@/lib/capacitor/haptics"
 
 const log = loggers.shell
 
@@ -225,6 +227,21 @@ export function AppShellMobile() {
 
   const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
+  // Tactile confirmation for the primary chat action: a light impact once the
+  // turn dispatches, an error notification if it throws. Both no-op off-mobile
+  // (the haptics wrapper resolves `unsupported`), so wrapping is harmless.
+  const handleSend = useCallback(
+    async (content: SendContent) => {
+      try {
+        await send(content)
+        void impact("light")
+      } catch (err) {
+        void notify("error")
+        throw err
+      }
+    },
+    [send]
+  )
   const respondToApproval = (
     approval: typeof pendingApproval,
     decision: Parameters<typeof directChat.respondToApproval>[1]
@@ -497,38 +514,50 @@ export function AppShellMobile() {
 
       {/* ── Chat pane (single column) ─────────────────────────────────── */}
       <main
-        className="relative flex min-w-0 flex-1 flex-col overflow-hidden safe-area-pb"
+        // Reserve the fixed <MobileTabBar /> footprint (h-14 + its own
+        // safe-area inset) so the composer's bottom toolbar row isn't hidden
+        // behind it. The shell root is `h-[100dvh]`, which overrides the
+        // MobileShellWrapper's `pb` reservation, so we re-assert it here. This
+        // calc already includes env(safe-area-inset-bottom), superseding the
+        // bare `safe-area-pb` that only cleared the home indicator.
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]"
         data-bg-target="chat"
       >
         {!mounted ? null : (
-          <ChatPane
-            activeSession={activeSession}
-            // The mobile shell renders its own top bar (CharacterHeader) +
-            // relocates the inner ChatHeader's affordances into the session
-            // settings sheet, so suppress the duplicate inner header.
-            showHeader={false}
-            onSend={send}
-            onStop={stop}
-            onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-            onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-            onCreate={handleNewDirect}
-            onUseSample={(text) => void send(text)}
-            onOpenSettings={openSettings}
-            recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
-            onResumeSession={handleSwitchToSession}
-            composerRef={composerRef}
-            mobileMentionMembers={isTeamSession ? teamMembers : undefined}
-            welcomeExtras={{
-              hideSamples: true,
-              header: <MobileActiveRunsCard />,
-              quickActions: (
-                <MobileQuickActions
-                  onNewChat={handleNewDirect}
-                  onSearch={() => setSearchOpen(true)}
-                />
-              ),
-            }}
-          />
+          // gap11 — wrap the chat in the artifact dock (mirrors the desktop
+          // workspace + /inbox/c). On mobile the dock renders an `ArtifactPanel`
+          // bottom Sheet that opens automatically when an artifact is created;
+          // without this mount an `ArtifactPart` tap had nothing to open.
+          <ArtifactWorkspaceDock>
+            <ChatPane
+              activeSession={activeSession}
+              // The mobile shell renders its own top bar (CharacterHeader) +
+              // relocates the inner ChatHeader's affordances into the session
+              // settings sheet, so suppress the duplicate inner header.
+              showHeader={false}
+              onSend={handleSend}
+              onStop={stop}
+              onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
+              onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+              onCreate={handleNewDirect}
+              onUseSample={(text) => void send(text)}
+              onOpenSettings={openSettings}
+              recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
+              onResumeSession={handleSwitchToSession}
+              composerRef={composerRef}
+              mobileMentionMembers={isTeamSession ? teamMembers : undefined}
+              welcomeExtras={{
+                hideSamples: true,
+                header: <MobileActiveRunsCard />,
+                quickActions: (
+                  <MobileQuickActions
+                    onNewChat={handleNewDirect}
+                    onSearch={() => setSearchOpen(true)}
+                  />
+                ),
+              }}
+            />
+          </ArtifactWorkspaceDock>
         )}
       </main>
 

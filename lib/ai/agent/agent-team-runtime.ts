@@ -26,6 +26,7 @@ import type { VisualWorkflow, WorkflowTriggeredFrom } from "@/types/workflow/vis
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
 import { createTeammatePool } from "./team/teammate-pool"
+import { resolveTeamTwinRuntime } from "./team/twin-context"
 import { createBudgetGuard } from "./team/budget-guard"
 import { createTeamNotifier, type TeamNotifierDeps } from "./team/team-notifier"
 import {
@@ -35,9 +36,15 @@ import {
   type TeamStoreWriter,
 } from "./team/team-run-context"
 import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
+import { applyGateBehavior, resolveGatePolicy, type TeamRunOrigin } from "./team/gate-policy"
 import { createDeadlockHandler } from "./team/deadlock-gate"
 import { runTeamWaves } from "./team/team-wave-runner"
 import { createLedgerCheckpoint } from "./team/progress-ledger-checkpoint"
+import {
+  RateLimitResumeController,
+  createRealResumeDeps,
+  NUDGE_CONTINUE_PROMPT,
+} from "./team/rate-limit-resume"
 import { isUltracodeActive, type UltracodeOverride } from "./team/ultracode-trigger"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 
@@ -74,6 +81,14 @@ export interface RunTeamLifecycleDeps {
    */
   triggeredFrom?: WorkflowTriggeredFrom
   /**
+   * Where this run was triggered from. Headless origins (scheduler / remote /
+   * external / plugin / im / delegation) resolve the HITL gates through
+   * `resolveGatePolicy` instead of blocking on a modal nobody is watching —
+   * see `team/gate-policy.ts`. Defaults to "im" when `triggeredFrom.source`
+   * is "im", else "interactive" (unchanged behavior for UI runs).
+   */
+  origin?: TeamRunOrigin
+  /**
    * Operator override for ultracode orchestration (ADR-0022 addendum).
    * `"force"` runs the ultracode pattern composition regardless of autoMode;
    * `"off"` forces the flat task DAG. Omitted → the team's `ultracode.autoMode`
@@ -86,6 +101,13 @@ export interface RunTeamLifecycleDeps {
    * letting the caller assemble the run via `queryByTrace`.
    */
   traceId?: string
+  /**
+   * Depth of the team-completion → workflow → team chain that produced this
+   * run (0 = root). Threaded by the `action.team.run` executor from the
+   * outer run's `trigger.payload.chainDepth`; the terminal `trigger.team`
+   * fan-out stops past MAX_TEAM_TRIGGER_CHAIN_DEPTH (loop guard).
+   */
+  triggerChainDepth?: number
 }
 
 export interface RunTeamLifecycleResult {
@@ -173,6 +195,18 @@ export async function runTeamLifecycle(
       taskCount: tasks.length,
     })
 
+    // ── Resolve the per-run gate policy from the trigger origin ──
+    // Headless origins resolve gates immediately (auto-approve / auto-reject /
+    // fail-fast) instead of blocking on a modal nobody is watching.
+    const origin: TeamRunOrigin =
+      deps.origin ?? (deps.triggeredFrom?.source === "im" ? "im" : "interactive")
+    const gatePolicy = resolveGatePolicy(origin)
+
+    // Notifier is created BEFORE the pre-run gates so the capability-audit
+    // gate can open its modal (interactive) or emit its warning (headless).
+    // It has no dependency on the pool/budget built further down.
+    const notifier = createTeamNotifier({ runId, teamId }, deps.notifierDeps)
+
     // ── Pre-run capability-audit gate ──
     // If any team/teammate references a capability id that no longer resolves
     // (e.g. a contributing plugin was disabled), surface the stale ids and ask
@@ -187,9 +221,31 @@ export async function runTeamLifecycle(
         // Populate the derived sidecar map so the consent UI + Settings red
         // dots can enumerate exactly which ids are stale.
         void refreshAllInstanceCapabilityWarnings()
-        const decision = await waitForDecision(
-          { scope: "agent-team-capability-audit", id: runId },
-          ac.signal
+        if (gatePolicy.capabilityAudit === "block") {
+          // Interactive: open the HITL modal. Without this notify the gate
+          // used to wait on a scope no UI ever produced — hanging even on
+          // the desktop.
+          notifier.notify({
+            level: "critical",
+            title: "Stale capabilities detected",
+            body: `${auditWarnings.length} capability reference(s) no longer resolve (a contributing plugin may be disabled). Run anyway, or cancel to fix the configuration.`,
+            runId,
+            teamId,
+            openApproval: { scope: "agent-team-capability-audit", id: runId },
+            dedupeKey: `capability-audit:${runId}`,
+          })
+        } else {
+          notifier.notify({
+            level: "warn",
+            title: "Proceeding with stale capabilities",
+            body: `${auditWarnings.length} capability reference(s) no longer resolve; the ${origin} run continues without them (headless policy).`,
+            runId,
+            teamId,
+            dedupeKey: `capability-audit:${runId}`,
+          })
+        }
+        const decision = await applyGateBehavior(gatePolicy.capabilityAudit, () =>
+          waitForDecision({ scope: "agent-team-capability-audit", id: runId }, ac.signal)
         ).catch(() => ({ outcome: "reject" as const }))
         if (decision.outcome !== "approve") {
           return {
@@ -203,6 +259,22 @@ export async function runTeamLifecycle(
 
     // ── Plan-approval gate (synthesizer-local; never enters workflow) ──
     if (team.config.requirePlanApproval) {
+      // Headless: fail fast BEFORE running lead planning — approval without a
+      // human is meaningless and planning tokens would be wasted on a run
+      // that cannot be approved. `requirePlanApproval=true` was an explicit
+      // operator choice; honor it by failing loudly instead of auto-approving.
+      if (gatePolicy.planApproval !== "block") {
+        const reason = `requirePlanApproval is enabled but this run is headless (origin=${origin}); approve interactively or disable plan approval`
+        notifier.notify({
+          level: "critical",
+          title: "Headless run blocked by plan approval",
+          body: reason,
+          runId,
+          teamId,
+          dedupeKey: `plan-approval-headless:${runId}`,
+        })
+        return { runId: "", status: "failed", reason }
+      }
       const lead = allMembers.find((m) => m.id === team.leadId)
       if (!lead) {
         return { runId: "", status: "failed", reason: "Lead teammate not found" }
@@ -251,10 +323,9 @@ export async function runTeamLifecycle(
       }
     }
 
-    // ── Build per-run shared state ──
+    // ── Build per-run shared state (notifier hoisted above the pre-run gates) ──
     const concurrency = createConcurrencyController(team.config.maxConcurrentTeammates ?? 5)
     const modelPref = createModelPreferenceController()
-    const notifier = createTeamNotifier({ runId, teamId }, deps.notifierDeps)
     const pool = createTeammatePool({ teammates: workers, teamId, runId })
     const budget = createBudgetGuard({
       runId,
@@ -265,6 +336,47 @@ export async function runTeamLifecycle(
       modelCtrl: modelPref,
     })
 
+    // ── Guarded rate-limit resume controller ──
+    // On a teammate rate-limit failure, dispatch-teammate reports the cooldown
+    // here; once it elapses (and the run is still alive) we post a single
+    // guarded "continue" nudge into the team mailbox so the lead/member resumes
+    // instead of stalling. Disposed in `finally`. Gated by config (default on).
+    const nudgeCfg = team.config.nudges ?? {}
+    const rateLimitResume =
+      nudgeCfg.enabled !== false
+        ? new RateLimitResumeController(
+            createRealResumeDeps(
+              ({ memberId, generation }) => {
+                const member = workers.find((w) => w.id === memberId)
+                notifier.notify({
+                  level: "info",
+                  title: `Resuming after rate-limit cooldown`,
+                  body: `${member?.name ?? memberId} is being nudged to continue.`,
+                  runId,
+                  teamId,
+                  dedupeKey: `nudge:${runId}:${memberId}:${generation}`,
+                })
+                deps.storeWriter.addMessage({
+                  teamId,
+                  senderId: "system",
+                  recipientId: team.leadId || memberId,
+                  type: "system",
+                  content: NUDGE_CONTINUE_PROMPT,
+                  structuredPayload: {
+                    type: "nudge",
+                    nudgeType: "rate_limit_resume",
+                    generation,
+                  },
+                })
+              },
+              {
+                maxPerHour: nudgeCfg.maxPerMemberPerHour,
+                busyWindowMs: nudgeCfg.busySignalWindowMs,
+              }
+            )
+          )
+        : undefined
+
     // ── Wire HITL gate subscriptions ──
     const subs: Array<() => void> = []
 
@@ -274,6 +386,7 @@ export async function runTeamLifecycle(
       pool.onAllUnavailable(
         createDeadlockHandler({
           recovery: team.config.enableDeadlockRecovery !== false,
+          behavior: gatePolicy.deadlock,
           runId,
           teamId,
           notifier,
@@ -292,6 +405,19 @@ export async function runTeamLifecycle(
       pool.onTeammateDisqualified((teammateId, reason) => {
         if (ac.signal.aborted) return
         const tm = workers.find((w) => w.id === teammateId)
+        if (gatePolicy.teammateFix !== "block") {
+          // Headless: reject semantics are fail-open (leave disqualified, run
+          // continues on the remaining workers) — inform, don't gate.
+          notifier.notify({
+            level: "info",
+            title: `Teammate disqualified: ${tm?.name ?? teammateId}`,
+            body: `Reason: ${reason}. Headless ${origin} run continues on the remaining teammates.`,
+            runId,
+            teamId,
+            dedupeKey: `teammate-fix:${runId}:${teammateId}`,
+          })
+          return
+        }
         notifier.notify({
           level: "critical",
           title: `Teammate disqualified: ${tm?.name ?? teammateId}`,
@@ -354,6 +480,12 @@ export async function runTeamLifecycle(
     subs.push(
       budget.on("pause_for_review", () => {
         if (ac.signal.aborted || budgetResolverActive) return
+        if (gatePolicy.budget !== "block") {
+          // Headless: nobody can grant an extension — abort instead of
+          // parking the run at concurrency 0 forever.
+          ac.abort(new Error(`Token budget exhausted (headless ${origin} run)`))
+          return
+        }
         budgetResolverActive = true
         concurrency.reduceTo(0)
         void waitForDecision({ scope: "agent-team-budget", id: runId }, ac.signal)
@@ -374,6 +506,21 @@ export async function runTeamLifecycle(
       })
     )
 
+    // ── Employee Digital Twin runtime (ADR-0003 × ADR-0022) ──
+    // Build the shared vector-store deps once per run when any teammate is
+    // twin-bound OR the team exposes team-level knowledge twins OR the run may
+    // recruit twins mid-run; enumerate recruitable twins only when adaptive
+    // re-planning / the progress ledger can re-staff. Fully best-effort.
+    const usesTwin =
+      workers.some((w) => Boolean(w.config?.twinId)) ||
+      (team.config.knowledgeTwinIds?.length ?? 0) > 0
+    const mayRecruit =
+      team.config.adaptiveReplan?.enabled === true || team.config.progressLedger?.enabled === true
+    const { twinDeps, availableTwins } = await resolveTeamTwinRuntime({
+      buildDeps: usesTwin || mayRecruit,
+      listAvailable: mayRecruit,
+    })
+
     // ── Register the per-run context FIRST ──
     // Ultracode planning + every pattern/dispatch node reads it via
     // getTeamRunContext(runId); registering before synthesis lets the planner
@@ -388,7 +535,11 @@ export async function runTeamLifecycle(
       notifier,
       concurrency,
       modelPref,
+      gatePolicy,
       storeWriter: deps.storeWriter,
+      ...(rateLimitResume ? { rateLimitResume } : {}),
+      ...(twinDeps ? { twinDeps } : {}),
+      ...(availableTwins.length > 0 ? { availableTwins } : {}),
       // Lazily populated by dispatchTeammate on first claim — see
       // `lib/ai/agent/team/dispatch-teammate.ts`.
       resolvedCapabilities: new Map(),
@@ -537,6 +688,28 @@ export async function runTeamLifecycle(
         status: finalStatus,
         reason: finalReason,
       })
+      // "On team finished" workflow fan-out (trigger.team). Fire-and-forget:
+      // the linkage module PII-gates reason/finalResult and enforces the
+      // chain-depth loop guard. This terminal block is the single point every
+      // start surface funnels through, so no per-trigger wiring is needed.
+      void import("./team-completion-linkage")
+        .then(({ dispatchTeamCompletedTriggers }) =>
+          dispatchTeamCompletedTriggers({
+            teamId,
+            teamName: team.name,
+            runId,
+            status: finalStatus,
+            ...(finalReason ? { reason: finalReason } : {}),
+            ...(() => {
+              const finalResult = deps.storeReader.getTeam(teamId)?.finalResult
+              return finalResult ? { finalResult } : {}
+            })(),
+            chainDepth: deps.triggerChainDepth ?? 0,
+          })
+        )
+        .catch(() => {
+          // Best-effort — fan-out failures must not affect the run result.
+        })
       for (const u of subs) {
         try {
           u()
@@ -544,6 +717,8 @@ export async function runTeamLifecycle(
           /* listener already gone */
         }
       }
+      // Cancel any pending resume timer so it can't fire after the run ends.
+      rateLimitResume?.dispose()
       unregisterTeamRunContext(runId)
       // Release any pending approval-bus waiters keyed to this run.
       approveBus({ scope: "agent-team-deadlock", id: runId })

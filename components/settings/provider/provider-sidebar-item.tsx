@@ -1,11 +1,17 @@
 "use client"
 
 import React, { useCallback } from "react"
-import { Check, AlertTriangle, X, Circle } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { Check, AlertTriangle, X, Circle, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
-export type ProviderConnectionStatus = "connected" | "warning" | "not-configured" | "error"
+export type ProviderConnectionStatus =
+  | "connected"
+  | "warning"
+  | "not-configured"
+  | "error"
+  | "limited"
 
 interface ProviderSidebarItemProps {
   providerId: string
@@ -18,32 +24,57 @@ interface ProviderSidebarItemProps {
   modelCount?: number
 }
 
+/**
+ * Per-status presentation. `labelKey` / `reasonKey` resolve under the
+ * `providers.sidebar` namespace — the reason is surfaced as a native tooltip on
+ * the badge so a "warning"/"error" provider explains itself on hover and the
+ * user knows the row is worth opening.
+ */
 const STATUS_CONFIG: Record<
   ProviderConnectionStatus,
-  { icon: React.ComponentType<{ className?: string }>; label: string; className: string }
+  {
+    icon: React.ComponentType<{ className?: string }>
+    labelKey: string
+    reasonKey: string
+    className: string
+  }
 > = {
   connected: {
     icon: Check,
-    label: "Connected",
+    labelKey: "statusConnected",
+    reasonKey: "reasonConnected",
     className:
       "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400",
   },
   warning: {
     icon: AlertTriangle,
-    label: "Warning",
+    labelKey: "statusWarning",
+    reasonKey: "reasonWarning",
     className:
       "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400",
   },
   "not-configured": {
     icon: Circle,
-    label: "Not Configured",
+    labelKey: "statusUnconfigured",
+    reasonKey: "reasonUnconfigured",
     className: "border-muted-foreground/20 bg-muted/50 text-muted-foreground",
   },
   error: {
     icon: X,
-    label: "Error",
+    labelKey: "statusError",
+    reasonKey: "reasonError",
     className:
       "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400",
+  },
+  // Verified but with caveats (e.g. authoritative verification wasn't
+  // possible in this runtime) — distinct from a plain "connected" pass so
+  // the sidebar badge doesn't overclaim.
+  limited: {
+    icon: Info,
+    labelKey: "statusLimited",
+    reasonKey: "reasonLimited",
+    className:
+      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400",
   },
 }
 
@@ -82,13 +113,17 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   onClick,
   modelCount,
 }: ProviderSidebarItemProps) {
+  const t = useTranslations("providers.sidebar")
   const handleClick = useCallback(() => onClick(providerId), [onClick, providerId])
   const statusCfg = STATUS_CONFIG[status]
   const StatusIcon = statusCfg.icon
+  const statusLabel = t(statusCfg.labelKey)
+  const statusReason = t(statusCfg.reasonKey)
 
   return (
     <button
       type="button"
+      id={`provider-${providerId}`}
       onClick={handleClick}
       className={cn(
         "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
@@ -133,10 +168,12 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
       <Badge
         variant="outline"
         data-status={status}
+        title={statusReason}
+        aria-label={`${statusLabel} — ${statusReason}`}
         className={cn("shrink-0 gap-1 text-[10px] px-1.5 py-0", statusCfg.className)}
       >
         <StatusIcon className="h-3 w-3" />
-        <span className="hidden sm:inline">{statusCfg.label}</span>
+        <span className="hidden sm:inline">{statusLabel}</span>
       </Badge>
     </button>
   )

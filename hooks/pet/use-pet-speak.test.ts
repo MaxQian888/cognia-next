@@ -30,6 +30,13 @@ jest.mock("@/lib/pet/llm/recall", () => ({
   recallAboutUser: (...a: unknown[]) => recallAboutUser(...a),
 }))
 
+// The persona resolver is dynamically imported inside the hook; mock it so we
+// can pin the resolved string and assert it reaches the system prompt.
+const resolveCharacterPersona = jest.fn()
+jest.mock("@/lib/pet/llm/character-persona", () => ({
+  resolveCharacterPersona: (...a: unknown[]) => resolveCharacterPersona(...a),
+}))
+
 const stateRef: { current: { settings: Partial<AppSettings> | null } } = {
   current: { settings: null },
 }
@@ -87,6 +94,7 @@ beforeEach(() => {
   appendPetTurn.mockReset().mockResolvedValue(1)
   listRecentPetTurns.mockReset().mockResolvedValue([])
   recallAboutUser.mockReset().mockResolvedValue("")
+  resolveCharacterPersona.mockReset().mockResolvedValue(null)
   setLlmSpeak(true)
 })
 
@@ -203,6 +211,44 @@ describe("usePetSpeak", () => {
     expect(usePetStore.getState().bubble?.origin).toBe("llm")
     expect(listRecentPetTurns).not.toHaveBeenCalled()
     expect(appendPetTurn).not.toHaveBeenCalled()
+  })
+
+  it("injects the bound character's persona into the system prompt", async () => {
+    resolveCharacterPersona.mockResolvedValue("Warm mentor; tone: gentle")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "char_1" }))
+    await emitTalk("hello")
+    expect(resolveCharacterPersona).toHaveBeenCalledWith("char_1")
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).toContain("Your human's current persona is: Warm mentor; tone: gentle.")
+  })
+
+  it("omits the persona but still speaks when the resolved persona trips the PII gate", async () => {
+    resolveCharacterPersona.mockResolvedValue("Reach me at bob@example.com any time")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "char_1" }))
+    await emitTalk("hello")
+    const bubble = usePetStore.getState().bubble
+    expect(bubble?.origin).toBe("llm")
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).not.toContain("Your human's current persona is")
+  })
+
+  it("adds no persona layer when no character is bound", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello")
+    expect(resolveCharacterPersona).not.toHaveBeenCalled()
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).not.toContain("Your human's current persona is")
+  })
+
+  it("caches the resolved persona per character id across talks", async () => {
+    resolveCharacterPersona.mockResolvedValue("Warm mentor")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "char_1" }))
+    await emitTalk("first")
+    // The limiter would otherwise turn the second talk into a template fallback
+    // before the async block runs — reset it so the cache path is exercised.
+    __resetSpeakLimiterForTesting()
+    await emitTalk("second")
+    expect(resolveCharacterPersona).toHaveBeenCalledTimes(1)
   })
 
   it("ignores non-talked events and does nothing when disabled", async () => {

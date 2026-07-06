@@ -27,10 +27,33 @@ jest.mock("@/lib/terminal/headless-session-registry", () => ({
   closeRunSessions: (...args: unknown[]) => mockCloseRunSessions(...args),
 }))
 
+// LLM client used by the ai.prompt node once a real apiKey is resolved. Capture
+// the opts so we can assert the resolved keyring value flowed through.
+const createLlmClientMock = jest.fn((_opts: { apiKey?: string }) => ({
+  complete: async () => "REAL-COMPLETION",
+  getUsageSnapshot: () => ({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+}))
+jest.mock("@/lib/twin/distill/llm", () => ({
+  createLlmClient: (opts: { apiKey?: string }) => createLlmClientMock(opts),
+}))
+
+// Stand in for the production keyring-backed default resolver (real branch is
+// covered by secret-resolver-keyring.test.ts). Proves the orchestrator now
+// falls back to getDefaultSecretResolver() when no resolver is passed.
+jest.mock("./secret-resolver-keyring", () => ({
+  getDefaultSecretResolver: () => ({
+    resolve: async (ref: string) => (ref === "keyring:openai:key" ? "sk-test" : undefined),
+  }),
+}))
+
 import { runWorkflow } from "./orchestrator"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listRunEvents } from "./event-log"
 import type { TriggerEvent, VisualWorkflow } from "@/types/workflow/visual"
+
+// Cold-opening the full schema ladder on fresh fake-indexeddb regularly
+// exceeds Jest's 5 s default on a busy machine (grew again with v95–v98).
+jest.setTimeout(30_000)
 
 beforeEach(async () => {
   await getDb().delete()
@@ -138,6 +161,49 @@ describe("runWorkflow — end-to-end happy paths", () => {
     const events = await listRunEvents(result.runId)
     const completed = events.filter((e) => e.type === "step_completed").map((e) => e.stepId)
     expect(completed).toEqual(["n_start", "n_set", "n_prompt", "n_branch"])
+  })
+
+  it("uses the default keyring resolver so an ai.prompt credentialRef makes a real call (not a stub)", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+        {
+          id: "n_prompt",
+          type: "ai.prompt",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: {
+            label: "ai",
+            params: {
+              provider: "openai",
+              model: "gpt-4o-mini",
+              userPrompt: "hi",
+              temperature: 0,
+              // No inline apiKey — must resolve through the keyring credential ref.
+              credentialRefs: { apiKey: "keyring:openai:key" },
+            },
+          },
+        },
+      ],
+      [{ id: "e1", source: "n_start", target: "n_prompt" }]
+    )
+
+    // Note: no `secretResolver` passed → orchestrator falls back to
+    // getDefaultSecretResolver() (mocked above).
+    const result = await runWorkflow({ workflow: wf, trigger })
+
+    expect(result.status).toBe("succeeded")
+    const out = result.output as { completion?: string; stub?: boolean }
+    expect(out.completion).toBe("REAL-COMPLETION")
+    expect(out.stub).toBe(false)
+    // The resolved keyring value reached the LLM client.
+    expect(createLlmClientMock).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "sk-test" }))
   })
 
   it("propagates expression values through upstream", async () => {

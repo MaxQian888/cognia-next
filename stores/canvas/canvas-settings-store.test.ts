@@ -302,5 +302,99 @@ describe("useCanvasSettingsStore", () => {
       expect(options.minimap).toEqual({ enabled: false, scale: 1 })
       expect(options.autoClosingBrackets).toBe("never")
     })
+
+    it("maps the new typography/rendering options", () => {
+      const { result } = renderHook(() => useCanvasSettingsStore())
+
+      act(() => {
+        result.current.updateEditorSettings({
+          fontLigatures: false,
+          letterSpacing: 1.5,
+          minimapScale: 2,
+          renderLineHighlight: "all",
+          stickyScroll: false,
+          stickyScrollMaxLines: 8,
+          folding: false,
+          showFoldingControls: "always",
+          inlineSuggest: false,
+          cursorSmoothCaretAnimation: "on",
+          padding: { top: 12, bottom: 20 },
+        })
+      })
+
+      const options = result.current.getEditorOptions()
+      expect(options.fontLigatures).toBe(false)
+      expect(options.letterSpacing).toBe(1.5)
+      expect(options.minimap).toEqual({ enabled: true, scale: 2 })
+      expect(options.renderLineHighlight).toBe("all")
+      expect(options.stickyScroll).toEqual({ enabled: false, maxLineCount: 8 })
+      expect(options.folding).toBe(false)
+      expect(options.showFoldingControls).toBe("always")
+      expect(options.inlineSuggest).toEqual({ enabled: false })
+      expect(options.cursorSmoothCaretAnimation).toBe("on")
+      expect(options.padding).toEqual({ top: 12, bottom: 20 })
+    })
+
+    it("wires accessibility: screen-reader forces accessibilitySupport on", () => {
+      const { result } = renderHook(() => useCanvasSettingsStore())
+
+      expect(result.current.getEditorOptions().accessibilitySupport).toBe("auto")
+
+      act(() => {
+        result.current.updateSettings({
+          accessibility: {
+            ...DEFAULT_CANVAS_SETTINGS.accessibility,
+            screenReaderOptimized: true,
+          },
+        })
+      })
+
+      expect(result.current.getEditorOptions().accessibilitySupport).toBe("on")
+    })
+
+    it("wires accessibility: reduced-motion overrides animation options", () => {
+      const { result } = renderHook(() => useCanvasSettingsStore())
+
+      act(() => {
+        result.current.updateEditorSettings({
+          smoothScrolling: true,
+          cursorSmoothCaretAnimation: "on",
+          cursorBlinking: "smooth",
+        })
+        result.current.updateSettings({
+          accessibility: {
+            ...DEFAULT_CANVAS_SETTINGS.accessibility,
+            reducedMotion: true,
+          },
+        })
+      })
+
+      const options = result.current.getEditorOptions()
+      expect(options.smoothScrolling).toBe(false)
+      expect(options.cursorSmoothCaretAnimation).toBe("off")
+      expect(options.cursorBlinking).toBe("solid")
+    })
+  })
+
+  describe("validation of new editor options", () => {
+    it("rejects out-of-range letter spacing, minimap scale, sticky lines, and padding", () => {
+      const { result } = renderHook(() => useCanvasSettingsStore())
+      const base = DEFAULT_CANVAS_SETTINGS.editor
+
+      const cases: Array<[Partial<typeof base>, string]> = [
+        [{ letterSpacing: 20 }, "Letter spacing"],
+        [{ minimapScale: 5 }, "Minimap scale"],
+        [{ stickyScrollMaxLines: 50 }, "Sticky scroll max lines"],
+        [{ padding: { top: 100, bottom: 0 } }, "Editor padding"],
+      ]
+
+      for (const [patch, expected] of cases) {
+        let errors: string[] = []
+        act(() => {
+          errors = result.current.updateSettings({ editor: { ...base, ...patch } })
+        })
+        expect(errors.some((e) => e.includes(expected))).toBe(true)
+      }
+    })
   })
 })

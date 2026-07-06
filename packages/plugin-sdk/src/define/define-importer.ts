@@ -18,7 +18,7 @@
  *   })
  */
 
-import type { CustomImporter } from "@/types/plugin/plugin-extended"
+import type { CustomImporter } from "@/types/plugin/plugin"
 
 export function defineImporter<T = unknown>(importer: CustomImporter<T>): CustomImporter<T> {
   return importer

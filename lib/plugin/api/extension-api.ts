@@ -10,7 +10,7 @@ import type {
   ExtensionOptions,
   ExtensionRegistration,
   ExtensionProps,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { nanoid } from "nanoid"
 import React from "react"
 import { createPluginSystemLogger } from "../core/logger"

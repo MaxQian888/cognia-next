@@ -28,9 +28,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { AppSettings, BiometricGuardPolicy } from "@/lib/claude/types"
+import type { BiometricGuardPolicy } from "@/lib/claude/types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { useSettingsStore } from "@/stores/settings"
 
 export default function MobilePreferencesPage() {
@@ -39,21 +39,13 @@ export default function MobilePreferencesPage() {
   const tSec = useTranslations("mobile.security")
 
   const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
+  const update = useSettingsPatch()
 
   const fontScale = settings?.fontScale ?? "md"
   const defaultModel = settings?.defaultModel ?? ""
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
-
-  const update = async (patch: Partial<AppSettings>) => {
-    await save(patch as never)
-    const keys = Object.keys(patch ?? {}).join(", ")
-    await enqueue({
-      command: "app_settings_update",
-      payload: { patch },
-      label: tPanel("queueLabel", { keys }),
-    })
-  }
+  const reduceMotion = settings?.reduceMotion ?? false
+  const telemetryEnabled = settings?.telemetryEnabled ?? false
 
   const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>
     update({ biometricRequiredFor: { ...policy, ...patch } })
@@ -130,6 +122,23 @@ export default function MobilePreferencesPage() {
             checked={policy.signOut}
             onChange={(v) => void updateBiometric({ signOut: v })}
             testid="pref-biometric-sign-out"
+          />
+        </MeSection>
+
+        <MeSection title={tPanel("privacyTitle")} testid="me-section-pref-privacy">
+          <BiometricRow
+            label={tPanel("reduceMotion")}
+            help={tPanel("reduceMotionHelp")}
+            checked={reduceMotion}
+            onChange={(v) => void update({ reduceMotion: v })}
+            testid="pref-reduce-motion"
+          />
+          <BiometricRow
+            label={tPanel("telemetry")}
+            help={tPanel("telemetryHelp")}
+            checked={telemetryEnabled}
+            onChange={(v) => void update({ telemetryEnabled: v })}
+            testid="pref-telemetry"
           />
         </MeSection>
       </div>

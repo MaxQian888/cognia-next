@@ -37,18 +37,38 @@
  * deterministic replays during tests.
  */
 
-export type PiiKind =
-  | "EMAIL"
-  | "PHONE"
-  | "CN_ID"
-  | "BANK_CARD"
-  | "NAME"
-  | "IP_ADDR"
-  | "API_KEY"
-  | "JWT"
-  | "PEM_KEY"
-  | "PASSPORT"
-  | "DRIVER_LICENSE"
+/**
+ * Canonical list of every placeholder kind this module can emit. `PiiKind`
+ * derives from it, so adding a kind here automatically widens the type AND
+ * every pattern built from this array — downstream placeholder scanners
+ * (see `PII_PLACEHOLDER_SOURCE`) must derive from this instead of
+ * hand-copying the alternation, which is how `unredact-draft.ts` drifted
+ * out of sync (missing JWT / PEM_KEY) in the first place.
+ */
+export const PII_KINDS = [
+  "EMAIL",
+  "PHONE",
+  "CN_ID",
+  "BANK_CARD",
+  "NAME",
+  "IP_ADDR",
+  "API_KEY",
+  "JWT",
+  "PEM_KEY",
+  "PASSPORT",
+  "DRIVER_LICENSE",
+] as const
+
+export type PiiKind = (typeof PII_KINDS)[number]
+
+/**
+ * Regex source matching one emitted placeholder, e.g. `<EMAIL_001>`.
+ * Counters are padStart(3)-formatted but grow past three digits on
+ * PII-heavy documents — hence `\d{3,}`. Consumers wrap it in
+ * `new RegExp(PII_PLACEHOLDER_SOURCE, "g")` (or embed it) so every
+ * scanner stays in lockstep with `PII_KINDS`.
+ */
+export const PII_PLACEHOLDER_SOURCE = `<(?:${PII_KINDS.join("|")})_\\d{3,}>`
 
 export interface RedactionRecord {
   placeholder: string
@@ -171,19 +191,7 @@ interface RedactState {
 
 function freshState(): RedactState {
   return {
-    counters: {
-      EMAIL: 0,
-      PHONE: 0,
-      CN_ID: 0,
-      BANK_CARD: 0,
-      NAME: 0,
-      IP_ADDR: 0,
-      API_KEY: 0,
-      JWT: 0,
-      PEM_KEY: 0,
-      PASSPORT: 0,
-      DRIVER_LICENSE: 0,
-    },
+    counters: Object.fromEntries(PII_KINDS.map((kind) => [kind, 0])) as Record<PiiKind, number>,
     reuse: new Map(),
     map: {},
   }
@@ -257,7 +265,7 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   )
   out = out.replace(PHONE_RE, (m) => {
     // Avoid double-tokenizing chunks that look like already-claimed placeholders.
-    if (/^\s*<[A-Z_]+_\d{3}>\s*$/.test(m)) return m
+    if (/^\s*<[A-Z_]+_\d{3,}>\s*$/.test(m)) return m
     return tokenize(state, "PHONE", m)
   })
   // IPv4 / IPv6 last so a bare 192.0.2.1 in a log line doesn't get mistaken
@@ -266,7 +274,7 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   out = out.replace(IPV6_RE, (m) => tokenize(state, "IP_ADDR", m))
   out = out.replace(IPV6_COMPRESSED_RE, (m) => {
     // Skip anything already swapped for a placeholder this pass.
-    if (/^\s*<[A-Z_]+_\d{3}>\s*$/.test(m)) return m
+    if (/^\s*<[A-Z_]+_\d{3,}>\s*$/.test(m)) return m
     return tokenize(state, "IP_ADDR", m)
   })
 
@@ -287,20 +295,16 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
  * the chunk row stores the original, but reconstructed views (LLM critique
  * output, exported reports) round-trip through this function.
  */
-export function unredactText(text: string, map: Record<string, RedactionRecord>): string {
-  return text.replace(
-    /<(EMAIL|PHONE|CN_ID|BANK_CARD|NAME|IP_ADDR|API_KEY|JWT|PEM_KEY|PASSPORT|DRIVER_LICENSE)_\d{3}>/g,
-    (placeholder) => {
-      const record = map[placeholder]
-      return record ? record.original : placeholder
-    }
-  )
-}
+// Derived from PII_KINDS so the scanner can never drift from the emitter.
+// Safe to share across replace/matchAll: both reset/clone `lastIndex`.
+const PLACEHOLDER_SCAN_RE = new RegExp(PII_PLACEHOLDER_SOURCE, "g")
 
-// Placeholder counters are padStart(3)-formatted but can grow past three
-// digits on PII-heavy documents — hence `\d{3,}`.
-const PLACEHOLDER_SCAN_RE =
-  /<(?:EMAIL|PHONE|CN_ID|BANK_CARD|NAME|IP_ADDR|API_KEY|JWT|PEM_KEY|PASSPORT|DRIVER_LICENSE)_\d{3,}>/g
+export function unredactText(text: string, map: Record<string, RedactionRecord>): string {
+  return text.replace(PLACEHOLDER_SCAN_RE, (placeholder) => {
+    const record = map[placeholder]
+    return record ? record.original : placeholder
+  })
+}
 
 /** A char range in pre-redaction text space. Extra fields (page numbers,
  *  bounding boxes, …) pass through translation untouched via the generic. */

@@ -57,7 +57,17 @@ describe("SettingsHydrator", () => {
     expect((getSettings as jest.Mock).mock.calls.length).toBe(0)
   })
 
-  it("writes the appearance mirror to localStorage when resolvedTheme is available", async () => {
+  it("writes the appearance mirror to localStorage for a non-default theme", async () => {
+    // The default preset is governed by globals.css and is intentionally NOT
+    // mirrored (see the default-base test below); a color preset is. Mark the
+    // store loaded so the mount's load() early-returns instead of resetting
+    // colorTheme back to "default".
+    useSettingsStore.setState({
+      settings: { id: "singleton" } as never,
+      loaded: true,
+      colorTheme: "ocean",
+      activeCustomThemeId: null,
+    })
     render(<SettingsHydrator />)
     await waitFor(() => {
       const raw = window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)
@@ -69,6 +79,26 @@ describe("SettingsHydrator", () => {
     expect(typeof mirror["--foreground"]).toBe("string")
     expect(typeof mirror["--primary"]).toBe("string")
     expect(typeof mirror["--accent"]).toBe("string")
+  })
+
+  it("does not write the mirror for the default preset, and clears any stale one", async () => {
+    // Seed a stale mirror as if a custom theme had previously been active.
+    window.localStorage.setItem(
+      BOOT_MIRROR_STORAGE_KEY,
+      JSON.stringify({ "--background": "#0b1220" })
+    )
+    // Default base: colorTheme "default" + no active custom theme. loaded:true
+    // keeps load() from re-deriving the flat fields.
+    useSettingsStore.setState({
+      settings: { id: "singleton" } as never,
+      loaded: true,
+      colorTheme: "default",
+      activeCustomThemeId: null,
+    })
+    render(<SettingsHydrator />)
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBeNull()
+    })
   })
 
   it("does not write the mirror until next-themes has resolved", () => {

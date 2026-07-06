@@ -35,15 +35,46 @@ use sha2::{Digest, Sha256};
 use super::{advertised_port, tls_fingerprint, SharedState};
 
 /// `GET /api/v1/healthz` handler.
+///
+/// On a headless `cognia-server` (ADR-0059 R8) the payload additionally
+/// carries `brain` and `sidecar` supervision blocks so orchestrators and the
+/// tier-2 smoke can see the full process tree's health. Both keys are absent
+/// on desktop (no headless services installed).
 pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
     let secret = state.secret.read().clone();
     let server_id = derive_server_id(&secret);
-    let payload = json!({
+    let mut payload = json!({
         "version": env!("CARGO_PKG_VERSION"),
         "fingerprint": tls_fingerprint(),
         "advertised_port": advertised_port(),
         "server_id": server_id,
     });
+    if let Some(services) = crate::headless::headless_services() {
+        let obj = payload.as_object_mut().expect("payload is an object");
+        // `brain` reports the supervisor when one is installed; a headless
+        // server booted without a brain entry reports `configured: false`.
+        obj.insert(
+            "brain".to_string(),
+            match crate::headless::brain::brain_status() {
+                Some(status) => {
+                    let mut b = serde_json::to_value(status)
+                        .unwrap_or_else(|_| json!({}));
+                    if let Some(map) = b.as_object_mut() {
+                        map.insert("configured".to_string(), json!(true));
+                    }
+                    b
+                }
+                None => json!({ "configured": false }),
+            },
+        );
+        obj.insert(
+            "sidecar".to_string(),
+            json!({
+                "ready": services.sidecar.is_ready().await,
+                "restart_count": services.sidecar.restart_count(),
+            }),
+        );
+    }
     (StatusCode::OK, Json(payload)).into_response()
 }
 
@@ -153,6 +184,50 @@ mod tests {
         );
         let sid = body["server_id"].as_str().expect("server_id is string");
         assert_eq!(sid, derive_server_id(SECRET));
+    }
+
+    /// Desktop shape: no headless services installed → no brain/sidecar keys.
+    /// Headless shape: both keys present (ADR-0059 R8).
+    #[tokio::test]
+    async fn healthz_gains_brain_and_sidecar_blocks_only_when_headless() {
+        // The headless-services slot is process-global; serialize on the same
+        // lock the other global-slot tests use.
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
+
+        let router = build_router(test_state());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/healthz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        let body = body_json(resp).await;
+        assert!(body.get("brain").is_none(), "desktop must not report brain");
+        assert!(
+            body.get("sidecar").is_none(),
+            "desktop must not report sidecar"
+        );
+
+        crate::headless::install_headless_services(Some(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        ));
+        let router = build_router(test_state());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/healthz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        let body = body_json(resp).await;
+        assert_eq!(
+            body["brain"]["configured"], false,
+            "no brain supervisor installed in this test"
+        );
+        assert_eq!(body["sidecar"]["ready"], false);
+        assert!(body["sidecar"]["restart_count"].is_number());
+
+        crate::headless::install_headless_services(None);
     }
 
     #[tokio::test]

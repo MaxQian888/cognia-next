@@ -12,11 +12,13 @@
  * navigation/answer logic is factored into the pure helpers below so it unit-
  * tests without Ink.
  */
-import React, { useState } from "react"
+import React, { useRef, useState } from "react"
 import { Box, Text, useInput } from "ink"
+import type { DOMElement } from "ink"
 
 import { useTheme } from "../../theme/context"
 import { isMouseSequence } from "../../input/mouse"
+import { usePanelClick } from "../../input/use-panel-click"
 import { OverlayFooter } from "../OverlayFooter"
 import type { AskUserAnswer, AskUserRequest } from "@/lib/claude/ask-user-tool"
 
@@ -87,13 +89,36 @@ export function AskUserDialog({
 }) {
   const theme = useTheme()
   const [draft, setDraft] = useState<AskUserDraft>({ selected: [], text: "", cursor: 0 })
+  const boxRef = useRef<DOMElement | null>(null)
 
   const submit = () => {
     if (canSubmitAsk(request, draft)) onResolve(buildAnswer(draft))
   }
   const cancel = () => onResolve({ selected: [], text: "", cancelled: true })
 
+  // Mouse (fullscreen `scroll` only): clicking an option row focuses + toggles
+  // it; for a single-select prompt that also submits (like Enter on the option).
+  // Header = question line + the optional "Select one or more" multi-select line.
+  // Only the option rows are clickable — the free-text row needs the keyboard.
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: 1 + (request.multiSelect ? 1 : 0),
+    hasAboveMore: false,
+    visibleCount: request.options.length,
+    onPick: (offset) => {
+      const opt = request.options[offset]
+      if (!opt) return
+      const picked = toggleOption(request, { ...draft, cursor: offset }, opt.value)
+      if (!request.multiSelect && canSubmitAsk(request, picked)) {
+        onResolve(buildAnswer(picked))
+        return
+      }
+      setDraft(picked)
+    },
+  })
+
   useInput((input, key) => {
+    if (handleMouse(input)) return
     if (key.escape) {
       cancel()
       return
@@ -144,7 +169,13 @@ export function AskUserDialog({
       : "↑/↓ move · Space/Enter select · Enter submit · Esc cancel"
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+    <Box
+      ref={boxRef}
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.border}
+      paddingX={1}
+    >
       <Text color={theme.accent} bold>
         {request.question}
       </Text>

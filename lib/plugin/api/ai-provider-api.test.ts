@@ -18,11 +18,7 @@ import {
   getCodeAdapterExecutor,
   __resetProtocolAdaptersForTesting,
 } from "@cognia/provider-core/providers/protocol-adapter-registry"
-import type {
-  AIProviderDefinition,
-  AIChatChunk,
-  AIChatMessage,
-} from "@/types/plugin/plugin-extended"
+import type { AIProviderDefinition, AIChatChunk, AIChatMessage } from "@/types/plugin/plugin"
 import type { CodeAdapterChunk } from "@/types/plugin/plugin-protocol-adapter"
 
 // Mock the settings store
@@ -255,8 +251,52 @@ describe("AI Provider API", () => {
       expect(chunks).toEqual([
         { type: "text-delta", text: "Hello" },
         { type: "text-delta", text: " world" },
-        { type: "finish", finishReason: "stop", usage: { input: 3, output: 2 } },
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 },
+        },
       ])
+    })
+
+    it("maps AI SDK modelParams into plugin chat options for code adapters", async () => {
+      const api = createAIProviderAPI(testPluginId)
+      const id = `${testPluginId}:options-provider`
+      let capturedOptions: unknown
+      api.registerProvider({
+        id: "options-provider",
+        name: "Options Provider",
+        description: "",
+        models: [],
+        chat: async function* (_messages, options) {
+          capturedOptions = options
+          yield { content: "ok" }
+        },
+      })
+
+      const factory = getCodeAdapterExecutor(id)!
+      const adapter = await factory({ adapterId: id, pluginId: testPluginId })
+      for await (const _chunk of adapter.stream({
+        model: "m",
+        messages: [{ role: "user", content: "hi" }],
+        modelParams: {
+          temperature: 0.2,
+          maxOutputTokens: 128,
+          topP: 0.8,
+          stopSequences: ["</done>"],
+        },
+        credentials: {},
+      })) {
+        // drain
+      }
+
+      expect(capturedOptions).toEqual({
+        model: "m",
+        temperature: 0.2,
+        maxTokens: 128,
+        topP: 0.8,
+        stop: ["</done>"],
+      })
     })
   })
 

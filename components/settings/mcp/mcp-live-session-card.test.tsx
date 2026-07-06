@@ -26,7 +26,15 @@ jest.mock("@/lib/claude/ipc", () => ({
   toggleSessionMcpServer: (...a: unknown[]) => toggleSessionMcpServer(...a),
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+const useMcpServerLogs = jest.fn()
+jest.mock("@/hooks/mcp/use-mcp-server-logs", () => ({
+  mcpServerLogsHref: (s: string) => `/logs?src=mcp&module=mcp:${s}`,
+  useMcpServerLogs: (...a: unknown[]) => useMcpServerLogs(...a),
+}))
+
+const EMPTY_LOGS = { logs: [], lastEntry: null, lastError: null, errorCount: 0, isLoading: false }
+
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 import type { SdkMcpServerStatus } from "@/lib/claude/types"
 import { McpLiveSessionCard } from "./mcp-live-session-card"
@@ -44,6 +52,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   activeSessionId = "s1"
   mockIsTauri.mockReturnValue(true)
+  useMcpServerLogs.mockReturnValue(EMPTY_LOGS)
 })
 
 describe("McpLiveSessionCard", () => {
@@ -151,6 +160,124 @@ describe("McpLiveSessionCard", () => {
     // disabled → the toggle reads "enable" and flips to enabled=true.
     fireEvent.click(screen.getByText("enable"))
     await waitFor(() => expect(toggleSessionMcpServer).toHaveBeenCalledWith("s1", "off", true))
+  })
+
+  it("drops a stale status write after the session changes mid-operation", async () => {
+    let resolveReconnectFetch: (v: SdkMcpServerStatus[]) => void = () => {}
+    getSessionMcpStatus
+      .mockResolvedValueOnce([failedRow]) // s1 mount
+      .mockImplementationOnce(
+        () =>
+          new Promise<SdkMcpServerStatus[]>((res) => {
+            resolveReconnectFetch = res
+          })
+      ) // s1 reconnect refetch (deferred)
+      .mockResolvedValueOnce([okRow]) // s2 mount
+    reconnectSessionMcpServer.mockResolvedValue(undefined)
+    const { rerender } = render(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-github")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("reconnect"))
+    await waitFor(() => expect(reconnectSessionMcpServer).toHaveBeenCalledWith("s1", "github"))
+    // Switch sessions — the mount effect loads s2's rows (cognia).
+    activeSessionId = "s2"
+    rerender(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument())
+    // The stale s1 reconnect fetch resolves late with old (failed) data — the
+    // session guard must drop it so s2's view is not clobbered.
+    resolveReconnectFetch([failedRow])
+    await waitFor(() => expect(screen.queryByTestId("mcp-live-row-github")).toBeNull())
+    expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument()
+  })
+
+  it("links each row to its per-server log view", async () => {
+    getSessionMcpStatus.mockResolvedValue([failedRow])
+    render(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-github")).toBeInTheDocument())
+    expect(screen.getByLabelText('viewLogsFor:{"name":"github"}')).toHaveAttribute(
+      "href",
+      "/logs?src=mcp&module=mcp:github"
+    )
+  })
+
+  it("surfaces the most recent bridged error line when the SDK reports none", async () => {
+    useMcpServerLogs.mockReturnValue({
+      ...EMPTY_LOGS,
+      lastError: { message: "stderr boom", timestamp: new Date().toISOString(), level: "error" },
+      errorCount: 1,
+    })
+    getSessionMcpStatus.mockResolvedValue([okRow]) // connected → no srv.error
+    render(<McpLiveSessionCard />)
+    await waitFor(() => expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument())
+    expect(screen.getByTitle("stderr boom")).toBeInTheDocument()
+  })
+
+  it("self-refreshes a pending server until it settles (no manual refresh needed)", async () => {
+    jest.useFakeTimers()
+    try {
+      getSessionMcpStatus
+        .mockResolvedValueOnce([{ name: "warm", status: "pending" } as SdkMcpServerStatus])
+        .mockResolvedValueOnce([{ name: "warm", status: "connected" } as SdkMcpServerStatus])
+      render(<McpLiveSessionCard />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByText("status.pending")).toBeInTheDocument()
+      // The bounded poll fires after ~2.5s and picks up the settled status.
+      await act(async () => {
+        jest.advanceTimersByTime(2600)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByText("status.connected")).toBeInTheDocument()
+      expect(getSessionMcpStatus).toHaveBeenCalledTimes(2)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("stops self-refreshing a permanently failed server once the poll budget is spent", async () => {
+    jest.useFakeTimers()
+    try {
+      getSessionMcpStatus.mockResolvedValue([failedRow])
+      render(<McpLiveSessionCard />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByTestId("mcp-live-row-github")).toBeInTheDocument()
+      // Burn well past the 6-poll budget.
+      for (let i = 0; i < 10; i++) {
+        await act(async () => {
+          jest.advanceTimersByTime(2600)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+      }
+      // 1 initial load + at most 6 budgeted polls.
+      expect(getSessionMcpStatus.mock.calls.length).toBeLessThanOrEqual(7)
+      expect(getSessionMcpStatus.mock.calls.length).toBe(7)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not self-refresh when every server is settled", async () => {
+    jest.useFakeTimers()
+    try {
+      getSessionMcpStatus.mockResolvedValue([okRow])
+      render(<McpLiveSessionCard />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument()
+      await act(async () => {
+        jest.advanceTimersByTime(10_000)
+      })
+      expect(getSessionMcpStatus).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("toasts an error when toggle fails", async () => {

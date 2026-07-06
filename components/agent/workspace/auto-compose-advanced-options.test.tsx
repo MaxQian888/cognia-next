@@ -130,4 +130,26 @@ describe("AutoComposeAdvancedOptions", () => {
     await user.click(screen.getByTestId("auto-compose-clarify-toggle"))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ clarifyEnabled: false }))
   })
+
+  it("consensus and verify toggles are mutually exclusive", async () => {
+    const user = userEvent.setup()
+    const { onChange } = setup({ consensusNeeded: false, verificationNeeded: true })
+    await user.click(screen.getByTestId("auto-compose-advanced-trigger"))
+
+    // Turning consensus ON also clears verify.
+    await user.click(screen.getByTestId("auto-compose-consensus"))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ consensusNeeded: true, verificationNeeded: false })
+    )
+  })
+
+  it("turning verify on clears consensus", async () => {
+    const user = userEvent.setup()
+    const { onChange } = setup({ consensusNeeded: true, verificationNeeded: false })
+    await user.click(screen.getByTestId("auto-compose-advanced-trigger"))
+    await user.click(screen.getByTestId("auto-compose-verify"))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ verificationNeeded: true, consensusNeeded: false })
+    )
+  })
 })

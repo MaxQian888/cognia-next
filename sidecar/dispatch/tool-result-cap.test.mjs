@@ -56,3 +56,36 @@ test("never touches non-tool messages", () => {
   assert.equal(out[1], convo[1])
   assert.equal(out[2], convo[2])
 })
+
+test("caps Anthropic-shaped nested tool_result content arrays", () => {
+  const big = "z".repeat(4000)
+  const conversation = [
+    {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "t1",
+          content: [{ type: "text", text: big }],
+        },
+      ],
+    },
+  ]
+  const out = capToolResults(conversation, { maxToolResultTokens: 100 })
+  const block = out[0].content[0].content[0]
+  assert.ok(block.text.length < big.length)
+  assert.match(block.text, /truncated/)
+})
+
+test("nested arrays below the cap pass through by identity", () => {
+  const conversation = [
+    {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "small" }] },
+      ],
+    },
+  ]
+  const out = capToolResults(conversation, { maxToolResultTokens: 100 })
+  assert.equal(out[0], conversation[0])
+})

@@ -21,6 +21,11 @@ jest.mock("@/lib/subscription/core/migration", () => ({
   subscriptionInitOnce: (...args: unknown[]) => mInitOnce(...args),
 }))
 
+const mNotifyChanged = jest.fn()
+jest.mock("@/lib/subscription/core/subscription-events", () => ({
+  notifySubscriptionChanged: () => mNotifyChanged(),
+}))
+
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: (selector: (state: typeof accountState) => unknown) => selector(accountState),
 }))
@@ -32,6 +37,7 @@ jest.mock("next-intl", () => ({
 
 beforeEach(() => {
   mInitOnce.mockClear()
+  mNotifyChanged.mockClear()
   accountState = {
     unlockedAccountId: "local_acct_a",
     accountRevision: 1,
@@ -78,6 +84,24 @@ describe("SubscriptionInitializer", () => {
     rerender(<SubscriptionInitializer />)
 
     await waitFor(() => expect(mInitOnce).toHaveBeenCalledTimes(2))
+  })
+
+  it("re-runs when the account revision bumps for the same unlocked account", async () => {
+    // Switching away and back (or re-activating) keeps the same
+    // unlockedAccountId but bumps accountRevision — the init key must change so
+    // the per-account credential projection is rebuilt rather than left stale.
+    const { rerender } = render(<SubscriptionInitializer />)
+    await waitFor(() => expect(mInitOnce).toHaveBeenCalledTimes(1))
+
+    accountState = { unlockedAccountId: "local_acct_a", accountRevision: 2 }
+    rerender(<SubscriptionInitializer />)
+
+    await waitFor(() => expect(mInitOnce).toHaveBeenCalledTimes(2))
+  })
+
+  it("notifies subscription listeners after rebuilding the projection", async () => {
+    render(<SubscriptionInitializer />)
+    await waitFor(() => expect(mNotifyChanged).toHaveBeenCalledTimes(1))
   })
 
   it("does not initialize subscription keyrings while no local account is unlocked", async () => {

@@ -27,7 +27,7 @@ import {
 import type { ImportStaging } from "@/stores/skills"
 import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
-import { useSkillSync } from "@/hooks/skills"
+import { useSkillSync, useSkillPanelPrefs } from "@/hooks/skills"
 import { getSkill } from "@/lib/db/skills"
 
 interface Props {
@@ -42,6 +42,7 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
   const [strategy, setStrategy] = useState<ImportConflictStrategy>("skip")
   const [running, setRunning] = useState(false)
   const sync = useSkillSync()
+  const autoEnableNew = useSkillPanelPrefs().autoEnableNew
 
   const totalResources = staging.drafts.reduce((acc, d) => acc + (d.resources?.length ?? 0), 0)
   const hasResources = totalResources > 0
@@ -58,6 +59,9 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
         allowedTools: d.allowedTools,
         category: d.category,
         source: "imported",
+        // Honor the "auto-enable new skills" preference: when off, imported
+        // skills land disabled so the user opts them into the prompt.
+        status: autoEnableNew ? undefined : "disabled",
         // Forward bundle-only fields so `bulkImportSkills` can dispatch to
         // the canonical-id upsert path and persist resources.
         canonicalId: d.canonicalId,

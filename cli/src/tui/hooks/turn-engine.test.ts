@@ -33,6 +33,18 @@ describe("createGateController", () => {
     expect(() => gate.resolve({ decision: "deny" })).not.toThrow()
   })
 
+  it("peek returns the head request (for attributing a denial), undefined when empty", () => {
+    const gate = createGateController(() => {})
+    expect(gate.peek()).toBeUndefined()
+    void gate.responder({ toolName: "bash" } as never)
+    void gate.responder({ toolName: "edit" } as never)
+    expect(gate.peek()?.toolName).toBe("bash") // FIFO head
+    gate.resolve({ decision: "deny" })
+    expect(gate.peek()?.toolName).toBe("edit") // head advances
+    gate.resolve({ decision: "allow" })
+    expect(gate.peek()).toBeUndefined()
+  })
+
   it("queues concurrent requests in order", async () => {
     const gate = createGateController(() => {})
     const a = gate.responder({ toolName: "a" } as never)
@@ -41,6 +53,36 @@ describe("createGateController", () => {
     gate.resolve({ decision: "deny" })
     await expect(a).resolves.toEqual({ decision: "allow" })
     await expect(b).resolves.toEqual({ decision: "deny" })
+  })
+
+  it("surfaces parallel requests one overlay at a time (head only, then re-pumps)", async () => {
+    // Regression: a single assistant message can emit several tool_use blocks in
+    // parallel, so the responder is invoked concurrently for all of them. The
+    // overlay must show ONE request at a time — firing onRequest for every
+    // arrival overwrote the overlay down to the last ask, and the UI resolved a
+    // single decision then closed, stranding the other resolvers (their
+    // canUseTool promises never settled → the turn hung forever).
+    const opened: string[] = []
+    const gate = createGateController((req) => opened.push(req.toolName))
+    const a = gate.responder({ toolName: "dir_a" } as never)
+    const b = gate.responder({ toolName: "dir_b" } as never)
+    const c = gate.responder({ toolName: "dir_c" } as never)
+    // Only the head opened an overlay; the other two wait their turn.
+    expect(opened).toEqual(["dir_a"])
+    expect(gate.isPending()).toBe(true)
+
+    gate.resolve({ decision: "allow" }) // dir_a → re-pumps dir_b
+    expect(opened).toEqual(["dir_a", "dir_b"])
+    gate.resolve({ decision: "allow" }) // dir_b → re-pumps dir_c
+    expect(opened).toEqual(["dir_a", "dir_b", "dir_c"])
+    gate.resolve({ decision: "allow" }) // dir_c → queue drained, no re-pump
+    expect(opened).toEqual(["dir_a", "dir_b", "dir_c"])
+    expect(gate.isPending()).toBe(false)
+
+    // Every parallel ask was answered — none stranded.
+    await expect(a).resolves.toEqual({ decision: "allow" })
+    await expect(b).resolves.toEqual({ decision: "allow" })
+    await expect(c).resolves.toEqual({ decision: "allow" })
   })
 
   it("reset clears pending resolvers so the next request doesn't pop a stale one", async () => {
@@ -269,7 +311,32 @@ describe("runTurn", () => {
       gate: async () => ({ decision: "allow" }),
     })
     expect(ok).toBe(false)
-    expect(actions.at(-1)).toEqual({ type: "TURN_ERROR", message: "kaboom" })
+    // A generic error still carries the classified title (no hint for generic).
+    expect(actions.at(-1)).toEqual({
+      type: "TURN_ERROR",
+      message: "kaboom",
+      title: "Error",
+      category: "generic",
+    })
+  })
+
+  it("attaches a remediation hint + category for a classifiable error", async () => {
+    const actions: TuiAction[] = []
+    const session: TurnSession = {
+      async send() {
+        throw new Error("Request failed: 401 Unauthorized")
+      },
+    }
+    await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (a) => actions.push(a),
+      gate: async () => ({ decision: "allow" }),
+    })
+    const last = actions.at(-1) as Extract<TuiAction, { type: "TURN_ERROR" }>
+    expect(last.type).toBe("TURN_ERROR")
+    expect(last.category).toBe("auth")
+    expect(last.hint).toMatch(/re-authenticate/i)
   })
 
   it("maps an aborted turn to TURN_ABORTED and returns ok:false", async () => {

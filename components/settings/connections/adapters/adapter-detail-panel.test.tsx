@@ -126,6 +126,13 @@ const messages = {
   settings: {
     connections: {
       adapters: {
+        platforms: {
+          dingtalk: "DingTalk / 钉钉",
+          telegram: "Telegram",
+        },
+        transportLabels: {
+          dingtalkStream: "Stream Mode WSS",
+        },
         enableAria: "Enable {name}",
         disableAria: "Disable {name}",
         enabled: "Enabled",
@@ -207,6 +214,19 @@ describe("AdapterDetailPanel — header", () => {
   it("shows the adapter type badge", () => {
     render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
     expect(screen.getByText("telegram")).toBeInTheDocument()
+  })
+
+  it("shows DingTalk Stream Mode instead of the internal longpoll bucket", () => {
+    const dingtalkRow: AdapterInstanceRow = {
+      ...baseRow,
+      id: "dt-1",
+      type: "dingtalk",
+      displayName: "DingTalk Bot",
+      transportMode: "longpoll",
+    }
+    mockUseLiveQuery.mockReturnValue(dingtalkRow as unknown as ReturnType<typeof useLiveQuery>)
+    render(withIntl(<AdapterDetailPanel adapterId="dt-1" />))
+    expect(screen.getByText(/DingTalk .* · Stream Mode WSS/)).toBeInTheDocument()
   })
 
   it("shows the defaultMode badge", () => {

@@ -97,6 +97,88 @@ describe("detectTrigger — @agent mode", () => {
   })
 })
 
+describe("detectTrigger — @skill: / @preset: namespaced prefixes", () => {
+  it("flips to skill kind once `@skill:` is typed (combined mode)", () => {
+    const tg = detectTrigger("use @skill:rev", 14, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("skill")
+    expect(tg?.query).toBe("rev")
+    expect(tg?.tokenStart).toBe(4)
+  })
+
+  it("yields an empty query right after `@skill:`", () => {
+    const tg = detectTrigger("@skill:", 7, { mentionMode: "files" })
+    expect(tg?.kind).toBe("skill")
+    expect(tg?.query).toBe("")
+  })
+
+  it("flips to preset kind for `@preset:`", () => {
+    const tg = detectTrigger("@preset:cod", 11, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("preset")
+    expect(tg?.query).toBe("cod")
+  })
+
+  it("stays a file token until the colon is typed", () => {
+    const tg = detectTrigger("@skill", 6, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.query).toBe("skill")
+  })
+
+  it("does NOT flip in agents mode (team workspace `@` means members)", () => {
+    const tg = detectTrigger("@skill:rev", 10, { mentionMode: "agents" })
+    expect(tg?.kind).toBe("agent")
+    expect(tg?.query).toBe("skill:rev")
+  })
+
+  it("keeps a dotted/colon token as a single token (boundary at whitespace)", () => {
+    const tg = detectTrigger("@skill:my.cool-skill ", 20, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("skill")
+    expect(tg?.query).toBe("my.cool-skill")
+    expect(tg?.tokenEnd).toBe(20)
+  })
+})
+
+describe("detectTrigger — workflow mode (@node / @edge)", () => {
+  it("makes a bare `@` mean a workflow node", () => {
+    const tg = detectTrigger("look @draft", 11, { mentionMode: "workflow" })
+    expect(tg?.kind).toBe("wfNode")
+    expect(tg?.query).toBe("draft")
+    expect(tg?.tokenStart).toBe(5)
+  })
+
+  it("flips to node kind for the `@node:` prefix", () => {
+    const tg = detectTrigger("@node:n_a", 9, { mentionMode: "workflow" })
+    expect(tg?.kind).toBe("wfNode")
+    expect(tg?.query).toBe("n_a")
+    expect(tg?.tokenStart).toBe(0)
+  })
+
+  it("flips to edge kind for the `@edge:` prefix", () => {
+    const tg = detectTrigger("wire @edge:e_1", 14, { mentionMode: "workflow" })
+    expect(tg?.kind).toBe("wfEdge")
+    expect(tg?.query).toBe("e_1")
+  })
+
+  it("yields an empty query right after a bare `@`", () => {
+    const tg = detectTrigger("hi @", 4, { mentionMode: "workflow" })
+    expect(tg?.kind).toBe("wfNode")
+    expect(tg?.query).toBe("")
+  })
+
+  it("does not treat `@skill:` as a namespaced picker in workflow mode", () => {
+    // Only node:/edge: are workflow prefixes — `@skill:` stays a bare node token.
+    const tg = detectTrigger("@skill:x", 8, { mentionMode: "workflow" })
+    expect(tg?.kind).toBe("wfNode")
+    expect(tg?.query).toBe("skill:x")
+  })
+
+  it("does not treat `@node:` as a workflow picker outside workflow mode", () => {
+    // In the default file composer `node:` is not a prefix — it's plain query text.
+    const tg = detectTrigger("@node:n_a", 9, { mentionMode: "files" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.query).toBe("node:n_a")
+  })
+})
+
 describe("spliceToken", () => {
   it("inserts the replacement and adds a trailing space", () => {
     const result = spliceToken("hi @c", 3, 5, "@codex")

@@ -59,7 +59,7 @@ import { usePinnedMeRows } from "@/components/mobile/me/use-pinned-me-rows"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { usePlatform } from "@/hooks/use-platform"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 
 export default function MePage() {
   const t = useTranslations("mobile.me")

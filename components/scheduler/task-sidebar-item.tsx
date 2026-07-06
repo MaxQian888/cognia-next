@@ -2,17 +2,21 @@
 
 /**
  * TaskSidebarItem - Single task row for the scheduler sidebar
- * Supports right-click context menu with quick actions
+ * Clicking the row selects it; quick actions live behind a hover-revealed
+ * "⋯" button so the menu never swallows the selection click.
  */
 
 import React from "react"
 import { useTranslations } from "next-intl"
 import {
+  MoreVertical,
   Workflow,
   Bot,
   Database,
   Archive,
   BookOpen,
+  Radar,
+  SearchCheck,
   Cog,
   Plug,
   FileCode,
@@ -148,6 +152,16 @@ const taskTypeConfig: Record<
     bg: "bg-indigo-500/10",
     color: "text-indigo-500",
   },
+  "wiki-lint": {
+    icon: <SearchCheck className="h-3.5 w-3.5" />,
+    bg: "bg-teal-500/10",
+    color: "text-teal-500",
+  },
+  "radar-report": {
+    icon: <Radar className="h-3.5 w-3.5" />,
+    bg: "bg-amber-500/10",
+    color: "text-amber-500",
+  },
 }
 
 const statusDotColor: Record<ScheduledTaskStatus, string> = {
@@ -203,7 +217,7 @@ export interface TaskSidebarItemProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function TaskSidebarItem({
+export const TaskSidebarItem = React.memo(function TaskSidebarItem({
   task,
   isActive,
   isHighlighted,
@@ -221,134 +235,149 @@ export function TaskSidebarItem({
   const triggerText = getTriggerText(task, t)
   const nextRunText = formatNextRun(task.nextRunAt)
   const isPaused = task.status === "paused"
+  const hasAnyAction = !!(onRunNow || onPause || onResume || onEdit || onDuplicate || onDelete)
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {/* Whole row is the trigger — right-click opens menu via context */}
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => onClick(task.id)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") onClick(task.id)
-          }}
-          className={cn(
-            "flex cursor-pointer items-center gap-2 px-3 py-2 transition-all duration-200 hover:bg-accent/50",
-            isActive && "bg-accent border-l-2 border-primary",
-            isHighlighted && "ring-1 ring-primary/50"
-          )}
-        >
-          {/* Type icon */}
-          <span
-            className={cn(
-              "flex h-6 w-6 shrink-0 items-center justify-center rounded",
-              typeConf.bg,
-              typeConf.color
-            )}
-          >
-            {typeConf.icon}
-          </span>
-
-          {/* Name + meta */}
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{task.name}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {triggerText}
-              {task.nextRunAt ? ` · ${nextRunText}` : ""}
-            </p>
-          </div>
-
-          {/* Status dot */}
-          <span
-            data-testid="status-dot"
-            className={cn(
-              "h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-300",
-              dotColor,
-              task.status === "active" && "animate-pulse"
-            )}
-          />
-        </div>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="start" side="right" className="w-44">
-        {onRunNow && (
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.stopPropagation()
-              onRunNow(task.id)
-            }}
-          >
-            <Play className="mr-2 h-3.5 w-3.5" />
-            {t("runNow")}
-          </DropdownMenuItem>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onClick(task.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onClick(task.id)
+      }}
+      className={cn(
+        "group flex cursor-pointer items-center gap-2 px-3 py-2 transition-all duration-200 hover:bg-accent/50",
+        isActive && "bg-accent border-l-2 border-primary",
+        isHighlighted && "ring-1 ring-primary/50"
+      )}
+    >
+      {/* Type icon */}
+      <span
+        className={cn(
+          "flex h-6 w-6 shrink-0 items-center justify-center rounded",
+          typeConf.bg,
+          typeConf.color
         )}
+      >
+        {typeConf.icon}
+      </span>
 
-        {(onPause || onResume) && (
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.stopPropagation()
-              if (isPaused) onResume?.(task.id)
-              else onPause?.(task.id)
-            }}
-          >
-            {isPaused ? (
-              <>
+      {/* Name + meta */}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{task.name}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {triggerText}
+          {task.nextRunAt ? ` · ${nextRunText}` : ""}
+        </p>
+      </div>
+
+      {/* Status dot */}
+      <span
+        data-testid="status-dot"
+        className={cn(
+          "h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-300",
+          dotColor,
+          task.status === "active" && "animate-pulse"
+        )}
+      />
+
+      {hasAnyAction && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("moreOptions")}
+              data-testid={`task-row-menu-${task.id}`}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground",
+                "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+              )}
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="right" className="w-44">
+            {onRunNow && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRunNow(task.id)
+                }}
+              >
                 <Play className="mr-2 h-3.5 w-3.5" />
-                {t("resume")}
-              </>
-            ) : (
+                {t("runNow")}
+              </DropdownMenuItem>
+            )}
+
+            {(onPause || onResume) && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isPaused) onResume?.(task.id)
+                  else onPause?.(task.id)
+                }}
+              >
+                {isPaused ? (
+                  <>
+                    <Play className="mr-2 h-3.5 w-3.5" />
+                    {t("resume")}
+                  </>
+                ) : (
+                  <>
+                    <Pause className="mr-2 h-3.5 w-3.5" />
+                    {t("pause")}
+                  </>
+                )}
+              </DropdownMenuItem>
+            )}
+
+            {onEdit && (
               <>
-                <Pause className="mr-2 h-3.5 w-3.5" />
-                {t("pause")}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onEdit(task.id)
+                  }}
+                >
+                  <Pencil className="mr-2 h-3.5 w-3.5" />
+                  {t("edit")}
+                </DropdownMenuItem>
               </>
             )}
-          </DropdownMenuItem>
-        )}
 
-        {onEdit && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation()
-                onEdit(task.id)
-              }}
-            >
-              <Pencil className="mr-2 h-3.5 w-3.5" />
-              {t("edit")}
-            </DropdownMenuItem>
-          </>
-        )}
+            {onDuplicate && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDuplicate(task.id)
+                }}
+              >
+                <Copy className="mr-2 h-3.5 w-3.5" />
+                {t("duplicate")}
+              </DropdownMenuItem>
+            )}
 
-        {onDuplicate && (
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.stopPropagation()
-              onDuplicate(task.id)
-            }}
-          >
-            <Copy className="mr-2 h-3.5 w-3.5" />
-            {t("duplicate")}
-          </DropdownMenuItem>
-        )}
-
-        {onDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete(task.id)
-              }}
-            >
-              <Trash2 className="mr-2 h-3.5 w-3.5" />
-              {t("delete")}
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            {onDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDelete(task.id)
+                  }}
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                  {t("delete")}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
   )
-}
+})

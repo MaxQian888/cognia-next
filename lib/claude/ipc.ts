@@ -19,9 +19,14 @@ import type {
   SendOptions,
   SessionControlMethod,
 } from "./types"
-import { isControlResponseEvent, isPluginToolExecEvent } from "./types"
+import {
+  isControlResponseEvent,
+  isPluginToolExecEvent,
+  isProtocolAdapterCancelEvent,
+} from "./types"
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
+import type { ProtocolAdapterCancelEvent } from "./types"
 
 const SIDECAR_EVENT = "claude://message"
 
@@ -357,9 +362,24 @@ export async function setApiKey(key: string | null): Promise<void> {
  *
  * Pass `null` for either field to clear it. Empty strings are treated as null
  * by the Rust side.
+ *
+ * `customHeaders` carries relay-required headers (e.g.
+ * `{ "anthropic-beta": "context-1m-2025-08-07" }` for the 1M window), forwarded
+ * as `ANTHROPIC_CUSTOM_HEADER_*` at sidecar spawn. Semantics on the Rust side:
+ * `undefined` leaves the existing header set untouched (legacy callers that
+ * don't manage headers); an explicit object — including `{}` — replaces it, so
+ * switching to a provider without headers clears a previous relay's headers.
  */
-export async function setProviderEnv(apiKey: string | null, baseUrl: string | null): Promise<void> {
-  await transport.call("claude_set_provider_env", { apiKey, baseUrl })
+export async function setProviderEnv(
+  apiKey: string | null,
+  baseUrl: string | null,
+  customHeaders?: Record<string, string>
+): Promise<void> {
+  await transport.call("claude_set_provider_env", {
+    apiKey,
+    baseUrl,
+    customHeaders: customHeaders ? Object.entries(customHeaders) : undefined,
+  })
 }
 
 export async function hasApiKey(): Promise<boolean> {
@@ -426,6 +446,14 @@ export async function subscribeProtocolAdapterExec(
     if ((evt as { type?: string }).type === "protocol_adapter_exec") {
       handler(evt as unknown as ProtocolAdapterExecEvent)
     }
+  })
+}
+
+export async function subscribeProtocolAdapterCancel(
+  handler: (req: ProtocolAdapterCancelEvent) => void
+): Promise<UnlistenFn> {
+  return onClaudeMessage((evt) => {
+    if (isProtocolAdapterCancelEvent(evt)) handler(evt)
   })
 }
 

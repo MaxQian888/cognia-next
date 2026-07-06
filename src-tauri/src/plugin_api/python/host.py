@@ -15,6 +15,10 @@ Protocol (NDJSON over stdio, driven by src-tauri/src/plugin_api/python/):
 Methods: ping, import_main, get_tools, call_tool, call, call_hook,
 push_config, get_info, shutdown.
 
+The `cognia` shim installed into sys.modules before importing the plugin
+exposes: tool, hook, progress, get_config, log, on_config_changed — mirroring
+the reference SDK's module-level surface (plugin-sdk/python/src/cognia).
+
 Lifecycle conventions (module-level, all optional): on_startup() runs after
 import; on_config_updated(config) runs on push_config; on_shutdown() runs
 on graceful shutdown. Tools returning an iterator/generator stream each
@@ -40,6 +44,7 @@ _TOOLS = {}  # name -> {"fn": callable, "definition": {name, description, parame
 _HOOKS = []  # (event, callable)
 _MAIN_MODULE = None
 _CONFIG = {}  # persisted plugin config, pushed by the host app
+_CONFIG_LISTENERS = []  # cognia.on_config_changed(fn) subscribers, fired on push_config
 _CURRENT_CALL_ID = None  # request id while a handler runs (serial main loop)
 _SHUTDOWN = False
 
@@ -153,12 +158,32 @@ def _get_config():
     return _CONFIG
 
 
+def _log(*args):
+    """cognia.log(...) — protocol-safe logging.
+
+    Writes to stderr (the app-log channel) so it can never corrupt the NDJSON
+    protocol on stdout. Mirrors the reference SDK's ``cognia.log``.
+    """
+    print(*args, file=sys.stderr)
+
+
+def _on_config_changed(fn):
+    """cognia.on_config_changed(fn) — register a listener fired whenever the
+    host pushes new config. Mirrors the reference SDK's module-level proxy to
+    ``Runtime.on_config_changed`` / the TS ``ctx.configuration.onChange``.
+    """
+    _CONFIG_LISTENERS.append(fn)
+    return fn
+
+
 def _install_cognia_shim():
     shim = types.ModuleType("cognia")
     shim.tool = _tool
     shim.hook = _hook
     shim.progress = _progress
     shim.get_config = _get_config
+    shim.log = _log
+    shim.on_config_changed = _on_config_changed
     sys.modules["cognia"] = shim
 
 
@@ -293,6 +318,13 @@ def _handle_push_config(params):
     updated = _lifecycle_fn("on_config_updated")
     if updated is not None:
         updated(_CONFIG)
+    # Notify cognia.on_config_changed subscribers. A listener that raises must
+    # not stop the others or the host push.
+    for listener in list(_CONFIG_LISTENERS):
+        try:
+            listener(_CONFIG)
+        except Exception:
+            pass
     return None
 
 

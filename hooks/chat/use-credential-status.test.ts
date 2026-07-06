@@ -30,6 +30,23 @@ jest.mock("@/lib/logging", () => ({
   loggers: { chat: { warn: jest.fn(), error: jest.fn() } },
 }))
 
+// Standalone (BYOK) branch — controllable from each test.
+const mockStandalone = { value: false }
+const mockResolution = { value: { kind: "unresolved" } as { kind: string } }
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: () => mockStandalone.value,
+}))
+jest.mock("@/lib/ai/chat/resolve-standalone-provider", () => ({
+  resolveStandaloneProvider: () => mockResolution.value,
+}))
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: Object.assign(
+    (selector: (s: { settings?: { updatedAt?: number } }) => unknown) =>
+      selector({ settings: { updatedAt: 1 } }),
+    { getState: () => ({ settings: { updatedAt: 1 } }) }
+  ),
+}))
+
 import { renderHook, waitFor, act } from "@testing-library/react"
 
 import { useCredentialStatus } from "./use-credential-status"
@@ -49,6 +66,8 @@ const mIsTauri = isTauri as jest.Mock
 
 beforeEach(() => {
   unlockedAccountId = "local_acct_a"
+  mockStandalone.value = false
+  mockResolution.value = { kind: "unresolved" }
   mIsTauri.mockReturnValue(true)
   mHasApiKey.mockResolvedValue(false)
   mHasOauthBearer.mockResolvedValue(false)
@@ -167,6 +186,24 @@ describe("useCredentialStatus", () => {
     mGetActive.mockRejectedValue("vault locked")
     const { result } = renderHook(() => useCredentialStatus())
     await waitFor(() => expect(result.current.keyOk).toBe(true))
+    expect(result.current.plan).toBeNull()
+  })
+
+  it("resolves keyOk from local settings in standalone (BYOK) mode without the keyring", async () => {
+    mockStandalone.value = true
+    mockResolution.value = { kind: "resolved" }
+    const { result } = renderHook(() => useCredentialStatus())
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    expect(result.current.plan).toBeNull()
+    expect(mHasApiKey).not.toHaveBeenCalled()
+    expect(mHasOauthBearer).not.toHaveBeenCalled()
+  })
+
+  it("reports keyOk=false in standalone mode when no provider key is configured", async () => {
+    mockStandalone.value = true
+    mockResolution.value = { kind: "unresolved" }
+    const { result } = renderHook(() => useCredentialStatus())
+    await waitFor(() => expect(result.current.keyOk).toBe(false))
     expect(result.current.plan).toBeNull()
   })
 

@@ -41,6 +41,15 @@ export interface PluginSubagentDef {
   disallowedTools?: string[]
   /** Model alias (`opus` / `sonnet` / `haiku`) or full id; defaults to the parent's model. */
   model?: string
+  /**
+   * Provider id (`anthropic` / `openai` / `deepseek` / …) this subagent runs on.
+   * When set AND configured, the subagent runs on this provider with its own
+   * credentials — so a subagent can use a DIFFERENT provider than the parent
+   * session (e.g. a DeepSeek chat delegating to a Claude reviewer). Pairs with
+   * `model`; omit to inherit the parent's provider. An unconfigured provider
+   * falls back to the parent's (so a stale id never breaks dispatch).
+   */
+  provider?: string
   /** Max round-trips before the SDK stops looping the subagent. */
   maxTurns?: number
   /** Reasoning effort dial. */

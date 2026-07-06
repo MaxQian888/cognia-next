@@ -62,6 +62,7 @@ import {
   toggleStatusBarAction,
   type MenuActionId,
 } from "@/lib/desktop/menu-actions"
+import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -332,15 +333,10 @@ export function TitleBar() {
   const handleOpenWorkspace = async () => {
     log.info("title-bar menu open-workspace")
     try {
-      const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
-      const picked = await openDialog({
-        directory: true,
-        multiple: false,
-        title: "Select workspace",
-      })
-      if (typeof picked === "string") {
-        await useSettingsStore.getState().save({ defaultWorkingDir: picked })
-      }
+      // Unified flow: pick a folder and create/activate a real workspace Project
+      // (mirrors the File menu / Cmd+O / switcher). The old `defaultWorkingDir`
+      // write was shadowed by the active workspace root.
+      await openFolderAsWorkspace()
     } catch (err) {
       log.warn("title-bar open-workspace failed", {
         error: err instanceof Error ? err.message : String(err),

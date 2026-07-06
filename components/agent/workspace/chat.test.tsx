@@ -410,6 +410,19 @@ describe("AgentTeamChat", () => {
     expect(screen.getByTestId("mock-markdown")).toBeInTheDocument()
   })
 
+  it("hides <info_for_agent> blocks from the rendered message", () => {
+    const msg = makeMessage("agent2", {
+      senderId: "agent-1",
+      content: "Visible result.\n<info_for_agent>\nsecret coordination\n</info_for_agent>",
+      metadata: {},
+    })
+    render(<AgentTeamChat teamId="t1" messages={[msg]} />)
+    const rendered = screen.getByTestId("mock-markdown")
+    expect(rendered).toHaveTextContent("Visible result.")
+    expect(rendered).not.toHaveTextContent("secret coordination")
+    expect(rendered).not.toHaveTextContent("info_for_agent")
+  })
+
   // ── chip pick wires into the composer ref ─────────────────────────────────
 
   it("calls insertMention via localComposerRef when a mention chip is picked", () => {

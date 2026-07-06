@@ -10,6 +10,9 @@ export interface ShellResult {
   stdout: string
   stderr: string
   code: number
+  /** True when the run was terminated via the abort signal (Ctrl+C), not by the
+   * process exiting on its own. Omitted (falsy) on a normal exit. */
+  aborted?: boolean
 }
 
 /** Minimal spawned-process surface the runner consumes. */
@@ -18,15 +21,75 @@ export interface ShellChild {
   stderr: { on(event: "data", cb: (chunk: unknown) => void): void } | null
   on(event: "close", cb: (code: number | null) => void): void
   on(event: "error", cb: (err: Error) => void): void
+  /** Terminate the process (and, for the real spawn, its whole tree). Optional so
+   * the injected test child can omit it. */
+  kill?(signal?: NodeJS.Signals | number): void
 }
 
 export type ShellSpawn = (command: string, opts: { cwd?: string }) => ShellChild
 
-const realSpawn: ShellSpawn = (command, opts) =>
-  nodeSpawn(command, {
+const isWindows = process.platform === "win32"
+
+/**
+ * Kill a spawned shell command and everything it started. A leading `!` command
+ * is run through a shell (`shell: true`), so the direct child is the shell and
+ * the real workload (a dev server, a watcher) is a grandchild — `child.kill()`
+ * alone leaves it orphaned and still holding the port. We kill the whole tree:
+ * `taskkill /T` on Windows, the negative-pid process group on POSIX (the child
+ * is spawned `detached`, so it leads its own group).
+ */
+function killTree(
+  child: { pid?: number; kill(signal?: NodeJS.Signals | number): boolean },
+  signal: NodeJS.Signals
+): void {
+  const pid = child.pid
+  if (pid == null) {
+    try {
+      child.kill(signal)
+    } catch {
+      // already gone
+    }
+    return
+  }
+  if (isWindows) {
+    try {
+      nodeSpawn("taskkill", ["/pid", String(pid), "/T", "/F"])
+      return
+    } catch {
+      // fall through to the direct kill
+    }
+  } else {
+    try {
+      process.kill(-pid, signal)
+      return
+    } catch {
+      // process group already gone — fall through
+    }
+  }
+  try {
+    child.kill(signal)
+  } catch {
+    // already gone
+  }
+}
+
+const realSpawn: ShellSpawn = (command, opts) => {
+  const child = nodeSpawn(command, {
     shell: true,
     cwd: opts.cwd,
-  }) as unknown as ShellChild
+    // POSIX: lead a new process group so `killTree` can signal the whole group.
+    detached: !isWindows,
+  })
+  return {
+    stdout: child.stdout,
+    stderr: child.stderr,
+    on: (event: "close" | "error", cb: never) => child.on(event, cb),
+    kill: (signal) => killTree(child, (signal as NodeJS.Signals) ?? "SIGTERM"),
+  } as ShellChild
+}
+
+/** Grace period before escalating an abort from SIGTERM to SIGKILL. */
+const ABORT_KILL_GRACE_MS = 2000
 
 export interface RunShellOpts {
   cwd?: string
@@ -35,6 +98,9 @@ export interface RunShellOpts {
    * live instead of waiting for the process to exit. The resolved
    * {@link ShellResult} still carries the full accumulated text. */
   onChunk?: (text: string, stream: "stdout" | "stderr") => void
+  /** Abort kills the running process tree (Ctrl+C on a blocking command). The
+   * resolved {@link ShellResult} carries `aborted: true`. */
+  signal?: AbortSignal
 }
 
 /** Coerce a `data` event payload to a Buffer (real child) or keep a string (the
@@ -101,13 +167,45 @@ export function runShell(command: string, opts: RunShellOpts = {}): Promise<Shel
       resolve({ stdout: "", stderr: e instanceof Error ? e.message : String(e), code: 1 })
       return
     }
+    let aborted = false
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      aborted = true
+      // SIGTERM first so the process can clean up, then SIGKILL if it ignores it.
+      child.kill?.("SIGTERM")
+      killTimer = setTimeout(() => child.kill?.("SIGKILL"), ABORT_KILL_GRACE_MS)
+      // Don't keep the event loop alive just to escalate a kill.
+      ;(killTimer as { unref?: () => void }).unref?.()
+    }
+    const cleanup = () => {
+      if (killTimer) clearTimeout(killTimer)
+      opts.signal?.removeEventListener("abort", onAbort)
+    }
+    if (opts.signal) {
+      if (opts.signal.aborted) onAbort()
+      else opts.signal.addEventListener("abort", onAbort, { once: true })
+    }
     child.stdout?.on("data", (c) => out.feed(c))
     child.stderr?.on("data", (c) => err.feed(c))
     child.on("error", (e) => {
-      resolve({ stdout: out.final(), stderr: err.final() + (e.message ?? ""), code: 1 })
+      cleanup()
+      resolve({
+        stdout: out.final(),
+        stderr: err.final() + (e.message ?? ""),
+        code: 1,
+        ...(aborted ? { aborted: true } : {}),
+      })
     })
     child.on("close", (code) => {
-      resolve({ stdout: out.final(), stderr: err.final(), code: code ?? 0 })
+      cleanup()
+      // A killed process reports a null/signal code; surface the conventional
+      // 130 (128 + SIGINT) so the cell shows a non-zero exit.
+      resolve({
+        stdout: out.final(),
+        stderr: err.final(),
+        code: code ?? (aborted ? 130 : 0),
+        ...(aborted ? { aborted: true } : {}),
+      })
     })
   })
 }

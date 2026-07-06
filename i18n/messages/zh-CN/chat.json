@@ -108,8 +108,11 @@
   "compactBoundary": {
     "auto": "自动",
     "detail": "{from} → {to} tokens",
+    "effectiveness": "已回收 {pct}%",
     "label": "上下文已压缩",
-    "manual": "手动"
+    "manual": "手动",
+    "phase": "已在第 {turn} 轮重置上下文",
+    "viewFrames": "查看图像帧"
   },
   "compaction": {
     "notification": "上下文已压缩",
@@ -117,6 +120,21 @@
     "undo": "撤销压缩",
     "undoFailed": "无法恢复对话",
     "undoSuccess": "对话已恢复"
+  },
+  "opticalArchive": {
+    "coverage": "字符覆盖率",
+    "description": "较早的轮次被渲染为 {count} 张图像帧，由视觉模型回读。",
+    "estimate": "图像 / 文本 token",
+    "frameAlt": "光学帧 {n}",
+    "hideText": "隐藏原文",
+    "noText": "未捕获原文（此边界未开启撤销）。",
+    "notFound": "该归档已不可用。",
+    "readability": "可读性",
+    "revealText": "显示原文",
+    "saved": "已节省 {pct}%",
+    "shape": "形状",
+    "title": "光学归档",
+    "tokens": "Token"
   },
   "composer": {
     "ariaAttachImage": "添加图片",
@@ -139,6 +157,13 @@
       "removeAria": "移除 {filename}",
       "removeFallback": "移除附件",
       "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。"
+    },
+    "camera": {
+      "captureAria": "拍照或添加照片",
+      "captureFailed": "添加照片失败，请重试。",
+      "captureTooltip": "拍照或添加照片",
+      "permissionDenied": "需要相机或照片访问权限才能添加照片。",
+      "unsupported": "此设备不支持拍照。"
     },
     "commands": {
       "failed": "命令执行失败",
@@ -204,7 +229,9 @@
       "dismiss": "关闭建议",
       "label": "追问建议"
     },
+    "ghostAccept": "接受",
     "ghostAcceptHint": "Tab",
+    "ghostDismiss": "忽略建议",
     "helperHints": {
       "dropImages": "拖拽 / 粘贴图片",
       "send": "⏎ 发送 · ⇧⏎ 换行",
@@ -221,6 +248,10 @@
       "userLabel": "用户 memory"
     },
     "modelPicker": {
+      "autoBadge": "自动",
+      "autoBadgeHint": "已开启自动路由——每条提示按难度选择模型档位。",
+      "autoToggle": "自动路由",
+      "autoToggleHint": "按难度为每条提示选择模型档位",
       "capReasoning": "推理",
       "capTools": "工具调用",
       "capVision": "视觉",
@@ -253,6 +284,7 @@
         "goal": "目标",
         "help": "帮助",
         "other": "其他",
+        "plugins": "插件",
         "system": "系统",
         "template": "提示词"
       },
@@ -263,18 +295,40 @@
       "noCommandMatches": "没有匹配「/{query}」的命令。",
       "noCommands": "暂无可用命令。",
       "noFiles": "没有匹配「{query}」的文件。",
+      "noPresetMatches": "没有匹配「{query}」的预设。",
+      "noPresets": "暂无可用预设。",
+      "noSkillMatches": "没有匹配「{query}」的技能。",
+      "noSkills": "暂无可用技能。",
+      "noWorkflowEdgeMatches": "没有匹配“{query}”的连线。",
+      "noWorkflowEdges": "此工作流暂无连线。",
+      "noWorkflowNodeMatches": "没有匹配“{query}”的节点。",
+      "noWorkflowNodes": "此工作流暂无节点。",
       "pinAction": "置顶 /{name}",
       "pinnedSection": "置顶",
+      "presetTitle": "套用提示词预设",
       "recentSection": "最近使用",
       "searching": "搜索中…",
       "searchingShort": "搜索中…",
+      "skillTitle": "启用技能",
       "slashTitle": "斜杠命令",
       "unpinAction": "取消置顶 /{name}",
+      "wfEdgeTitle": "引用一条连线",
+      "wfNodeTitle": "引用一个节点",
       "workspaceEmpty": "工作区为空。",
       "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
     },
+    "presets": {
+      "applied": "已套用预设「{name}」。",
+      "needsSession": "请先开始一个对话再套用预设。"
+    },
+    "skills": {
+      "enabled": "已启用技能「{name}」。"
+    },
     "references": {
       "removeAria": "移除引用 {path}"
+    },
+    "workflowRefs": {
+      "removeAria": "移除对 {label} 的引用"
     },
     "sandboxShield": {
       "label": {
@@ -302,12 +356,19 @@
     "stopTooltip": "停止",
     "toolbar": {
       "breakdownAgents": "子智能体",
+      "breakdownClaudeMd": "CLAUDE.md / 系统提示词",
       "breakdownCommands": "斜杠命令",
       "breakdownMcp": "MCP 工具",
       "breakdownMemory": "记忆文件",
+      "breakdownMentionedFiles": "引用的文件",
+      "breakdownSourceTitle": "按来源划分的上下文",
       "breakdownSystemPrompt": "系统提示词",
+      "breakdownTaskCoordination": "任务协调",
+      "breakdownThinking": "思考",
       "breakdownTitle": "上下文构成",
+      "breakdownToolOutputs": "工具输出",
       "breakdownTools": "内置工具",
+      "breakdownUserMessages": "用户消息",
       "compactNow": "立即压缩",
       "compactThreshold": "{pct} 时自动压缩",
       "contextUsageAria": "上下文窗口已用 {pct}",
@@ -324,6 +385,10 @@
         "explainAria": "解释所选节点",
         "explainNoSelection": "请先在画布上选中一个或多个节点",
         "explainTooltip": "让代理解释当前选中的 {count} 个节点",
+        "reference": "引用",
+        "referenceAria": "在对话中引用选中的节点",
+        "referenceNoSelection": "请先在画布上选择节点或连线",
+        "referenceTooltip": "将选中的 {count} 个元素附加到下一条消息",
         "suggest": "下一个",
         "suggestAria": "建议下一个节点",
         "suggestTooltip": "让 workflow-designer 子代理推荐下一个要添加的节点",
@@ -343,6 +408,10 @@
     "pastedChip": "已粘贴 {count} 行",
     "removePastedChip": "移除粘贴的文本",
     "pasteReminder": "草稿未保存大段粘贴内容——发送前请重新粘贴（{count}）。"
+  },
+  "planMode": {
+    "banner": "计划模式——只读调研；智能体将在修改前先提出计划。",
+    "hint": "Shift+Tab"
   },
   "concurrent": {
     "awaitingApproval": "等待审批",
@@ -409,6 +478,7 @@
     "cwdReset": "重置",
     "debugMode": "调试模式",
     "description": "为本会话覆盖默认值，留空则继承全局设置。",
+    "insights": "会话洞察",
     "flowDisplay": {
       "aria": "Agent 流程展示模式",
       "detailed": "详细",
@@ -490,21 +560,6 @@
     "retry": "重试"
   },
   "hookNotice": {
-    "event": {
-      "Notification": "通知",
-      "PermissionDenied": "权限被拒绝",
-      "PermissionRequest": "权限请求",
-      "PostCompact": "压缩后",
-      "PostToolUse": "工具调用后",
-      "PostToolUseFailure": "工具失败后",
-      "PreToolUse": "工具调用前",
-      "SessionEnd": "会话结束",
-      "SessionStart": "会话开始",
-      "Stop": "停止",
-      "StopFailure": "停止（失败）",
-      "SubagentStop": "子代理停止",
-      "UserPromptSubmit": "提交提示词"
-    },
     "outcome": {
       "blocked": "已拦截",
       "context": "已注入上下文",
@@ -575,8 +630,29 @@
       "truncated": "预览已截断 — 完整内容已写入磁盘。"
     }
   },
+  "filePreview": {
+    "loading": "正在加载 {name}…",
+    "pdfFallback": "无法预览此 PDF。"
+  },
+  "mcpContent": {
+    "embeddedResource": "嵌入资源：{uri}"
+  },
+  "ocrResult": {
+    "title": "已识别文本",
+    "provider": "识别引擎：{id}",
+    "languages": "语言：{langs}",
+    "confidence": "置信度：{pct}%",
+    "cached": "缓存命中",
+    "duration": "{ms} 毫秒",
+    "copy": "复制文本",
+    "copied": "已复制",
+    "askAbout": "追问此内容",
+    "noText": "未识别到文本。",
+    "thumbnailAlt": "源图像"
+  },
   "message": {
     "attachmentAlt": "附件",
+    "unknownPart": "未知内容（{type}）",
     "bookmarkLabel": "切换收藏",
     "bookmarkRemoveTooltip": "取消收藏",
     "bookmarkTooltip": "收藏",
@@ -664,6 +740,10 @@
       "tooltip": "自动批准文件编辑；其它工具仍会弹窗征求。"
     },
     "aria": "权限模式：{label}。点击切换。",
+    "auto": {
+      "label": "自动",
+      "tooltip": "多数操作在后台安全检查下运行，尽量减少弹窗征求。"
+    },
     "bypass": {
       "label": "全部放行",
       "tooltip": "所有工具自动批准。请谨慎 — Claude 可能执行任意命令。"
@@ -671,6 +751,10 @@
     "default": {
       "label": "默认",
       "tooltip": "工具按常规弹窗征求权限。"
+    },
+    "dontAsk": {
+      "label": "不询问",
+      "tooltip": "仅运行预先批准和只读的工具；其它一律拒绝。"
     },
     "plan": {
       "label": "计划模式",
@@ -857,6 +941,7 @@
     "ranSlashCommand": "执行了斜杠命令"
   },
   "sourcesPart": {
+    "citationsLabel": "{count, plural, other {# 个网页来源}}",
     "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
     "originLabel": {
       "anthropic": "网络",
@@ -872,19 +957,24 @@
     "viewSource": "查看原文"
   },
   "subagentPart": {
+    "abort": "停止子代理",
     "backgroundRunning": "后台运行中…",
     "depthBadge": "深度 {n}",
     "durationMs": "{ms}ms",
+    "logsTailNote": "仅显示最近 {n} 条日志",
     "noLogsYet": "暂无日志 — 子代理正在初始化。",
     "openInWorkspace": "在工作区打开",
     "rejected": {
       "cycle": "派发被拒 — 会形成循环。",
       "maxDepth": "派发被拒 — 已达最大嵌套深度。"
     },
+    "resultHeading": "结果",
     "rowAria": "{name} 子代理 — {status}",
     "title": "子代理",
     "tokens": "{n} tokens",
-    "toolsRunCount": "{n} 次工具调用"
+    "tokensBreakdown": "{prompt} 输入 · {completion} 输出 · 共 {total} tokens",
+    "toolsRunCount": "{n} 次工具调用",
+    "toolsTailNote": "仅显示最近 {n} 次工具调用"
   },
   "terminalTool": {
     "bashLabel": "Bash",

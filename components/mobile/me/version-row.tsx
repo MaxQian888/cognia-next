@@ -39,7 +39,7 @@ export interface VersionRowProps {
 }
 
 export function VersionRow({ loader }: VersionRowProps = {}) {
-  const t = useTranslations("mobile.me.about")
+  const t = useTranslations("mobile.me")
   const [nativeBuild, setNativeBuild] = useState<string | null>(null)
 
   useEffect(() => {

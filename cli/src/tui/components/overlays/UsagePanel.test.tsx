@@ -43,6 +43,60 @@ describe("UsagePanel", () => {
     expect(text).toContain("▰")
   })
 
+  it("renders the per-model breakdown once two+ models have run", () => {
+    const { container } = render(
+      <UsagePanel
+        usage={{ inputTokens: 1000, outputTokens: 500 }}
+        model="claude-opus-4-8"
+        modelTotals={{
+          "claude-opus-4-8": {
+            costUsd: 51.18,
+            inputTokens: 95_200,
+            outputTokens: 271_300,
+            cacheReadTokens: 64_800_000,
+            cacheCreationTokens: 1_200_000,
+            durationMs: 0,
+          },
+          "claude-haiku-4-5": {
+            costUsd: 0.55,
+            inputTokens: 2100,
+            outputTokens: 16_400,
+            cacheReadTokens: 2_900_000,
+            cacheCreationTokens: 141_400,
+            durationMs: 0,
+          },
+        }}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Usage by model")
+    expect(text).toContain("claude-opus-4-8")
+    expect(text).toContain("claude-haiku-4-5")
+    expect(text).toContain("64.8M cache r")
+    expect(text).toContain("$51.18")
+  })
+
+  it("hides the per-model breakdown when only one model has run", () => {
+    const { container } = render(
+      <UsagePanel
+        model="claude-opus-4-8"
+        modelTotals={{
+          "claude-opus-4-8": {
+            costUsd: 1,
+            inputTokens: 1000,
+            outputTokens: 500,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            durationMs: 0,
+          },
+        }}
+        onClose={() => {}}
+      />
+    )
+    expect(container.textContent).not.toContain("Usage by model")
+  })
+
   it("renders the cost trend when priced turns are present", () => {
     const { container } = render(
       <UsagePanel

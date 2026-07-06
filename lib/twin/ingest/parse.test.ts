@@ -75,6 +75,32 @@ Second body.
     expect(parsed.originalText).toContain("First message")
     expect(parsed.originalText).toContain("Second message")
     expect(parsed.originalText).toContain("---")
+    // Fan-out speakers are unioned onto the parsed baseMetadata so the
+    // redaction pass can seed nameHints on the paste-mode importer path.
+    expect(parsed.baseMetadata.speakers).toEqual(
+      expect.arrayContaining(["alice@example", "bob@example", "charlie@example"])
+    )
+  })
+
+  it("unions parse-time speakers with speakers the raw source already carried", async () => {
+    const eml = `Subject: Union check
+From: dave@example
+To: erin@example
+
+Body.
+`
+    const raw: RawSource = {
+      id: "src_eml_union",
+      filename: "x.eml",
+      format: "eml",
+      text: eml,
+      baseMetadata: { speakers: ["Preexisting Person", "dave@example"] },
+    }
+    const parsed = await parseSource(raw)
+    const speakers = parsed.baseMetadata.speakers ?? []
+    expect(speakers).toEqual(expect.arrayContaining(["Preexisting Person", "dave@example"]))
+    // De-duped: dave@example appears once despite coming from both feeds.
+    expect(speakers.filter((s) => s === "dave@example")).toHaveLength(1)
   })
 
   it("routes eml through the importer", async () => {

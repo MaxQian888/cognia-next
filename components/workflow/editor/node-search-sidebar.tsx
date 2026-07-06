@@ -28,6 +28,7 @@ import {
   type NodeCatalogEntry,
 } from "@/lib/workflow/nodes/catalog"
 import { tNodeField } from "@/lib/workflow/i18n/node-translate"
+import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
 import { usePalettePreferencesStore } from "@/stores/workflow"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
@@ -232,7 +233,10 @@ function NodeCategoryGroup({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <p className="px-6 pb-1 text-[11px] text-muted-foreground/70">{hint}</p>
-        <div className="px-2 pb-1 space-y-1">
+        {/* content-visibility skips layout/paint for groups scrolled out of
+            view — the palette renders the full catalog unvirtualized, so this
+            is the cheap 80% of a virtual list for plugin-heavy catalogs. */}
+        <div className="px-2 pb-1 space-y-1 [content-visibility:auto] [contain-intrinsic-size:auto_300px]">
           {entries.map((entry) => (
             <NodeChip key={entry.kind} entry={entry} onAddNodeAtCenter={onAddNodeAtCenter} />
           ))}
@@ -289,7 +293,10 @@ function PinnedNodeGroup({
   )
 }
 
-function NodeChip({
+// Memoized: catalog entries are stable references, so a favorite toggle (or
+// any parent re-render from search/preference churn) only re-renders the
+// chips whose own subscribed slice actually changed.
+const NodeChip = memo(function NodeChip({
   entry,
   onAddNodeAtCenter,
 }: {
@@ -312,6 +319,7 @@ function NodeChip({
   })
   const Icon =
     (LucideIcons as unknown as Record<string, LucideIcon>)[entry.iconName] ?? LucideIcons.Box
+  const capabilityInfo = useMissingNodeCapabilities(entry)
   const isFavorite = usePalettePreferencesStore((s) => s.favoriteNodeKinds.includes(entry.kind))
   const toggleFavorite = usePalettePreferencesStore((s) => s.toggleFavorite)
   const handleDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
@@ -338,12 +346,17 @@ function NodeChip({
               <span className="text-[9px] uppercase tracking-wide text-wf-status-running">
                 {t("desktopOnly")}
               </span>
+            ) : capabilityInfo ? (
+              <CapabilityBadge info={capabilityInfo} />
             ) : null}
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-xs">
           <p className="font-medium">{label}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+          {capabilityInfo ? (
+            <p className="text-xs text-wf-status-running mt-0.5">{capabilityInfo.tooltip}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
       <button
@@ -364,4 +377,4 @@ function NodeChip({
       </button>
     </div>
   )
-}
+})

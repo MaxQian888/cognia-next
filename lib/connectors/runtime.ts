@@ -10,7 +10,9 @@
  *                          gate → runAndCapture(...) → enqueueOutbound with
  *                          the captured assistant text.
  *      - "manual-store"  → nothing further (session + message already written).
- *      - "draft-prepare" → create a ConnectorDraft with placeholder segments.
+ *      - "draft-prepare" → resolveSendOptions(inbox context) → runAndCapture
+ *                          (PII-gated, tool perms denied) → create a
+ *                          ConnectorDraft with the generated reply segments.
  *      - "store-only"    → nothing further.
  *      - "drop"          → skip StoredMessage insert; audit policy_blocked.
  *
@@ -25,19 +27,21 @@ import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segm
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
-import type { SendContent, StoredMessage, AppSettings } from "@/lib/claude/types"
+import type { SendContent, StoredMessage, AppSettings, ChatSession } from "@/lib/claude/types"
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { createDraft } from "@/lib/db/connector-drafts"
-import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { readForResolution } from "@/lib/db/conversation-overrides"
+import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { endSpan } from "@cognia/agent-trace/emitter"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
@@ -77,8 +81,16 @@ export type RunAndCaptureFn = (
    * while the authoritative final message still flows through the durable
    * outbound queue. Production wires this to `runAndCaptureAssistantReply`,
    * whose 4th `RunAndCaptureOptions` arg is a structural superset.
+   *
+   * `adapterId` / `conversationKey` are optional connector-context passthrough
+   * so a wrapping injection (production routes this through `safeSendPrompt`)
+   * can attribute the PII gate + usage telemetry to the right conversation.
+   * They are ignored by the raw capture wrapper.
    */
-  cap?: import("@/lib/claude/run-and-capture").RunAndCaptureOptions
+  cap?: import("@/lib/claude/run-and-capture").RunAndCaptureOptions & {
+    adapterId?: string
+    conversationKey?: string
+  }
 ) => Promise<{
   text: string
   messageId: string
@@ -231,7 +243,7 @@ export async function insertInboundMessage(
   // into an InboundA2UIBlock so the Inbox renderer can show native UI
   // structure rather than the plaintext fallback. Best-effort — the
   // mapper returns null when the payload has nothing structured.
-  const inboundA2UI = projectInboundToA2UI(event.platform, event.raw)
+  const inboundA2UI = projectInboundToA2UI(event.platform, event.raw, event.segments)
 
   const row: StoredMessage = {
     id: crypto.randomUUID(),
@@ -275,6 +287,108 @@ function suppressedReasonToAuditKind(
 }
 
 /**
+ * Resolve the `SendOptions` for an inbound turn — shared by the `ai-run` and
+ * `draft-prepare` branches so a draft is grounded in the exact same character,
+ * twin, and long-term-memory context a live reply would use. Pure context
+ * resolution: it wires no send-side hooks, applies no suppression handling, and
+ * owns no span accounting — the caller does. Every lookup is best-effort; a
+ * missing AppSettings / character degrades to an ungrounded reply rather than
+ * crashing the pipeline.
+ */
+async function resolveInboundSendOptions(params: {
+  event: NormalizedInboundEvent
+  session: ChatSession
+  resolved: ResolvedBinding
+  override: ConversationOverrideRow | null
+  adapterRow: AdapterInstanceRow
+  emitTrace: boolean
+}): Promise<{
+  sendOptions: Awaited<ReturnType<typeof resolveSendOptions>>
+  appSettings: AppSettings | undefined
+}> {
+  const { event, session, resolved, override, adapterRow, emitTrace } = params
+
+  let appSettings: AppSettings | undefined
+  try {
+    appSettings = await getSettings()
+  } catch {
+    appSettings = undefined
+  }
+  let character
+  if (resolved.characterId) {
+    try {
+      character = await getCharacter(resolved.characterId)
+    } catch {
+      character = undefined
+    }
+  }
+
+  const inboxPolicy: InboxSendPolicy = {
+    quietHours: adapterRow.quietHours,
+    muted: adapterRow.muted,
+    forcedMode: override?.mode,
+  }
+
+  // Twin runtime injection (parity with the in-app chat path in
+  // use-claude-chat): when the conversation's character is twin-bound, hand
+  // resolveSendOptions the RAG deps so the inbound message is grounded in the
+  // twin's knowledge. Best-effort — tryBuildTwinDeps returns undefined when the
+  // twin runtime is disabled/unconfigured, and a twinId-less character skips the
+  // lookup entirely.
+  const twinHandshake =
+    character?.twinId && event.plainText.trim() ? await tryBuildTwinDeps() : undefined
+
+  // Long-term memory recall (parity with use-claude-chat): ground the inbound
+  // reply in the operator's memory store. `tryBuildMemoryDeps` no-ops when
+  // memory is disabled, and memories are PII-filtered at write time. Inbound
+  // content is never *written* back (provenance gate in run-memory-extraction),
+  // but recall keeps connector replies consistent with direct chat instead of
+  // being blind to the user's known facts.
+  const memoryHandshake = event.plainText.trim()
+    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory), twinHandshake)
+    : undefined
+
+  // Embed the inbound message ONCE (when twin deps exist) so the twin RAG and
+  // memory recall legs share one query vector instead of embedding twice. Memory
+  // reuses the twin embedding model, so the vector is valid for both. Best-effort.
+  let turnEmbedding: number[] | undefined
+  if (twinHandshake && event.plainText.trim()) {
+    try {
+      turnEmbedding = (await generateEmbedding(event.plainText, twinHandshake.embedding)).embedding
+    } catch {
+      turnEmbedding = undefined
+    }
+  }
+
+  const sendOptions = await resolveSendOptions({
+    session,
+    character,
+    appSettings,
+    conversationKey: event.conversationKey,
+    platformBinding: session.platformBinding,
+    inboxPolicy,
+    // Reuse the rows the bus already fetched — skips two Dexie re-reads inside
+    // resolveSendOptions (provider/model override + capability matrix).
+    imOverrideRow: override,
+    imAdapterRow: adapterRow,
+    twinDeps: twinHandshake,
+    twinUserMessage: twinHandshake ? event.plainText : undefined,
+    memoryDeps: memoryHandshake,
+    memoryUserMessage: memoryHandshake ? event.plainText : undefined,
+    precomputedQueryEmbedding: turnEmbedding,
+    // Open the connector turn's agent-trace ROOT span (ai-run) so the whole
+    // turn appears in the waterfall under surface "connector". Draft prepares
+    // pass `emitTrace: false` — a draft is not a live turn, so it mints no span
+    // and the caller runs no endSpan dance. Suppressed turns mint nothing too
+    // (guarded in the resolver).
+    emitTrace,
+    traceSurface: "connector",
+  })
+
+  return { sendOptions, appSettings }
+}
+
+/**
  * Install the route handler on the bus singleton.
  *
  * Call this once at app startup (e.g. from ConnectorBusProvider).
@@ -283,7 +397,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
   bus.routeHandler = async (
     event: NormalizedInboundEvent,
     decision: RouteDecision,
-    resolved: ResolvedBinding
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
   ): Promise<void> => {
     const now = Date.now()
 
@@ -309,8 +425,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
     // session the user switched to; fall back to the most-recently-updated
     // bound session, then create one. The override read is best-effort — a
     // failure degrades to "most-recent / create", today's behaviour.
-    const step1Override = await readForResolution(event.conversationKey).catch(() => undefined)
-    let session = await findActiveSessionForConversation(event.conversationKey, step1Override)
+    // Reuse the override row the bus already fetched (Step 3) — it is
+    // immutable for this inbound event, so a second Dexie read here would be
+    // pure waste. Null when the conversation has no override.
+    let session = await findActiveSessionForConversation(
+      event.conversationKey,
+      override ?? undefined
+    )
     if (!session) {
       session = await createPlatformSession(event, resolved.characterId)
     }
@@ -331,29 +452,17 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // still produces SOMETHING for the user. The capture wrapper itself
         // is wrapped in try/catch so a sidecar failure becomes an
         // "adapter.error" audit row, not an unhandled rejection.
-        let adapterRow
-        let overrideRow
-        let appSettings: AppSettings | undefined
-        let character
-        try {
-          adapterRow = await getAdapterInstance(event.adapterId)
-        } catch {
-          adapterRow = undefined
-        }
-        try {
-          overrideRow = await readForResolution(event.conversationKey)
-        } catch {
-          overrideRow = undefined
-        }
+        // `adapterRow` and `override` were already fetched by the bus and
+        // threaded in — no re-read here.
         // ── Team dispatch (control-plane multi-agent) ──
         // When the conversation is bound to an Agent Team, route the turn to
         // the team runtime instead of the single-character `runAndCapture`
         // path. The team's progress + final result fan back to this
         // conversation via the workflow-progress-runner (triggeredFrom). Skip
         // the rest of the ai-run branch on success.
-        if (overrideRow?.teamId) {
+        if (override?.teamId) {
           const res = await startTeamRunFromIM({
-            teamId: overrideRow.teamId,
+            teamId: override.teamId,
             goal: event.plainText,
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
@@ -365,7 +474,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             at: Date.now(),
             conversationKey: event.conversationKey,
             ...(res.started ? {} : { reason: res.reason ?? "team_dispatch_failed" }),
-            fields: { teamId: overrideRow.teamId, sourceMessageId: storedMsg.id },
+            fields: { teamId: override.teamId, sourceMessageId: storedMsg.id },
           })
           break
         }
@@ -377,9 +486,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // nodes as `$trigger.payload.message`; progress + final fan back through
         // the same `workflow-progress-runner` the team path uses. Skip the rest
         // of the ai-run branch on dispatch.
-        if (overrideRow?.workflowId) {
+        if (override?.workflowId) {
           const res = await startWorkflowFromIM({
-            workflowId: overrideRow.workflowId,
+            workflowId: override.workflowId,
             runParams: { message: event.plainText },
             triggeredFrom: {
               source: "im",
@@ -394,7 +503,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             at: Date.now(),
             conversationKey: event.conversationKey,
             ...(res.ok ? {} : { reason: res.reason ?? "workflow_dispatch_failed" }),
-            fields: { workflowId: overrideRow.workflowId, sourceMessageId: storedMsg.id },
+            fields: { workflowId: override.workflowId, sourceMessageId: storedMsg.id },
           })
           break
         }
@@ -422,50 +531,17 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           break
         }
 
-        try {
-          appSettings = await getSettings()
-        } catch {
-          appSettings = undefined
-        }
-        if (resolved.characterId) {
-          try {
-            character = await getCharacter(resolved.characterId)
-          } catch {
-            character = undefined
-          }
-        }
-
-        const inboxPolicy: InboxSendPolicy = {
-          quietHours: adapterRow?.quietHours,
-          muted: adapterRow?.muted,
-          forcedMode: overrideRow?.mode,
-        }
-
-        // Twin runtime injection (parity with the in-app chat path in
-        // use-claude-chat): when the conversation's character is twin-bound,
-        // hand resolveSendOptions the RAG deps so the inbound message is
-        // grounded in the twin's knowledge. Best-effort — tryBuildTwinDeps
-        // returns undefined when the twin runtime is disabled/unconfigured,
-        // and a twinId-less character skips the lookup entirely.
-        const twinHandshake =
-          character?.twinId && event.plainText.trim() ? await tryBuildTwinDeps() : undefined
-
-        const sendOptions = await resolveSendOptions({
+        // Resolve the send options (character + twin + memory context) through
+        // the shared helper so an ai-run and a draft prepare from identical
+        // grounding. `emitTrace: true` mints the connector root span, ended on
+        // the capture-error / success branches below.
+        const { sendOptions, appSettings } = await resolveInboundSendOptions({
+          event,
           session,
-          character,
-          appSettings,
-          conversationKey: event.conversationKey,
-          platformBinding: session.platformBinding,
-          inboxPolicy,
-          twinDeps: twinHandshake,
-          twinUserMessage: twinHandshake ? event.plainText : undefined,
-          // Open the connector turn's agent-trace ROOT span so the whole ai-run
-          // appears in the waterfall under surface "connector". The span is
-          // ended on the capture-error / success branches below with the
-          // turn's usage. Suppressed turns mint nothing (guarded in the
-          // resolver), so the short-circuit `break` above needs no `endSpan`.
+          resolved,
+          override,
+          adapterRow,
           emitTrace: true,
-          traceSurface: "connector",
         })
 
         // ── Suppression gate: short-circuit before the sidecar call ──
@@ -498,14 +574,14 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const targetAdapter = bus.getAdapter(event.adapterId)
         // Live in-turn activity card (control-plane visibility — the
         // cc-connect-style "the agent is working" live card). Default ON
-        // (`overrideRow?.liveActivity !== false`); operators can suppress it
+        // (`override?.liveActivity !== false`); operators can suppress it
         // for noisy channels. The dispatcher is inert in suppress mode
         // (adapter without `edit()`), so constructing it is cheap. Every card
         // dispatch flows through `enqueueOutbound`, so it inherits the
         // outbound runner's rate-limit / circuit-breaker / quiet-hours /
         // idempotency gates automatically. See
         // `lib/connectors/activity/turn-activity-dispatcher.ts`.
-        const liveActivityEnabled = overrideRow?.liveActivity !== false
+        const liveActivityEnabled = override?.liveActivity !== false
         const activityDispatcher = liveActivityEnabled
           ? new TurnActivityDispatcher({
               adapterId: event.adapterId,
@@ -515,7 +591,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               i18n: resolveActivityI18n(appSettings?.language),
               enqueue: enqueueOutbound,
               supportsEdit: () => typeof targetAdapter?.edit === "function",
-              canAppend: () => overrideRow?.appendActivity !== false,
+              canAppend: () => override?.appendActivity !== false,
               getJob: (id) => getDb().outboundQueue.get(id),
               onAudit: (kind, fields) => {
                 void appendAudit({
@@ -528,14 +604,21 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               },
             })
           : null
-        const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions = {
+        const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions & {
+          adapterId?: string
+          conversationKey?: string
+        } = {
+          // Connector context for the injected PII gate (`safeSendPrompt`) and
+          // its usage telemetry; ignored by the raw capture wrapper.
+          adapterId: event.adapterId,
+          conversationKey: event.conversationKey,
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
           onPermissionRequest: makeImPermissionResponder({
             sessionId: session.id,
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             conversationRef: event.conversationRef,
-            approvalMode: overrideRow?.approvalMode,
+            approvalMode: override?.approvalMode,
           }),
           ...(activityDispatcher
             ? {
@@ -561,15 +644,23 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         try {
           captured = await opts.runAndCapture(session.id, prompt, sendOptions, cap)
         } catch (err) {
-          await appendAudit({
-            adapterId: event.adapterId,
-            kind: "adapter.error",
-            at: Date.now(),
-            conversationKey: event.conversationKey,
-            reason: "ai_run_capture_failed",
-            message: err instanceof Error ? err.message : String(err),
-            fields: { sourceMessageId: storedMsg.id },
-          })
+          // The PII gate (`safeSendPrompt`) throws `PiiGateBlocked` and has
+          // ALREADY written the precise `adapter.error / pii_blocked` audit
+          // row before throwing. Detect it by name (no heavy import) and skip
+          // the generic `ai_run_capture_failed` row so we don't double-audit
+          // or mislabel a deliberate PII block as a sidecar failure.
+          const isPiiBlocked = err instanceof Error && err.name === "PiiGateBlocked"
+          if (!isPiiBlocked) {
+            await appendAudit({
+              adapterId: event.adapterId,
+              kind: "adapter.error",
+              at: Date.now(),
+              conversationKey: event.conversationKey,
+              reason: "ai_run_capture_failed",
+              message: err instanceof Error ? err.message : String(err),
+              fields: { sourceMessageId: storedMsg.id },
+            })
+          }
           // Finalize the live-activity card to its Failed terminal state.
           // Self-contained try/catch so a dispatcher failure (e.g. a Dexie
           // write during the crash) never masks the original error. On a
@@ -600,7 +691,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           // dangle. Idempotent + no-op when minting was skipped (suppressed).
           if (sendOptions.spanId) {
             endSpan(sendOptions.spanId, {
-              errorType: "ai_run_capture_failed",
+              errorType: isPiiBlocked ? "pii_blocked" : "ai_run_capture_failed",
               errorMessage: err instanceof Error ? err.message : String(err),
             })
           }
@@ -661,15 +752,22 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         })
 
         // Close the agent-trace root span with the turn's token usage + cost.
-        // The connector inbound path runs `runAndCaptureAssistantReply`
-        // directly (no `recordProviderOutcome` child span), so the root span
-        // itself carries the LLM accounting. No-op when minting was skipped.
+        // The inbound path routes through `safeSendPrompt`, which — ONLY when a
+        // provider override is configured (`sendOptions.provider`) — records a
+        // `recordProviderOutcome` child span under this same root that already
+        // carries the LLM cost/usage. To avoid double-booking, the root span
+        // owns the accounting only when there is NO provider child span; with a
+        // provider set it closes with metadata alone. No-op when minting was
+        // skipped (suppressed turns).
         if (sendOptions.spanId) {
           const u = captured.usage
+          const ownsAccounting = !sendOptions.provider
           endSpan(sendOptions.spanId, {
             responseModel: sendOptions.model,
-            ...(typeof u?.totalCostUsd === "number" ? { costUsdEstimate: u.totalCostUsd } : {}),
-            ...(u
+            ...(ownsAccounting && typeof u?.totalCostUsd === "number"
+              ? { costUsdEstimate: u.totalCostUsd }
+              : {}),
+            ...(ownsAccounting && u
               ? {
                   usage: {
                     inputTokens: u.inputTokens ?? 0,
@@ -686,12 +784,81 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
       }
 
       case "draft-prepare": {
-        // Create a draft with placeholder segments; real AI invocation is later.
-        await createDraft({
+        // Generate a REAL drafted reply — grounded in the same character / twin
+        // / memory context a live `ai-run` would use — and persist it for human
+        // review (manual connector mode: the operator approves or edits before
+        // it's sent). The turn runs through the same PII gate (`opts.runAndCapture`
+        // → `safeSendPrompt`), so a leak blocks the draft instead of persisting
+        // sensitive text. Unlike `ai-run`, a draft has no live conversation
+        // surface: no live-activity card, no platform streaming, and any
+        // ask-tier tool permission is denied by default — there is no human in
+        // the loop at generation time (the human reviews the finished draft).
+        const { sendOptions } = await resolveInboundSendOptions({
+          event,
+          session,
+          resolved,
+          override,
+          adapterRow,
+          emitTrace: false,
+        })
+        const draftPrompt = inboundEventToSendContent(event)
+        let draftCapture: Awaited<ReturnType<RunAndCaptureFn>>
+        try {
+          draftCapture = await opts.runAndCapture(session.id, draftPrompt, sendOptions, {
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+            timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
+            onPermissionRequest: () => ({ decision: "deny" as const }),
+          })
+        } catch (err) {
+          // The PII gate (`safeSendPrompt`) throws `PiiGateBlocked` after writing
+          // its own `pii_blocked` audit row — don't double-audit, and never
+          // persist a draft that would leak. Mirrors the ai-run capture-error
+          // handling (adapter.error + reason).
+          const isPiiBlocked = err instanceof Error && err.name === "PiiGateBlocked"
+          if (!isPiiBlocked) {
+            await appendAudit({
+              adapterId: event.adapterId,
+              kind: "adapter.error",
+              at: Date.now(),
+              conversationKey: event.conversationKey,
+              reason: "draft_prepare_capture_failed",
+              message: err instanceof Error ? err.message : String(err),
+              fields: { sourceMessageId: storedMsg.id },
+            })
+          }
+          break
+        }
+
+        // Project the captured reply (text + any A2UI surfaces) into segments —
+        // identical to the ai-run outbound projection so an approved draft
+        // renders the same as a live reply. A turn that produced neither text
+        // nor surfaces still stores an explicit text mirror so the draft is not
+        // silently empty.
+        const projected = assistantReplyToSegments({
+          text: draftCapture.text,
+          a2uiSurfaces: draftCapture.a2uiSurfaces,
+          a2uiSurfaceOrder: draftCapture.a2uiSurfaceOrder,
+        })
+        const draftSegments: MessageSegment[] = projected.length
+          ? projected
+          : [{ type: "text", text: draftCapture.text }]
+        const draft = await createDraft({
           conversationKey: event.conversationKey,
           sessionId: session.id,
-          segments: [{ type: "text", text: "[Draft placeholder]" }],
+          segments: draftSegments,
           sourceMessageId: storedMsg.id,
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "draft.prepared",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          fields: {
+            draftId: draft.id,
+            sourceMessageId: storedMsg.id,
+            assistantMessageId: draftCapture.messageId,
+          },
         })
         break
       }

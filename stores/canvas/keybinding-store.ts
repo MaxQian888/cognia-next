@@ -31,7 +31,6 @@ export const DEFAULT_KEYBINDINGS: Record<string, string> = {
   "action.simplify": "Ctrl+Shift+L",
   "action.expand": "Ctrl+Shift+X",
   "action.translate": "Ctrl+Shift+T",
-  "action.run": "Ctrl+Enter",
   "navigation.nextSuggestion": "Alt+]",
   "navigation.prevSuggestion": "Alt+[",
   "navigation.acceptSuggestion": "Tab",
@@ -48,10 +47,13 @@ export const DEFAULT_KEYBINDINGS: Record<string, string> = {
   "edit.paste": "Ctrl+V",
   "edit.duplicate": "Ctrl+D",
   "edit.comment": "Ctrl+/",
-  "fold.foldAll": "Ctrl+K Ctrl+0",
-  "fold.unfoldAll": "Ctrl+K Ctrl+J",
-  "fold.foldLevel1": "Ctrl+K Ctrl+1",
-  "fold.foldLevel2": "Ctrl+K Ctrl+2",
+  // Single-stroke defaults (not Ctrl+K chords): Ctrl+K is claimed by the
+  // command palette (`view.toggleInlineCommand`), whose global handler fires on
+  // the lone Ctrl+K before any chord's second stroke can arrive.
+  "fold.foldAll": "Ctrl+Alt+0",
+  "fold.unfoldAll": "Ctrl+Alt+J",
+  "fold.foldLevel1": "Ctrl+Alt+1",
+  "fold.foldLevel2": "Ctrl+Alt+2",
 }
 
 interface KeybindingState {

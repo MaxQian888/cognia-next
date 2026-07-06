@@ -120,6 +120,11 @@ export interface MemoryConfig {
   decayHalfLifeDays: number
   /** "Incognito": when true, the current context neither reads nor writes memory. */
   temporary: boolean
+  /**
+   * Heuristic synonym expansion of the memory BM25 keyword leg (recall lift for
+   * alternate phrasings). Off by default; the vector leg is unaffected.
+   */
+  enableQueryExpansion?: boolean
 }
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
@@ -134,6 +139,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   maxIdleDays: 0,
   decayHalfLifeDays: 30,
   temporary: false,
+  enableQueryExpansion: false,
 }
 
 /** View mode for the `/memory` management panel. */

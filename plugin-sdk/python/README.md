@@ -14,18 +14,22 @@ module namespace, or from `cognia` for concise plugin authoring.
 
 ## Layout
 
-| Module                                | Surface                                                                                                                                                                                           |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cognia.decorators`                   | `@tool`, `@hook`                                                                                                                                                                                  |
-| `cognia.runtime`                      | `Runtime` (registry + protocol dispatch), `progress`, `get_config`, `log`                                                                                                                         |
-| `cognia.context`                      | `Context` — typed proxy over config / progress / logging                                                                                                                                          |
-| `cognia.plugin`                       | `Plugin` base class for class-style plugins                                                                                                                                                       |
-| `cognia.types`                        | `ToolDefinition`, `ToolParameter`, `PluginHook`, parameter inference, serialization checks, typed manifest entry mirrors (`WorkspaceBackendDef`, `MessageRendererDef`, `ChatMiddlewareDef`, etc.) |
-| `cognia.modes`                        | `Mode`, `define_mode`                                                                                                                                                                             |
-| `cognia.a2ui`                         | `A2UIComponent`, `define_component`, `define_template`                                                                                                                                            |
-| `cognia.capability_contract`          | `CapabilityContract`, `validate_capabilities`                                                                                                                                                     |
-| `cognia_next.external_agent_presets`  | `define_external_agent_preset`, `register_external_agent_preset`                                                                                                                                  |
-| `cognia_next.external_agent_adapters` | `define_external_agent_adapter`, `register_external_agent_adapter`                                                                                                                                |
+| Module                       | Surface                                                                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cognia.decorators`          | `@tool`, `@hook`                                                                                                                                                                                  |
+| `cognia.runtime`             | `Runtime` (registry + protocol dispatch), `progress`, `get_config`, `log`                                                                                                                         |
+| `cognia.context`             | `Context` — typed proxy over config / progress / logging                                                                                                                                          |
+| `cognia.plugin`              | `Plugin` base class for class-style plugins                                                                                                                                                       |
+| `cognia.types`               | `ToolDefinition`, `ToolParameter`, `PluginHook`, parameter inference, serialization checks, typed manifest entry mirrors (`WorkspaceBackendDef`, `MessageRendererDef`, `ChatMiddlewareDef`, etc.) |
+| `cognia.modes`               | `Mode`, `define_mode`                                                                                                                                                                             |
+| `cognia.a2ui`                | `A2UIComponent`, `define_component`, `define_template`                                                                                                                                            |
+| `cognia.capability_contract` | `CapabilityContract`, `validate_capabilities`                                                                                                                                                     |
+| `cognia.external_agent`      | `define_external_agent_preset`, `register_external_agent_preset`, `define_external_agent_adapter`, `register_external_agent_adapter`, `STDIO`, `ACP`                                              |
+| `cognia.agent`               | `define_skill`, `define_subagent`, `define_command`, `define_quick_action`, `define_mcp_server_preset`, `define_native_anthropic_tool`, `define_agent_team_template`, `define_character_pack`     |
+| `cognia.providers`           | `define_ai_provider`, `define_ocr_provider`, `define_lsp_server`, `define_cli_tool`, `define_connector`                                                                                           |
+| `cognia.workflow`            | `define_workflow_template`, `define_scheduled_task`, `define_configuration`                                                                                                                       |
+| `cognia.appearance`          | `define_theme`, `define_theme_pack`, `define_font_contribution`, `define_wallpaper`                                                                                                               |
+| `cognia.pet`                 | `define_pet_item`, `define_pet_achievement`                                                                                                                                                       |
 
 ## Module-style plugin
 

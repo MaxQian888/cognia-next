@@ -16,4 +16,4 @@ export type {
   ExportOptions,
   ExportResult,
   PluginExportAPI,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"

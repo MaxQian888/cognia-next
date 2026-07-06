@@ -36,9 +36,14 @@ description: "创建 Slack 应用，收集 bot/app 令牌与签名密钥，并�
 
 ---
 
-## 3. 启用 Socket Mode
+## 3. 选择入站传输方式
 
-cognia-next 默认使用 **Socket Mode**，即通过一个持久的 WebSocket 连接，无需公网 URL。
+cognia-next 支持两种 Slack 入站传输方式：
+
+- **Socket Mode**（默认）：cognia-next 通过持久 WebSocket 主动连接 Slack。无需公网 URL，但需要 app-level `xapp-...` token。
+- **Events API webhook**：Slack 通过公网 HTTPS Request URL 调用 cognia-next。该模式需要 Signing Secret，并且需要正在运行的公网隧道。
+
+默认 Socket Mode 路径：
 
 1. 在应用设置中，从左侧边栏选择 **Socket Mode**。
 2. 将 **Enable Socket Mode** 切换为开启。
@@ -47,6 +52,13 @@ cognia-next 默认使用 **Socket Mode**，即通过一个持久的 WebSocket �
    - 添加权限范围 `connections:write`。
    - 点击 **Generate**。
 4. 复制该令牌 —— 它以 `xapp-` 开头。**请妥善保管。**
+
+Events API webhook 路径：
+
+1. 在 cognia-next 中选择 **Events API webhook** 创建 Slack 适配器，保存后重新打开它。
+2. 在 **设置 → Companion → Tunnel** 中启动 Cloudflared 隧道。
+3. 从 Slack 配置对话框复制生成的 **Request URL**。
+4. 在 Slack 打开 **Event Subscriptions**，启用 events，并将该 URL 粘贴为 **Request URL**。
 
 ---
 
@@ -75,12 +87,11 @@ cognia-next 默认使用 **Socket Mode**，即通过一个持久的 WebSocket �
    - 为该机器人输入一个 **显示名称**（例如 "My Workspace Bot"）。
    - 粘贴你在第 4 步复制的 **Bot Token**（`xoxb-...`）。
    - 点击 **Test** 验证该令牌能否成功连接到 Slack。对话框会显示你的机器人用户名和工作区名称。
-   - 粘贴你在第 5 步复制的 **签名密钥（Signing Secret）**。
-   - 选择 **Socket Mode** 作为传输方式（默认）。
-   - 粘贴你在第 3 步复制的 **App Token**（`xapp-...`）。
+   - 选择 **Socket Mode**（默认）并粘贴你在第 3 步复制的 **App Token**（`xapp-...`）。
+   - 或者选择 **Events API webhook**，粘贴你在第 5 步复制的 **Signing Secret**，保存后将生成的 Request URL 填入 Slack Event Subscriptions。
 4. 点击 **Create**。
 
-cognia-next 将通过 Socket Mode 连接到 Slack，无需公网 URL。
+cognia-next 会根据所选传输方式，通过 Socket Mode 连接 Slack，或等待已验签的 Events API webhook 回调。
 
 ---
 
@@ -93,8 +104,8 @@ cognia-next 将通过 Socket Mode 连接到 Slack，无需公网 URL。
 如果适配器显示 **已停止** 或 **降级**：
 
 - 验证 bot 令牌是否正确（`xoxb-...`）。
-- 验证 app 令牌是否正确（`xapp-...`）且具备 `connections:write` 权限范围。
-- 确认已在 Slack Developer Portal 中启用 Socket Mode。
+- Socket Mode：验证 app token 是否正确（`xapp-...`）且具备 `connections:write` 权限范围，并确认已在 Slack Developer Portal 中启用 Socket Mode。
+- Events API webhook：验证 Signing Secret 已保存、Cloudflared 隧道正在运行，并且 Slack Event Subscriptions 的 Request URL 与对话框生成的 URL 一致。
 - 在 设置 → 平台连接 的 **Audit Log** 标签页中查看错误详情。
 
 ---
@@ -102,6 +113,6 @@ cognia-next 将通过 Socket Mode 连接到 Slack，无需公网 URL。
 ## 注意事项
 
 - **速率限制**：Slack 对每个频道强制实施约每秒 1 条消息的突发限制。cognia-next 的出站执行器会遵循可重试的错误（HTTP 429）。
-- **Events API Webhook**：对于部署在公网 URL 之后的生产环境，你可以在配置对话框中将传输方式切换为 **Events API Webhook**。这需要一个公网可访问的 HTTPS URL，且不在第 1 阶段（Phase 1）的范围内。
-- **正在输入指示器**：Slack 的 `assistant.threads.setStatus` 仅限于 Slack Assistant 应用使用。标准机器人适配器在第 1 阶段不支持正在输入指示器。
-- **文件上传**：第 1 阶段通过 `chat.postMessage` 以超链接形式发送文件。通过 `files.upload` 进行的原生文件上传计划在第 2 阶段（Phase 2）实现。
+- **Events API Webhook**：当桌面隧道把 connectors server 暴露为公网 HTTPS URL 时可用。Rust webhook handler 会先验证 Slack HMAC 签名，再把事件交给适配器。
+- **正在输入指示器**：Slack 的 `assistant.threads.setStatus` 仅限于 Slack Assistant 应用使用。标准机器人适配器不支持正在输入指示器。
+- **文件上传**：Slack 出站会通过 `chat.postMessage` 以超链接形式发送文件段。通过 Slack 文件 API 进行原生上传仍是后续工作。

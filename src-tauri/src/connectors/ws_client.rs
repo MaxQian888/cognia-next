@@ -182,6 +182,28 @@ pub async fn ws_close(handle_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Close **every** live WS handle and return how many were closed.
+///
+/// Used on connector bootstrap to reap sockets leaked by a previous webview
+/// load whose JS cleanup never ran: a hard reload / Fast-Refresh full reload
+/// discards the renderer that owned the handle ids while the Rust core process
+/// — and these sockets — keep running. Without this, each reload piles up a
+/// zombie socket that keeps delivering duplicate inbound events.
+///
+/// Drains the registry under the lock, then sends `Close` outside it — the
+/// std `Mutex` guard must never be held across an `.await`.
+pub async fn close_all() -> usize {
+    let txs: Vec<SendTx> = {
+        let mut map = handles().lock().unwrap();
+        map.drain().map(|(_, h)| h.tx).collect()
+    };
+    let count = txs.len();
+    for tx in txs {
+        let _ = tx.send(Message::Close(None)).await;
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +241,23 @@ mod tests {
         ws_stream.send(Message::Text("ping".into())).await.unwrap();
         let msg = ws_stream.next().await.unwrap().unwrap();
         assert_eq!(msg.to_text().unwrap(), "ping");
+    }
+
+    #[tokio::test]
+    async fn close_all_drains_every_handle() {
+        // Reap any residue from a prior test so the count is deterministic.
+        close_all().await;
+        // Insert two synthetic handles directly into the global registry;
+        // keep the receivers alive so the Close send doesn't error.
+        let (tx1, _rx1) = mpsc::channel::<Message>(1);
+        let (tx2, _rx2) = mpsc::channel::<Message>(1);
+        {
+            let mut map = handles().lock().unwrap();
+            map.insert("h1".into(), WsHandle { tx: tx1 });
+            map.insert("h2".into(), WsHandle { tx: tx2 });
+        }
+        let closed = close_all().await;
+        assert_eq!(closed, 2);
+        assert!(handles().lock().unwrap().is_empty());
     }
 }

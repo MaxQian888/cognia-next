@@ -27,7 +27,7 @@ const MOOD_TOKEN: Record<MascotMood, keyof ThemePalette> = {
   stopping: "mascotStopping",
 }
 
-export function Mascot({
+function MascotImpl({
   mood,
   style,
   enabled,
@@ -64,3 +64,7 @@ export function Mascot({
     </Box>
   )
 }
+
+// Memoized: all props are primitives, so this skips re-render on every streaming
+// delta and re-renders only when mood/style/enabled actually change.
+export const Mascot = React.memo(MascotImpl)

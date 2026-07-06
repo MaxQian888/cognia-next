@@ -17,6 +17,9 @@ jest.mock("@/lib/db/mcp-servers", () => ({
 
 jest.mock("@/lib/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
+  // The live-session card pulls in `@/stores/chat` → `lib/execution/broker`,
+  // which calls `createLogger` at module load; stub it so the suite can import.
+  createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -75,6 +78,7 @@ const server = (id: string): McpServer =>
 beforeEach(() => {
   mockServers = []
   useMcpPanelStore.setState({
+    activeTab: "my-servers",
     search: "",
     transportFilter: "all",
     statusFilter: "all",
@@ -92,6 +96,36 @@ describe("McpMyServersTab", () => {
     render(<McpMyServersTab />)
     expect(screen.getByText("empty")).toBeInTheDocument()
     expect(screen.queryByTestId("server-list")).not.toBeInTheDocument()
+  })
+
+  it("switches to the presets tab from the empty-state CTA", () => {
+    render(<McpMyServersTab />)
+    fireEvent.click(screen.getByText("emptyBrowsePresets"))
+    expect(useMcpPanelStore.getState().activeTab).toBe("presets")
+  })
+
+  it("opens the create editor from the empty-state Add button", async () => {
+    render(<McpMyServersTab />)
+    // Second "Add server" in DOM order is the empty-state CTA (toolbar is first).
+    fireEvent.click(screen.getAllByText("addServer")[1])
+    await waitFor(() =>
+      expect(useMcpPanelStore.getState().editorTarget).toMatchObject({ mode: "create" })
+    )
+  })
+
+  it("selects and clears all visible servers via the select-all toggle", () => {
+    mockServers = [server("a"), server("b")]
+    render(<McpMyServersTab />)
+    fireEvent.click(screen.getByText('selectAll:{"count":2}'))
+    expect(useMcpPanelStore.getState().selection).toEqual(new Set(["a", "b"]))
+    // Label flips to "clear" once everything visible is selected.
+    fireEvent.click(screen.getByText("clearSelection"))
+    expect(useMcpPanelStore.getState().selection.size).toBe(0)
+  })
+
+  it("hides the select-all row while the empty state is showing", () => {
+    render(<McpMyServersTab />)
+    expect(screen.queryByLabelText("selectAllAria")).not.toBeInTheDocument()
   })
 
   it("renders the list when servers exist", () => {
@@ -124,7 +158,9 @@ describe("McpMyServersTab", () => {
 
   it("opens the create editor via the seeded add button", async () => {
     render(<McpMyServersTab />)
-    fireEvent.click(screen.getByText("addServer"))
+    // With no servers the empty-state CTA also renders an "Add server" button, so
+    // target the toolbar one (first in DOM order).
+    fireEvent.click(screen.getAllByText("addServer")[0])
     await waitFor(() =>
       expect(useMcpPanelStore.getState().editorTarget).toMatchObject({ mode: "create" })
     )

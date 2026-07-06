@@ -110,6 +110,41 @@ describe("persistChunks", () => {
     expect(persisted).toHaveLength(2)
   })
 
+  it("assigns deterministic vectorDocIds so a re-ingest overwrites instead of orphaning", async () => {
+    const store = fakeStore()
+    await makeSource("twin_d", "src_d")
+    const chunk = {
+      content: "Hi",
+      contentRedacted: "Hi",
+      charStart: 0,
+      charEnd: 2,
+      strategy: "paragraph" as const,
+      tokenCount: 1,
+      metadata: {},
+    }
+    const first = await persistChunks({
+      twinId: "twin_d",
+      sourceId: "src_d",
+      vectorBackend: "qdrant",
+      store,
+      chunks: [chunk],
+      embeddings: [[0.1, 0.2]],
+    })
+    expect(first.vectorDocIds).toEqual(["twin_d__src_d__0"])
+
+    // A second ingest of the same source mints the SAME id → remote upsert
+    // overwrites the prior vector rather than stranding it under a random id.
+    const second = await persistChunks({
+      twinId: "twin_d",
+      sourceId: "src_d",
+      vectorBackend: "qdrant",
+      store,
+      chunks: [chunk],
+      embeddings: [[0.3, 0.4]],
+    })
+    expect(second.vectorDocIds).toEqual(["twin_d__src_d__0"])
+  })
+
   it("idempotently replaces chunks on re-parse + drops remote vectors", async () => {
     const store = fakeStore()
     await makeSource("twin_b", "src_b")

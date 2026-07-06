@@ -41,15 +41,29 @@ import type {
 // Importing the built-ins triggers their registration side effect.
 import "@/lib/workflow/nodes/built-ins"
 import { createRunLogger } from "./event-log"
+import {
+  CAPABILITY_MISSING_CODE_PREFIX,
+  formatPreflightFailures,
+  preflightCapabilities,
+  remoteCapabilityUnion,
+} from "./capability-preflight"
 import { IdempotencyCache } from "./idempotency"
 import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
 import { runLoopContainer } from "./loop-container"
 import { buildErrorOutput, resolveNodeFailure } from "./node-failure"
 import { isJoinCancel, JoinCancelError, losingBranchScope } from "./branch-scope"
-import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
+import { type SecretResolver } from "./secret-resolver"
+import { getDefaultSecretResolver } from "./secret-resolver-keyring"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
 import { registerRun, unregisterRun } from "./run-cancel-registry"
+import {
+  claimRunLease,
+  getExecutorId,
+  releaseRunLease,
+  startLeaseHeartbeat,
+  stopLeaseHeartbeat,
+} from "./run-lease"
 import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
 
 /**
@@ -65,8 +79,19 @@ async function releaseRunResources(runId: string): Promise<void> {
   } catch {
     // best-effort cleanup
   }
+  // Lease teardown (ADR 0061 P4) — stop renewing, then free the claim so a
+  // resume/replay elsewhere isn't blocked for a full TTL.
+  stopLeaseHeartbeat(runId)
+  try {
+    await releaseRunLease(runId)
+  } catch {
+    // best-effort — an unreleased lease simply expires
+  }
   unregisterRun(runId)
 }
+
+/** Terminal run statuses — never re-enter execution for these. */
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed", "cancelled"])
 
 export interface RunWorkflowInput {
   workflow: VisualWorkflow
@@ -165,6 +190,26 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // any step executes). Fires once per run() invocation.
   getPluginEventHooks().dispatchWorkflowStart(workflow.id, workflow.name)
 
+  // 2a. Ownership guards (ADR 0061 P4) — BEFORE the unconditional `put`
+  // below, which would otherwise clobber another executor's row.
+  //   - A terminal row (soft-cancelled from a companion, or already
+  //     finished) must never be resurrected by a resume replay: ack the
+  //     mirror so Rust stops offering it, and report the terminal state.
+  //   - A live lease held by another executor process means the run is
+  //     already being driven — back off instead of double-executing.
+  const existingRow = await getDb().workflowRuns.get(runId)
+  if (existingRow && TERMINAL_RUN_STATUSES.has(existingRow.status)) {
+    await ackRunCompleted(runId)
+    return { runId, status: existingRow.status, error: existingRow.error }
+  }
+  if (
+    existingRow?.lease &&
+    existingRow.lease.expiresAt > Date.now() &&
+    existingRow.lease.ownerId !== getExecutorId()
+  ) {
+    return { runId, status: existingRow.status }
+  }
+
   // 2. Persist the WorkflowRunRow up front so the UI can render it as
   // "running" immediately. We freeze the workflow snapshot here.
   const startedAt = Date.now()
@@ -182,9 +227,24 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     startedAt,
     workflowSnapshot: validated as VisualWorkflow,
     ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
+    // Denormalised indexed column (Dexie v91) so the IM progress-runner can
+    // query `.where("triggeredBySource").equals("im")` instead of scanning the
+    // whole table. "ui" is the default origin for non-IM/non-API runs.
+    triggeredBySource: input.triggeredBy?.source ?? "ui",
   }
   // If we're resuming, the row may already exist — Dexie's `put` handles both.
   await getDb().workflowRuns.put(runRow)
+
+  // 2a′. Claim the execution lease (ADR 0061 P4). The transaction serialises
+  // racing claimants; losing the race here (a concurrent resume beat us
+  // between the read above and this claim) backs off exactly like the
+  // pre-put guard. Renewed by the heartbeat below, released with the run's
+  // resources on every terminal path.
+  const claim = await claimRunLease(runId)
+  if (claim === "held") {
+    return { runId, status: "running" }
+  }
+
   await persistRunState({
     runId,
     workflowId: workflow.id,
@@ -193,12 +253,49 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   })
   await logger.runStarted({ trigger })
 
+  // 2b. Capability preflight (ADR 0060): fail the run at t=0 — one structured,
+  // recoverable failure — when this runtime lacks a capability some node
+  // requires, instead of an executor-internal throw after earlier steps ran
+  // with side effects. Re-runs on resume by design (the resuming device must
+  // also hold the caps).
+  const preflightFailures = preflightCapabilities(validated, undefined, {
+    restrictToNodeIds: input.restrictToStepIds,
+    seededNodeIds: input.seedOutputs ? Object.keys(input.seedOutputs) : undefined,
+    // ADR 0061 P3 — requirements satisfiable via a paired device pass here;
+    // the mobile proxy executors own run-time reachability failures.
+    remoteCapabilities: await remoteCapabilityUnion(),
+  })
+  if (preflightFailures.length > 0) {
+    const message = formatPreflightFailures(preflightFailures)
+    const code = CAPABILITY_MISSING_CODE_PREFIX + preflightFailures[0].missing[0]
+    const nodeId = preflightFailures[0].nodeId
+    await logger.runFailed({ message, nodeId, code })
+    runRow = {
+      ...runRow,
+      status: "failed",
+      completedAt: Date.now(),
+      error: { message, nodeId, code },
+    }
+    await getDb().workflowRuns.put(runRow)
+    await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
+    getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
+    getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    await releaseRunResources(runId)
+    return { runId, status: "failed", error: { message, nodeId, code } }
+  }
+
   // 3. Set up the abort + idempotency machinery.
   const ac = new AbortController()
   // Expose this run to the out-of-band cancel registry so a remote
   // `workflow_cancel_run` RPC can abort it. Unregistered on every terminal
   // path below.
   registerRun(runId, ac)
+  // Lease heartbeat (ADR 0061 P4): keeps the claim fresh and observes
+  // cross-executor cancel requests (`cancelRequestedAt` stamped by a
+  // surface whose local abort couldn't reach this process).
+  startLeaseHeartbeat(runId, {
+    onCancelRequested: () => ac.abort(new Error("Workflow run cancelled by another device")),
+  })
   const externalAbort = () => ac.abort(new Error("Workflow run aborted"))
   if (input.signal) {
     if (input.signal.aborted) ac.abort(new Error("Workflow run aborted"))
@@ -227,7 +324,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       if (!cache.has(id)) cache.set(id, value)
     }
   }
-  const secretResolver = input.secretResolver ?? NoopSecretResolver
+  const secretResolver = input.secretResolver ?? getDefaultSecretResolver()
 
   // Dynamic concurrency cap (ADR-0022 §3.7). Defaults to settings.maxConcurrency
   // or 1, preserving sequential behavior for existing callers.

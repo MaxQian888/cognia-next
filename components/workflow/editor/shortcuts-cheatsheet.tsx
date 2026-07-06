@@ -39,6 +39,8 @@ const GROUPS: ShortcutGroup[] = [
       { keys: [["Ctrl", "Shift", "Z"]], labelKey: "redo" },
       { keys: [["Ctrl", "K"]], labelKey: "commands" },
       { keys: [["Ctrl", "/"]], labelKey: "shortcuts" },
+      { keys: [["Ctrl", "B"]], labelKey: "togglePalette" },
+      { keys: [["Ctrl", "J"]], labelKey: "toggleSidebar" },
     ],
   },
   {

@@ -33,6 +33,22 @@ description: 用本地 127.0.0.1 axum HTTP 监听器、HMAC 签名的出站投�
 
 接通后的细节见[远程控制子系统文档](../subsystems/remote-control)。
 
+## 自定义更新（2026-07-03）
+
+设置面板新增了更细粒度、端到端接线的控制项，遵循最小权限 ACL 与主流 webhook 后台的惯例：
+
+- **按目标的权限 ACL（入站）。** `RemoteControlInboundConfig.disabledTargets` 是一个拒绝列表，
+  在 Rust 服务端（`run_command` 在发出命令事件前返回 `403 target_disabled`）强制执行，并在
+  `dispatchRemoteCommand` 中加一道渲染端防线作为纵深防御。入站页签把命令目标按子系统渲染为开关
+  （含批量启用/禁用）。与端口/白名单/能力一样，在下次启动监听器时生效。
+- **按端点的事件订阅（出站）。** `WebhookEgressEndpoint.eventTypes` 把某个出站端点过滤为指定的
+  生命周期事件类型（为空即全部），由 `publishOutboundEvent` 中的 `endpointSubscribesTo` 执行。
+  端点还新增了按端点的自定义请求头编辑与实时 URL 校验。
+- **可调的投递限制（出站）。** `RemoteControlOutboundConfig.delivery`（`maxRetries` /
+  `timeoutMs` / `baseDelayMs`，由 `normalizeWebhookDelivery` 夹取范围）取代了 `deliverWebhook`
+  中原先写死的常量；对单任务 URL 与出站端点均生效。
+- **入站快速上手** cURL 片段，以及概览页的流量快照（近期调用窗口内的成功/错误/成功率）。
+
 ## 背景
 
 自 scheduler 落地以来，cognia-next 已交付两个相邻的半成品特性：

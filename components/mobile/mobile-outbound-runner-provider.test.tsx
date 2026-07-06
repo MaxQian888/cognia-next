@@ -26,6 +26,16 @@ jest.mock("@/lib/queue/outbound-queue", () => ({
   createOutboundRunner: (opts: unknown) => fakeFactory(opts),
 }))
 
+const transportCall = jest.fn().mockResolvedValue({ ok: true })
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: (...args: unknown[]) => transportCall(...args) },
+}))
+
+const runSyncDownMock = jest.fn().mockResolvedValue([])
+jest.mock("@/lib/sync/companion-sync", () => ({
+  runSyncDown: (...args: unknown[]) => runSyncDownMock(...args),
+}))
+
 const fakeDispatcher: OutboundDispatcher = {
   async call() {
     return null
@@ -36,6 +46,8 @@ beforeEach(() => {
   fakeFactory.mockClear()
   fakeRunner.kick.mockClear()
   fakeRunner.stop.mockClear()
+  transportCall.mockClear()
+  runSyncDownMock.mockClear()
 })
 
 describe("MobileOutboundRunnerProvider", () => {
@@ -78,6 +90,35 @@ describe("MobileOutboundRunnerProvider", () => {
       expect.any(Error)
     )
     warn.mockRestore()
+  })
+
+  describe("liveDispatcher post-trigger run sync", () => {
+    // With no `dispatcher` prop the provider builds the production
+    // `liveDispatcher`; the mocked factory lets us capture and invoke it.
+    function captureLiveDispatcher(): OutboundDispatcher {
+      render(<MobileOutboundRunnerProvider platformOverride="mobile" />)
+      const opts = fakeFactory.mock.calls[0]?.[0] as { dispatcher: OutboundDispatcher }
+      return opts.dispatcher
+    }
+
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it("pulls workflowRuns shortly after a manual trigger is dispatched", async () => {
+      const dispatcher = captureLiveDispatcher()
+      await dispatcher.call("workflow_trigger_manual", { workflowId: "w1" }, { idempotencyKey: "k" })
+      expect(transportCall).toHaveBeenCalledWith("workflow_trigger_manual", { workflowId: "w1" })
+      expect(runSyncDownMock).not.toHaveBeenCalled()
+      jest.advanceTimersByTime(2500)
+      expect(runSyncDownMock).toHaveBeenCalledWith({ only: ["workflowRuns"] })
+    })
+
+    it("does not schedule a run sync for non-trigger commands", async () => {
+      const dispatcher = captureLiveDispatcher()
+      await dispatcher.call("connector_send", { foo: 1 }, { idempotencyKey: "k" })
+      jest.advanceTimersByTime(5000)
+      expect(runSyncDownMock).not.toHaveBeenCalled()
+    })
   })
 
   it("recreates the runner when platform flips from web to mobile", () => {

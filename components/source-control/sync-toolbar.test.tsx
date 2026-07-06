@@ -3,6 +3,18 @@ import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SyncToolbar } from "./sync-toolbar"
 import { useGitStore } from "@/stores/git/git-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+
+/** Set panel prefs (confirm toggles) on the settings singleton. */
+function setPanelPrefs(panel: Record<string, unknown>) {
+  act(() => {
+    useSettingsStore.setState({
+      settings: {
+        gitSettings: { commitMessageAI: { enabled: false, conventionalCommits: true }, panel },
+      } as never,
+    })
+  })
+}
 
 function makeActions() {
   return {
@@ -53,7 +65,10 @@ function renderToolbar(actions = makeActions(), handlers = {}) {
 }
 
 beforeEach(() => {
-  act(() => useGitStore.getState().reset())
+  act(() => {
+    useGitStore.getState().reset()
+    useSettingsStore.setState({ settings: null as never })
+  })
 })
 
 describe("SyncToolbar", () => {
@@ -117,7 +132,7 @@ describe("SyncToolbar", () => {
     renderToolbar(actions)
     expect(screen.queryByTestId("sync-push")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("sync-publish"))
-    expect(actions.push).toHaveBeenCalledWith(true)
+    expect(actions.push).toHaveBeenCalledWith({ setUpstream: true })
   })
 
   it("shows the plain Push button when an upstream is configured", () => {
@@ -184,5 +199,76 @@ describe("SyncToolbar", () => {
     await user.click(screen.getByTestId("sync-more"))
     await user.click(await screen.findByTestId("more-abort-merge"))
     expect(actions.mergeAbort).toHaveBeenCalled()
+  })
+
+  it("pulls with rebase from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-pull-rebase"))
+    expect(actions.pull).toHaveBeenCalledWith({ rebase: true })
+  })
+
+  it("fetches with prune from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-fetch-prune"))
+    expect(actions.fetch).toHaveBeenCalledWith({ prune: true })
+  })
+
+  it("plain pull/fetch apply the default prefs", () => {
+    setPanelPrefs({ pullRebase: true, fetchPrune: true })
+    const actions = makeActions()
+    renderToolbar(actions)
+    fireEvent.click(screen.getByTestId("sync-pull"))
+    fireEvent.click(screen.getByTestId("sync-fetch"))
+    expect(actions.pull).toHaveBeenCalledWith({ rebase: true })
+    expect(actions.fetch).toHaveBeenCalledWith({ prune: true })
+  })
+
+  it("force pushes behind a confirm dialog (with lease)", async () => {
+    setStatus({}) // has an upstream → force push is enabled
+    const user = userEvent.setup()
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-force-push"))
+    // Guarded — nothing pushed until confirmed.
+    expect(actions.push).not.toHaveBeenCalled()
+    await user.click(await screen.findByTestId("force-push-confirm-action"))
+    expect(actions.push).toHaveBeenCalledWith({ forceWithLease: true })
+  })
+
+  it("force pushes immediately when its confirm pref is off", async () => {
+    setStatus({})
+    setPanelPrefs({ confirmForcePush: false })
+    const user = userEvent.setup()
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-force-push"))
+    expect(actions.push).toHaveBeenCalledWith({ forceWithLease: true })
+  })
+
+  it("disables force push when the branch has no upstream", async () => {
+    setStatus({ upstream: null })
+    const user = userEvent.setup()
+    renderToolbar()
+    await user.click(screen.getByTestId("sync-more"))
+    expect(await screen.findByTestId("more-force-push")).toHaveAttribute("data-disabled")
+  })
+
+  it("confirms before discarding all from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-discard-all"))
+    expect(actions.discardAll).not.toHaveBeenCalled()
+    await user.click(await screen.findByTestId("discard-confirm-action"))
+    expect(actions.discardAll).toHaveBeenCalledWith(false)
   })
 })

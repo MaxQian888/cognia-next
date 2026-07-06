@@ -27,6 +27,8 @@ export interface RunEvalServiceInput {
   appSettings: AppSettings | null
   /** Override the cross-model judge. */
   judgeModel?: string
+  /** Skip the LLM judge tier — deterministic scorers only. */
+  forceDeterministic?: boolean
   signal?: AbortSignal
   onProgress?: (p: EvalProgress) => void
   /** Test / caller seam — defaults to the browser/Dexie wiring. */
@@ -50,6 +52,7 @@ export async function runEvalService(input: RunEvalServiceInput): Promise<RunEva
     const wired = buildConfiguredRunDeps({
       appSettings: input.appSettings,
       ...(input.judgeModel ? { judgeModel: input.judgeModel } : {}),
+      ...(input.forceDeterministic ? { forceDeterministic: true } : {}),
     })
     deps = wired.deps
     deterministicOnly = wired.deterministicOnly

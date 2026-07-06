@@ -17,12 +17,17 @@ import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import type { MarketplaceBrowseEntry } from "../runtime/marketplace-filter"
 import type { McpPanelServer, McpPanelTool } from "../runtime/mcp-panel-model"
 import type { SkillPanelRow } from "../runtime/skill-panel-model"
+import type { AgentPanelRow } from "../runtime/agents-panel-model"
+import type { AgentStatsOverview, ConvStatRow, ConvWithUsage } from "../runtime/agent-stats-model"
+import type { SessionReport } from "@/lib/analysis/session-report"
+import type { SubagentModelRow } from "../runtime/subagent-models-model"
 
 import type {
   ResolvedConfig,
   PERMISSION_MODES,
   StatusBarConfig,
   MascotConfig,
+  EditorConfig,
   OutputStyle,
   ThinkingLevel,
   LayoutMode,
@@ -90,6 +95,12 @@ export interface ErrorCell {
   id: string
   kind: "error"
   message: string
+  /** Optional remediation hint, rendered as a dim second line under the error
+   * (e.g. "run /login or check your token"). Filled by {@link classifyError}. */
+  hint?: string
+  /** Classification bucket — auth | rateLimit | network | timeout | sidecar |
+   * permission | generic. Lets the renderer pick an icon/verb per category. */
+  category?: string
 }
 
 /** Non-error system notice (e.g. "Pushed to desktop", "Fresh session"). */
@@ -107,6 +118,9 @@ export interface BashCell {
   output: string
   status: "running" | "done" | "error"
   exitCode?: number
+  /** Moved to the background (Ctrl+B): keeps running but is no longer the
+   * foreground Ctrl+C target. Cleared once the command settles. */
+  background?: boolean
 }
 
 /**
@@ -152,7 +166,7 @@ export type TurnStatus = "idle" | "streaming" | "aborting"
 // ── Background activity (goal loop, workflow run, subagent dispatch) ───────────
 // These run outside the normal chat turn, so they get their own status pill.
 
-export type ActivityKind = "goal" | "workflow" | "agent" | "team" | "loop"
+export type ActivityKind = "goal" | "workflow" | "agent" | "team" | "loop" | "council"
 
 export interface ActivityState {
   kind: ActivityKind
@@ -165,6 +179,40 @@ export interface ActivityState {
   /** A short status note (e.g. the current step). */
   note?: string
   status: "running" | "done" | "error"
+}
+
+/**
+ * A completion signal, bumped once each time a turn or a background run finishes.
+ * The terminal-chrome effect watches it (by object identity) to fire the bell +
+ * desktop notification exactly once per completion, with the right verb — a plain
+ * busy→idle transition can't distinguish done vs error vs abort, nor cover
+ * background runs (which never flip the turn's busy flag). `label` is the ready-made
+ * notification body.
+ */
+export interface CompletionSignal {
+  kind: "turn" | "activity"
+  status: "done" | "error" | "aborted"
+  /** Notification body (e.g. "Response ready", "Authentication failed", "goal loop done"). */
+  label: string
+}
+
+/** Severity of a transient toast — drives its glyph/color and dismiss TTL. */
+export type ToastSeverity = "info" | "warn" | "error"
+
+/**
+ * A transient, dismissible notification shown just above the composer (distinct
+ * from a permanent {@link NoticeCell}/{@link ErrorCell} in the scrollback). Used
+ * for events that would otherwise pass silently — sidecar death, rate-limit
+ * warnings, MCP load failures, background-run errors, hook failures. Auto-expires
+ * via an effect with an injected clock ({@link useToastExpiry}); the reducer never
+ * times anything, so it stays pure.
+ */
+export interface Toast {
+  id: string
+  severity: ToastSeverity
+  message: string
+  /** Optional second line with a remediation hint. */
+  hint?: string
 }
 
 /** Live per-node progress for a `/workflow run` in flight (panel above composer). */
@@ -309,12 +357,48 @@ export interface InspectItem {
   isError: boolean
 }
 
+/** Severity of a captured MCP log line, most→least severe. */
+export type McpLogLevel = "error" | "warn" | "info" | "debug"
+
+/** Where a captured MCP log line came from:
+ *  - `stderr`     — a spawned MCP server's stderr (both dispatch paths)
+ *  - `diagnostic` — a structured connect/tool diagnostic from the ai-sdk bridge
+ *  - `sidecar`    — the sidecar's generic `log` stream (not MCP-specific)
+ *  - `status`     — a live `mcpServerStatus` snapshot line */
+export type McpLogSource = "stderr" | "diagnostic" | "sidecar" | "status"
+
+/** One captured MCP log line held in the session ring buffer (`state.mcpLogs`). */
+export interface McpLogEntry {
+  /** Stable id (also the row key) — monotonic, from `state.seq`. */
+  id: string
+  /** Epoch ms the line was captured. */
+  ts: number
+  /** Server the line belongs to, when known. */
+  server?: string
+  level: McpLogLevel
+  source: McpLogSource
+  message: string
+}
+
+/** `/agent-stats` overview overlay (named so `agentStatsDetail.back` can reuse it). */
+export interface AgentStatsOverlay {
+  kind: "agentStats"
+  overview: AgentStatsOverview
+  rows: ConvStatRow[]
+  items: ConvWithUsage[]
+  index: number
+}
+
 export type Overlay =
   | { kind: "none" }
   | { kind: "permission"; req: PermissionRequestEvent; choices: PermissionChoice[]; index: number }
   | { kind: "slash"; query: string; index: number }
   | { kind: "files"; token: string; completions: string[]; index: number }
-  | { kind: "model"; options: string[]; index: number }
+  // `/model` switcher. `options` is the FULL provider catalog; `query` is the
+  // live typeahead filter (the list can run to hundreds of OpenRouter ids), and
+  // `index` points into the FILTERED view, not `options` — so navigation and
+  // selection always track what's on screen.
+  | { kind: "model"; options: string[]; index: number; query: string }
   | { kind: "mode"; options: PermissionMode[]; index: number }
   // Reasoning-effort slider (replaces the old vertical `thinking` list). `off`
   // mirrors the "use model default" checkbox; `index` points into the non-off
@@ -324,7 +408,7 @@ export type Overlay =
   | { kind: "effortSlider"; off: boolean; index: number }
   | { kind: "provider"; options: ProviderOption[]; index: number }
   | { kind: "config"; rows: ConfigMenuRow[]; index: number }
-  | { kind: "sessions"; items: SessionSummary[]; index: number }
+  | { kind: "sessions"; items: SessionSummary[]; index: number; query?: string }
   | { kind: "usage" }
   // Subscription limits/usage panel (`/limits`, alias `/subscription`). Renders
   // Claude-Code-style utilization bars across every configured subscription
@@ -352,12 +436,19 @@ export type Overlay =
   // Generic list overlay any feature can open without touching App per-feature.
   // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`. When
   // `onSelectCommand` is omitted the list is view-only — Enter just closes it.
-  | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand?: string }
+  | {
+      kind: "select"
+      title: string
+      items: SelectItem[]
+      index: number
+      onSelectCommand?: string
+      query?: string
+    }
   // Tool-output inspector (`/inspect`, default Ctrl+G). A picker of every
   // tool/bash/subagent cell that produced output, newest-first; Enter opens the
   // chosen cell's full, syntax-highlighted output in the document pager. Gives
   // the transcript a "jump to any output" affordance without a per-cell cursor.
-  | { kind: "inspect"; items: InspectItem[]; index: number }
+  | { kind: "inspect"; items: InspectItem[]; index: number; query?: string }
   // Scrollable read-only pager. `markdown` bodies are rendered through the
   // Markdown tokenizer; `text` bodies are shown verbatim (optionally syntax-
   // highlighted by `lang`). Used by skill/tool detail and the `/view` file
@@ -407,17 +498,72 @@ export type Overlay =
   // panel). Space toggles a tool (writes the `disabledTools` overlay → the
   // model's `disallowedTools`); Esc returns to the server panel.
   | { kind: "mcpTools"; server: string; tools: McpPanelTool[] }
+  // Captured MCP server output log (`/mcp logs`). A scrollable, filterable view
+  // over `state.mcpLogs` (the sidecar's `mcp_log` + generic `log` stream). Like
+  // the `mcp` panel, the component owns its view controls (query, level/server
+  // filter cycle, follow-tail, scroll cursor) as local state; the rows render
+  // from the live buffer so new entries stream in while it's open.
+  // `statusSummary` is a snapshot of each server's status (from the warmed probe
+  // cache) shown under the title.
+  | { kind: "mcpLogs"; statusSummary?: string }
   // Interactive Skills panel (`/skill`). One browsable row per skill with the
   // rich metadata the old flat list hid (origin · category · usage · validation
   // warnings) and an enabled badge. Space toggles for the session, Enter opens
   // the detail pager, n/d create/delete. Query/highlight live in the component.
   | { kind: "skills"; rows: SkillPanelRow[] }
+  // Interactive agents panel (`/agents`, default Ctrl+B). A live board of the
+  // sub-agents running now — in-turn dispatches + background runs (live + settled
+  // from the journal). Index/highlight live in the component (like `mcp`); Enter
+  // opens a settled background run's output in the document pager, Esc closes.
+  | { kind: "agents"; rows: AgentPanelRow[] }
+  // `/agent-stats` overview: aggregate statistics over other coding agents'
+  // conversation histories (Claude Code / Codex / OpenCode), read live off disk
+  // by the agent-stats controller. `items` carries the parsed conversations so a
+  // row can be drilled into (`agentStatsDetail`) without re-parsing.
+  | AgentStatsOverlay
+  // One conversation's health report (the CLI render of `SessionReport`). `back`
+  // carries the overview overlay so Esc/Enter returns to it.
+  | {
+      kind: "agentStatsDetail"
+      report: SessionReport
+      title: string
+      back: AgentStatsOverlay
+    }
+  // The live "agent run page" — switch into one sub-agent's run and watch its
+  // streamed text / reasoning / tool activity token-by-token (read from the
+  // live-output store by `liveId`; the title/task are the static identity). Esc
+  // returns to the agents panel / chat.
+  | { kind: "agentRun"; liveId: string; name: string; task: string }
+  // `/agents models` panel — assign a provider/model to each dispatchable
+  // subagent. A controlled master list (cursor `index` in the overlay, like
+  // `settings`): ←/→ cycles the model, `p` the provider, `r` resets to inherit;
+  // each edit persists to `config.subagentModels` and reopens with fresh rows.
+  | { kind: "subagentModels"; rows: SubagentModelRow[]; index: number }
   // `ask_user` elicitation prompt (model-initiated). Opened when the agent calls
   // the `ask_user` tool — the request round-trips through `useAskUserStore`, the
   // App mirrors the active prompt into this overlay, and the AskUserDialog's
   // submission resolves the blocked tool call. `request` is the parsed prompt
   // (question + options + flags); the dialog owns its draft (selection + text).
   | { kind: "askUser"; request: AskUserRequest }
+  // `/menu` command center — a searchable, clickable index over the curated
+  // quick actions PLUS every visible registry command (see
+  // `build-command-palette`). Each row carries the slash command it runs when
+  // picked. Reducer-owned cursor + typeahead (`index`/`query`) so it renders
+  // through the shared SelectList like `select`. The list can run to dozens of
+  // commands, so the 🔎 search row is always on.
+  | { kind: "quickActions"; rows: QuickActionRow[]; index: number; query?: string }
+
+/** One row of the `/menu` command center. Picking it runs {@link command}. */
+export interface QuickActionRow {
+  /** Stable id (also the row key). */
+  id: string
+  /** Display label, with a leading glyph. */
+  label: string
+  /** Muted right-hand hint — current value or a one-line description. */
+  hint?: string
+  /** The slash command line this row runs when chosen (e.g. `/model`). */
+  command: string
+}
 
 /** How a {@link Overlay} `document` body should be rendered. */
 export type DocumentFormat = "markdown" | "text"
@@ -430,6 +576,20 @@ export interface InputBuffer {
   cursorRow: number
   cursorCol: number
 }
+
+/** A single reducer-applied editor operation (see the INPUT_EDIT action). The
+ * reducer maps each to the matching `input/buffer` transform on the live buffer. */
+export type InputEditOp =
+  | { op: "insert"; text: string }
+  | { op: "newline" }
+  | { op: "backspace" }
+  | { op: "delete-word" }
+  | { op: "kill-to-start" }
+  | { op: "kill-to-end" }
+  | {
+      op: "move"
+      dir: "left" | "right" | "up" | "down" | "home" | "end" | "word-left" | "word-right"
+    }
 
 export interface HistoryState {
   /** Past submissions, oldest first. */
@@ -483,6 +643,11 @@ export interface TuiState {
   modelMeta?: ModelMeta
   /** Cumulative cost/token totals across every turn this session. */
   sessionTotals: SessionTotals
+  /** Cumulative cost/token totals broken down by the model that ran each turn,
+   * keyed by model id — feeds the usage panel's "Usage by model" table (mirrors
+   * Claude Code's `/usage`). The turn's model is resolved from the active config
+   * at accumulation time. */
+  modelTotals: Record<string, SessionTotals>
   /** Per-turn total tokens (prompt incl. cache + output), capped — feeds the
    * usage panel's token-trend sparkline. Oldest → newest. */
   usageHistory: number[]
@@ -526,6 +691,13 @@ export interface TuiState {
    * `content` the proposed body. `/init apply` writes it; the confirm overlay's
    * cancel (or a fresh stage) clears it. Absent when nothing is staged. */
   initDraft?: { target: string; content: string }
+  /** Pending Conventional-Commit message staged by `/commit`, awaiting
+   * confirmation. `/commit apply` creates the commit; the confirm overlay's
+   * cancel clears it. Absent when nothing is staged. */
+  commitDraft?: { message: string }
+  /** Pending PR draft staged by `/pr`, awaiting confirmation. `/pr apply` opens
+   * the draft PR with `gh`; cancel clears it. Absent when nothing is staged. */
+  prDraft?: { title: string; body: string; base: string }
   /** Pending `btw` steer messages typed while a turn or a goal/loop run is in
    * flight. The active driver (or the next plain turn) drains and delivers them
    * at the next turn boundary, so steering never interrupts the running turn. */
@@ -540,6 +712,10 @@ export interface TuiState {
   exit: boolean
   /** Monotonic counter feeding unique cell ids without Date.now/Math.random. */
   seq: number
+  /** Monotonic counter bumped on every live stream-activity action (text /
+   * thinking / tool / usage delta). The App watches it to timestamp "last
+   * activity" and surface the stall hint when the stream goes silent. */
+  streamSeq: number
   /** Active backtrack-to-edit selection: the index in `cells` of the user
    * message currently highlighted for editing. Absent when not selecting. */
   backtrack?: { index: number }
@@ -547,6 +723,22 @@ export interface TuiState {
    * is loaded in the composer. Submitting forks the conversation here, discarding
    * every later turn. Absent when not editing. */
   editTarget?: { index: number }
+  /** Active transient toasts (newest last), capped to the most recent few. Shown
+   * above the composer and auto-expired by {@link useToastExpiry}. */
+  toasts: Toast[]
+  /** Latest turn/background-run completion, for the notification effect. A fresh
+   * object each completion so a watch on its identity fires once. Absent until the
+   * first turn/run finishes. */
+  lastCompletion?: CompletionSignal
+  /** True when the sidecar process has exited and not yet been respawned. Set on
+   * a `sidecar_exited` event, cleared at the next TURN_START (the send respawns
+   * it) and on RESET. Lets the footer flag a dead backend even while idle. */
+  sidecarDown?: boolean
+  /** Captured MCP server output log (newest last), a bounded ring buffer fed by
+   * the sidecar's `mcp_log` + generic `log` stream. Rendered by the `/mcp logs`
+   * panel. Survives `/clear` (backend diagnostics aren't conversation state);
+   * `MCP_LOG_CLEAR` empties it. */
+  mcpLogs: McpLogEntry[]
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -556,6 +748,10 @@ export type TuiAction =
   | { type: "INFLIGHT_TEXT"; delta: string }
   | { type: "INFLIGHT_THINKING"; delta: string }
   | { type: "TOOL_CALL"; callKey: string; toolName: string; input: Record<string, unknown> }
+  // Programmatic plan capture from the `/plan explore` pipeline (the Plan
+  // subagent's output), routed through the same commit path as the ExitPlanMode
+  // tool signal so it surfaces the approval overlay.
+  | { type: "COMMIT_PLAN"; raw: string }
   | {
       type: "TOOL_RESULT"
       toolName: string
@@ -578,7 +774,7 @@ export type TuiAction =
   // Turn lifecycle (from the turn engine)
   | { type: "TURN_START"; prompt: string }
   | { type: "TURN_COMMIT"; result: RunAndCaptureResult }
-  | { type: "TURN_ERROR"; message: string }
+  | { type: "TURN_ERROR"; message: string; hint?: string; category?: string; title?: string }
   | { type: "TURN_ABORTED" }
   // Background activity (goal / workflow / subagent runs)
   | { type: "ACTIVITY_START"; kind: ActivityKind; label: string; max?: number }
@@ -601,11 +797,21 @@ export type TuiAction =
   | { type: "COPILOT_SET_PROPOSAL"; proposalId: string }
   | { type: "COPILOT_CLEAR_PROPOSAL" }
   | { type: "COPILOT_MARK_DIRTY" }
-  // Shell-out (`!command`)
-  | { type: "BASH_START"; command: string }
+  // Shell-out (`!command`). `id` targets a specific cell so concurrent runs
+  // (e.g. a backgrounded command + a new foreground one) never cross-fill; when
+  // omitted, the most-recent still-running bash cell is used (legacy callers).
+  | { type: "BASH_START"; command: string; id?: string }
   /** Append streamed output to the running shell cell as the process writes. */
-  | { type: "BASH_APPEND"; chunk: string }
-  | { type: "BASH_RESULT"; output: string; status: "done" | "error"; exitCode?: number }
+  | { type: "BASH_APPEND"; chunk: string; id?: string }
+  | {
+      type: "BASH_RESULT"
+      output: string
+      status: "done" | "error"
+      exitCode?: number
+      id?: string
+    }
+  /** Move a running shell cell to the background (keeps running). */
+  | { type: "BASH_BACKGROUND"; id: string }
   // Cells
   | { type: "TOGGLE_COLLAPSE"; id: string }
   /** Expand every collapsed tool/thinking cell, or collapse them all when none
@@ -616,7 +822,17 @@ export type TuiAction =
   | { type: "TOGGLE_VERBOSE" }
   /** Force a full transcript repaint (resize recovery). */
   | { type: "REPAINT" }
-  | { type: "NOTICE"; message: string }
+  // A one-line system notice → permanent NoticeCell. When `toast` is set it ALSO
+  // raises a transient toast (severity defaults to "info"), so a single dispatch
+  // can both archive to scrollback and surface an ephemeral alert.
+  | { type: "NOTICE"; message: string; severity?: ToastSeverity; toast?: boolean }
+  // Raise a transient toast only (no scrollback cell). For otherwise-silent
+  // events — sidecar death, rate-limit warnings, MCP load failures, hook errors.
+  | { type: "TOAST_PUSH"; severity: ToastSeverity; message: string; hint?: string }
+  | { type: "TOAST_DISMISS"; id: string }
+  // Sidecar liveness — set `down` on a `sidecar_exited` event so the footer can
+  // flag a dead backend even while idle (cleared at the next TURN_START / RESET).
+  | { type: "SIDECAR_STATUS"; down: boolean }
   | { type: "LOAD_CELLS"; cells: Cell[] }
   | { type: "RESET"; sessionId: string }
   // Backtrack-to-edit: select a prior user message (Esc/↑↓), then commit it as
@@ -630,6 +846,14 @@ export type TuiAction =
   // pending confirmation, then clear it once applied or cancelled.
   | { type: "SET_INIT_DRAFT"; target: string; content: string }
   | { type: "CLEAR_INIT_DRAFT" }
+  // `/commit` staged-draft lifecycle: stage a generated commit message pending
+  // confirmation, then clear it once the commit is applied or cancelled.
+  | { type: "SET_COMMIT_DRAFT"; message: string }
+  | { type: "CLEAR_COMMIT_DRAFT" }
+  // `/pr` staged-draft lifecycle: stage a generated PR title/body pending
+  // confirmation, then clear it once the PR is opened or cancelled.
+  | { type: "SET_PR_DRAFT"; title: string; body: string; base: string }
+  | { type: "CLEAR_PR_DRAFT" }
   // Config switches
   | { type: "SET_MODEL"; model: string }
   | { type: "SET_MODE"; mode: PermissionMode }
@@ -637,6 +861,7 @@ export type TuiAction =
   | { type: "SET_PROVIDER"; provider: string }
   | { type: "SET_STATUS_BAR"; statusBar: StatusBarConfig }
   | { type: "SET_MASCOT"; mascot: MascotConfig }
+  | { type: "SET_EDITOR"; editor: EditorConfig }
   | { type: "SET_THEME"; theme: string }
   | { type: "SET_OUTPUT_STYLE"; style: OutputStyle }
   | { type: "SET_AGENT_MODE"; modeId: string }
@@ -652,6 +877,23 @@ export type TuiAction =
   | { type: "OVERLAY_CLOSE" }
   | { type: "OVERLAY_MOVE"; delta: number }
   | { type: "OVERLAY_SET_INDEX"; index: number }
+  // Live-refresh the option list of an open `model` overlay (no-op if a
+  // different overlay is open). Used by the OpenRouter `/model` picker: the
+  // overlay opens instantly with whatever models are cached, then this swaps in
+  // the full real-time `/models` catalog the moment the async sync completes —
+  // so the picker stops looking "stuck" on the static fallback subset.
+  | { type: "OVERLAY_REFRESH_MODEL_OPTIONS"; options: string[] }
+  // Set the `/model` picker's typeahead filter (no-op unless the model overlay
+  // is open). Resets the highlight to the top of the freshly-filtered list.
+  | { type: "OVERLAY_MODEL_QUERY"; query: string }
+  // Set the typeahead filter on a generic searchable overlay (`select`,
+  // `sessions`, `inspect`, `quickActions`). Resets the highlight to the top of
+  // the freshly-filtered list; no-op for any other overlay kind.
+  | { type: "OVERLAY_QUERY"; query: string }
+  // Live-patch one marketplace entry (by installRef) in an open `marketplace`
+  // overlay — used for in-place enable/disable so the badge updates without
+  // closing the browser (no-op if a different overlay is open).
+  | { type: "MARKETPLACE_PATCH_ENTRY"; ref: string; patch: Partial<MarketplaceBrowseEntry> }
   | { type: "FORM_UPDATE"; form: FormOverlayState }
   // Live-patch one MCP server's status/error/toolCount into an open `mcp`
   // overlay as its async probe resolves (no-op if a different overlay is open).
@@ -662,6 +904,13 @@ export type TuiAction =
       /** Clear the panel-level `probing` spinner (set on the last server). */
       doneProbing?: boolean
     }
+  // Append a captured MCP log line to the session ring buffer (`state.mcpLogs`).
+  // `id`/`ts` are stamped by the reducer from `seq`/the event so the action stays
+  // a plain payload. Independent of the open overlay — the buffer accrues even
+  // when the `/mcp logs` panel is closed.
+  | { type: "MCP_LOG_APPEND"; entry: Omit<McpLogEntry, "id"> }
+  // Empty the captured MCP log buffer (the `/mcp logs` panel's `c` action).
+  | { type: "MCP_LOG_CLEAR" }
   // Flip one skill row's enabled badge in an open `skills` overlay (the panel's
   // space toggle). Persistence to `skill-state.json` is done by the caller; this
   // just keeps the visible badge in sync (no-op if a different overlay is open).
@@ -672,6 +921,11 @@ export type TuiAction =
   | { type: "SKILL_ROWS_SET_MANY"; ids: string[]; enabled: boolean }
   // Input editor
   | { type: "INPUT_SET"; buffer: InputBuffer }
+  /** Apply a single editor operation to the CURRENT buffer inside the reducer.
+   * Unlike INPUT_SET (which carries a buffer precomputed from the component's
+   * possibly-stale closure), this lets several keystrokes batched into one render
+   * apply sequentially — without it a fast burst collapses to just the last key. */
+  | { type: "INPUT_EDIT"; edit: InputEditOp }
   | { type: "INPUT_HISTORY"; history: HistoryState }
   | { type: "INPUT_ADD_PASTE"; id: string; text: string }
   | { type: "INPUT_CLEAR" }

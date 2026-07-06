@@ -30,6 +30,8 @@ export type ConversationSection =
   | { kind: "pinned"; sessions: ChatSession[] }
   | { kind: "folder"; folder: SessionFolder; sessions: ChatSession[]; collapsed: boolean }
   | { kind: "date"; bucket: DateBucket; sessions: ChatSession[] }
+  // Flat "recent" list emitted instead of date buckets when `groupByDate` is off.
+  | { kind: "recent"; sessions: ChatSession[] }
   | { kind: "search"; sessions: ChatSession[] }
 
 export interface BuildSectionsOptions {
@@ -41,6 +43,17 @@ export interface BuildSectionsOptions {
   now: number
   /** Folder ids the user has collapsed (P3). */
   collapsedFolderIds: ReadonlySet<string>
+  /**
+   * Group loose sessions into relative date buckets. Defaults to `true`.
+   * When `false`, loose sessions collapse into a single flat `recent` section.
+   */
+  groupByDate?: boolean
+  /**
+   * Optional set of session ids whose message *content* matched the query
+   * (resolved async by the caller). In search mode a session matches when its
+   * title matches OR its id is in this set. Undefined = title-only search.
+   */
+  contentMatchIds?: ReadonlySet<string>
 }
 
 export interface ConversationListModel {
@@ -56,6 +69,50 @@ export interface ConversationListModel {
 /** Sort newest-first by `updatedAt`. */
 function byRecent(a: ChatSession, b: ChatSession): number {
   return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+}
+
+/**
+ * Stable identity of one conversation-list section, stored alongside
+ * `manualOrder` (see `ChatSession.manualOrderSection`) so a manual order only
+ * applies inside the section it was dragged in. Without the key, an order set
+ * in one date bucket would pin the session to the top of every bucket it later
+ * migrates into (today → yesterday → …), permanently overriding recency.
+ */
+export function conversationSectionKey(
+  section: Pick<ConversationSection, "kind"> & { folder?: SessionFolder; bucket?: DateBucket }
+): string {
+  switch (section.kind) {
+    case "pinned":
+      return "pinned"
+    case "folder":
+      return `folder:${section.folder!.id}`
+    case "date":
+      return `date:${section.bucket!}`
+    case "recent":
+      return "recent"
+    case "search":
+      return "search"
+  }
+}
+
+/**
+ * Comparator factory: sort a section by `manualOrder` (ascending) first —
+ * honored only for rows whose `manualOrderSection` matches this section —
+ * falling back to recency for un-dragged rows and for orders that were set in
+ * a different section (legacy rows without a section key keep working inside
+ * whichever section they sit in today).
+ */
+function byManualThenRecent(sectionKey: string): (a: ChatSession, b: ChatSession) => number {
+  const orderOf = (s: ChatSession): number =>
+    s.manualOrder != null && (s.manualOrderSection == null || s.manualOrderSection === sectionKey)
+      ? s.manualOrder
+      : Number.POSITIVE_INFINITY
+  return (a, b) => {
+    const ao = orderOf(a)
+    const bo = orderOf(b)
+    if (ao !== bo) return ao - bo
+    return byRecent(a, b)
+  }
 }
 
 /** Map a session's `updatedAt` to its relative date bucket (local calendar). */
@@ -92,7 +149,7 @@ export function buildConversationSections(
   folders: readonly SessionFolder[],
   opts: BuildSectionsOptions
 ): ConversationListModel {
-  const { query, view, now, collapsedFolderIds } = opts
+  const { query, view, now, collapsedFolderIds, groupByDate = true, contentMatchIds } = opts
   const needle = query.trim().toLowerCase()
 
   const viewed = sessions.filter((s) =>
@@ -100,9 +157,12 @@ export function buildConversationSections(
   )
   const total = viewed.length
 
-  // Search mode: flat result list, no grouping.
+  // Search mode: flat result list, no grouping. A session matches when its
+  // title matches OR (content search) its id is in `contentMatchIds`.
   if (needle) {
-    const matched = viewed.filter((s) => matchesQuery(s, needle)).sort(byRecent)
+    const matched = viewed
+      .filter((s) => matchesQuery(s, needle) || (contentMatchIds?.has(s.id) ?? false))
+      .sort(byRecent)
     return {
       sections: matched.length ? [{ kind: "search", sessions: matched }] : [],
       total,
@@ -114,7 +174,7 @@ export function buildConversationSections(
   const sections: ConversationSection[] = []
 
   // 1. Pinned float to the top (regardless of folder).
-  const pinned = viewed.filter((s) => s.pinned).sort(byRecent)
+  const pinned = viewed.filter((s) => s.pinned).sort(byManualThenRecent("pinned"))
   if (pinned.length) sections.push({ kind: "pinned", sessions: pinned })
 
   const rest = viewed.filter((s) => !s.pinned)
@@ -140,28 +200,48 @@ export function buildConversationSections(
     sections.push({
       kind: "folder",
       folder,
-      sessions: (byFolder.get(folder.id) ?? []).sort(byRecent),
+      sessions: (byFolder.get(folder.id) ?? []).sort(byManualThenRecent(`folder:${folder.id}`)),
       collapsed: collapsedFolderIds.has(folder.id),
     })
   }
 
-  // 3. Date buckets for the remaining loose sessions.
-  const buckets = new Map<DateBucket, ChatSession[]>()
-  for (const s of loose) {
-    const bucket = dateBucketFor(now, s.updatedAt ?? 0)
-    const list = buckets.get(bucket)
-    if (list) list.push(s)
-    else buckets.set(bucket, [s])
+  // 3. Remaining loose sessions: date buckets, or a single flat "recent" list
+  //    when date grouping is disabled.
+  if (!groupByDate) {
+    if (loose.length)
+      sections.push({ kind: "recent", sessions: loose.sort(byManualThenRecent("recent")) })
+  } else {
+    const buckets = new Map<DateBucket, ChatSession[]>()
+    for (const s of loose) {
+      const bucket = dateBucketFor(now, s.updatedAt ?? 0)
+      const list = buckets.get(bucket)
+      if (list) list.push(s)
+      else buckets.set(bucket, [s])
+    }
+    for (const bucket of DATE_BUCKET_ORDER) {
+      const list = buckets.get(bucket)
+      if (list?.length)
+        sections.push({
+          kind: "date",
+          bucket,
+          sessions: list.sort(byManualThenRecent(`date:${bucket}`)),
+        })
+    }
   }
-  for (const bucket of DATE_BUCKET_ORDER) {
-    const list = buckets.get(bucket)
-    if (list?.length) sections.push({ kind: "date", bucket, sessions: list.sort(byRecent) })
+
+  // Flatten in render order for range-selection / keyboard nav — but skip the
+  // members of a collapsed folder: they aren't rendered, so navigating or
+  // range-selecting onto a hidden row would be surprising.
+  const orderedIds: string[] = []
+  for (const sec of sections) {
+    if (sec.kind === "folder" && sec.collapsed) continue
+    for (const s of sec.sessions) orderedIds.push(s.id)
   }
 
   return {
     sections,
     total,
     filteredCount: total,
-    orderedIds: sections.flatMap((sec) => sec.sessions.map((s) => s.id)),
+    orderedIds,
   }
 }

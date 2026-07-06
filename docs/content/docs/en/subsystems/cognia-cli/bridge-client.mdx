@@ -14,8 +14,8 @@ description: How status / install / uninstall / list / reload / dev reach a runn
   `/api/v1/dev/health` and emits token-free JSON; `list` exposes the installed plugin snapshot as
   a table or `schemaVersion: 1` JSON; `reload` POSTs a hot-reload request for a
   plugin id, rebuilt bundle, or unpacked directory; `install` accepts either a built `.zip` or a directory containing
-  `plugin.json`, preflights installed plugins, and prompts before replacing an existing id; `uninstall --purge-data` shows an irreversibility warning box; `dev` watches `src/ · wit/ · dist/ · Cargo.toml ·
-  package.json · plugin.json` with `notify`, debounces 250 ms, rebuilds via `cmd_build`, and
+  `plugin.json`, preflights installed plugins, and prompts before replacing an existing id; `uninstall --purge-data` shows an irreversibility warning box; `dev` watches the base source/build paths plus manifest-declared runtime entries
+  (`main`, `pythonMain`, `vscodeMain`, `styles`, `bundle_include[]`) with `notify`, debounces 250 ms, rebuilds via `cmd_build`, and
   POSTs `/api/v1/dev/plugins/reload` — degrading gracefully to rebuild-only when no app runs.
 </TLDR>
 
@@ -89,6 +89,12 @@ a trailing-slash-trimmed base, deserialize 2xx JSON, and surface non-2xx as
    prints `✓ installed <id> from <path>` plus any server-returned warnings indented as `⚠ …`; failure prints
    `install rejected by cognia: <error>`
 
+In `--json` mode, install/reload/uninstall all keep stdout structured for endpoint discovery
+failures, bridge envelopes (`{"ok": false, "error": "..."}`), and raw HTTP/transport failures from
+`post_json`. The payloads use `schemaVersion: 1`, `ok: false`, the command `action`,
+`stage: "endpoint"` or `"bridge"`, command inputs, and the actionable error string; stderr stays
+empty because `JsonFailureExit` suppresses the generic error renderer.
+
 ## uninstall
 
 `cmd_uninstall.rs:50-138`. Plain mode posts straight away. With `--purge-data`, a warning box is
@@ -116,6 +122,8 @@ plugin id, version, status, and install path. `--json` emits:
 ```json
 {
   "schemaVersion": 1,
+  "ok": true,
+  "action": "list",
   "plugins": [
     {
       "pluginId": "demo",
@@ -124,6 +132,21 @@ plugin id, version, status, and install path. `--json` emits:
       "installPath": "/path/to/plugin"
     }
   ]
+}
+```
+
+If endpoint discovery or the bridge request itself fails in JSON mode (for example a missing/stale
+endpoint file, auth rejection, or non-2xx bridge response), stdout remains machine-readable and the
+command exits non-zero. `stage` is `"endpoint"` before an HTTP request exists and `"bridge"` after a
+request reaches the client:
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "action": "list",
+  "stage": "bridge",
+  "error": "GET http://127.0.0.1:4567/api/v1/dev/plugins/installed -> HTTP 500\nresponse: ..."
 }
 ```
 
@@ -139,10 +162,26 @@ output shows whether the bridge is running, plus the endpoint file path and base
 ```json
 {
   "schemaVersion": 1,
+  "ok": true,
+  "action": "status",
   "running": true,
   "endpointFile": "C:/Users/dev/AppData/Roaming/cognia/cli-endpoint.json",
   "baseUrl": "http://127.0.0.1:4567",
   "error": null
+}
+```
+
+An unavailable bridge keeps the same envelope and leaves stderr empty:
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "action": "status",
+  "running": false,
+  "endpointFile": "C:/Users/dev/AppData/Roaming/cognia/cli-endpoint.json",
+  "baseUrl": null,
+  "error": "no running cognia detected: expected C:/Users/dev/AppData/Roaming/cognia/cli-endpoint.json to exist"
 }
 ```
 
@@ -162,11 +201,37 @@ cognia plugin reload --path target/cognia/hello-0.1.0.zip
 cognia plugin reload --path .
 ```
 
-The response envelope mirrors install: `{ok, pluginId, warnings[]}`. Non-2xx transport failures
-still flow through `http_client::post_json`, so stale endpoint files and bridge auth failures get
-the same actionable diagnostics as install/uninstall.
+The response envelope mirrors install: `{ok, pluginId, warnings[]}`. In human mode, non-2xx
+transport failures still use the generic `http_client::post_json` diagnostics; in `--json` mode,
+reload wraps those errors into the same `ok: false`, `stage: "bridge"` payload shape used for
+bridge-level rejections.
 
 ## dev — the watch loop
+
+`cognia plugin dev --once` reuses the same build + optional reload pipeline without starting the
+file watcher. It is intended for CI, editor tasks, and "does this plugin still build and reload?"
+smokes. `--json` is accepted only with `--once`, so stdout is always one complete JSON document:
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "action": "dev",
+  "mode": "once",
+  "pluginId": "hello-python",
+  "version": "0.1.0",
+  "pluginType": "python",
+  "bundle": "target/cognia/hello-python-0.1.0.zip",
+  "reload": {
+    "attempted": false,
+    "skippedReason": "no-endpoint"
+  }
+}
+```
+
+If the bridge responds with `{ "ok": false, "error": "..." }`, the command exits non-zero and keeps
+the build metadata in the failure payload with `stage: "reload"` and
+`"reload": { "attempted": true, "ok": false }`.
 
 ```mermaid
 sequenceDiagram
@@ -176,7 +241,7 @@ sequenceDiagram
   participant X as bridge POST /reload
   participant R as renderer
 
-  FS-->>L: Create/Modify/Remove under src/ wit/ dist/<br/>or Cargo.toml · package.json · plugin.json
+  FS-->>L: Create/Modify/Remove under base paths<br/>or manifest-declared runtime entries
   L->>L: pending = true · debounce 250 ms
   L->>B: rebuild (quiet flags, cargo/esbuild output still streams)
   B-->>L: target/cognia/<id>-<version>.zip
@@ -188,7 +253,7 @@ sequenceDiagram
 Mechanics (`cmd_dev.rs`):
 
 - **watcher** — `notify::recommended_watcher()` (inotify / FSEvents / ReadDirectoryChangesW);
-  recursive on `src/`, `wit/`, `dist/`, non-recursive on the three manifests (`:71-86`); only
+  starts from `src/`, `wit/`, `dist/`, `Cargo.toml`, `package.json`, and `plugin.json`, then adds safe manifest-declared paths from `main`, `pythonMain`, `vscodeMain`, `styles`, and `bundle_include[]`; only
   Create/Modify/Remove count (`should_rebuild`, `:160-165`); `DEBOUNCE = 250 ms` (`:37`)
 - **endpoint resolution** (`resolve_reload_endpoint`, `:200-213`) — `--reload-url` overrides the
   discovered base (token still read from the endpoint file when present); no endpoint at all →
@@ -202,3 +267,22 @@ Mechanics (`cmd_dev.rs`):
 
 A failed rebuild is reported above the panel (`✗ rebuild failed: …`) and the loop keeps
 watching — the dev loop never dies on a compile error.
+
+## acp — stdio to WebSocket bridge
+
+`cognia acp` is a top-level utility command rather than a `cognia plugin` subcommand. Editors that
+speak the Agent Client Protocol over newline-delimited stdio can configure
+`{"command": "cognia", "args": ["acp"]}`; the CLI resolves a companion WebSocket endpoint and then
+forwards stdin JSON-RPC lines to WebSocket text frames, printing server frames back to stdout.
+
+Target resolution (`cmd_acp.rs`) is intentionally strict:
+
+1. `COGNIA_ACP_URL` + `COGNIA_ACP_TOKEN` override discovery only when both are non-empty.
+   Supplying just one of them fails immediately with a message naming the missing variable.
+2. Without an override, the command reads the normal `cli-endpoint.json` and POSTs
+   `/api/v1/dev/acp/token` to mint a scoped token and receive the `ws://` / `wss://` URL.
+3. Broker-issued URLs must be loopback (`localhost`, `127.0.0.1`, or `::1`). Non-loopback URLs are
+   accepted only through the explicit env override.
+
+Status text goes to stderr so stdout remains a clean ACP JSON-RPC stream, and `--quiet`
+suppresses that status line for editor integrations that treat stderr as a signal.

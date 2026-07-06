@@ -1,4 +1,11 @@
-import { highlightCached, LruCache, themeCodeKey, tokenizeCached } from "./render-cache"
+import {
+  __resetTransientCacheForTesting,
+  highlightCached,
+  LruCache,
+  themeCodeKey,
+  tokenizeCached,
+  tokenizeTransient,
+} from "./render-cache"
 import { highlightCode } from "./highlight"
 import { tokenizeMarkdown } from "./tokenize"
 import { expandPalette, type BaseColors } from "../theme/palette"
@@ -54,6 +61,38 @@ describe("tokenizeCached", () => {
     const raw = "## Cached\n\n- a\n- b"
     const first = tokenizeCached(raw)
     expect(tokenizeCached(raw)).toBe(first)
+  })
+})
+
+describe("tokenizeTransient", () => {
+  beforeEach(() => __resetTransientCacheForTesting())
+
+  it("matches a direct tokenize", () => {
+    const raw = "# H\n\ngrowing text"
+    expect(tokenizeTransient(raw)).toEqual(tokenizeMarkdown(raw))
+  })
+
+  it("hits the single-entry cache for the same text", () => {
+    const raw = "## Streaming\n\n- a"
+    const first = tokenizeTransient(raw)
+    expect(tokenizeTransient(raw)).toBe(first)
+  })
+
+  it("recomputes when the growing prefix changes", () => {
+    const first = tokenizeTransient("hel")
+    const second = tokenizeTransient("hello")
+    expect(second).not.toBe(first)
+    // Single-entry: the previous key is evicted, so re-requesting it recomputes.
+    expect(tokenizeTransient("hel")).not.toBe(first)
+  })
+
+  it("does not evict the shared tokenizeCached entries", () => {
+    const committed = "## Committed cell\n\nbody"
+    const cached = tokenizeCached(committed)
+    // Stream a flood of distinct growing prefixes — far past the shared LRU cap.
+    for (let i = 0; i < 500; i++) tokenizeTransient("x".repeat(i + 1))
+    // The committed cell's entry must still be a cache hit (same reference).
+    expect(tokenizeCached(committed)).toBe(cached)
   })
 })
 

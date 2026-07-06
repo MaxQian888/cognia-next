@@ -9,15 +9,17 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { FolderOpenIcon, GitBranchIcon, SparklesIcon } from "lucide-react"
+import { FolderOpenIcon, GitBranchIcon, SlidersHorizontalIcon, SparklesIcon } from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import { gitInit } from "@/lib/git/commands"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
 import { useGitActions } from "@/hooks/git/use-git-actions"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 import { useGitStore } from "@/stores/git/git-store"
 import { BranchHeader } from "./branch-header"
 import { ChangesView } from "./changes-view"
@@ -34,11 +36,13 @@ import { StashPanel } from "./stash-panel"
 import { SyncToolbar } from "./sync-toolbar"
 import { TagPanel } from "./tag-panel"
 import { TimelineView } from "./timeline-view"
+import { SourceControlViewSettings } from "./view-settings"
 
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
   const { available, rootDir, refresh, openFolder } = useGitRepo()
   const actions = useGitActions(refresh)
+  const { isDefault: prefsIsDefault } = useSourceControlPrefs()
 
   const repoState = useGitStore((s) => s.repoState)
   const status = useGitStore((s) => s.status)
@@ -150,15 +154,39 @@ export function SourceControlPanel() {
             actions={actions}
           />
         </div>
-        <SyncToolbar
-          actions={actions}
-          onOpenStash={() => setStashOpen(true)}
-          onOpenTimeline={() => openTimelineFor(null)}
-          onOpenRemotes={() => setRemoteOpen(true)}
-          onOpenTags={() => setTagOpen(true)}
-          onOpenCompare={() => setCompareOpen(true)}
-          onRefresh={() => void refresh()}
-        />
+        <div className="flex items-center gap-0.5">
+          <SyncToolbar
+            actions={actions}
+            onOpenStash={() => setStashOpen(true)}
+            onOpenTimeline={() => openTimelineFor(null)}
+            onOpenRemotes={() => setRemoteOpen(true)}
+            onOpenTags={() => setTagOpen(true)}
+            onOpenCompare={() => setCompareOpen(true)}
+            onRefresh={() => void refresh()}
+          />
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative size-7 text-muted-foreground hover:text-foreground"
+                aria-label={t("viewSettings.label")}
+                data-testid="sc-view-settings-trigger"
+              >
+                <SlidersHorizontalIcon className="size-3.5" />
+                {!prefsIsDefault && (
+                  <span
+                    className="absolute right-1 top-1 size-1.5 rounded-full bg-blue-500"
+                    aria-hidden
+                  />
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72">
+              <SourceControlViewSettings />
+            </PopoverContent>
+          </Popover>
+        </div>
       </header>
 
       {repoState?.operationInProgress && (

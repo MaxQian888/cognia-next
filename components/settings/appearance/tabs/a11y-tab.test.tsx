@@ -72,8 +72,11 @@ describe("A11yTab — preserves siblings on save", () => {
     const reduceLabel = screen.getByText("motion.reduceLabel")
     const switchEl = within(reduceLabel.closest("div.flex") as HTMLElement).getByRole("switch")
     fireEvent.click(switchEl)
+    // Dual-write: the canonical motion.reduce plus the legacy boolean, and
+    // nothing in the a11y slice.
     expect(save.mock.calls[0][0]).toEqual({
       motion: expect.objectContaining({ reduce: true }),
+      reduceMotion: true,
     })
   })
 })

@@ -77,7 +77,7 @@ These sites swallow Tauri-mode failures invisibly, so the Plugins → Audit pane
 Two audit dimensions came back clean and require no work:
 
 - **i18n**: 36 `plugins.*` + 12 `settings.plugins.*` keys, fully synchronized between `i18n/messages/en.json` and `i18n/messages/zh-CN.json`. All 28 `useTranslations()` call sites resolve in both locales. No drift, no dead keys (the two "container" keys `plugins.tabs` and `plugins.signature` are accessed via dynamic iteration, not stale).
-- **API surface**: all 14 `lib/plugin/api/*-api.ts` modules are wired into `FullPluginContext` via `lib/plugin/core/context.ts:146-211`. `PluginContext` (base, 19 fields) and `FullPluginContext` (base + 14 extended APIs) align with the type declarations in `types/plugin/plugin.ts` and `types/plugin/plugin-extended.ts`.
+- **API surface**: all 14 `lib/plugin/api/*-api.ts` modules are wired into `FullPluginContext` via `lib/plugin/core/context.ts:146-211`. `PluginContext` (base, 19 fields) and `FullPluginContext` (base + 14 extended APIs) align with the type declarations in `types/plugin/plugin.ts`.
 
 ## Decisions
 

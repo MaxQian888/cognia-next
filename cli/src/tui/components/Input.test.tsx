@@ -8,7 +8,6 @@ jest.mock("../mention/highlight", () => {
 })
 
 import { Input, routePasteInsert } from "./Input"
-import { createPasteParser } from "../input/bracketed-paste"
 import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
@@ -127,6 +126,25 @@ describe("Input (rich composer)", () => {
     expect(onSubmit).toHaveBeenCalledWith("hello")
   })
 
+  it("accumulates a burst of keystrokes delivered in one render (no re-render between)", () => {
+    // Regression: edits used to be computed from the component's closure buffer
+    // and dispatched as a precomputed INPUT_SET. When several keystrokes batch
+    // into a single render (the norm once Ink reads stdin directly), they all
+    // started from the same stale buffer and only the last survived — the "only
+    // one letter types" bug. Firing three keys inside ONE act() (no flush between)
+    // reproduces the batch; the reducer-applied edits must compose to "abc".
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    act(() => {
+      __fireInput("a")
+      __fireInput("b")
+      __fireInput("c")
+    })
+    expect(container.textContent).toContain("abc")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("abc")
+  })
+
   it("shows the placeholder when empty and hides it once typing starts", () => {
     const { container } = render(<Harness onSubmit={jest.fn()} />)
     expect(container.textContent).toContain("Ask, run /commands")
@@ -239,6 +257,24 @@ describe("Input (rich composer)", () => {
     expect(onSubmit).toHaveBeenCalledWith("@src/")
   })
 
+  it("completes a file-path argument in bash (!) mode", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("!cat re")
+    // Bare path candidate (no @ sigil) for the trailing argument.
+    expect(container.textContent).toContain("readme.md")
+    key("", { tab: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("!cat readme.md")
+  })
+
+  it("does not offer bash path completion for the command name itself", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} />)
+    type("!sr")
+    // "sr" is the command name (no preceding space) — no path popup.
+    expect(container.textContent).not.toContain("src/")
+  })
+
   it("drills into a folder: accepting a dir keeps the popup open for its contents", () => {
     const onSubmit = jest.fn()
     const nested: Record<string, DirEntry[]> = {
@@ -320,10 +356,25 @@ describe("Input (rich composer)", () => {
     const onSubmit = jest.fn()
     const big = "l1\nl2\nl3\nl4\nl5\nl6"
     const { container } = render(<Harness onSubmit={onSubmit} />)
+    // Ink ≥7 coalesces a bracketed paste into a single `useInput` call, so the
+    // whole paste arrives as one `key(big)` insert (not char-by-char).
     key(big)
     expect(container.textContent).toContain("[Pasted 6 lines")
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith(big)
+  })
+
+  it("never attaches a stdin 'data' listener (would starve Ink's paused reads)", () => {
+    // Regression guard: Ink ≥7 reads stdin in PAUSED mode via the 'readable'
+    // event + `stdin.read()`. A stray `stdin.on('data')` listener flips the
+    // stream into flowing mode, so `read()` returns null and ALL keyboard input
+    // dies — the composer appears to lose focus. The component must rely on
+    // Ink's own paste coalescing instead of teeing raw stdin.
+    const before = process.stdin.listenerCount("data")
+    const { unmount } = render(<Harness onSubmit={jest.fn()} />)
+    expect(process.stdin.listenerCount("data")).toBe(before)
+    unmount()
+    expect(process.stdin.listenerCount("data")).toBe(before)
   })
 
   it("boosts recently used slash commands to the top of the palette", () => {
@@ -570,11 +621,16 @@ describe("routePasteInsert (paste routing)", () => {
     expect(r.display).toBe("hi there")
   })
 
-  it("routes a bracketed-paste span (parser → routePasteInsert) to a placeholder", () => {
-    const parser = createPasteParser()
+  it("collapses a coalesced paste (one useInput chunk) to a placeholder", () => {
+    // Ink ≥7 parses the bracketed-paste span natively and forwards the whole
+    // body to `useInput` as a SINGLE insert — simulated here by firing one large
+    // chunk. The composer must collapse it to a `[Pasted …]` placeholder rather
+    // than dumping the raw body into the buffer.
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
     const body = "y".repeat(1000)
-    const { pastes } = parser.feed(`\x1b[200~${body}\x1b[201~`)
-    expect(pastes).toEqual([body])
-    expect(routePasteInsert(pastes[0], 0).isLarge).toBe(true)
+    key(body)
+    expect(container.textContent).toContain("[Pasted")
+    expect(container.textContent).not.toContain(body)
   })
 })

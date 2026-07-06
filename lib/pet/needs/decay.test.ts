@@ -1,4 +1,4 @@
-import { applyDecay, applyInteraction, INTERACTION_EFFECTS } from "./decay"
+import { applyDecay, applyInteraction, applyNeedEffect, INTERACTION_EFFECTS } from "./decay"
 import type { PetNeeds } from "@/types/pet"
 
 const HOUR = 3_600_000
@@ -67,5 +67,27 @@ describe("applyInteraction", () => {
     expect(out.bond).toBe(56)
     expect(out.mood).toBe(58)
     expect(out.energy).toBe(48)
+  })
+})
+
+describe("applyNeedEffect", () => {
+  it("settles decay then adds an arbitrary effect, clamped", () => {
+    const out = applyNeedEffect(needs({ energy: 50 }), { energy: 45, mood: 10, bond: 2 }, HOUR)
+    // energy 50 − 4 (decay) + 45 = 91; mood 100 − 2.5 + 10 → clamp 100.
+    expect(out.energy).toBeCloseTo(91)
+    expect(out.mood).toBe(100)
+    expect(out.lastTickAt).toBe(new Date(HOUR).toISOString())
+  })
+
+  it("treats missing keys as zero and clamps negatives at 0", () => {
+    const out = applyNeedEffect(needs({ energy: 2, mood: 50 }), { energy: -10 }, 0)
+    expect(out.energy).toBe(0)
+    expect(out.mood).toBe(50)
+  })
+
+  it("matches applyInteraction bit-for-bit for a table effect", () => {
+    const viaInteraction = applyInteraction(needs({ energy: 50 }), "fed", HOUR)
+    const viaEffect = applyNeedEffect(needs({ energy: 50 }), INTERACTION_EFFECTS.fed, HOUR)
+    expect(viaEffect).toEqual(viaInteraction)
   })
 })

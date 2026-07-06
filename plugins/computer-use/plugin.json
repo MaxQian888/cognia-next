@@ -21,6 +21,10 @@
       "availability": "degraded",
       "entrypoint": "src/index.ts",
       "reason": "The plugin registers the native tool definitions and renderer-side dispatch wiring. Drives the Rust uiautomation/xcap backend in src-tauri/src/automation/ via the plugin_computer_use_* Tauri commands."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Screen capture and input synthesis require native desktop APIs — unavailable in the mobile WebView."
     }
   }
 }

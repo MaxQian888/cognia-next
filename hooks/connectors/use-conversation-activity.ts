@@ -28,6 +28,19 @@ export const ACTIVITY_KINDS: ReadonlySet<AuditKind> = new Set<AuditKind>([
   "goal.started.im",
   "goal.blocked.im",
   "override.computer_use_changed",
+  // "Why didn't THIS conversation get a reply?" — the silent-reply reasons.
+  // Without these, a conversation whose last inbound was policy-blocked /
+  // suppressed / dead-lettered shows an empty activity log.
+  "inbound.policy_blocked",
+  "inbound.deferred_manual_mode",
+  "delivery.error",
+  "delivery.deadlettered",
+  "plugin.inbound_blocked",
+  "plugin.rate_blocked",
+  "plugin.transform_pii_blocked",
+  "notify.im_pii_blocked",
+  "workflow.dispatched",
+  "team.dispatched",
 ])
 
 export function isActivityKind(kind: AuditKind): boolean {

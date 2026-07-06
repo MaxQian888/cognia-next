@@ -18,7 +18,11 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText, DANGEROUS_PATTERNS } from "../safety.mjs"
 import { tailTruncate } from "../shared/truncate.mjs"
 import { pickStreamDecoder } from "../shared/console-decode.mjs"
-import { activeShellDescriptor, bashToolDescription } from "../shared/shell-detect.mjs"
+import {
+  activeShellDescriptor,
+  applyNonInteractiveEnv,
+  bashToolDescription,
+} from "../shared/shell-detect.mjs"
 import { resolveToolPath } from "./read.mjs"
 
 // Re-exported for back-compat: the canonical implementation now lives in
@@ -86,7 +90,9 @@ export function resolveShellInvocation(command, descriptor = activeShellDescript
     isWin: descriptor.isWin,
     shell: descriptor.bin,
     shellArgs: descriptor.buildArgs(command),
-    env: descriptor.sanitizeEnv(process.env),
+    // Drop shell-specific injection vectors, then pin the non-interactive vars
+    // (pager/editor/credential prompts) so a git/pager command can't hang the turn.
+    env: applyNonInteractiveEnv(descriptor.sanitizeEnv(process.env), descriptor),
   }
 }
 
@@ -167,21 +173,34 @@ export function createBashTool({ cwd, bgShells, shell }) {
           stdio: ["ignore", "pipe", "pipe"],
         })
         // Keep a bounded head (frozen) + a rolling tail in memory for the
-        // preview, and stream the full combined output to a temp file so large
-        // logs aren't lost to truncation.
+        // preview. The full combined output is spilled to a temp file ONLY when
+        // it grows past the inline budget — most commands print far less, so we
+        // avoid creating/writing/deleting a temp file per run. `pending` buffers
+        // the complete output until the spill file opens, then is discarded; it
+        // is bounded by MAX_OUTPUT_CHARS + one chunk, so memory stays capped.
         let head = ""
         let mem = ""
+        let pending = ""
         let total = 0
         let timedOut = false
         let fileOk = true
         let stream = null
-        try {
-          stream = createWriteStream(tmpPath)
-          stream.on("error", () => {
+        let spilling = false
+        let fileCreated = false
+        const openSpill = () => {
+          spilling = true // never attempt to open twice, even on failure
+          try {
+            stream = createWriteStream(tmpPath)
+            stream.on("error", () => {
+              fileOk = false
+            })
+            fileCreated = true
+            stream.write(pending)
+          } catch {
             fileOk = false
-          })
-        } catch {
-          fileOk = false
+            stream = null
+          }
+          pending = "" // freed whether the open succeeded or not
         }
         // Decode bytes auto-detecting the console encoding (UTF-8, or the OEM
         // code page on Windows — cmd built-ins print GBK/Shift-JIS/… to a pipe).
@@ -194,7 +213,10 @@ export function createBashTool({ cwd, bgShells, shell }) {
           if (head.length < PREVIEW_HEAD_CHARS) head += s.slice(0, PREVIEW_HEAD_CHARS - head.length)
           mem += s
           if (mem.length > MAX_OUTPUT_CHARS * 2) mem = mem.slice(-MAX_OUTPUT_CHARS * 2)
-          if (fileOk && stream) {
+          if (!spilling) {
+            pending += s
+            if (total > MAX_OUTPUT_CHARS) openSpill()
+          } else if (fileOk && stream) {
             try {
               stream.write(s)
             } catch {
@@ -216,7 +238,8 @@ export function createBashTool({ cwd, bgShells, shell }) {
           clearTimeout(timer)
           // Flush any bytes the streaming decoder is holding for a partial char.
           if (decoder) append(decoder.decode())
-          const done = () => resolve({ head, mem, total, fileOk, tmpPath, timedOut, ...extra })
+          const done = () =>
+            resolve({ head, mem, total, fileOk, fileCreated, tmpPath, timedOut, ...extra })
           if (stream) stream.end(done)
           else done()
         }
@@ -230,10 +253,11 @@ export function createBashTool({ cwd, bgShells, shell }) {
 
       const tailPreview = result.mem.slice(-(MAX_OUTPUT_CHARS - PREVIEW_HEAD_CHARS))
       let fullPath = null
-      if (result.fileOk && result.total > MAX_OUTPUT_CHARS) {
+      if (result.fileCreated && result.fileOk && result.total > MAX_OUTPUT_CHARS) {
         fullPath = result.tmpPath
-      } else if (result.fileOk) {
-        // Small enough to inline — drop the spill file.
+      } else if (result.fileCreated) {
+        // A spill file was opened but the output ended up inline (or the stream
+        // errored) — drop it. Small runs never create a file, so this is rare.
         fsp.unlink(result.tmpPath).catch(() => {})
       }
       const { body: outBody, truncated } = composeBashBody({

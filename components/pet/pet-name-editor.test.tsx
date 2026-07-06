@@ -25,7 +25,8 @@ describe("PetNameEditor", () => {
     const onRename = jest.fn()
     render(<PetNameEditor name="Boba" onRename={onRename} />)
     fireEvent.click(screen.getByLabelText(/rename|pet\.rename\.edit/i))
-    const input = screen.getByLabelText(/pet name|pet\.rename\.label/i)
+    // the input renders (implicit existence assertion)
+    screen.getByLabelText(/pet name|pet\.rename\.label/i)
     // unchanged
     fireEvent.click(screen.getByLabelText(/save name|pet\.rename\.save/i))
     expect(onRename).not.toHaveBeenCalled()

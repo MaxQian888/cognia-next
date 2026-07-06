@@ -23,10 +23,11 @@ import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
 import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
+import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/shell/member-list"
-import { ArtifactPanel } from "@/components/artifacts/artifact-panel"
+import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { CanvasShell } from "@/components/canvas"
 import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
@@ -40,6 +41,7 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
+import { updateSession, setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@/lib/logging"
@@ -299,6 +301,23 @@ export function DesktopChatWorkspace() {
   )
   const paneClose = useCallback((sid: string) => void directChat.close(sid), [directChat])
 
+  // After a plan is approved in the plan-approval dock, switch the session's
+  // permission mode and resume the turn. The store mode is set FIRST (so the
+  // composer's persist effect can't clobber the row back to `plan`), the row is
+  // then written authoritatively and AWAITED before `send` — `send` resolves the
+  // mode from the session row, not the store, so a stale row would run the resume
+  // turn in `plan` mode. `skipUserAppend` injects the turn with no user bubble.
+  const resumeAfterPlanApproval = useCallback(
+    async (prompt: string, mode: PlanResumeMode, sid: string) => {
+      if (useChatStore.getState().activeSessionId === sid) {
+        useChatStore.getState().setPermissionMode(mode)
+      }
+      await updateSession(sid, { permissionMode: mode })
+      await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
+    },
+    [directChat]
+  )
+
   const handleChannelNewDirect = useCallback(() => {
     void handleNewDirect()
   }, [handleNewDirect])
@@ -323,6 +342,10 @@ export function DesktopChatWorkspace() {
     },
     [rename]
   )
+
+  const handleReorderSessions = useCallback((ids: string[], sectionKey: string) => {
+    void setSessionOrder(ids, sectionKey)
+  }, [])
 
   // `useTranslations` returns a fresh function reference on each render. Hold
   // it in a ref so the bulk callbacks (consumed by ChannelList) stay
@@ -468,49 +491,26 @@ export function DesktopChatWorkspace() {
               onRenameFolder={renameFolder}
               onDeleteFolder={deleteFolder}
               onAssignToFolder={assignToFolder}
+              onReorderSessions={handleReorderSessions}
             />
           )}
 
-          <main
-            className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
-            data-bg-target="chat"
-          >
-            {!mounted ? null : platform !== "tauri" ? (
-              <DesktopOnlyBanner />
-            ) : isTeamSession ? (
-              // Team sessions stay single-pane (per-member sub-sessions are
-              // orchestrated by useTeamChat); no multi-pane tabs.
-              <ChatPane
-                activeSession={activeSession}
-                onSend={sendWithTrustPrompt}
-                onStop={stop}
-                onRegenerate={teamChat.regenerate}
-                onEditResend={teamChat.editAndResend}
-                onCreate={handleNewDirect}
-                onUseSample={handleUseSample}
-                onOpenSettings={openSettings}
-                recentSessions={recentSessions}
-                onResumeSession={handleSwitchToSession}
-                composerRef={composerRef}
-              />
-            ) : (
-              <>
-                <WorkspaceTrustGate
-                  sessionId={activeSession?.id ?? null}
-                  promptNonce={trustPromptNonce}
-                />
-                {/* Concurrent direct-chat workspace: tabs + optional split, each
-                    pane bound to its own session slice + inline approval gate. */}
-                <ChatPaneGroup
-                  sessions={sessions}
-                  send={paneSend}
-                  stop={paneStop}
-                  steerNow={paneSteer}
-                  steerFlush={paneFlush}
-                  regenerate={paneRegenerate}
-                  editResend={paneEditResend}
-                  respondToApproval={directChat.respondToApproval}
-                  closePane={paneClose}
+          <ArtifactWorkspaceDock>
+            <main
+              className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+              data-bg-target="chat"
+            >
+              {!mounted ? null : platform !== "tauri" ? (
+                <DesktopOnlyBanner />
+              ) : isTeamSession ? (
+                // Team sessions stay single-pane (per-member sub-sessions are
+                // orchestrated by useTeamChat); no multi-pane tabs.
+                <ChatPane
+                  activeSession={activeSession}
+                  onSend={sendWithTrustPrompt}
+                  onStop={stop}
+                  onRegenerate={teamChat.regenerate}
+                  onEditResend={teamChat.editAndResend}
                   onCreate={handleNewDirect}
                   onUseSample={handleUseSample}
                   onOpenSettings={openSettings}
@@ -518,9 +518,36 @@ export function DesktopChatWorkspace() {
                   onResumeSession={handleSwitchToSession}
                   composerRef={composerRef}
                 />
-              </>
-            )}
-          </main>
+              ) : (
+                <>
+                  <WorkspaceTrustGate
+                    sessionId={activeSession?.id ?? null}
+                    promptNonce={trustPromptNonce}
+                  />
+                  {/* Concurrent direct-chat workspace: tabs + optional split, each
+                    pane bound to its own session slice + inline approval gate. */}
+                  <ChatPaneGroup
+                    sessions={sessions}
+                    send={paneSend}
+                    stop={paneStop}
+                    steerNow={paneSteer}
+                    steerFlush={paneFlush}
+                    regenerate={paneRegenerate}
+                    editResend={paneEditResend}
+                    respondToApproval={directChat.respondToApproval}
+                    closePane={paneClose}
+                    onCreate={handleNewDirect}
+                    onUseSample={handleUseSample}
+                    onOpenSettings={openSettings}
+                    recentSessions={recentSessions}
+                    onResumeSession={handleSwitchToSession}
+                    composerRef={composerRef}
+                    onResumeAfterPlanApproval={resumeAfterPlanApproval}
+                  />
+                </>
+              )}
+            </main>
+          </ArtifactWorkspaceDock>
 
           {isTeamSession && (
             <MemberList
@@ -529,7 +556,6 @@ export function DesktopChatWorkspace() {
               onMention={handleMemberMention}
             />
           )}
-          <ArtifactPanel />
         </>
       )}
 

@@ -40,3 +40,27 @@ MAX_BODY_BYTES = "10485760"
 
 [observability]
 enabled = true
+
+# ── Staging (ADR-0059 P0.1) ─────────────────────────────────────────────────
+# `wrangler deploy --env staging` → a separate worker on *.workers.dev (no
+# route). Named envs do not inherit vars or bindings, so they are repeated.
+# One-time provisioning for staging:
+#   wrangler r2 bucket create cognia-shares-staging
+#   wrangler kv namespace create SHARE_KV --env staging   (paste id via CI var)
+#   wrangler secret put SHARE_UPLOAD_SECRET --env staging
+# The deploy workflow seds REPLACE_WITH_KV_NAMESPACE_ID from the
+# environment-scoped CF_SHARE_KV_NAMESPACE_ID variable, so staging and
+# production each inject their own namespace id.
+[env.staging]
+name = "cognia-share-staging"
+
+[[env.staging.r2_buckets]]
+binding = "SHARE_BUCKET"
+bucket_name = "cognia-shares-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "SHARE_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[env.staging.vars]
+MAX_BODY_BYTES = "10485760"

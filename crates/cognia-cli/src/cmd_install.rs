@@ -11,7 +11,7 @@
 //! definition a local operation.
 
 use anyhow::{anyhow, bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -55,32 +55,71 @@ struct InstalledPluginEntry {
 /// bridge for the currently installed plugins, and if our id is already
 /// loaded, surface "X v1.0 → v1.1" and prompt for replace. `--yes` skips.
 pub fn run(bundle: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
-    let endpoint = load_endpoint()?;
-    run_with_endpoint(bundle, &endpoint, ui)
+    let prepared = match prepare_install_input(bundle.clone()) {
+        Ok(prepared) => prepared,
+        Err(err) if ui.flags.json => {
+            return emit_json_failure(
+                "input",
+                InstallInputKind::Unknown,
+                bundle.display().to_string(),
+                err.to_string(),
+                Vec::new(),
+            );
+        }
+        Err(err) => return Err(err),
+    };
+    let endpoint = match load_endpoint() {
+        Ok(endpoint) => endpoint,
+        Err(err) if ui.flags.json => {
+            return emit_json_failure(
+                "endpoint",
+                prepared.input_kind,
+                prepared.abs_string,
+                err.to_string(),
+                Vec::new(),
+            );
+        }
+        Err(err) => return Err(err),
+    };
+    run_prepared_with_endpoint(prepared, &endpoint, ui)
 }
 
 /// Endpoint-injected variant. Used by tests so they don't race on the
-/// global `COGNIA_CLI_ENDPOINT_FILE` env var, and by future callers that
-/// already hold a resolved endpoint.
+/// global `COGNIA_CLI_ENDPOINT_FILE` env var.
+#[cfg(test)]
 pub fn run_with_endpoint(
     input: PathBuf,
     endpoint: &EndpointFile,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
-    let abs = input
-        .canonicalize()
-        .with_context(|| format!("resolve {}", input.display()))?;
-    let input_kind = install_input_kind(&abs)?;
+    let prepared = prepare_install_input(input)?;
+    run_prepared_with_endpoint(prepared, endpoint, ui)
+}
+
+fn run_prepared_with_endpoint(
+    prepared: PreparedInstallInput,
+    endpoint: &EndpointFile,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
+    let PreparedInstallInput {
+        abs,
+        abs_string,
+        input_kind,
+    } = prepared;
     // ── Preflight: peek manifest, ask bridge for installed list ─────
+    let mut local_warnings = Vec::new();
     let (incoming_id, incoming_version) = match read_input_id_version(&abs, input_kind) {
         Ok(v) => v,
         Err(e) => {
             // Non-fatal — the bridge will reject the malformed bundle
-            // later with a clearer message. Print a hint and continue.
-            eprintln!(
-                "{}could not pre-read bundle manifest: {e}",
-                style::warn_prefix()
-            );
+            // later with a clearer message. Preserve the hint without
+            // leaking human text into JSON-mode stderr.
+            let warning = format!("could not pre-read bundle manifest: {e}");
+            if ui.flags.json {
+                local_warnings.push(warning);
+            } else if !ui.flags.quiet {
+                eprintln!("{}{}", style::warn_prefix(), warning);
+            }
             (String::new(), String::new())
         }
     };
@@ -97,23 +136,46 @@ pub fn run_with_endpoint(
                 } else {
                     incoming_version.clone()
                 };
-                println!(
-                    "{}{} is already installed (v{from} → v{to}).",
-                    style::warn_prefix(),
-                    style::bold(&incoming_id)
-                );
+                if !ui.flags.json && !ui.flags.quiet {
+                    println!(
+                        "{}{} is already installed (v{from} → v{to}).",
+                        style::warn_prefix(),
+                        style::bold(&incoming_id)
+                    );
+                }
                 let proceed = if ui.flags.yes {
                     true
                 } else {
-                    ui.prompter()
-                        .confirm(
-                            &format!("Replace existing {incoming_id} v{from} with v{to}?"),
-                            false,
-                            "--yes to replace without prompting",
-                        )
-                        .map_err(|e| anyhow!("{e}"))?
+                    match ui.prompter().confirm(
+                        &format!("Replace existing {incoming_id} v{from} with v{to}?"),
+                        false,
+                        "--yes to replace without prompting",
+                    ) {
+                        Ok(proceed) => proceed,
+                        Err(err) if ui.flags.json => {
+                            return emit_json_failure(
+                                "confirm",
+                                input_kind,
+                                abs_string,
+                                err.to_string(),
+                                local_warnings,
+                            );
+                        }
+                        Err(err) => return Err(anyhow!("{err}")),
+                    }
                 };
                 if !proceed {
+                    if ui.flags.json {
+                        return emit_json_failure(
+                            "confirm",
+                            input_kind,
+                            abs_string,
+                            format!(
+                                "install aborted: {incoming_id} v{from} kept (no changes made)"
+                            ),
+                            local_warnings,
+                        );
+                    }
                     bail!("install aborted: {incoming_id} v{from} kept (no changes made)");
                 }
             }
@@ -122,38 +184,167 @@ pub fn run_with_endpoint(
         // the bridge enforce whatever idempotency policy it has.
     }
 
-    let abs_string = abs.to_string_lossy().into_owned();
     let (path, body) = match input_kind {
         InstallInputKind::Bundle => (INSTALL_BUNDLE_PATH, json!({ "bundle_path": abs_string })),
         InstallInputKind::Directory => {
             (INSTALL_DIRECTORY_PATH, json!({ "source_dir": abs_string }))
         }
+        InstallInputKind::Unknown => {
+            let error = format!(
+                "install path is neither a file bundle nor a plugin directory: {}",
+                abs.display()
+            );
+            if ui.flags.json {
+                return emit_json_failure("input", input_kind, abs_string, error, local_warnings);
+            }
+            bail!(error);
+        }
     };
-    let resp: InstallResponse = post_json(endpoint, path, &body)?;
+    let resp: InstallResponse = match post_json(endpoint, path, &body) {
+        Ok(resp) => resp,
+        Err(err) if ui.flags.json => {
+            return emit_json_failure(
+                "bridge",
+                input_kind,
+                abs_string,
+                err.to_string(),
+                local_warnings,
+            );
+        }
+        Err(err) => return Err(err),
+    };
     if !resp.ok {
-        bail!(
-            "install rejected by cognia: {}",
-            resp.error.unwrap_or_else(|| "<no error message>".into())
-        );
+        let error = resp.error.unwrap_or_else(|| "<no error message>".into());
+        if ui.flags.json {
+            let mut warnings = local_warnings;
+            warnings.extend(resp.warnings);
+            let payload = InstallFailureJsonPayload {
+                schema_version: 1,
+                ok: false,
+                action: "install",
+                stage: "bridge",
+                input_kind: input_kind.label(),
+                path: abs_string,
+                error,
+                warnings,
+            };
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+            return Err(crate::JsonFailureExit.into());
+        }
+        bail!("install rejected by cognia: {}", error);
     }
     let id = resp.plugin_id.as_deref().unwrap_or("<unknown id>");
-    println!(
-        "{}{} {} from {}",
-        style::success_prefix(),
-        style::ok("installed"),
-        style::bold(id),
-        style::dim(abs.display().to_string())
-    );
-    for warn in &resp.warnings {
-        println!("  {}{}", style::warn_prefix(), warn);
+    if ui.flags.json {
+        let mut warnings = local_warnings;
+        warnings.extend(resp.warnings);
+        let payload = InstallJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "install",
+            plugin_id: id.to_string(),
+            input_kind: input_kind.label(),
+            path: abs_string,
+            warnings,
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else if !ui.flags.quiet {
+        println!(
+            "{}{} {} from {}",
+            style::success_prefix(),
+            style::ok("installed"),
+            style::bold(id),
+            style::dim(abs.display().to_string())
+        );
+        for warn in &resp.warnings {
+            println!("  {}{}", style::warn_prefix(), warn);
+        }
     }
     Ok(())
 }
 
+struct PreparedInstallInput {
+    abs: PathBuf,
+    abs_string: String,
+    input_kind: InstallInputKind,
+}
+
+fn prepare_install_input(input: PathBuf) -> Result<PreparedInstallInput> {
+    let abs = input
+        .canonicalize()
+        .with_context(|| format!("resolve {}", input.display()))?;
+    let input_kind = install_input_kind(&abs)?;
+    let abs_string = abs.to_string_lossy().into_owned();
+    Ok(PreparedInstallInput {
+        abs,
+        abs_string,
+        input_kind,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallInputKind {
+    Unknown,
     Bundle,
     Directory,
+}
+
+impl InstallInputKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Bundle => "bundle",
+            Self::Directory => "directory",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct InstallJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    #[serde(rename = "pluginId")]
+    plugin_id: String,
+    #[serde(rename = "inputKind")]
+    input_kind: &'static str,
+    path: String,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InstallFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    #[serde(rename = "inputKind")]
+    input_kind: &'static str,
+    path: String,
+    error: String,
+    warnings: Vec<String>,
+}
+
+fn emit_json_failure(
+    stage: &'static str,
+    input_kind: InstallInputKind,
+    path: String,
+    error: String,
+    warnings: Vec<String>,
+) -> Result<()> {
+    let payload = InstallFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "install",
+        stage,
+        input_kind: input_kind.label(),
+        path,
+        error,
+        warnings,
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
 }
 
 fn install_input_kind(path: &Path) -> Result<InstallInputKind> {
@@ -174,6 +365,10 @@ fn read_input_id_version(path: &Path, kind: InstallInputKind) -> Result<(String,
     match kind {
         InstallInputKind::Bundle => read_bundle_id_version(path),
         InstallInputKind::Directory => read_plugin_dir_id_version(path),
+        InstallInputKind::Unknown => bail!(
+            "install path is neither a file bundle nor a plugin directory: {}",
+            path.display()
+        ),
     }
 }
 
@@ -527,5 +722,50 @@ mod tests {
         let (id, ver) = read_bundle_id_version(&path).unwrap();
         assert_eq!(id, "my-plug");
         assert_eq!(ver, "2.3.4");
+    }
+
+    #[test]
+    fn install_json_payload_is_schema_versioned() {
+        let payload = InstallJsonPayload {
+            schema_version: 1,
+            ok: true,
+            action: "install",
+            plugin_id: "demo".into(),
+            input_kind: "directory",
+            path: "C:/plugins/demo".into(),
+            warnings: vec!["reload recommended".into()],
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["action"], "install");
+        assert_eq!(json["pluginId"], "demo");
+        assert_eq!(json["inputKind"], "directory");
+        assert_eq!(json["warnings"][0], "reload recommended");
+    }
+
+    #[test]
+    fn install_failure_json_payload_carries_bridge_error() {
+        let payload = InstallFailureJsonPayload {
+            schema_version: 1,
+            ok: false,
+            action: "install",
+            stage: "bridge",
+            input_kind: "directory",
+            path: "C:/plugins/demo".into(),
+            error: "manifest invalid".into(),
+            warnings: vec!["could not pre-read bundle manifest: parse plugin.json".into()],
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["action"], "install");
+        assert_eq!(json["stage"], "bridge");
+        assert_eq!(json["inputKind"], "directory");
+        assert_eq!(json["error"], "manifest invalid");
+        assert!(json["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("could not pre-read"));
     }
 }

@@ -28,6 +28,19 @@ jest.mock("@/components/chat/branch-dialog", () => ({
   ),
 }))
 
+// Importing the composer for the append-event constant would drag in the whole
+// composer module (stores, Dexie, etc.); stub it to just the string (mirrors
+// plugins/ocr/src/ocr-result-card.test.tsx).
+jest.mock("@/components/chat/composer", () => ({
+  __esModule: true,
+  COMPOSER_APPEND_EVENT: "cognia:composer-append",
+}))
+
+jest.mock("@/lib/capacitor/haptics", () => ({
+  __esModule: true,
+  selectionFeedback: jest.fn(),
+}))
+
 import { share } from "@/lib/capacitor/share"
 import { toast } from "sonner"
 
@@ -43,6 +56,7 @@ const messages = {
       copy: "Copy text",
       copySuccess: "Copied to clipboard.",
       copyFailed: "Copy failed: {message}",
+      quote: "Quote",
       share: "Share…",
       shareDialogTitle: "Share via",
       shareUnsupported: "Sharing isn't supported on this device.",
@@ -163,6 +177,31 @@ describe("MessageActionSheet", () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello world")
     })
     expect(mockToastSuccess).toHaveBeenCalledWith("Copied to clipboard.")
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("renders the Quote row", () => {
+    renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.getByTestId("message-action-quote")).toBeInTheDocument()
+  })
+
+  it("disables Copy/Quote/Share for an empty message", () => {
+    renderSheet(makeMessage(""), jest.fn())
+    expect(screen.getByTestId("message-action-quote")).toBeDisabled()
+    expect(screen.getByTestId("message-action-copy")).toBeDisabled()
+    expect(screen.getByTestId("message-action-share")).toBeDisabled()
+  })
+
+  it("dispatches a markdown blockquote to the composer and closes on Quote", () => {
+    const onOpenChange = jest.fn()
+    const handler = jest.fn()
+    window.addEventListener("cognia:composer-append", handler)
+    renderSheet(makeMessage("line one\nline two"), onOpenChange)
+    fireEvent.click(screen.getByTestId("message-action-quote"))
+    window.removeEventListener("cognia:composer-append", handler)
+    expect(handler).toHaveBeenCalledTimes(1)
+    const detail = (handler.mock.calls[0][0] as CustomEvent<{ text: string }>).detail
+    expect(detail.text).toBe("> line one\n> line two\n\n")
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 

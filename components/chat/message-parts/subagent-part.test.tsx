@@ -16,6 +16,27 @@ jest.mock("next-intl", () => ({
 // Stub Collapsible primitives so children always render in tests.
 jest.mock("@/components/ui/collapsible")
 
+// MarkdownRenderer pulls in ESM (streamdown/shiki) — stub it.
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => (
+    <div data-testid="subagent-md">{content}</div>
+  ),
+}))
+// Inline tool list children — assert via entry counts, not their internals.
+jest.mock("@/components/chat/message-parts/tool-activity-group", () => ({
+  ToolActivityGroup: ({ entries }: { entries: unknown[] }) => (
+    <div data-testid="tool-activity-group" data-count={entries.length} />
+  ),
+}))
+jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
+  ToolCallRow: () => <div data-testid="tool-call-row" />,
+}))
+
+const cancelSubagentRun = jest.fn()
+jest.mock("@/lib/claude/agents/cancel-subagent", () => ({
+  cancelSubagentRun: (...a: unknown[]) => cancelSubagentRun(...a),
+}))
+
 const basePart: SubagentPartType = {
   type: "subagent",
   subagentId: "sa-1",
@@ -51,6 +72,7 @@ function makeSubAgent(overrides: Partial<SubAgent> = {}): SubAgent {
 
 beforeEach(() => {
   useSubagentRuntimeStore.setState((s) => ({ ...s, subAgents: {} }))
+  cancelSubagentRun.mockClear()
 })
 
 describe("SubagentPart", () => {
@@ -194,6 +216,159 @@ describe("SubagentPart", () => {
       />
     )
     expect(screen.getByTestId("subagent-tokens-badge").textContent).toMatch(/15/)
+  })
+
+  describe("inline tool list + result + abort (Part 2)", () => {
+    it("renders a grouped tool activity when ≥2 tool calls (detailed/open)", () => {
+      useSubagentRuntimeStore.getState().upsert(
+        makeSubAgent({
+          toolCalls: [
+            { id: "t1", name: "read", state: "done" },
+            { id: "t2", name: "grep", state: "running" },
+          ],
+        })
+      )
+      render(<SubagentPart part={basePart} mode="detailed" />)
+      expect(screen.getByTestId("tool-activity-group").getAttribute("data-count")).toBe("2")
+    })
+
+    it("renders a single tool row when exactly one tool call", () => {
+      useSubagentRuntimeStore
+        .getState()
+        .upsert(makeSubAgent({ toolCalls: [{ id: "t1", name: "read", state: "running" }] }))
+      render(<SubagentPart part={basePart} mode="detailed" />)
+      expect(screen.getByTestId("tool-call-row")).toBeInTheDocument()
+    })
+
+    it("renders the final output as markdown when the run has a result", () => {
+      useSubagentRuntimeStore.getState().upsert(
+        makeSubAgent({
+          status: "completed",
+          completedAt: new Date(),
+          result: {
+            success: true,
+            finalResponse: "# Done",
+            steps: [],
+            totalSteps: 0,
+            duration: 1,
+          },
+        })
+      )
+      render(<SubagentPart part={{ ...basePart, completedAt: Date.now() }} mode="detailed" />)
+      expect(screen.getByTestId("subagent-result")).toBeInTheDocument()
+      expect(screen.getByTestId("subagent-md").textContent).toBe("# Done")
+    })
+
+    it("renders a token breakdown from the run result", () => {
+      useSubagentRuntimeStore.getState().upsert(
+        makeSubAgent({
+          status: "completed",
+          completedAt: new Date(),
+          result: {
+            success: true,
+            finalResponse: "ok",
+            steps: [],
+            totalSteps: 0,
+            duration: 1,
+            tokenUsage: { promptTokens: 30, completionTokens: 12, totalTokens: 42 },
+          },
+        })
+      )
+      render(<SubagentPart part={{ ...basePart, completedAt: Date.now() }} mode="detailed" />)
+      expect(screen.getByTestId("subagent-tokens-breakdown").textContent).toContain('"total":42')
+    })
+
+    it("shows an Abort button while running and calls cancelSubagentRun", () => {
+      useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "running" }))
+      render(<SubagentPart part={basePart} mode="standard" />)
+      const abort = screen.getByTestId("subagent-abort-sa-1")
+      fireEvent.click(abort)
+      expect(cancelSubagentRun).toHaveBeenCalledWith("sa-1", { backgrounded: false })
+    })
+
+    it("hides the Abort button once the run is no longer running", () => {
+      useSubagentRuntimeStore
+        .getState()
+        .upsert(makeSubAgent({ status: "completed", completedAt: new Date() }))
+      render(<SubagentPart part={{ ...basePart, completedAt: Date.now() }} />)
+      expect(screen.queryByTestId("subagent-abort-sa-1")).toBeNull()
+    })
+
+    it("passes backgrounded:true to cancel for a backgrounded run", () => {
+      useSubagentRuntimeStore
+        .getState()
+        .upsert(makeSubAgent({ status: "running", backgrounded: true }))
+      render(<SubagentPart part={{ ...basePart, backgrounded: true }} mode="simplified" />)
+      fireEvent.click(screen.getByTestId("subagent-abort-sa-1"))
+      expect(cancelSubagentRun).toHaveBeenCalledWith("sa-1", { backgrounded: true })
+    })
+  })
+
+  describe("gap7 — persisted snapshot fallback (store empty after reload)", () => {
+    it("renders tool list + result + logs from the part snapshot when the store has no live run", () => {
+      // store is empty (beforeEach) — simulate a cold reload.
+      const snapshotPart: SubagentPartType = {
+        ...basePart,
+        status: "completed",
+        completedAt: basePart.startedAt + 1000,
+        toolCalls: [
+          { id: "t1", name: "read", state: "done" },
+          { id: "t2", name: "grep", state: "done" },
+        ],
+        logs: [{ level: "info", message: "persisted log" }],
+        finalResponse: "# Frozen result",
+        toolUses: 2,
+      }
+      render(<SubagentPart part={snapshotPart} mode="detailed" />)
+      expect(screen.getByTestId("tool-activity-group").getAttribute("data-count")).toBe("2")
+      expect(screen.getByTestId("subagent-result")).toBeInTheDocument()
+      expect(screen.getByTestId("subagent-md").textContent).toBe("# Frozen result")
+      expect(screen.getByText(/persisted log/)).toBeInTheDocument()
+    })
+
+    it("prefers the live store value over the part snapshot when both exist", () => {
+      useSubagentRuntimeStore.getState().upsert(
+        makeSubAgent({
+          status: "running",
+          logs: [{ timestamp: new Date(), level: "info", message: "LIVE log" }],
+        })
+      )
+      const snapshotPart: SubagentPartType = {
+        ...basePart,
+        logs: [{ level: "info", message: "STALE log" }],
+      }
+      render(<SubagentPart part={snapshotPart} mode="detailed" />)
+      expect(screen.getByText(/LIVE log/)).toBeInTheDocument()
+      expect(screen.queryByText(/STALE log/)).toBeNull()
+    })
+  })
+
+  describe("gap8 — stream-text logs gated to detailed mode", () => {
+    const streamLogPart = (): SubagentPartType => ({
+      ...basePart,
+      status: "completed",
+      completedAt: basePart.startedAt + 1,
+      logs: [
+        { level: "info", message: "ran a tool" },
+        { level: "info", message: "narrated reasoning", data: { stream: "text" } },
+      ],
+    })
+
+    it("hides stream-text logs in standard mode", () => {
+      render(<SubagentPart part={streamLogPart()} mode="standard" />)
+      expect(screen.getByText(/ran a tool/)).toBeInTheDocument()
+      expect(screen.queryByText(/narrated reasoning/)).toBeNull()
+    })
+
+    it("hides stream-text logs in simplified mode (incl. the row preview)", () => {
+      render(<SubagentPart part={streamLogPart()} mode="simplified" open onToggle={() => {}} />)
+      expect(screen.queryByText(/narrated reasoning/)).toBeNull()
+    })
+
+    it("shows stream-text logs in detailed mode", () => {
+      render(<SubagentPart part={streamLogPart()} mode="detailed" />)
+      expect(screen.getByText(/narrated reasoning/)).toBeInTheDocument()
+    })
   })
 
   describe("mode + controlled open", () => {

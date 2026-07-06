@@ -35,6 +35,18 @@ export interface CapabilityCatalog {
   subagentIds: string[]
 }
 
+/**
+ * A recruitable Employee Digital Twin (ADR-0003) the composer may bind to a
+ * teammate. Gathered by `twin-roster.ts` from the twin registry; the composer
+ * may only assign a `twinId` present here (validated, never hallucinated).
+ */
+export interface TwinRosterEntry {
+  twinId: string
+  name: string
+  /** Short expertise blurb (voice summary + key entities), truncated. */
+  expertise: string
+}
+
 /** A proposed teammate, before it is materialized into the store. */
 export interface ProposedTeammate {
   name: string
@@ -45,6 +57,12 @@ export interface ProposedTeammate {
   specialization?: string
   /** Capability overlay (validated against the catalog — never hallucinated). */
   capabilities?: TeammateCapabilityOverlay
+  /**
+   * Bind this teammate to an existing digital employee (twin). Validated
+   * against the run's `TwinRosterEntry[]` — dropped if unknown. When set, the
+   * materialized teammate rides the twin's persona + per-task RAG (Pillar A).
+   */
+  twinId?: string
 }
 
 /** A proposed task, before it is materialized. References are array indices. */
@@ -65,4 +83,17 @@ export interface AutoOrchestrationProposal {
   assessment: TeamRoutingAssessment
   roster: ProposedTeammate[]
   tasks: ProposedTask[]
+  /**
+   * The digital employees (twins) that were offered to the composer, so the
+   * roster editor can render + let the operator re-bind them. Absent when the
+   * host has no twins. See `twin-roster.ts`.
+   */
+  twinRoster?: TwinRosterEntry[]
+  /**
+   * The chosen executor (single-send / council / ensemble / team-* / handoff),
+   * derived from the assessment + operator consensus signal. Optional so
+   * materialize-only callers and older proposals are unaffected; consumers
+   * recompute via `chooseExecutor` when absent. See `dispatch-executor.ts`.
+   */
+  executor?: import("./dispatch-executor").DispatchDecision
 }

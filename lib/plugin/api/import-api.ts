@@ -7,12 +7,14 @@
  */
 
 import { createPluginSystemLogger } from "../core/logger"
+import { registerSessionSource } from "@/lib/session-import/registry"
+import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
 import type {
   CustomImporter,
   ImportResult,
   ImportSource,
   PluginImportAPI,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 
 // Registry for custom importers, keyed by the namespaced `${pluginId}:${id}`.
 const customImporters = new Map<string, CustomImporter>()
@@ -32,6 +34,15 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
     },
 
     getCustomImporters: (): CustomImporter[] => Array.from(customImporters.values()),
+
+    registerSessionSource: (adapter: AgentSessionSourceAdapter) => {
+      const dispose = registerSessionSource(adapter, { pluginId })
+      logger.info(`Registered session source: ${adapter.id}`)
+      return () => {
+        dispose()
+        logger.info(`Unregistered session source: ${adapter.id}`)
+      }
+    },
 
     importContent: async (source: ImportSource, format: string): Promise<ImportResult> => {
       const importer = Array.from(customImporters.values()).find((i) => i.format === format)

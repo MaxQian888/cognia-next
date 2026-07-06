@@ -29,6 +29,11 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Characters, skills, and templates load on mobile; the agent.turn node needs the desktop sidecar Claude Agent SDK."
     }
   }
 }

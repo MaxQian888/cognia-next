@@ -197,6 +197,21 @@ export async function pruneOlderThan(olderThanMs: number): Promise<number> {
     .delete()
 }
 
+/** Count all persisted spans — drives the observability settings "N traces
+ * stored" figure and the empty-state decision without materializing rows. */
+export async function countAllSpans(): Promise<number> {
+  return getDb().agentTraces.count()
+}
+
+/** Drop every persisted span. Distinct from `pruneOlderThan` (retention) — this
+ * is the explicit "clear all telemetry" action behind a confirm dialog in the
+ * observability settings. Returns the number of rows removed. */
+export async function clearAllSpans(): Promise<number> {
+  const removed = await getDb().agentTraces.count()
+  await getDb().agentTraces.clear()
+  return removed
+}
+
 /** Test-only: drop every row. Production code should never call this. */
 export async function __clearAgentTracesForTesting(): Promise<void> {
   await getDb().agentTraces.clear()

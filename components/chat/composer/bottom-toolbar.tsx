@@ -187,34 +187,50 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
     </>
   )
 
-  return (
-    <div
-      ref={rootRef}
-      className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground"
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <ModelPicker session={session} disabled={isStreaming} />
-        <EffortSelector session={session} disabled={isStreaming} />
-        <PermissionModeIndicator
-          onCycle={(next) => setPermissionMode(next)}
-          disabled={isStreaming}
-        />
-        <SandboxShield session={session} />
-        {!compact && (
-          <>
-            <div className="flex items-center gap-2">{tier2}</div>
-            <div className="flex items-center gap-2">{tier3}</div>
-            {/* Runtime overflow even on a wide toolbar — keeps the primary row short. */}
-            <ToolbarMoreMenu
-              label={t("moreControls")}
-              active={runtime !== "claude-sdk"}
-              disabled={isStreaming}
-            >
-              <div className="flex flex-col gap-2">{runtimeControl}</div>
-            </ToolbarMoreMenu>
-          </>
-        )}
-        {compact && (
+  // Tier 1 stays on ONE line as a single shrinkable unit: `flex-nowrap` +
+  // `min-w-0` lets the model chip ellipsize when space is tight (long provider
+  // model ids) instead of pushing Effort / Permission / Sandbox onto a second
+  // row.
+  const tier1Group = (
+    <div className="flex min-w-0 flex-nowrap items-center gap-x-2">
+      <ModelPicker session={session} disabled={isStreaming} />
+      <EffortSelector session={session} disabled={isStreaming} />
+      <PermissionModeIndicator onCycle={(next) => setPermissionMode(next)} disabled={isStreaming} />
+      <SandboxShield session={session} />
+    </div>
+  )
+
+  const contextIndicator = (
+    <ContextUsageIndicator
+      modelId={modelId}
+      providerId={providerId}
+      sdkUsage={sdkUsage}
+      triggerClassName="ml-auto shrink-0"
+    />
+  )
+
+  // The SkillPicker dialog stays mounted regardless of tier so the trigger
+  // inside `tier2` (inline or in the More menu) can open it.
+  const skillPicker = (
+    <SkillPicker
+      open={pickerOpen}
+      onOpenChange={setPickerOpen}
+      value={ephemeralSkillIds}
+      onChange={setEphemeralSkillIds}
+    />
+  )
+
+  // Compact (mobile / narrow workflow sidebar): cap the toolbar at TWO rows —
+  // Tier 1 on the first, the overflow menu + context usage sharing the second
+  // — so it never spills into the ugly three-row stack ([tier1] / [⋯] / [%]).
+  if (compact) {
+    return (
+      <div
+        ref={rootRef}
+        className="mt-2 flex flex-col gap-1 px-1 text-[11px] text-muted-foreground"
+      >
+        {tier1Group}
+        <div className="flex items-center justify-between gap-x-2">
           <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">{tier2}</div>
@@ -222,23 +238,36 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
               <div className="flex flex-wrap items-center gap-2">{runtimeControl}</div>
             </div>
           </ToolbarMoreMenu>
-        )}
-        {/* The SkillPicker dialog stays mounted regardless of tier so the */}
-        {/* trigger inside `tier2` (inline or in the More menu) can open it. */}
-        <SkillPicker
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          value={ephemeralSkillIds}
-          onChange={setEphemeralSkillIds}
-        />
+          {contextIndicator}
+        </div>
+        {skillPicker}
+      </div>
+    )
+  }
+
+  // Wide (web / desktop): everything on a single wrapping row, context usage
+  // pinned to the right via `ml-auto`.
+  return (
+    <div
+      ref={rootRef}
+      className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground"
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        {tier1Group}
+        <div className="flex items-center gap-2">{tier2}</div>
+        <div className="flex items-center gap-2">{tier3}</div>
+        {/* Runtime overflow even on a wide toolbar — keeps the primary row short. */}
+        <ToolbarMoreMenu
+          label={t("moreControls")}
+          active={runtime !== "claude-sdk"}
+          disabled={isStreaming}
+        >
+          <div className="flex flex-col gap-2">{runtimeControl}</div>
+        </ToolbarMoreMenu>
+        {skillPicker}
       </div>
 
-      <ContextUsageIndicator
-        modelId={modelId}
-        providerId={providerId}
-        sdkUsage={sdkUsage}
-        triggerClassName="ml-auto shrink-0"
-      />
+      {contextIndicator}
     </div>
   )
 }

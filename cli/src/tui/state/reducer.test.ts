@@ -169,6 +169,54 @@ describe("tuiReducer", () => {
     expect(s.inflight.text).toBe("Hello")
   })
 
+  it("bumps streamSeq on each live stream-activity delta", () => {
+    const s0 = base()
+    expect(s0.streamSeq).toBe(0)
+    const s1 = reduce(s0, { type: "INFLIGHT_TEXT", delta: "a" })
+    expect(s1.streamSeq).toBe(1)
+    const s2 = reduce(s1, { type: "INFLIGHT_THINKING", delta: "t" })
+    expect(s2.streamSeq).toBe(2)
+    const s3 = reduce(s2, {
+      type: "TOOL_CALL",
+      callKey: "k1",
+      toolName: "bash",
+      input: { command: "ls" },
+    })
+    expect(s3.streamSeq).toBe(3)
+    const s4 = reduce(s3, {
+      type: "TOOL_RESULT",
+      callKey: "k1",
+      toolName: "bash",
+      result: "ok",
+      isError: false,
+    })
+    expect(s4.streamSeq).toBe(4)
+  })
+
+  it("does not bump streamSeq for non-stream actions or no-op deltas", () => {
+    const s0 = base()
+    // TURN_START is lifecycle, not stream activity.
+    const s1 = reduce(s0, { type: "TURN_START", prompt: "go" })
+    expect(s1.streamSeq).toBe(0)
+    // A duplicate TOOL_CALL for an already-running callKey is a no-op (state
+    // unchanged) so the counter must not advance.
+    const sCall = reduce(s1, {
+      type: "TOOL_CALL",
+      callKey: "dup",
+      toolName: "bash",
+      input: { command: "ls" },
+    })
+    expect(sCall.streamSeq).toBe(1)
+    const sDup = reduce(sCall, {
+      type: "TOOL_CALL",
+      callKey: "dup",
+      toolName: "bash",
+      input: { command: "ls" },
+    })
+    expect(sDup).toBe(sCall)
+    expect(sDup.streamSeq).toBe(1)
+  })
+
   it("INFLIGHT_TEXT flushes pending reasoning to a thinking cell first", () => {
     const s = reduce(
       base(),
@@ -309,6 +357,43 @@ describe("tuiReducer", () => {
     expect(s.inflight.tools.find((t) => t.toolName === "bash")?.status).toBe("running")
   })
 
+  it("TOOL_RESULT whose key AND name both match nothing does NOT hijack the lone running tool", () => {
+    // A late/duplicate keyed result (its own tool already resolved or it collided)
+    // whose name also doesn't match must be dropped, not force-attached to
+    // whatever single tool is in flight via the sole-running fallback.
+    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} })
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "k-stale", toolName: "glob", result: "wrong" })
+    expect(s.inflight.tools[0].status).toBe("running")
+    expect(s.inflight.tools[0].result).toBeUndefined()
+  })
+
+  it("TOOL_RESULT still pairs by name when only the callKey is stale (oldest same-name)", () => {
+    // The name tier is the legitimate fallback: a result with a non-matching key
+    // but a matching tool name pairs to the oldest running tool of that name.
+    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} })
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "k-stale", toolName: "bash", result: "ok" })
+    expect(s.inflight.tools[0].status).toBe("done")
+    expect(s.inflight.tools[0].result).toBe("ok")
+  })
+
+  it("two identical concurrent calls with distinct ids both render and pair to their own result", () => {
+    // Same name + same input but distinct tool_use ids → distinct callKeys. The
+    // dedup must NOT collapse them, and each result pairs to its own card.
+    let s = reduce(base(), {
+      type: "TOOL_CALL",
+      callKey: "tu_1",
+      toolName: "read",
+      input: { p: "x" },
+    })
+    s = reduce(s, { type: "TOOL_CALL", callKey: "tu_2", toolName: "read", input: { p: "x" } })
+    expect(s.inflight.tools).toHaveLength(2)
+    expect(s.toolStats.read.calls).toBe(2)
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "tu_2", toolName: "read", result: "second" })
+    s = reduce(s, { type: "TOOL_RESULT", callKey: "tu_1", toolName: "read", result: "first" })
+    expect(s.inflight.tools.find((t) => t.callKey === "tu_1")?.result).toBe("first")
+    expect(s.inflight.tools.find((t) => t.callKey === "tu_2")?.result).toBe("second")
+  })
+
   it("TURN_START pushes a user cell and enters streaming", () => {
     const s = reduce(base(), { type: "TURN_START", prompt: "do it" })
     expect(s.cells[0]).toMatchObject({ kind: "user", text: "do it" })
@@ -369,6 +454,20 @@ describe("tuiReducer", () => {
     expect(s.lastPlan).toMatchObject({ raw: "# Plan\n- step one\n- step two" })
     // The plan's seq matches the cell that carries it.
     expect(s.lastPlan?.seq).toBe(Number((s.cells.at(-1)!.id as string).slice(1)))
+  })
+
+  it("COMMIT_PLAN captures a programmatic plan (from /plan explore) as a PlanCell + lastPlan", () => {
+    // Independent of permission mode — the pipeline can be kicked from any mode.
+    const s = reduce(base(), { type: "COMMIT_PLAN", raw: "# Explored Plan\n1. a\n2. b" })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "plan", raw: "# Explored Plan\n1. a\n2. b" })
+    expect(s.lastPlan).toMatchObject({ raw: "# Explored Plan\n1. a\n2. b" })
+    expect(s.planCapturedThisTurn).toBe(true)
+  })
+
+  it("COMMIT_PLAN ignores an empty/whitespace plan body", () => {
+    const s = reduce(base(), { type: "COMMIT_PLAN", raw: "   " })
+    expect(s.lastPlan).toBeUndefined()
+    expect(s.cells.some((c) => c.kind === "plan")).toBe(false)
   })
 
   it("TURN_COMMIT records the superseded plan as prevRaw on a revision", () => {
@@ -876,10 +975,32 @@ describe("tuiReducer", () => {
     expect(s.initDraft).toBeUndefined()
   })
 
+  it("SET_COMMIT_DRAFT / CLEAR_COMMIT_DRAFT stage and drop a pending commit message", () => {
+    let s = reduce(base(), { type: "SET_COMMIT_DRAFT", message: "feat: x" })
+    expect(s.commitDraft).toEqual({ message: "feat: x" })
+    s = reduce(s, { type: "CLEAR_COMMIT_DRAFT" })
+    expect(s.commitDraft).toBeUndefined()
+  })
+
+  it("SET_PR_DRAFT / CLEAR_PR_DRAFT stage and drop a pending PR draft", () => {
+    let s = reduce(base(), { type: "SET_PR_DRAFT", title: "feat: x", body: "b", base: "master" })
+    expect(s.prDraft).toEqual({ title: "feat: x", body: "b", base: "master" })
+    s = reduce(s, { type: "CLEAR_PR_DRAFT" })
+    expect(s.prDraft).toBeUndefined()
+  })
+
+  it("RESET clears staged commit + PR drafts", () => {
+    let s = reduce(base(), { type: "SET_COMMIT_DRAFT", message: "feat: x" })
+    s = reduce(s, { type: "SET_PR_DRAFT", title: "t", body: "b", base: "master" })
+    s = reduce(s, { type: "RESET", sessionId: "ses3" })
+    expect(s.commitDraft).toBeUndefined()
+    expect(s.prDraft).toBeUndefined()
+  })
+
   it("SET_MODEL and SET_MODE update config and close the overlay", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
-      overlay: { kind: "model", options: ["a"], index: 0 },
+      overlay: { kind: "model", options: ["a"], index: 0, query: "" },
     })
     s = reduce(s, { type: "SET_MODEL", model: "claude-x" })
     expect(s.config.model).toBe("claude-x")
@@ -1112,17 +1233,19 @@ describe("tuiReducer", () => {
     expect(reduce(help, { type: "OVERLAY_MOVE", delta: 1 })).toBe(help)
   })
 
-  it("OVERLAY_MOVE wraps the three-choice plan-approval overlay", () => {
+  it("OVERLAY_MOVE wraps the five-choice plan-approval overlay", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
       overlay: { kind: "plan", raw: "# Plan", index: 0 },
     })
+    // Five choices: approve-auto, approve-confirm, approve-new-session,
+    // edit-then-approve, keep.
+    for (let i = 1; i <= 4; i++) {
+      s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+      expect((s.overlay as { index: number }).index).toBe(i)
+    }
     s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
-    expect((s.overlay as { index: number }).index).toBe(1)
-    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
-    expect((s.overlay as { index: number }).index).toBe(2)
-    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
-    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 3rd choice
+    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 5th choice
     s = reduce(s, { type: "OVERLAY_CLOSE" })
     expect(s.overlay.kind).toBe("none")
   })
@@ -1130,12 +1253,189 @@ describe("tuiReducer", () => {
   it("OVERLAY_SET_INDEX clamps to the list bounds and no-ops for non-lists", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
-      overlay: { kind: "model", options: ["a", "b"], index: 0 },
+      overlay: { kind: "model", options: ["a", "b"], index: 0, query: "" },
     })
     s = reduce(s, { type: "OVERLAY_SET_INDEX", index: 9 })
     expect((s.overlay as { index: number }).index).toBe(1)
     const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
     expect(reduce(usage, { type: "OVERLAY_SET_INDEX", index: 3 })).toBe(usage)
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS swaps the live list and keeps the selected id", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "model",
+        options: ["anthropic/claude-sonnet-4", "openai/gpt-5"],
+        index: 1,
+        query: "",
+      },
+    })
+    // Live catalog lands with a superset; the selected id ("openai/gpt-5") moves.
+    s = reduce(s, {
+      type: "OVERLAY_REFRESH_MODEL_OPTIONS",
+      options: ["aaa/free", "openai/gpt-5", "anthropic/claude-sonnet-4", "zzz/big"],
+    })
+    expect(s.overlay).toEqual({
+      kind: "model",
+      options: ["aaa/free", "openai/gpt-5", "anthropic/claude-sonnet-4", "zzz/big"],
+      index: 1,
+      query: "",
+    })
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS clamps to 0 when the selected id is gone", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "model", options: ["old/model"], index: 0, query: "" },
+    })
+    s = reduce(s, { type: "OVERLAY_REFRESH_MODEL_OPTIONS", options: ["new/a", "new/b"] })
+    expect((s.overlay as { index: number }).index).toBe(0)
+    expect((s.overlay as { options: string[] }).options).toEqual(["new/a", "new/b"])
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS no-ops when the model overlay is not open or list is empty", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "OVERLAY_REFRESH_MODEL_OPTIONS", options: ["a"] })).toBe(usage)
+    const model = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "model", options: ["a"], index: 0, query: "" },
+    })
+    expect(reduce(model, { type: "OVERLAY_REFRESH_MODEL_OPTIONS", options: [] })).toBe(model)
+  })
+
+  it("OVERLAY_MODEL_QUERY filters the picker and resets the highlight to the top", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "model",
+        options: ["anthropic/claude-opus", "anthropic/claude-sonnet", "openai/gpt-5"],
+        index: 2,
+        query: "",
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_MODEL_QUERY", query: "claude" })
+    expect(s.overlay).toEqual({
+      kind: "model",
+      options: ["anthropic/claude-opus", "anthropic/claude-sonnet", "openai/gpt-5"],
+      index: 0,
+      query: "claude",
+    })
+    // Navigation now ranges over the filtered view (2 claude rows), not all 3.
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(1)
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 2nd match
+  })
+
+  it("OVERLAY_MODEL_QUERY no-ops when the model overlay is not open", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "OVERLAY_MODEL_QUERY", query: "x" })).toBe(usage)
+  })
+
+  it("OVERLAY_QUERY filters a generic select overlay and resets the highlight", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "select",
+        title: "Plugins",
+        items: [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+        ],
+        index: 2,
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_QUERY", query: "beta" })
+    expect((s.overlay as { query: string }).query).toBe("beta")
+    expect((s.overlay as { index: number }).index).toBe(0)
+    // Navigation now ranges over the single filtered row (wraps to itself).
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0)
+  })
+
+  it("OVERLAY_QUERY filters sessions, inspect and quickActions overlays", () => {
+    const sessions = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "sessions",
+        items: [
+          { sessionId: "1", title: "login bug", turns: 1, updatedAt: 0 },
+          { sessionId: "2", title: "dark mode", turns: 1, updatedAt: 0 },
+        ],
+        index: 1,
+      },
+    })
+    const sAfter = reduce(sessions, { type: "OVERLAY_QUERY", query: "dark" })
+    expect((sAfter.overlay as { query: string }).query).toBe("dark")
+    expect((sAfter.overlay as { index: number }).index).toBe(0)
+
+    const quick = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "quickActions",
+        rows: [
+          { id: "model", label: "Model", hint: "opus", command: "/model" },
+          { id: "diff", label: "Git diff", hint: "changes", command: "/diff" },
+        ],
+        index: 0,
+      },
+    })
+    const qAfter = reduce(quick, { type: "OVERLAY_QUERY", query: "diff" })
+    expect((qAfter.overlay as { query: string }).query).toBe("diff")
+  })
+
+  it("OVERLAY_QUERY no-ops for an overlay kind without typeahead", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "OVERLAY_QUERY", query: "x" })).toBe(usage)
+  })
+
+  it("MARKETPLACE_PATCH_ENTRY updates one entry's badge in the open browser", () => {
+    const s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "marketplace",
+        entries: [
+          { installRef: "a/x", name: "Alpha", installed: true, enabled: true },
+          { installRef: "b/y", name: "Beta", installed: true, enabled: true },
+        ],
+      },
+    })
+    const after = reduce(s, {
+      type: "MARKETPLACE_PATCH_ENTRY",
+      ref: "a/x",
+      patch: { enabled: false },
+    })
+    const entries = (after.overlay as { entries: { installRef: string; enabled: boolean }[] })
+      .entries
+    expect(entries[0].enabled).toBe(false)
+    expect(entries[1].enabled).toBe(true)
+  })
+
+  it("MARKETPLACE_PATCH_ENTRY is a no-op when the marketplace isn't open", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "MARKETPLACE_PATCH_ENTRY", ref: "a/x", patch: {} })).toBe(usage)
+  })
+
+  it("OVERLAY_REFRESH_MODEL_OPTIONS keeps the selected id across a refresh while filtered", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "model",
+        options: ["a/claude-opus", "a/claude-sonnet", "b/gpt"],
+        index: 1,
+        query: "claude",
+      },
+    })
+    // Selected id is the 2nd claude match ("a/claude-sonnet"); after a refresh it
+    // sits at a new position in the freshly-filtered superset.
+    s = reduce(s, {
+      type: "OVERLAY_REFRESH_MODEL_OPTIONS",
+      options: ["a/claude-haiku", "a/claude-sonnet", "a/claude-opus", "b/gpt"],
+    })
+    expect((s.overlay as { index: number }).index).toBe(1) // claude-sonnet among 3 claude matches
+    expect((s.overlay as { query: string }).query).toBe("claude")
   })
 
   it("OVERLAY_MOVE no-ops on an empty list", () => {
@@ -1245,6 +1545,42 @@ describe("tuiReducer", () => {
     expect(reduce(s0, { type: "BASH_RESULT", output: "x", status: "done" })).toBe(s0)
   })
 
+  it("id-targeted BASH_APPEND/RESULT fill the matching cell, not the most recent", () => {
+    // Two concurrent runs: a backgrounded one (a) and a fresh foreground one (b).
+    let s = reduce(base(), { type: "BASH_START", command: "a", id: "bash-1" })
+    s = reduce(s, { type: "BASH_BACKGROUND", id: "bash-1" })
+    s = reduce(s, { type: "BASH_START", command: "b", id: "bash-2" })
+    // A late chunk for `a` lands on `a`, even though `b` started later.
+    s = reduce(s, { type: "BASH_APPEND", chunk: "from-a", id: "bash-1" })
+    const a = s.cells.find((c) => c.id === "bash-1")
+    expect(a).toMatchObject({ kind: "bash", output: "from-a", background: true })
+    // `a`'s result settles `a` and clears its background marker; `b` untouched.
+    s = reduce(s, {
+      type: "BASH_RESULT",
+      output: "done-a",
+      status: "done",
+      exitCode: 0,
+      id: "bash-1",
+    })
+    expect(s.cells.find((c) => c.id === "bash-1")).toMatchObject({
+      kind: "bash",
+      status: "done",
+      background: false,
+    })
+    expect(s.cells.find((c) => c.id === "bash-2")).toMatchObject({ status: "running" })
+  })
+
+  it("BASH_BACKGROUND marks a running cell and only a running one", () => {
+    let s = reduce(base(), { type: "BASH_START", command: "srv", id: "bash-1" })
+    s = reduce(s, { type: "BASH_BACKGROUND", id: "bash-1" })
+    expect(s.cells.find((c) => c.id === "bash-1")).toMatchObject({ background: true })
+    // Settled, then a stray BASH_BACKGROUND is a no-op on the now-done cell.
+    s = reduce(s, { type: "BASH_RESULT", output: "x", status: "done", id: "bash-1" })
+    const settled = s.cells.find((c) => c.id === "bash-1")
+    s = reduce(s, { type: "BASH_BACKGROUND", id: "bash-1" })
+    expect(s.cells.find((c) => c.id === "bash-1")).toBe(settled)
+  })
+
   it("ACTIVITY_START/PROGRESS/END drive the background activity pill", () => {
     let s = reduce(base(), { type: "ACTIVITY_START", kind: "goal", label: "ship it" })
     expect(s.activity).toEqual({ kind: "goal", label: "ship it", status: "running" })
@@ -1329,6 +1665,23 @@ describe("tuiReducer", () => {
     // Latest usage replaces; cost accumulates.
     expect(s.usage?.inputTokens).toBe(200)
     expect(s.sessionTotals.costUsd).toBeCloseTo(0.3)
+  })
+
+  it("SET_USAGE attributes each turn to its model in modelTotals", () => {
+    let s = reduce(base(), { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 0.1 } })
+    s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 200, totalCostUsd: 0.2 } })
+    // Same model both turns → one bucket whose total mirrors the session total.
+    const keys = Object.keys(s.modelTotals)
+    expect(keys).toHaveLength(1)
+    expect(s.modelTotals[keys[0]].inputTokens).toBe(300)
+    expect(s.modelTotals[keys[0]].costUsd).toBeCloseTo(s.sessionTotals.costUsd)
+  })
+
+  it("RESET clears the per-model totals", () => {
+    let s = reduce(base(), { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 0.1 } })
+    expect(Object.keys(s.modelTotals)).toHaveLength(1)
+    s = reduce(s, { type: "RESET", sessionId: "next" })
+    expect(s.modelTotals).toEqual({})
   })
 
   it("SET_USAGE appends each turn's total tokens to the trend history", () => {
@@ -1663,5 +2016,141 @@ describe("tuiReducer — workflow copilot mode", () => {
       { type: "COPILOT_MARK_DIRTY" }
     )
     expect(s.copilot).toBeUndefined()
+  })
+})
+
+describe("tuiReducer — toasts & completion signals", () => {
+  it("TOAST_PUSH appends a toast and caps at three (oldest dropped)", () => {
+    const s = reduce(
+      base(),
+      { type: "TOAST_PUSH", severity: "info", message: "one" },
+      { type: "TOAST_PUSH", severity: "warn", message: "two" },
+      { type: "TOAST_PUSH", severity: "error", message: "three", hint: "fix it" },
+      { type: "TOAST_PUSH", severity: "info", message: "four" }
+    )
+    expect(s.toasts.map((t) => t.message)).toEqual(["two", "three", "four"])
+    expect(s.toasts[1]).toMatchObject({ severity: "error", hint: "fix it" })
+    // Ids are unique (derived from the monotonic seq).
+    expect(new Set(s.toasts.map((t) => t.id)).size).toBe(3)
+  })
+
+  it("TOAST_DISMISS removes the matching toast only", () => {
+    const pushed = reduce(base(), { type: "TOAST_PUSH", severity: "info", message: "keep" })
+    const id = pushed.toasts[0].id
+    const other = reduce(pushed, { type: "TOAST_PUSH", severity: "warn", message: "drop" })
+    const dropId = other.toasts[1].id
+    const after = reduce(other, { type: "TOAST_DISMISS", id: dropId })
+    expect(after.toasts.map((t) => t.id)).toEqual([id])
+  })
+
+  it("NOTICE with toast:true archives a cell AND raises a toast", () => {
+    const s = reduce(base(), { type: "NOTICE", message: "heads up", severity: "warn", toast: true })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "notice", message: "heads up" })
+    expect(s.toasts).toHaveLength(1)
+    expect(s.toasts[0]).toMatchObject({ severity: "warn", message: "heads up" })
+  })
+
+  it("NOTICE without toast only appends a cell", () => {
+    const s = reduce(base(), { type: "NOTICE", message: "quiet" })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "notice", message: "quiet" })
+    expect(s.toasts).toHaveLength(0)
+  })
+
+  it("SIDECAR_STATUS toggles the down flag; TURN_START clears it", () => {
+    const down = reduce(base(), { type: "SIDECAR_STATUS", down: true })
+    expect(down.sidecarDown).toBe(true)
+    const started = reduce(down, { type: "TURN_START", prompt: "hi" })
+    expect(started.sidecarDown).toBe(false)
+  })
+
+  it("TURN_ERROR carries hint/category and sets an error completion signal", () => {
+    const s = reduce(base(), {
+      type: "TURN_ERROR",
+      message: "401 Unauthorized",
+      hint: "run /provider",
+      category: "auth",
+      title: "Authentication failed",
+    })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "error", hint: "run /provider", category: "auth" })
+    expect(s.lastCompletion).toEqual({
+      kind: "turn",
+      status: "error",
+      label: "Authentication failed",
+    })
+  })
+
+  it("ACTIVITY_END with status error surfaces a toast even without a summary", () => {
+    const running = reduce(base(), { type: "ACTIVITY_START", kind: "goal", label: "ship it" })
+    const ended = reduce(running, { type: "ACTIVITY_END", status: "error" })
+    expect(ended.activity).toBeUndefined()
+    expect(ended.toasts).toHaveLength(1)
+    expect(ended.toasts[0]).toMatchObject({ severity: "error", message: "ship it error" })
+    expect(ended.lastCompletion).toMatchObject({ kind: "activity", status: "error" })
+  })
+
+  it("ACTIVITY_END done with a summary appends a notice and no toast", () => {
+    const running = reduce(base(), { type: "ACTIVITY_START", kind: "loop", label: "loop" })
+    const ended = reduce(running, { type: "ACTIVITY_END", status: "done", summary: "3 turns" })
+    expect(ended.cells.at(-1)).toMatchObject({ kind: "notice", message: "3 turns" })
+    expect(ended.toasts).toHaveLength(0)
+    expect(ended.lastCompletion).toMatchObject({ kind: "activity", status: "done" })
+  })
+})
+
+describe("tuiReducer — MCP logs", () => {
+  it("starts with an empty MCP log buffer", () => {
+    expect(base().mcpLogs).toEqual([])
+  })
+
+  it("MCP_LOG_APPEND stamps a stable id and preserves order", () => {
+    const s = reduce(
+      base(),
+      {
+        type: "MCP_LOG_APPEND",
+        entry: { ts: 1, level: "error", source: "stderr", message: "boom", server: "github" },
+      },
+      { type: "MCP_LOG_APPEND", entry: { ts: 2, level: "info", source: "sidecar", message: "ok" } }
+    )
+    expect(s.mcpLogs).toHaveLength(2)
+    expect(s.mcpLogs[0]).toMatchObject({ level: "error", message: "boom", server: "github" })
+    expect(s.mcpLogs[1]).toMatchObject({ level: "info", message: "ok" })
+    // Ids are unique + monotonic (derived from seq).
+    expect(s.mcpLogs[0].id).not.toEqual(s.mcpLogs[1].id)
+    expect(typeof s.mcpLogs[0].id).toBe("string")
+  })
+
+  it("MCP_LOG_APPEND caps the ring buffer at 1000 (oldest drop)", () => {
+    let s = base()
+    for (let i = 0; i < 1005; i++) {
+      s = reduce(s, {
+        type: "MCP_LOG_APPEND",
+        entry: { ts: i, level: "info", source: "stderr", message: `line ${i}` },
+      })
+    }
+    expect(s.mcpLogs).toHaveLength(1000)
+    // The oldest 5 were dropped; newest is retained.
+    expect(s.mcpLogs[0].message).toBe("line 5")
+    expect(s.mcpLogs.at(-1)?.message).toBe("line 1004")
+  })
+
+  it("MCP_LOG_CLEAR empties the buffer and is a no-op when already empty", () => {
+    const filled = reduce(base(), {
+      type: "MCP_LOG_APPEND",
+      entry: { ts: 1, level: "warn", source: "diagnostic", message: "x" },
+    })
+    const cleared = reduce(filled, { type: "MCP_LOG_CLEAR" })
+    expect(cleared.mcpLogs).toEqual([])
+    // Already-empty clear returns the same reference (no needless re-render).
+    expect(reduce(cleared, { type: "MCP_LOG_CLEAR" })).toBe(cleared)
+  })
+
+  it("MCP logs survive RESET (backend diagnostics aren't conversation state)", () => {
+    const withLog = reduce(base(), {
+      type: "MCP_LOG_APPEND",
+      entry: { ts: 1, level: "info", source: "stderr", message: "kept" },
+    })
+    const afterReset = reduce(withLog, { type: "RESET", sessionId: "ses2" })
+    expect(afterReset.mcpLogs).toHaveLength(1)
+    expect(afterReset.mcpLogs[0].message).toBe("kept")
   })
 })

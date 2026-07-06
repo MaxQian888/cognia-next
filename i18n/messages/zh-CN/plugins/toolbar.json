@@ -26,6 +26,8 @@
   "groupWasm": "WASM 包",
   "install": "安装",
   "loadUnpacked": "加载本地目录…",
+  "syncDone": "注册表已同步 — {count, plural, =0 {暂无可用更新} other {# 个插件有更新}}",
+  "syncFailed": "注册表同步失败：{message}",
   "syncRegistry": "同步注册表",
   "syncRegistryAria": "刷新市场注册表并检查已安装插件的更新"
 }

@@ -29,7 +29,19 @@ import {
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import { transport } from "@/lib/tauri/transport-instance"
+import {
+  installCapabilityReporter,
+  type CapabilityReporterTransport,
+} from "@/lib/companion/capability-reporter"
+import { installRemoteStepServer } from "@/lib/companion/remote-step-server"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
+import { getSettings } from "@/lib/db/settings"
 import { loggers } from "@/lib/logging"
+
+// Onboarding routes where the boot provider must NOT redirect (the chooser /
+// pair / oauth flows own navigation there).
+const ONBOARDING_PREFIXES = ["/welcome", "/pair", "/oauth"]
 
 const log = loggers.shell
 
@@ -134,11 +146,25 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       const config = await hydrateCompanionConfig()
       if (cancelled) return
 
-      const onPair = pathname === "/pair"
+      // Runtime mode is read from the authoritative Dexie settings (race-free at
+      // boot, unlike the in-memory store which may not be hydrated yet).
+      const mode = (await getSettings().catch(() => null))?.mobileRuntimeMode
+      if (cancelled) return
+
+      // Standalone (BYOK) mode: no paired desktop — skip companion sync/push
+      // entirely. The chat/search/doc paths run in-webview against the user's
+      // own keys; a leftover config (paired-then-switched) is intentionally idle.
+      if (mode === "standalone") return
+
       if (!config) {
-        if (!onPair) {
-          log.info("companion: no config, redirecting to /pair")
-          router.replace("/pair")
+        const onOnboarding = ONBOARDING_PREFIXES.some((p) => pathname.startsWith(p))
+        if (!onOnboarding) {
+          // Chosen pairing but not paired yet → pair flow; mode not chosen yet
+          // (and no legacy config) → the welcome chooser. Already-paired users
+          // never reach here because `config` is present (backward compatible).
+          const target = mode === "paired" ? "/pair" : "/welcome"
+          log.info(`companion: unpaired, redirecting to ${target}`)
+          router.replace(target)
         }
         return
       }
@@ -160,6 +186,31 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       // `installForegroundSync` / `installEventDrivenSync` shape.
       cleanup.push(await installNetworkSync())
       cleanup.push(await installResumeSync())
+
+      // ── Capability report (ADR-0060) ──────────────────────────────────
+      // Report this device's platform capability manifest on each connect so
+      // the desktop's capability-aware workflow surfaces know what this
+      // phone can run. Duck-typed: only the CompanionTransport exposes the
+      // connection-state surface (the CLI's stdio transport does not).
+      const reporterTransport = transport as Partial<CapabilityReporterTransport>
+      if (
+        typeof reporterTransport.call === "function" &&
+        typeof reporterTransport.getConnectionState === "function" &&
+        typeof reporterTransport.onConnectionStateChange === "function"
+      ) {
+        cleanup.push(installCapabilityReporter(reporterTransport as CapabilityReporterTransport))
+      }
+
+      // ── Remote step server (ADR-0061 P3) ─────────────────────────────
+      // Serve desktop-issued `workflow://step-execute` requests (camera,
+      // barcode, location, …) addressed to this device. Foreground-only by
+      // nature — the WS subscription lives with the app session.
+      cleanup.push(
+        installRemoteStepServer({
+          transport,
+          getDeviceId: () => loadCompanionConfig()?.deviceId,
+        })
+      )
 
       // ── Push notifications ────────────────────────────────────────────
       const push = await registerPushNotifications()

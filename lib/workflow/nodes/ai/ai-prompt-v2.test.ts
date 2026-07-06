@@ -31,6 +31,11 @@ jest.mock("@cognia/provider-core/providers/model-pricing", () => ({
   estimateCallCostUsd: jest.fn(() => 0.0042),
 }))
 
+const injectTwinContextMock = jest.fn()
+jest.mock("../shared/twin-injector", () => ({
+  injectTwinContext: (...args: unknown[]) => injectTwinContextMock(...(args as [])),
+}))
+
 function makeCtx(
   params: Record<string, unknown>,
   extra: Partial<StepExecutionContext> = {}
@@ -52,6 +57,7 @@ function makeCtx(
 beforeEach(() => {
   jest.clearAllMocks()
   mockComplete.mockResolvedValue("real completion")
+  injectTwinContextMock.mockResolvedValue({ systemPrompt: "", applied: false })
 })
 
 describe("executeAiPromptV2 — explicit mode", () => {
@@ -87,6 +93,105 @@ describe("executeAiPromptV2 — explicit mode", () => {
       "span1",
       expect.objectContaining({ responseModel: "gpt-x" })
     )
+  })
+
+  it("forwards explicit provider protocol metadata to the LLM client", async () => {
+    const headers = { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" }
+    const ctx = makeCtx({
+      provider: "openrouter",
+      model: "openai/gpt-4.1-mini",
+      apiKey: "k",
+      baseURL: "https://openrouter.ai/api/v1",
+      apiFlavor: "chat",
+      headers,
+      userPrompt: "hi",
+    })
+
+    await executeAiPromptV2(ctx)
+
+    expect(mockCreateLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers,
+      })
+    )
+  })
+
+  it("injects twin context into the system prompt for a twin-bound character", async () => {
+    injectTwinContextMock.mockResolvedValue({ systemPrompt: "TWIN-WRAPPED", applied: true })
+    const ctx = makeCtx({
+      provider: "openai",
+      model: "gpt-x",
+      apiKey: "k",
+      systemPrompt: "base",
+      userPrompt: "hi",
+      characterId: "char_1",
+    })
+
+    await executeAiPromptV2(ctx)
+
+    expect(injectTwinContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        characterId: "char_1",
+        userPrompt: "hi",
+        baseSystemPrompt: "base",
+        source: "workflow:ai.prompt",
+      })
+    )
+    // The twin context is MERGED with the node base (not replacing it), twin
+    // context first and the node prompt last.
+    expect(mockComplete).toHaveBeenCalledWith(
+      "hi",
+      expect.objectContaining({ system: "TWIN-WRAPPED\n\nbase" })
+    )
+  })
+
+  it("preserves the node systemPrompt + JSON instruction when twin context applies in json mode", async () => {
+    injectTwinContextMock.mockResolvedValue({ systemPrompt: "TWIN-WRAPPED", applied: true })
+    mockComplete.mockResolvedValue('{"x": 1}')
+    const ctx = makeCtx({
+      provider: "openai",
+      model: "gpt-x",
+      apiKey: "k",
+      systemPrompt: "node-base",
+      userPrompt: "hi",
+      characterId: "char_1",
+      responseFormat: "json",
+    })
+
+    await executeAiPromptV2(ctx)
+
+    const sentSystem = mockComplete.mock.calls[0][1].system as string
+    expect(sentSystem).toContain("TWIN-WRAPPED")
+    expect(sentSystem).toContain("node-base")
+    // The JSON-mode instruction survives the twin merge.
+    expect(sentSystem).toContain("Respond with ONLY a single valid JSON value")
+  })
+
+  it("keeps the original system prompt when the injector does not apply", async () => {
+    injectTwinContextMock.mockResolvedValue({ systemPrompt: "IGNORED", applied: false })
+    const ctx = makeCtx({
+      provider: "openai",
+      model: "gpt-x",
+      apiKey: "k",
+      systemPrompt: "base",
+      userPrompt: "hi",
+      characterId: "char_1",
+    })
+
+    await executeAiPromptV2(ctx)
+
+    expect(mockComplete).toHaveBeenCalledWith("hi", expect.objectContaining({ system: "base" }))
+  })
+
+  it("does not consult the twin injector when no characterId is set", async () => {
+    const ctx = makeCtx({ provider: "openai", model: "gpt-x", apiKey: "k", userPrompt: "hi" })
+    await executeAiPromptV2(ctx)
+    expect(injectTwinContextMock).not.toHaveBeenCalled()
   })
 
   it("streams through ctx.emitStream when available", async () => {

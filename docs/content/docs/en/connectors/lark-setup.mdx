@@ -44,11 +44,13 @@ Click **Save**.
 
 A public HTTPS endpoint on the same machine is required.
 
-1. Go to **Event subscriptions** in your app's menu.
-2. Under **Subscription method**, select **Configure request URL**.
-3. Enter your webhook URL (e.g. `https://your-host.example.com/connectors/lark/<adapterId>`).
-4. Lark will send a verification request; cognia-next's Rust HTTP proxy handles the handshake.
-5. Subscribe to the following event:
+1. In cognia-next, create the Lark adapter with **Webhook** selected, then reopen the saved adapter.
+2. Start the Cloudflared tunnel from **Settings → Companion → Tunnel**.
+3. Copy the generated callback URL from the Lark configuration dialog. It has the shape `https://.../webhook/lark/<adapterId>`.
+4. In Lark, go to **Event subscriptions** in your app's menu.
+5. Under **Subscription method**, select **Configure request URL** and paste the generated callback URL.
+6. Lark will send a verification request; cognia-next's Rust HTTP proxy handles the handshake.
+7. Subscribe to the following event:
    - `im.message.receive_v1` — Bot receives a message
 
 Click **Save**.

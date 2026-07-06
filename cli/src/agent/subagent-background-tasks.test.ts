@@ -193,6 +193,48 @@ describe("CLI background subagent tasks", () => {
     )
   })
 
+  it("hides a live run from a foreign session and lets the owner collect it", async () => {
+    const home = makeHome()
+    const run = deferred<string>()
+    startCliBackgroundRun("r1", meta(home, { sessionId: "owner" }), run.promise)
+
+    // A different session sees the run as unknown and does NOT consume it.
+    await expect(
+      collectCliBackgroundResult("r1", { home, owner: "intruder" })
+    ).resolves.toBeUndefined()
+    expect(hasCliBackgroundRun("r1")).toBe(true)
+
+    // The owner collects normally.
+    const collected = collectCliBackgroundResult("r1", { home, owner: "owner" })
+    run.resolve("[reviewer]\nowned")
+    await expect(collected).resolves.toBe("[reviewer]\nowned")
+  })
+
+  it("hides a journaled run from a foreign session", async () => {
+    const home = makeHome()
+    await startCliBackgroundJournal(home)
+    await getDb().backgroundTasks.put(
+      row({ runId: "j1", sessionId: "owner", status: "done", resultText: "secret" })
+    )
+    await expect(
+      collectCliBackgroundResult("j1", { home, owner: "intruder" })
+    ).resolves.toBeUndefined()
+    await expect(collectCliBackgroundResult("j1", { home, owner: "owner" })).resolves.toBe("secret")
+  })
+
+  it("scopes listing + running counts to the owning session", async () => {
+    startCliBackgroundRun("a", meta(undefined, { sessionId: "s1" }), deferred<string>().promise)
+    startCliBackgroundRun("b", meta(undefined, { sessionId: "s2" }), deferred<string>().promise)
+
+    expect(countRunningCliBackgroundRuns()).toBe(2)
+    expect(countRunningCliBackgroundRuns("s1")).toBe(1)
+    expect(listCliBackgroundRuns("s1").map((r) => r.runId)).toEqual(["a"])
+    expect(listCliBackgroundRuns("s2").map((r) => r.runId)).toEqual(["b"])
+    expect(listCliBackgroundRuns()[0]).toEqual(
+      expect.objectContaining({ runId: "a", sessionId: "s1" })
+    )
+  })
+
   it("ignores non-cli journal rows and reports zero interrupted rows", async () => {
     const home = makeHome()
     await startCliBackgroundJournal(home)

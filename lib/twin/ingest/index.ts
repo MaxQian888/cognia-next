@@ -18,7 +18,13 @@ export type { PreparedChunk, ChunkInput } from "./chunk"
 export type { DispatchResult } from "./dispatch"
 export type { RunIngestInput, RunIngestResult } from "./job-runner"
 
-export { detectSourceFormat, dispatchSource, listSupportedFormats } from "./dispatch"
+export {
+  BINARY_TWIN_FORMATS,
+  detectSourceFormat,
+  dispatchSource,
+  listSupportedExtensions,
+  listSupportedFormats,
+} from "./dispatch"
 export { hasNoLeakingPii, redactText, unredactText } from "./redact"
 export type { RedactionRecord, RedactionResult, PiiKind } from "./redact"
 export { prepareChunks } from "./chunk"

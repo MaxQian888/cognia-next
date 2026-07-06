@@ -10,6 +10,7 @@
 //! `fetch_attachment` is idempotent: a cache hit short-circuits the remote
 //! fetch, regardless of how old the file is (TTL / expiry is a future add).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use aes_gcm::{
@@ -41,6 +42,7 @@ pub async fn fetch_attachment(
     adapter_id: String,
     remote_ref: String,
     source_url: String,
+    headers: Option<HashMap<String, String>>,
 ) -> Result<AttachmentRef, String> {
     let cache_dir = resolve_cache_dir()?;
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("create cache dir failed: {e}"))?;
@@ -60,8 +62,19 @@ pub async fn fetch_attachment(
     }
 
     // Cache miss — fetch, encrypt, write.
-    let bytes = reqwest::get(&source_url)
+    let client = reqwest::Client::new();
+    let mut request = client.get(&source_url);
+    for (name, value) in headers.unwrap_or_default() {
+        request = request.header(name, value);
+    }
+    let bytes = request
+        .send()
         .await
+        .map_err(|e| format!("fetch failed: {e}"))?
+        // A non-2xx body (auth error page, rate-limit JSON …) must never be
+        // cached: the cache is hit-first with no TTL, so a cached error body
+        // would permanently shadow the real attachment.
+        .error_for_status()
         .map_err(|e| format!("fetch failed: {e}"))?
         .bytes()
         .await
@@ -75,6 +88,34 @@ pub async fn fetch_attachment(
         local_url: raw_path.to_string_lossy().to_string(),
         remote_ref,
     })
+}
+
+/// Read a previously cached attachment's plaintext bytes as base64.
+///
+/// Decrypts the `.enc` copy (the canonical cache artifact) rather than
+/// trusting the raw plaintext copy. Returns `Ok(None)` when the attachment is
+/// not cached or its plaintext exceeds `max_bytes` — the renderer uses the cap
+/// to skip inlining large media.
+pub fn read_attachment_base64(
+    adapter_id: &str,
+    remote_ref: &str,
+    max_bytes: u64,
+) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+
+    let cache_dir = resolve_cache_dir()?;
+    let cache_key = compute_cache_key(adapter_id, remote_ref);
+    let enc_path = cache_dir.join(format!("{cache_key}.enc"));
+    if !enc_path.exists() {
+        return Ok(None);
+    }
+    let plaintext = decrypt_file(&enc_path)?;
+    if plaintext.len() as u64 > max_bytes {
+        return Ok(None);
+    }
+    Ok(Some(
+        base64::engine::general_purpose::STANDARD.encode(plaintext),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +198,7 @@ fn decrypt_file(path: &Path) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn keyring_available() -> bool {
@@ -206,19 +247,115 @@ mod tests {
         let unique_ref = format!("test-img-{}", uuid::Uuid::new_v4());
         let url = format!("{}/img.png", mock_server.uri());
 
-        let ref1 = fetch_attachment("test-adapter".into(), unique_ref.clone(), url.clone())
+        let ref1 = fetch_attachment("test-adapter".into(), unique_ref.clone(), url.clone(), None)
             .await
             .unwrap();
         assert_eq!(ref1.remote_ref, unique_ref);
         assert!(!ref1.local_url.is_empty());
 
         // Second call — mock expects only 1 hit, so this must be a cache hit.
-        let ref2 = fetch_attachment("test-adapter".into(), unique_ref.clone(), url.clone())
+        let ref2 = fetch_attachment("test-adapter".into(), unique_ref.clone(), url.clone(), None)
             .await
             .unwrap();
         assert_eq!(ref2.local_url, ref1.local_url);
 
         // Verify the mock was only contacted once.
+        mock_server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn fetch_rejects_non_2xx_and_does_not_cache_error_body() {
+        if !keyring_available() {
+            return;
+        }
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/forbidden.png"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("token expired"))
+            .mount(&mock_server)
+            .await;
+
+        let unique_ref = format!("test-err-img-{}", uuid::Uuid::new_v4());
+        let url = format!("{}/forbidden.png", mock_server.uri());
+
+        let result =
+            fetch_attachment("test-adapter".into(), unique_ref.clone(), url, None).await;
+        assert!(result.is_err(), "non-2xx must be an error, got {result:?}");
+
+        // Nothing may have landed in the cache — a later fetch with a fixed
+        // token must go back to the network, not read the cached error body.
+        let cache_dir = resolve_cache_dir().unwrap();
+        let cache_key = compute_cache_key("test-adapter", &unique_ref);
+        assert!(!cache_dir.join(format!("{cache_key}.enc")).exists());
+        assert!(!cache_dir.join(&cache_key).exists());
+    }
+
+    #[tokio::test]
+    async fn read_attachment_base64_round_trips_and_caps_size() {
+        use base64::Engine as _;
+
+        if !keyring_available() {
+            return;
+        }
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/read.png"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![5u8, 6, 7, 8]))
+            .mount(&mock_server)
+            .await;
+
+        let unique_ref = format!("test-read-img-{}", uuid::Uuid::new_v4());
+        let url = format!("{}/read.png", mock_server.uri());
+        fetch_attachment("test-adapter".into(), unique_ref.clone(), url, None)
+            .await
+            .unwrap();
+
+        // Missing ref → None.
+        assert_eq!(
+            read_attachment_base64("test-adapter", "never-fetched", 1024).unwrap(),
+            None
+        );
+        // Cached and under cap → decrypted bytes.
+        let b64 = read_attachment_base64("test-adapter", &unique_ref, 1024)
+            .unwrap()
+            .expect("cached attachment must be readable");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD.decode(b64).unwrap(),
+            vec![5u8, 6, 7, 8]
+        );
+        // Over cap → None.
+        assert_eq!(
+            read_attachment_base64("test-adapter", &unique_ref, 3).unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_sends_optional_headers() {
+        if !keyring_available() {
+            return;
+        }
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/auth.png"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![9u8, 8, 7]))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let unique_ref = format!("test-auth-img-{}", uuid::Uuid::new_v4());
+        let url = format!("{}/auth.png", mock_server.uri());
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer tok".to_string());
+
+        let fetched = fetch_attachment("test-adapter".into(), unique_ref.clone(), url, Some(headers))
+            .await
+            .unwrap();
+        assert_eq!(fetched.remote_ref, unique_ref);
         mock_server.verify().await;
     }
 }

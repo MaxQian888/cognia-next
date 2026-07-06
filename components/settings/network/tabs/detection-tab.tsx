@@ -1,9 +1,12 @@
 "use client"
 
 /**
- * Settings → Network Proxy → Detection. One-click probe of common local
- * proxy ports (Clash, V2Ray, Shadowsocks, generic HTTP/SOCKS) plus a Clash
- * controller API check that surfaces the version string when present.
+ * Settings → Network Proxy → Detection. Probes common local proxy ports
+ * (Clash, V2Ray, Shadowsocks, generic HTTP/SOCKS) plus a Clash controller API
+ * check that surfaces the version string when present.
+ *
+ * The scan runs automatically once when the tab mounts (the tab is literally
+ * labeled "Auto-detect") — the "Detect now" button re-runs it on demand.
  *
  * Picking a candidate writes the corresponding host/port/protocol back into
  * `networkProxy` (mode flips to `auto`) and pushes the new config to Rust.
@@ -104,6 +107,15 @@ export function NetworkDetectionTab() {
       setRunning(false)
     }
   }
+
+  // Auto-scan once on mount so the "Auto-detect" tab actually lives up to its
+  // name. The button still re-runs it on demand.
+  useEffect(() => {
+    if (!isTauri()) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: auto-scan on mount
+    void runDetect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const apply = async (candidate: ProxyCandidate) => {
     const next = buildAppliedConfig(cfg, candidate)

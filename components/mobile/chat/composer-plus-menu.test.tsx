@@ -126,7 +126,7 @@ describe("<ComposerPlusMenu />", () => {
     )
   })
 
-  it("forwards a chosen file via the file input change", async () => {
+  it("forwards a single chosen file via the file input change", async () => {
     const onAttach = jest.fn()
     const user = userEvent.setup()
     render(<ComposerPlusMenu onAttach={onAttach} />)
@@ -134,7 +134,19 @@ describe("<ComposerPlusMenu />", () => {
     const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
     const file = new File(["payload"], "doc.txt", { type: "text/plain" })
     await user.upload(input, file)
-    expect(onAttach).toHaveBeenCalledWith({ kind: "file", file })
+    expect(onAttach).toHaveBeenCalledWith({ kind: "files", files: [file] })
+  })
+
+  it("forwards multiple chosen files via the file input change", async () => {
+    const onAttach = jest.fn()
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={onAttach} />)
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
+    const a = new File(["a"], "a.txt", { type: "text/plain" })
+    const b = new File(["b"], "b.txt", { type: "text/plain" })
+    await user.upload(input, [a, b])
+    expect(onAttach).toHaveBeenCalledWith({ kind: "files", files: [a, b] })
   })
 
   it("voice button reports unsupported on web (no native plugin)", async () => {
@@ -201,6 +213,36 @@ describe("<ComposerPlusMenu />", () => {
     expect(block?.type).toBe("image")
     expect(block?.source?.media_type).toBe("image/png")
     expect(typeof block?.source?.data).toBe("string")
+  })
+
+  it("forwards multiple image files as multiple SendContent blocks in one onSend", async () => {
+    const onSend = jest.fn(async () => {})
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={jest.fn()} onSend={onSend} />)
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
+    const a = new File([new Uint8Array([1])], "a.png", { type: "image/png" })
+    const b = new File([new Uint8Array([2])], "b.jpg", { type: "image/jpeg" })
+    await user.upload(input, [a, b])
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    const blocks = (onSend.mock.calls[0] as unknown as [unknown[]])[0]
+    expect(blocks).toHaveLength(2)
+  })
+
+  it("for a mixed selection forwards all files but only sends image blocks", async () => {
+    const onAttach = jest.fn()
+    const onSend = jest.fn(async () => {})
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={onAttach} onSend={onSend} />)
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
+    const png = new File([new Uint8Array([1])], "p.png", { type: "image/png" })
+    const txt = new File(["t"], "t.txt", { type: "text/plain" })
+    await user.upload(input, [png, txt])
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(onAttach).toHaveBeenCalledWith({ kind: "files", files: [png, txt] })
+    const blocks = (onSend.mock.calls[0] as unknown as [unknown[]])[0]
+    expect(blocks).toHaveLength(1)
   })
 
   it("file input does NOT call onSend for non-image files", async () => {

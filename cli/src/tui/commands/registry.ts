@@ -31,6 +31,7 @@ import { outputStyleCommand } from "./output-style-command"
 import { agentModeCommand } from "./agent-mode-command"
 import { layoutCommand } from "./layout-command"
 import { mouseCommand } from "./mouse-command"
+import { editorCommands } from "./editor-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
 /** Back-compat alias for consumers that referenced the old shape. */
@@ -86,7 +87,7 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
           message: "No models configured. Set one with `cognia-agent config set model <id>`.",
         }
       }
-      return { kind: "openOverlay", overlay: { kind: "model", options, index: 0 } }
+      return { kind: "openOverlay", overlay: { kind: "model", options, index: 0, query: "" } }
     },
   },
   {
@@ -129,6 +130,7 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   agentModeCommand,
   layoutCommand,
   mouseCommand,
+  ...editorCommands,
   {
     name: "retry",
     aliases: ["resend"],
@@ -190,9 +192,13 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "cwd",
-    description: "show the working directory",
+    aliases: ["cd"],
+    description: "show or change the working directory",
     category: "system",
-    handler: (ctx) => ({ kind: "notice", message: ctx.config.cwd }),
+    handler: (ctx) => {
+      const dir = ctx.args.trim()
+      return dir ? { kind: "changeCwd", dir } : { kind: "notice", message: ctx.config.cwd }
+    },
   },
   {
     name: "about",

@@ -29,7 +29,8 @@ export function baseOptions(lang: string): Omit<DocsLayoutProps, "tree" | "child
     i18n,
     nav: {
       title: "cognia-next",
-      url: lang === i18n.defaultLanguage ? "/docs" : `/${lang}/docs`,
+      // hideLocale is "never" (D8 static export) — every locale is prefixed.
+      url: `/${lang}/docs`,
     },
   }
 }

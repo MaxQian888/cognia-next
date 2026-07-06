@@ -108,4 +108,17 @@ export interface PairedDeviceRow {
    * mirror of `rendezvousId`.
    */
   rendezvousSecret?: string
+
+  /**
+   * ADR-0060: platform capability manifest last reported by the device via
+   * the `device_capabilities_report` RPC — `CapabilityId` strings from
+   * `lib/platform/capabilities.ts` (kept as `string[]` here so a newer phone
+   * reporting ids this desktop doesn't know yet still round-trips). Additive +
+   * non-indexed — no Dexie version bump. Absent until the device first
+   * reports (rows paired before ADR-0060, or a device that never connected).
+   */
+  capabilities?: string[]
+
+  /** Epoch ms of the most recent capability report. Mirrors `capabilities`. */
+  capabilitiesReportedAt?: number
 }

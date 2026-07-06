@@ -23,7 +23,9 @@ import { assessRouting } from "./assess-routing"
 import { composeRoster } from "./compose-roster"
 import { decomposeTasks } from "./decompose-tasks"
 import { gatherCapabilityCatalog, EMPTY_CAPABILITY_CATALOG } from "./capability-catalog"
-import type { AutoOrchestrationProposal, CapabilityCatalog } from "./types"
+import { gatherTwinRoster } from "./twin-roster"
+import { chooseExecutor, type ConsensusSignal } from "./dispatch-executor"
+import type { AutoOrchestrationProposal, CapabilityCatalog, TwinRosterEntry } from "./types"
 
 export class AutoOrchestrationPiiError extends Error {
   constructor() {
@@ -50,6 +52,11 @@ export interface PlanAutoOrchestrationInput {
   client: LlmClient
   /** Pre-built catalog; gathered live when omitted. */
   catalog?: CapabilityCatalog
+  /**
+   * Pre-built digital-employee (twin) roster; gathered live when omitted. Pass
+   * `[]` to explicitly disable twin binding for this run.
+   */
+  twinRoster?: TwinRosterEntry[]
   /** Cap on roster size (incl. lead). */
   maxRoster?: number
   /**
@@ -63,6 +70,12 @@ export interface PlanAutoOrchestrationInput {
   now?: () => Date
   /** Injectable PII gate (default {@link defaultPiiGate}). */
   piiGate?: (objective: string) => PiiGateResult
+  /**
+   * Operator consensus/verification signal. Opts into a council/ensemble
+   * executor, which the router can't recommend on its own. Threaded into
+   * `chooseExecutor` to populate `proposal.executor`.
+   */
+  consensusSignal?: ConsensusSignal
 }
 
 /**
@@ -79,13 +92,22 @@ export async function planAutoOrchestration(
   if (gate.leaked) throw new AutoOrchestrationPiiError()
   const objective = gate.redacted
 
-  // 2. Catalog (fail open to empty so enumeration never wedges the pipeline).
+  // 2. Catalog + digital-employee roster (both fail open to empty so
+  // enumeration never wedges the pipeline).
   let catalog = input.catalog
   if (!catalog) {
     try {
       catalog = await gatherCapabilityCatalog()
     } catch {
       catalog = EMPTY_CAPABILITY_CATALOG
+    }
+  }
+  let twinRoster = input.twinRoster
+  if (!twinRoster) {
+    try {
+      twinRoster = await gatherTwinRoster()
+    } catch {
+      twinRoster = []
     }
   }
 
@@ -108,6 +130,7 @@ export async function planAutoOrchestration(
     catalog,
     client: input.client,
     maxRoster: input.maxRoster,
+    twinRoster,
     signal: input.signal,
   })
   const tasks = await decomposeTasks({
@@ -118,5 +141,16 @@ export async function planAutoOrchestration(
     signal: input.signal,
   })
 
-  return { objective, assessment, roster, tasks }
+  // Choose the concrete executor from the (possibly operator-overridden)
+  // assessment + consensus signal. Pure — no model call.
+  const executor = chooseExecutor(assessment, input.consensusSignal)
+
+  return {
+    objective,
+    assessment,
+    roster,
+    tasks,
+    executor,
+    ...(twinRoster.length > 0 ? { twinRoster } : {}),
+  }
 }

@@ -45,6 +45,7 @@ import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { mintSessionId } from "./run"
 import { type PermissionResponder } from "./permission-gate"
+import { fetchTwinContext as defaultFetchTwinContext } from "../twin/context-client"
 import { readToolApprovals } from "./tool-approvals"
 import { appendTranscript, type TranscriptFs } from "./transcript"
 import {
@@ -52,7 +53,11 @@ import {
   withCliAutoApprovedTools,
   withCliDisabledMcpTools,
 } from "./tool-suppression"
-import { buildAgents, discoverAgentFiles, type AgentSummary } from "./discover-agents"
+import {
+  applySubagentModelOverrides,
+  discoverDispatchableAgents,
+  type AgentSummary,
+} from "./discover-agents"
 import { withBuiltinAgents } from "./builtin-agents"
 import { discoverCustomAgentModes, resolveAgentMode as selectAgentMode } from "../config/agent-mode"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
@@ -138,6 +143,10 @@ export interface AgentSessionParams {
    * permission mode without respawning the sidecar. Defaults to the ipc
    * {@link defaultSetSessionMode}; injected in tests. */
   setSessionMode?: (sessionId: string, mode: PermissionModeValue) => Promise<void>
+  /** Fetch the twin context from the running desktop (only when `config.twin`
+   * is enabled). Resolves `null` on any failure — the turn then proceeds
+   * without twin grounding. Injected in tests. */
+  fetchTwin?: typeof defaultFetchTwinContext
   now?: () => number
 }
 
@@ -167,6 +176,9 @@ export interface SendTurnOptions {
   /** Fired once per turn when the prompt referenced one or more `@<path>`
    * attachments, summarising how each was handled. Lets the UI show a notice. */
   onAttachments?: (summary: AttachmentSummary) => void
+  /** Fired at most once per session when twin grounding is enabled but the
+   * desktop bridge is unreachable — the turn proceeds without twin context. */
+  onTwinNotice?: (message: string) => void
   signal?: AbortSignal
   timeoutMs?: number
 }
@@ -237,7 +249,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const resolveAgents =
     params.resolveAgents ??
     (async () =>
-      withBuiltinAgents(buildAgents(await discoverAgentFiles([params.config.cwd, home]))))
+      applySubagentModelOverrides(
+        withBuiltinAgents(await discoverDispatchableAgents([params.config.cwd, home])),
+        params.config.subagentModels
+      ))
   const resolveAgentMode =
     params.resolveAgentMode ??
     (async () =>
@@ -267,6 +282,16 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   // are cached). Surfaced to the UI via `onActiveSkills` on the first send.
   let activeSkillIds: string[] = []
   let skillsAnnounced = false
+  // Digital-twin grounding state. The stable segment (persona/identity) is
+  // appended to the cached SendOptions once per options lifetime; the dynamic
+  // segment (per-turn RAG + style) rides each user message as a
+  // <twin-context> block, because the interactive channel caches its options
+  // at ensureReady and cannot re-resolve the system prompt per turn. One
+  // English notice per session when the desktop is unreachable.
+  const fetchTwin = params.fetchTwin ?? defaultFetchTwinContext
+  const twinEnabled = params.config.twin?.enabled === true && !!params.config.twin.characterId
+  let twinStableInjected = false
+  let twinNoticeShown = false
 
   async function ensureReady(): Promise<SendOptions> {
     if (closed) throw new Error("agent session is closed")
@@ -305,6 +330,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         ephemeralSkillIds,
         ...(params.sessionKind ? { sessionKind: params.sessionKind } : {}),
         ...(agentMode ? { agentMode } : {}),
+        // Live TUI turn: request token-level partials so the deltas keep feeding
+        // the idle watchdog through a long single generation (large file write),
+        // preventing a spurious "stream idle for 60000ms" interrupt.
+        interactive: true,
         now: now(),
       })
       options = withCliDisabledMcpTools(
@@ -312,19 +341,29 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         resolveDisabledMcpTools()
       )
       // Surface the `dispatch_agent` (Task) tool so the model can launch a
-      // subagent. The SDK-native Task tool is driven by `options.agents`, but the
-      // CLI host never populates it (project-instruction discovery needs a Tauri
-      // fs that isn't present here), so on BOTH channels the discovered subagents
-      // would be unreachable. We therefore advertise the provider-agnostic
-      // plugin-tool equivalent whenever `options.agents` is empty — the Anthropic
-      // path consumes `pluginTools` (a `cognia-plugin-tools` MCP server) exactly
-      // like the ai-sdk path, so the tool round-trips to the CLI handle either
-      // way. When `options.agents` IS populated (SDK-native dispatch present) we
-      // add nothing, to avoid two competing dispatch tools. Empty-guarded: no
-      // `.cognia/agents/*.md` ⇒ no tool advertised.
-      agents = await resolveAgents().catch(() => [])
-      const nativeAgentsPresent = Object.keys(options.agents ?? {}).length > 0
-      const manifest = nativeAgentsPresent ? null : buildCliSubagentToolManifest(agents)
+      // subagent. The CLI's dispatch is ALWAYS its own: a model call round-trips
+      // (`plugin_tool_exec` → the CLI handle → `runCliSubagent`) and runs over
+      // THIS host's sidecar/provider. So advertise the provider-agnostic
+      // plugin-tool unconditionally — the Anthropic path consumes `pluginTools`
+      // (a `cognia-plugin-tools` MCP server) exactly like the ai-sdk path, so the
+      // tool reaches the model on BOTH channels.
+      //
+      // We must NOT lean on the SDK-native Task tool driven by `options.agents`:
+      // `resolveSendOptions` now populates that in direct chat (the desktop's
+      // workflow-*/plugin/template subagents), but (a) those are wired to the
+      // desktop's Dexie-backed `executeAgent`, absent here, and (b) on the ai-sdk
+      // channel `options.agents` only drives the `@agent` identity overlay, never
+      // a dispatch tool — so the model saw NO way to delegate there. A non-empty
+      // `options.agents` also used to SUPPRESS this very tool (the removed
+      // `nativeAgentsPresent` guard), the regression that left dispatch dormant.
+      // So drop the desktop agent map and make the CLI plugin tool the single
+      // dispatch path. `withBuiltinAgents` guarantees ≥1 agent (general-purpose)
+      // even on discovery failure, so the manifest is non-null even with no
+      // `.cognia/agents/*.md`. The CLI sets no `options.agent` (see
+      // `toBuildContext`), so dropping the map can't strand an `@agent` reference.
+      agents = await resolveAgents().catch(() => withBuiltinAgents([]))
+      delete options.agents
+      const manifest = buildCliSubagentToolManifest(agents)
       if (manifest) {
         options.pluginTools = [...(options.pluginTools ?? []), manifest]
         subagentToolEnabled = true
@@ -397,6 +436,35 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         skillsAnnounced = true
         opts.onActiveSkills?.(activeSkillIds)
       }
+      // Digital-twin grounding (opt-in): REDACTED context from the running
+      // desktop. Stable segment appends to the cached system prompt once;
+      // the dynamic segment (per-turn RAG) is prepended to this turn's user
+      // content below. Unreachable desktop → one notice, turn ungrounded.
+      let twinDynamic: string | undefined
+      if (twinEnabled) {
+        const twin = await fetchTwin({
+          characterId: params.config.twin!.characterId!,
+          message: prompt,
+          sessionId,
+        })
+        if (!twin) {
+          if (!twinNoticeShown) {
+            twinNoticeShown = true
+            opts.onTwinNotice?.(
+              "Twin context unavailable — the Cognia desktop app is not reachable; continuing without it."
+            )
+          }
+        } else if (twin.applied) {
+          const stable = twin.applied.stable ?? twin.applied.systemPrompt
+          if (!twinStableInjected && stable) {
+            twinStableInjected = true
+            sendOptions.systemPrompt = sendOptions.systemPrompt
+              ? `${sendOptions.systemPrompt}\n\n${stable}`
+              : stable
+          }
+          twinDynamic = twin.applied.dynamic
+        }
+      }
       // Assemble multimodal content: encode `@image` refs, inject text/rich-doc
       // content, and resolve `@*.pdf` per the active model (native block vs
       // OCR). The transcript keeps the typed text; only the wire payload carries
@@ -454,8 +522,18 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         })
       }
       let result: RunAndCaptureResult
+      // Per-turn twin RAG rides the user content as a <twin-context> block —
+      // the cached SendOptions can't carry a fresh system prompt each turn.
+      let turnContent = built.content
+      if (twinDynamic) {
+        const block = `<twin-context>\n${twinDynamic}\n</twin-context>`
+        turnContent =
+          typeof turnContent === "string"
+            ? `${block}\n\n${turnContent}`
+            : [{ type: "text" as const, text: block }, ...turnContent]
+      }
       try {
-        result = await capture(sessionId, built.content, sendOptions, {
+        result = await capture(sessionId, turnContent, sendOptions, {
           signal: opts.signal,
           timeoutMs: opts.timeoutMs,
           // Idle (read) watchdog: interrupt a turn whose provider stream stalls
@@ -490,6 +568,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // Re-resolve skills next turn and re-announce them (the user may have
       // just toggled a skill via `/skill`).
       skillsAnnounced = false
+      // The rebuilt options lose the appended twin stable segment — inject it
+      // again on the next twin-grounded turn.
+      twinStableInjected = false
     },
     async setPermissionMode(mode) {
       // Before the sidecar has spawned there is no live session to mutate — the

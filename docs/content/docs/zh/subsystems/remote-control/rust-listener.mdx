@@ -23,14 +23,31 @@ description: server.rs —— spawn_server、axum 路由、四级中间件闸门
 通过 `listener.local_addr()` 读回，因此调用方记录的是真实端口。
 
 ```rust
-// src-tauri/src/remote_control/server.rs:100
+// src-tauri/src/remote_control/server.rs
 let app = Router::new()
     .route("/api/v1/health", get(health))
     .route("/api/v1/tasks/:id/run", post(run_task))
     .route("/api/v1/events", post(emit_event))
+    .route("/api/v1/commands/:target", post(run_command))
+    // 读取面（GET）——`read` 能力令牌即可访问。
+    .route("/api/v1/targets", get(get_targets))
+    .route("/api/v1/tasks", get(get_tasks))
+    .route("/api/v1/workflows/:id/runs", get(get_workflow_runs))
+    .route("/api/v1/goals", get(get_goals))
+    .route("/api/v1/audit", get(get_audit))
+    .route("/api/v1/runs/:runId", get(get_run_status))
     .layer(from_fn_with_state(state.clone(), middleware))
-    .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES)); // 8 * 1024, server.rs:46
+    .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES)); // 8 * 1024
 ```
+
+能力分档（`route_needs_write`）：`read` 令牌可访问健康探针与全部 `GET` 读取端点；变更类方法（`POST`）需要
+`write`。通用的 `POST /api/v1/commands/:target` 路由还会对**敏感**目标（`chat.send`、`connector.send`、
+`goal.create`）额外拦截，除非开启 `RemoteControlInboundConfig.allowSensitiveTargets`，否则返回
+`403 sensitive_target_disabled`。
+
+除 `/targets`（由 Rust 原生应答）外，每个 `GET` 读取都通过 `remote-control://query` 事件 + `QueryRegistry`
+oneshot 往返渲染进程，由 `remote_control_query_response` 命令解析；窗口关闭/繁忙时在有界等待后返回
+`503 window_unavailable`。完整线缆契约见 `docs/api/remote-control.openapi.yaml`。
 
 `AppState`（`server.rs:54`）是 `Clone` 的，携带 `AppHandle`、一个 `Arc<String>` 令牌、
 解析后的允许列表、限流器，以及 `Arc<dyn RequestObserver>`：

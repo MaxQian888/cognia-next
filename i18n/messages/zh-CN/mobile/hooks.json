@@ -1,0 +1,12 @@
+{
+  "backAria": "返回我的",
+  "builtin": {
+    "description": "随产品内置的生命周期钩子，会合并在你自己的钩子之下。",
+    "title": "内置钩子"
+  },
+  "defaultOff": "默认关闭",
+  "defaultOn": "默认开启",
+  "intro": "查看产品内置的生命周期钩子。你自己的按事件钩子存储在已配对桌面端的 .claude/settings.json 中。",
+  "manageOnDesktop": "用户、项目和本地钩子存储在已配对桌面端的 .claude/settings.json 中。请在桌面端添加、编辑和切换。",
+  "title": "钩子"
+}

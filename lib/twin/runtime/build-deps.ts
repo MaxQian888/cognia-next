@@ -1,7 +1,8 @@
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { createVectorStore } from "@cognia/vector/store"
 import { embeddingProviderRequiresApiKey } from "@cognia/provider-embedding/embedding-catalog"
-import { lexicalRerankScorer } from "./reranker"
+import { createLlmRerankScorer, lexicalRerankScorer } from "./reranker"
+import { createLlmClient, createTwinLanguageModel } from "@/lib/twin/distill/llm"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 
 export type TwinDepsForBuild = TwinRuntimeDepsForBuild
@@ -105,24 +106,93 @@ export async function tryBuildTwinDeps(): Promise<TwinDepsForBuild | undefined> 
     if (!storeConfig) return undefined
 
     const store = createVectorStore(storeConfig)
-    // Optional reranker: when enabled, attach the built-in key-free lexical
-    // scorer so applyTwinContext over-fetches + re-scores. When disabled (the
-    // default) we leave `reranker` unset, so RAG fetches exactly topK with no
-    // over-fetch and no rerank pass.
-    const reranker = settings.reranker?.enabled
-      ? {
-          model: settings.reranker.model,
-          overFetch: 3,
-          scorer: lexicalRerankScorer,
-        }
-      : undefined
+    // Optional reranker: when enabled, attach a re-scorer so applyTwinContext
+    // over-fetches + re-scores. When disabled (the default) we leave `reranker`
+    // unset, so RAG fetches exactly topK with no over-fetch and no rerank pass.
+    //   - "lexical"     → the built-in key-free scorer (no LLM, no over-fetch cost).
+    //   - anything else → a model-backed LLM reranker using the twin's own LLM
+    //     config (one batched relevance call over a wider pool). Falls back to
+    //     the lexical scorer when the LLM is unconfigured (no apiKey / baseURL),
+    //     so a half-set model id never silently disables reranking. The LLM
+    //     batch call gets a longer timeout than the local lexical path.
+    const reranker = buildReranker(settings)
+    const expansion = await buildExpansion(settings)
     return {
       store,
       embedding: settings.embedding,
       vectorBackend: settings.storage.vectorBackend,
       ...(reranker ? { reranker } : {}),
+      ...(expansion ? { expansion } : {}),
     }
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Build the LLM query-expansion dep from the twin runtime settings, or
+ * `undefined` when the global `queryExpansion` block is off or the distill LLM
+ * is unconfigured (heuristic synonym expansion still runs per-character without
+ * this dep). The per-character `enableQueryExpansion` toggle gates whether the
+ * runtime actually uses it.
+ */
+async function buildExpansion(settings: TwinSettings): Promise<TwinDepsForBuild["expansion"]> {
+  const qe = settings.queryExpansion
+  if (!qe?.enabled) return undefined
+  const llm = settings.llm
+  const llmReady = Boolean(llm.apiKey || llm.baseURL)
+  if (!llmReady) return undefined
+  try {
+    const model = await createTwinLanguageModel({
+      provider: llm.provider,
+      model: llm.model,
+      apiKey: llm.apiKey,
+      baseURL: llm.baseURL,
+    })
+    return { model, strategy: qe.strategy }
+  } catch {
+    return undefined
+  }
+}
+
+type TwinSettings = Awaited<ReturnType<typeof getTwinRuntimeSettings>>
+
+/**
+ * Build the reranker dep from the twin runtime settings, or `undefined` when
+ * reranking is off. See the call site in `tryBuildTwinDeps` for the strategy
+ * matrix (lexical vs LLM, with graceful fallback).
+ */
+function buildReranker(settings: TwinSettings): TwinDepsForBuild["reranker"] {
+  const rr = settings.reranker
+  if (!rr?.enabled) return undefined
+
+  // Lexical (default): local, key-free, cheap.
+  if (rr.model === "lexical") {
+    return { model: rr.model, overFetch: 3, scorer: lexicalRerankScorer }
+  }
+
+  // Model-backed: reuse the twin's distill LLM config. A cloud provider needs
+  // an apiKey; an OpenAI-compatible local endpoint may pass only a baseURL.
+  const llm = settings.llm
+  const llmReady = Boolean(llm.apiKey || llm.baseURL)
+  if (!llmReady) {
+    // Half-configured model id — degrade to the lexical scorer rather than
+    // silently disabling the rerank pass the user turned on.
+    return { model: "lexical", overFetch: 3, scorer: lexicalRerankScorer }
+  }
+
+  const client = createLlmClient({
+    provider: llm.provider,
+    model: llm.model,
+    apiKey: llm.apiKey,
+    baseURL: llm.baseURL,
+  })
+  return {
+    model: rr.model,
+    // Wider pool for the LLM to choose from; one batched call re-ranks it.
+    overFetch: 5,
+    // LLM makes a network round-trip — allow more than the 1.5 s local default.
+    timeoutMs: 8000,
+    batchScorer: createLlmRerankScorer(client),
   }
 }

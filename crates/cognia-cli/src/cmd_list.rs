@@ -31,23 +31,45 @@ pub(crate) struct InstalledPluginEntry {
 pub(crate) struct ListJsonPayload {
     #[serde(rename = "schemaVersion")]
     pub(crate) schema_version: u32,
+    pub(crate) ok: bool,
+    pub(crate) action: &'static str,
     pub(crate) plugins: Vec<InstalledPluginEntry>,
 }
 
+#[derive(Debug, Serialize)]
+struct ListFailureJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    action: &'static str,
+    stage: &'static str,
+    error: String,
+}
+
 pub fn run(json: bool, ui: &mut RuntimeUi) -> Result<()> {
-    let endpoint = load_endpoint()?;
+    let endpoint = match load_endpoint() {
+        Ok(endpoint) => endpoint,
+        Err(err) if json => return emit_json_failure("endpoint", err),
+        Err(err) => return Err(err),
+    };
     run_with_endpoint(json, &endpoint, ui)
 }
 
-pub fn run_with_endpoint(json: bool, endpoint: &EndpointFile, _ui: &mut RuntimeUi) -> Result<()> {
-    let plugins = fetch_installed_plugins(endpoint)?;
+pub fn run_with_endpoint(json: bool, endpoint: &EndpointFile, ui: &mut RuntimeUi) -> Result<()> {
+    let plugins = match fetch_installed_plugins(endpoint) {
+        Ok(plugins) => plugins,
+        Err(err) if json => return emit_json_failure("bridge", err),
+        Err(err) => return Err(err),
+    };
     if json {
         let payload = ListJsonPayload {
             schema_version: 1,
+            ok: true,
+            action: "list",
             plugins,
         };
         println!("{}", serde_json::to_string_pretty(&payload)?);
-    } else {
+    } else if !ui.flags.quiet {
         print_human(&plugins);
     }
     Ok(())
@@ -58,6 +80,18 @@ pub(crate) fn fetch_installed_plugins(
 ) -> Result<Vec<InstalledPluginEntry>> {
     let response: ListInstalledResponse = get_json(endpoint, LIST_PATH)?;
     Ok(response.plugins)
+}
+
+fn emit_json_failure(stage: &'static str, err: anyhow::Error) -> Result<()> {
+    let payload = ListFailureJsonPayload {
+        schema_version: 1,
+        ok: false,
+        action: "list",
+        stage,
+        error: err.to_string(),
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Err(crate::JsonFailureExit.into())
 }
 
 fn print_human(plugins: &[InstalledPluginEntry]) {
@@ -138,6 +172,8 @@ mod tests {
     fn json_payload_is_schema_versioned() {
         let payload = ListJsonPayload {
             schema_version: 1,
+            ok: true,
+            action: "list",
             plugins: vec![InstalledPluginEntry {
                 plugin_id: "demo".into(),
                 version: "1.2.3".into(),
@@ -147,7 +183,26 @@ mod tests {
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["schemaVersion"], serde_json::Value::Number(1.into()));
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["action"], "list");
         assert_eq!(json["plugins"][0]["pluginId"], "demo");
         assert_eq!(json["plugins"][0]["installPath"], "/plugins/demo");
+    }
+
+    #[test]
+    fn list_failure_json_payload_carries_bridge_error() {
+        let payload = ListFailureJsonPayload {
+            schema_version: 1,
+            ok: false,
+            action: "list",
+            stage: "bridge",
+            error: "GET http://127.0.0.1:7891/api/v1/dev/plugins/installed -> HTTP 500".into(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["action"], "list");
+        assert_eq!(json["stage"], "bridge");
+        assert!(json["error"].as_str().unwrap().contains("HTTP 500"));
     }
 }

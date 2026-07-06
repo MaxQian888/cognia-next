@@ -2,6 +2,9 @@ import {
   type AgentTeam,
   type AgentTeammate,
   type AgentTeamTask,
+  type AgentTaskComment,
+  type TaskCommentAttachment,
+  type AddTaskCommentInput,
   type AgentTeamMessage,
   type AgentTeamConfig,
   type AgentTeamTemplate,
@@ -109,6 +112,8 @@ export interface AgentTeamState {
   setTaskStatus: (taskId: string, status: TeamTaskStatus, result?: string, error?: string) => void
   claimTask: (taskId: string, teammateId: string) => void
   assignTask: (taskId: string, teammateId: string) => void
+  addTaskComment: (input: AddTaskCommentInput) => AgentTaskComment | null
+  attachTaskFile: (taskId: string, attachment: Omit<TaskCommentAttachment, "id">) => void
 
   // Messages
   addMessage: (input: SendMessageInput) => AgentTeamMessage
@@ -149,6 +154,7 @@ export interface AgentTeamState {
   getTeammate: (teammateId: string) => AgentTeammate | undefined
   getTeammates: (teamId: string) => AgentTeammate[]
   getTeamTasks: (teamId: string) => AgentTeamTask[]
+  getTaskComments: (taskId: string) => AgentTaskComment[]
   getTeamMessages: (teamId: string) => AgentTeamMessage[]
   getUnreadMessages: (teammateId: string) => AgentTeamMessage[]
   getActiveTeam: () => AgentTeam | undefined

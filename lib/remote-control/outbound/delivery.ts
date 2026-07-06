@@ -7,19 +7,27 @@
  */
 
 import { buildSignedHeaders } from "./signing"
-import type { OutboundWebhookEvent, WebhookEgressEndpoint } from "@/types/remote-control"
+import {
+  DEFAULT_WEBHOOK_DELIVERY,
+  normalizeWebhookDelivery,
+  type OutboundWebhookEvent,
+  type WebhookDeliveryConfig,
+  type WebhookEgressEndpoint,
+} from "@/types/remote-control"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
-const MAX_RETRIES = 3
-const BASE_DELAY = 1000
-const TIMEOUT_MS = 10_000
 
 export interface DeliverInput {
   endpoint: WebhookEgressEndpoint
   event: OutboundWebhookEvent
   /** Resolved Standard Webhooks signing secret. Omitted → unsigned delivery. */
   signingSecret?: string
+  /**
+   * User-tunable retry / timeout / backoff limits. Clamped to the accepted
+   * bounds before use; omitted → {@link DEFAULT_WEBHOOK_DELIVERY}.
+   */
+  limits?: Partial<WebhookDeliveryConfig>
 }
 
 export interface DeliverResult {
@@ -37,6 +45,8 @@ export async function deliverWebhook(
 ): Promise<DeliverResult> {
   const sleep = opts.sleep ?? realSleep
   const { endpoint, event, signingSecret } = input
+  const limits = input.limits ? normalizeWebhookDelivery(input.limits) : DEFAULT_WEBHOOK_DELIVERY
+  const { maxRetries, baseDelayMs, timeoutMs } = limits
   const body = JSON.stringify(event) // serialize ONCE
   const timestamp = Math.floor(new Date(event.occurredAt).getTime() / 1000)
 
@@ -49,9 +59,9 @@ export async function deliverWebhook(
     Object.assign(baseHeaders, await buildSignedHeaders(event.id, timestamp, body, signingSecret))
   }
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const res = await fetch(endpoint.url, {
         method: "POST",
@@ -61,16 +71,16 @@ export async function deliverWebhook(
       })
       clearTimeout(timer)
       if (res.ok) return { ok: true, httpStatus: res.status }
-      if (attempt === MAX_RETRIES) {
+      if (attempt === maxRetries) {
         return { ok: false, httpStatus: res.status, error: `http ${res.status}` }
       }
     } catch (error) {
       clearTimeout(timer)
-      if (attempt === MAX_RETRIES) {
+      if (attempt === maxRetries) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) }
       }
     }
-    const delay = BASE_DELAY * 2 ** attempt + Math.random() * 500
+    const delay = baseDelayMs * 2 ** attempt + Math.random() * 500
     log.warn(
       `webhook delivery attempt ${attempt + 1} failed for ${endpoint.url}, retrying in ${Math.round(delay)}ms`
     )

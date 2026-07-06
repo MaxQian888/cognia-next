@@ -83,6 +83,10 @@ sequenceDiagram
   （`normalize_signature`，`:313-324`）；占位符密钥 ⇒ 跳过并报
   `release signing key is a placeholder; skipping Ed25519 verification (SHA-256 enforced)`；
   真实密钥 ⇒ 失败即中止安装
+- **离线校验** —— `cognia release-verify <artifact> --checksums <checksums.txt> [--signature <sig>] [--json]`
+  在不下载、不安装的情况下复用同一套 checksum 与 release-key 策略。发布密钥是真实密钥时，
+  默认读取 `<artifact>.sig`；`--signature` 只是覆盖这个 sidecar 路径。JSON 会报告两个摘要、
+  `checksumVerified`、`signatureStatus` 和 release-key fingerprint。
 - **安装目录**（`:282-291`）—— `<app_data>/cognia/cli/<version_label>`（Roaming AppData /
   Application Support / `~/.config`），可按调用经 `targetDir` 覆盖
 - **解压**（`extract_tar_gz`，`:154-189`）—— gzip + tar 遍历，**拒绝路径穿越

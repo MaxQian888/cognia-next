@@ -2,9 +2,10 @@
 //!
 //! Exposes Tauri commands for managing external agent processes and terminals.
 
-use super::process::{
-    ExternalAgentEventSink, ExternalAgentProcessManager, ExternalAgentSpawnConfig,
+use super::exec_backend::{
+    self, AgentEventEmitter, ExecBackend, LocalProcessBackend, STATE_CHANGE_CHANNEL,
 };
+use super::process::{ExternalAgentProcessManager, ExternalAgentSpawnConfig};
 use super::terminal::{AcpTerminalManager, TerminalExitStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,49 +19,29 @@ use tauri::{AppHandle, Emitter, State};
 /// external-agent operation (spawn, send, kill, status) against each other.
 pub struct ExternalAgentState(pub Arc<ExternalAgentProcessManager>);
 
+impl ExternalAgentState {
+    /// The desktop's exec backend view over the managed process manager
+    /// (ADR-0059 R10) — one code path with the headless RPC arms.
+    fn backend(&self) -> Arc<LocalProcessBackend> {
+        LocalProcessBackend::from_manager(Arc::clone(&self.0))
+    }
+}
+
 impl Default for ExternalAgentState {
     fn default() -> Self {
         Self(Arc::new(ExternalAgentProcessManager::new()))
     }
 }
 
-/// Emits `external-agent://*` events for a spawned process. Passed to
-/// `ExternalAgentProcessManager::spawn` so the stdout/stderr reader tasks and
-/// the exit supervisor push straight to the webview — no polling, no lock.
-struct TauriEventSink {
+/// Desktop emitter for the `external-agent://*` channels — payload shapes
+/// are the frozen ones in [`exec_backend`].
+struct TauriAgentEmitter {
     app: AppHandle,
 }
 
-impl ExternalAgentEventSink for TauriEventSink {
-    fn stdout_line(&self, agent_id: &str, line: &str) {
-        let _ = self.app.emit(
-            "external-agent://stdout",
-            serde_json::json!({ "agentId": agent_id, "data": line }),
-        );
-    }
-
-    fn stderr_line(&self, agent_id: &str, line: &str) {
-        let _ = self.app.emit(
-            "external-agent://stderr",
-            serde_json::json!({ "agentId": agent_id, "data": line }),
-        );
-    }
-
-    fn exited(&self, agent_id: &str, code: Option<i32>, signal: Option<String>) {
-        // Mirror the previous poll-loop payloads: a state-change to Stopped
-        // followed by the exit event (code defaults to 0 when unavailable).
-        let _ = self.app.emit(
-            "external-agent://state-change",
-            serde_json::json!({ "agentId": agent_id, "state": "Stopped" }),
-        );
-        let _ = self.app.emit(
-            "external-agent://exit",
-            serde_json::json!({
-                "agentId": agent_id,
-                "code": code.unwrap_or(0),
-                "signal": signal
-            }),
-        );
+impl AgentEventEmitter for TauriAgentEmitter {
+    fn emit(&self, channel: &str, payload: serde_json::Value) {
+        let _ = self.app.emit(channel, payload);
     }
 }
 
@@ -73,54 +54,17 @@ impl Default for AcpTerminalState {
     }
 }
 
-/// Spawn an external agent process
+/// Spawn an external agent process. Event choreography lives in
+/// `exec_backend::spawn_with_events` — one code path with the headless RPC
+/// arms (ADR-0059 R10).
 #[tauri::command]
 pub async fn spawn_external_agent(
     config: ExternalAgentSpawnConfig,
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let id = config.id.clone();
-    let sink: Arc<dyn ExternalAgentEventSink> = Arc::new(TauriEventSink { app: app.clone() });
-
-    let result = state.0.spawn(config, sink).await;
-
-    if result.is_ok() {
-        // Emit spawn event with Starting state
-        let _ = app.emit(
-            "external-agent://spawn",
-            serde_json::json!({
-                "agentId": id,
-                "status": "starting"
-            }),
-        );
-
-        // Transition to Running state
-        let _ = state.0.set_running(&id).await;
-
-        // Emit state change to Running
-        let _ = app.emit(
-            "external-agent://state-change",
-            serde_json::json!({
-                "agentId": id,
-                "state": "Running"
-            }),
-        );
-
-        // stdout/stderr/exit events are now pushed by the reader + supervisor
-        // tasks via the sink — no polling loop here.
-    } else {
-        // Spawn failed - this happens before process is created
-        let _ = app.emit(
-            "external-agent://state-change",
-            serde_json::json!({
-                "agentId": id,
-                "state": "Failed"
-            }),
-        );
-    }
-
-    result
+    let emitter: Arc<dyn AgentEventEmitter> = Arc::new(TauriAgentEmitter { app });
+    exec_backend::spawn_with_events(state.backend().as_ref(), emitter, config).await
 }
 
 /// Send a message to an external agent process
@@ -130,7 +74,7 @@ pub async fn send_to_external_agent(
     message: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<(), String> {
-    state.0.send(&agent_id, &message).await
+    state.backend().send(&agent_id, &message).await
 }
 
 /// Kill an external agent process. The exit event is emitted by the process
@@ -140,7 +84,7 @@ pub async fn kill_external_agent(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<(), String> {
-    state.0.kill(&agent_id).await
+    state.backend().kill(&agent_id).await
 }
 
 /// Get status of an external agent process
@@ -149,7 +93,7 @@ pub async fn get_external_agent_status(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<String, String> {
-    match state.0.status(&agent_id).await {
+    match state.backend().status(&agent_id).await {
         Some(status) => Ok(format!("{:?}", status)),
         None => Err(format!("Agent {} not found", agent_id)),
     }
@@ -160,7 +104,7 @@ pub async fn get_external_agent_status(
 pub async fn list_external_agents(
     state: State<'_, ExternalAgentState>,
 ) -> Result<Vec<String>, String> {
-    Ok(state.0.list().await)
+    Ok(state.backend().list().await)
 }
 
 /// Check if an external agent process is running
@@ -169,7 +113,7 @@ pub async fn is_external_agent_running(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<bool, String> {
-    state.0.is_running(&agent_id).await
+    state.backend().is_running(&agent_id).await
 }
 
 /// Get detailed info about an external agent process
@@ -178,7 +122,7 @@ pub async fn get_external_agent_info(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<serde_json::Value, String> {
-    state.0.get_info(&agent_id).await
+    state.backend().get_info(&agent_id).await
 }
 
 /// Set external agent state to Running
@@ -188,15 +132,12 @@ pub async fn set_external_agent_running(
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let result = state.0.set_running(&agent_id).await;
+    let result = state.backend().set_running(&agent_id).await;
 
     if result.is_ok() {
         let _ = app.emit(
-            "external-agent://state-change",
-            serde_json::json!({
-                "agentId": agent_id,
-                "state": "Running"
-            }),
+            STATE_CHANGE_CHANNEL,
+            exec_backend::state_change_payload(&agent_id, "Running"),
         );
     }
 
@@ -210,15 +151,12 @@ pub async fn set_external_agent_failed(
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let result = state.0.set_failed(&agent_id).await;
+    let result = state.backend().set_failed(&agent_id).await;
 
     if result.is_ok() {
         let _ = app.emit(
-            "external-agent://state-change",
-            serde_json::json!({
-                "agentId": agent_id,
-                "state": "Failed"
-            }),
+            STATE_CHANGE_CHANNEL,
+            exec_backend::state_change_payload(&agent_id, "Failed"),
         );
     }
 
@@ -228,7 +166,7 @@ pub async fn set_external_agent_failed(
 /// Kill all external agent processes
 #[tauri::command]
 pub async fn kill_all_external_agents(state: State<'_, ExternalAgentState>) -> Result<(), String> {
-    state.0.kill_all().await
+    state.backend().kill_all().await
 }
 
 // ============================================================================

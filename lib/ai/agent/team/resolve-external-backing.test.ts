@@ -26,6 +26,7 @@ const addAgent = jest.fn()
 const getAllAgents = jest.fn()
 const createAgentFromPreset = jest.fn()
 const isFromPreset = jest.fn()
+const resolvePreferredCodex = jest.fn<Promise<string>, []>(async () => "codex")
 
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({ addAgent, getAllAgents }),
@@ -33,6 +34,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
 jest.mock("@/lib/ai/agent/external/presets", () => ({
   createAgentFromPreset: (...args: unknown[]) => createAgentFromPreset(...args),
   isFromPreset: (...args: unknown[]) => isFromPreset(...args),
+  resolvePreferredCodexExecutablePresetId: () => resolvePreferredCodex(),
 }))
 
 function ctx(): TeamRunContext {
@@ -44,6 +46,7 @@ beforeEach(() => {
   getAllAgents.mockReset().mockReturnValue([])
   createAgentFromPreset.mockReset()
   isFromPreset.mockReset().mockReturnValue(null)
+  resolvePreferredCodex.mockReset().mockResolvedValue("codex")
 })
 
 describe("resolveTeammatePresetId", () => {
@@ -107,6 +110,34 @@ describe("resolveTeammateExternalAgent", () => {
     expect(id).toBe("live-7")
     expect(addAgent).not.toHaveBeenCalled()
     expect(createAgentFromPreset).not.toHaveBeenCalled()
+  })
+
+  it("upgrades runtime 'codex' to the native app-server when the codex CLI is present", async () => {
+    resolvePreferredCodex.mockResolvedValue("codex-app-server")
+    createAgentFromPreset.mockReturnValue({
+      id: "agent-x",
+      metadata: { preset: "codex-app-server" },
+    })
+    const c = ctx()
+    const id = await resolveTeammateExternalAgent(
+      teammate({ config: { runtime: "codex" } }),
+      EMPTY_CAPS,
+      c
+    )
+    expect(id).toBe("agent-x")
+    expect(createAgentFromPreset).toHaveBeenCalledWith("codex-app-server")
+    expect(c.externalAgentInstances.get("codex-app-server")).toBe("agent-x")
+  })
+
+  it("does not upgrade a non-codex runtime", async () => {
+    createAgentFromPreset.mockReturnValue({ id: "g1", metadata: { preset: "gemini-cli" } })
+    await resolveTeammateExternalAgent(
+      teammate({ config: { runtime: "gemini-cli" } }),
+      EMPTY_CAPS,
+      ctx()
+    )
+    expect(resolvePreferredCodex).not.toHaveBeenCalled()
+    expect(createAgentFromPreset).toHaveBeenCalledWith("gemini-cli")
   })
 
   it("returns null when the preset is unknown (caller falls back)", async () => {

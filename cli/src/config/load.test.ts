@@ -395,3 +395,37 @@ describe("mouse config", () => {
     expect(cfg.mouse).toBeUndefined()
   })
 })
+
+describe("editor config", () => {
+  it("is absent by default (detector decides at use time)", () => {
+    expect(run({}).editor).toBeUndefined()
+  })
+
+  it("normalizes the string sugar to the object form", () => {
+    const cfg = run({ [userConfigPath(HOME)]: JSON.stringify({ editor: "code" }) })
+    expect(cfg.editor).toEqual({ command: "code" })
+  })
+
+  it("reads the object form verbatim", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ editor: { command: "subl", args: ["-n"] } }),
+    })
+    expect(cfg.editor).toEqual({ command: "subl", args: ["-n"] })
+  })
+
+  it("lets a project layer override the user editor", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ editor: "vim" }),
+      [projectConfigPath(CWD)]: JSON.stringify({ editor: "cursor" }),
+    })
+    expect(cfg.editor).toEqual({ command: "cursor" })
+  })
+
+  it("lets COGNIA_EDITOR override the config file", () => {
+    const cfg = run(
+      { [userConfigPath(HOME)]: JSON.stringify({ editor: { command: "vim", args: ["-p"] } }) },
+      { env: { COGNIA_EDITOR: "code" } }
+    )
+    expect(cfg.editor).toEqual({ command: "code", args: ["-p"] })
+  })
+})

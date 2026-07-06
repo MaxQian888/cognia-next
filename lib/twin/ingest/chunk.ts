@@ -38,6 +38,7 @@ const FORMAT_TO_STRATEGY: Record<TwinSourceFormat, ChunkingStrategy> = {
   markdown: "heading",
   pdf: "smart",
   docx: "heading",
+  xlsx: "fixed",
   pptx: "paragraph",
   odt: "heading",
   odp: "paragraph",

@@ -69,6 +69,16 @@ import {
   gatherCapabilityCatalog,
 } from "@/lib/ai/agent/team/auto/capability-catalog"
 import { materializeProposal } from "@/lib/ai/agent/team/auto/materialize"
+import {
+  materializeBackgroundHandoff,
+  materializeExternalHandoff,
+} from "@/lib/ai/agent/team/auto/handoff"
+import {
+  runCouncilFromProposal,
+  runEnsembleFromProposal,
+  type RunExecutorDeps,
+} from "@/lib/ai/agent/team/auto/run-executor"
+import { defaultCouncilRunPrompt } from "@/lib/ai/council/run-council"
 import type { AutoOrchestrationProposal, CapabilityCatalog } from "@/lib/ai/agent/team/auto/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { AgentTeamConfig, TeamExecutionPattern } from "@/types/agent/agent-team"
@@ -99,25 +109,43 @@ export interface AutoComposeDialogProps {
   onOpenChange: (open: boolean) => void
   /** Called with the new team id after the operator approves (or quick-creates). */
   onComposed: (teamId: string) => void
+  /** Called with the markdown report after a council/ensemble executor runs
+   * in-dialog, so a chat-hosted trigger can forward it into the transcript. */
+  onResult?: (markdown: string) => void
   // ── injectable seams (default to the real impls; faked in tests) ──
   plan?: typeof planAutoOrchestration
   materialize?: typeof materializeProposal
+  materializeBackground?: typeof materializeBackgroundHandoff
+  materializeExternal?: typeof materializeExternalHandoff
   buildClient?: () => LlmClient | null
   clarify?: typeof clarifyObjective
   getCatalog?: () => Promise<CapabilityCatalog>
+  runCouncilExec?: typeof runCouncilFromProposal
+  runEnsembleExec?: typeof runEnsembleFromProposal
+  /** Enabled routing aliases (defaults to the settings model-mappings). */
+  loadAliases?: () => Promise<string[]>
+  /** Routed prompt runner factory (defaults to the ADR-0043 engine). */
+  makeRunPrompt?: () => Promise<RunExecutorDeps["runPrompt"]>
 }
 
-type Phase = "input" | "clarify" | "loading" | "preview"
+type Phase = "input" | "clarify" | "loading" | "preview" | "result"
 
 export function AutoComposeDialog({
   open,
   onOpenChange,
   onComposed,
+  onResult,
   plan = planAutoOrchestration,
   materialize = materializeProposal,
+  materializeBackground = materializeBackgroundHandoff,
+  materializeExternal = materializeExternalHandoff,
   buildClient,
   clarify = clarifyObjective,
   getCatalog = gatherCapabilityCatalog,
+  runCouncilExec = runCouncilFromProposal,
+  runEnsembleExec = runEnsembleFromProposal,
+  loadAliases,
+  makeRunPrompt,
 }: AutoComposeDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.autoCompose")
   const appSettings = useSettingsStore((s) => s.settings)
@@ -130,6 +158,7 @@ export function AutoComposeDialog({
   const [catalog, setCatalog] = useState<CapabilityCatalog>(EMPTY_CAPABILITY_CATALOG)
   const [questions, setQuestions] = useState<string[]>([])
   const [answers, setAnswers] = useState<string[]>([])
+  const [resultMarkdown, setResultMarkdown] = useState<string | null>(null)
 
   const resolveClient = useMemo(
     () =>
@@ -152,9 +181,24 @@ export function AutoComposeDialog({
     setCatalog(EMPTY_CAPABILITY_CATALOG)
     setQuestions([])
     setAnswers([])
+    setResultMarkdown(null)
   }
 
   const isBusy = phase === "loading"
+
+  /** The consensus/verify signal the operator chose (opts into council/ensemble). */
+  const consensusSignal = {
+    ...(options.consensusNeeded ? { consensusNeeded: true } : {}),
+    ...(options.verificationNeeded ? { verificationNeeded: true } : {}),
+  }
+
+  /** Alias source for in-dialog council/ensemble runs. */
+  const resolveAliases =
+    loadAliases ??
+    (async () =>
+      (appSettings?.modelMappings ?? [])
+        .filter((m) => m && m.enabled !== false && m.alias)
+        .map((m) => m.alias))
 
   /** Build the run-option config the operator chose for team creation. */
   const buildConfig = (): Partial<AgentTeamConfig> => ({
@@ -195,6 +239,26 @@ export function AutoComposeDialog({
     }
   }
 
+  /** Run a non-team (council/ensemble) executor in-dialog and show its report. */
+  const runAnalysisExecutor = async (
+    p: AutoOrchestrationProposal,
+    kind: "council" | "ensemble"
+  ) => {
+    setPhase("loading")
+    try {
+      const runPrompt = await (makeRunPrompt ?? defaultCouncilRunPrompt)()
+      const deps: RunExecutorDeps = { loadAliases: resolveAliases, runPrompt }
+      const res =
+        kind === "council" ? await runCouncilExec(p, deps) : await runEnsembleExec(p, deps)
+      setResultMarkdown(res.markdown)
+      setPhase("result")
+      onResult?.(res.markdown)
+      log.info("auto_compose_executor_ran", { kind, ok: res.ok })
+    } catch (err) {
+      handlePlanError(err)
+    }
+  }
+
   /** Plan from `objectiveText` and open the editable preview. */
   const doPlan = async (objectiveText: string, client: LlmClient) => {
     setPhase("loading")
@@ -207,6 +271,7 @@ export function AutoComposeDialog({
         maxRoster: options.maxRoster,
         preferredPattern:
           options.preferredPattern === "auto" ? undefined : options.preferredPattern,
+        consensusSignal,
       })
       setProposal(next)
       setCatalog(cat)
@@ -272,6 +337,36 @@ export function AutoComposeDialog({
     await doPlan(objective.trim(), client)
   }
 
+  /**
+   * Handoff executors — background queues a one-shot scheduler run, external
+   * marks the team awaiting pickup via the bridge. Both still materialize a
+   * real team; the dialog's `materialize` seam is threaded so tests stay
+   * store-free.
+   */
+  const runHandoffExecutor = async (
+    next: AutoOrchestrationProposal,
+    kind: "background-handoff" | "external-handoff",
+    name?: string
+  ): Promise<void> => {
+    const opts = { name, config: buildConfig() }
+    if (kind === "background-handoff") {
+      const r = await materializeBackground(next, opts, { materialize })
+      log.info("auto_compose_background_handoff", {
+        teamId: r.teamId,
+        scheduledTaskId: r.scheduledTaskId,
+      })
+      toast.success(t(r.scheduledTaskId ? "queuedBackground" : "queuedBackgroundNoScheduler"))
+      onComposed(r.teamId)
+      reset()
+      return
+    }
+    const r = await materializeExternal(next, opts, { materialize })
+    log.info("auto_compose_external_handoff", { teamId: r.teamId })
+    toast.success(t("awaitingExternal"))
+    onComposed(r.teamId)
+    reset()
+  }
+
   /** "Quick create": plan with smart defaults and materialize immediately. */
   const handleQuickCreate = async () => {
     const ready = prepare()
@@ -286,7 +381,17 @@ export function AutoComposeDialog({
         maxRoster: options.maxRoster,
         preferredPattern:
           options.preferredPattern === "auto" ? undefined : options.preferredPattern,
+        consensusSignal,
       })
+      const kind = next.executor?.kind
+      if (kind === "council" || kind === "ensemble") {
+        await runAnalysisExecutor(next, kind)
+        return
+      }
+      if (kind === "background-handoff" || kind === "external-handoff") {
+        await runHandoffExecutor(next, kind)
+        return
+      }
       const { teamId } = materialize(next, { config: buildConfig() })
       log.info("auto_compose_quick_created", { teamId })
       toast.success(t("created"))
@@ -297,8 +402,22 @@ export function AutoComposeDialog({
     }
   }
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!proposal) return
+    const kind = proposal.executor?.kind
+    // Council / ensemble aren't teams — run them here and surface the report
+    // rather than materializing a team. Handoffs materialize AND queue/mark
+    // (background → one-shot scheduler run; external → awaiting bridge
+    // pickup). Everything else materializes as before (single-send lands as
+    // a 1-member team; team-* run from the workspace).
+    if (kind === "council" || kind === "ensemble") {
+      await runAnalysisExecutor(proposal, kind)
+      return
+    }
+    if (kind === "background-handoff" || kind === "external-handoff") {
+      await runHandoffExecutor(proposal, kind, teamName.trim() || undefined)
+      return
+    }
     const { teamId } = materialize(proposal, {
       name: teamName.trim() || undefined,
       config: buildConfig(),
@@ -351,6 +470,13 @@ export function AutoComposeDialog({
             answers={answers}
             onAnswerChange={(i, v) => setAnswers((prev) => prev.map((a, j) => (j === i ? v : a)))}
           />
+        ) : phase === "result" ? (
+          <div
+            className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap rounded-md border p-3 text-xs"
+            data-testid="auto-compose-result"
+          >
+            {resultMarkdown ?? ""}
+          </div>
         ) : proposal ? (
           <div
             className="space-y-4 max-h-[60vh] overflow-y-auto pr-1"
@@ -392,11 +518,24 @@ export function AutoComposeDialog({
                 </Select>
               </div>
               <p className="text-xs text-muted-foreground">{proposal.assessment.reason}</p>
+              {proposal.executor ? (
+                <div className="flex items-center gap-2" data-testid="auto-compose-executor">
+                  <Badge variant="secondary" className="text-[10px]">
+                    {t("executorLabel", {
+                      executor: t(`executors.${proposal.executor.kind}`),
+                    })}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground">
+                    {proposal.executor.reason}
+                  </span>
+                </div>
+              ) : null}
             </div>
 
             <AutoComposeRosterEditor
               roster={proposal.roster}
               catalog={catalog}
+              twinRoster={proposal.twinRoster ?? []}
               onChange={(roster) => updateProposal({ roster })}
               onAdd={() => updateProposal({ roster: addMember(proposal.roster) })}
               onRemove={(i) => {
@@ -441,10 +580,25 @@ export function AutoComposeDialog({
               >
                 {t("reject")}
               </Button>
-              <Button size="sm" onClick={handleApprove} data-testid="auto-compose-approve">
+              <Button
+                size="sm"
+                onClick={() => void handleApprove()}
+                data-testid="auto-compose-approve"
+              >
                 {t("approve")}
               </Button>
             </>
+          ) : phase === "result" ? (
+            <Button
+              size="sm"
+              onClick={() => {
+                reset()
+                onOpenChange(false)
+              }}
+              data-testid="auto-compose-result-done"
+            >
+              {t("resultDone")}
+            </Button>
           ) : phase === "clarify" ? (
             <>
               <Button

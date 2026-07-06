@@ -253,6 +253,60 @@ describe("TwinSettingsTab — native vector backend", () => {
     })
   })
 
+  it("enables LLM query expansion and persists it on save", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const toggle = screen.getByLabelText(/llm query expansion/i)
+    await user.click(toggle)
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ queryExpansion: expect.objectContaining({ enabled: true }) })
+      )
+    })
+  })
+
+  // D1 privacy: extraNameHints textarea parses comma/newline input and saves.
+  it("persists extraNameHints parsed from the always-redact names textarea", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const textarea = screen.getByTestId("twin-settings-extra-name-hints")
+    await user.type(textarea, "Alice, 张伟")
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ extraNameHints: ["Alice", "张伟"] })
+      )
+    })
+  })
+
+  // Phase 4a: the reranker model selector persists the LLM-backed choice
+  it("lets the user pick the LLM reranker model and persists it", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    // The model selector only appears once reranking is enabled.
+    await user.click(screen.getByLabelText(/rerank retrieved results/i))
+    const modelSelect = (await screen.findByLabelText("Reranker model")) as HTMLSelectElement
+    await user.selectOptions(modelSelect, "llm")
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reranker: expect.objectContaining({ enabled: true, model: "llm" }),
+        })
+      )
+    })
+  })
+
   // 3. "Test connection" calls verifyVectorBackendReadiness and shows the result
   it("calls verifyVectorBackendReadiness on test click and shows Operational badge", async () => {
     mockedIsTauri.mockReturnValue(true)

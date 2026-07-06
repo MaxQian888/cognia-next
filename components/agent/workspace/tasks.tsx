@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
-import { ListTodoIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { ListTodoIcon, MessageSquareIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -37,6 +37,7 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TASK_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeamTask, AgentTeammate } from "@/types/agent/agent-team"
 import { createLogger } from "@/lib/logging"
+import { TaskComments } from "./task-comments"
 
 const log = createLogger("agentTeams.tasks")
 
@@ -66,6 +67,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
   const [description, setDescription] = useState("")
   const [priority, setPriority] = useState("normal")
   const [assigneeId, setAssigneeId] = useState("")
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
 
   const handleCreate = () => {
     if (!title.trim()) return
@@ -270,6 +272,18 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
                     {task.result}
                   </p>
                 )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={() => setExpandedTaskId((prev) => (prev === task.id ? null : task.id))}
+                  aria-expanded={expandedTaskId === task.id}
+                  data-testid={`task-${task.id}-comments-toggle`}
+                >
+                  <MessageSquareIcon className="mr-1 size-3" />
+                  {t("comments.count", { count: task.comments?.length ?? 0 })}
+                </Button>
+                {expandedTaskId === task.id && <TaskComments taskId={task.id} />}
               </Card>
             </motion.div>
           )

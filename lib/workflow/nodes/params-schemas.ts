@@ -56,7 +56,10 @@ function isHttpUrlOrExpression(value: string): boolean {
 
 // ── Triggers ────────────────────────────────────────────────────────────────
 
-const ManualTriggerParams = z.object({})
+const ManualTriggerParams = z.object({
+  // Declared input schema for the published interface (D5).
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+})
 
 const CronParams = z.object({
   cron: requiredString("required").regex(cronExprRegex, "cronExpr"),
@@ -81,6 +84,28 @@ const GoalCompletedTriggerParams = z.object({
   sessionId: optionalString,
   characterId: optionalString,
   status: optionalString,
+})
+
+const TeamTriggerParams = z.object({
+  // All optional — an unscoped node fires for every team run that reaches a
+  // terminal status. Scope by team and/or terminal status.
+  teamId: optionalString,
+  status: z.enum(["completed", "failed", "cancelled"]).optional(),
+})
+
+/** Lifecycle kinds `trigger.pet.event` may subscribe to. */
+export const PET_TRIGGER_KINDS = ["levelUp", "evolved", "achievementUnlocked", "unwell"] as const
+
+const PetEventTriggerParams = z.object({
+  // Unscoped = any of the four lifecycle kinds.
+  kinds: z.array(z.enum(PET_TRIGGER_KINDS)).optional(),
+  cooldownMs: z.number().int().nonnegative().optional(),
+})
+
+const PetInteractActionParams = z.object({
+  kind: z.enum(["fed", "played", "petted", "talked", "slept", "cleaned", "treated"]),
+  // Optional shop-item id — the controller applies the item's restore.
+  itemId: optionalString,
 })
 
 const WebhookTriggerParams = z.object({
@@ -126,6 +151,9 @@ const AgentTurnParams = z.object({
   toolsEnabled: z.boolean().optional(),
   requireTools: z.boolean().optional(),
   cwd: optionalString,
+  // Typed output (D3): JSON object schema the reply must satisfy.
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
 // ── Actions: goals ─────────────────────────────────────────────────────────
@@ -662,6 +690,57 @@ const ConnectorDraftParams = z.object({
   ttlMs: numberRange(0).optional(),
 })
 
+const ApprovalRequestParams = z.object({
+  title: requiredString("required"),
+  message: optionalString,
+  /** How long to wait before the onTimeout policy applies. Default 1 h. */
+  timeoutMs: numberRange(1_000).optional(),
+  /** What a timeout means: route down "rejected" (default) or fail the step. */
+  onTimeout: z.enum(["reject", "fail"]).optional(),
+})
+
+/** Shared remote-device fields (ADR 0061 P3): pin a device, bound the wait. */
+const mobileStepBase = {
+  /** Pin to one paired device; empty = any capable device (freshest first). */
+  deviceId: optionalString,
+  /** How long to wait for the device. Default 120 s. */
+  timeoutMs: numberRange(1_000).optional(),
+}
+
+const MobileCameraParams = z.object({
+  ...mobileStepBase,
+  quality: numberRange(1, 100).optional(),
+  width: numberRange(64).optional(),
+})
+
+const MobileScanBarcodeParams = z.object({
+  ...mobileStepBase,
+  formats: z.array(z.string()).optional(),
+})
+
+const MobileLocationParams = z.object({
+  ...mobileStepBase,
+  enableHighAccuracy: z.boolean().optional(),
+})
+
+const MobileShareParams = z
+  .object({
+    ...mobileStepBase,
+    title: optionalString,
+    text: optionalString,
+    url: optionalString,
+  })
+  .refine((v) => Boolean(v.text?.length) || Boolean(v.url?.length), {
+    message: "required",
+    path: ["text"],
+  })
+
+const MobileNotifyParams = z.object({
+  ...mobileStepBase,
+  title: requiredString("required"),
+  body: optionalString,
+})
+
 const McpInvokeToolParams = z.object({
   serverId: requiredString("required"),
   toolName: requiredString("required"),
@@ -916,37 +995,52 @@ const DesktopEventKind = z.enum(["focus-changed", "structure-changed", "property
 const DesktopEventTriggerParams = z.object({
   kinds: z.array(DesktopEventKind).optional(),
   scope: DesktopElementRef.optional(),
+  /**
+   * Loop guard: minimum ms between fires per workflow (a workflow's own
+   * desktop actions cause focus events). Default 2000.
+   */
+  cooldownMs: numberRange(0).optional(),
 })
 
 // ── AI primitives ──────────────────────────────────────────────────────────
 
-// ai.prompt v2 additions, also accepted by the classify/extract delegators.
+// ai.prompt v2/provider additions, also accepted by the classify/extract delegators.
 // All optional — v1 nodes validate against the same (superset) schema.
-const aiRoutedFields = {
+const aiProviderFields = {
   /** "routed" consults the provider-routing engine instead of explicit creds. */
   mode: z.enum(["explicit", "routed"]).optional(),
   /** Routed mode: model alias resolved through the mapping registry. */
   modelAlias: optionalString,
+  /** Explicit mode: OpenAI endpoint family override for compatible providers. */
+  apiFlavor: z.enum(["auto", "responses", "chat"]).optional(),
+  /** Explicit mode: provider-specific static headers passed to the model factory. */
+  headers: z.record(z.string(), z.string()).optional(),
   /** PII gate applied before any text egress. */
   piiGate: z.enum(["off", "block", "redact"]).optional(),
 }
 
 const AiPromptParams = z.object({
-  ...aiRoutedFields,
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
   baseURL: optionalString,
   systemPrompt: optionalString,
+  // Optional twin-bound character — injects the twin's retrieved context into
+  // the system prompt when the character has a twinId (see ai-prompt-v2.ts).
+  characterId: optionalString,
   userPrompt: requiredString("required"),
   temperature: numberRange(0, 2).optional(),
   // Structured output (B1): "json" parses the completion into output.structured.
   responseFormat: z.enum(["text", "json"]).optional(),
   jsonSchema: optionalString,
+  // Typed output (D3): validated JSON object schema + auto-fix retry.
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
 const AiClassifyParams = z.object({
-  ...aiRoutedFields,
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -958,7 +1052,7 @@ const AiClassifyParams = z.object({
 })
 
 const AiExtractParams = z.object({
-  ...aiRoutedFields,
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -979,6 +1073,61 @@ const AiEmbedParams = z.object({
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
+})
+
+// ai.council — multi-model consensus. Councillors + synthesizer are addressed
+// by routing alias; the prompt fans out, then one synthesizer merges them.
+const CouncillorSpecSchema = z.object({
+  name: requiredString("required"),
+  modelAlias: requiredString("required"),
+  systemPrompt: optionalString,
+})
+
+const AiCouncilParams = z.object({
+  prompt: requiredString("required"),
+  councillors: z.array(CouncillorSpecSchema).min(1),
+  synthesizerAlias: requiredString("required"),
+  synthesisInstructions: optionalString,
+  timeoutMs: numberRange(1000, 600000).optional(),
+  executionMode: z.enum(["parallel", "serial"]).optional(),
+  maxConcurrency: numberRange(1, 16).optional(),
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
+})
+
+const AiEnsembleAggregationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("majority-vote-on-field"), field: optionalString }),
+  z.object({
+    kind: z.literal("threshold-count"),
+    field: optionalString,
+    equals: z.unknown().optional(),
+    threshold: numberRange(1),
+  }),
+  z.object({ kind: z.literal("best-of-by-score"), scoreField: requiredString("required") }),
+  z.object({ kind: z.literal("synthesize-by-final-agent"), instructions: optionalString }),
+])
+
+const AiEnsembleParams = z.object({
+  prompt: optionalString,
+  target: z
+    .object({
+      kind: z.enum(["agent.turn", "subworkflow"]).optional(),
+      systemPrompt: optionalString,
+      model: optionalString,
+      characterId: optionalString,
+      allowedTools: z.array(z.string()).optional(),
+      toolsEnabled: z.boolean().optional(),
+      outputSchema: z.record(z.string(), z.unknown()).optional(),
+      workflowId: optionalString,
+    })
+    .optional(),
+  n: numberRange(1, 50).optional(),
+  iterationConcurrency: numberRange(1, 16).optional(),
+  lens: z.array(z.string()).optional(),
+  aggregation: AiEnsembleAggregationSchema.optional(),
+  synthesizerAlias: optionalString,
+  synthesisInstructions: optionalString,
+  timeoutMs: numberRange(1000, 600000).optional(),
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
 })
 
 // ── Flow ────────────────────────────────────────────────────────────────────
@@ -1061,6 +1210,19 @@ const SplitParams = z.object({
 const JoinParams = z.object({
   joinPolicy: z.enum(["all", "any", "race"]).optional(),
   timeoutMs: numberRange(0).optional(),
+  // Optional gather→reduce in one step (D6③); mirrors AggregateParams.
+  aggregate: z
+    .object({
+      operation: z
+        .enum(["collect", "concat", "merge-objects", "group-by", "dedupe", "numeric", "custom"])
+        .optional(),
+      keyExpression: optionalString,
+      numericField: optionalString,
+      numericOp: z.enum(["sum", "avg", "min", "max", "count"]).optional(),
+      reducerExpression: optionalString,
+      initialValue: z.unknown().optional(),
+    })
+    .optional(),
 })
 
 // Legacy (typeVersion 1) flat array-transform loop.
@@ -1237,6 +1399,17 @@ const TransformParams = z.object({
   expression: requiredString("required"),
 })
 
+const AggregateParams = z.object({
+  operation: z
+    .enum(["collect", "concat", "merge-objects", "group-by", "dedupe", "numeric", "custom"])
+    .optional(),
+  keyExpression: optionalString,
+  numericField: optionalString,
+  numericOp: z.enum(["sum", "avg", "min", "max", "count"]).optional(),
+  reducerExpression: optionalString,
+  initialValue: z.unknown().optional(),
+})
+
 const CodeParams = z.object({
   code: requiredString("required"),
 })
@@ -1259,6 +1432,13 @@ const WebhookRespondParams = z.object({
   headersJson: optionalString,
   headers: z.record(z.string(), z.unknown()).optional(),
   body: optionalString,
+})
+
+const OutputParams = z.object({
+  // The terminal value (expression or literal); falls back to the first upstream.
+  value: z.unknown().optional(),
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
 const CatchParams = z.object({
@@ -1293,9 +1473,11 @@ export const PARAMS_SCHEMAS = {
   "trigger.connector.inbound": ConnectorInboundParams,
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.goal.completed": GoalCompletedTriggerParams,
+  "trigger.pet.event": PetEventTriggerParams,
+  "action.pet.interact": PetInteractActionParams,
   "trigger.webhook": WebhookTriggerParams,
   "trigger.github.webhook": WebhookTriggerParams,
-  "trigger.team": z.object({}),
+  "trigger.team": TeamTriggerParams,
   // Actions: characters
   "action.character.send": CharacterSendParams,
   "action.character.create": CharacterCreateParams,
@@ -1373,6 +1555,14 @@ export const PARAMS_SCHEMAS = {
   // Actions: connectors
   "action.connector.send": ConnectorSendParams,
   "action.connector.draft": ConnectorDraftParams,
+  // Actions: human-in-the-loop (ADR 0061 P2)
+  "action.approval.request": ApprovalRequestParams,
+  // Actions: remote device steps (ADR 0061 P3)
+  "action.mobile.camera": MobileCameraParams,
+  "action.mobile.scanBarcode": MobileScanBarcodeParams,
+  "action.mobile.location": MobileLocationParams,
+  "action.mobile.share": MobileShareParams,
+  "action.mobile.notify": MobileNotifyParams,
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,
@@ -1417,6 +1607,8 @@ export const PARAMS_SCHEMAS = {
   "ai.classify": AiClassifyParams,
   "ai.extract": AiExtractParams,
   "ai.embed": AiEmbedParams,
+  "ai.council": AiCouncilParams,
+  "ai.ensemble": AiEnsembleParams,
   // Flow
   "flow.branch": BranchParams,
   "flow.switch": SwitchParams,
@@ -1433,11 +1625,13 @@ export const PARAMS_SCHEMAS = {
   "flow.continue": z.object({}).passthrough(),
   // Data
   "data.transform": TransformParams,
+  "data.aggregate": AggregateParams,
   "data.code": CodeParams,
   "data.template": TemplateParams,
   // IO
   "io.http": HttpRequestParams,
   "io.webhook.respond": WebhookRespondParams,
+  "io.output": OutputParams,
   // Annotation
   "annotation.note": NoteParams,
   "annotation.group": GroupAnnotationParams,

@@ -15,6 +15,8 @@ export function InspectOverlay({
   index,
   width,
   maxRows,
+  query,
+  onQueryChange,
   onMove,
   onSelect,
   onCancel,
@@ -23,6 +25,10 @@ export function InspectOverlay({
   index: number
   width?: number | string
   maxRows?: number
+  /** Active typeahead filter (the parent owns filtering; this only renders 🔎). */
+  query?: string
+  /** Presence enables the search row; the parent re-filters on each keystroke. */
+  onQueryChange?: (query: string) => void
   onMove: (delta: number) => void
   onSelect: (index: number) => void
   onCancel: () => void
@@ -38,6 +44,10 @@ export function InspectOverlay({
       index={index}
       width={width}
       maxRows={maxRows}
+      query={query}
+      searchPlaceholder="type to filter output"
+      emptyHint="no output matches"
+      onQueryChange={onQueryChange}
       onMove={onMove}
       onSelect={onSelect}
       onCancel={onCancel}

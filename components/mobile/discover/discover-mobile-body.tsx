@@ -12,10 +12,11 @@
  * inspector.
  */
 
-import { useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CompassIcon, PlusIcon } from "lucide-react"
 
+import { ActiveFilterChips } from "@/components/discover/active-filter-chips"
 import { CategoryChipStrip } from "@/components/discover/category-chip-strip"
 import { DiscoverGrid } from "@/components/discover/discover-grid"
 import { DiscoverInspector } from "@/components/discover/discover-inspector"
@@ -40,9 +41,12 @@ import { EmptyState } from "@/components/mobile/empty-state"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
+import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
+import { useDiscoverPreferences } from "@/hooks/discover/use-discover-preferences"
 import { useDiscoverQuery, type DiscoverItem } from "@/hooks/discover/use-discover-query"
 import { useDiscoverRouteState } from "@/hooks/discover/use-discover-route-state"
 import { useDiscoverView } from "@/hooks/discover/use-discover-view"
+import { useSearchHotkey } from "@/hooks/discover/use-search-hotkey"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { setSkillStatus } from "@/lib/db/skills"
 import { runSyncDown } from "@/lib/sync/companion-sync"
@@ -50,6 +54,7 @@ import type { Character } from "@/lib/claude/types"
 import {
   FAVORITES_CATEGORY,
   isValidView,
+  resolveLandingCategory,
   type DiscoverCategoryId,
   type DiscoverView,
 } from "@/lib/discover/categories"
@@ -80,16 +85,44 @@ const TOGGLE_LEGACY_CATEGORIES = new Set<DiscoverCategoryId>(["characters", "tea
 
 export function DiscoverMobileBody() {
   const t = useTranslations("discover")
-  const { category, item, sort, filter, setCategory, setItem, clearItem, setSort, setFilter } =
-    useDiscoverRouteState()
+  const {
+    category,
+    categoryExplicit,
+    item,
+    sort,
+    filter,
+    setCategory,
+    setItem,
+    clearItem,
+    setSort,
+    setFilter,
+  } = useDiscoverRouteState()
   const [query, setQuery] = useState("")
+  const searchRef = useRef<HTMLInputElement>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   /** Card whose long-press action sheet (share, …) is open. */
   const [actionItem, setActionItem] = useState<DiscoverItem | null>(null)
 
   const { favoriteKeys } = useDiscoverFavorites()
+  const { layout } = useDiscoverLayout()
+  const { preferences } = useDiscoverPreferences()
   const { view } = useDiscoverView()
+
+  // Press "/" (hardware keyboard) to focus search; harmless on touch-only.
+  useSearchHotkey(searchRef)
+
+  // Land on the user's preferred category when the URL carries none, matching
+  // the desktop body. Falls back to their first visible category.
+  const landing = useMemo(
+    () => resolveLandingCategory(preferences.landingCategory, layout),
+    [preferences.landingCategory, layout]
+  )
+  useEffect(() => {
+    if (!categoryExplicit && category !== landing) {
+      setCategory(landing)
+    }
+  }, [categoryExplicit, category, landing, setCategory])
 
   const charactersQuery = useDiscoverQuery("characters", query, { sort, filter, favoriteKeys })
   const teamsQuery = useDiscoverQuery("teams", query, { sort, filter, favoriteKeys })
@@ -121,7 +154,10 @@ export function DiscoverMobileBody() {
   // successful regardless of network state.
   const onRefresh = async () => {
     try {
-      await runSyncDown()
+      // Discover only renders the content tables below — scope the pull so it
+      // doesn't also sync sessions/messages/workflows/settings the user can't
+      // see from here.
+      await runSyncDown({ only: ["characters", "skills", "twinProfile", "plugins"] })
     } catch {
       // Transport may be uninitialised on web/dev — fall through.
     }
@@ -143,7 +179,13 @@ export function DiscoverMobileBody() {
             onFilterChange={setFilter}
           />
         </div>
-        <DiscoverSearch value={query} onChange={setQuery} />
+        <DiscoverSearch value={query} onChange={setQuery} inputRef={searchRef} />
+        <ActiveFilterChips
+          sort={sort}
+          filter={filter}
+          onSortChange={setSort}
+          onFilterChange={setFilter}
+        />
         <CategoryChipStrip
           activeCategory={category}
           onSelect={(id: DiscoverView) => {

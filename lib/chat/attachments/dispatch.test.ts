@@ -99,29 +99,96 @@ describe("buildAttachmentBlocks — documents", () => {
     expect(typeof processMock.mock.calls[0][2]).toBe("string")
   })
 
-  it("rejects an empty extraction instead of sending a blank block", async () => {
+  it("rejects an empty PDF when the OCR fallback also finds nothing", async () => {
     processMock.mockResolvedValue({ embeddableContent: "   ", content: "" })
-    const { blocks, rejected } = await buildAttachmentBlocks([
-      {
-        url: dataUrl("application/pdf", "%PDF"),
-        mediaType: "application/pdf",
-        filename: "scan.pdf",
-      },
-    ])
+    const ocr = jest.fn(async () => null)
+    const { blocks, rejected } = await buildAttachmentBlocks(
+      [
+        {
+          url: dataUrl("application/pdf", "%PDF"),
+          mediaType: "application/pdf",
+          filename: "scan.pdf",
+        },
+      ],
+      { pdfOcrFallback: ocr }
+    )
     expect(blocks).toEqual([])
     expect(rejected).toEqual([{ filename: "scan.pdf", reason: "empty" }])
+    expect(ocr).toHaveBeenCalledTimes(1)
   })
 
   it("rejects a file whose parser throws", async () => {
     processMock.mockRejectedValue(new Error("corrupt"))
-    const { rejected } = await buildAttachmentBlocks([
-      {
-        url: dataUrl("application/pdf", "%PDF"),
-        mediaType: "application/pdf",
-        filename: "bad.pdf",
-      },
-    ])
+    const { rejected } = await buildAttachmentBlocks(
+      [
+        {
+          url: dataUrl("application/pdf", "%PDF"),
+          mediaType: "application/pdf",
+          filename: "bad.pdf",
+        },
+      ],
+      { pdfOcrFallback: jest.fn(async () => null) }
+    )
     expect(rejected).toEqual([{ filename: "bad.pdf", reason: "parse-failed" }])
+  })
+})
+
+describe("buildAttachmentBlocks — scanned-PDF OCR fallback", () => {
+  it("OCRs a scanned PDF whose text layer is empty", async () => {
+    processMock.mockResolvedValue({ embeddableContent: "", content: "" })
+    const ocr = jest.fn(async () => "scanned page text from OCR")
+    const { blocks, rejected } = await buildAttachmentBlocks(
+      [
+        {
+          url: dataUrl("application/pdf", "%PDF"),
+          mediaType: "application/pdf",
+          filename: "scan.pdf",
+        },
+      ],
+      { pdfOcrFallback: ocr }
+    )
+    expect(rejected).toEqual([])
+    expect(blocks).toHaveLength(1)
+    const text = (blocks[0] as { text: string }).text
+    expect(text).toContain('Attached file "scan.pdf"')
+    expect(text).toContain("scanned page text from OCR")
+    expect(ocr).toHaveBeenCalledWith(expect.any(Uint8Array), "")
+  })
+
+  it("OCRs a PDF whose text layer is sparse (below the trigger threshold)", async () => {
+    processMock.mockResolvedValue({ embeddableContent: "1", content: "1" })
+    const ocr = jest.fn(async () => "full recovered body text")
+    const { blocks } = await buildAttachmentBlocks(
+      [{ url: dataUrl("application/pdf", "%PDF"), filename: "page.pdf" }],
+      { pdfOcrFallback: ocr }
+    )
+    expect((blocks[0] as { text: string }).text).toContain("full recovered body text")
+    expect(ocr).toHaveBeenCalledWith(expect.any(Uint8Array), "1")
+  })
+
+  it("does NOT run OCR when the PDF already has a real text layer", async () => {
+    processMock.mockResolvedValue({
+      embeddableContent: "x".repeat(200),
+      content: "x".repeat(200),
+    })
+    const ocr = jest.fn(async () => "should not be used")
+    const { blocks } = await buildAttachmentBlocks(
+      [{ url: dataUrl("application/pdf", "%PDF"), filename: "digital.pdf" }],
+      { pdfOcrFallback: ocr }
+    )
+    expect(ocr).not.toHaveBeenCalled()
+    expect((blocks[0] as { text: string }).text).toContain("x".repeat(200))
+  })
+
+  it("does NOT run OCR for non-PDF documents with empty extraction", async () => {
+    processMock.mockResolvedValue({ embeddableContent: "", content: "" })
+    const ocr = jest.fn(async () => "irrelevant")
+    const { rejected } = await buildAttachmentBlocks(
+      [{ url: dataUrl("text/plain", "x"), filename: "empty.txt" }],
+      { pdfOcrFallback: ocr }
+    )
+    expect(ocr).not.toHaveBeenCalled()
+    expect(rejected).toEqual([{ filename: "empty.txt", reason: "empty" }])
   })
 })
 

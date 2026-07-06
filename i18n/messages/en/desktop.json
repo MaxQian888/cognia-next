@@ -41,9 +41,12 @@
     "newFolderName": "New folder",
     "openSessions": "Open sessions",
     "renameFolder": "Rename folder",
+    "resizeHandle": "Resize sidebar",
     "searchAria": "Search conversations",
     "searchPlaceholder": "Search conversations…",
+    "searchTruncated": "Some results may be hidden — refine your search.",
     "sectionPinned": "Pinned",
+    "sectionRecent": "Recent",
     "teamFallback": "Team",
     "viewActive": "Show active conversations",
     "viewArchived": "Show archived conversations"
@@ -169,7 +172,8 @@
     },
     "tabs": {
       "active": "Active",
-      "history": "History"
+      "history": "History",
+      "running": "Running"
     },
     "title": "Job Center",
     "toast": {
@@ -420,6 +424,7 @@
     "archive": "Archive",
     "branchedFrom": "Branched conversation — open parent",
     "delete": "Delete",
+    "dragHandle": "Drag to reorder or move to a folder",
     "moveToFolder": "Move to folder",
     "openInTerminal": "Open in terminal",
     "openInTerminalFailed": "Could not export this session for the terminal",
@@ -448,8 +453,11 @@
     "openCommandPalette": "Open command palette",
     "openLogs": "Open logs",
     "permissionAcceptEdits": "Auto-accept",
+    "permissionAdvanced": "Advanced",
+    "permissionAuto": "Auto",
     "permissionBypass": "Bypass",
     "permissionDefault": "Default",
+    "permissionDontAsk": "Don't ask",
     "permissionMode": "Permission",
     "permissionPlan": "Plan",
     "streaming": "Streaming",

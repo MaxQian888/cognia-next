@@ -39,10 +39,14 @@ export function MobilePairedServersSheet({ open, onOpenChange }: MobilePairedSer
   const devices = useClientLiveQuery<PairedDeviceRow[]>(() => listPairedDevices(), [], [])
   const [now, setNow] = useState<number>(() => Date.now())
 
+  // Only tick the "last seen" relative-time clock while the sheet is open —
+  // the timestamps it refreshes are never visible when the sheet is closed,
+  // so an always-running interval just burns wakeups/battery.
   useEffect(() => {
+    if (!open) return
     const id = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(id)
-  }, [])
+  }, [open])
 
   const visible = (devices ?? []).filter((d) => !d.revokedAt)
 

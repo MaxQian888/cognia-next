@@ -1,0 +1,8 @@
+{
+  "backAria": "Back to Me",
+  "empty": "No subagent templates available.",
+  "manageHint": "Subagent templates run on your paired desktop. Create and edit them in the desktop app under Settings → Subagents.",
+  "sectionDescription": "Reusable subagent configurations your paired desktop can dispatch.",
+  "sectionTitle": "Available templates",
+  "title": "Subagents"
+}

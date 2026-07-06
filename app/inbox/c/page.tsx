@@ -21,6 +21,7 @@ import { PageLoading } from "@/components/ui/loading-states"
 import { DraftBanner } from "@/components/inbox/draft-banner"
 import { ConversationActivityLog } from "@/components/inbox/conversation-activity-log"
 import { ChatPane } from "@/components/chat/chat-view"
+import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connector-mode"
 import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
@@ -119,17 +120,19 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
         />
         <DraftBanner conversationKey={conversationKey} />
         <ConversationActivityLog conversationKey={conversationKey} />
-        <ChatPane
-          showHeader={false}
-          activeSession={session}
-          onSend={send}
-          onStop={stop}
-          onRegenerate={regenerate}
-          onEditResend={editAndResend}
-          onCreate={() => {}}
-          onUseSample={(text) => void send(text)}
-          onOpenSettings={openSettings}
-        />
+        <ArtifactWorkspaceDock>
+          <ChatPane
+            showHeader={false}
+            activeSession={session}
+            onSend={send}
+            onStop={stop}
+            onRegenerate={regenerate}
+            onEditResend={editAndResend}
+            onCreate={() => {}}
+            onUseSample={(text) => void send(text)}
+            onOpenSettings={openSettings}
+          />
+        </ArtifactWorkspaceDock>
       </div>
     </InboxShell>
   )

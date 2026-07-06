@@ -43,6 +43,7 @@
   "renameAria": "重命名会话",
   "search": "搜索聊天…",
   "searchAria": "搜索聊天",
+  "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
   "sections": {
     "activeRuns": "运行中",
     "recents": "最近会话"

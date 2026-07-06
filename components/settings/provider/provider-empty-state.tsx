@@ -21,7 +21,9 @@ interface ProviderGuidanceItem {
 
 interface ProviderEmptyStateProps {
   onAddProvider: () => void
-  onImportSettings: () => void
+  /** Omit when there's no import feature to offer — the button is hidden
+   *  entirely rather than wired to a no-op. */
+  onImportSettings?: () => void
   importButton?: ReactNode
   guidanceItems?: ProviderGuidanceItem[]
 }
@@ -80,14 +82,13 @@ export function ProviderEmptyState({
             <Plus className="h-4 w-4" />
             {t("addProvider") || "Add Provider"}
           </Button>
-          {importButton ? (
-            importButton
-          ) : (
-            <Button variant="outline" onClick={onImportSettings} className="gap-2">
-              <Upload className="h-4 w-4" />
-              {t("importSettings") || "Import Settings"}
-            </Button>
-          )}
+          {importButton ??
+            (onImportSettings && (
+              <Button variant="outline" onClick={onImportSettings} className="gap-2">
+                <Upload className="h-4 w-4" />
+                {t("importSettings") || "Import Settings"}
+              </Button>
+            ))}
         </div>
       </CardContent>
     </Card>

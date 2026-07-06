@@ -20,9 +20,16 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
-import type { ExternalAgentInstance } from "@/types/agent/external-agent"
+import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import type { ExternalAgentInstance, ExternalAgentProtocol } from "@/types/agent/external-agent"
 import { PermissionModeSelect } from "./permission-mode-select"
 import type { ExternalAgentDraft } from "./types"
+
+interface PayloadAgentOption {
+  id: string
+  name: string
+  protocol?: ExternalAgentProtocol
+}
 
 export interface ExternalAgentPayloadEditorProps {
   draft: ExternalAgentDraft
@@ -30,7 +37,7 @@ export interface ExternalAgentPayloadEditorProps {
   errors?: Record<string, string>
   disabled?: boolean
   testId?: string
-  agentsForTesting?: Array<{ id: string; name: string }>
+  agentsForTesting?: PayloadAgentOption[]
 }
 
 export function ExternalAgentPayloadEditor({
@@ -42,9 +49,7 @@ export function ExternalAgentPayloadEditor({
   agentsForTesting,
 }: ExternalAgentPayloadEditorProps) {
   const t = useTranslations("scheduler")
-  const [agents, setAgents] = useState<Array<{ id: string; name: string }> | null>(
-    agentsForTesting ?? null
-  )
+  const [agents, setAgents] = useState<PayloadAgentOption[] | null>(agentsForTesting ?? null)
 
   useEffect(() => {
     if (agentsForTesting) return
@@ -58,7 +63,13 @@ export function ExternalAgentPayloadEditor({
         try {
           const manager = getExternalAgentManager()
           const all: ExternalAgentInstance[] = manager.getAllAgents()
-          setAgents(all.map((a) => ({ id: a.config.id, name: a.config.name })))
+          setAgents(
+            all.map((a) => ({
+              id: a.config.id,
+              name: a.config.name,
+              protocol: a.config.protocol,
+            }))
+          )
         } catch {
           // Manager not initialized yet — surface empty list and let user type id directly.
           setAgents([])
@@ -77,6 +88,22 @@ export function ExternalAgentPayloadEditor({
   }
 
   const hasAgents = (agents?.length ?? 0) > 0
+  const selectedProtocol = agents?.find((a) => a.id === draft.agentId)?.protocol
+
+  /**
+   * Switch the target agent and, if the current permission mode cannot be
+   * enforced by the new backend, clamp it to the nearest supported mode in the
+   * same update so the saved draft never carries a backend-incompatible value.
+   */
+  function selectAgent(agentId: string) {
+    const nextProtocol = agents?.find((a) => a.id === agentId)?.protocol
+    const next: ExternalAgentDraft = { ...draft, agentId }
+    if (draft.permissionMode && nextProtocol) {
+      next.permissionMode = adaptPermissionMode(draft.permissionMode, nextProtocol)
+        .mode as ExternalAgentDraft["permissionMode"]
+    }
+    onDraftChange(next)
+  }
 
   return (
     <div className="space-y-4" data-testid={testId}>
@@ -107,7 +134,7 @@ export function ExternalAgentPayloadEditor({
         {hasAgents ? (
           <Select
             value={draft.agentId || "__none__"}
-            onValueChange={(v) => update("agentId", v === "__none__" ? "" : v)}
+            onValueChange={(v) => selectAgent(v === "__none__" ? "" : v)}
             disabled={disabled}
           >
             <SelectTrigger
@@ -150,6 +177,7 @@ export function ExternalAgentPayloadEditor({
         <Label className="text-sm font-medium">{t("payload.permissionMode")}</Label>
         <PermissionModeSelect
           flavor="acp"
+          protocol={selectedProtocol}
           value={draft.permissionMode}
           onChange={(v) =>
             update("permissionMode", (v as ExternalAgentDraft["permissionMode"]) ?? undefined)

@@ -8,11 +8,12 @@
  * Keys: type to filter · ↑/↓ move · Space toggle · Enter detail · Ctrl+N new ·
  * Ctrl+X delete · Esc clears the filter, then closes.
  */
-import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import React, { useRef, useState } from "react"
+import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
+import { usePanelClick } from "../input/use-panel-click"
 import { windowList } from "./list-window"
 import { OverlayFooter } from "./OverlayFooter"
 import {
@@ -61,14 +62,41 @@ export function SkillPanel({
   const theme = useTheme()
   const [query, setQuery] = useState("")
   const [index, setIndex] = useState(0)
+  const boxRef = useRef<DOMElement | null>(null)
 
   const filtered = filterSkillRows(rows, query)
   const safeIndex = filtered.length > 0 ? Math.min(index, filtered.length - 1) : 0
   const current = filtered[safeIndex]
   const summary = skillSummary(rows)
 
+  const win = windowList(filtered.length, safeIndex, maxRows)
+  const visible = filtered.slice(win.start, win.end)
+
+  // Mouse (fullscreen `scroll` only): header = title + filter line (2 rows); a
+  // click opens the row's detail pager (same as Enter).
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: 2,
+    hasAboveMore: win.above > 0,
+    visibleCount: visible.length,
+    onPick: (offset) => {
+      const target = filtered[win.start + offset]
+      if (target) {
+        setIndex(win.start + offset)
+        onShow(target.id)
+      }
+    },
+    onWheel: (dir) =>
+      setIndex((i) =>
+        dir === "up"
+          ? Math.max(0, Math.min(i, filtered.length - 1) - 1)
+          : Math.min(filtered.length - 1, i + 1)
+      ),
+  })
+
   useInput(
     (input, key) => {
+      if (handleMouse(input)) return
       if (key.escape) {
         if (query) {
           setQuery("")
@@ -131,11 +159,9 @@ export function SkillPanel({
     { isActive }
   )
 
-  const win = windowList(filtered.length, safeIndex, maxRows)
-  const visible = filtered.slice(win.start, win.end)
-
   return (
     <Box
+      ref={boxRef}
       flexDirection="column"
       borderStyle="round"
       borderColor={theme.border}

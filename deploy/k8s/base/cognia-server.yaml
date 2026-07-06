@@ -1,0 +1,89 @@
+# cognia-server — headless brain host (ADR-0059 D9 base).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cognia-server
+spec:
+  serviceName: cognia-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cognia-server
+  template:
+    metadata:
+      labels:
+        app: cognia-server
+    spec:
+      # Production: set `runtimeClassName: gvisor` via the tenant overlay
+      # (cluster/runtimeclass-gvisor.yaml must be applied first).
+      containers:
+        - name: cognia-server
+          image: ghcr.io/maxqian888/cognia-server:latest-full
+          args: ["serve", "--port", "7890"]
+          ports:
+            - containerPort: 7890
+              name: https
+          env:
+            - name: COGNIA_DATA_DIR
+              value: /data
+            - name: COGNIA_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cognia-secrets
+                  key: COGNIA_MASTER_KEY
+            - name: COGNIA_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: publicUrl
+                  optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cognia-secrets
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /api/v1/healthz
+              port: 7890
+              scheme: HTTPS
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /api/v1/healthz
+              port: 7890
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cognia-server
+spec:
+  selector:
+    app: cognia-server
+  ports:
+    - port: 7890
+      targetPort: 7890
+      name: https

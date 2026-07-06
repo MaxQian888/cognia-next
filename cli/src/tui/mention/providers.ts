@@ -6,7 +6,8 @@
  * Each source reuses existing discovery/seed code rather than reimplementing it:
  *   - files  → `completeAtPath` (`commands/file-completer.ts`)
  *   - skills → `seedDiskSkills` + `listSkills` (CLI disk import → Dexie)
- *   - agents → `discoverAgentFiles` + `buildAgents` (`agent/discover-agents.ts`)
+ *   - agents → `discoverDispatchableAgents` (`agent/discover-agents.ts`): native
+ *     `.cognia/agents` + autonomously-reused Claude Code / Codex subagents
  */
 import os from "node:os"
 
@@ -20,7 +21,7 @@ import {
   type SkillScanOptions,
 } from "../../skill/discover-skills"
 import { ensureCliDb } from "../../db/bootstrap"
-import { buildAgents, discoverAgentFiles, type AgentSummary } from "../../agent/discover-agents"
+import { discoverDispatchableAgents, type AgentSummary } from "../../agent/discover-agents"
 import { withBuiltinAgents } from "../../agent/builtin-agents"
 import { fuzzyFilter } from "../runtime/fuzzy-filter"
 import type { MentionCandidate } from "./types"
@@ -118,8 +119,7 @@ export function createMentionProviders(deps: MentionProviderDeps): MentionProvid
   const seedSkills =
     deps.seedSkills ?? (() => seedDiskSkills(scanOptionsOf(deps), upsertSkillByCanonicalId))
   const listAllAgents =
-    deps.listAgents ??
-    (async () => withBuiltinAgents(buildAgents(await discoverAgentFiles(deps.roots))))
+    deps.listAgents ?? (async () => withBuiltinAgents(await discoverDispatchableAgents(deps.roots)))
 
   let skillCache: MentionCandidate[] | null = null
   let agentCache: MentionCandidate[] | null = null

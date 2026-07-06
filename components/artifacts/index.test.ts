@@ -15,6 +15,9 @@ import * as Barrel from "./index"
 describe("components/artifacts barrel", () => {
   it("re-exports the public surface", () => {
     expect(typeof Barrel.ArtifactPanel).toBe("function")
+    expect(typeof Barrel.ArtifactPanelContent).toBe("function")
+    expect(typeof Barrel.ArtifactDock).toBe("function")
+    expect(typeof Barrel.ArtifactWorkspaceDock).toBe("function")
     expect(typeof Barrel.ArtifactList).toBe("function")
     expect(typeof Barrel.ArtifactCard).toBe("function")
     expect(typeof Barrel.ArtifactPreview).toBe("function")

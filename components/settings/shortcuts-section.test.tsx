@@ -81,4 +81,29 @@ describe("ShortcutsSection", () => {
       expect.objectContaining({ id: "tray.show", chord: "ctrl+shift+space" })
     )
   })
+
+  describe("optional shortcut rows (no built-in default)", () => {
+    it("renders 'Not set' with no Clear button until the user records one", () => {
+      render(<ShortcutsSection />)
+      expect(screen.getByText("Toggle desktop pet")).toBeInTheDocument()
+      expect(screen.getByText("Not set")).toBeInTheDocument()
+      expect(screen.queryByLabelText("Clear")).toBeNull()
+    })
+
+    it("shows the bound chord and a Clear button once bound, which unbinds on click", async () => {
+      invoke.mockResolvedValue(undefined)
+      useShortcutStore.setState({
+        bindings: { "pet.toggle-window": "ctrl+alt+p" },
+        hydrated: true,
+      })
+      render(<ShortcutsSection />)
+      expect(screen.queryByText("Not set")).toBeNull()
+      const clearButton = screen.getByLabelText("Clear")
+      fireEvent.click(clearButton)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(invoke).toHaveBeenCalledWith("shortcut_unbind", { id: "pet.toggle-window" })
+    })
+  })
 })

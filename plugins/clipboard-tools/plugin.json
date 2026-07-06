@@ -18,6 +18,11 @@
     "browser": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Clipboard read/write is restricted in the mobile WebView (no synchronous read; user-gesture required)."
     }
   }
 }

@@ -1,7 +1,7 @@
 import type { ComponentType } from "react"
 import { clearPluginExtensions, createExtensionAPI } from "@/lib/plugin/api"
 import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
-import type { ExtensionProps } from "@/types/plugin/plugin-extended"
+import type { ExtensionProps } from "@/types/plugin/plugin"
 
 let counter = 0
 const activePluginIds = new Set<string>()

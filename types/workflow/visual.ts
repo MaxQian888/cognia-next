@@ -119,6 +119,18 @@ export type WorkflowNodeKind =
   | "action.memory.store"
   | "action.connector.send"
   | "action.connector.draft"
+  // Human-in-the-loop gate (ADR 0061 P2): blocks until a human approves or
+  // rejects — desktop notification action, or a paired device via the
+  // `workflow_approval_respond` RPC. Routes downstream via decision handles.
+  | "action.approval.request"
+  // Remote device steps (ADR 0061 P3): hub-side proxy executors dispatch to
+  // a capable paired device via the remote-step broker and marshal the
+  // device's output back into the run.
+  | "action.mobile.camera"
+  | "action.mobile.scanBarcode"
+  | "action.mobile.location"
+  | "action.mobile.share"
+  | "action.mobile.notify"
   | "action.mcp.invokeTool"
   | "action.plugin.invoke"
   // GitHub Delivery (provided by the github-delivery plugin)
@@ -182,11 +194,17 @@ export type WorkflowNodeKind =
   // workflow-spawned tabs are excluded to prevent self-trigger loops).
   // TS-hook trigger — fan-out lives in `lib/terminal/command-trigger.ts`.
   | "trigger.terminal.command"
+  // Desktop-pet lifecycle trigger (levelUp/evolved/achievementUnlocked/unwell)
+  // + nurture action. Runner lives in `lib/workflow/runtime/pet-event-trigger.ts`.
+  | "trigger.pet.event"
+  | "action.pet.interact"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
   | "ai.extract"
   | "ai.embed"
+  | "ai.council"
+  | "ai.ensemble"
   // Flow control
   | "flow.branch"
   | "flow.switch"
@@ -206,6 +224,7 @@ export type WorkflowNodeKind =
   | "flow.catch"
   // Data
   | "data.transform"
+  | "data.aggregate"
   | "data.code"
   | "data.template"
   | "ocr.extract"
@@ -215,6 +234,7 @@ export type WorkflowNodeKind =
   // I/O
   | "io.http"
   | "io.webhook.respond"
+  | "io.output"
   // Annotation
   | "annotation.note"
   | "annotation.group"
@@ -337,6 +357,12 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.memory.store",
   "action.connector.send",
   "action.connector.draft",
+  "action.approval.request",
+  "action.mobile.camera",
+  "action.mobile.scanBarcode",
+  "action.mobile.location",
+  "action.mobile.share",
+  "action.mobile.notify",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
   "action.github.openPr",
@@ -378,10 +404,14 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.terminal.readRecent",
   "action.terminal.waitForExit",
   "trigger.terminal.command",
+  "trigger.pet.event",
+  "action.pet.interact",
   "ai.prompt",
   "ai.classify",
   "ai.extract",
   "ai.embed",
+  "ai.council",
+  "ai.ensemble",
   "flow.branch",
   "flow.switch",
   "flow.split",
@@ -394,6 +424,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "flow.continue",
   "flow.catch",
   "data.transform",
+  "data.aggregate",
   "data.code",
   "data.template",
   "ocr.extract",
@@ -401,6 +432,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "eval.gate",
   "io.http",
   "io.webhook.respond",
+  "io.output",
   "annotation.note",
   "annotation.group",
   "pattern.multi-modal-sweep",
@@ -472,6 +504,31 @@ export interface VisualWorkflow {
   staticData?: Record<string, unknown>
   /** Last saved canvas viewport so reopening lands the user where they were. */
   viewport?: WorkflowViewport
+  /**
+   * Declared call interface (D5). When present the workflow can be published as
+   * a typed callable unit — an agent tool, a typed `flow.subworkflow` target,
+   * and a skill-catalog entry. Stored as serializable JSON Schemas; the canvas
+   * `trigger.manual` input + `io.output` node edit them. Interface (schema) is
+   * declared separately from implementation (the graph).
+   */
+  interface?: WorkflowInterface
+  /** Set when the workflow has been published as a callable unit. */
+  published?: WorkflowPublication
+}
+
+/** Typed input/output contract a published workflow exposes to callers. */
+export interface WorkflowInterface {
+  /** JSON object schema for the run payload (surfaces as `$trigger.payload`). */
+  inputSchema?: Record<string, unknown>
+  /** JSON object schema the terminal output must satisfy. */
+  outputSchema?: Record<string, unknown>
+}
+
+/** Publication record: registers the 3 call surfaces (tool / subworkflow / skill). */
+export interface WorkflowPublication {
+  at: number
+  /** Stable tool name the agent calls (also the skill-catalog canonical id). */
+  toolName: string
 }
 
 export interface WorkflowNode<TParams = Record<string, unknown>> {
@@ -671,6 +728,8 @@ export interface WorkflowTriggerBinding {
   characterId?: string
   /** Scopes a `trigger.goal.completed` subscription to a specific goal id. */
   goalId?: string
+  /** Scopes a `trigger.team` subscription to a specific team id. */
+  teamId?: string
 }
 
 /**
@@ -684,10 +743,22 @@ export interface WorkflowTriggerBinding {
  * to `triggeredBy.conversationKey` via `enqueueOutbound`.
  */
 export interface WorkflowTriggeredFrom {
-  source: "im" | "ui" | "api"
+  /**
+   * `"chat"` = the main chat `/workflow` slash command; `"desktop"` = the
+   * library card Run button. Both are surfaced by the global run-progress
+   * toaster (`"ui"` — editor/run-list — keeps its own inline toasts).
+   */
+  source: "im" | "ui" | "api" | "chat" | "desktop"
   adapterId?: string
   conversationKey?: string
   sessionId?: string
+  /**
+   * Paired-device id of the companion caller (ADR-0060). Stamped server-side
+   * from the verified device JWT — never client-supplied — so run history and
+   * audit surfaces can answer "which device triggered this". Absent for runs
+   * originating on the desktop itself.
+   */
+  deviceId?: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -699,6 +770,21 @@ export interface WorkflowTriggeredFrom {
  * its own alias so callers reading the table can grep for the row type.
  */
 export type WorkflowRow = VisualWorkflow
+
+/**
+ * Execution lease (ADR 0061 P4). Exactly one executor process may drive a
+ * run: the lease is claimed before the first step and heartbeat-renewed
+ * while the run is live, so a second process (crash-resume race, a future
+ * cloud brain) backs off instead of double-executing. Additive +
+ * non-indexed — no Dexie version bump.
+ */
+export interface WorkflowRunLease {
+  /** Per-process executor id (`lib/workflow/runtime/run-lease.ts`). */
+  ownerId: string
+  claimedAt: number
+  /** Epoch ms; a lease past this is stale and free to claim. */
+  expiresAt: number
+}
 
 export interface WorkflowRunRow {
   id: string
@@ -745,6 +831,23 @@ export interface WorkflowRunRow {
    * fan-out — see `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
    */
   triggeredBy?: WorkflowTriggeredFrom
+  /**
+   * Denormalised copy of `triggeredBy.source` (Dexie v91), promoted to a
+   * top-level INDEXED column because Dexie cannot index nested object props.
+   * Lets `workflow-progress-runner` watch only IM-triggered runs via
+   * `.where("triggeredBySource").equals("im")` instead of scanning the whole
+   * `workflowRuns` table on every run. Stamped at run creation and backfilled
+   * for legacy rows (`triggeredBy?.source ?? "ui"`).
+   */
+  triggeredBySource?: string
+  /** Execution lease (ADR 0061 P4) — see {@link WorkflowRunLease}. */
+  lease?: WorkflowRunLease
+  /**
+   * Epoch ms when a cancel was requested by a surface that could NOT abort
+   * the run locally (the lease is held by another live executor). The lease
+   * owner's heartbeat observes this and aborts. Additive + non-indexed.
+   */
+  cancelRequestedAt?: number
   /**
    * Dead-letter / replay metadata (A3). All additive + non-indexed (no Dexie
    * version bump): the dead-letter panel queries the existing `status` index

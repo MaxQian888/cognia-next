@@ -3,7 +3,7 @@
  */
 
 import { render, screen, act } from "@testing-library/react"
-import type { ExtensionRegistration } from "@/types/plugin/plugin-extended"
+import type { ExtensionRegistration } from "@/types/plugin/plugin"
 // Real (un-mocked) context-key store — drives the slot's second
 // useSyncExternalStore for when-clause reactivity.
 import {

@@ -393,6 +393,13 @@
           "riskLevel": "low",
           "requiresApproval": false,
           "alwaysLoad": true
+        },
+        {
+          "name": "current_time",
+          "descriptionKey": "tools.currentTime",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
         }
       ]
     },
@@ -490,6 +497,127 @@
         {
           "name": "lsp_diagnostics",
           "descriptionKey": "tools.lspDiagnostics",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "codeGraph",
+      "nameKey": "codeGraph",
+      "descriptionKey": "codeGraphDesc",
+      "riskLevel": "low",
+      "requiresApproval": false,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "codegraph_status",
+          "descriptionKey": "tools.codegraphStatus",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_search",
+          "descriptionKey": "tools.codegraphSearch",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_node",
+          "descriptionKey": "tools.codegraphNode",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_callers",
+          "descriptionKey": "tools.codegraphCallers",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_callees",
+          "descriptionKey": "tools.codegraphCallees",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_impact",
+          "descriptionKey": "tools.codegraphImpact",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_context",
+          "descriptionKey": "tools.codegraphContext",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_explore",
+          "descriptionKey": "tools.codegraphExplore",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_files",
+          "descriptionKey": "tools.codegraphFiles",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "astGrep",
+      "nameKey": "astGrep",
+      "descriptionKey": "astGrepDesc",
+      "riskLevel": "high",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "ast_grep_search",
+          "descriptionKey": "tools.astGrepSearch",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "ast_grep_replace",
+          "descriptionKey": "tools.astGrepReplace",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "dependencyResearch",
+      "nameKey": "dependencyResearch",
+      "descriptionKey": "dependencyResearchDesc",
+      "riskLevel": "medium",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "clone_dep_source",
+          "descriptionKey": "tools.cloneDepSource",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "list_cloned_deps",
+          "descriptionKey": "tools.listClonedDeps",
           "riskLevel": "low",
           "requiresApproval": false,
           "alwaysLoad": false

@@ -113,5 +113,11 @@
   "verifyButton": "Verify confinement",
   "version": {
     "label": "Version"
+  },
+  "workspaceConfinement": {
+    "description": "Confine the built-in file and shell tools to the active workspace roots. Tools that try to write outside the workspace ask for approval first; credential paths (.ssh, .aws, …) are always blocked.",
+    "label": "Confine tools to the workspace",
+    "note": "On by default, and works on every platform. Disabling lets built-in tools read and write anywhere on this machine without asking. The OS sandbox, when enabled, supersedes this layer.",
+    "title": "Workspace confinement"
   }
 }

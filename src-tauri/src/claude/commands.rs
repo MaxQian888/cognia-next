@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
+use super::host::{SidecarHost, TauriSidecarHost};
 use super::sidecar::{emit_hook_fire, spawn as spawn_sidecar, SidecarState};
 use crate::hooks;
 
@@ -111,6 +114,13 @@ pub struct ProviderCredentials {
     /// built-in providers the sidecar derives the protocol from the id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
+    /// Explicit OpenAI endpoint family: `"auto"` | `"responses"` | `"chat"`.
+    /// Overrides the sidecar's host heuristic so the Responses API can be used
+    /// on Azure OpenAI, on compatible gateways that proxy `/responses`, and on
+    /// custom base URLs. Like `headers`, it MUST round-trip this strictly-typed
+    /// boundary or the sidecar's `decideOpenAiEndpointFlavor` never sees it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_flavor: Option<String>,
     /// Extra default headers forwarded to the provider client. Used by the
     /// Codex ChatGPT-login path (`ChatGPT-Account-Id`, `OpenAI-Beta`,
     /// `originator`, `OAI-Product-Sku`). Must round-trip the boundary so the
@@ -161,9 +171,14 @@ impl SendOptions {
             if let Some(proto) = creds.protocol.as_ref() {
                 if !matches!(
                     proto.as_str(),
-                    "openai" | "anthropic" | "google" | "mistral" | "cohere"
+                    "openai" | "anthropic" | "google" | "mistral" | "cohere" | "azure" | "bedrock"
                 ) {
                     return Err(format!("invalid providerCredentials.protocol: {proto}"));
+                }
+            }
+            if let Some(flavor) = creds.api_flavor.as_ref() {
+                if !matches!(flavor.as_str(), "auto" | "responses" | "chat") {
+                    return Err(format!("invalid providerCredentials.apiFlavor: {flavor}"));
                 }
             }
         }
@@ -189,9 +204,29 @@ pub async fn claude_send(
     prompt: Value,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
+    claude_send_with_host(
+        Arc::new(TauriSidecarHost(app)),
+        state.inner().clone(),
+        session_id,
+        prompt,
+        options,
+    )
+    .await
+}
+
+/// Host-generic body of [`claude_send`] (ADR-0059 R6). The desktop command
+/// wraps the `AppHandle` in a [`TauriSidecarHost`]; the headless RPC arm (R7)
+/// passes the `HeadlessSidecarHost` from the services registry.
+pub async fn claude_send_with_host(
+    host: Arc<dyn SidecarHost>,
+    state: SidecarState,
+    session_id: String,
+    prompt: Value,
+    options: Option<SendOptions>,
+) -> Result<(), String> {
     let _perf = crate::perf::guard("claude.send");
-    spawn_sidecar(app.clone(), state.inner().clone()).await?;
-    let opts_value = match options {
+    spawn_sidecar(Arc::clone(&host), state.clone()).await?;
+    let mut opts_value = match options {
         Some(o) => {
             o.validate()?;
             serde_json::to_value(o).map_err(|e| e.to_string())?
@@ -214,11 +249,27 @@ pub async fn claude_send(
     // resolve project/local-scope settings for this session's later events.
     state.register_session_cwd(&session_id, cwd.clone()).await;
     let prompt_text = extract_prompt_text(&prompt);
+    // Project/local hooks load only for a trusted cwd; untrusted → user scope.
+    let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
+    let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
+
+    // Convergence (ADR-0040 follow-up): hand the trusted, merged settings.json
+    // hooks to the sidecar so it runs tool-scoped hooks (PreToolUse / PostToolUse
+    // / PostToolUseFailure) as SDK-native `options.hooks` — where `updatedInput`
+    // / `updatedToolOutput` and blocking work in-process. Injected HERE, HOST-side,
+    // AFTER the trust gate, so a compromised renderer cannot smuggle untrusted
+    // project hooks in via `options`. Session-scoped events (UserPromptSubmit
+    // below, and the observational lifecycle hooks) stay HOST-run in this phase;
+    // the sidecar's `buildAgentHooks` only registers the tool-scoped events, so
+    // passing the full config causes no double-firing.
+    if let Some(hooks_value) = settings.merged.hooks.clone() {
+        if let Value::Object(map) = &mut opts_value {
+            map.insert("hooks".to_string(), hooks_value);
+        }
+    }
+
     let mut prompt = prompt;
     if !prompt_text.is_empty() {
-        // Project/local hooks load only for a trusted cwd; untrusted → user scope.
-        let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
-        let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
         let decision = hooks::run_user_prompt_submit(
             &settings,
             &session_id,
@@ -230,7 +281,7 @@ pub async fn claude_send(
         // decision fields are consumed below (block short-circuits the turn,
         // additional_context is folded into the prompt).
         emit_hook_fire(
-            &app,
+            host.as_ref(),
             &session_id,
             &hooks::hook_event_name(hooks::HookEvent::UserPromptSubmit),
             None,
@@ -299,13 +350,71 @@ fn prepend_context_to_prompt(prompt: &Value, extra: &str) -> Value {
     prompt.clone()
 }
 
+// ---------------------------------------------------------------------------
+// Host-generic command bodies (ADR-0059 R7)
+//
+// The RPC dispatch arms resolve a `SidecarState` from either the Tauri app or
+// the headless services registry and call these `_impl` functions; the
+// `#[tauri::command]` wrappers delegate so desktop behavior is unchanged.
+// ---------------------------------------------------------------------------
+
+pub async fn claude_interrupt_impl(state: &SidecarState, session_id: String) -> Result<(), String> {
+    let msg = json!({ "type": "interrupt", "sessionId": session_id });
+    state.write_command(&msg).await
+}
+
+pub async fn claude_compact_impl(
+    state: &SidecarState,
+    session_id: String,
+    focus: Option<String>,
+) -> Result<(), String> {
+    let msg = json!({ "type": "compact", "sessionId": session_id, "focus": focus });
+    state.write_command(&msg).await
+}
+
+pub async fn claude_approve_impl(
+    state: &SidecarState,
+    session_id: String,
+    request_id: String,
+    decision: String,
+    message: Option<String>,
+    updated_input: Option<Value>,
+) -> Result<(), String> {
+    let valid = matches!(decision.as_str(), "allow" | "allow_always" | "deny");
+    if !valid {
+        return Err(format!("invalid decision: {decision}"));
+    }
+    let payload = json!({
+      "type": "permission_response",
+      "sessionId": session_id,
+      "requestId": request_id,
+      "decision": decision,
+      "message": message,
+      "updatedInput": updated_input,
+    });
+    state.write_command(&payload).await
+}
+
+pub async fn claude_close_session_impl(
+    state: &SidecarState,
+    session_id: String,
+) -> Result<(), String> {
+    let msg = json!({ "type": "close", "sessionId": session_id });
+    state.write_command(&msg).await
+}
+
+pub async fn claude_sidecar_status_impl(state: &SidecarState) -> Result<SidecarStatus, String> {
+    Ok(SidecarStatus {
+        ready: state.is_ready().await,
+    })
+}
+
 #[tauri::command]
 pub async fn claude_interrupt(
     state: State<'_, SidecarState>,
     session_id: String,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "interrupt", "sessionId": session_id });
-    state.write_command(&msg).await
+    claude_interrupt_impl(&state, session_id).await
 }
 
 /// Manually compact a session's context. Mirrors `claude_interrupt` — a control
@@ -317,8 +426,7 @@ pub async fn claude_compact(
     session_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "compact", "sessionId": session_id, "focus": focus });
-    state.write_command(&msg).await
+    claude_compact_impl(&state, session_id, focus).await
 }
 
 /// Undo a prior compaction by restoring the pre-compaction message snapshot.
@@ -343,19 +451,15 @@ pub async fn claude_approve(
     message: Option<String>,
     updated_input: Option<Value>,
 ) -> Result<(), String> {
-    let valid = matches!(decision.as_str(), "allow" | "allow_always" | "deny");
-    if !valid {
-        return Err(format!("invalid decision: {decision}"));
-    }
-    let payload = json!({
-      "type": "permission_response",
-      "sessionId": session_id,
-      "requestId": request_id,
-      "decision": decision,
-      "message": message,
-      "updatedInput": updated_input,
-    });
-    state.write_command(&payload).await
+    claude_approve_impl(
+        &state,
+        session_id,
+        request_id,
+        decision,
+        message,
+        updated_input,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -363,8 +467,7 @@ pub async fn claude_close_session(
     state: State<'_, SidecarState>,
     session_id: String,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "close", "sessionId": session_id });
-    state.write_command(&msg).await
+    claude_close_session_impl(&state, session_id).await
 }
 
 /// Allowlisted Claude Agent SDK `Query` control methods the renderer may drive
@@ -509,9 +612,7 @@ pub async fn claude_protocol_adapter_message(
 pub async fn claude_sidecar_status(
     state: State<'_, SidecarState>,
 ) -> Result<SidecarStatus, String> {
-    Ok(SidecarStatus {
-        ready: state.is_ready().await,
-    })
+    claude_sidecar_status_impl(&state).await
 }
 
 /// ADR-0028 Phase 14 — sidecar restart counter for the Diagnostics
@@ -532,6 +633,75 @@ mod tests {
 
     fn parse(json_str: &str) -> SendOptions {
         serde_json::from_str(json_str).expect("valid SendOptions JSON")
+    }
+
+    /// R7 acceptance: `claude_send_with_host` on a host-generic (recording)
+    /// host spawns a real `node` echo script and the send payload round-trips
+    /// through the sidecar reader back out as a host event. Skips gracefully
+    /// when Node is not installed.
+    #[tokio::test]
+    async fn claude_send_with_host_reaches_a_fake_echo_script() {
+        use crate::claude::host::test_support::RecordingSidecarHost;
+
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("echo-host.mjs");
+        std::fs::write(
+            &script,
+            concat!(
+                "process.stdout.write(JSON.stringify({type:'ready'})+'\\n');\n",
+                "process.stdin.setEncoding('utf8');\n",
+                "let buf='';\n",
+                "process.stdin.on('data',(d)=>{buf+=d;let i;\n",
+                "  while((i=buf.indexOf('\\n'))>=0){\n",
+                "    const line=buf.slice(0,i);buf=buf.slice(i+1);\n",
+                "    if(!line.trim())continue;\n",
+                "    process.stdout.write(JSON.stringify({type:'echo',payload:JSON.parse(line)})+'\\n');\n",
+                "  }});\n",
+                "process.stdin.on('end',()=>process.exit(0));\n",
+            ),
+        )
+        .expect("write echo script");
+
+        let host = RecordingSidecarHost::with_script(script);
+        let state = SidecarState::new();
+
+        claude_send_with_host(
+            host.clone(),
+            state.clone(),
+            "sess-echo".into(),
+            json!("hello from headless"),
+            None,
+        )
+        .await
+        .expect("send must spawn + write");
+
+        // The echo script reflects the send command back; the reader emits it
+        // as a host event on the sidecar channel.
+        let mut echoed = None;
+        for _ in 0..100 {
+            if let Some((_, payload)) = host
+                .events()
+                .into_iter()
+                .find(|(channel, payload)| {
+                    channel == super::super::sidecar::SIDECAR_EVENT && payload["type"] == "echo"
+                })
+            {
+                echoed = Some(payload);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let echoed = echoed.expect("echo event must arrive via the host");
+        assert_eq!(echoed["payload"]["type"], "send");
+        assert_eq!(echoed["payload"]["sessionId"], "sess-echo");
+        assert_eq!(echoed["payload"]["prompt"], "hello from headless");
+
+        super::super::sidecar::kill_sidecar(state).await;
     }
 
     #[test]
@@ -773,6 +943,45 @@ mod tests {
             json["providerCredentials"]["headers"]["OAI-Product-Sku"],
             "codex"
         );
+    }
+
+    #[test]
+    fn provider_credentials_api_flavor_round_trips() {
+        // apiFlavor must survive deserialize → re-serialize across the
+        // renderer→Rust→sidecar boundary, or the sidecar's
+        // decideOpenAiEndpointFlavor never sees the user's Responses/Chat choice
+        // (the same drop trap as `headers`). It also unlocks the Responses API
+        // on Azure / compatible gateways / custom base URLs.
+        let opts = parse(
+            r#"{
+                "provider": "azure",
+                "model": "gpt-5",
+                "providerCredentials": {
+                    "apiKey": "az-key",
+                    "baseURL": "https://x.openai.azure.com",
+                    "protocol": "azure",
+                    "apiFlavor": "responses"
+                }
+            }"#,
+        );
+        assert!(opts.validate().is_ok());
+        let creds = opts.provider_credentials.as_ref().expect("creds present");
+        assert_eq!(creds.api_flavor.as_deref(), Some("responses"));
+        let json = serde_json::to_value(&opts).expect("serialise");
+        assert_eq!(json["providerCredentials"]["apiFlavor"], "responses");
+    }
+
+    #[test]
+    fn provider_credentials_rejects_bad_api_flavor() {
+        let opts = parse(
+            r#"{
+                "provider": "openai",
+                "model": "gpt-5",
+                "providerCredentials": { "apiFlavor": "streaming" }
+            }"#,
+        );
+        let err = opts.validate().expect_err("bad apiFlavor should fail");
+        assert!(err.contains("apiFlavor"));
     }
 
     #[test]

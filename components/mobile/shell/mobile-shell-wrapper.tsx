@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils"
 import { MobileTabBar, tabHref, type TabId } from "./mobile-tab-bar"
 import { useMobileTabLayout } from "./use-mobile-tab-layout"
 
-const TAB_BAR_HIDDEN_PREFIXES = ["/pair", "/oauth"]
+const TAB_BAR_HIDDEN_PREFIXES = ["/pair", "/oauth", "/welcome"]
 
 export interface MobileShellWrapperProps {
   children: React.ReactNode
@@ -107,16 +107,33 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     chat: (badges?.chat ?? 0) + inboundUnread,
   }
 
+  // Some routes own the full viewport and host an internal scroll region whose
+  // `h-full` chain needs a *definite* parent height to resolve against:
+  //   - Workflow detail sub-routes (`/workflows/...`): the touch editor + run
+  //     detail host a fixed-height ReactFlow canvas.
+  //   - The A2UI mini-apps hub + workspace (`/a2ui`): the hub wraps its body in
+  //     a `ScrollArea h-full` and the workspace stacks header/toolbar over a
+  //     flex-1 preview/tab region.
+  // A bare `min-h-[100dvh]` is NOT a *definite* height, so those `h-full`
+  // chains resolve to `auto` and collapse to 0 — the page renders as a blank
+  // strip below the top bar. Give just those routes a definite flex-column
+  // viewport so the offline banner takes its own row and the page body fills
+  // the rest; every other (scrollable) route keeps the document-scroll
+  // `min-h-[100dvh]`.
+  const fullViewport =
+    pathname.startsWith("/workflows/") || pathname === "/a2ui" || pathname.startsWith("/a2ui/")
+
   return (
     <div
       data-testid="mobile-shell-wrapper"
       className={cn("contents", className)}
       data-platform={platform}
       data-tab-bar-visible={showTabBar ? "true" : "false"}
+      data-full-viewport={fullViewport ? "true" : "false"}
     >
       <div
         className={cn(
-          "min-h-[100dvh]",
+          fullViewport ? "flex h-[100dvh] flex-col overflow-hidden" : "min-h-[100dvh]",
           showTabBar ? "pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]" : null
         )}
       >

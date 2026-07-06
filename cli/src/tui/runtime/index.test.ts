@@ -28,9 +28,10 @@ function harness() {
     copilotExit: make("copilotExit", true),
     agentsList: make("agentsList", false),
     agentsDispatch: make("agentsDispatch", true),
+    agentsPanel: make("agentsPanel", false),
     teamList: make("teamList", false),
     teamShow: make("teamShow", true),
-    teamRunUnavailable: make("teamRunUnavailable", false),
+    teamRun: make("teamRun", true),
     memoryList: make("memoryList", false),
     memoryShow: make("memoryShow", true),
     memoryAdd: make("memoryAdd", true),
@@ -52,6 +53,7 @@ function harness() {
     mcpAuth: make("mcpAuth", true),
     mcpLogout: make("mcpLogout", true),
     mcpPresets: make("mcpPresets", false),
+    mcpLogsPanel: make("mcpLogsPanel", false),
     skillList: make("skillList", false),
     skillShow: make("skillShow", true),
     skillToggle: make("skillToggle", true),
@@ -88,6 +90,9 @@ function harness() {
     planShow: make("planShow", true),
     planDelete: make("planDelete", true),
     planDiff: make("planDiff", true),
+    councilRun: make("councilRun", true),
+    runCommit: make("runCommit", false),
+    runPr: make("runPr", false),
   } as unknown as RuntimeImpl
   const actions: TuiAction[] = []
   const deps: import("./index").RuntimeDeps = {
@@ -120,10 +125,11 @@ describe("runRuntimeRequest", () => {
     [{ feature: "workflow", action: "save", arg: "w1" }, "copilotSave"],
     [{ feature: "workflow", action: "exit", arg: "w1" }, "copilotExit"],
     [{ feature: "agents", action: "list" }, "agentsList"],
+    [{ feature: "agents", action: "panel" }, "agentsPanel"],
     [{ feature: "agents", action: "run", arg: "rev go" }, "agentsDispatch"],
     [{ feature: "team", action: "list" }, "teamList"],
     [{ feature: "team", action: "show", arg: "t1" }, "teamShow"],
-    [{ feature: "team", action: "run" }, "teamRunUnavailable"],
+    [{ feature: "team", action: "run" }, "teamRun"],
     [{ feature: "memory", action: "list" }, "memoryList"],
     [{ feature: "memory", action: "show", arg: "m1" }, "memoryShow"],
     [{ feature: "memory", action: "add", arg: "a fact" }, "memoryAdd"],
@@ -146,6 +152,7 @@ describe("runRuntimeRequest", () => {
     [{ feature: "mcp", action: "auth", arg: "fs" }, "mcpAuth"],
     [{ feature: "mcp", action: "logout", arg: "fs" }, "mcpLogout"],
     [{ feature: "mcp", action: "presets" }, "mcpPresets"],
+    [{ feature: "mcp", action: "logs" }, "mcpLogsPanel"],
     [{ feature: "skill", action: "list" }, "skillList"],
     [{ feature: "skill", action: "show", arg: "s1" }, "skillShow"],
     [{ feature: "skill", action: "toggle", arg: "s1" }, "skillToggle"],
@@ -190,6 +197,11 @@ describe("runRuntimeRequest", () => {
     [{ feature: "plan", action: "show", arg: "s-plan-1" }, "planShow"],
     [{ feature: "plan", action: "delete", arg: "s-plan-1" }, "planDelete"],
     [{ feature: "plan", action: "diff" }, "planDiff"],
+    [{ feature: "council", action: "run", arg: "why" }, "councilRun"],
+    [{ feature: "commit", action: "run" }, "runCommit"],
+    [{ feature: "commit", action: "apply" }, "runCommit"],
+    [{ feature: "pr", action: "run" }, "runPr"],
+    [{ feature: "pr", action: "apply" }, "runPr"],
   ] as [RuntimeRequest, string][])("routes %o to %s", async (req, expected) => {
     const h = harness()
     await run(req, h)

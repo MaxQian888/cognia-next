@@ -21,6 +21,23 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 /**
+ * Minimum gap between two automatic checks. Boot used to fire the effect
+ * several times back-to-back — settings-store hydration re-evaluating
+ * `autoCheck`, locale/message loading re-creating `t` (formerly an effect
+ * dep), and StrictMode's dev double-invoke — and each re-subscription ran an
+ * immediate network check, so a single boot could hit the update endpoint six
+ * times. Module-level so the throttle survives effect re-mounts within the
+ * same window; the 6-hour interval comfortably clears it.
+ */
+const MIN_AUTO_CHECK_GAP_MS = 60 * 1000
+let lastAutoCheckAt = 0
+
+/** Test-only: clear the boot-storm throttle between cases. */
+export function __resetAutoCheckThrottle(): void {
+  lastAutoCheckAt = 0
+}
+
+/**
  * The Tauri updater throws this (and 404-shaped variants) when the endpoint has
  * no published release yet — the normal state before the first `v*` tag ships,
  * and on forks that never publish. That is "no update available", not a fault,
@@ -39,9 +56,15 @@ function isNoReleaseError(message: string): boolean {
 export function UpdateCheckInitializer() {
   const autoCheck = useSettingsStore((s) => s.settings?.updates?.autoCheck ?? true)
   const t = useTranslations("settings.about.updates")
-  // Don't re-toast the same version when the 6h interval fires again or the
-  // locale flips (which re-subscribes the effect).
+  // Don't re-toast the same version when the 6h interval fires again.
   const notifiedVersion = useRef<string | null>(null)
+  // Keep the latest translator out of the main effect's deps: a locale flip
+  // re-creates `t`, and re-subscribing the effect used to fire an immediate
+  // extra network check on every boot-time context change.
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   useEffect(() => {
     if (!isTauri() || !autoCheck) return
@@ -52,21 +75,26 @@ export function UpdateCheckInitializer() {
     // The handle was cached by the preceding `checkForUpdate`, so this does not
     // re-hit the network on the happy path.
     const install = async () => {
-      const toastId = toast.loading(t("installing"))
+      const toastId = toast.loading(tRef.current("installing"))
       try {
         const result = await downloadAndInstallUpdate()
         if (result === "noLongerAvailable") {
-          toast.info(t("updateNoLongerAvailable"), { id: toastId })
+          toast.info(tRef.current("updateNoLongerAvailable"), { id: toastId })
         }
         // "installed" relaunches the app; "web" can't happen on the desktop path.
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
         loggers.app.error("about.autoUpdateInstallFailed", err)
-        toast.error(t("updateInstallFailed", { error }), { id: toastId })
+        toast.error(tRef.current("updateInstallFailed", { error }), { id: toastId })
       }
     }
 
     const run = async () => {
+      // Squash the boot storm: effect re-subscriptions (autoCheck hydration,
+      // StrictMode double-invoke) within the gap share the first check.
+      const now = Date.now()
+      if (now - lastAutoCheckAt < MIN_AUTO_CHECK_GAP_MS) return
+      lastAutoCheckAt = now
       try {
         const update = await checkForUpdate()
         if (cancelled || !update) return
@@ -76,9 +104,9 @@ export function UpdateCheckInitializer() {
           status: "available",
           version: update.version,
         })
-        toast.success(t("updateAvailableBackground", { version: update.version }), {
+        toast.success(tRef.current("updateAvailableBackground", { version: update.version }), {
           action: {
-            label: t("goInstallAction"),
+            label: tRef.current("goInstallAction"),
             onClick: () => void install(),
           },
         })
@@ -98,7 +126,7 @@ export function UpdateCheckInitializer() {
       cancelled = true
       clearInterval(id)
     }
-  }, [autoCheck, t])
+  }, [autoCheck])
 
   return null
 }

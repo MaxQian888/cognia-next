@@ -146,3 +146,27 @@ export function cellTopRow(
   }
   return null
 }
+
+/**
+ * The inverse of {@link cellTopRow}: the {@link Cell.id} whose measured band
+ * `[top, top + height)` contains content `row`, or null when the row lands on
+ * the trailing `gap` between cells, before the first / after the last cell, or
+ * on a cell with no measured height (height 0). Used to map a transcript click
+ * (the absolute click row, normalised to the scroll content's top) back to the
+ * cell the user aimed at. Pure → unit-tested without Ink measurement.
+ */
+export function cellAtRow(
+  orderedIds: string[],
+  heights: ReadonlyMap<string, number>,
+  row: number,
+  gap = 1
+): string | null {
+  if (row < 0) return null
+  let top = 0
+  for (const id of orderedIds) {
+    const height = heights.get(id) ?? 0
+    if (height > 0 && row >= top && row < top + height) return id
+    top += height + gap
+  }
+  return null
+}

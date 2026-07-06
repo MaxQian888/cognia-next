@@ -3,9 +3,10 @@
  */
 import path from "node:path"
 
-import { planList, planShow, planDelete, planDiff } from "./plan-controller"
+import { planList, planShow, planDelete, planDiff, planExplore } from "./plan-controller"
 import { plansDir, type PlanStoreDeps } from "./plan-store"
 import type { TuiAction } from "../state/types"
+import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
 const HOME = "/home/.cognia"
 
@@ -168,5 +169,77 @@ describe("planDelete", () => {
     expect(actions[1]).toMatchObject({ type: "OVERLAY_OPEN", overlay: { kind: "select" } })
     const overlay = (actions[1] as { overlay: { items: { id: string }[] } }).overlay
     expect(overlay.items.map((i) => i.id)).toEqual(["a-plan-1"])
+  })
+})
+
+describe("planExplore", () => {
+  it("notices usage when no task is given", async () => {
+    const { actions, dispatch } = harness()
+    await planExplore("  ", { dispatch, dispatchAgent: async () => ({ text: "" }) })
+    expect((actions[0] as { message: string }).message).toMatch(/Usage: \/plan explore/)
+  })
+
+  it("runs Explore then Plan and commits the plan the Plan agent returns", async () => {
+    const { actions, dispatch } = harness()
+    const calls: Array<{ id: string; prompt: string }> = []
+    const dispatchAgent = async (def: PluginSubagentDef, prompt: string) => {
+      calls.push({ id: def.id, prompt })
+      return { text: def.id === "Explore" ? "digest: foo.ts:12" : "# Plan\n1. do it" }
+    }
+    await planExplore("add retries", { dispatch, dispatchAgent })
+    // Explore ran first, then Plan with the digest folded into its prompt.
+    expect(calls.map((c) => c.id)).toEqual(["Explore", "Plan"])
+    expect(calls[1].prompt).toContain("digest: foo.ts:12")
+    // The Plan agent's markdown is committed via COMMIT_PLAN.
+    const commit = actions.find((a) => a.type === "COMMIT_PLAN") as { raw: string } | undefined
+    expect(commit?.raw).toBe("# Plan\n1. do it")
+  })
+
+  it("notices when the Plan agent returns nothing", async () => {
+    const { actions, dispatch } = harness()
+    const dispatchAgent = async () => ({ text: "" })
+    await planExplore("x", { dispatch, dispatchAgent })
+    expect(actions.some((a) => a.type === "COMMIT_PLAN")).toBe(false)
+    expect((actions[actions.length - 1] as { message: string }).message).toMatch(/no plan/i)
+  })
+
+  it("stops after Explore when aborted before planning, without committing", async () => {
+    const { actions, dispatch } = harness()
+    const controller = new AbortController()
+    const dispatchAgent = async (def: PluginSubagentDef) => {
+      if (def.id === "Explore") controller.abort()
+      return { text: "x" }
+    }
+    await planExplore("x", { dispatch, dispatchAgent, signal: controller.signal })
+    expect(actions.some((a) => a.type === "COMMIT_PLAN")).toBe(false)
+  })
+
+  it("stops after Plan when aborted before committing", async () => {
+    const { actions, dispatch } = harness()
+    const controller = new AbortController()
+    const dispatchAgent = async (def: PluginSubagentDef) => {
+      if (def.id === "Plan") controller.abort()
+      return { text: "# Plan\n1. a" }
+    }
+    await planExplore("x", { dispatch, dispatchAgent, signal: controller.signal })
+    expect(actions.some((a) => a.type === "COMMIT_PLAN")).toBe(false)
+  })
+
+  it("reports a failure notice when a subagent throws an Error", async () => {
+    const { actions, dispatch } = harness()
+    const dispatchAgent = async () => {
+      throw new Error("boom")
+    }
+    await planExplore("x", { dispatch, dispatchAgent })
+    expect((actions[actions.length - 1] as { message: string }).message).toMatch(/failed: boom/)
+  })
+
+  it("reports a failure notice when a subagent throws a non-Error value", async () => {
+    const { actions, dispatch } = harness()
+    const dispatchAgent = async () => {
+      throw "kaboom"
+    }
+    await planExplore("x", { dispatch, dispatchAgent })
+    expect((actions[actions.length - 1] as { message: string }).message).toMatch(/failed: kaboom/)
   })
 })

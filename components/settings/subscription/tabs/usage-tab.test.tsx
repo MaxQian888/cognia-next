@@ -161,6 +161,25 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.getByText("Representative")).toBeInTheDocument()
   })
 
+  it("surfaces contributing-factor insights derived from the session rows", () => {
+    setup({
+      sessionRows: [
+        usageRow({ inputTokens: 200_000, costUsd: 1 }),
+        usageRow({ messageId: "m2", surface: "agent-team", costUsd: 1 }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-insights-section")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-insight-high-context")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-insight-automated-surface")).toBeInTheDocument()
+  })
+
+  it("shows the insights empty hint when no characteristic applies", () => {
+    setup({ sessionRows: [usageRow({ inputTokens: 1000, surface: "chat", costUsd: 0.25 })] })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-insights-empty")).toBeInTheDocument()
+  })
+
   it("computes the cache hit rate stat from cacheRead / (input + cacheRead)", () => {
     setup({
       sessionRows: [

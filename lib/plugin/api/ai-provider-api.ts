@@ -19,7 +19,7 @@ import type {
   AIChatMessage,
   AIChatOptions,
   AIChatChunk,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { createPluginSystemLogger } from "../core/logger"
 import {
   registerProviderDefinition,
@@ -68,6 +68,12 @@ function buildPluginLlmCodeAdapter(provider: AIProviderDefinition): CodeProtocol
             typeof req.modelParams?.maxOutputTokens === "number"
               ? req.modelParams.maxOutputTokens
               : undefined,
+          topP: typeof req.modelParams?.topP === "number" ? req.modelParams.topP : undefined,
+          stop: Array.isArray(req.modelParams?.stopSequences)
+            ? req.modelParams.stopSequences.filter(
+                (value): value is string => typeof value === "string"
+              )
+            : undefined,
         }
         for await (const chunk of provider.chat(messages, options)) {
           if (chunk.content) yield { type: "text-delta", text: chunk.content }
@@ -76,7 +82,11 @@ function buildPluginLlmCodeAdapter(provider: AIProviderDefinition): CodeProtocol
               type: "finish",
               finishReason: chunk.finishReason,
               usage: chunk.usage
-                ? { input: chunk.usage.promptTokens, output: chunk.usage.completionTokens }
+                ? {
+                    promptTokens: chunk.usage.promptTokens,
+                    completionTokens: chunk.usage.completionTokens,
+                    totalTokens: chunk.usage.totalTokens,
+                  }
                 : undefined,
             }
           }

@@ -54,8 +54,8 @@ flowchart TD
 
 ### Name validation
 
-`validate_name` (`cmd_new.rs:366-385`): ≤ 64 chars, ASCII alphanumeric start, then alphanumeric
-plus `-`, `_`, `.`. Exact failures:
+`validate_name` (`cmd_new.rs:366-385`): ≤ 64 chars, lowercase ASCII alphanumeric start and end,
+with lowercase alphanumeric plus `-`, `_`, `.` in between. Exact failures:
 
 ```text
 plugin name is empty                                       (cmd_new.rs:368)
@@ -63,7 +63,8 @@ plugin name must be ≤ 64 characters                        (cmd_new.rs:371)
 plugin name must be lowercase alphanumeric plus -_. (got `…`)  (cmd_new.rs:382)
 ```
 
-`"0plugin"` and `"foo.bar_1"` pass; `"has space"` and `"!banged"` fail (unit tests at
+`"0plugin"` and `"foo.bar_1"` pass; `"has space"`, `"!banged"`, `"Uppercase"`, and
+`"trailing-"` fail (unit tests at
 `cmd_new.rs:393-404`).
 
 ## Templates are embedded sibling sources

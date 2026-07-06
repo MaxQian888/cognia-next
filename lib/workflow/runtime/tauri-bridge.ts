@@ -16,6 +16,7 @@ import type {
   PersistRunStateInput,
   RegisterTriggerInput,
 } from "@/types/workflow/visual"
+import { notifyCompanionsOfRunState } from "./companion-run-events"
 
 let _isTauri: boolean | null = null
 
@@ -46,6 +47,10 @@ async function safeInvoke<T>(name: string, payload?: unknown): Promise<T | null>
 /** Persist (or upsert) a run-state mirror row in Rust's SQLite. */
 export async function persistRunState(input: PersistRunStateInput): Promise<void> {
   await safeInvoke("workflow_persist_run_state", input)
+  // ADR 0061 P2 — fan the transition out to paired devices (live WS frame,
+  // sync invalidate on terminal, push policy). Fire-and-forget: companion
+  // delivery must never block or fail the orchestrator's persistence path.
+  void notifyCompanionsOfRunState(input)
 }
 
 /** Register / update a trigger row. Causes the Rust daemon to reload its schedule. */

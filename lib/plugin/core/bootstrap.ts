@@ -4,6 +4,13 @@ import type { PluginManagerConfig } from "./manager"
 
 export interface ResolvePluginRuntimeBootstrapOptions {
   isTauri: boolean
+  /**
+   * True when running inside the Capacitor mobile (WebView) shell. Mutually
+   * exclusive with `isTauri` (Tauri wins if both were somehow set). Selects the
+   * `mobile` runtime profile so the manager loads only mobile-supported
+   * built-ins instead of treating the WebView as a desktop browser.
+   */
+  isMobile?: boolean
   windowLabel: string | null
   pluginDirectory?: string
 }
@@ -25,7 +32,10 @@ export function resolvePluginRuntimeBootstrap(
     return {
       shouldInitialize: true,
       config: {
-        runtimeProfile: "browser",
+        // Capacitor mobile is a browser-class WebView without the Tauri bridge.
+        // It boots the `mobile` profile so desktop-native built-ins stay
+        // discovered-but-inert; plain web (and the Node CLI) stays `browser`.
+        runtimeProfile: options.isMobile ? "mobile" : "browser",
         pluginDirectory: "",
         enablePython: false,
       },

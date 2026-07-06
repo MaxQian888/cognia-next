@@ -200,6 +200,14 @@ describe("CharacterEditor — v2 fields", () => {
     expect(onSave.mock.calls[0][0].availableOnPlatforms).toEqual(["tauri"])
   })
 
+  it("can restrict a character to the mobile platform", async () => {
+    const { onSave } = renderEditor(baseInitial())
+    fireEvent.click(screen.getByText("platforms.mobile"))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0].availableOnPlatforms).toEqual(["mobile"])
+  })
+
   it("clears the avatar image via the remove button", async () => {
     const { onSave } = renderEditor(
       baseInitial({ avatarImageDataUrl: "data:image/png;base64,AAAA" })

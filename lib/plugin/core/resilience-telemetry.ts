@@ -19,7 +19,7 @@ import {
   loadBreakerKey,
   snapshotKey,
 } from "@/lib/plugin/resilience/breaker-registry"
-import { createBoundedBuffer } from "@/lib/utils/bounded-buffer"
+import { createBoundedBuffer } from "@cognia/primitives"
 
 export interface PluginActivationFailureRecord {
   pluginId: string

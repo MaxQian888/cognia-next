@@ -1,0 +1,35 @@
+{
+  "bubbleAria": "确认捕获",
+  "close": "关闭",
+  "countdown": "{seconds} 秒",
+  "dismiss": "忽略",
+  "kind": {
+    "text": "文本",
+    "url": "链接",
+    "image": "图片"
+  },
+  "save": "保存",
+  "settings": {
+    "title": "内容捕获",
+    "description": "监听剪贴板并保存到知识库（供雷达分析）。",
+    "enabled": "启用捕获",
+    "enabledDesc": "在桌面端监听剪贴板。",
+    "modeLabel": "模式",
+    "mode": {
+      "confirm": "确认气泡",
+      "silent": "静默 + toast",
+      "manual": "仅手动"
+    },
+    "pollInterval": "轮询间隔（毫秒）",
+    "confirmTimeout": "确认超时（秒）",
+    "privacy": "隐私暂停",
+    "privacyDesc": "临时停止读取剪贴板。",
+    "save": "保存",
+    "saved": "已保存捕获设置。"
+  },
+  "toast": {
+    "saved": "已捕获。",
+    "duplicate": "已捕获过，已跳过。",
+    "failed": "捕获失败：{message}"
+  }
+}

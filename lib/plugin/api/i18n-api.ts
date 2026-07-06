@@ -6,8 +6,8 @@
 
 import { useSettingsStore } from "@/stores"
 import { locales, localeNames, type Locale } from "@/lib/i18n/config"
-import type { PluginI18nAPI, TranslationParams } from "@/types/plugin/plugin-extended"
-import type { Locale as PluginLocale } from "@/types/plugin/plugin-extended"
+import type { PluginI18nAPI, TranslationParams } from "@/types/plugin/plugin"
+import type { Locale as PluginLocale } from "@/types/plugin/plugin"
 import { createPluginSystemLogger } from "../core/logger"
 
 // Plugin translation registrations

@@ -6,9 +6,10 @@
  * and with per-row "Sync now" retry buttons.
  *
  * Live data: `snapshotSyncStates()` is in-memory state managed by the
- * companion sync orchestrator. We re-read it on a one-second tick while
- * mounted so the "lastSyncAt" stamp stays fresh — the orchestrator does
- * not (yet) expose a subscription API.
+ * companion sync orchestrator. The orchestrator does not (yet) expose a
+ * subscription API, so we re-read it on a slow tick to keep the relative
+ * "lastSyncAt" stamp fresh, and refresh on demand right after a sync the
+ * panel itself triggers so feedback is immediate (not up to a tick late).
  */
 
 import { Fragment, useCallback, useEffect, useState } from "react"
@@ -29,19 +30,21 @@ import {
 } from "@/components/ui/item"
 import { TransportTierIndicator } from "./transport-tier-indicator"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 
 type Snapshot = ReturnType<typeof snapshotSyncStates>
 
-function useSyncSnapshot(intervalMs = 1000): Snapshot {
+function useSyncSnapshot(intervalMs = 15_000): { snapshot: Snapshot; refresh: () => void } {
   const [snapshot, setSnapshot] = useState<Snapshot>(() => snapshotSyncStates())
+  const refresh = useCallback(() => setSnapshot(snapshotSyncStates()), [])
   useEffect(() => {
-    const id = setInterval(() => {
-      setSnapshot(snapshotSyncStates())
-    }, intervalMs)
+    // Only the relative-time labels go stale between syncs, so a slow tick
+    // is plenty — the prior 1Hz interval re-rendered the whole panel 60×/min
+    // for no real freshness gain. Sync-triggered updates use `refresh()`.
+    const id = setInterval(refresh, intervalMs)
     return () => clearInterval(id)
-  }, [intervalMs])
-  return snapshot
+  }, [intervalMs, refresh])
+  return { snapshot, refresh }
 }
 
 export interface SyncStatusPanelProps {
@@ -53,7 +56,7 @@ export interface SyncStatusPanelProps {
 
 export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) {
   const t = useTranslations("mobile.me.sync")
-  const liveSnapshot = useSyncSnapshot()
+  const { snapshot: liveSnapshot, refresh } = useSyncSnapshot()
   const snapshot = reader ? reader() : liveSnapshot
   const [busy, setBusy] = useState<keyof Snapshot | "all" | null>(null)
 
@@ -65,6 +68,9 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
         const runner =
           trigger ?? ((scope?: readonly (keyof Snapshot)[]) => runSyncDown({ only: scope }))
         await runner(only ? [only] : undefined)
+        // Pull the freshest orchestrator state immediately rather than
+        // waiting for the next slow tick.
+        refresh()
         toast.success(only ? t("toastTableSynced", { table: only }) : t("toastAllSynced"))
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -73,7 +79,7 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
         setBusy(null)
       }
     },
-    [t, trigger]
+    [t, trigger, refresh]
   )
 
   const tables = Object.keys(snapshot) as (keyof Snapshot)[]
