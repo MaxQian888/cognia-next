@@ -111,7 +111,8 @@
     "effectiveness": "已回收 {pct}%",
     "label": "上下文已压缩",
     "manual": "手动",
-    "phase": "已在第 {turn} 轮重置上下文"
+    "phase": "已在第 {turn} 轮重置上下文",
+    "viewFrames": "查看图像帧"
   },
   "compaction": {
     "notification": "上下文已压缩",
@@ -119,6 +120,21 @@
     "undo": "撤销压缩",
     "undoFailed": "无法恢复对话",
     "undoSuccess": "对话已恢复"
+  },
+  "opticalArchive": {
+    "coverage": "字符覆盖率",
+    "description": "较早的轮次被渲染为 {count} 张图像帧，由视觉模型回读。",
+    "estimate": "图像 / 文本 token",
+    "frameAlt": "光学帧 {n}",
+    "hideText": "隐藏原文",
+    "noText": "未捕获原文（此边界未开启撤销）。",
+    "notFound": "该归档已不可用。",
+    "readability": "可读性",
+    "revealText": "显示原文",
+    "saved": "已节省 {pct}%",
+    "shape": "形状",
+    "title": "光学归档",
+    "tokens": "Token"
   },
   "composer": {
     "ariaAttachImage": "添加图片",

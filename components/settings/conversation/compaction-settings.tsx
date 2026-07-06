@@ -31,6 +31,7 @@ const STRATEGIES: CompressionStrategy[] = [
   "sliding-window",
   "selective",
   "recursive",
+  "optical",
 ]
 const TRIGGERS: CompressionTrigger[] = ["token-threshold", "message-count", "manual"]
 

@@ -820,11 +820,71 @@ export function dispatchAiSdk({
     let next
     let decision = "reused"
     let summaryProduced = false
+    let opticalMeta
 
-    if (plan.kind === "rebuild") {
+    // Optical strategy (ADR-0063): render the `middle` to image frame(s) the
+    // vision model reads back. `buildOpticalCompaction` gates on coverage,
+    // budget, and a round-trip readability check; on any failure it returns null
+    // and we drop through to summarize the same `middle` as text below.
+    if (plan.kind === "optical") {
+      const { buildOpticalCompaction } = await import("./optical/compact.mjs")
+      const opticalTranscribe = async (dataUrl) => {
+        const sum = comp.summary ?? {}
+        let visionAdapter = protocolAdapter
+        if (sum.protocol) {
+          const alt = resolveAdapter(sum.protocol, sum.protocolAdapterSpec, {
+            emit,
+            sessionId,
+            pendingProtocolExecs,
+          })
+          if (alt) visionAdapter = alt
+        }
+        const run = await visionAdapter.start({
+          model: sum.model || model,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "image", image: dataUrl, mediaType: "image/png" },
+                {
+                  type: "text",
+                  text: "Transcribe ALL text visible in this image verbatim, preserving reading order. Output only the transcription, no commentary.",
+                },
+              ],
+            },
+          ],
+          modelParams: { ...modelParams, maxOutputTokens: 1024 },
+          tools: undefined,
+          maxSteps: 1,
+          credentials: sum.credentials || creds,
+          ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
+          streamTextFn: streamTextOverride,
+        })
+        let out = ""
+        for await (const evt of run.fullStream) {
+          if (evt?.type === "text-delta") out += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+        }
+        return out.trim()
+      }
+      const optical = await buildOpticalCompaction({
+        middle: plan.middle,
+        modelId: model,
+        version: nextVersion,
+        options: comp.optical ?? {},
+        transcribe: comp.optical?.verify === false ? undefined : opticalTranscribe,
+        log,
+      })
+      if (optical) {
+        next = [...plan.systemHead, ...frozen, ...(plan.keep ?? []), optical.message, ...plan.tail]
+        opticalMeta = optical.meta
+        summaryProduced = true
+      }
+    }
+
+    if (next === undefined && plan.kind === "rebuild") {
       // Sliding-window (or a no-op fallback) — no LLM call.
       next = plan.rebuilt
-    } else {
+    } else if (next === undefined) {
       let summaryText
       if (plan.kind === "chunked") {
         // Chunks are independent — summarize them concurrently (order is
@@ -884,6 +944,8 @@ export function dispatchAiSdk({
           post_tokens: estimateTokens(next),
           strategy: comp.strategy ?? "summary",
           ...(summaryProduced ? { frozenSummaryDecision: decision } : {}),
+          ...(opticalMeta ? { optical: { ...opticalMeta, sessionId } } : {}),
+          ...(plan.kind === "optical" && !opticalMeta ? { opticalFallback: true } : {}),
           ...(preMessages ? { pre_messages: preMessages } : {}),
         },
       },

@@ -173,5 +173,15 @@ describe("compact-instructions", () => {
           .maxSummaryTokens
       ).toBe(DEFAULT_MAX_SUMMARY_TOKENS)
     })
+
+    it("threads the optical shape/budget knobs to the wire (app override then default)", () => {
+      // App-level optical config wins.
+      const r = resolveCompaction({
+        appComp: { optical: { size: 512, variant: "bw", maxFrames: 2 } },
+      })
+      expect(r.optical).toEqual({ size: 512, variant: "bw", maxFrames: 2 })
+      // Absent → the documented default block.
+      expect(resolveCompaction({}).optical).toBe(DEFAULT_COMPRESSION_SETTINGS.optical)
+    })
   })
 })

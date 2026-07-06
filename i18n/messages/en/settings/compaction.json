@@ -5,6 +5,7 @@
     "label": "Compaction method",
     "options": {
       "hybrid": "Hybrid (recent verbatim + summary)",
+      "optical": "Optical (older turns rendered as images)",
       "recursive": "Recursive (chunked summary)",
       "selective": "Selective (keep important, summarise rest)",
       "sliding-window": "Sliding window (drop oldest)",

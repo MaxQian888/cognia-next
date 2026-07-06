@@ -29,6 +29,7 @@ import type {
   CompressionSettings,
   CompressionStrategy,
   CompressionTrigger,
+  OpticalCompactionOptions,
   SessionCompressionOverrides,
 } from "@/types/system/compression"
 
@@ -110,6 +111,9 @@ export interface ResolvedCompaction {
   retainedFraction?: number
   /** Attach the pre-compaction message snapshot to the boundary event (enables undo). */
   captureUndoSnapshot?: boolean
+  /** Shape + budget knobs for the "optical" strategy (ADR-0063); read only when
+   * `strategy === "optical"`. Absent ⇒ the sidecar renderer's own defaults. */
+  optical?: OpticalCompactionOptions
 }
 
 /**

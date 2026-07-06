@@ -111,7 +111,8 @@
     "effectiveness": "reclaimed {pct}%",
     "label": "Context compacted",
     "manual": "manual",
-    "phase": "context reset at turn {turn}"
+    "phase": "context reset at turn {turn}",
+    "viewFrames": "View frames"
   },
   "compaction": {
     "notification": "Context compacted",
@@ -119,6 +120,21 @@
     "undo": "Undo compaction",
     "undoFailed": "Couldn't restore the conversation",
     "undoSuccess": "Conversation restored"
+  },
+  "opticalArchive": {
+    "coverage": "Coverage",
+    "description": "Older turns rendered as {count} image frame(s) a vision model reads back.",
+    "estimate": "Image / text tokens",
+    "frameAlt": "Optical frame {n}",
+    "hideText": "Hide original text",
+    "noText": "The original text wasn't captured (undo was off for this boundary).",
+    "notFound": "This archive is no longer available.",
+    "readability": "Readability",
+    "revealText": "Show original text",
+    "saved": "{pct}% saved",
+    "shape": "Shape",
+    "title": "Optical archive",
+    "tokens": "Tokens"
   },
   "composer": {
     "ariaAttachImage": "Attach image",

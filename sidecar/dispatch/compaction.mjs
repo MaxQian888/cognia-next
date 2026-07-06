@@ -151,20 +151,41 @@ export function shouldCompact({
 /** Sentinel prefix every spliced summary message opens with. */
 export const SUMMARY_OPEN_TAG = "<conversation-summary"
 
-/** True when `m` is a previously-spliced compaction summary. */
+/** Leading text of a summary/optical message (the sentinel-bearing header),
+ * whether content is a plain string or a `[text, …image]` array (the optical
+ * strategy renders the archive as image parts after the header). */
+function leadingText(m) {
+  if (!m || m.role !== "user") return null
+  if (typeof m.content === "string") return m.content
+  if (Array.isArray(m.content)) {
+    const first = m.content.find((p) => p && p.type === "text" && typeof p.text === "string")
+    return first ? first.text : null
+  }
+  return null
+}
+
+/** True when `m` is a previously-spliced compaction summary OR optical archive.
+ * Both are protected as frozen so prior archives are carried forward verbatim
+ * instead of being fed back into `middle` (and, for optical, silently lost — an
+ * image part yields no text to re-summarize). */
 export function isSummaryMessage(m) {
+  const head = leadingText(m)
+  return head != null && head.startsWith(SUMMARY_OPEN_TAG)
+}
+
+/** True when the frozen artifact is an optical (image-bearing) archive. */
+export function isOpticalMessage(m) {
   return (
-    !!m &&
-    m.role === "user" &&
-    typeof m.content === "string" &&
-    m.content.startsWith(SUMMARY_OPEN_TAG)
+    isSummaryMessage(m) &&
+    Array.isArray(m.content) &&
+    m.content.some((p) => p && p.type === "image")
   )
 }
 
-/** Version parsed from a summary message's `v="N"` header (0 when absent). */
+/** Version parsed from a summary/optical message's `v="N"` header (0 absent). */
 export function summaryVersion(m) {
   if (!isSummaryMessage(m)) return 0
-  const match = m.content.match(/^<conversation-summary\s+v="(\d+)"/)
+  const match = leadingText(m).match(/^<conversation-summary\s+v="(\d+)"/)
   return match ? Number(match[1]) : 0
 }
 
@@ -175,6 +196,27 @@ export function makeSummaryMessage(summary, version) {
     role: "user",
     content: `${SUMMARY_OPEN_TAG} v="${v}">\nSummary of earlier conversation (compacted to save context):\n${summary}\n</conversation-summary>`,
   }
+}
+
+/**
+ * Render one versioned optical-archive message: a sentinel-bearing text header
+ * followed by the rendered image parts. Recognized as frozen by
+ * {@link isSummaryMessage}, so it is carried forward verbatim across turns.
+ * @param {Array<{type:"image", image:string, mediaType?:string}>} imageParts
+ * @param {{ messageCount?:number, frameCount?:number }} info
+ * @param {number} version
+ */
+export function makeOpticalMessage(imageParts, info, version) {
+  const v = Number.isFinite(version) && version > 0 ? version : 1
+  const frames = imageParts.length
+  const msgs = info?.messageCount
+  const header =
+    `${SUMMARY_OPEN_TAG} v="${v}" optical="1">\n` +
+    `Earlier conversation${typeof msgs === "number" ? ` (${msgs} messages)` : ""} was compacted to ` +
+    `save context: it is rendered as ${frames} optical frame image${frames === 1 ? "" : "s"} below. ` +
+    `Read the image${frames === 1 ? "" : "s"} as verbatim conversation history and treat it as authoritative.\n` +
+    `</conversation-summary>`
+  return { role: "user", content: [{ type: "text", text: header }, ...imageParts] }
 }
 
 /**

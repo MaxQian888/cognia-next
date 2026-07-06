@@ -2226,6 +2226,17 @@ export class CogniaDB extends Dexie {
       projectChunks:
         "&id, projectId, fileId, vectorDocId, [projectId+fileId], [projectId+createdAt]",
     })
+
+    // v101 — Optical-compaction archives (ADR-0063). One row per "optical"
+    // compaction boundary: the rendered image frames + token stats + the
+    // original pre-compaction transcript, so a boundary can be re-opened after a
+    // reload (the in-memory undo registry is empty then). `sessionId` powers the
+    // per-session viewer; `createdAt` (and the `[sessionId+createdAt]` compound)
+    // drive newest-first reads + cap trimming. Pure additive — no upgrade hook.
+    // See `lib/db/optical-archives.ts`.
+    this.version(101).stores({
+      opticalArchives: "&id, sessionId, createdAt, [sessionId+createdAt]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2286,6 +2297,8 @@ export class CogniaDB extends Dexie {
   inboundDrafts!: Table<import("./inbound-drafts").InboundDraftRow, string>
   // v99 — Inbound gateway durable request log. See `lib/db/gateway-request-log.ts`.
   gatewayRequestLog!: Table<import("@/types/gateway").GatewayRequestLogRow, string>
+  // v101 — Optical-compaction archives (ADR-0063). See `lib/db/optical-archives.ts`.
+  opticalArchives!: Table<import("./optical-archives").OpticalArchiveRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -2304,6 +2317,7 @@ export type { AutomationAuditLogRow } from "@/lib/automation/audit"
 export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
 export type { PluginDexieMeta } from "./plugin-types"
 export type { EvalRunRow } from "./eval-runs"
+export type { OpticalArchiveRow, OpticalArchiveFrame } from "./optical-archives"
 export type { TraceAnnotationRow } from "./trace-annotations"
 export type { CalibrationItemRow } from "./calibration-items"
 export type { CalibrationRunRow, CalibrationVerdict } from "./calibration-runs"

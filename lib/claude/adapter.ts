@@ -25,6 +25,7 @@ import type {
 } from "./parts-extensions"
 import type { HookNoticePartData } from "./hooks"
 import { registerUndoSnapshot } from "./compaction-undo"
+import { persistOpticalArchive, type OpticalBoundaryMeta } from "./optical-archive-persist"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
 import {
   extractAnthropicCitations,
@@ -535,6 +536,12 @@ function appendCompactBoundary(
       // `captureUndoSnapshot` setting is on. Kept OUT of the persisted part —
       // it is moved into the in-memory undo registry instead.
       pre_messages?: unknown[]
+      // Optical-strategy archive (ADR-0063): rendered frames + token stats.
+      // Persisted to Dexie (durable, survives reload) rather than embedded in
+      // the transcript part; the part only carries a reference id + frame count.
+      optical?: OpticalBoundaryMeta
+      // True when the optical strategy fell back to a text summary this boundary.
+      opticalFallback?: boolean
     }
   }
 ): UIMessage[] {
@@ -555,6 +562,9 @@ function appendCompactBoundary(
     })
   }
 
+  // Persist the optical archive (durable) and reference it from the part.
+  const opticalArchiveId = meta?.optical ? persistOpticalArchive(id, meta) : undefined
+
   const marker: UIMessage = {
     id,
     role: "system",
@@ -566,6 +576,9 @@ function appendCompactBoundary(
         postTokens: meta?.post_tokens,
         strategy: meta?.strategy,
         ...(undoToken ? { undoToken } : {}),
+        ...(opticalArchiveId ? { opticalArchiveId } : {}),
+        ...(meta?.optical?.frameCount ? { opticalFrameCount: meta.optical.frameCount } : {}),
+        ...(meta?.opticalFallback ? { opticalFallback: true } : {}),
       } as unknown as UIMessage["parts"][number],
     ],
   }

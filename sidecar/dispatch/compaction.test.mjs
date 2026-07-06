@@ -11,8 +11,10 @@ import {
   applyCompactionIncremental,
   applyCompactionRegenerated,
   isSummaryMessage,
+  isOpticalMessage,
   summaryVersion,
   makeSummaryMessage,
+  makeOpticalMessage,
 } from "./compaction.mjs"
 
 test("AUTO_COMPACT_FRACTION mirrors the renderer constant", () => {
@@ -154,6 +156,35 @@ test("planCompaction protects leading system + frozen summaries from re-summariz
   assert.deepEqual(
     plan.tail.map((m) => m.content),
     ["u-recent", "a-recent"]
+  )
+})
+
+test("optical archives are recognized and protected as frozen artifacts", () => {
+  const imageParts = [
+    { type: "image", image: "data:image/png;base64,AAAA", mediaType: "image/png" },
+  ]
+  const archive = makeOpticalMessage(imageParts, { messageCount: 4, frameCount: 1 }, 2)
+  assert.ok(isSummaryMessage(archive), "array-content optical archive is a frozen artifact")
+  assert.ok(isOpticalMessage(archive), "and detectable as optical (image-bearing)")
+  assert.equal(summaryVersion(archive), 2)
+  assert.equal(isOpticalMessage(makeSummaryMessage("text only", 1)), false)
+
+  // A prior optical archive right after the system head is carried forward in
+  // `frozen`, never fed back into `middle` (where its image would yield no text).
+  const conversation = [
+    { role: "system", content: "sys" },
+    archive,
+    { role: "user", content: "u-new" },
+    { role: "assistant", content: "a-new" },
+    { role: "user", content: "u-recent" },
+    { role: "assistant", content: "a-recent" },
+  ]
+  const plan = planCompaction({ conversation, keepRecentMessages: 2 })
+  assert.equal(plan.frozen.length, 1)
+  assert.ok(isOpticalMessage(plan.frozen[0]))
+  assert.deepEqual(
+    plan.middle.map((m) => m.content),
+    ["u-new", "a-new"]
   )
 })
 

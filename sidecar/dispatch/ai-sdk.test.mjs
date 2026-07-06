@@ -489,6 +489,65 @@ test("maybeCompact: sliding-window strategy compacts WITHOUT an LLM summary call
   }
 })
 
+test("maybeCompact: optical strategy renders the middle to image frames and emits optical metadata", async () => {
+  const { events, emit } = captureEmit()
+  // Long ASCII so the archive is worthwhile vs. its text tokens.
+  const LONG =
+    "the assistant refactored the authentication module to use rotating refresh tokens and updated the co located unit tests across several files without regressions. ".repeat(
+      4
+    )
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: LONG },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: LONG,
+    sendOptions: {
+      // model id resolves to the anthropic vision family → cheap frame estimate.
+      model: "claude-test",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "optical",
+        // verify off → no vision round-trip call needed in the test harness.
+        optical: { size: 512, verify: false },
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  await waitForTurns(1)
+  session.pushUserMessage(LONG)
+  await waitForTurns(2)
+  session.pushUserMessage(LONG)
+  await waitForTurns(3)
+  session.closeInput()
+
+  const boundaries = events.filter(
+    (e) => e.type === "event" && e.event?.subtype === "compact_boundary"
+  )
+  assert.ok(boundaries.length >= 1, "optical strategy emits a boundary")
+  const optical = boundaries.find((b) => b.event.compact_metadata.optical)
+  assert.ok(optical, "a boundary carries optical metadata")
+  const meta = optical.event.compact_metadata
+  assert.equal(meta.strategy, "optical")
+  assert.ok(meta.optical.frameCount >= 1)
+  assert.equal(meta.optical.frames.length, meta.optical.frameCount)
+  assert.ok(meta.optical.frames[0].base64.length > 0, "rendered frame is carried on the event")
+  assert.ok(meta.optical.estImageTokens < meta.optical.estTextTokens, "cheaper than text")
+  // No text-summary call was made (no summarizer prompt message).
+  assert.ok(!calls.some((a) => a.messages?.[0]?.content === "SUMMARIZE"))
+})
+
 test("maybeCompact: captures a pre-compaction snapshot when undo is enabled", async () => {
   const { events, emit } = captureEmit()
   const { fn } = capturingStream(

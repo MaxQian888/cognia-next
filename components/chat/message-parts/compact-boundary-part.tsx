@@ -12,13 +12,14 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ScissorsIcon, Undo2Icon } from "lucide-react"
+import { ImageIcon, ScissorsIcon, Undo2Icon } from "lucide-react"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
 
 import { useChatStore } from "@/stores/chat"
 import { restoreSession } from "@/lib/claude/ipc"
 import { getUndoSnapshot, hasUndoSnapshot, clearUndoSnapshot } from "@/lib/claude/compaction-undo"
+import { OpticalArchiveDialog } from "./optical-archive-dialog"
 import {
   computeCompactionTokenDeltas,
   deriveContextPhases,
@@ -35,6 +36,12 @@ export interface CompactBoundaryPartData {
   strategy?: string
   /** Present when a live undo snapshot exists for this boundary. */
   undoToken?: string
+  /** Present when the "optical" strategy archived this boundary (ADR-0063). */
+  opticalArchiveId?: string
+  /** Number of image frames in the optical archive. */
+  opticalFrameCount?: number
+  /** True when the optical strategy fell back to a text summary this boundary. */
+  opticalFallback?: boolean
 }
 
 /** True when a message is the synthetic compact-boundary marker. */
@@ -54,6 +61,7 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
   const replaceMessages = useChatStore((s) => s.replaceMessages)
   const messages = useChatStore((s) => s.messages)
   const [undoing, setUndoing] = useState(false)
+  const [viewingFrames, setViewingFrames] = useState(false)
 
   // Turn label + effectiveness for THIS boundary, derived from the transcript.
   const metric = useMemo(() => {
@@ -136,7 +144,25 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
           {tc("undo")}
         </button>
       )}
+      {part.opticalArchiveId && (
+        <button
+          type="button"
+          onClick={() => setViewingFrames(true)}
+          data-testid="compact-view-frames"
+          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <ImageIcon className="size-3" aria-hidden />
+          {t("viewFrames")}
+        </button>
+      )}
       <div className="h-px flex-1 bg-border" />
+      {part.opticalArchiveId && (
+        <OpticalArchiveDialog
+          archiveId={part.opticalArchiveId}
+          open={viewingFrames}
+          onOpenChange={setViewingFrames}
+        />
+      )}
     </div>
   )
 }

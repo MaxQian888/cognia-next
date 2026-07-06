@@ -180,3 +180,17 @@ test("hybrid engages the drain-line by default (distinct from summary)", () => {
   assert.equal(summary.tail.length, 8)
   assert.equal(hybrid.tail.length, MIN_TAIL)
 })
+
+test("optical produces an optical plan carrying the middle (fallback-compatible)", () => {
+  const conversation = convo(10)
+  const plan = planStrategy({ strategy: "optical", conversation, keepRecent: 2 })
+  assert.equal(plan.kind, "optical")
+  // Same shape as "single" so the orchestrator can summarize this middle as text
+  // if the optical render or round-trip check fails.
+  assert.equal(plan.middle.length, 8)
+  assert.equal(plan.tail.length, 2)
+  assert.deepEqual(
+    plan.systemHead.map((m) => m.content),
+    ["sys"]
+  )
+})

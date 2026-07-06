@@ -116,6 +116,19 @@ export function planStrategy({
     return { kind: "chunked", systemHead, frozen, keep, chunks, tail }
   }
 
+  if (strategy === "optical") {
+    // Optical (snapcompact) rendering: the middle is rasterized to image
+    // frame(s) the vision model reads back (ADR-0063). The orchestrator owns the
+    // render + round-trip verify and, on failure, falls back to summarizing this
+    // same `middle` — so the plan carries it exactly like the "single" kind.
+    const keep = protectedSystems()
+    const material = preserveSystemMessages ? middle.filter((m) => m.role !== "system") : middle
+    if (material.length === 0) {
+      return { kind: "rebuild", rebuilt: [...systemHead, ...frozen, ...keep, ...tail] }
+    }
+    return { kind: "optical", systemHead, frozen, keep, middle: material, tail }
+  }
+
   // "summary" | "hybrid" → a single summary of the middle.
   const keep = protectedSystems()
   const summarizeSet = preserveSystemMessages ? middle.filter((m) => m.role !== "system") : middle

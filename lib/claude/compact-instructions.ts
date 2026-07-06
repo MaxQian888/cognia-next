@@ -193,7 +193,13 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
   const summaryProvider = appComp?.compressionModel?.provider?.trim() || undefined
   const summaryModel = appComp?.compressionModel?.model?.trim() || undefined
 
+  // Optical (snapcompact) shape/budget knobs — app-level only for now (no
+  // per-session override field). Only consulted by the sidecar when
+  // `strategy === "optical"`; harmless to carry otherwise.
+  const optical = appComp?.optical ?? D.optical
+
   return {
+    optical,
     enabled,
     fraction,
     keepRecent,

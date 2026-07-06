@@ -15,6 +15,9 @@
  * - selective: Keep important messages (system, key exchanges) and summarize others
  * - hybrid: Combination of sliding window for recent + summary for older
  * - recursive: Chunk-based recursive summarization for very long conversations
+ * - optical: Render older messages to compact image frames a vision model reads
+ *   back (optical / "text-as-image" compression, ADR-0063). Falls back to a
+ *   text summary when the transcript is unrenderable or the round-trip fails.
  */
 export type CompressionStrategy =
   | "summary"
@@ -22,6 +25,38 @@ export type CompressionStrategy =
   | "selective"
   | "hybrid"
   | "recursive"
+  | "optical"
+
+/**
+ * Shape + budget knobs for the "optical" strategy (ADR-0063). All optional; the
+ * sidecar renderer supplies defaults for anything omitted. Serialised verbatim
+ * onto `ResolvedCompaction.optical` for the generic (AI-SDK) path.
+ */
+export interface OpticalCompactionOptions {
+  /** Frame edge in px (also bounds the glyph grid rows). Default 1024. */
+  size?: number
+  /** Bundled bitmap font. Default "8x8" (the eval-winning square unscii cell). */
+  font?: "8x8" | "5x8"
+  /** Ink variant: six-hue sentence cycling, or plain black. Default per model. */
+  variant?: "sent" | "bw"
+  /** Target cell advance/pitch in px (differing from the font cell stretches). */
+  cellWidth?: number
+  cellHeight?: number
+  /** 1 = row-major grid, 2 = two-column "doc" layout. Default 1. */
+  columns?: 1 | 2
+  /** Print each line N times (redundancy coding). Default 1. */
+  lineRepeat?: number
+  /** Max image frames before falling back to a text summary. Default 4. */
+  maxFrames?: number
+  /** Min renderable-character fraction to attempt optical (else text). Default 0.7. */
+  minCoverage?: number
+  /** Min token savings vs. text required to keep the optical archive. Default 0.15. */
+  minSavings?: number
+  /** Run a one-shot vision round-trip readability check before keeping. Default true. */
+  verify?: boolean
+  /** Min word-recall from the round-trip to keep the frame (0..1). Default 0.6. */
+  readabilityThreshold?: number
+}
 
 /**
  * Trigger modes for automatic compression
@@ -97,6 +132,11 @@ export interface CompressionSettings {
    * default focus for a manual `/compact` with no explicit argument.
    */
   focus?: string
+  /**
+   * Shape + budget knobs for the "optical" strategy (only consulted when
+   * `strategy === "optical"`). Absent ⇒ the sidecar renderer's own defaults.
+   */
+  optical?: OpticalCompactionOptions
 }
 
 /**
@@ -293,4 +333,13 @@ export const DEFAULT_COMPRESSION_SETTINGS: CompressionSettings = {
   recursiveChunkSize: 20,
   retainedThreshold: 40, // Compress down to 40% — creates a buffer below the trigger
   prefixStabilityMode: true, // Enable by default for cache-friendly compression
+  optical: {
+    size: 1024,
+    font: "8x8",
+    maxFrames: 4,
+    minCoverage: 0.7,
+    minSavings: 0.15,
+    verify: true,
+    readabilityThreshold: 0.6,
+  },
 }
