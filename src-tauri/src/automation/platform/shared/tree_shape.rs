@@ -135,7 +135,9 @@ pub fn find_in_tree(root: &ElementInfo, locator: &Locator) -> Option<ElementRef>
 
 /// Coordinate-click point of an element: the center of its bounding rect.
 /// Backends use this when a native pattern invoke isn't available and they
-/// must fall back to a synthetic click.
+/// must fall back to a synthetic click. Reserved for that fallback path —
+/// currently exercised only by tests, so allow it to be unused otherwise.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn rect_center(rect: &Rect) -> Point {
     Point {
         x: rect.x + rect.width / 2,

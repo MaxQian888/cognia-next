@@ -52,6 +52,11 @@ pub fn wire_uia_event_sink(app: AppHandle) {
 /// Deliver one event through the sink. No-op (dropped) before wiring —
 /// a watcher can outlive the renderer during shutdown, so this must never
 /// panic or block.
+// Delivery happens only from the Windows-only UIA watcher (`platform::uia`,
+// gated to `target_os = "windows"`) and from tests; the sink itself is wired on
+// every platform, so the emitter is legitimately unused on non-Windows,
+// non-test builds.
+#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
 pub fn emit_uia_event(payload: UiaEventPayload) {
     let sink = EVENT_SINK.read().clone();
     if let Some(sink) = sink {
