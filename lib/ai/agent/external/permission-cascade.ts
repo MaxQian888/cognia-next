@@ -1,4 +1,6 @@
 import type { AcpCapabilities, AcpPermissionMode } from "@/types/agent/external-agent"
+import type { SandboxResourcePolicy } from "@/lib/claude/types"
+import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 
 /**
  * A minimal, protocol-agnostic description of the permission surface an
@@ -21,6 +23,12 @@ export interface ExternalSessionPermissionSpec {
   disallowedTools?: string[]
   /** MCP servers the session may reach. The parent's set is the ceiling. */
   mcpServers?: Array<{ name: string; [key: string]: unknown }>
+  /**
+   * OS-sandbox resource/network ceiling (ADR-0028). Cascades monotonically via
+   * {@link clampSandboxPolicy}: a child may only narrow writable roots, tighten
+   * the network reach, and lower the CPU/memory caps — never widen them.
+   */
+  sandboxPolicy?: SandboxResourcePolicy
 }
 
 /**
@@ -121,6 +129,9 @@ export function deriveExternalSessionPermission(
 
   const mcpServers = intersectServers(parent.mcpServers, child.mcpServers)
   if (mcpServers) result.mcpServers = mcpServers
+
+  const sandboxPolicy = clampSandboxPolicy(parent.sandboxPolicy, child.sandboxPolicy)
+  if (sandboxPolicy) result.sandboxPolicy = sandboxPolicy
 
   return result
 }

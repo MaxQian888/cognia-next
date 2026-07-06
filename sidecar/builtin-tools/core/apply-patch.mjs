@@ -15,6 +15,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { applyPatch, parsePatch } from "diff"
 
 import { toolError, toolText } from "../safety.mjs"
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { canonicalKey } from "./read-tracker.mjs"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
 import { resolveToolPath } from "./read.mjs"
@@ -121,6 +122,7 @@ async function planFilePatch(fp, cwd, readTracker) {
   const rel = deletion ? stripGitPrefix(fp.oldFileName) : stripGitPrefix(fp.newFileName)
   if (isDevNull(rel)) throw new Error("patch is missing a target file path")
   const abs = resolveToolPath(cwd, rel)
+  assertNotSecretEscape(cwd, abs)
 
   if (deletion) {
     let st

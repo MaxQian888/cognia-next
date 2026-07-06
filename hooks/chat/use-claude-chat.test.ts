@@ -356,8 +356,13 @@ jest.mock("@/lib/execution/chat-lease", () => ({
 }))
 
 const settingsState = {
-  settings: { alwaysAllowTools: [] as string[], artifacts: { autoCreate: false } },
+  settings: {
+    alwaysAllowTools: [] as string[],
+    artifacts: { autoCreate: false },
+    agentPermissions: undefined as { toolRules?: Record<string, unknown> } | undefined,
+  },
   toggleAlwaysAllow: jest.fn().mockResolvedValue(undefined),
+  save: jest.fn().mockResolvedValue(undefined),
 }
 const settingsSubscribers: Array<(s: typeof settingsState) => void> = []
 
@@ -839,6 +844,30 @@ describe("useClaudeChat — actions", () => {
       )
     })
     expect(settingsState.toggleAlwaysAllow).toHaveBeenCalledWith("read", true)
+    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
+  })
+
+  it("respondToApproval (allow_always) persists a TARGET-SCOPED rule when a target exists", async () => {
+    settingsState.save.mockClear()
+    settingsState.toggleAlwaysAllow.mockClear()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId: "r-1",
+          toolName: "Bash",
+          input: { command: "git status" },
+        } as never,
+        "allow_always"
+      )
+    })
+    // Scoped rule persisted; the coarse name-grant path is NOT taken.
+    expect(settingsState.save).toHaveBeenCalledWith({
+      agentPermissions: { toolRules: { Bash: { "git *": "allow" } } },
+    })
+    expect(settingsState.toggleAlwaysAllow).not.toHaveBeenCalled()
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
   })
 

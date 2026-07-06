@@ -25,6 +25,7 @@ import { makeInputStream } from "./input-stream.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
+import { classifyToolCallConfinement, combineVerdict } from "../builtin-tools/confinement.mjs"
 import {
   makeServerAlwaysLoad,
   alwaysLoadToolSet,
@@ -400,31 +401,60 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       if (!doomed && suppressList && suppressList.includes(toolName)) {
         return Promise.resolve({ behavior: "allow", updatedInput: input })
       }
-      // OpenCode-style static ruleset short-circuit (Layer A). Only EXPLICIT
-      // allow/deny rules act here; anything else ("ask") falls through to the
-      // normal round-trip so the renderer's richer Auto-mode (Layer B) and the
-      // manual approval modal still run. Fail-open on any resolver error.
+      // OpenCode-style static ruleset short-circuit (Layer A), composed with the
+      // workspace-confinement verdict (ADR-0028 lite). Only EXPLICIT allow/deny
+      // rules act here; a confinement "ask" (mutator escaping the workspace roots)
+      // overrides a ruleset "allow" and falls through to the round-trip, while a
+      // confinement "deny" (write into / symlink-escape toward a credential path)
+      // hard-rejects. Anything unresolved ("ask") falls through so the renderer's
+      // richer Auto-mode (Layer B) and the manual approval modal still run.
+      // Fail-open on any resolver error.
       const ruleset = sendOptions.permissionRuleset
+      let rulesetVerdict = null
       if (ruleset) {
         try {
-          const verdict = resolveForToolCall(ruleset, toolName, input)
-          // An explicit DENY outranks the doom-loop escalation: a doom-looped
-          // call to a user-denied tool must stay denied, not downgrade to an
-          // approval prompt the user could accept.
-          if (verdict === "deny") {
-            return Promise.resolve({
-              behavior: "deny",
-              message: "denied by permission ruleset",
-            })
-          }
-          // The silent ALLOW short-circuit is what the doom guard exists to
-          // suspend — a doomed call falls through to the approval round-trip.
-          if (verdict === "allow" && !doomed) {
-            return Promise.resolve({ behavior: "allow", updatedInput: input })
-          }
+          rulesetVerdict = resolveForToolCall(ruleset, toolName, input)
         } catch {
-          // fall through to the approval round-trip
+          rulesetVerdict = null
         }
+      }
+      let confinementVerdict = null
+      try {
+        confinementVerdict = classifyToolCallConfinement(
+          sendOptions.confinement,
+          toolName,
+          input,
+          sendOptions.cwd
+        )
+      } catch {
+        confinementVerdict = null
+      }
+      const combinedVerdict = combineVerdict(rulesetVerdict, confinementVerdict)
+      // An explicit DENY outranks the doom-loop escalation: a doom-looped call
+      // to a denied tool (or a credential-escaping write) must stay denied, not
+      // downgrade to an approval prompt the user could accept.
+      if (combinedVerdict === "deny") {
+        return Promise.resolve({
+          behavior: "deny",
+          message:
+            confinementVerdict === "deny" && rulesetVerdict !== "deny"
+              ? "denied: path escapes the workspace into a protected credential location"
+              : "denied by permission ruleset",
+        })
+      }
+      // Session-global "Allow always" grant (parity with the ai-sdk gate). An
+      // explicit name-level grant beats a confinement "ask" but not the "deny"
+      // handled above; the doom guard still suspends the silent short-circuit.
+      const alwaysAllow = Array.isArray(sendOptions.alwaysAllowTools)
+        ? sendOptions.alwaysAllowTools
+        : null
+      if (!doomed && alwaysAllow && alwaysAllow.includes(toolName)) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
+      // The silent ALLOW short-circuit is what the doom guard exists to
+      // suspend — a doomed call falls through to the approval round-trip.
+      if (combinedVerdict === "allow" && !doomed) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
       }
       const requestId = randomUUID()
       // Boundary instrumentation (COGNIA_SIDECAR_VERBOSE=1): the Agent SDK path

@@ -410,6 +410,20 @@ export interface AgentTeamConfig {
    * Undefined = no mode ceiling.
    */
   defaultPermissionMode?: import("./external-agent").AcpPermissionMode
+  /**
+   * Team-level OS-sandbox default (ADR-0028). When true, every teammate dispatch
+   * runs its Bash/Edit/Write through the per-platform OS sandbox unless the
+   * teammate opts out. A teammate may enable it individually even when this is
+   * unset. See `teammateToCharacter`.
+   */
+  sandboxEnabled?: boolean
+  /**
+   * Team-level OS-sandbox resource/network **ceiling** (ADR-0028). Cascades
+   * monotonically: a teammate's own `TeammateConfig.sandboxPolicy` may only
+   * further-restrict this (writable roots narrow, network tightens, caps lower)
+   * via `clampSandboxPolicy`. Only consulted when the sandbox resolves enabled.
+   */
+  sandboxPolicy?: import("@/lib/claude/types").SandboxResourcePolicy
   /** Max result tokens before auto-summarization (context isolation) */
   maxResultTokens?: number
   /** Auto-clean shared memory when team completes */

@@ -8,6 +8,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { canonicalKey } from "./read-tracker.mjs"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
 import { resolveToolPath } from "./read.mjs"
@@ -52,6 +53,9 @@ export function createWriteTool({ cwd, readTracker, lspResolver }) {
   async function execWrite(args) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
+      // Defence-in-depth: never write into a credential path, even when no
+      // confinement policy is configured for this session.
+      assertNotSecretEscape(cwd, abs)
       return await withFileLock(canonicalKey(abs), async () => {
         let existing = null
         try {

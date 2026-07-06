@@ -34,6 +34,7 @@ import {
 const ASK_USER_TOOL_NAME = "ask_user"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
+import { classifyToolCallConfinement } from "../builtin-tools/confinement.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
@@ -220,6 +221,29 @@ export function createToolPermissionGate({
     // runaway-loop protection.
     const doomed = doomGuard ? doomGuard.check(toolName, input) === "ask" : false
 
+    // Workspace confinement (ADR-0028 lite): resolve once and reuse across the
+    // mode branches. A "deny" (write into / symlink-escape toward a credential
+    // path) is a hard security invariant enforced in EVERY mode, including
+    // bypassPermissions — mirroring how deny rules survive bypass. An "ask"
+    // (mutator escaping the workspace roots) suppresses the auto-approvals below
+    // so the call round-trips through the user instead of being auto-allowed.
+    let confVerdict = null
+    try {
+      confVerdict = classifyToolCallConfinement(
+        sendOptions?.confinement,
+        toolName,
+        input,
+        sendOptions?.cwd
+      )
+    } catch {
+      confVerdict = null
+    }
+    if (confVerdict === "deny") {
+      throw new Error(
+        `denied: "${toolName}" resolves into a protected credential path (workspace confinement)`
+      )
+    }
+
     // Plan mode: enforce read-only here on the AI-SDK path (the Anthropic path
     // gets this from the SDK). Only read-only built-in tools — plus the
     // `exit_plan_mode` signal tool the model uses to submit its final plan, the
@@ -266,7 +290,9 @@ export function createToolPermissionGate({
           } catch {
             verdict = undefined
           }
-          if (verdict === "allow") return input
+          // A confinement "ask" cannot be honoured in dontAsk (no prompt), so an
+          // out-of-workspace mutator stays denied even with an allow rule.
+          if (verdict === "allow" && confVerdict !== "ask") return input
         }
       }
       throw new Error(
@@ -292,7 +318,11 @@ export function createToolPermissionGate({
       const parts = String(toolName).split("__")
       const server = parts.length >= 3 ? parts[1] : null
       const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
-      if (server === SERVER_NAME && ACCEPT_EDITS_TOOL_NAMES.has(bare)) return input
+      // A confinement "ask" (edit escaping the workspace roots) overrides the
+      // acceptEdits auto-approval and falls through to the prompt.
+      if (server === SERVER_NAME && ACCEPT_EDITS_TOOL_NAMES.has(bare) && confVerdict !== "ask") {
+        return input
+      }
     }
 
     if (!doomed) {
@@ -307,7 +337,9 @@ export function createToolPermissionGate({
       } catch {
         verdict = undefined // resolver error → fall through to the prompt
       }
-      if (verdict === "allow") return input
+      // A confinement "ask" (out-of-workspace mutator) overrides a ruleset
+      // allow and falls through to the approval round-trip below.
+      if (verdict === "allow" && confVerdict !== "ask") return input
       if (verdict === "deny") throw new Error(`denied by permission ruleset: ${toolName}`)
     }
 

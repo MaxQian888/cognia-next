@@ -9,6 +9,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { canonicalKey } from "./read-tracker.mjs"
 import { decodeText, encodeText, withFileLock } from "./text-io.mjs"
 import { replaceWithFallback } from "./fuzzy-replace.mjs"
@@ -117,6 +118,7 @@ export function createEditTool({ cwd, readTracker, lspResolver }) {
   async function execEdit(args) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
+      assertNotSecretEscape(cwd, abs)
       return await withFileLock(canonicalKey(abs), async () => {
         const traits = await loadForEdit(abs, readTracker)
         // fuzzy-replace operates on LF-normalized text; the model's strings
@@ -149,6 +151,7 @@ export function createMultiEditTool({ cwd, readTracker, lspResolver }) {
   async function execMultiEdit(args) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
+      assertNotSecretEscape(cwd, abs)
       return await withFileLock(canonicalKey(abs), async () => {
         const traits = await loadForEdit(abs, readTracker)
         let content = traits.content

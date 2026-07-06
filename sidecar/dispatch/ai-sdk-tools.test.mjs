@@ -3,7 +3,14 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { buildAiSdkTools, createToolPermissionGate, __testing__ } from "./ai-sdk-tools.mjs"
+
+function mkConfRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-gate-conf-"))
+}
 
 test("buildAiSdkTools registers built-in tools for enabled categories only", () => {
   const tools = buildAiSdkTools({
@@ -218,6 +225,81 @@ test("createToolPermissionGate: acceptEdits auto-approves file-edit tools, still
   // Exec/process tools are NOT edit-class → still gated (here denied by the stub).
   await assert.rejects(gate("mcp__cognia-tools__bash", { command: "ls" }))
   assert.ok(emitted >= 1, "a non-edit tool must still round-trip through approval")
+})
+
+test("createToolPermissionGate: confinement escalates an out-of-root write past acceptEdits", async () => {
+  const root = mkConfRoot()
+  const outside = path.join(mkConfRoot(), "escape.txt")
+  let emitted = 0
+  const pending = new Map()
+  const gate = createToolPermissionGate({
+    emit: (ev) => {
+      emitted++
+      queueMicrotask(() => pending.get(ev.requestId)?.resolve({ behavior: "deny", message: "no" }))
+    },
+    sessionId: "s1",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "acceptEdits",
+      cwd: root,
+      confinement: { enabled: true, roots: [root] },
+    },
+  })
+  // In-root write → acceptEdits auto-approves, no prompt.
+  await gate("mcp__cognia-tools__write", { file_path: path.join(root, "a.txt"), content: "x" })
+  assert.equal(emitted, 0, "in-root edit must not prompt in acceptEdits")
+  // Out-of-root write → confinement "ask" overrides acceptEdits → round-trips.
+  await assert.rejects(gate("mcp__cognia-tools__write", { file_path: outside, content: "x" }))
+  assert.ok(emitted >= 1, "an out-of-root write must escalate to approval")
+})
+
+test("createToolPermissionGate: confinement overrides a ruleset allow for out-of-root writes", async () => {
+  const root = mkConfRoot()
+  const outside = path.join(mkConfRoot(), "escape.txt")
+  let emitted = 0
+  const pending = new Map()
+  const gate = createToolPermissionGate({
+    emit: (ev) => {
+      emitted++
+      queueMicrotask(() => pending.get(ev.requestId)?.resolve({ behavior: "deny", message: "no" }))
+    },
+    sessionId: "s1",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "default",
+      cwd: root,
+      permissionRuleset: { "mcp__cognia-tools__write": "allow" },
+      confinement: { enabled: true, roots: [root] },
+    },
+  })
+  // In-root: allow rule stands → runs silently.
+  await gate("mcp__cognia-tools__write", { file_path: path.join(root, "a.txt"), content: "x" })
+  assert.equal(emitted, 0)
+  // Out-of-root: confinement "ask" beats the allow rule → round-trips.
+  await assert.rejects(gate("mcp__cognia-tools__write", { file_path: outside, content: "x" }))
+  assert.ok(emitted >= 1)
+})
+
+test("createToolPermissionGate: confinement hard-denies a credential-path write in every mode", async () => {
+  const root = mkConfRoot()
+  const secret = path.join(os.homedir(), ".ssh", "authorized_keys")
+  for (const permissionMode of ["default", "acceptEdits", "bypassPermissions", "dontAsk"]) {
+    const gate = createToolPermissionGate({
+      emit: () => {},
+      sessionId: "s1",
+      pendingApprovals: new Map(),
+      sendOptions: {
+        permissionMode,
+        cwd: root,
+        confinement: { enabled: true, roots: [root] },
+      },
+    })
+    await assert.rejects(
+      gate("mcp__cognia-tools__write", { file_path: secret, content: "x" }),
+      /protected credential path/,
+      `credential write must be denied in ${permissionMode}`
+    )
+  }
 })
 
 test("createToolPermissionGate: dontAsk allows read-only builtins, denies the rest without prompting", async () => {

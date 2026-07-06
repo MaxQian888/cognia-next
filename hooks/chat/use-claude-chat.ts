@@ -17,6 +17,8 @@ import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { runAutoModeForTool } from "@/lib/claude/permissions/auto-mode-runner"
+import { deriveAllowRuleFromApproval } from "@/lib/claude/permissions/approval-rule"
+import { setToolRule } from "@/lib/claude/permissions/ruleset-edit"
 import { getPluginCommandRulesets } from "@/lib/plugin/registries/command-safety-registry"
 import {
   runTitleTask,
@@ -1326,9 +1328,20 @@ export function useClaudeChat() {
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
-      // Persist always-allow choice.
+      // Persist the always-allow choice. Prefer a TARGET-SCOPED rule
+      // (`Bash(git *)`, `Read(/path/x)`) so the grant is precise and future
+      // matching calls auto-resolve via the sidecar ruleset — falling back to a
+      // coarse tool-NAME grant only when no useful target can be extracted.
       if (decision === "allow_always") {
-        await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
+        const rule = deriveAllowRuleFromApproval(approval.toolName, approval.input)
+        if (rule) {
+          const settingsState = useSettingsStore.getState()
+          const ap = settingsState.settings?.agentPermissions ?? {}
+          const nextRules = setToolRule(ap.toolRules, rule.tool, rule.pattern, "allow")
+          await settingsState.save({ agentPermissions: { ...ap, toolRules: nextRules } })
+        } else {
+          await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
+        }
       }
       // ADR-0020 W3 — remember the operator's Allow for any computer-use
       // plugin tool so subsequent turns inside this session skip the chat

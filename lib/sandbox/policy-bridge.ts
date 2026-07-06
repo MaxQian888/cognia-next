@@ -175,6 +175,52 @@ export function clampPolicyRequest<T extends ClampableRequest>(
   }
 }
 
+/**
+ * Compose a parent sandbox ceiling with a child override so the child may only
+ * ever **further-restrict** — the sandbox analogue of
+ * `deriveExternalSessionPermission`. Used when a teammate / subagent dispatch
+ * inherits its parent's sandbox ceiling: writable roots narrow to the parent's,
+ * network clamps down, and resource caps take the tighter of the two.
+ *
+ * - No parent → the child stands (no ceiling to clamp against).
+ * - No child  → the parent ceiling passes through unchanged.
+ */
+export function clampSandboxPolicy(
+  parent: SandboxResourcePolicy | null | undefined,
+  child: SandboxResourcePolicy | null | undefined
+): SandboxResourcePolicy | undefined {
+  if (!parent && !child) return undefined
+  if (!parent) return child ?? undefined
+  if (!child) return parent
+
+  // Network: treat the child as a request clamped down to the parent ceiling.
+  const net = clampNetwork(child.network ?? "on", child.networkAllowlist ?? [], parent)
+
+  // Writable roots: narrow the child's roots to those under the parent's. An
+  // unset child inherits the parent's ceiling; an unset parent imposes none.
+  const parentRoots = parent.writableRoots ?? []
+  const writableRoots =
+    child.writableRoots !== undefined
+      ? parentRoots.length > 0
+        ? narrowToRoots(child.writableRoots, parentRoots)
+        : child.writableRoots
+      : parent.writableRoots
+
+  return {
+    maxCpuSeconds: clampCap(child.maxCpuSeconds ?? 0, parent.maxCpuSeconds),
+    maxMemoryMb: clampCap(child.maxMemoryMb ?? 0, parent.maxMemoryMb),
+    network: net.network,
+    networkAllowlist:
+      net.network === "allowlist"
+        ? net.networkHosts
+        : (child.networkAllowlist ?? parent.networkAllowlist),
+    ...(writableRoots !== undefined ? { writableRoots } : {}),
+    ...((child.readableRoots ?? parent.readableRoots)
+      ? { readableRoots: child.readableRoots ?? parent.readableRoots }
+      : {}),
+  }
+}
+
 /** Test-only — wipe the per-session registry. */
 export function __resetSandboxPolicyBridgeForTesting(): void {
   activePolicy.clear()

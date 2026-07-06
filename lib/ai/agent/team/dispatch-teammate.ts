@@ -109,6 +109,7 @@ function teamPermissionCeiling(
       ? { disallowedTools: config.disallowedTools }
       : {}),
     ...(config.defaultPermissionMode ? { permissionMode: config.defaultPermissionMode } : {}),
+    ...(config.sandboxPolicy ? { sandboxPolicy: config.sandboxPolicy } : {}),
   }
   return Object.keys(spec).length > 0 ? spec : undefined
 }

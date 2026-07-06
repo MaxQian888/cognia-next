@@ -435,6 +435,17 @@ export interface SendOptions {
   suppressApprovalForTools?: string[]
 
   /**
+   * Session-global "always allow" tool names (from `AppSettings.alwaysAllowTools`).
+   * Honored by BOTH sidecar `canUseTool` gates (anthropic + ai-sdk) so a tool the
+   * user marked "Allow always" runs without a `permission_request` round-trip —
+   * previously only the ai-sdk path read this and the anthropic path relied on the
+   * renderer's `allowListRef` to auto-answer the round-trip. A confinement `deny`
+   * (credential path) still overrides this; a confinement `ask` does not (an
+   * explicit name-level grant is deliberate). Populated by `resolveSendOptions`.
+   */
+  alwaysAllowTools?: string[]
+
+  /**
    * OpenCode-style glob permission ruleset consulted by the sidecar
    * `canUseTool` before emitting a `permission_request`. A resolved
    * `tool → glob → allow|ask|deny` map (see
@@ -445,6 +456,20 @@ export interface SendOptions {
    * The fine-grained layer that augments the coarse allow/deny tool union.
    */
   permissionRuleset?: import("@/lib/claude/permissions/ruleset").Ruleset
+
+  /**
+   * Workspace confinement policy (ADR-0028 "lite") consulted by the sidecar
+   * `canUseTool` gates. When set, the built-in file/bash tools are confined to
+   * `roots`: a mutator call whose target escapes every root escalates to the
+   * approval round-trip ("ask"), and any op resolving into a protected
+   * credential path (`.ssh`/`.aws`/`.git-credentials`/…) — directly or via a
+   * symlink escape — is hard-denied. Read-only tools outside the roots are not
+   * confined (only secret paths deny). Populated by `resolveSendOptions` from
+   * the active workspace roots (`cwd` + `additionalDirectories`); omitted when
+   * the heavy OS sandbox is active for the session (that path enforces at the
+   * OS level instead, so the two never double-confine).
+   */
+  confinement?: { enabled: boolean; roots: string[] }
 
   /**
    * Extra HTTP headers the sidecar should merge into the Anthropic
@@ -1297,6 +1322,13 @@ export interface ChatSession {
    * appSettings.sandboxDefaultEnabled. Undefined falls through.
    */
   sandboxEnabled?: boolean
+  /**
+   * Per-session override of the always-on workspace confinement layer
+   * (ADR-0028 "lite"). Precedence: session → character →
+   * `AppSettings.workspaceConfinementEnabled` (default true). Set false to opt
+   * this session out of confinement.
+   */
+  workspaceConfinementEnabled?: boolean
   /**
    * ADR-0020 remote-target — per-session override of the computer-use GUI
    * execution target. `"local"` forces the host even if the character defaults
@@ -2843,6 +2875,17 @@ export interface AppSettings {
    */
   sandboxDefaultEnabled?: boolean
   /**
+   * App-wide default for the always-on **workspace confinement** layer
+   * (ADR-0028 "lite"). When true (the default), the sidecar built-in file/bash
+   * tools are confined to the active workspace roots: out-of-root mutator calls
+   * escalate to approval and credential paths hard-deny. Cross-platform (incl.
+   * native Windows) and complementary to `sandboxDefaultEnabled` — the heavy OS
+   * sandbox, when active, takes over and this layer steps aside. Beaten by
+   * `Character.workspaceConfinementEnabled` / `ChatSession.workspaceConfinementEnabled`.
+   * Read by `resolveSendOptions`.
+   */
+  workspaceConfinementEnabled?: boolean
+  /**
    * Confine code executed from the Canvas panel (Python especially) through
    * the OS sandbox. Independent of `sandboxDefaultEnabled` (which gates chat
    * Bash/Edit/Write): defaults to **true** so model-authored Canvas code is
@@ -3491,6 +3534,12 @@ export interface Character {
    * Undefined falls through to the app default.
    */
   sandboxEnabled?: boolean
+  /**
+   * Per-character override of the always-on workspace confinement layer
+   * (ADR-0028 "lite"). Beats `AppSettings.workspaceConfinementEnabled` but
+   * loses to `ChatSession.workspaceConfinementEnabled`.
+   */
+  workspaceConfinementEnabled?: boolean
   /**
    * Sandbox tier (ADR-0028 T4). `"os"` (default) routes Bash / Edit / Write
    * through the per-platform OS sandbox (sandbox-exec / bwrap / windows-codex).

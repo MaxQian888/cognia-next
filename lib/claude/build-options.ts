@@ -1675,6 +1675,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.permissionRuleset = deterministicRulesetSort(mergedRuleset)
   }
 
+  // Session-global "Allow always" list — honored directly in the sidecar gates
+  // so an always-allowed tool skips the redundant `permission_request`
+  // round-trip (previously only the renderer's `allowListRef` short-circuited).
+  // Sorted for prompt-cache stability.
+  if (appSettings?.alwaysAllowTools && appSettings.alwaysAllowTools.length > 0) {
+    opts.alwaysAllowTools = [...appSettings.alwaysAllowTools].sort()
+  }
+
   // --- Tool whitelist/blacklist --------------------------------------------
   // Member override REPLACES the character's allowedTools (does not union).
   // Skills still contribute their tools so an override doesn't accidentally
@@ -2400,6 +2408,33 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     setActiveSandboxTier(session?.id, "os")
     setActiveSandboxPolicy(session?.id, null)
     setActiveSandboxConfine(session?.id, null)
+  }
+
+  // --- Workspace confinement (ADR-0028 "lite") ------------------------------
+  // The always-on, cross-platform middle layer: when the heavy OS sandbox is
+  // NOT active, confine the sidecar built-in file/bash tools to the active
+  // workspace roots. Out-of-root mutator calls escalate to approval; credential
+  // paths hard-deny (enforced in the sidecar canUseTool gates via
+  // `sendOptions.confinement`). Mutually exclusive with `sandboxEnabled` — that
+  // path already swaps in the `sandbox_*` tools and enforces at the OS level, so
+  // stacking both would double-confine. Rootless sessions (no active project)
+  // carry no policy and behave exactly as before.
+  const confinementEnabled =
+    !sandboxEnabled &&
+    Boolean(ctx.activeProject) &&
+    (session?.workspaceConfinementEnabled ??
+      character?.workspaceConfinementEnabled ??
+      appSettings?.workspaceConfinementEnabled ??
+      true)
+  if (confinementEnabled) {
+    const roots = new Set<string>()
+    if (opts.cwd) roots.add(opts.cwd)
+    for (const dir of opts.additionalDirectories ?? []) {
+      if (dir) roots.add(dir)
+    }
+    if (roots.size > 0) {
+      opts.confinement = { enabled: true, roots: [...roots] }
+    }
   }
 
   // --- IM-session core-tool safeguard ---------------------------------------

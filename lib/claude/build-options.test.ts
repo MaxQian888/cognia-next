@@ -3036,6 +3036,71 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
   })
 })
 
+describe("resolveSendOptions — ADR-0028 lite workspace confinement", () => {
+  it("defaults ON: stamps confinement.roots from cwd + additionalDirectories", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }, { path: "/ws/extra" }]),
+    })
+    expect(opts.confinement?.enabled).toBe(true)
+    expect(opts.confinement?.roots?.sort()).toEqual(["/ws", "/ws/extra"].sort())
+  })
+
+  it("does NOT confine when the heavy OS sandbox is enabled (mutually exclusive)", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", sandboxEnabled: true }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("session.workspaceConfinementEnabled = false opts the session out", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workspaceConfinementEnabled: false }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("character override beats the app default", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", workspaceConfinementEnabled: false }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+      appSettings: { id: "singleton", workspaceConfinementEnabled: true } as AppSettings,
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("carries no policy for a rootless session (no active project)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — alwaysAllowTools passthrough", () => {
+  it("copies (sorted) appSettings.alwaysAllowTools onto SendOptions", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: {
+        id: "singleton",
+        alwaysAllowTools: ["Write", "Bash", "Read"],
+      } as AppSettings,
+    })
+    expect(opts.alwaysAllowTools).toEqual(["Bash", "Read", "Write"])
+  })
+
+  it("omits the field when the list is empty", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton", alwaysAllowTools: [] as string[] } as AppSettings,
+    })
+    expect(opts.alwaysAllowTools).toBeUndefined()
+  })
+})
+
 describe("resolveSendOptions — ADR-0028 per-`query()` env injection", () => {
   it("merges account env + proxy env into opts.env when accountId resolves", async () => {
     mGetCharacter.mockResolvedValue(makeChar({ id: "c1", providerId: "anthropic" }))

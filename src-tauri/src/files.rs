@@ -118,15 +118,37 @@ fn is_path_within_roots(path: &str, roots: &[String]) -> bool {
     starts_with_any_canonical_root(&canonical, &canonical_roots)
 }
 
-/// Shadow-mode gate: log (but do not block) a raw fs op that escapes the
-/// registered roots. The `op`/`path` marker lets the diagnostics log surface
-/// real out-of-root accesses ahead of a future enforce-mode flip.
-fn shadow_check_path(path: &str, op: &str) {
-    if !is_path_allowed(path) {
-        log::warn!(
-            "fs_shadow_denial op={op} path={path} — outside registered roots (allowed in shadow mode)"
-        );
+/// Origin of a raw fs command. `Local` = the renderer (a trusted user gesture —
+/// typically a file dialog — stands in for the fs scope). `Remote` = a paired
+/// device over the companion API, which has no such gesture and is the real
+/// exfil / backdoor-write surface.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum FsOrigin {
+    Local,
+    Remote,
+}
+
+/// Containment gate for the raw fs commands. Remote WRITES that escape the
+/// registered roots are ENFORCED (hard `Err`) — closing the documented hole
+/// where a paired device could read/write anywhere the desktop can. Local calls
+/// (backed by a user gesture) and all READS stay in shadow mode: logged, never
+/// blocked, so existing local flows are unaffected. An empty registry allows
+/// everything (never blocks before startup seeding runs).
+fn enforce_check_path(path: &str, op: &str, origin: FsOrigin) -> Result<(), String> {
+    if is_path_allowed(path) {
+        return Ok(());
     }
+    let is_write = matches!(op, "write_text_file" | "ensure_dir");
+    if origin == FsOrigin::Remote && is_write {
+        log::warn!("fs_enforce_denial op={op} path={path} origin=remote — outside registered roots (blocked)");
+        return Err(format!(
+            "{op}: path is outside the workspace roots this device may write to: {path}"
+        ));
+    }
+    log::warn!(
+        "fs_shadow_denial op={op} path={path} origin={origin:?} — outside registered roots (allowed in shadow mode)"
+    );
+    Ok(())
 }
 
 /// Register a dialog-chosen path so a subsequent confined/raw write to it is
@@ -162,13 +184,13 @@ pub fn fs_set_allowed_roots(paths: Vec<String>) {
 /// actual sync logic so tests and the companion RPC path can call it directly.
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || read_text_file_impl(path))
+    tokio::task::spawn_blocking(move || read_text_file_impl(path, FsOrigin::Local))
         .await
         .map_err(|e| format!("read_text_file task failed: {e}"))?
 }
 
-pub(crate) fn read_text_file_impl(path: String) -> Result<String, String> {
-    shadow_check_path(&path, "read_text_file");
+pub(crate) fn read_text_file_impl(path: String, origin: FsOrigin) -> Result<String, String> {
+    enforce_check_path(&path, "read_text_file", origin)?;
     std::fs::read_to_string(&path).map_err(|e| format!("read {}: {}", path, e))
 }
 
@@ -177,13 +199,17 @@ pub(crate) fn read_text_file_impl(path: String) -> Result<String, String> {
 /// Runs off the UI thread (see [`read_text_file`]).
 #[tauri::command]
 pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || write_text_file_impl(path, content))
+    tokio::task::spawn_blocking(move || write_text_file_impl(path, content, FsOrigin::Local))
         .await
         .map_err(|e| format!("write_text_file task failed: {e}"))?
 }
 
-pub(crate) fn write_text_file_impl(path: String, content: String) -> Result<(), String> {
-    shadow_check_path(&path, "write_text_file");
+pub(crate) fn write_text_file_impl(
+    path: String,
+    content: String,
+    origin: FsOrigin,
+) -> Result<(), String> {
+    enforce_check_path(&path, "write_text_file", origin)?;
     let p = PathBuf::from(&path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() {
@@ -199,13 +225,13 @@ pub(crate) fn write_text_file_impl(path: String, content: String) -> Result<(), 
 /// UI thread (see [`read_text_file`]).
 #[tauri::command]
 pub async fn ensure_dir(path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || ensure_dir_impl(path))
+    tokio::task::spawn_blocking(move || ensure_dir_impl(path, FsOrigin::Local))
         .await
         .map_err(|e| format!("ensure_dir task failed: {e}"))?
 }
 
-pub(crate) fn ensure_dir_impl(path: String) -> Result<(), String> {
-    shadow_check_path(&path, "ensure_dir");
+pub(crate) fn ensure_dir_impl(path: String, origin: FsOrigin) -> Result<(), String> {
+    enforce_check_path(&path, "ensure_dir", origin)?;
     std::fs::create_dir_all(&path).map_err(|e| format!("mkdir {}: {}", path, e))
 }
 
@@ -1164,8 +1190,8 @@ mod tests {
     fn write_and_read_roundtrip() {
         let tmp = std::env::temp_dir().join(format!("cognia-test-{}.txt", std::process::id()));
         let path = tmp.to_string_lossy().to_string();
-        write_text_file_impl(path.clone(), "hello".into()).unwrap();
-        assert_eq!(read_text_file_impl(path.clone()).unwrap(), "hello");
+        write_text_file_impl(path.clone(), "hello".into(), FsOrigin::Local).unwrap();
+        assert_eq!(read_text_file_impl(path.clone(), FsOrigin::Local).unwrap(), "hello");
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -1189,7 +1215,7 @@ mod tests {
             .join("b")
             .join("file.txt");
         let path = tmp.to_string_lossy().to_string();
-        write_text_file_impl(path.clone(), "x".into()).unwrap();
+        write_text_file_impl(path.clone(), "x".into(), FsOrigin::Local).unwrap();
         assert!(std::path::Path::new(&path).is_file());
         let _ = std::fs::remove_file(&tmp);
     }
@@ -1567,6 +1593,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn remote_writes_enforce_root_containment_local_stays_shadow() {
+        // Seed a root so the registry is non-empty (an empty registry is
+        // shadow-permissive by design and would not exercise enforcement).
+        let root = make_sandbox("remote-enforce");
+        add_allowed_root(root.to_string_lossy().to_string());
+
+        // Remote write INSIDE the root → allowed.
+        let inside = root.join("ok.txt").to_string_lossy().to_string();
+        write_text_file_impl(inside.clone(), "x".into(), FsOrigin::Remote).unwrap();
+        assert!(std::path::Path::new(&inside).is_file());
+
+        // Remote write OUTSIDE every root → hard error, and the file is NOT created.
+        let out_dir = std::env::temp_dir().join(format!("cognia-remote-out-{}", std::process::id()));
+        let outside = out_dir.join("escape.txt");
+        let outside_s = outside.to_string_lossy().to_string();
+        let err = write_text_file_impl(outside_s.clone(), "x".into(), FsOrigin::Remote).unwrap_err();
+        assert!(err.contains("outside the workspace roots"), "got: {err}");
+        assert!(!outside.exists(), "a blocked remote write must not create the file");
+
+        // Remote ensure_dir outside every root → also blocked.
+        assert!(ensure_dir_impl(out_dir.to_string_lossy().to_string(), FsOrigin::Remote).is_err());
+
+        // A LOCAL write to the same outside path stays in shadow mode (allowed) —
+        // the enforcement flip is remote-only so existing renderer flows survive.
+        write_text_file_impl(outside_s.clone(), "x".into(), FsOrigin::Local).unwrap();
+        assert!(outside.exists());
+
+        // A remote READ is never containment-blocked (only writes are enforced);
+        // it succeeds now that the local write created the file.
+        assert_eq!(read_text_file_impl(outside_s.clone(), FsOrigin::Remote).unwrap(), "x");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&out_dir);
     }
 
     #[test]

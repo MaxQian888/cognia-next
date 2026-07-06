@@ -10,6 +10,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { canonicalKey } from "./read-tracker.mjs"
 import { withFileLock } from "./text-io.mjs"
 import { resolveToolPath } from "./read.mjs"
@@ -60,6 +61,7 @@ export function createNotebookEditTool({ cwd, readTracker } = {}) {
   async function execNotebookEdit(args) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
+      assertNotSecretEscape(cwd, abs)
       return await withFileLock(canonicalKey(abs), async () => {
         let st
         try {
