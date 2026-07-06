@@ -20,7 +20,6 @@ use tauri::State;
 
 use super::super::PluginRuntimeState;
 use super::host::{ActivateOutcome, WasmManifestSlice, WasmPluginHost, WasmPluginSnapshot};
-use super::wit::since_v0_1;
 use super::WasmPluginState;
 
 #[derive(Debug, Serialize)]
@@ -76,39 +75,36 @@ pub async fn plugin_wasm_activate(
     plugin_id: String,
     config_json: String,
 ) -> Result<ActivateOutcome, String> {
-    // Snapshot what we need out of the loaded-plugin map without holding
-    // its lock across the `.await` below — Component is Clone-able and
-    // the manifest fields we need are cheap to copy.
-    let (component, manifest, plugin_api_version, plugin_dir) = {
+    // Snapshot what we need out of the loaded-plugin maps without holding
+    // their locks across the `.await` below. The typed pre-instantiation
+    // handle (built once at load) carries the linker + import resolution, so
+    // per call we only build a fresh permission-scoped Store and instantiate.
+    let (manifest, plugin_api_version, plugin_pre) = {
         let map = state.loaded.read();
         let entry = map
             .get(&plugin_id)
             .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
+        let plugin_pre = state
+            .pres
+            .read()
+            .get(&plugin_id)
+            .cloned()
+            .ok_or_else(|| format!("plugin not instantiable (no pre): {plugin_id}"))?;
         (
-            entry.component.clone(),
             entry.manifest.clone(),
             entry.plugin_api_version.clone(),
-            entry.plugin_path.clone(),
+            plugin_pre,
         )
     };
 
     let perms = granted_permissions(&runtime, &plugin_id);
     let shell_allow = granted_shell_commands(&runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
-    let mut store = WasmPluginHost::build_activation_store(
-        &super::host::LoadedPlugin {
-            manifest: manifest.clone(),
-            plugin_path: plugin_dir,
-            component: component.clone(),
-            plugin_api_version: plugin_api_version.clone(),
-        },
-        &data_dir,
-        &perms,
-        &shell_allow,
-    )?;
+    let mut store =
+        WasmPluginHost::build_activation_store(&manifest, &data_dir, &perms, &shell_allow)?;
 
-    let linker = WasmPluginHost::version_linker(&plugin_api_version)?;
-    let bindings = since_v0_1::CogniaPlugin::instantiate_async(&mut store, &component, &linker)
+    let bindings = plugin_pre
+        .instantiate_async(&mut store)
         .await
         .map_err(|e| format!("instantiate component: {e}"))?;
 
@@ -151,36 +147,28 @@ pub async fn plugin_wasm_call(
         return Err("export_name is empty".into());
     }
 
-    let (component, manifest, plugin_api_version, plugin_dir) = {
+    let (manifest, plugin_pre) = {
         let map = state.loaded.read();
         let entry = map
             .get(&plugin_id)
             .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
-        (
-            entry.component.clone(),
-            entry.manifest.clone(),
-            entry.plugin_api_version.clone(),
-            entry.plugin_path.clone(),
-        )
+        let plugin_pre = state
+            .pres
+            .read()
+            .get(&plugin_id)
+            .cloned()
+            .ok_or_else(|| format!("plugin not instantiable (no pre): {plugin_id}"))?;
+        (entry.manifest.clone(), plugin_pre)
     };
 
     let perms = granted_permissions(&runtime, &plugin_id);
     let shell_allow = granted_shell_commands(&runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
-    let mut store = WasmPluginHost::build_activation_store(
-        &super::host::LoadedPlugin {
-            manifest,
-            plugin_path: plugin_dir,
-            component: component.clone(),
-            plugin_api_version: plugin_api_version.clone(),
-        },
-        &data_dir,
-        &perms,
-        &shell_allow,
-    )?;
+    let mut store =
+        WasmPluginHost::build_activation_store(&manifest, &data_dir, &perms, &shell_allow)?;
 
-    let linker = WasmPluginHost::version_linker(&plugin_api_version)?;
-    let bindings = since_v0_1::CogniaPlugin::instantiate_async(&mut store, &component, &linker)
+    let bindings = plugin_pre
+        .instantiate_async(&mut store)
         .await
         .map_err(|e| format!("instantiate component: {e}"))?;
 

@@ -9,7 +9,57 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { makeWrappedEmit, restartReason, routeRestore } from "./claude-host.mjs"
+import {
+  makeWrappedEmit,
+  restartReason,
+  routeRestore,
+  runControlWithTimeout,
+} from "./claude-host.mjs"
+
+test("runControlWithTimeout resolves a fast control method", async () => {
+  const out = await runControlWithTimeout(async (x) => x + 1, null, [41], 1000)
+  assert.deepEqual(out, { ok: true, result: 42 })
+})
+
+test("runControlWithTimeout maps a thrown error to ok:false", async () => {
+  const out = await runControlWithTimeout(
+    async () => {
+      throw new Error("boom")
+    },
+    null,
+    [],
+    1000
+  )
+  assert.deepEqual(out, { ok: false, error: "boom" })
+})
+
+test("runControlWithTimeout returns a timeout error when the method never settles", async () => {
+  // A control method that never resolves must not hang the host — the backstop
+  // resolves with a timeout error within the deadline. We use a releasable
+  // promise (rather than a forever-pending one) so the inner invocation can
+  // settle AFTER the assertion, keeping node:test's event loop clean.
+  let release
+  const slow = new Promise((resolve) => {
+    release = resolve
+  })
+  const started = Date.now()
+  const out = await runControlWithTimeout(() => slow, null, [], 30)
+  assert.deepEqual(out, { ok: false, error: "control timed out" })
+  assert.ok(Date.now() - started < 5000, "must resolve via the deadline, not hang")
+  release("late")
+  await slow
+})
+
+test("runControlWithTimeout binds thisArg for the control method", async () => {
+  const q = {
+    model: "sonnet",
+    async getModel() {
+      return this.model
+    },
+  }
+  const out = await runControlWithTimeout(q.getModel, q, [], 1000)
+  assert.deepEqual(out, { ok: true, result: "sonnet" })
+})
 
 function setup(sessionId, session) {
   const forwarded = []

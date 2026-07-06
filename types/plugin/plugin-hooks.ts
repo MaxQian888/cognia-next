@@ -374,7 +374,17 @@ export interface AIHookEvents {
     sessionId: string
   ) => PostToolUseResult | Promise<PostToolUseResult>
 
-  /** Called before context compression */
+  /**
+   * Called before context compression.
+   *
+   * DORMANT — not yet wired to a live compaction trigger. The Anthropic path
+   * self-manages compaction inside the Agent SDK and the generic (AI-SDK) path
+   * summarizes in the sidecar, which cannot call back into `lib/`. Registering
+   * this hook today is a silent no-op. Kept for contract parity (mirrored in the
+   * Python `PluginHook.ON_PRE_COMPACT` enum, guarded by `runtime-proof-audit`).
+   * See `hooks-system.ts` `dispatchPreCompact`.
+   * @deprecated Dormant: no host call site yet — registering this is a silent no-op.
+   */
   onPreCompact?: (context: PreCompactContext) => PreCompactResult | Promise<PreCompactResult>
 
   /** Called after receiving AI response */
@@ -683,6 +693,7 @@ export interface PluginHooksAll extends PluginHooks {
   onUserPromptSubmit?: AIHookEvents["onUserPromptSubmit"]
   onPreToolUse?: AIHookEvents["onPreToolUse"]
   onPostToolUse?: AIHookEvents["onPostToolUse"]
+  /** @deprecated Dormant: not yet wired to a compaction trigger — registering this is a silent no-op. See `AIHookEvents.onPreCompact`. */
   onPreCompact?: AIHookEvents["onPreCompact"]
   onPostChatReceive?: AIHookEvents["onPostChatReceive"]
   onBuildOptions?: AIHookEvents["onBuildOptions"]

@@ -766,7 +766,6 @@ pub fn run() {
             plugin_api::context_menu::plugin_context_menu_unregister,
             plugin_api::notification::plugin_show_notification,
             plugin_api::process_ops::plugin_process_kill,
-            plugin_api::node_permission::plugin_node_permission_argv,
             plugin_api::signature::plugin_generate_keypair,
             plugin_api::signature::plugin_create_signature,
             plugin_api::signature::plugin_verify_signature,

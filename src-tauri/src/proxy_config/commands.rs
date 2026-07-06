@@ -30,8 +30,9 @@ pub struct ProxyTestResult {
     pub proxy_url: Option<String>,
 }
 
-/// Replace the in-process proxy config. Called from the frontend after
-/// every settings save and once at app boot.
+/// Replace the in-process proxy config. The renderer is the sole writer: it
+/// calls this after every settings save and once on startup (after loading the
+/// persisted config). The process default stays `Off` until that first push.
 #[tauri::command]
 pub async fn proxy_set(cfg: ProxyConfig) -> Result<(), String> {
     set_current(cfg);

@@ -221,8 +221,11 @@ pub fn current() -> ProxyConfig {
     slot().read().expect("proxy config lock poisoned").clone()
 }
 
-/// Replace the live config. Called from the `proxy_set` Tauri command after
-/// every settings save on the frontend, plus once at app boot.
+/// Replace the live config. The renderer is the only writer: it calls the
+/// `proxy_set` Tauri command after every settings save, and once on startup
+/// after it loads the persisted proxy config. There is no Rust-side boot
+/// initialization, so the process default stays [`ProxyMode::Off`] until that
+/// first renderer push lands.
 pub fn set_current(cfg: ProxyConfig) {
     *slot().write().expect("proxy config lock poisoned") = cfg;
 }

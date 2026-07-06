@@ -61,6 +61,56 @@ describe("resolveContextContributions", () => {
     })
     expect(await resolveContextContributions({ prompt: "hi" })).toBe("kept")
   })
+
+  it("preserves registration order even when providers resolve out of order", async () => {
+    // Provider "a" resolves only after "c" has already settled — output must
+    // still be ordered by registration, not by resolution order.
+    let resolveA: ((v: string) => void) | undefined
+    const aPromise = new Promise<string>((r) => {
+      resolveA = r
+    })
+    registerContextProvider("a", { id: "a", provide: () => aPromise })
+    registerContextProvider("c", { id: "c", provide: async () => "gamma" })
+    const resultPromise = resolveContextContributions({ prompt: "hi" })
+    resolveA!("alpha")
+    expect(await resultPromise).toBe("alpha\n\ngamma")
+  })
+
+  it("runs providers concurrently rather than serially", async () => {
+    // A serial loop would never see two providers active at once (max 1);
+    // Promise.all kicks both off before either yields (max 2).
+    let active = 0
+    let maxActive = 0
+    const make = (id: string) => async () => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await Promise.resolve()
+      active--
+      return id
+    }
+    registerContextProvider("p1", { id: "p1", provide: make("p1") })
+    registerContextProvider("p2", { id: "p2", provide: make("p2") })
+    expect(await resolveContextContributions({ prompt: "hi" })).toBe("p1\n\np2")
+    expect(maxActive).toBeGreaterThan(1)
+  })
+
+  it("isolates a rejecting and a synchronously-throwing provider under parallelism", async () => {
+    registerContextProvider("good1", { id: "good1", provide: () => "one" })
+    registerContextProvider("asyncBad", {
+      id: "asyncBad",
+      provide: async () => {
+        throw new Error("async boom")
+      },
+    })
+    registerContextProvider("syncBad", {
+      id: "syncBad",
+      provide: () => {
+        throw new Error("sync boom")
+      },
+    })
+    registerContextProvider("good2", { id: "good2", provide: async () => "two" })
+    expect(await resolveContextContributions({ prompt: "hi" })).toBe("one\n\ntwo")
+  })
 })
 
 describe("readSharedMemory", () => {

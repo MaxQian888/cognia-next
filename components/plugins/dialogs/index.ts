@@ -26,6 +26,10 @@ export {
 export { PluginUpdateDialog, __resetPluginUpdateClientForTests } from "./plugin-update-dialog"
 export { PluginVsixInstallDialog } from "./plugin-vsix-install-dialog"
 export {
+  PluginWasmFromGitDialog,
+  type PluginWasmFromGitDialogProps,
+} from "./plugin-wasm-from-git-dialog"
+export {
   WasmCapabilityGrantSheet,
   type WasmCapabilityGrantSheetProps,
   type WasmCapabilityGrantDecision,

@@ -9793,6 +9793,7 @@
         "description": "提供插件清单（plugin.json）的直链。清单将先经过审查再安装。",
         "emptyError": "请输入 URL。",
         "error": "获取清单失败：{message}",
+        "invalidManifest": "插件清单无效：{errors}",
         "label": "清单 URL",
         "placeholder": "https://example.com/plugin.json",
         "submit": "获取",
@@ -9800,6 +9801,8 @@
       },
       "fromUrlPrompt": "插件清单 URL",
       "fromUrlSigned": "从已签名 URL…",
+      "fromVsix": "从 .vsix 安装…",
+      "fromWasmGit": "从 Git 安装（WASM）…",
       "groupGit": "Git",
       "groupLocal": "本地插件",
       "groupManifest": "清单",
@@ -9867,6 +9870,20 @@
     "viewContainers": {
       "empty": "此视图容器还没有任何视图。",
       "unavailable": "此视图容器已不可用——其插件可能已被禁用。"
+    },
+    "wasmGitInstall": {
+      "branchLabel": "分支 / 标签 / 提交（可选）",
+      "branchPlaceholder": "main",
+      "cancel": "取消",
+      "description": "克隆 Git 仓库并使用 cargo-component 在本地构建其 WASM 插件。需要桌面运行时、git 和 cargo-component。",
+      "emptyError": "请输入仓库 URL。",
+      "install": "安装",
+      "installing": "正在克隆并构建…",
+      "repoUrlLabel": "仓库 URL",
+      "repoUrlPlaceholder": "https://github.com/owner/repo",
+      "title": "从 Git 安装 WASM",
+      "toolchainMissingHint": "请安装 Rust 并运行 `cargo install cargo-component`，并确保 git 在 PATH 中，然后重试。",
+      "toolchainMissingTitle": "未找到构建工具链"
     },
     "wasmInstall": {
       "capabilityGrantSheet": {

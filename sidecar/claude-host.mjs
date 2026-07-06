@@ -352,6 +352,44 @@ async function handleSetMode(msg) {
   }
 }
 
+// Sidecar-side backstop deadline for a live-SDK control method. Deliberately a
+// bit longer than the renderer's `ipc.ts` CONTROL_TIMEOUT_MS (8s): the renderer
+// gives up first, and this guarantees the host's own promise never dangles
+// forever if the SDK control call wedges (e.g. a provider API hang).
+export const CONTROL_TIMEOUT_MS = 10_000
+
+/**
+ * Invoke a live-SDK control method with a hard deadline. The underlying SDK
+ * promise cannot be cancelled, so on timeout we RESOLVE with an error and let
+ * the late settlement be ignored — this frees `handleControl` instead of
+ * awaiting indefinitely. Pure (no module state) so the timeout/await/throw
+ * branches are unit-testable.
+ *
+ * @param {Function} fn the control method
+ * @param {unknown} thisArg `this` for the method (the live `Query`)
+ * @param {unknown[]} args positional args
+ * @param {number} timeoutMs deadline in ms
+ * @returns {Promise<{ ok: true, result: unknown } | { ok: false, error: string }>}
+ */
+export async function runControlWithTimeout(fn, thisArg, args, timeoutMs = CONTROL_TIMEOUT_MS) {
+  let timer
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, error: "control timed out" }), timeoutMs)
+  })
+  const invoke = (async () => {
+    try {
+      return { ok: true, result: await fn.apply(thisArg, args) }
+    } catch (err) {
+      return { ok: false, error: err?.message ?? String(err) }
+    }
+  })()
+  try {
+    return await Promise.race([invoke, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // Drive a live session's SDK `Query` control method (getContextUsage,
 // mcpServerStatus, reconnectMcpServer, toggleMcpServer, supportedModels,
 // supportedCommands, setModel) and reply with a `control_response` correlated by
@@ -375,17 +413,14 @@ async function handleControl(msg) {
     respond({ ok: false, error: "unsupported_provider" })
     return
   }
-  try {
-    const result = await fn.apply(s.q, controlArgs(method, params))
-    // Keep the shared sendOptions ref consistent so any later resolve agrees
-    // with the live switch (mirrors handleSetMode's permissionMode mutation).
-    if (method === "setModel" && s.sendOptions && params?.model) {
-      s.sendOptions.model = params.model
-    }
-    respond({ ok: true, result })
-  } catch (err) {
-    respond({ ok: false, error: err?.message ?? String(err) })
+  const outcome = await runControlWithTimeout(fn, s.q, controlArgs(method, params))
+  // Keep the shared sendOptions ref consistent so any later resolve agrees with
+  // the live switch (mirrors handleSetMode's permissionMode mutation). Only on a
+  // confirmed (non-timed-out) success.
+  if (outcome.ok && method === "setModel" && s.sendOptions && params?.model) {
+    s.sendOptions.model = params.model
   }
+  respond(outcome)
 }
 
 /**

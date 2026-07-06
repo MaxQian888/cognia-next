@@ -1,0 +1,14 @@
+{
+  "branchLabel": "分支 / 标签 / 提交（可选）",
+  "branchPlaceholder": "main",
+  "cancel": "取消",
+  "description": "克隆 Git 仓库并使用 cargo-component 在本地构建其 WASM 插件。需要桌面运行时、git 和 cargo-component。",
+  "emptyError": "请输入仓库 URL。",
+  "install": "安装",
+  "installing": "正在克隆并构建…",
+  "repoUrlLabel": "仓库 URL",
+  "repoUrlPlaceholder": "https://github.com/owner/repo",
+  "title": "从 Git 安装 WASM",
+  "toolchainMissingHint": "请安装 Rust 并运行 `cargo install cargo-component`，并确保 git 在 PATH 中，然后重试。",
+  "toolchainMissingTitle": "未找到构建工具链"
+}

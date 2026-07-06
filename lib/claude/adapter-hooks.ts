@@ -20,34 +20,19 @@
 
 import { getPluginEventHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
-import type { PluginMessage } from "@/types/plugin"
+import type { PluginHooks, PluginMessage } from "@/types/plugin"
+import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
 
-interface DispatcherInternals {
-  hooks?: { has: (name: string) => boolean }
-  dispatcher?: { hooks?: { has: (name: string) => boolean } }
+function hasListeners(hookName: keyof PluginHooks): boolean {
+  // Lifecycle-scoped query against the real singleton — true only when some
+  // plugin actually registered this hook, so the dispatch is genuinely skipped
+  // when nothing is wired.
+  return getPluginLifecycleHooks().hasAnyHook(hookName)
 }
 
-function readHookRegistry(dispatcher: unknown): { has: (name: string) => boolean } | undefined {
-  const internals = dispatcher as DispatcherInternals
-  return internals.dispatcher?.hooks ?? internals.hooks
-}
-
-function hasListeners(hookName: string): boolean {
-  // Lifecycle-scoped hook query.
-  const hooks = readHookRegistry(getPluginLifecycleHooks())
-  if (hooks && typeof hooks.has === "function") {
-    return hooks.has(hookName)
-  }
-  return true // when in doubt, dispatch — keep the wrapper safe.
-}
-
-function hasEventListeners(hookName: string): boolean {
-  // Event-scoped hook query (separate singleton from lifecycle hooks).
-  const hooks = readHookRegistry(getPluginEventHooks())
-  if (hooks && typeof hooks.has === "function") {
-    return hooks.has(hookName)
-  }
-  return true
+function hasEventListeners(hookName: keyof PluginHooksAll): boolean {
+  // Event-scoped query (separate singleton from lifecycle hooks).
+  return getPluginEventHooks().hasAnyHook(hookName)
 }
 
 export interface PromptSubmitContextLike {

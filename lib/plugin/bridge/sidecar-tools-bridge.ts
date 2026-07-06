@@ -9,9 +9,9 @@
  * tools, the sidecar emits a `plugin_tool_exec` event back over stdout
  * and the renderer dispatches it via `handlePluginToolExec`.
  *
- * Mirrors the in-process AI-SDK flow in `agent-integration.ts` so a
- * plugin tool registered ONCE via `ctx.agent.registerTool()` lights up
- * both runtimes without the plugin author wiring anything extra.
+ * A plugin tool registered ONCE via `ctx.agent.registerTool()` (which
+ * writes straight to `PluginRegistry`) lights up the sidecar runtime here
+ * without the plugin author wiring anything extra.
  *
  * Wave 1 (terminal dock unification): the manifest can also carry a
  * block of synthetic terminal-dock entries when the user has flipped

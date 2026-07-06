@@ -100,7 +100,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     support: "supported",
     manifestFields: ["modes"],
     runtimeBinding: "PluginRegistry modes",
-    hostBindings: ["lib/plugin/core/registry.ts", "lib/plugin/bridge/agent-integration.ts"],
+    hostBindings: ["lib/plugin/core/registry.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/manifest/index.ts",
       "packages/plugin-sdk/src/index.ts",
@@ -645,7 +645,6 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.agent.registerExternalAgentPreset + presets.registerPreset overlay",
     hostBindings: [
       "lib/ai/agent/external/presets.ts",
-      "lib/plugin/bridge/agent-integration.ts",
       "components/agent/external-agent/manager.tsx",
     ],
     typescriptSdk: [
@@ -709,7 +708,6 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.agent.registerMcpServerPreset + mcp-server-preset-registry overlay",
     hostBindings: [
       "lib/plugin/registries/mcp-server-preset-registry.ts",
-      "lib/plugin/bridge/agent-integration.ts",
       "lib/claude/mcp-presets.ts",
     ],
     typescriptSdk: [

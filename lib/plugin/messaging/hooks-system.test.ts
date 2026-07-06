@@ -311,6 +311,62 @@ describe("Chat Hook System", () => {
   })
 })
 
+describe("hasAnyHook predicates", () => {
+  describe("PluginEventHooks.hasAnyHook", () => {
+    let eventHooks: PluginEventHooks
+
+    beforeEach(() => {
+      eventHooks = getPluginEventHooks()
+      jest.clearAllMocks()
+      ;(usePluginStore.getState as jest.Mock).mockReturnValue({ plugins: {} })
+    })
+
+    it("is false when no plugin contributes the hook", () => {
+      expect(eventHooks.hasAnyHook("onUserPromptSubmit")).toBe(false)
+    })
+
+    it("is true when an enabled plugin contributes the hook", () => {
+      ;(usePluginStore.getState as jest.Mock).mockReturnValue({
+        plugins: { p1: { status: "enabled", hooks: { onUserPromptSubmit: jest.fn() } } },
+      })
+      expect(eventHooks.hasAnyHook("onUserPromptSubmit")).toBe(true)
+      // A different, unregistered hook name stays false.
+      expect(eventHooks.hasAnyHook("onPreToolUse")).toBe(false)
+    })
+
+    it("ignores disabled plugins (enabled-only, matching the dispatch path)", () => {
+      ;(usePluginStore.getState as jest.Mock).mockReturnValue({
+        plugins: { p1: { status: "disabled", hooks: { onUserPromptSubmit: jest.fn() } } },
+      })
+      expect(eventHooks.hasAnyHook("onUserPromptSubmit")).toBe(false)
+    })
+  })
+
+  describe("PluginLifecycleHooks.hasAnyHook", () => {
+    let lifecycleHooks: PluginLifecycleHooks
+
+    beforeEach(() => {
+      lifecycleHooks = new PluginLifecycleHooks()
+    })
+
+    it("is false before any registration", () => {
+      expect(lifecycleHooks.hasAnyHook("onMessageReceive")).toBe(false)
+    })
+
+    it("is true once a plugin registers the hook, false for others", () => {
+      lifecycleHooks.registerHooks("p1", { onMessageReceive: (m) => m })
+      expect(lifecycleHooks.hasAnyHook("onMessageReceive")).toBe(true)
+      expect(lifecycleHooks.hasAnyHook("onEnable")).toBe(false)
+    })
+
+    it("returns false after the contributing plugin unregisters", () => {
+      lifecycleHooks.registerHooks("p1", { onMessageReceive: (m) => m })
+      lifecycleHooks.unregisterHooks("p1")
+      expect(lifecycleHooks.hasAnyHook("onMessageReceive")).toBe(false)
+    })
+  })
+})
+
 describe("PluginLifecycleHooks - New Dispatchers", () => {
   let lifecycleHooks: PluginLifecycleHooks
 

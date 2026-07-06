@@ -650,6 +650,8 @@ class PluginHook(Enum):
     ON_USER_PROMPT_SUBMIT = "onUserPromptSubmit"
     ON_PRE_TOOL_USE = "onPreToolUse"
     ON_POST_TOOL_USE = "onPostToolUse"
+    # DORMANT: not yet wired to a compaction trigger; registering is a silent no-op
+    # (parity-only). See lib/plugin/messaging/hooks-system.ts dispatchPreCompact.
     ON_PRE_COMPACT = "onPreCompact"
     ON_POST_CHAT_RECEIVE = "onPostChatReceive"
     ON_DOCUMENTS_INDEXED = "onDocumentsIndexed"

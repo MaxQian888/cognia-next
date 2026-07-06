@@ -64,11 +64,21 @@ pub struct LoadedPlugin {
 #[derive(Default)]
 pub struct WasmPluginState {
     pub loaded: Arc<RwLock<HashMap<String, LoadedPlugin>>>,
+    /// Typed pre-instantiation handle per plugin, built once in `load()` and
+    /// reused on every call. The `Linker` (WASI + cognia host imports) and the
+    /// linker→component type-resolution are baked in here, so `plugin_wasm_call`
+    /// only allocates a fresh, permission-scoped `Store<HostState>` and
+    /// instantiates against it. Kept as a sibling map (not a `LoadedPlugin`
+    /// field) so the synthetic empty-component test fixtures — which cannot
+    /// build a real `CogniaPluginPre` — stay valid.
+    pub pres: Arc<RwLock<HashMap<String, Arc<since_v0_1::CogniaPluginPre<HostState>>>>>,
 }
 
-/// The cognia API surface for WASM plugins. Today this is a thin registry;
-/// once bindgen lands `activate` will also stash the live `Instance`
-/// alongside the `Store` so re-entry from TS is constant-time.
+/// The cognia API surface for WASM plugins. `load` stashes a typed
+/// pre-instantiation handle (`CogniaPluginPre`) per plugin in
+/// `WasmPluginState::pres`, so each call only builds a fresh permission-scoped
+/// `Store` and instantiates against the cached handle — the linker and
+/// import resolution are not rebuilt per call.
 pub struct WasmPluginHost;
 
 #[derive(Debug, Serialize)]
@@ -111,6 +121,11 @@ impl WasmPluginHost {
         }
         let component = Component::from_binary(engine(), &bytes)
             .map_err(|e| format!("compile component: {e}"))?;
+        // Build the typed pre-instantiation handle once, here at load time,
+        // so per-call work is just a fresh Store + instantiate. This also
+        // surfaces a structurally-invalid component (missing world exports /
+        // bad imports) at load rather than on first call.
+        let plugin_pre = Self::build_plugin_pre(&plugin_api_version, &component)?;
         let id = manifest.id.clone();
         let entry = LoadedPlugin {
             manifest,
@@ -119,6 +134,7 @@ impl WasmPluginHost {
             plugin_api_version: plugin_api_version.clone(),
         };
         state.loaded.write().insert(id.clone(), entry);
+        state.pres.write().insert(id, Arc::new(plugin_pre));
         Ok(plugin_api_version)
     }
 
@@ -131,13 +147,29 @@ impl WasmPluginHost {
         }
     }
 
+    /// Build the typed pre-instantiation handle for a compiled component.
+    /// Reuses `version_linker` so the WASI + cognia host imports are
+    /// registered exactly once; the returned handle is cloned (via `Arc`) per
+    /// call and instantiated against a fresh, permission-scoped `Store`.
+    pub fn build_plugin_pre(
+        plugin_api_version: &str,
+        component: &Component,
+    ) -> Result<since_v0_1::CogniaPluginPre<HostState>, String> {
+        let linker = Self::version_linker(plugin_api_version)?;
+        let instance_pre = linker
+            .instantiate_pre(component)
+            .map_err(|e| format!("pre-instantiate linker: {e}"))?;
+        since_v0_1::CogniaPluginPre::new(instance_pre)
+            .map_err(|e| format!("typed pre-instantiation: {e}"))
+    }
+
     /// Build a fresh `Store<HostState>` for an activation. The capability
     /// set is sourced from the per-plugin permission ledger (passed in by
     /// the caller after consulting the on-disk grant file). `shell_allowlist`
     /// is the plugin's declared `shellCommands`, mirrored from
     /// `PluginRuntimeState`, and gates `process.exec` deny-by-default.
     pub fn build_activation_store(
-        plugin: &LoadedPlugin,
+        manifest: &WasmManifestSlice,
         plugin_data_dir: &Path,
         granted_permissions: &[String],
         shell_allowlist: &[String],
@@ -146,25 +178,22 @@ impl WasmPluginHost {
         for p in granted_permissions {
             caps.add(p.clone());
         }
-        let memory_mb = plugin
-            .manifest
+        let memory_mb = manifest
             .wasm
             .memory_limit_mb
             .unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
-        let timeout_ms = plugin
-            .manifest
+        let timeout_ms = manifest
             .wasm
             .call_timeout_ms
             .unwrap_or(DEFAULT_CALL_TIMEOUT_MS);
-        let extra: Vec<PathBuf> = plugin
-            .manifest
+        let extra: Vec<PathBuf> = manifest
             .wasm
             .fs
             .as_ref()
             .map(|fs| fs.preopens.iter().map(PathBuf::from).collect())
             .unwrap_or_default();
         let mut store = build_store(
-            plugin.manifest.id.clone(),
+            manifest.id.clone(),
             plugin_data_dir,
             &extra,
             caps,
@@ -173,7 +202,7 @@ impl WasmPluginHost {
         )
         .map_err(|e| format!("build store: {e}"))?;
         // Ensure the plugin id is reflected in the freshly built state.
-        store.data_mut().plugin_id = plugin.manifest.id.clone();
+        store.data_mut().plugin_id = manifest.id.clone();
         // Mirror the declared shell-command allowlist so `process.exec` can
         // enforce it deny-by-default.
         store.data_mut().shell_allowlist = shell_allowlist.to_vec();
@@ -197,6 +226,7 @@ impl WasmPluginHost {
     }
 
     pub fn unload(state: &WasmPluginState, plugin_id: &str) -> bool {
+        state.pres.write().remove(plugin_id);
         state.loaded.write().remove(plugin_id).is_some()
     }
 }
@@ -334,7 +364,7 @@ mod tests {
         };
         let data_dir = tmp.path().join("data");
         let store = WasmPluginHost::build_activation_store(
-            &plugin,
+            &plugin.manifest,
             &data_dir,
             &["process:spawn".to_string()],
             &["git".to_string(), "node".to_string()],
@@ -345,5 +375,25 @@ mod tests {
             vec!["git".to_string(), "node".to_string()]
         );
         assert!(store.data().capabilities.allows("process:spawn"));
+    }
+
+    #[test]
+    fn build_plugin_pre_rejects_component_without_world_exports() {
+        // The empty-component preamble compiles but exposes none of the
+        // `cognia-plugin` world exports (`init`/`on-event`/…), so typed
+        // pre-instantiation must fail — proving the pre is built and validated
+        // at load time (and documenting why the snapshot fixtures can't cache one).
+        const EMPTY_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+        let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
+        assert!(WasmPluginHost::build_plugin_pre("0.1.0", &component).is_err());
+    }
+
+    #[test]
+    fn build_plugin_pre_rejects_unsupported_version() {
+        const EMPTY_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+        let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
+        // Routes through `version_linker`, which only registers v0.1.x.
+        assert!(WasmPluginHost::build_plugin_pre("0.2.0", &component).is_err());
+        assert!(WasmPluginHost::build_plugin_pre("garbage", &component).is_err());
     }
 }

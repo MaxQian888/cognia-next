@@ -133,13 +133,44 @@ impl PluginApiError {
     fn permission_denied(message: impl Into<String>) -> Self {
         Self::new("PERMISSION_DENIED", message)
     }
+    fn incompatible_sdk(sdk_version: &str) -> Self {
+        Self::new(
+            "INCOMPATIBLE_SDK",
+            format!(
+                "plugin SDK version {sdk_version} is below the minimum supported {MIN_SUPPORTED_SDK}"
+            ),
+        )
+    }
+}
+
+/// Parse a `major.minor.patch` string into a comparable tuple. Missing minor
+/// or patch components default to 0 (so `"2"` / `"2.0"` / `"2.0.0"` all parse),
+/// but an absent or non-numeric major component yields `None`.
+fn parse_sdk_semver(s: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = s.trim().split('.');
+    let major: u32 = parts.next()?.trim().parse().ok()?;
+    let minor: u32 = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
+    let patch: u32 = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+/// True when `sdk_version` is `>= MIN_SUPPORTED_SDK` by (major, minor, patch)
+/// ordering. Fail-closed: an unparseable version is treated as incompatible.
+fn sdk_is_compatible(sdk_version: &str) -> bool {
+    match (
+        parse_sdk_semver(sdk_version),
+        parse_sdk_semver(MIN_SUPPORTED_SDK),
+    ) {
+        (Some(sdk), Some(min)) => sdk >= min,
+        _ => false,
+    }
 }
 
 fn compat_for(sdk_version: &str) -> PluginApiCompat {
     PluginApiCompat {
         sdk_version: sdk_version.to_string(),
         min_supported_sdk: MIN_SUPPORTED_SDK.to_string(),
-        compatible: true,
+        compatible: sdk_is_compatible(sdk_version),
     }
 }
 
@@ -1121,6 +1152,14 @@ pub async fn plugin_api_invoke(
         payload,
     } = request;
 
+    if !sdk_is_compatible(&sdk_version) {
+        return Ok(err_response(
+            &request_id,
+            &sdk_version,
+            PluginApiError::incompatible_sdk(&sdk_version),
+        ));
+    }
+
     if !state.plugins.read().contains_key(&plugin_id) {
         return Ok(err_response(
             &request_id,
@@ -1177,6 +1216,24 @@ pub async fn plugin_api_batch_invoke(
         strategy,
         requests,
     } = request;
+
+    if !sdk_is_compatible(&sdk_version) {
+        let results = requests
+            .iter()
+            .map(|item| {
+                err_response(
+                    &item.request_id,
+                    &sdk_version,
+                    PluginApiError::incompatible_sdk(&sdk_version),
+                )
+            })
+            .collect();
+        return Ok(BatchInvokeResponse {
+            success: false,
+            results,
+        });
+    }
+
     let abort_on_error = strategy.as_deref() == Some("abortOnError");
     let loaded = state.plugins.read().contains_key(&plugin_id);
 
@@ -1423,6 +1480,44 @@ mod tests {
         let s = serde_json::to_string(&resp).unwrap();
         assert!(s.contains("\"code\":\"NOT_SUPPORTED\""));
         assert!(s.contains("\"success\":false"));
+    }
+
+    #[test]
+    fn sdk_is_compatible_enforces_minimum() {
+        // Wire default ("2.0.0") and the floor itself are compatible.
+        assert!(sdk_is_compatible("2.0.0"));
+        assert!(sdk_is_compatible("1.0.0"));
+        assert!(sdk_is_compatible("1.5.3"));
+        assert!(sdk_is_compatible("2")); // lenient on missing minor/patch
+        assert!(sdk_is_compatible("2.0"));
+        // Below the floor, or unparseable → incompatible (fail-closed).
+        assert!(!sdk_is_compatible("0.9.0"));
+        assert!(!sdk_is_compatible("0.0.1"));
+        assert!(!sdk_is_compatible("garbage"));
+        assert!(!sdk_is_compatible(""));
+    }
+
+    #[test]
+    fn compat_for_reports_real_compatibility() {
+        let ok = compat_for("2.0.0");
+        assert!(ok.compatible);
+        assert_eq!(ok.min_supported_sdk, "1.0.0");
+        let bad = compat_for("0.9.0");
+        assert!(!bad.compatible);
+        assert_eq!(bad.min_supported_sdk, "1.0.0");
+    }
+
+    #[test]
+    fn incompatible_sdk_error_has_typed_code() {
+        let resp = err_response(
+            "req-3",
+            "0.9.0",
+            PluginApiError::incompatible_sdk("0.9.0"),
+        );
+        assert!(!resp.success);
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(s.contains("\"code\":\"INCOMPATIBLE_SDK\""));
+        assert!(s.contains("\"compatible\":false"));
     }
 
     #[test]

@@ -46,6 +46,20 @@ fn backoff_delay(consecutive_failures: u32) -> Duration {
     Duration::from_millis(SPAWN_BACKOFF_MS[idx])
 }
 
+/// Minimum Node.js major version the chat sidecar requires. The
+/// `@anthropic-ai/claude-agent-sdk` + undici proxy stack assume Node >= 20;
+/// older runtimes fail late and opaquely deep inside the SDK, so we probe up
+/// front and surface an actionable error instead.
+const MIN_NODE_MAJOR: u32 = 20;
+
+/// Parse the major version out of `node --version` output (e.g. `"v20.11.0\n"`
+/// → `Some(20)`). Tolerates a missing leading `v`. Pure — unit-tested.
+fn parse_node_major(version_output: &str) -> Option<u32> {
+    let trimmed = version_output.trim();
+    let without_v = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    without_v.split('.').next()?.parse::<u32>().ok()
+}
+
 /// Shared, mutable state. Cloned cheaply via `Arc`.
 #[derive(Clone, Default)]
 pub struct SidecarState {
@@ -70,6 +84,11 @@ pub struct SidecarState {
     /// recovered without restarting the app. `AtomicU64` keeps the
     /// counter lock-free.
     restart_count: Arc<std::sync::atomic::AtomicU64>,
+    /// Set once a `node --version` probe confirms Node >= [`MIN_NODE_MAJOR`].
+    /// Caches the happy path so we don't fork `node --version` on every spawn;
+    /// a failed probe leaves this `false` so a later spawn (after the user
+    /// installs/upgrades Node) re-checks.
+    node_version_ok: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Default)]
@@ -113,6 +132,50 @@ impl SidecarState {
     pub(crate) fn bump_restart_count(&self) {
         self.restart_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Probe `node --version` once and verify Node >= [`MIN_NODE_MAJOR`] before
+    /// the first spawn. Without this gate a too-old (or missing) Node fails
+    /// late and opaquely deep inside the Agent SDK; here we surface a clear,
+    /// actionable error. The happy result is cached; a failure re-checks next
+    /// time so the user can recover by installing Node without restarting.
+    async fn ensure_node_version(&self) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        if self.node_version_ok.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let output = Command::new("node")
+            .arg("--version")
+            .output()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Node.js was not found on PATH — install Node.js >= {MIN_NODE_MAJOR}, \
+                     which the chat sidecar requires ({e})"
+                )
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "`node --version` failed (exit {:?}) — install Node.js >= {MIN_NODE_MAJOR}",
+                output.status.code()
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let major = parse_node_major(&stdout).ok_or_else(|| {
+            format!(
+                "could not parse Node.js version from {:?} — install Node.js >= {MIN_NODE_MAJOR}",
+                stdout.trim()
+            )
+        })?;
+        if major < MIN_NODE_MAJOR {
+            return Err(format!(
+                "Node.js {} is too old — the chat sidecar requires Node.js >= {MIN_NODE_MAJOR}; \
+                 please upgrade Node.js",
+                stdout.trim()
+            ));
+        }
+        self.node_version_ok.store(true, Ordering::Relaxed);
+        Ok(())
     }
 
     /// The current spawn generation. The watchdog compares this against the
@@ -320,6 +383,10 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
             remaining.as_millis()
         ));
     }
+
+    // Fail fast with an actionable message if Node is missing or too old,
+    // rather than letting the spawn (or the SDK) blow up later and opaquely.
+    state.ensure_node_version().await?;
 
     let script = resolve_sidecar_script(&app)?;
     let cwd = script
@@ -864,6 +931,21 @@ pub async fn kill_sidecar(state: SidecarState) {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn parse_node_major_handles_all_forms() {
+        // Canonical `node --version` output.
+        assert_eq!(parse_node_major("v20.11.0\n"), Some(20));
+        assert_eq!(parse_node_major("v18.19.0"), Some(18));
+        // Missing leading `v` is tolerated.
+        assert_eq!(parse_node_major("22.1.0"), Some(22));
+        // Surrounding whitespace is trimmed.
+        assert_eq!(parse_node_major("  v24.0.0  "), Some(24));
+        // Garbage / empty input yields None (caller treats as "unknown").
+        assert_eq!(parse_node_major(""), None);
+        assert_eq!(parse_node_major("vX.Y.Z"), None);
+        assert_eq!(parse_node_major("not a version"), None);
+    }
 
     #[test]
     fn backoff_delay_escalates_and_saturates() {

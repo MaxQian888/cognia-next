@@ -14,6 +14,13 @@ jest.mock("@/stores/plugins", () => ({
   usePluginsStore: (selector: (s: unknown) => unknown) => selector({ setImportStaging }),
 }))
 
+// The real manifest validator has its own exhaustive tests; here we mock it so
+// the dialog tests focus on the dialog's own valid/invalid branching.
+const validatePluginManifest = jest.fn()
+jest.mock("@/lib/plugin/core/validation", () => ({
+  validatePluginManifest: (...args: unknown[]) => validatePluginManifest(...args),
+}))
+
 import { PluginInstallFromUrlDialog } from "./plugin-install-from-url-dialog"
 
 const originalFetch = global.fetch
@@ -21,6 +28,14 @@ const originalFetch = global.fetch
 describe("PluginInstallFromUrlDialog", () => {
   beforeEach(() => {
     setImportStaging.mockClear()
+    validatePluginManifest.mockReset()
+    // Default: manifest passes validation so existing staging tests hold.
+    validatePluginManifest.mockReturnValue({
+      valid: true,
+      errors: [],
+      warnings: [],
+      diagnostics: [],
+    })
   })
 
   afterEach(() => {
@@ -88,6 +103,27 @@ describe("PluginInstallFromUrlDialog", () => {
     const [[arg]] = setImportStaging.mock.calls
     expect(arg.drafts[0].id).toBe("https://example.com/p.json")
     expect(arg.drafts[0].version).toBe("0.0.0")
+  })
+
+  it("rejects an invalid manifest and does not stage it", async () => {
+    validatePluginManifest.mockReturnValue({
+      valid: false,
+      errors: ['Required field "id" is missing', 'Invalid "type"'],
+      warnings: [],
+      diagnostics: [],
+    })
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ bogus: true }),
+    }) as unknown as typeof fetch
+    render(<PluginInstallFromUrlDialog open={true} onOpenChange={jest.fn()} />)
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "https://evil.example.com/x.json" },
+    })
+    fireEvent.click(screen.getByText("submit"))
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
+    expect(screen.getByRole("alert")).toHaveTextContent("invalidManifest")
+    expect(setImportStaging).not.toHaveBeenCalled()
   })
 
   it("renders error message on HTTP failure", async () => {

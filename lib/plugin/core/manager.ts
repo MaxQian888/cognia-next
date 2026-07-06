@@ -3191,8 +3191,8 @@ export class PluginManager {
 
       const handler = async (args: string) => {
         // Refresh the idle-suspend clock on command invocation (mirrors the
-        // tool-dispatch refresh in agent-integration.ts) so command-driven
-        // plugins aren't suspended between uses.
+        // tool-dispatch refresh) so command-driven plugins aren't suspended
+        // between uses.
         usePluginStore.getState().updateLastUsedAt(pluginId)
         // Manifest hooks expect `string[]` args; `dispatchSlashCommand` hands
         // us the post-`/cmd ` tail as a single string. Splitting on

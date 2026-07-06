@@ -172,9 +172,38 @@ describe("PluginSignatureVerifier", () => {
     })
   })
 
-  describe("Verification Method", () => {
+  describe("Verification Method (policy gate)", () => {
     it("should have verify method that accepts plugin path", () => {
       expect(typeof verifier.verify).toBe("function")
+    })
+
+    it("rejects an unsigned plugin when signatures are required", async () => {
+      verifier.setConfig({ requireSignatures: true })
+      const result = await verifier.verify("/plugins/demo")
+      expect(result.valid).toBe(false)
+      expect(result.reason).toBe("Signature required but not found")
+    })
+
+    it("allows an unsigned plugin with a warning when signatures are not required", async () => {
+      verifier.setConfig({ requireSignatures: false })
+      const result = await verifier.verify("/plugins/demo")
+      expect(result.valid).toBe(true)
+      expect(result.warnings).toContain("Plugin is not signed")
+    })
+
+    it("does NOT invoke the (removed) file-based crypto command", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
+      verifier.setConfig({ requireSignatures: false })
+      await verifier.verify("/plugins/demo")
+      expect(invoke).not.toHaveBeenCalledWith("plugin_verify_signature", expect.anything())
+    })
+
+    it("caches a rejection so the second call is served from cache", async () => {
+      verifier.setConfig({ requireSignatures: true, cacheVerifications: true })
+      const first = await verifier.verify("/plugins/demo")
+      expect(first.valid).toBe(false)
+      expect(verifier.getCachedVerification("/plugins/demo")).toEqual(first)
     })
   })
 })

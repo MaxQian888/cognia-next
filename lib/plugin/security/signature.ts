@@ -163,114 +163,21 @@ export class PluginSignatureVerifier {
 
     const warnings: string[] = []
 
-    try {
-      const signatureData = await this.readSignatureFile(pluginPath)
-
-      if (!signatureData) {
-        if (this.config.requireSignatures) {
-          return this.createResult(pluginPath, false, "Signature required but not found", warnings)
-        }
-        warnings.push("Plugin is not signed")
-        return this.createResult(pluginPath, true, undefined, warnings)
-      }
-
-      // Check expiration
-      if (signatureData.expiresAt && new Date(signatureData.expiresAt) < new Date()) {
-        return this.createResult(
-          pluginPath,
-          false,
-          "Signature has expired",
-          warnings,
-          signatureData
-        )
-      }
-
-      // Verify signature cryptographically
-      const cryptoValid = await this.verifyCryptographic(pluginPath, signatureData)
-      if (!cryptoValid) {
-        return this.createResult(
-          pluginPath,
-          false,
-          "Cryptographic verification failed",
-          warnings,
-          signatureData
-        )
-      }
-
-      // Check if signer is trusted
-      const signer = this.findPublisher(signatureData.publicKey)
-
-      if (!signer) {
-        if (this.config.trustedPublishersOnly) {
-          return this.createResult(
-            pluginPath,
-            false,
-            "Signer is not in trusted publishers list",
-            warnings,
-            signatureData
-          )
-        }
-        warnings.push("Signer is not in trusted publishers list")
-      }
-
-      if (!this.config.allowUntrusted && (!signer || signer.trustLevel === "untrusted")) {
-        return this.createResult(
-          pluginPath,
-          false,
-          "Untrusted publishers not allowed",
-          warnings,
-          signatureData
-        )
-      }
-
-      const result: SignatureVerificationResult = {
-        valid: true,
-        pluginId: signatureData.pluginId,
-        version: signatureData.version,
-        signer: signer
-          ? {
-              name: signer.name,
-              organization: signer.name,
-              verified: true,
-              trustedLevel: signer.trustLevel,
-            }
-          : {
-              name: "Unknown",
-              verified: false,
-              trustedLevel: "unknown",
-            },
-        warnings,
-      }
-
-      if (this.config.cacheVerifications) {
-        this.verificationCache.set(pluginPath, result)
-      }
-
-      return result
-    } catch (error) {
-      return this.createResult(
-        pluginPath,
-        false,
-        `Verification error: ${error instanceof Error ? error.message : String(error)}`,
-        warnings
-      )
+    // File-based (`signature.json`) cryptographic verification was removed: no
+    // install path ever wrote that file, so the branch was unreachable, and the
+    // `plugin_verify_signature` invoke it relied on had a mismatched argument
+    // shape that always rejected. The AUTHORITATIVE integrity + signature check
+    // for marketplace bundles runs host-side over the raw archive bytes
+    // (`verify_download_integrity` in src-tauri) BEFORE anything is written to
+    // disk, and WASM bundles use the detached-signature path
+    // (`verifyDetachedBundleSignature`). What remains here is purely the policy
+    // gate: an unsigned plugin is rejected only when the user requires
+    // signatures, otherwise it loads with a warning.
+    if (this.config.requireSignatures) {
+      return this.createResult(pluginPath, false, "Signature required but not found", warnings)
     }
-  }
-
-  private async verifyCryptographic(
-    pluginPath: string,
-    signature: PluginSignature
-  ): Promise<boolean> {
-    try {
-      return await invoke<boolean>("plugin_verify_signature", {
-        pluginPath,
-        signature: signature.signature,
-        publicKey: signature.publicKey,
-        algorithm: signature.algorithm,
-      })
-    } catch {
-      return false
-    }
+    warnings.push("Plugin is not signed")
+    return this.createResult(pluginPath, true, undefined, warnings)
   }
 
   private createResult(
@@ -447,36 +354,6 @@ export class PluginSignatureVerifier {
         },
         error
       )
-    }
-  }
-
-  private async readSignatureFile(pluginPath: string): Promise<PluginSignature | null> {
-    const candidates = ["signature.json", "plugin-signature.json"].map((fileName) => {
-      const normalizedPath = pluginPath.replace(/[/\\]+$/, "")
-      return `${normalizedPath}/${fileName}`
-    })
-
-    try {
-      const { readTextFile } = await import("@tauri-apps/plugin-fs")
-      for (const path of candidates) {
-        try {
-          const raw = await readTextFile(path)
-          const parsed = JSON.parse(raw) as Omit<PluginSignature, "signedAt" | "expiresAt"> & {
-            signedAt: string | Date
-            expiresAt?: string | Date
-          }
-          return {
-            ...parsed,
-            signedAt: new Date(parsed.signedAt),
-            expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : undefined,
-          }
-        } catch {
-          // Try next candidate path.
-        }
-      }
-      return null
-    } catch {
-      return null
     }
   }
 }

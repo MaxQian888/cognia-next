@@ -105,20 +105,69 @@ impl ActiveAccountState {
 //
 // Beyond what `SubscriptionProvider::env_for_sidecar` already emits, this also
 // appends a per-account `CLAUDE_CONFIG_DIR` pointing at
-// `<app_data>/cognia/claude-configs/<account_id>/`. Per-account credentials
-// directories are the cure for the OAuth refresh race
+// `<app_data>/cognia/accounts/<local_account_id>/claude-configs/<account_id>/`.
+// Per-account credentials directories are the cure for the OAuth refresh race
 // (Anthropic issues #43392 / #24317): two concurrent CLI subprocesses sharing
 // one `.credentials.json` will race on refresh; per-account dirs give each
-// account its own file.
+// account its own file. Scoping by `local_account_id` also keeps two local
+// accounts that happen to hold the same provider `account_id` mutually
+// invisible (ADR-0054).
 // ---------------------------------------------------------------------------
 
 /// Per-account `CLAUDE_CONFIG_DIR` path. Pure: caller decides whether to
-/// ensure-create.
-pub fn per_account_config_dir(app_data_dir: &Path, account_id: &str) -> PathBuf {
+/// ensure-create. Scoped by `local_account_id` so the OAuth-refresh watcher
+/// (`subscription/commands.rs`) and this env builder resolve to the SAME
+/// directory and two local accounts never collide on one config dir.
+pub fn per_account_config_dir(
+    app_data_dir: &Path,
+    local_account_id: &str,
+    account_id: &str,
+) -> PathBuf {
+    app_data_dir
+        .join("cognia")
+        .join("accounts")
+        .join(local_account_id)
+        .join("claude-configs")
+        .join(account_id)
+}
+
+/// Legacy (pre-ADR-0054) per-account config dir that omitted the
+/// `local_account_id` segment. Used only by [`migrate_legacy_config_dir`].
+fn legacy_per_account_config_dir(app_data_dir: &Path, account_id: &str) -> PathBuf {
     app_data_dir
         .join("cognia")
         .join("claude-configs")
         .join(account_id)
+}
+
+/// Best-effort one-time migration of a pre-ADR-0054 config dir into its new
+/// `local_account_id`-scoped location. No-op when the new dir already exists or
+/// the legacy dir is absent. Failures are non-fatal — the CLI can re-OAuth into
+/// a fresh dir — so the caller only logs a warning.
+fn migrate_legacy_config_dir(app_data_dir: &Path, account_id: &str, new_dir: &Path) {
+    if new_dir.exists() {
+        return;
+    }
+    let legacy = legacy_per_account_config_dir(app_data_dir, account_id);
+    if legacy == new_dir || !legacy.exists() {
+        return;
+    }
+    if let Some(parent) = new_dir.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!(
+                "failed to create parent for legacy config-dir migration ({}): {e}",
+                parent.display()
+            );
+            return;
+        }
+    }
+    if let Err(e) = std::fs::rename(&legacy, new_dir) {
+        log::warn!(
+            "failed to migrate legacy CLAUDE_CONFIG_DIR {} -> {}: {e}",
+            legacy.display(),
+            new_dir.display()
+        );
+    }
 }
 
 /// Inline dispatch to the provider impl's `env_for_sidecar`. The same shape
@@ -156,7 +205,8 @@ pub fn env_for_local_account(
     let Some(account) = vault.find_account(account_id) else {
         return Ok(None);
     };
-    let env = env_for_account_with_vault(app_data_dir, provider, &vault, account)?;
+    let env =
+        env_for_account_with_vault(app_data_dir, local_account_id, provider, &vault, account)?;
     Ok(Some(env))
 }
 
@@ -164,12 +214,14 @@ pub fn env_for_local_account(
 /// — exercised by unit tests without the keyring.
 pub fn env_for_account_with_vault(
     app_data_dir: &Path,
+    local_account_id: &str,
     provider: ProviderId,
     vault: &ProviderVault,
     account: &Account,
 ) -> Result<Vec<(String, String)>, String> {
     let mut env = dispatch_env_for_sidecar(provider, account, vault.resolve_preset(account));
-    let config_dir = per_account_config_dir(app_data_dir, &account.id);
+    let config_dir = per_account_config_dir(app_data_dir, local_account_id, &account.id);
+    migrate_legacy_config_dir(app_data_dir, &account.id, &config_dir);
     std::fs::create_dir_all(&config_dir).map_err(|e| {
         format!(
             "failed to create per-account CLAUDE_CONFIG_DIR at {}: {e}",
@@ -295,9 +347,20 @@ mod tests {
     #[test]
     fn per_account_config_dir_builds_expected_path() {
         let app_data = Path::new("/tmp/app-data");
-        let got = per_account_config_dir(app_data, "01abc-account");
-        let expected = Path::new("/tmp/app-data/cognia/claude-configs/01abc-account");
+        let got = per_account_config_dir(app_data, "local-1", "01abc-account");
+        let expected =
+            Path::new("/tmp/app-data/cognia/accounts/local-1/claude-configs/01abc-account");
         assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn per_account_config_dir_scopes_by_local_account() {
+        // Same provider account_id under two different local accounts must
+        // resolve to two distinct directories (ADR-0054 isolation).
+        let app_data = Path::new("/tmp/app-data");
+        let a = per_account_config_dir(app_data, "local-A", "shared-acct");
+        let b = per_account_config_dir(app_data, "local-B", "shared-acct");
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -305,28 +368,64 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let account = sample_anthropic_account("01abc");
         let vault = vault_with(vec![account.clone()]);
-        let env = env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account)
-            .unwrap();
+        let env = env_for_account_with_vault(
+            tmp.path(),
+            "local-1",
+            ProviderId::Anthropic,
+            &vault,
+            &account,
+        )
+        .unwrap();
 
         // OAuth bearer surfaces verbatim.
         assert!(env
             .iter()
             .any(|(k, v)| k == "CLAUDE_CODE_OAUTH_TOKEN" && v == "oat01-env-for-account"));
 
-        // CLAUDE_CONFIG_DIR points at <app_data>/cognia/claude-configs/<id>.
+        // CLAUDE_CONFIG_DIR points at the local-account-scoped path and is the
+        // SAME path the watcher resolves through `per_account_config_dir`.
         let config_dir_entry = env
             .iter()
             .find(|(k, _)| k == "CLAUDE_CONFIG_DIR")
             .expect("CLAUDE_CONFIG_DIR must be present");
-        let expected = tmp
-            .path()
-            .join("cognia")
-            .join("claude-configs")
-            .join("01abc");
+        let expected = per_account_config_dir(tmp.path(), "local-1", "01abc");
         assert_eq!(config_dir_entry.1, expected.to_string_lossy());
 
         // Directory is ensure-created.
         assert!(expected.is_dir(), "per-account config dir must be created");
+    }
+
+    #[test]
+    fn env_for_account_with_vault_migrates_legacy_config_dir() {
+        // A pre-ADR-0054 config dir (no local_account_id segment) holding a
+        // .credentials.json should be moved into the new scoped location on
+        // first resolve, preserving the existing OAuth credentials.
+        let tmp = tempfile::tempdir().unwrap();
+        let legacy = tmp
+            .path()
+            .join("cognia")
+            .join("claude-configs")
+            .join("01abc");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join(".credentials.json"), b"{\"oauth\":1}").unwrap();
+
+        let account = sample_anthropic_account("01abc");
+        let vault = vault_with(vec![account.clone()]);
+        env_for_account_with_vault(
+            tmp.path(),
+            "local-1",
+            ProviderId::Anthropic,
+            &vault,
+            &account,
+        )
+        .unwrap();
+
+        let new_dir = per_account_config_dir(tmp.path(), "local-1", "01abc");
+        assert!(
+            new_dir.join(".credentials.json").is_file(),
+            "legacy credentials must be migrated into the scoped dir"
+        );
+        assert!(!legacy.exists(), "legacy dir must be moved, not copied");
     }
 
     #[test]
@@ -337,8 +436,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let account = sample_anthropic_account("01abc");
         let vault = vault_with(vec![account.clone()]);
-        let env = env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account)
-            .unwrap();
+        let env = env_for_account_with_vault(
+            tmp.path(),
+            "local-1",
+            ProviderId::Anthropic,
+            &vault,
+            &account,
+        )
+        .unwrap();
         assert!(
             !env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"),
             "OAuth-mode account must not emit ANTHROPIC_API_KEY"
@@ -367,8 +472,14 @@ mod tests {
         vault.upsert_preset(preset);
         vault.default_preset_id = Some("p1".into());
 
-        let env = env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account)
-            .unwrap();
+        let env = env_for_account_with_vault(
+            tmp.path(),
+            "local-1",
+            ProviderId::Anthropic,
+            &vault,
+            &account,
+        )
+        .unwrap();
         assert!(env
             .iter()
             .any(|(k, v)| k == "ANTHROPIC_BASE_URL" && v == "https://bedrock.example.com"));
@@ -388,9 +499,11 @@ mod tests {
         let vault = vault_with(vec![a.clone(), b.clone()]);
 
         let env_a =
-            env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &a).unwrap();
+            env_for_account_with_vault(tmp.path(), "local-1", ProviderId::Anthropic, &vault, &a)
+                .unwrap();
         let env_b =
-            env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &b).unwrap();
+            env_for_account_with_vault(tmp.path(), "local-1", ProviderId::Anthropic, &vault, &b)
+                .unwrap();
 
         let dir_a = env_a
             .iter()

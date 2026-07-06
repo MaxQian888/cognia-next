@@ -9793,6 +9793,7 @@
         "description": "Provide a direct link to a plugin manifest (plugin.json). The manifest will be staged for review before installation.",
         "emptyError": "Please enter a URL.",
         "error": "Failed to fetch manifest: {message}",
+        "invalidManifest": "Invalid plugin manifest: {errors}",
         "label": "Manifest URL",
         "placeholder": "https://example.com/plugin.json",
         "submit": "Fetch",
@@ -9800,6 +9801,8 @@
       },
       "fromUrlPrompt": "Plugin manifest URL",
       "fromUrlSigned": "From signed URL…",
+      "fromVsix": "From .vsix…",
+      "fromWasmGit": "From Git (WASM)…",
       "groupGit": "Git",
       "groupLocal": "Local plugin",
       "groupManifest": "Manifest",
@@ -9867,6 +9870,20 @@
     "viewContainers": {
       "empty": "This view container has no views yet.",
       "unavailable": "This view container is no longer available — its plugin may be disabled."
+    },
+    "wasmGitInstall": {
+      "branchLabel": "Branch / tag / commit (optional)",
+      "branchPlaceholder": "main",
+      "cancel": "Cancel",
+      "description": "Clone a Git repository and build its WASM plugin locally with cargo-component. Requires the desktop runtime, git, and cargo-component.",
+      "emptyError": "Please enter a repository URL.",
+      "install": "Install",
+      "installing": "Cloning and building…",
+      "repoUrlLabel": "Repository URL",
+      "repoUrlPlaceholder": "https://github.com/owner/repo",
+      "title": "Install WASM from Git",
+      "toolchainMissingHint": "Install Rust and run `cargo install cargo-component`, and make sure git is on your PATH, then try again.",
+      "toolchainMissingTitle": "Build toolchain not found"
     },
     "wasmInstall": {
       "capabilityGrantSheet": {

@@ -509,14 +509,12 @@ pub async fn claude_env_for_account(
         .app_data_dir()
         .map_err(|e| format!("no app_data_dir: {e}"))?;
     // ADR-0028 Phase 14 — start the OAuth-refresh watcher on first use
-    // for this account. Idempotent: subsequent calls are a no-op.
+    // for this account. Idempotent: subsequent calls are a no-op. The watcher
+    // must observe the SAME directory the CLI writes its `.credentials.json`
+    // to, so resolve it through the single authoritative path function.
     if matches!(id, ProviderId::Anthropic) {
-        let configdir = app_data_dir
-            .join("cognia")
-            .join("accounts")
-            .join(&local_account_id)
-            .join("claude-configs")
-            .join(&account_id);
+        let configdir =
+            active::per_account_config_dir(&app_data_dir, &local_account_id, &account_id);
         if let Err(err) = state.ensure_watching(&local_account_id, &account_id, configdir) {
             log::warn!("anthropic credential watcher start failed: {err}");
         }

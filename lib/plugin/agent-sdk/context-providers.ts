@@ -26,22 +26,28 @@ import type {
  * Run every registered context provider and join their contributions. Returns
  * an empty string when nothing is contributed. A throwing provider is skipped
  * (best-effort — one bad provider never breaks the run).
+ *
+ * Providers run concurrently (each turn, independent reads). `Promise.all`
+ * resolves to results in registration order regardless of which provider
+ * finishes first, so the joined output order is stable; per-provider try/catch
+ * keeps a failing provider from rejecting the whole batch.
  */
 export async function resolveContextContributions(
   input: PluginContextProviderInput
 ): Promise<string> {
   const entries = listContextProviderEntries()
   if (entries.length === 0) return ""
-  const parts: string[] = []
-  for (const { entry } of entries) {
-    try {
-      const out = await entry.provide(input)
-      if (typeof out === "string" && out.trim().length > 0) parts.push(out.trim())
-    } catch {
-      /* skip a failing provider */
-    }
-  }
-  return parts.join("\n\n")
+  const results = await Promise.all(
+    entries.map(async ({ entry }) => {
+      try {
+        const out = await entry.provide(input)
+        return typeof out === "string" && out.trim().length > 0 ? out.trim() : null
+      } catch {
+        return null // skip a failing provider — one bad provider never breaks the run
+      }
+    })
+  )
+  return results.filter((part): part is string => part !== null).join("\n\n")
 }
 
 /** Project a team's ACL-readable shared-memory entries (operator view). */

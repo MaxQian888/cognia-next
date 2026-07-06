@@ -8,6 +8,7 @@ export type PluginApiErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "TIMEOUT"
+  | "INCOMPATIBLE_SDK"
   | "INTERNAL"
 
 export interface PluginApiError {

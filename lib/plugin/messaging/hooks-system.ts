@@ -911,6 +911,18 @@ export class PluginLifecycleHooks {
     return registered?.hooks[hookName] !== undefined
   }
 
+  /**
+   * Cheap existence check: does ANY registered plugin contribute `hookName`?
+   * Powers the adapter-hooks no-listener fast path so dispatch is skipped when
+   * no plugin is wired. Distinct from the per-plugin `hasHook(pluginId, …)`.
+   */
+  hasAnyHook(hookName: HookName): boolean {
+    for (const reg of this.registeredHooks.values()) {
+      if (reg.hooks[hookName] !== undefined) return true
+    }
+    return false
+  }
+
   getPluginsWithHook(hookName: HookName): string[] {
     return Array.from(this.registeredHooks.entries())
       .filter(([_, reg]) => reg.hooks[hookName] !== undefined)
@@ -989,6 +1001,16 @@ export class PluginEventHooks {
     return pluginsWithHook
       .sort((a, b) => priorityToNumber(b.priority) - priorityToNumber(a.priority))
       .map((p) => p.id)
+  }
+
+  /**
+   * Cheap existence check: is there at least one ENABLED plugin contributing
+   * `hookName`? Reuses `getPluginsByPriority` so the enabled-only + has-handler
+   * filter stays identical to the dispatch path. Powers the adapter-hooks
+   * no-listener fast path.
+   */
+  hasAnyHook(hookName: keyof PluginHooksAll): boolean {
+    return this.getPluginsByPriority(hookName).length > 0
   }
 
   /** Default timeout for hook execution in milliseconds */
