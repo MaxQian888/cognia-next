@@ -232,17 +232,31 @@ mod platform {
         dict: &CFDictionary<CFString, CFType>,
         own_pid: i64,
     ) -> Option<WindowCandidate> {
-        if dict_i64(dict, kCGWindowOwnerPID) == Some(own_pid) {
+        // SAFETY: the `kCGWindow*` keys are immutable, process-lifetime
+        // `CFStringRef` constants exported by CoreGraphics; reading them is
+        // always sound. rustc now requires the read of an extern `static` to
+        // sit in an `unsafe` block, so bind them once up front.
+        let (owner_pid_key, bounds_key, layer_key, number_key, name_key, owner_name_key) = unsafe {
+            (
+                kCGWindowOwnerPID,
+                kCGWindowBounds,
+                kCGWindowLayer,
+                kCGWindowNumber,
+                kCGWindowName,
+                kCGWindowOwnerName,
+            )
+        };
+        if dict_i64(dict, owner_pid_key) == Some(own_pid) {
             return None;
         }
-        let rect = dict_rect(dict, kCGWindowBounds)?;
-        let layer = dict_i64(dict, kCGWindowLayer).unwrap_or(0);
-        let window_id = dict_i64(dict, kCGWindowNumber).unwrap_or(0);
-        let name = dict_string(dict, kCGWindowName);
+        let rect = dict_rect(dict, bounds_key)?;
+        let layer = dict_i64(dict, layer_key).unwrap_or(0);
+        let window_id = dict_i64(dict, number_key).unwrap_or(0);
+        let name = dict_string(dict, name_key);
         let title = if !name.is_empty() {
             name
         } else {
-            dict_string(dict, kCGWindowOwnerName)
+            dict_string(dict, owner_name_key)
         };
         Some(WindowCandidate {
             left: rect.origin.x as i32,
@@ -646,9 +660,12 @@ mod tests {
         assert!(json["surfaces"].is_array());
     }
 
-    #[cfg(not(target_os = "windows"))]
+    // Only the fallback stub (non-Windows, non-macOS) returns an empty list —
+    // Windows and macOS have real window-enumeration backends. Gate this to
+    // exactly the stub platform, mirroring the stub `mod platform` cfg above.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     #[test]
-    fn enumerate_is_empty_off_windows() {
+    fn enumerate_is_empty_on_stub_platforms() {
         assert!(platform::enumerate().is_empty());
     }
 }

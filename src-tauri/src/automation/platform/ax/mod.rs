@@ -82,10 +82,18 @@ impl AutomationBackend for AxBackend {
         };
         let budget = TreeBudget::from_opts(opts.max_depth);
         let app = AXUIElement::application(pid as i32);
+        // `AXFocusedWindow`/`AXMainWindow` have no generated accessor in
+        // accessibility 0.1.6, and reading them via the raw attribute API would
+        // pull that crate's older core-foundation types across the version
+        // boundary this module deliberately avoids. Root the walk at the app's
+        // first window instead — `AXWindows` is front-to-back ordered, so this
+        // is the frontmost (active) window — falling back to the application
+        // element (whose children are its windows) when none is exposed.
         let root = app
-            .focused_window()
-            .or_else(|_| app.main_window())
-            .unwrap_or_else(|_| app.clone());
+            .windows()
+            .ok()
+            .and_then(|w| w.iter().next().map(|c| (*c).clone()))
+            .unwrap_or_else(|| app.clone());
         let proc_name = snap.process_name.as_deref();
         let to_info = |el: &AXUIElement| ax_element_to_info(el, Some(pid), proc_name);
         let children = |el: &AXUIElement| -> Vec<AXUIElement> {
